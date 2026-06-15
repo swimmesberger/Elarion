@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  dotnet:
+    name: .NET
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.3.0
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: ga
+
+      - name: Restore
+        run: dotnet restore Elarion.slnx
+
+      - name: Build
+        run: dotnet build Elarion.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release --no-build --report-xunit-trx --report-xunit-trx-filename elarion-results.trx
+
+      - name: Pack
+        run: dotnet pack Elarion.slnx --configuration Release --no-build --output artifacts/nuget
+
+      - name: Upload NuGet artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: nuget-packages
+          path: artifacts/nuget/*
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dotnet-test-results
+          path: tests/**/TestResults/*.trx
+
+  npm:
+    name: npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: src/elarion-jsonrpc-client-generator
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Setup Node
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/elarion-jsonrpc-client-generator/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Verify package contents
+        run: npm pack --dry-run

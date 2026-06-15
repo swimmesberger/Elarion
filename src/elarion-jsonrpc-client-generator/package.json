@@ -1,0 +1,47 @@
+{
+  "name": "@swimmesberger/elarion-jsonrpc-client-generator",
+  "version": "0.1.0",
+  "description": "Generate TypeScript RPC contracts, Zod schemas, and a fetch client from Elarion JSON-RPC schema exports.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "elarion-jsonrpc-client-generator": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/generate.d.ts",
+      "import": "./dist/generate.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swimmesberger/Elarion.git",
+    "directory": "src/elarion-jsonrpc-client-generator"
+  },
+  "bugs": {
+    "url": "https://github.com/swimmesberger/Elarion/issues"
+  },
+  "homepage": "https://github.com/swimmesberger/Elarion#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

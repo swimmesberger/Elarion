@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Entity Framework Core source-generation markers for Elarion applications.</Description>
+  </PropertyGroup>
+
+</Project>

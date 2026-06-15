@@ -1,0 +1,211 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, for example 0.1.0 or v0.1.0. Leave empty for an automatic preview version.
+        required: false
+        default: ''
+        type: string
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  publish-dotnet:
+    name: Publish NuGet packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NUGET_USER: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          resolve_preview_version() {
+            VERSION_PREFIX=$(sed -nE 's:.*<VersionPrefix>([^<]+)</VersionPrefix>.*:\1:p' Directory.Build.props | head -n 1)
+            if [ -z "$VERSION_PREFIX" ]; then
+              echo "::error::Directory.Build.props must define VersionPrefix for preview publishing."
+              exit 1
+            fi
+
+            VERSION="${VERSION_PREFIX}-preview.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          }
+
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch)
+              VERSION="$INPUT_VERSION"
+              if [ -z "$VERSION" ]; then
+                resolve_preview_version
+              fi
+              ;;
+            release)
+              VERSION="$RELEASE_TAG"
+              ;;
+            push)
+              resolve_preview_version
+              ;;
+            *)
+              echo "::error::Unsupported event $GITHUB_EVENT_NAME."
+              exit 1
+              ;;
+          esac
+
+          VERSION="${VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '$VERSION' is not a valid package version."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.3.0
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: ga
+
+      - name: Restore
+        run: dotnet restore Elarion.slnx
+
+      - name: Build
+        run: dotnet build Elarion.slnx --configuration Release --no-restore /p:Version=${{ steps.version.outputs.version }}
+
+      - name: Test
+        run: dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release --no-build --report-xunit-trx --report-xunit-trx-filename elarion-results.trx
+
+      - name: Pack
+        run: dotnet pack Elarion.slnx --configuration Release --no-build --output artifacts/nuget /p:PackageVersion=${{ steps.version.outputs.version }}
+
+      - name: Verify NuGet trusted publishing configuration
+        run: |
+          if [ -z "$NUGET_USER" ]; then
+            echo "::error::Set the NUGET_USER repository variable or secret to the NuGet.org profile name used by the trusted publishing policy."
+            exit 1
+          fi
+
+      - name: NuGet login
+        id: nuget-login
+        uses: NuGet/login@v1.2.0
+        with:
+          user: ${{ env.NUGET_USER }}
+
+      - name: Publish to NuGet.org
+        run: |
+          dotnet nuget push "artifacts/nuget/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --skip-duplicate
+          dotnet nuget push "artifacts/nuget/*.snupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --skip-duplicate
+
+      - name: Upload NuGet artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: nuget-packages
+          path: artifacts/nuget/*
+
+  publish-npm:
+    name: Publish npm package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+
+    defaults:
+      run:
+        working-directory: src/elarion-jsonrpc-client-generator
+
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          resolve_preview_version() {
+            VERSION_PREFIX=$(sed -nE 's:.*<VersionPrefix>([^<]+)</VersionPrefix>.*:\1:p' ../../Directory.Build.props | head -n 1)
+            if [ -z "$VERSION_PREFIX" ]; then
+              echo "::error::Directory.Build.props must define VersionPrefix for preview publishing."
+              exit 1
+            fi
+
+            VERSION="${VERSION_PREFIX}-preview.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          }
+
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch)
+              VERSION="$INPUT_VERSION"
+              if [ -z "$VERSION" ]; then
+                resolve_preview_version
+              fi
+              ;;
+            release)
+              VERSION="$RELEASE_TAG"
+              ;;
+            push)
+              resolve_preview_version
+              ;;
+            *)
+              echo "::error::Unsupported event $GITHUB_EVENT_NAME."
+              exit 1
+              ;;
+          esac
+
+          VERSION="${VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '$VERSION' is not a valid package version."
+            exit 1
+          fi
+
+          NPM_TAG=latest
+          VERSION_WITHOUT_BUILD="${VERSION%%+*}"
+          if [[ "$VERSION_WITHOUT_BUILD" == *-* ]]; then
+            PRERELEASE="${VERSION_WITHOUT_BUILD#*-}"
+            NPM_TAG="${PRERELEASE%%.*}"
+            if [[ "$NPM_TAG" =~ ^[0-9]+$ ]]; then
+              NPM_TAG=next
+            fi
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "npm-tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/elarion-jsonrpc-client-generator/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Set package version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        run: npm publish --access public --tag "${{ steps.version.outputs.npm-tag }}"

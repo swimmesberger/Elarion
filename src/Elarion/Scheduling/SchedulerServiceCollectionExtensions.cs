@@ -1,0 +1,93 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Elarion.Abstractions.Resilience;
+using Elarion.Abstractions.Scheduling;
+using Elarion.Resilience;
+
+namespace Elarion.Scheduling;
+
+/// <summary>
+/// Registers the in-memory scheduler runtime.
+/// </summary>
+public static class SchedulerServiceCollectionExtensions {
+    /// <summary>
+    /// Adds the scheduler hosted service and runtime scheduling API using explicit options.
+    /// </summary>
+    /// <remarks>
+    /// Registers <see cref="IJobScheduler"/>, <see cref="IJobSchedulerInspector"/>,
+    /// <see cref="TimeProvider"/> when absent, and the hosted scheduler loop. Generated
+    /// scheduled job descriptor registration must still be called separately.
+    /// </remarks>
+    public static IServiceCollection AddInMemoryScheduler(
+        this IServiceCollection services,
+        SchedulerOptions? options = null) {
+        options ??= new SchedulerOptions();
+        services.AddMicrosoftResilienceRuntime();
+        services.TryAddSingleton(options);
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<InMemoryScheduler>();
+        services.TryAddSingleton<IJobScheduler>(sp => sp.GetRequiredService<InMemoryScheduler>());
+        services.TryAddSingleton<IJobSchedulerInspector>(sp => sp.GetRequiredService<InMemoryScheduler>());
+        services.AddHostedService(sp => sp.GetRequiredService<InMemoryScheduler>());
+        return services;
+    }
+
+    /// <summary>
+    /// Adds the scheduler hosted service using values from the <c>Scheduler</c> configuration section.
+    /// </summary>
+    /// <remarks>
+    /// Reads <c>Scheduler:Enabled</c>, <c>Scheduler:MaxConcurrentExecutions</c>,
+    /// <c>Scheduler:MaxRetainedCompletedJobs</c>, and
+    /// <c>Scheduler:MaxMisfireCatchUpRuns</c>. Invalid boolean or integer values throw during
+    /// service registration.
+    /// </remarks>
+    public static IServiceCollection AddInMemoryScheduler(
+        this IServiceCollection services,
+        IConfiguration configuration) {
+        var options = new SchedulerOptions {
+            Enabled = ReadBool(configuration, "Scheduler:Enabled", true),
+            MaxConcurrentExecutions = Math.Max(1, ReadInt(
+                configuration,
+                "Scheduler:MaxConcurrentExecutions",
+                Math.Max(1, Environment.ProcessorCount))),
+            MaxRetainedCompletedJobs = Math.Max(0, ReadInt(
+                configuration,
+                "Scheduler:MaxRetainedCompletedJobs",
+                1024)),
+            MaxMisfireCatchUpRuns = Math.Max(0, ReadInt(
+                configuration,
+                "Scheduler:MaxMisfireCatchUpRuns",
+                32))
+        };
+
+        return services.AddInMemoryScheduler(options);
+    }
+
+    private static bool ReadBool(IConfiguration configuration, string key, bool defaultValue) {
+        var value = configuration[key];
+        if (string.IsNullOrWhiteSpace(value)) {
+            return defaultValue;
+        }
+
+        if (bool.TryParse(value, out var parsed)) {
+            return parsed;
+        }
+
+        throw new InvalidOperationException($"Configuration value '{key}' must be a boolean.");
+    }
+
+    private static int ReadInt(IConfiguration configuration, string key, int defaultValue) {
+        var value = configuration[key];
+        if (string.IsNullOrWhiteSpace(value)) {
+            return defaultValue;
+        }
+
+        if (int.TryParse(value, out var parsed)) {
+            return parsed;
+        }
+
+        throw new InvalidOperationException($"Configuration value '{key}' must be an integer.");
+    }
+}

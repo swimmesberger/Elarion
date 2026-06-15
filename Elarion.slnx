@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
+    <Project Path="src/Elarion.AspNetCore/Elarion.AspNetCore.csproj" />
+    <Project Path="src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
+    <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
+    <Project Path="src/Elarion.Generators/Elarion.Generators.csproj" />
+    <Project Path="src/Elarion/Elarion.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Elarion.Tests/Elarion.Tests.csproj" />
+  </Folder>
+</Solution>

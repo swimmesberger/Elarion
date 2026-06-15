@@ -1,0 +1,150 @@
+using AwesomeAssertions;
+using Elarion.Generators;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Xunit;
+
+namespace Elarion.Tests.Generators;
+
+public sealed class AppModuleDiscoveryGeneratorTests {
+    [Fact]
+    public void GenerateBootstrapper_CoreModule_IsAlwaysEnabledAndOrderedBeforeFeatures() {
+        const string source =
+            """
+            namespace Elarion.AspNetCore {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class GenerateModuleBootstrapperAttribute : System.Attribute;
+            }
+
+            namespace Elarion.Abstractions.Modules {
+                public enum AppModuleKind {
+                    Feature = 0,
+                    Core = 1,
+                }
+
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class AppModuleAttribute(string name) : System.Attribute {
+                    public string Name { get; } = name;
+                    public AppModuleKind Kind { get; init; } = AppModuleKind.Feature;
+                    public string? DependsOn { get; init; }
+                }
+
+            }
+
+            namespace Microsoft.AspNetCore.Routing {
+                public interface IEndpointRouteBuilder;
+            }
+
+            namespace Microsoft.Extensions.Configuration {
+                public interface IConfiguration;
+
+                public static class ConfigurationBinder {
+                    public static T GetValue<T>(this IConfiguration configuration, string key, T defaultValue) =>
+                        defaultValue;
+                }
+            }
+
+            namespace Microsoft.Extensions.DependencyInjection {
+                public interface IServiceCollection;
+            }
+
+            namespace Host {
+                [Elarion.AspNetCore.GenerateModuleBootstrapper]
+                public static partial class ModuleBootstrapper;
+            }
+
+            namespace Sample.Modules.Core {
+                [Elarion.Abstractions.Modules.AppModule("Core", Kind = Elarion.Abstractions.Modules.AppModuleKind.Core)]
+                public static class CoreModule {
+                    public static void ConfigureServices(object services, object configuration) {
+                    }
+                }
+            }
+
+            namespace Sample.Modules.AiAgent {
+                [Elarion.Abstractions.Modules.AppModule("AiAgent")]
+                public static class AiAgentModule {
+                    public static void ConfigureServices(object services, object configuration) {
+                    }
+
+                    public static void MapEndpoints(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) {
+                    }
+                }
+            }
+            """;
+
+        var generated = GenerateModuleBootstrapperSource(source);
+
+        generated.Should().Contain("global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints");
+        generated.Should().Contain("public static void ConfigureAllServices(");
+        generated.Should().Contain("public static bool IsModuleEnabled(");
+        generated.Should().NotContain("public static partial void ConfigureAllServices(");
+        generated.Should().Contain("global::Sample.Modules.Core.CoreModule.ConfigureServices(services, configuration);");
+        generated.Should().Contain("if (IsModuleEnabled(configuration, \"AiAgent\"))");
+        generated.Should().Contain("global::Sample.Modules.AiAgent.AiAgentModule.MapEndpoints(endpoints);");
+        generated.Should().Contain("\"Core\" => true,");
+        generated.Should().NotContain("Modules:Core:Enabled");
+        generated.Should().Contain("return new string[] { \"Core\", \"AiAgent\" };");
+
+        generated.IndexOf(
+                "global::Sample.Modules.Core.CoreModule.ConfigureServices",
+                StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(generated.IndexOf(
+                "global::Sample.Modules.AiAgent.AiAgentModule.ConfigureServices",
+                StringComparison.Ordinal));
+    }
+
+    private static string GenerateModuleBootstrapperSource(string source) {
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
+        var compilation = CSharpCompilation.Create(
+            "AppModuleDiscoveryGeneratorTests",
+            [syntaxTree],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        compilation.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        GeneratorDriver driver = CSharpGeneratorDriver
+            .Create(new AppModuleDiscoveryGenerator())
+            .WithUpdatedParseOptions(parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(
+            compilation,
+            out var outputCompilation,
+            out var emitDiagnostics);
+        var result = driver.GetRunResult();
+
+        emitDiagnostics
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        outputCompilation.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        result.Diagnostics
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        var generatedTree = result.GeneratedTrees.Single(
+            tree => tree.FilePath.EndsWith(
+                "ModuleBootstrapper.g.cs",
+                StringComparison.Ordinal));
+
+        return generatedTree.GetText().ToString();
+    }
+
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
+        var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
+
+        trustedPlatformAssemblies.Should().NotBeNull();
+
+        return trustedPlatformAssemblies!
+            .Split(Path.PathSeparator)
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .ToArray();
+    }
+}
