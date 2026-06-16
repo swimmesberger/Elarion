@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Hybrid;
@@ -23,77 +24,112 @@ public sealed class HybridHandlerCache(
         TRequest request,
         Func<CancellationToken, ValueTask<TResponse>> factory,
         CancellationToken ct) {
-        // Note 9: Policies own the logical cache key; this type turns it into a physical key with scope information.
-        var key = CreatePhysicalKey(policy, request);
-        var options = new HybridCacheEntryOptions {
-            Expiration = policy.Expiration,
-            LocalCacheExpiration = policy.Expiration,
-        };
-        // Note 10: Tags are how HybridCache supports group invalidation without knowing every individual key.
-        var tags = CreatePhysicalTags(policy.Scope, policy.Tags);
-
-        if (policy is IHandlerCachePayloadPolicy<TRequest, TResponse> payloadPolicy) {
-            // Note 11: Payload policies store a serialized representation, useful when response types should not be cached directly.
-            return await GetOrCreatePayloadAsync(payloadPolicy, factory, key, options, tags, ct);
-        }
+        using var activity = HandlerCacheTelemetry.Source.StartActivity("handler cache get", ActivityKind.Internal);
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "unknown";
+        SetCacheTags(activity, "get", policy.KeyPrefix, policy.Scope, policy.Tags.Count);
 
         try {
-            return await cache.GetOrCreateAsync(
-                key,
-                factory,
-                static async (state, token) => {
-                    var response = await state(token);
-                    if (response is IResultLike { IsSuccess: false }) {
-                        // Note 12: Throwing here is a control-flow adapter for HybridCache: it prevents failed Result<T> values from being cached.
-                        throw new NonCacheableResultException<TResponse>(response);
-                    }
+            // Note 9: Policies own the logical cache key; this type turns it into a physical key with scope information.
+            var key = CreatePhysicalKey(policy, request);
+            var options = new HybridCacheEntryOptions {
+                Expiration = policy.Expiration,
+                LocalCacheExpiration = policy.Expiration,
+            };
+            // Note 10: Tags are how HybridCache supports group invalidation without knowing every individual key.
+            var tags = CreatePhysicalTags(policy.Scope, policy.Tags);
 
+            if (policy is IHandlerCachePayloadPolicy<TRequest, TResponse> payloadPolicy) {
+                // Note 11: Payload policies store a serialized representation, useful when response types should not be cached directly.
+                var payloadState = new PayloadFactoryState<TRequest, TResponse>(payloadPolicy, factory, jsonOptions, activity);
+                try {
+                    var response = await GetOrCreatePayloadAsync(payloadState, key, options, tags, ct);
+                    outcome = payloadState.FactoryExecuted ? "miss-factory-executed" : "cached-or-coalesced";
                     return response;
-                },
-                options,
-                tags,
-                cancellationToken: ct);
-        } catch (NonCacheableResultException<TResponse> ex) {
-            return ex.Response;
+                } catch (NonCacheableResultException<TResponse> ex) {
+                    outcome = "miss-non-cacheable";
+                    return ex.Response;
+                }
+            }
+
+            var state = new FactoryState<TResponse>(factory, activity);
+            try {
+                var response = await cache.GetOrCreateAsync(
+                    key,
+                    state,
+                    static async (state, token) => {
+                        state.MarkFactoryExecuted();
+                        var response = await state.Factory(token);
+                        if (response is IResultLike { IsSuccess: false }) {
+                            // Note 12: Throwing here is a control-flow adapter for HybridCache: it prevents failed Result<T> values from being cached.
+                            throw new NonCacheableResultException<TResponse>(response);
+                        }
+
+                        return response;
+                    },
+                    options,
+                    tags,
+                    cancellationToken: ct);
+                outcome = state.FactoryExecuted ? "miss-factory-executed" : "cached-or-coalesced";
+                return response;
+            } catch (NonCacheableResultException<TResponse> ex) {
+                outcome = "miss-non-cacheable";
+                return ex.Response;
+            }
+        } catch (Exception ex) {
+            outcome = "error";
+            RecordException(activity, ex);
+            throw;
+        } finally {
+            RecordCacheOutcome(activity, "get", outcome, started);
         }
     }
 
     /// <inheritdoc />
     public async ValueTask InvalidateAsync(IHandlerCacheInvalidationPolicy policy, CancellationToken ct) {
-        // Note 13: Invalidating by tag keeps command handlers independent from the exact read keys they invalidate.
-        var tags = CreatePhysicalTags(policy.Scope, policy.Tags);
-        foreach (var tag in tags) {
-            await cache.RemoveByTagAsync(tag, ct);
+        using var activity = HandlerCacheTelemetry.Source.StartActivity("handler cache invalidate", ActivityKind.Internal);
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "success";
+        SetCacheTags(activity, "invalidate", null, policy.Scope, policy.Tags.Count);
+
+        try {
+            // Note 13: Invalidating by tag keeps command handlers independent from the exact read keys they invalidate.
+            var tags = CreatePhysicalTags(policy.Scope, policy.Tags);
+            foreach (var tag in tags) {
+                await cache.RemoveByTagAsync(tag, ct);
+            }
+        } catch (Exception ex) {
+            outcome = "error";
+            RecordException(activity, ex);
+            throw;
+        } finally {
+            RecordCacheOutcome(activity, "invalidate", outcome, started);
         }
     }
 
     private async ValueTask<TResponse> GetOrCreatePayloadAsync<TRequest, TResponse>(
-        IHandlerCachePayloadPolicy<TRequest, TResponse> policy,
-        Func<CancellationToken, ValueTask<TResponse>> factory,
+        PayloadFactoryState<TRequest, TResponse> payloadState,
         string key,
         HybridCacheEntryOptions options,
         IReadOnlyList<string> tags,
         CancellationToken ct) {
-        try {
-            var payload = await cache.GetOrCreateAsync(
-                key,
-                (factory, policy, jsonOptions),
-                static async (state, token) => {
-                    var response = await state.factory(token);
-                    if (response is IResultLike { IsSuccess: false }) {
-                        throw new NonCacheableResultException<TResponse>(response);
-                    }
+        var payload = await cache.GetOrCreateAsync(
+            key,
+            payloadState,
+            static async (state, token) => {
+                state.MarkFactoryExecuted();
+                var response = await state.Factory(token);
+                if (response is IResultLike { IsSuccess: false }) {
+                    throw new NonCacheableResultException<TResponse>(response);
+                }
 
-                    return state.policy.Serialize(response, state.jsonOptions);
-                },
-                options,
-                tags,
-                cancellationToken: ct);
+                return state.Policy.Serialize(response, state.JsonOptions);
+            },
+            options,
+            tags,
+            cancellationToken: ct);
 
-            return policy.Deserialize(payload, jsonOptions);
-        } catch (NonCacheableResultException<TResponse> ex) {
-            return ex.Response;
-        }
+        return payloadState.Policy.Deserialize(payload, jsonOptions);
     }
 
     private string CreatePhysicalKey<TRequest>(IHandlerCachePolicy<TRequest> policy, TRequest request) {
@@ -147,7 +183,73 @@ public sealed class HybridHandlerCache(
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
+    private static void SetCacheTags(
+        Activity? activity,
+        string operation,
+        string? keyPrefix,
+        HandlerCacheScope scope,
+        int tagCount) {
+        if (activity?.IsAllDataRequested != true) {
+            return;
+        }
+
+        activity.SetTag("handler.cache.operation", operation);
+        if (!string.IsNullOrWhiteSpace(keyPrefix)) {
+            activity.SetTag("handler.cache.policy_prefix", keyPrefix);
+        }
+
+        activity.SetTag("handler.cache.scope", scope.ToString());
+        activity.SetTag("handler.cache.tag_count", tagCount);
+    }
+
+    private static void RecordCacheOutcome(Activity? activity, string operation, string outcome, long started) {
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("handler.cache.outcome", outcome);
+            activity.SetTag("handler.cache.factory_executed", outcome == "miss-factory-executed" || outcome == "miss-non-cacheable");
+
+            if (outcome == "error") {
+                activity.SetStatus(ActivityStatusCode.Error);
+            }
+        }
+
+        HandlerCacheTelemetry.RecordOperation(
+            operation,
+            outcome,
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+    }
+
+    private static void RecordException(Activity? activity, Exception exception) {
+        activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
+            { "exception.type", exception.GetType().FullName },
+            { "exception.message", exception.Message }
+        }));
+        activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
+    }
+
     private sealed class NonCacheableResultException<TResponse>(TResponse response) : Exception {
         public TResponse Response { get; } = response;
+    }
+
+    private class FactoryState<TResponse>(
+        Func<CancellationToken, ValueTask<TResponse>> factory,
+        Activity? activity) {
+        public Func<CancellationToken, ValueTask<TResponse>> Factory { get; } = factory;
+
+        public bool FactoryExecuted { get; private set; }
+
+        public void MarkFactoryExecuted() {
+            FactoryExecuted = true;
+            activity?.AddEvent(new ActivityEvent("cache factory executed"));
+        }
+    }
+
+    private sealed class PayloadFactoryState<TRequest, TResponse>(
+        IHandlerCachePayloadPolicy<TRequest, TResponse> policy,
+        Func<CancellationToken, ValueTask<TResponse>> factory,
+        JsonSerializerOptions jsonOptions,
+        Activity? activity) : FactoryState<TResponse>(factory, activity) {
+        public IHandlerCachePayloadPolicy<TRequest, TResponse> Policy { get; } = policy;
+
+        public JsonSerializerOptions JsonOptions { get; } = jsonOptions;
     }
 }

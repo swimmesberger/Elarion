@@ -20,8 +20,10 @@ public interface IBatchExecutionStrategy {
     /// <summary>
     /// Executes a batch of JSON-RPC 2.0 requests and returns their responses.
     /// Per the JSON-RPC 2.0 spec, each request is independent — failure of one
-    /// must not affect others. Notifications (requests with no <c>id</c>) must
-    /// not produce a response item.
+    /// must not affect others. Notifications are requests where the <c>id</c>
+    /// member is absent; explicit <c>"id": null</c> requests and invalid batch
+    /// envelopes still require a response item. Custom strategies should use
+    /// <see cref="JsonRpcRequest.ShouldSendResponse"/> for this decision.
     /// </summary>
     /// <param name="requests">The parsed batch of JSON-RPC requests.</param>
     /// <param name="dispatcher">The RPC dispatcher to invoke for each request.</param>

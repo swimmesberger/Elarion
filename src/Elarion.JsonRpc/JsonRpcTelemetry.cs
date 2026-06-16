@@ -26,7 +26,7 @@ public static class JsonRpcTelemetry {
 
     /// <summary>
     /// Counts the total number of JSON-RPC requests handled.
-    /// Tagged with <c>rpc.method</c> and <c>rpc.response.status_code</c>.
+    /// Tagged with <c>rpc.system.name</c>, <c>rpc.method</c>, and <c>rpc.response.status_code</c>.
     /// </summary>
     public static readonly Counter<long> RequestCount =
         MeterInstance.CreateCounter<long>(
@@ -35,11 +35,25 @@ public static class JsonRpcTelemetry {
 
     /// <summary>
     /// Records the duration of JSON-RPC request handling in milliseconds.
-    /// Tagged with <c>rpc.method</c> and <c>rpc.response.status_code</c>.
+    /// Tagged with <c>rpc.system.name</c>, <c>rpc.method</c>, and <c>rpc.response.status_code</c>.
     /// </summary>
     public static readonly Histogram<double> RequestDuration =
         MeterInstance.CreateHistogram<double>(
             "rpc.server.duration",
             unit: "ms",
             description: "Duration of JSON-RPC request handling");
+
+    /// <summary>Records the common request count and duration metrics for one JSON-RPC outcome.</summary>
+    public static void RecordRequest(string method, string statusCode, double elapsedMilliseconds) {
+        var tags = new TagList {
+            { "rpc.system.name", "jsonrpc" },
+            { "rpc.method", NormalizeMethod(method) },
+            { "rpc.response.status_code", statusCode }
+        };
+        RequestCount.Add(1, tags);
+        RequestDuration.Record(elapsedMilliseconds, tags);
+    }
+
+    internal static string NormalizeMethod(string? method) =>
+        string.IsNullOrWhiteSpace(method) ? "_unknown" : method;
 }

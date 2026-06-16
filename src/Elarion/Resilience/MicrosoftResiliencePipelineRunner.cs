@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Polly;
 using Polly.Retry;
 using Polly.Timeout;
@@ -15,18 +16,40 @@ internal sealed class MicrosoftResiliencePipelineRunner(
         ResiliencePolicyReference policy,
         Func<CancellationToken, ValueTask> action,
         CancellationToken ct) {
-        // Note 27: The framework stores neutral policy metadata; the default runtime lazily compiles Microsoft/Polly pipelines from it.
-        var pipeline = GetPipeline(policy);
-        await pipeline.ExecuteAsync(action, ct);
+        using var activity = StartActivity(policy);
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "success";
+        try {
+            // Note 27: The framework stores neutral policy metadata; the default runtime lazily compiles Microsoft/Polly pipelines from it.
+            var pipeline = GetPipeline(policy);
+            await pipeline.ExecuteAsync(action, ct);
+        } catch (Exception ex) {
+            outcome = ex is OperationCanceledException ? "cancelled" : "failed";
+            RecordException(activity, ex);
+            throw;
+        } finally {
+            RecordOutcome(activity, policy.Name, outcome, started);
+        }
     }
 
     public async ValueTask<T> ExecuteAsync<T>(
         ResiliencePolicyReference policy,
         Func<CancellationToken, ValueTask<T>> action,
         CancellationToken ct) {
-        // Note 28: This overload keeps typed handler responses type-safe while sharing the same named pipeline lookup.
-        var pipeline = GetPipeline(policy);
-        return await pipeline.ExecuteAsync(action, ct);
+        using var activity = StartActivity(policy);
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "success";
+        try {
+            // Note 28: This overload keeps typed handler responses type-safe while sharing the same named pipeline lookup.
+            var pipeline = GetPipeline(policy);
+            return await pipeline.ExecuteAsync(action, ct);
+        } catch (Exception ex) {
+            outcome = ex is OperationCanceledException ? "cancelled" : "failed";
+            RecordException(activity, ex);
+            throw;
+        } finally {
+            RecordOutcome(activity, policy.Name, outcome, started);
+        }
     }
 
     private ResiliencePipeline GetPipeline(ResiliencePolicyReference policy) =>
@@ -46,13 +69,31 @@ internal sealed class MicrosoftResiliencePipelineRunner(
                 Delay = retry.Delay,
                 BackoffType = ToMicrosoftBackoff(retry.Backoff),
                 MaxDelay = retry.MaxDelay,
-                UseJitter = retry.UseJitter
+                UseJitter = retry.UseJitter,
+                OnRetry = static args => {
+                    var tags = new ActivityTagsCollection {
+                        { "resilience.retry.attempt", args.AttemptNumber + 1 },
+                        { "resilience.retry.delay_ms", args.RetryDelay.TotalMilliseconds }
+                    };
+                    if (args.Outcome.Exception is { } exception) {
+                        tags.Add("exception.type", exception.GetType().FullName);
+                    }
+
+                    Activity.Current?.AddEvent(new ActivityEvent("resilience retry", tags: tags));
+                    return default;
+                }
             });
         }
 
         if (metadata.Timeout is { } timeout) {
             builder.AddTimeout(new TimeoutStrategyOptions {
-                Timeout = timeout
+                Timeout = timeout,
+                OnTimeout = static args => {
+                    Activity.Current?.AddEvent(new ActivityEvent("resilience timeout", tags: new ActivityTagsCollection {
+                        { "resilience.timeout_ms", args.Timeout.TotalMilliseconds }
+                    }));
+                    return default;
+                }
             });
         }
 
@@ -66,4 +107,37 @@ internal sealed class MicrosoftResiliencePipelineRunner(
             ResilienceBackoffType.Exponential => DelayBackoffType.Exponential,
             _ => throw new ArgumentOutOfRangeException(nameof(backoff), backoff, "Unknown resilience backoff type.")
         };
+
+    private static Activity? StartActivity(ResiliencePolicyReference policy) {
+        var activity = ResilienceTelemetry.Source.StartActivity(
+            $"resilience {policy.Name}",
+            ActivityKind.Internal);
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("resilience.policy.name", policy.Name);
+        }
+
+        return activity;
+    }
+
+    private static void RecordOutcome(Activity? activity, string policyName, string outcome, long started) {
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("resilience.policy.outcome", outcome);
+            if (outcome != "success") {
+                activity.SetStatus(ActivityStatusCode.Error, outcome);
+            }
+        }
+
+        ResilienceTelemetry.RecordExecution(
+            policyName,
+            outcome,
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+    }
+
+    private static void RecordException(Activity? activity, Exception exception) {
+        activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
+            { "exception.type", exception.GetType().FullName },
+            { "exception.message", exception.Message }
+        }));
+        activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
+    }
 }

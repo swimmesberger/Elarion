@@ -1,6 +1,10 @@
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
+using Elarion.Caching;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Elarion.Tests.Services;
@@ -50,6 +54,64 @@ public sealed class HandlerCacheDecoratorTests {
         cache.CreatedKeys.Should().Equal("42");
     }
 
+    [Fact]
+    public async Task HybridHandlerCache_GetOrCreate_EmitsHitAndMissTraceSpans() {
+        using var activities = new ActivityCollector(HandlerCacheTelemetry.ActivitySourceName);
+        using var meters = new MeterCollector(HandlerCacheTelemetry.MeterName);
+        await using var provider = CreateHybridCacheProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var cache = scope.ServiceProvider.GetRequiredService<IHandlerCache>();
+        var factoryCalls = 0;
+
+        var first = await cache.GetOrCreateAsync(
+            new CachePolicy(),
+            new Request { Id = 7 },
+            _ => {
+                factoryCalls++;
+                return ValueTask.FromResult("cached");
+            },
+            TestContext.Current.CancellationToken);
+        var second = await cache.GetOrCreateAsync(
+            new CachePolicy(),
+            new Request { Id = 7 },
+            _ => {
+                factoryCalls++;
+                return ValueTask.FromResult("not-used");
+            },
+            TestContext.Current.CancellationToken);
+
+        first.Should().Be("cached");
+        second.Should().Be("cached");
+        factoryCalls.Should().Be(1);
+        activities.Activities.Should().Contain(activity =>
+            activity.DisplayName == "handler cache get" &&
+            Equals(activity.GetTag("handler.cache.outcome"), "miss-factory-executed") &&
+            Equals(activity.GetTag("handler.cache.factory_executed"), true));
+        activities.Activities.Should().Contain(activity =>
+            activity.DisplayName == "handler cache get" &&
+            Equals(activity.GetTag("handler.cache.outcome"), "cached-or-coalesced") &&
+            Equals(activity.GetTag("handler.cache.factory_executed"), false));
+        meters.Measurements.Should().Contain(measurement =>
+            measurement.InstrumentName == "handler.cache.operation.count" &&
+            measurement.HasTag("handler.cache.operation", "get") &&
+            measurement.HasTag("handler.cache.outcome", "cached-or-coalesced"));
+    }
+
+    [Fact]
+    public async Task HybridHandlerCache_Invalidate_EmitsTraceSpan() {
+        using var activities = new ActivityCollector(HandlerCacheTelemetry.ActivitySourceName);
+        await using var provider = CreateHybridCacheProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var cache = scope.ServiceProvider.GetRequiredService<IHandlerCache>();
+
+        await cache.InvalidateAsync(new InvalidationPolicy(), TestContext.Current.CancellationToken);
+
+        activities.Activities.Should().Contain(activity =>
+            activity.DisplayName == "handler cache invalidate" &&
+            Equals(activity.GetTag("handler.cache.operation"), "invalidate") &&
+            Equals(activity.GetTag("handler.cache.outcome"), "success"));
+    }
+
     private sealed record Request {
         public int Id { get; init; }
     }
@@ -94,5 +156,14 @@ public sealed class HandlerCacheDecoratorTests {
 
             return ValueTask.CompletedTask;
         }
+    }
+
+    private static ServiceProvider CreateHybridCacheProvider() {
+        var services = new ServiceCollection();
+        services.AddSingleton(new JsonSerializerOptions {
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+        });
+        services.AddElarionHandlerCaching();
+        return services.BuildServiceProvider();
     }
 }

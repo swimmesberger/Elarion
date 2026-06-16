@@ -10,13 +10,11 @@
     </PackageReference>
     <PackageReference Include="xunit.v3.mtp-v2" />
     <PackageReference Include="AwesomeAssertions" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
-    <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
   </ItemGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
     <ProjectReference Include="../../src/Elarion/Elarion.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore/Elarion.AspNetCore.csproj" />

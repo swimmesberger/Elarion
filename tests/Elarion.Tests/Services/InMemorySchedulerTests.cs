@@ -42,6 +42,43 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
+    public async Task EnqueueAsync_RuntimeJob_EmitsScheduleEnqueueAndExecutionTrace() {
+        using var activities = new ActivityCollector(SchedulerTelemetry.ActivitySourceName, "Elarion.Tests.Parent");
+        using var meters = new MeterCollector(SchedulerTelemetry.MeterName);
+        using var parentSource = new ActivitySource("Elarion.Tests.Parent");
+        using var parent = parentSource.StartActivity("rpc parent");
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        await using var provider = CreateProvider(time);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        await hostedService.StartAsync(cts.Token);
+
+        var scheduler = provider.GetRequiredService<IJobScheduler>();
+        var recorder = provider.GetRequiredService<SchedulerRecorder>();
+
+        await scheduler.EnqueueAsync<TestRuntimeJob, TestPayload>(
+            new TestPayload { Value = "traced" },
+            cts.Token);
+
+        var observed = await recorder.WaitAsync(cts.Token);
+        await hostedService.StopAsync(cts.Token);
+
+        observed.Should().Be("traced");
+        var schedule = activities.Activities.Single(activity => activity.DisplayName == "scheduler schedule test.runtime");
+        var execution = activities.Activities.Single(activity => activity.DisplayName == "scheduled test.runtime");
+        activities.Activities.Should().Contain(activity =>
+            activity.DisplayName == "scheduler enqueue test.runtime" &&
+            Equals(activity.GetTag("scheduler.operation.outcome"), "queued"));
+        execution.TraceId.Should().Be(schedule.TraceId);
+        execution.ParentSpanId.Should().Be(schedule.SpanId);
+        execution.GetTag("scheduler.job.status").Should().Be("success");
+        meters.Measurements.Should().Contain(measurement =>
+            measurement.InstrumentName == "scheduler.operation.count" &&
+            measurement.HasTag("scheduler.operation", "schedule") &&
+            measurement.HasTag("scheduler.operation.outcome", "success"));
+    }
+
+    [Fact]
     public async Task ScheduleAsync_FutureRun_ExecutesOnceDueTimeIsReached()
     {
         using var cts = new CancellationTokenSource(WaitTimeout);
@@ -117,6 +154,34 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
+    public async Task EnqueueAsync_DisabledRuntimeJob_ParentsSkippedTraceToScheduleTrace() {
+        using var activities = new ActivityCollector(SchedulerTelemetry.ActivitySourceName);
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        await using var provider = CreateProvider(time);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        await hostedService.StartAsync(cts.Token);
+
+        var scheduler = provider.GetRequiredService<IJobScheduler>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
+
+        await scheduler.EnqueueAsync<DisabledRuntimeJob, TestPayload>(
+            new TestPayload { Value = "disabled" },
+            cts.Token);
+
+        await WaitUntilAsync(() => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
+            outcome.JobName == "test.disabledRuntime" &&
+            outcome.Status == ScheduledJobRunStatus.Skipped &&
+            outcome.Message == "disabled"));
+        await hostedService.StopAsync(cts.Token);
+
+        var schedule = activities.Activities.Single(activity => activity.DisplayName == "scheduler schedule test.disabledRuntime");
+        var skipped = activities.Activities.Single(activity => activity.DisplayName == "scheduled test.disabledRuntime skipped");
+        skipped.TraceId.Should().Be(schedule.TraceId);
+        skipped.ParentSpanId.Should().Be(schedule.SpanId);
+    }
+
+    [Fact]
     public async Task RecurringJob_MillisecondInterval_RunsOncePerInterval()
     {
         using var cts = new CancellationTokenSource(WaitTimeout);
@@ -186,6 +251,35 @@ public sealed class InMemorySchedulerTests
 
         await hostedService.StopAsync(cts.Token);
         counter.Count.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RecurringJob_SkipMisfire_EmitsSkippedTrace() {
+        using var activities = new ActivityCollector(SchedulerTelemetry.ActivitySourceName);
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        var descriptor = CreateCountingDescriptor(
+            "test.traceSkipMisfire",
+            ScheduledJobSchedule.FixedRate("50ms"),
+            ScheduledJobMisfirePolicy.Skip);
+        await using var provider = CreateProvider(time, descriptor);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
+
+        await hostedService.StartAsync(cts.Token);
+        await WaitUntilAsync(() => provider.GetRequiredService<RunCounter>().Count >= 1);
+
+        time.Advance(TimeSpan.FromSeconds(10));
+        await WaitUntilAsync(() => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
+            outcome.JobName == "test.traceSkipMisfire" &&
+            outcome.Status == ScheduledJobRunStatus.Skipped &&
+            outcome.Message == "misfire"));
+
+        await hostedService.StopAsync(cts.Token);
+        activities.Activities.Should().Contain(activity =>
+            activity.DisplayName == "scheduled test.traceSkipMisfire skipped" &&
+            Equals(activity.GetTag("scheduler.job.status"), "skipped") &&
+            Equals(activity.GetTag("scheduler.skip.reason"), "misfire"));
     }
 
     [Fact]
@@ -646,6 +740,8 @@ public sealed class InMemorySchedulerTests
     [Fact]
     public async Task DeferredRetry_RuntimeJob_SucceedsAfterRetryWithStableJobId()
     {
+        using var activities = new ActivityCollector(SchedulerTelemetry.ActivitySourceName);
+        using var meters = new MeterCollector(SchedulerTelemetry.MeterName);
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -687,6 +783,13 @@ public sealed class InMemorySchedulerTests
         succeeded.Attempt.Should().Be(2);
         succeeded.CompletedAtUtc.Should().NotBeNull();
         succeeded.CurrentRunId.Should().Be(waiting.CurrentRunId);
+        activities.Activities.Should().Contain(activity =>
+            activity.DisplayName == "scheduler enqueue test.flakyRuntime" &&
+            Equals(activity.GetTag("scheduler.job.attempt"), 2));
+        meters.Measurements.Should().Contain(measurement =>
+            measurement.InstrumentName == "scheduler.operation.count" &&
+            measurement.HasTag("scheduler.operation", "enqueue") &&
+            measurement.HasTag("scheduler.operation.outcome", "queued"));
     }
 
     [Fact]

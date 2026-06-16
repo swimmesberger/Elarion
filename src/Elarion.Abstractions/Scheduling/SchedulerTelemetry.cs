@@ -43,4 +43,27 @@ public static class SchedulerTelemetry {
         MeterInstance.CreateUpDownCounter<int>(
             "scheduler.job.active",
             description: "Number of scheduled jobs currently executing");
+
+    /// <summary>Counts scheduler control-plane operations by operation and outcome.</summary>
+    public static readonly Counter<long> OperationCount =
+        MeterInstance.CreateCounter<long>(
+            "scheduler.operation.count",
+            description: "Total number of scheduler control-plane operations");
+
+    /// <summary>Records scheduler control-plane operation duration in milliseconds.</summary>
+    public static readonly Histogram<double> OperationDuration =
+        MeterInstance.CreateHistogram<double>(
+            "scheduler.operation.duration",
+            unit: "ms",
+            description: "Duration of scheduler control-plane operations");
+
+    /// <summary>Records a scheduler control-plane operation metric.</summary>
+    public static void RecordOperation(string operation, string outcome, double elapsedMilliseconds) {
+        var tags = new TagList {
+            { "scheduler.operation", operation },
+            { "scheduler.operation.outcome", outcome }
+        };
+        OperationCount.Add(1, tags);
+        OperationDuration.Record(elapsedMilliseconds, tags);
+    }
 }
