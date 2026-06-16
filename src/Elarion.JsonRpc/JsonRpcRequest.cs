@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Elarion.AspNetCore;
+namespace Elarion.JsonRpc;
 
 internal enum JsonRpcIdKind {
     Missing,

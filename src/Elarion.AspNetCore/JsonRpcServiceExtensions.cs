@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Elarion.JsonRpc;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;

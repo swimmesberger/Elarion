@@ -1,4 +1,4 @@
-namespace Elarion.AspNetCore;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Marks a partial class to have its <c>RegisterAll</c> method body generated

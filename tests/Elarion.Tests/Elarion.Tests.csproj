@@ -18,6 +18,8 @@
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
     <ProjectReference Include="../../src/Elarion/Elarion.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore/Elarion.AspNetCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.Generators/Elarion.Generators.csproj" />
   </ItemGroup>
