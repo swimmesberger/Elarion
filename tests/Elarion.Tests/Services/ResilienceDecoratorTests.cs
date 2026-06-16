@@ -78,6 +78,46 @@ public sealed class ResilienceDecoratorTests {
         inner.Attempts.Should().Be(2);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_RetryPolicy_EmitsTraceSpanAndRetryEvent() {
+        using var activities = new ActivityCollector(ResilienceTelemetry.ActivitySourceName);
+        using var meters = new MeterCollector(ResilienceTelemetry.MeterName);
+        var services = new ServiceCollection();
+        services.AddElarionResiliencePolicyMetadata(new ResiliencePolicyMetadata {
+            Name = "telemetry-retry",
+            Retry = new ResilienceRetryOptions {
+                MaxRetryAttempts = 1,
+                Delay = TimeSpan.Zero,
+                Backoff = ResilienceBackoffType.Constant
+            }
+        });
+        services.AddMicrosoftResilienceRuntime();
+        await using var provider = services.BuildServiceProvider();
+        var runner = provider.GetRequiredService<IResiliencePipelineRunner>();
+        var attempts = 0;
+
+        await runner.ExecuteAsync(
+            new ResiliencePolicyReference { Name = "telemetry-retry" },
+            _ => {
+                attempts++;
+                if (attempts == 1) {
+                    throw new InvalidOperationException("retry");
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            TestContext.Current.CancellationToken);
+
+        activities.Activities.Should().Contain(activity =>
+            activity.DisplayName == "resilience telemetry-retry" &&
+            Equals(activity.GetTag("resilience.policy.outcome"), "success") &&
+            activity.Events.Any(evt => evt.Name == "resilience retry"));
+        meters.Measurements.Should().Contain(measurement =>
+            measurement.InstrumentName == "resilience.policy.execution.count" &&
+            measurement.HasTag("resilience.policy.name", "telemetry-retry") &&
+            measurement.HasTag("resilience.policy.outcome", "success"));
+    }
+
     private sealed record Request;
 
     private sealed class FlakyHandler : IHandler<Request, int> {

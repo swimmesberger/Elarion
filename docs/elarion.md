@@ -596,7 +596,7 @@ Operational constraints:
 - Fixed-rate and cron schedules skip missed in-process slots instead of replaying a burst.
 - There is no global one-second polling loop. The runtime waits until the nearest due item and wakes early when a new earlier item is enqueued.
 - `TimeProvider` is used throughout, so tests can drive millisecond schedules deterministically with a fake clock. Production precision is still bounded by the operating system timer resolution and normal host load.
-- Scheduler telemetry is emitted through `SchedulerTelemetry.Source` and `SchedulerTelemetry.Meter`; hosts that already register the framework telemetry source/meter receive job duration, lag, count, active-run, failure, skipped, and cancellation signals.
+- Scheduler telemetry is emitted through `SchedulerTelemetry.Source` and `SchedulerTelemetry.Meter`; hosts that register the framework telemetry source/meter receive scheduling/enqueue/cancel spans, execution spans, job duration, lag, count, active-run, failure, skipped, retry, and cancellation signals.
 
 ### Decorator pipelines
 
@@ -888,6 +888,49 @@ The host still owns:
 - middleware order
 - health checks, telemetry exporters, and deployment integration
 - JSON-RPC endpoint publication and transport-specific error mapping
+
+## Telemetry and tracing
+
+Elarion emits OpenTelemetry-compatible signals through `System.Diagnostics.ActivitySource` and `System.Diagnostics.Metrics`. Runtime packages do not depend on the OpenTelemetry SDK; the host chooses exporters and registers the sources/meters it wants to collect.
+
+Register the framework sources/meters from the host:
+
+```csharp
+using Elarion.AspNetCore;
+using Elarion.Abstractions.Scheduling;
+using Elarion.Caching;
+using Elarion.Resilience;
+
+builder.Services
+    .AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddSource(
+            JsonRpcTelemetry.ActivitySourceName,
+            SchedulerTelemetry.ActivitySourceName,
+            HandlerCacheTelemetry.ActivitySourceName,
+            ResilienceTelemetry.ActivitySourceName)
+        /* add exporters */)
+    .WithMetrics(metrics => metrics
+        .AddMeter(
+            JsonRpcTelemetry.MeterName,
+            SchedulerTelemetry.MeterName,
+            HandlerCacheTelemetry.MeterName,
+            ResilienceTelemetry.MeterName)
+        /* add exporters */);
+```
+
+Current first-party telemetry surfaces:
+
+| Surface | Source/meter | Trace coverage |
+| --- | --- | --- |
+| JSON-RPC | `JsonRpcTelemetry` (`JsonRpc`) | Every request dispatch creates a span, including single calls, notifications, batch items, invalid protocol versions, unknown methods, invalid params, application errors, unhandled exceptions, invalid envelopes, parse errors, and batch-level failures. Registered methods use their canonical method name; invalid or unregistered methods use bounded sentinels to avoid unbounded metric cardinality. Spans include bounded tags such as method, response/error code, JSON-RPC version, and batch index/size. |
+| Scheduler | `SchedulerTelemetry` (`Elarion.Scheduling`) | Runtime schedule/enqueue/cancel operations and job executions create spans. Runtime-scheduled jobs preserve scheduling trace context into the later execution span when possible. Recurring fixed-rate, fixed-delay, cron, skipped, misfired/coalesced, retry, cancellation, and failure outcomes are trace-visible. |
+| Handler cache | `HandlerCacheTelemetry` (`Elarion.Caching`) | Cache get/create spans expose the precise observable outcome: `miss-factory-executed`, `miss-non-cacheable`, or `cached-or-coalesced` when `HybridCache` returns without this call running the factory. Factory execution events, payload policy errors, and invalidation spans are trace-visible. Tags avoid full keys, raw user ids, request values, and arbitrary tag values. |
+| Resilience | `ResilienceTelemetry` (`Elarion.Resilience`) | Named policy execution spans expose final outcome and duration. Retry and timeout callbacks add span events when the default Microsoft/Polly-backed runtime performs those actions. |
+
+Elarion intentionally does not add blanket spans around every generated handler invocation by default. JSON-RPC, scheduler, cache, and resilience spans already identify the framework-owned runtime boundaries, and unconditional handler spans can duplicate transport spans or add cardinality before a host has decided its tracing model. Applications that need handler-level spans can add an explicit decorator through the generated pipeline system.
+
+The TypeScript JSON-RPC client remains OpenTelemetry-package-free and frontend-framework-free. Browser or Node.js applications should wrap the generated transport/fetch boundary when they need client-side tracing.
 
 ## JSON-RPC client generation
 

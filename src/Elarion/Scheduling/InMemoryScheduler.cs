@@ -117,9 +117,31 @@ public sealed class InMemoryScheduler(
             jobOptions.ResiliencePolicy,
             jobOptions.ResilienceMode,
             jobOptions.CorrelationId,
-            0);
+            0,
+            null);
 
-        Enqueue(item);
+        using var activity = SchedulerTelemetry.Source.StartActivity(
+            $"scheduler schedule {descriptor.Name}",
+            ActivityKind.Internal);
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "success";
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("scheduler.operation", "schedule");
+            SetJobTags(activity, item);
+        }
+
+        try {
+            item = item with {
+                TraceParent = activity?.Context ?? Activity.Current?.Context
+            };
+            Enqueue(item);
+        } catch (Exception ex) {
+            outcome = "error";
+            RecordException(activity, ex);
+            throw;
+        } finally {
+            RecordOperation(activity, "schedule", outcome, started);
+        }
 
         return ValueTask.FromResult(new ScheduledJobRunHandle {
             JobId = jobId,
@@ -135,21 +157,44 @@ public sealed class InMemoryScheduler(
     public ValueTask<bool> CancelRunAsync(Guid runId, CancellationToken ct = default) {
         ct.ThrowIfCancellationRequested();
 
+        using var activity = SchedulerTelemetry.Source.StartActivity("scheduler cancel run", ActivityKind.Internal);
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "not-found";
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("scheduler.operation", "cancel-run");
+            activity.SetTag("scheduler.job.run_id", runId);
+        }
+
         CancellationTokenSource? activeCancellation = null;
         lock (_stateLock) {
             if (_queuedRuns.TryGetValue(runId, out var queued)) {
                 _cancelledRuns.Add(runId);
+                outcome = "queued";
+                if (activity?.IsAllDataRequested == true) {
+                    SetJobTags(activity, queued);
+                }
+
                 if (queued.IsRuntimeScheduled) {
                     RecordJobStateLocked(queued, ScheduledJobLifecycleStatus.Cancelled, null, "cancelled", timeProvider.GetUtcNow());
                 }
             } else if (_dispatchingRuns.TryGetValue(runId, out var dispatching)) {
                 _cancelledRuns.Add(runId);
+                outcome = "dispatching";
+                if (activity?.IsAllDataRequested == true) {
+                    SetJobTags(activity, dispatching);
+                }
+
                 if (dispatching.IsRuntimeScheduled) {
                     RecordJobStateLocked(dispatching, ScheduledJobLifecycleStatus.Cancelled, null, "cancelled", timeProvider.GetUtcNow());
                 }
             } else if (_activeRuns.TryGetValue(runId, out var activeRun)) {
                 activeCancellation = activeRun.Cancellation;
+                outcome = "active";
+                if (activity?.IsAllDataRequested == true) {
+                    SetJobTags(activity, activeRun.Item);
+                }
             } else {
+                RecordOperation(activity, "cancel-run", outcome, started);
                 return ValueTask.FromResult(false);
             }
         }
@@ -157,10 +202,12 @@ public sealed class InMemoryScheduler(
         try {
             activeCancellation?.Cancel();
         } catch (ObjectDisposedException) {
+            RecordOperation(activity, "cancel-run", "disposed", started);
             return ValueTask.FromResult(false);
         }
 
         Wake();
+        RecordOperation(activity, "cancel-run", outcome, started);
         return ValueTask.FromResult(true);
     }
 
@@ -168,9 +215,18 @@ public sealed class InMemoryScheduler(
     public ValueTask<bool> CancelJobAsync(Guid jobId, CancellationToken ct = default) {
         ct.ThrowIfCancellationRequested();
 
+        using var activity = SchedulerTelemetry.Source.StartActivity("scheduler cancel job", ActivityKind.Internal);
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "not-found";
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("scheduler.operation", "cancel-job");
+            activity.SetTag("scheduler.job.id", jobId);
+        }
+
         CancellationTokenSource? activeCancellation = null;
         lock (_stateLock) {
             if (!_jobStates.ContainsKey(jobId)) {
+                RecordOperation(activity, "cancel-job", outcome, started);
                 return ValueTask.FromResult(false);
             }
 
@@ -179,24 +235,36 @@ public sealed class InMemoryScheduler(
                 .FirstOrDefault(item => item.JobId == jobId);
             if (pending is not null) {
                 _cancelledRuns.Add(pending.RunId);
+                outcome = "pending";
+                if (activity?.IsAllDataRequested == true) {
+                    SetJobTags(activity, pending);
+                }
+
                 RecordJobStateLocked(pending, ScheduledJobLifecycleStatus.Cancelled, null, "cancelled", timeProvider.GetUtcNow());
             } else {
                 var active = _activeRuns.Values.FirstOrDefault(run => run.Item.JobId == jobId);
                 if (active is null) {
+                    RecordOperation(activity, "cancel-job", "not-active", started);
                     return ValueTask.FromResult(false);
                 }
 
                 activeCancellation = active.Cancellation;
+                outcome = "active";
+                if (activity?.IsAllDataRequested == true) {
+                    SetJobTags(activity, active.Item);
+                }
             }
         }
 
         try {
             activeCancellation?.Cancel();
         } catch (ObjectDisposedException) {
+            RecordOperation(activity, "cancel-job", "disposed", started);
             return ValueTask.FromResult(false);
         }
 
         Wake();
+        RecordOperation(activity, "cancel-job", outcome, started);
         return ValueTask.FromResult(true);
     }
 
@@ -320,7 +388,8 @@ public sealed class InMemoryScheduler(
                 null,
                 ScheduledJobResilienceMode.Inline,
                 null,
-                0));
+                0,
+                null));
         }
     }
 
@@ -404,6 +473,7 @@ public sealed class InMemoryScheduler(
             }
         }
 
+        RecordEnqueue(item);
         Wake();
     }
 
@@ -420,6 +490,8 @@ public sealed class InMemoryScheduler(
                         timeProvider.GetUtcNow(),
                         ScheduledJobRunStatus.Cancelled,
                         "cancelled before execution");
+                    RecordPreExecutionOutcome(next, "cancelled", "cancelled before execution");
+                    RecordTerminalStatus(next.Descriptor, "cancelled", TimeSpan.Zero);
                     continue;
                 }
 
@@ -488,7 +560,7 @@ public sealed class InMemoryScheduler(
 
         if (!IsDescriptorEnabled(descriptor)) {
             if (item.IsRuntimeScheduled) {
-                RecordSkipped(descriptor, "disabled");
+                RecordSkipped(item, "disabled");
                 RecordOutcome(
                     item,
                     null,
@@ -505,7 +577,7 @@ public sealed class InMemoryScheduler(
         var executionStarted = false;
         try {
             if (IsScheduleDisabled(descriptor)) {
-                RecordSkipped(descriptor, "schedule-disabled");
+                RecordSkipped(item, "schedule-disabled");
                 RecordOutcome(
                     item,
                     null,
@@ -527,7 +599,7 @@ public sealed class InMemoryScheduler(
 
             if (!TryBeginRun(item, timeProvider.GetUtcNow(), runCancellation, out var skipReason)) {
                 // Note 37: Overlap and job-local concurrency decisions are recorded as skipped outcomes, not silent drops.
-                RecordSkipped(descriptor, skipReason);
+                RecordSkipped(item, skipReason);
                 RecordOutcome(
                     item,
                     null,
@@ -763,20 +835,12 @@ public sealed class InMemoryScheduler(
         string? outcomeMessage = null;
         var retryScheduled = false;
 
-        using var activity = SchedulerTelemetry.Source.StartActivity(
-            $"scheduled {descriptor.Name}",
-            ActivityKind.Internal);
+        using var activity = item.TraceParent is { } traceParent
+            ? SchedulerTelemetry.Source.StartActivity($"scheduled {descriptor.Name}", ActivityKind.Internal, traceParent)
+            : SchedulerTelemetry.Source.StartActivity($"scheduled {descriptor.Name}", ActivityKind.Internal);
         if (activity?.IsAllDataRequested == true) {
-            activity.SetTag("scheduler.job.name", descriptor.Name);
-            activity.SetTag("scheduler.job.id", item.JobId);
-            activity.SetTag("scheduler.job.run_id", item.RunId);
-            activity.SetTag("scheduler.job.attempt", item.Attempt);
-            activity.SetTag("scheduler.job.max_attempts", item.MaxAttempts);
-            activity.SetTag("scheduler.job.runtime_scheduled", item.IsRuntimeScheduled);
-            activity.SetTag("scheduler.job.due_time", item.DueTimeUtc);
-            if (!string.IsNullOrWhiteSpace(item.CorrelationId)) {
-                activity.SetTag("scheduler.job.correlation_id", item.CorrelationId);
-            }
+            SetJobTags(activity, item);
+            activity.SetTag("scheduler.job.scheduling_lag_ms", Math.Max(0, lag.TotalMilliseconds));
         }
 
         SchedulerTelemetry.ActiveJobRuns.Add(1, CreateTags(descriptor, "active"));
@@ -872,6 +936,11 @@ public sealed class InMemoryScheduler(
 
             SchedulerTelemetry.ActiveJobRuns.Add(-1, CreateTags(descriptor, "active"));
             SchedulerTelemetry.JobRunLag.Record(Math.Max(0, lag.TotalMilliseconds), CreateTags(descriptor, status));
+            if (activity?.IsAllDataRequested == true) {
+                activity.SetTag("scheduler.job.status", status);
+                activity.SetTag("scheduler.job.duration_ms", elapsed.TotalMilliseconds);
+            }
+
             RecordTerminalStatus(descriptor, status, elapsed);
         }
     }
@@ -935,6 +1004,7 @@ public sealed class InMemoryScheduler(
             { "scheduler.job.next_due_time", nextDue },
             { "scheduler.job.retry_delay_ms", delay.TotalMilliseconds }
         }));
+        RecordEnqueue(retryItem);
         Wake();
         return true;
     }
@@ -993,10 +1063,12 @@ public sealed class InMemoryScheduler(
                 timeProvider.GetUtcNow(),
                 ScheduledJobRunStatus.Cancelled,
                 "cancelled before execution");
+            RecordPreExecutionOutcome(item, "cancelled", "cancelled before execution");
+            RecordTerminalStatus(item.Descriptor, "cancelled", TimeSpan.Zero);
             return true;
         }
 
-        RecordSkipped(item.Descriptor, "misfire");
+        RecordSkipped(item, "misfire");
         RecordOutcome(
             item,
             null,
@@ -1040,7 +1112,8 @@ public sealed class InMemoryScheduler(
             ResiliencePolicy = null,
             ResilienceMode = ScheduledJobResilienceMode.Inline,
             CorrelationId = null,
-            MisfireCatchUpRuns = nextCatchUpRuns
+            MisfireCatchUpRuns = nextCatchUpRuns,
+            TraceParent = null
         });
     }
 
@@ -1064,7 +1137,7 @@ public sealed class InMemoryScheduler(
                 return nextAfterPrevious;
             }
 
-            RecordSkipped(item.Descriptor, "misfire-coalesced");
+            RecordSkipped(item, "misfire-coalesced");
         }
 
         return resolved.GetNextDueTime(item.DueTimeUtc, now);
@@ -1171,8 +1244,17 @@ public sealed class InMemoryScheduler(
         }
     }
 
-    private static void RecordSkipped(ScheduledJobDescriptor descriptor, string reason) {
-        var tags = CreateTags(descriptor, "skipped");
+    private static void RecordSkipped(ScheduledJobWorkItem item, string reason) {
+        using var activity = item.TraceParent is { } traceParent
+            ? SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} skipped", ActivityKind.Internal, traceParent)
+            : SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} skipped", ActivityKind.Internal);
+        if (activity?.IsAllDataRequested == true) {
+            SetJobTags(activity, item);
+            activity.SetTag("scheduler.job.status", "skipped");
+            activity.SetTag("scheduler.skip.reason", reason);
+        }
+
+        var tags = CreateTags(item.Descriptor, "skipped");
         tags.Add("scheduler.skip.reason", reason);
         SchedulerTelemetry.JobRunCount.Add(1, tags);
     }
@@ -1240,6 +1322,63 @@ public sealed class InMemoryScheduler(
             { "scheduler.job.status", status }
         };
 
+    private static void RecordEnqueue(ScheduledJobWorkItem item) {
+        using var activity = SchedulerTelemetry.Source.StartActivity(
+            $"scheduler enqueue {item.Descriptor.Name}",
+            ActivityKind.Internal);
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("scheduler.operation", "enqueue");
+            SetJobTags(activity, item);
+            activity.SetTag("scheduler.operation.outcome", "queued");
+        }
+
+        SchedulerTelemetry.RecordOperation("enqueue", "queued", 0);
+    }
+
+    private static void RecordPreExecutionOutcome(ScheduledJobWorkItem item, string status, string reason) {
+        using var activity = item.TraceParent is { } traceParent
+            ? SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} {status}", ActivityKind.Internal, traceParent)
+            : SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} {status}", ActivityKind.Internal);
+        if (activity?.IsAllDataRequested == true) {
+            SetJobTags(activity, item);
+            activity.SetTag("scheduler.job.status", status);
+            activity.SetTag("scheduler.job.outcome.reason", reason);
+        }
+    }
+
+    private static void SetJobTags(Activity activity, ScheduledJobWorkItem item) {
+        activity.SetTag("scheduler.job.name", item.Descriptor.Name);
+        activity.SetTag("scheduler.job.id", item.JobId);
+        activity.SetTag("scheduler.job.run_id", item.RunId);
+        activity.SetTag("scheduler.job.attempt", item.Attempt);
+        activity.SetTag("scheduler.job.max_attempts", item.MaxAttempts);
+        activity.SetTag("scheduler.job.runtime_scheduled", item.IsRuntimeScheduled);
+        activity.SetTag("scheduler.job.due_time", item.DueTimeUtc);
+        activity.SetTag("scheduler.job.schedule_kind", item.Descriptor.Schedule?.Kind.ToString() ?? "runtime");
+        if (!string.IsNullOrWhiteSpace(item.CorrelationId)) {
+            activity.SetTag("scheduler.job.correlation_id", item.CorrelationId);
+        }
+    }
+
+    private static void RecordOperation(Activity? activity, string operation, string outcome, long started) {
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("scheduler.operation.outcome", outcome);
+        }
+
+        SchedulerTelemetry.RecordOperation(
+            operation,
+            outcome,
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+    }
+
+    private static void RecordException(Activity? activity, Exception exception) {
+        activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
+            { "exception.type", exception.GetType().FullName },
+            { "exception.message", exception.Message }
+        }));
+        activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
+    }
+
     private sealed record ActiveScheduledJobRun(
         ScheduledJobWorkItem Item,
         DateTimeOffset StartedAtUtc,
@@ -1280,5 +1419,6 @@ public sealed class InMemoryScheduler(
         ResiliencePolicyReference? ResiliencePolicy,
         ScheduledJobResilienceMode ResilienceMode,
         string? CorrelationId,
-        int MisfireCatchUpRuns);
+        int MisfireCatchUpRuns,
+        ActivityContext? TraceParent);
 }

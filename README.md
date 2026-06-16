@@ -14,6 +14,10 @@ Elarion is a .NET application framework for module-based handler pipelines, comp
 | `Elarion.EntityFrameworkCore.Generators` | Roslyn generator for DbSet properties and entity configuration application. |
 | `@swimmesberger/elarion-jsonrpc-client-generator` | TypeScript CLI/library that converts exported Elarion JSON-RPC schemas into method contracts, Zod result schemas, and a portable fetch client. |
 
+## Telemetry
+
+Elarion emits OpenTelemetry-compatible tracing and metrics through `System.Diagnostics` sources/meters for JSON-RPC, scheduling, handler caching, and resilience. Hosts register the sources they want to collect; the framework runtime packages do not require an OpenTelemetry SDK dependency. See [docs/elarion.md](docs/elarion.md#telemetry-and-tracing) for source names and examples.
+
 ## Development
 
 ```bash

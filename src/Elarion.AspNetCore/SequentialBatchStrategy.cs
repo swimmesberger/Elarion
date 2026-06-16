@@ -27,7 +27,7 @@ public sealed class SequentialBatchStrategy : IBatchExecutionStrategy {
                 request, scope.ServiceProvider, ct);
 
             // Per JSON-RPC 2.0 spec §6: notifications (no id) produce no response
-            if (request.Id is not null) {
+            if (request.ShouldSendResponse) {
                 responses.Add(response);
             }
         }
