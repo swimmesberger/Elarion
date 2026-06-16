@@ -1,0 +1,73 @@
+---
+title: Runtime jobs
+description: Schedule typed one-off jobs with a payload at runtime through IJobScheduler, and cancel them by id.
+---
+
+Beyond compile-time recurring jobs, you can enqueue **one-off** work at runtime with a typed payload.
+The job type still carries `[ScheduledJob]` so the generator emits its descriptor and a direct
+invocation delegate — but it usually omits a recurring schedule.
+
+## Defining a runtime job
+
+A runtime job implements `IScheduledJob<TPayload>`:
+
+```csharp
+using Elarion.Abstractions.Scheduling;
+
+[ScheduledJob("emails.send")]
+public sealed class SendEmailJob(IEmailSender sender) : IScheduledJob<SendEmailPayload> {
+    public async ValueTask ExecuteAsync(
+        SendEmailPayload payload,
+        IScheduledJobContext context,
+        CancellationToken ct) {
+        await sender.SendAsync(payload.To, payload.Subject, payload.Body, ct);
+    }
+}
+
+public sealed record SendEmailPayload {
+    public required string To { get; init; }
+    public required string Subject { get; init; }
+    public required string Body { get; init; }
+}
+```
+
+## Scheduling and cancelling
+
+Use the typed `IJobScheduler` API:
+
+```csharp
+var handle = await scheduler.ScheduleAsync<SendEmailJob, SendEmailPayload>(
+    new SendEmailPayload {
+        To = "customer@example.com",
+        Subject = "Invoice",
+        Body = "Your invoice is ready."
+    },
+    timeProvider.GetUtcNow().AddMinutes(5),
+    ct);
+
+await scheduler.CancelJobAsync(handle.JobId, ct);
+```
+
+When a handler enqueues background work and needs to return an operation id, return `handle.JobId`.
+That is the id callers pass back to `CancelJobAsync`.
+
+## JobId vs. RunId
+
+These two identifiers serve different purposes:
+
+- **`JobId`** identifies the *logical* runtime job. `CancelJobAsync(jobId, ct)` is the user-facing
+  cancellation API: it cancels a queued job, a waiting retry attempt, or the active attempt without
+  the caller needing to know the current state.
+- **`RunId`** identifies *one* scheduler attempt, for diagnostics and snapshots. With
+  [deferred retry](/docs/resilience), each attempt gets a new `RunId` but keeps the same `JobId`.
+
+`CancelRunAsync(runId, ct)` targets one concrete attempt — use it for operator/diagnostic workflows
+acting on a specific run shown in a snapshot. Job code can also request cancellation through
+`IScheduledJobContext.RequestCancellation()`.
+
+## Resilience for runtime jobs
+
+Runtime jobs can opt into scheduler-deferred retry, which releases scheduler concurrency between
+attempts and exposes `WaitingRetry` status — the right model when another handler needs to observe
+progress. See [Resilience](/docs/resilience#scheduler-resilience) for `EnqueueAsync` with a policy
+reference and `ScheduledJobResilienceMode.DeferredRetry`.

@@ -1,0 +1,155 @@
+---
+title: Resilience
+description: Declare named retry/timeout policies as metadata, apply them to handlers and jobs, and back them with a runtime of your choice.
+icon: ShieldCheck
+---
+
+Resilience is a framework-level capability expressed as **neutral policy metadata** plus an
+`IResiliencePipelineRunner` contract. Application code uses Elarion attributes and generated
+registrations; the default runtime is backed by `Microsoft.Extensions.Resilience` / Polly, but that
+is an explicit host choice — the attributes and generated metadata do not require it.
+
+## Defining a policy
+
+Enable policy generation with `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]`,
+then declare named policies as partial static classes:
+
+```csharp
+using Elarion.Abstractions.Resilience;
+
+[ResiliencePolicy(
+    "invoice-email",
+    MaxRetryAttempts = 4,
+    Delay = "10s",
+    Backoff = ResilienceBackoffType.Exponential,
+    MaxDelay = "5m",
+    UseJitter = true,
+    Timeout = "30s")]
+public static partial class InvoiceEmailPolicy;
+```
+
+The generator emits the policy name, a typed `Reference`, a per-policy registration method, and an
+assembly aggregation method.
+
+### Policy properties
+
+These are behavioral, not just metadata:
+
+| Property | Runtime meaning |
+| --- | --- |
+| `MaxRetryAttempts` | Retries after the original attempt. `4` means up to 5 total attempts. Supplying any retry property enables retry generation. |
+| `Delay` | Base delay before the next retry. Inline: awaited in the current call/run. Deferred: becomes the next attempt's due time. |
+| `Backoff` | Delay growth: `Constant` reuses `Delay`, `Linear` multiplies by attempt number, `Exponential` doubles from the base. |
+| `MaxDelay` | Optional cap for calculated retry delays. |
+| `UseJitter` | Randomizes retry delays so many jobs do not retry at the same instant. |
+| `Timeout` | **Per-attempt** timeout. It limits one try, not the whole policy execution across all retries. |
+
+<Callout type="warn">
+  `Timeout = "30s"` means each attempt may run for at most 30 seconds. With `MaxRetryAttempts = 4`,
+  the operation can run longer than 30 seconds in total, because each retry gets its own window plus
+  retry delays. Use a caller/host cancellation token or an outer deadline when you need a total
+  end-to-end limit.
+</Callout>
+
+Timeouts are cooperative: when one fires, the framework cancels the attempt token and records the
+attempt as timed out. Handler and job code must pass that token into database calls, HTTP calls,
+delays, and other async work so the underlying operation stops promptly.
+
+## Registering a runtime
+
+Generated registration stores neutral `ResiliencePolicyMetadataRegistration` instances only — it does
+not build pipelines. The host picks a runtime:
+
+```csharp
+builder.Services.AddMyAppApplicationResiliencePolicies();
+builder.Services.AddMicrosoftResilienceRuntime();
+```
+
+`AddMicrosoftResilienceRuntime()` consumes the generated metadata and lazily builds executable
+Microsoft/Polly pipelines. A custom runtime can register its own `IResiliencePipelineRunner` and
+`IResiliencePolicyCatalog` while reusing the same attributes and metadata.
+
+## Handler resilience
+
+Handlers opt into request-path resilience with `[Resilient]`:
+
+```csharp
+[Resilient(InvoiceEmailPolicy.Name)]
+public sealed class SendInvoiceEmail
+    : IHandler<SendInvoiceEmail.Command, Result<SendInvoiceEmail.Response>> {
+    // ...
+}
+```
+
+The generated `ResilienceDecorator<TRequest, TResponse>` wraps the existing
+[pipeline](/docs/concepts/decorator-pipelines) so each retry attempt runs through the normal
+decorators. Use handler resilience only for **idempotent** work where the caller should wait for all
+attempts. The flow with the policy above:
+
+1. Attempt 1 starts.
+2. If it throws an ordinary exception, the retry policy waits per `Delay`/`Backoff`.
+3. Attempt 2 starts with a fresh timeout window.
+4. The caller waits until an attempt succeeds, retries are exhausted, cancellation is requested, or a
+   non-retryable failure is thrown.
+
+<Callout type="info">
+  `OperationCanceledException` and `NonRetryableException` are terminal and are not retried.
+  `Result<T>` failures are also terminal — they are normal return values, not exceptions.
+</Callout>
+
+## Scheduler resilience
+
+Scheduled jobs can opt into resilience two ways.
+
+### Inline resilience
+
+`[Resilient]` on a scheduled method retries inside the current scheduler run — Spring-style
+composition. `RunId` and scheduler status still represent one occurrence. This is right for short
+idempotent work where one occurrence owns all attempts; it is not ideal for long operations that
+should show `WaitingRetry` between attempts.
+
+```csharp
+[Resilient(InvoiceEmailPolicy.Name)]
+[ScheduledJob("invoice-email.retryOutbox", FixedDelay = "1m")]
+public async ValueTask RetryOutboxAsync(CancellationToken ct) {
+    await outbox.SendPendingAsync(ct);
+}
+```
+
+### Deferred retry
+
+For runtime one-off jobs where another handler needs to observe status, use scheduler-deferred retry
+with the same generated policy reference:
+
+```csharp
+var handle = await scheduler.EnqueueAsync<SendEmailJob, SendEmailPayload>(
+    payload,
+    new ScheduledJobOptions {
+        ResiliencePolicy = InvoiceEmailPolicy.Reference,
+        ResilienceMode = ScheduledJobResilienceMode.DeferredRetry,
+        CorrelationId = payload.InvoiceId.ToString()
+    },
+    ct);
+
+return new QueueEmailResponse(handle.JobId);
+```
+
+Deferred retry releases scheduler concurrency between attempts. A failed attempt records
+`WaitingRetry`, calculates the next due time from the generated retry metadata, and enqueues a fresh
+attempt with a new `RunId` and the same `JobId`. `Timeout` remains per attempt:
+
+1. Attempt 1 starts with its own `RunId`.
+2. If it throws or times out, the scheduler records that attempt outcome.
+3. If retries remain, the logical state becomes `WaitingRetry` and `NextAttemptDueTimeUtc` is set from
+   the policy delay/backoff.
+4. At the retry due time, attempt 2 starts with a new `RunId`, the same `JobId`, and a fresh timeout.
+
+<Callout type="warn">
+  Deferred retry requires generated policy metadata, because the scheduler needs framework-owned
+  retry settings to calculate future due times without sleeping inside an executing pipeline. It
+  stays in-memory — missing state can mean the id was never known, the process restarted, or a
+  terminal state aged out. Use durable infrastructure if retry history must survive restarts.
+</Callout>
+
+Resilience execution is also [trace-visible](/docs/telemetry): named policy spans expose the final
+outcome and duration, and retry/timeout callbacks add span events under the default runtime.

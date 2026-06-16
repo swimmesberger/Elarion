@@ -1,0 +1,91 @@
+---
+title: Configuration
+description: Every configuration key and MSBuild property Elarion reads, in one place.
+---
+
+This page collects the runtime configuration sections and build properties Elarion reads. Most are
+optional with sensible defaults.
+
+## Modules
+
+Feature modules are enabled by default. Disable one by name:
+
+```json
+{
+  "Modules": {
+    "Clients": { "Enabled": false }
+  }
+}
+```
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `Modules:{Name}:Enabled` | `true` | Disables a feature module's handlers, endpoints, JSON metadata, and scheduled jobs. Ignored for core modules. |
+
+See [Modules](/docs/concepts/modules).
+
+## Scheduler
+
+Read by `AddInMemoryScheduler(IConfiguration)`:
+
+```json
+{
+  "Scheduler": {
+    "Enabled": true,
+    "MaxConcurrentExecutions": 8,
+    "MaxRetainedCompletedJobs": 1024,
+    "MaxMisfireCatchUpRuns": 32
+  }
+}
+```
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `Scheduler:Enabled` | `true` | Master switch for the in-memory scheduler. |
+| `Scheduler:MaxConcurrentExecutions` | implementation default | Global cap on concurrent job executions. |
+| `Scheduler:MaxRetainedCompletedJobs` | implementation default | How many terminal job states are kept in memory. |
+| `Scheduler:MaxMisfireCatchUpRuns` | implementation default | Upper bound on catch-up runs for the `CatchUp` misfire policy. |
+
+See [Scheduling](/docs/scheduling).
+
+## Scheduled job placeholders
+
+`[ScheduledJob]` string properties (`FixedRate`, `FixedDelay`, `Cron`, `Enabled`, …) support
+Spring-style configuration placeholders, re-resolved per occurrence:
+
+| Placeholder | Behavior |
+| --- | --- |
+| `${Jobs:Interval}` | Resolve the key; throw during resolution if missing. |
+| `${Jobs:Interval:-15m}` | Resolve the key; fall back to `15m` if missing or blank. |
+
+See [Schedules](/docs/scheduling/schedules).
+
+## JSON-RPC schema generation (MSBuild)
+
+Properties read by `Elarion.AspNetCore.SchemaGeneration` during build:
+
+| Property | Default | Purpose |
+| --- | --- | --- |
+| `ElarionJsonRpcGenerateSchema` | `false` | Enables the build-time export targets. |
+| `ElarionJsonRpcGenerateSchemaOnBuild` | same as above | Controls automatic generation during `dotnet build`. |
+| `ElarionJsonRpcSchemaOutputPath` | `$(BaseIntermediateOutputPath)rpc-schema.json` | Exact output file path. |
+| `ElarionJsonRpcSchemaOutputDirectory` | `$(BaseIntermediateOutputPath)` | Output directory (with `…FileName`). |
+| `ElarionJsonRpcSchemaFileName` | `rpc-schema.json` | Output file name. |
+| `ElarionJsonRpcSchemaEnvironment` | `Development` | Environment used while loading the app. |
+| `ElarionJsonRpcSchemaApplicationArguments` | empty | Args passed to the app entry point. |
+| `ElarionJsonRpcSchemaGenerationOptions` | empty | Extra tool arguments. |
+
+See [Schema generation](/docs/json-rpc/schema-generation).
+
+## Current user (options, not config)
+
+`AddElarionCurrentUser(options => …)` configures claim mapping in code rather than `appsettings`:
+
+| Option | Default |
+| --- | --- |
+| `UserIdClaimType` | `"sub"` |
+| `EmailClaimType` | `"email"` |
+| `RoleClaimType` | `ClaimTypes.Role` |
+| `DefaultRolesWhenAuthenticated` | empty |
+
+See [Current user](/docs/concepts/current-user).

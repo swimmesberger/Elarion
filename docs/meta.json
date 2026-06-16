@@ -1,0 +1,21 @@
+{
+  "title": "Elarion",
+  "root": true,
+  "pages": [
+    "index",
+    "philosophy",
+    "---Getting Started---",
+    "getting-started",
+    "---Core Concepts---",
+    "concepts",
+    "---Features---",
+    "source-generation",
+    "json-rpc",
+    "scheduling",
+    "resilience",
+    "entity-framework",
+    "telemetry",
+    "---Reference---",
+    "reference"
+  ]
+}

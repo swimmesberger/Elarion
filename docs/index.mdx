@@ -1,0 +1,122 @@
+---
+title: Introduction
+description: Elarion is a .NET application framework that turns modules, handlers, and attributes into deterministic, compile-time wiring — no runtime reflection scanning.
+icon: BookOpen
+---
+
+Elarion is a .NET application framework for **module-based handler pipelines, compile-time
+registration, JSON-RPC hosting, scheduled jobs, and optional Entity Framework Core source
+generation**.
+
+The central idea is simple: your application assemblies define modules and handlers; your host
+assembly only wires infrastructure, transport, and deployment concerns. Everything that can be
+discovered from your code — handlers, validators, services, scheduled jobs, RPC methods, EF Core
+`DbSet`s — is emitted by source generators at compile time instead of scanned by reflection at
+startup.
+
+```csharp
+[RpcMethod("clients.get")]
+public sealed class GetClient(IAppDbContext db)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> {
+    public sealed record Query(Guid Id);
+    public sealed record Response(Guid Id, string Name);
+
+    public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var client = await db.Clients
+            .Where(c => c.Id == query.Id)
+            .Select(c => new Response(c.Id, c.Name))
+            .FirstOrDefaultAsync(ct);
+
+        return client is null
+            ? AppError.NotFound($"Client {query.Id} was not found.")
+            : client;
+    }
+}
+```
+
+That single class is a use case, a registered service, a JSON-RPC method, and (optionally) a
+schema-exported TypeScript contract — with no entry added to any `Program.cs` registration list.
+
+## Why Elarion
+
+<Cards>
+  <Card title="Compile-time, not reflection" href="/docs/source-generation">
+    Handlers, services, validators, modules, RPC maps, and scheduled jobs are generated as
+    ordinary DI code. Startup is deterministic and AOT-friendly; missing wiring is a build error,
+    not a runtime surprise.
+  </Card>
+  <Card title="Modules own their surface" href="/docs/concepts/modules">
+    A module is a namespace plus an `[AppModule]` marker. Add a handler under it and the module
+    publishes it automatically through generated `Add{Module}…()` methods.
+  </Card>
+  <Card title="Transport-neutral results" href="/docs/concepts/results-and-errors">
+    Handlers return `Result<T>` with a transport-agnostic `AppError`. The host maps failures to
+    JSON-RPC, HTTP, or any other protocol.
+  </Card>
+  <Card title="End-to-end JSON-RPC" href="/docs/json-rpc">
+    Mark a handler with `[RpcMethod]`, export a schema at build time, and generate a typed
+    TypeScript + Zod client — without hand-writing DTOs.
+  </Card>
+  <Card title="In-process scheduling" href="/docs/scheduling">
+    Source-generated scheduled jobs share one scheduler with explicit overlap, misfire, and
+    resilience policies — and full OpenTelemetry instrumentation.
+  </Card>
+  <Card title="Observable by default" href="/docs/telemetry">
+    JSON-RPC, scheduling, caching, and resilience emit OpenTelemetry-compatible traces and metrics
+    through `System.Diagnostics` — no SDK dependency forced on you.
+  </Card>
+</Cards>
+
+## The philosophy in one line
+
+> Auto-detect application patterns, explicitly wire platform capabilities.
+
+Repeating what your code already states — "I handle this request", "I validate this command",
+"this is a module service" — in a separate registration list creates a parallel model that drifts.
+Elarion declares intent *next to the type* and generates the wiring. The host stays a thin
+composition and transport shell that owns authentication, middleware, database providers, telemetry
+exporters, and deployment.
+
+This is the same broad approach used by mature annotation-driven frameworks such as Spring Boot —
+components live below a namespace boundary, attributes declare their role, sensible defaults cover
+the common path — implemented with .NET source generation instead of runtime classpath scanning.
+
+For the full reasoning behind each design decision — compile-time generation, handlers as the
+use-case boundary, result-based errors, JSON-RPC for internal APIs, and a thin host — see
+[Design & philosophy](/docs/philosophy).
+
+## When Elarion is a good fit
+
+- You are building a modular application or service and want feature modules to be self-contained.
+- You value deterministic startup, AOT compatibility, and inspectable generated code over runtime
+  reflection.
+- You want a typed RPC contract shared between a .NET backend and a TypeScript frontend.
+- You want in-process recurring/background work without standing up external job infrastructure.
+
+It is intentionally **not** a thin wrapper around default ASP.NET Core. You trade some convention
+freedom for less host boilerplate, inherent modularity, and a clear line between application policy
+and host mechanics. See [How Elarion differs from ASP.NET Core](/docs/reference/comparison) for the
+full trade-off table.
+
+## Next steps
+
+<Cards>
+  <Card title="Installation" href="/docs/getting-started/installation">
+    Add the packages and generators to an application and host project.
+  </Card>
+  <Card title="Quickstart" href="/docs/getting-started/quickstart">
+    Build your first module, handler, and JSON-RPC endpoint end to end.
+  </Card>
+  <Card title="Core concepts" href="/docs/concepts">
+    Handlers, results, modules, services, validators, pipelines, and caching.
+  </Card>
+  <Card title="Package reference" href="/docs/reference/packages">
+    What each Elarion package contains and when you need it.
+  </Card>
+</Cards>
+
+<Callout type="info">
+  Elarion is pre-1.0. The public surface described here is stable enough to build on, but minor
+  releases may introduce breaking changes until 1.0. See the
+  [changelog](https://github.com/swimmesberger/Elarion/blob/main/CHANGELOG.md) for details.
+</Callout>

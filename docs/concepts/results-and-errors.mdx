@@ -1,0 +1,109 @@
+---
+title: Results & errors
+description: Result<T> is a lightweight success-or-failure return type, and AppError is the transport-agnostic failure model.
+---
+
+Handlers return outcomes as values, not exceptions. `Result<T>` carries either a success value or an
+`AppError`, and the host maps that error to whatever the transport requires.
+
+## `Result<T>`
+
+`Result<T>` is a `readonly struct` with a success value or an `AppError`:
+
+```csharp
+public readonly struct Result<T> {
+    public bool IsSuccess { get; }
+    public T Value { get; }
+    public AppError Error { get; }
+
+    public static Result<T> Success(T value);
+    public static Result<T> Failure(AppError error);
+}
+```
+
+Implicit conversions let a handler return either a response or an error directly — no wrapping
+ceremony:
+
+```csharp
+return new Response(project.Id);                       // implicit Success
+return AppError.Validation("Name is required.");       // implicit Failure
+return AppError.Conflict("Invoice number is already reserved.");
+```
+
+Because it is a struct with `ValueTask`-friendly ergonomics, the success path stays allocation-light.
+
+## `AppError`
+
+`AppError` is a transport-agnostic record describing *what kind* of failure occurred, not *how* a
+particular protocol should report it:
+
+```csharp
+public sealed record AppError {
+    public required ErrorKind Kind { get; init; }
+    public required string Message { get; init; }
+    public object? Data { get; init; }
+}
+```
+
+### Error kinds
+
+| `ErrorKind` | Meaning |
+| --- | --- |
+| `Validation` | Invalid input or constraint violation. |
+| `NotFound` | The requested resource does not exist. |
+| `Conflict` | The operation conflicts with existing state (duplicate, concurrent modification). |
+| `Forbidden` | The caller is not authorized to perform this operation. |
+| `BusinessRule` | A domain business rule was violated. |
+| `Internal` | An unexpected internal error occurred. |
+
+### Factory methods
+
+Each kind has a factory; validation supports an optional structured payload:
+
+```csharp
+AppError.Validation("Name is required.");
+AppError.Validation("Invalid command.", new[] { "Name is required.", "Email is invalid." });
+AppError.NotFound($"Client {id} was not found.");
+AppError.Conflict("Invoice number is already reserved.");
+AppError.Forbidden("You cannot modify this resource.");
+AppError.BusinessRule("Credit limit exceeded.", data: limitInfo);
+AppError.Internal("Failed to render the document.");
+```
+
+`AppError.InternalError` is a shared instance for the generic internal-failure case.
+
+## Mapping to a transport
+
+`Kind` is the seam between application semantics and protocol codes. Each host owns the mapping, so
+different deployments can translate the same domain failure differently:
+
+```csharp
+// Example: AppError → JSON-RPC error code
+var code = error.Kind switch {
+    ErrorKind.Validation  => -32602,        // Invalid params
+    ErrorKind.NotFound    => -32004,
+    ErrorKind.Conflict    => -32009,
+    ErrorKind.Forbidden   => -32003,
+    ErrorKind.BusinessRule=> -32010,
+    _                     => -32603,        // Internal error
+};
+```
+
+This keeps handlers free of transport details: the same `AppError.NotFound(...)` becomes a JSON-RPC
+error in one host and an HTTP `404` in another.
+
+## Results in pipelines
+
+Decorators can inspect a `Result<T>` through the non-generic `IResultLike` interface — for example a
+transaction decorator that commits on success and rolls back on failure:
+
+```csharp
+if (response is IResultLike { IsSuccess: true }) {
+    await transaction.CommitAsync(ct);
+} else {
+    await transaction.RollbackAsync(ct);
+}
+```
+
+See [Decorator pipelines](/docs/concepts/decorator-pipelines) for the full pattern, including how a
+validation decorator turns failures into `Result<T>.Failure(...)`.

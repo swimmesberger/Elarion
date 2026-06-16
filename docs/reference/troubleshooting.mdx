@@ -1,0 +1,42 @@
+---
+title: Troubleshooting
+description: Common symptoms when wiring Elarion, their likely cause, and the fix.
+---
+
+Most Elarion problems surface at build time as a missing generated method or an analyzer diagnostic
+rather than a runtime failure. This table maps the common symptoms to fixes.
+
+## Generation and registration
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `Add{Module}Handlers` is missing | `[assembly: UseElarion]` / `[assembly: GenerateModuleHandlers]` absent, or the generator is not referenced as an analyzer. | Add the trigger attribute and the analyzer project/package reference. |
+| `Add{Module}Services` is missing | Trigger absent, no `[Service]` classes found in the module namespace, or the analyzer reference is missing. | Add the trigger, annotate service classes with `[Service]`, verify the analyzer reference. |
+| A handler is not registered | The class does not implement `Elarion.Abstractions.IHandler<TRequest, TResponse>`, or it is outside the module namespace. | Check the interface namespace and module namespace containment. |
+| A service is not registered | `[Service]` class is outside the module namespace, the explicit contract is invalid, or no contract could be resolved. | Move it under the module namespace; verify contract resolution. |
+| Hosted service registration fails a diagnostic | The hosted service uses `Scoped`/`Transient` scope. | Use `Scope = ServiceScope.Singleton`. |
+| Generic service registration fails a diagnostic | `[Service]` is on a generic type or one nested in a generic type. | Register open generics manually for now. |
+| Validators are not registered | The validator is outside the module namespace or does not inherit `AbstractValidator<T>`. | Move it under the module namespace; reference FluentValidation. |
+| RPC method is missing | The host lacks `[GenerateRpcMethodMap]`, the handler lacks `[RpcMethod]`, or nested `Command`/`Query` and `Response` types are missing. | Add the marker and follow the handler shape convention. |
+| Module services do not run | The module is disabled via `Modules:{Name}:Enabled=false`, or `[AppModule]` is missing. | Check configuration and the module attribute. |
+
+## JSON-RPC and schema generation
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| Build-time schema generation does not run | `ElarionJsonRpcGenerateSchema` is not `true`, the schema package is not referenced, or `…GenerateSchemaOnBuild` was disabled. | Add the private package reference and set `ElarionJsonRpcGenerateSchema=true`, or invoke `GenerateElarionJsonRpcSchema` manually. |
+| Schema generation fails after loading the app | Startup code before `builder.Build()` threw, or no frozen `JsonRpcDispatcher` was registered before build. | Register the dispatcher before `builder.Build()` and guard expensive startup work with `JsonRpcSchemaGeneration.IsRunning`. |
+| Generated frontend RPC types are stale | `rpc-schema.json` was updated but the client generator was not rerun. | Export the schema and re-run the client generator. |
+| Client generator fails on schema composition | The schema uses unsupported constructs such as `oneOf`, `anyOf`, or `allOf`. | Adjust the exported DTO shape, or extend the generator deliberately. |
+
+## Persistence and serialization
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| Transaction decorator cannot resolve `DbContext` | The host registered only the concrete context. | Register `DbContext` to resolve to the app context: `services.AddScoped<DbContext>(sp => sp.GetRequiredService<AppDbContext>())`. |
+| `System.Text.Json` cannot serialize a DTO under AOT | The type is missing from a module JSON context. | Add `[JsonSerializable(typeof(…))]` to the relevant module context. |
+| `DbSet<T>` is missing for an entity | The entity lacks `[DbEntity]`, or its scope does not intersect the `[GenerateDbSets("scope")]` interface. | Add `[DbEntity]` with a matching scope. |
+
+Still stuck? Open an issue at
+[github.com/swimmesberger/Elarion/issues](https://github.com/swimmesberger/Elarion/issues) with a
+minimal repro.

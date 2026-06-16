@@ -1,0 +1,134 @@
+---
+title: Entity Framework Core
+description: Optional source generation for DbSet properties and entity configuration application — interface-first, explicit, and AOT-friendly.
+icon: Database
+---
+
+The EF Core package is **optional**. Use it when you want the same compile-time, explicit-convention
+style for persistence wiring that the rest of Elarion uses — generated `DbSet<T>` properties and
+direct `IEntityTypeConfiguration<T>` calls instead of reflection-based assembly scanning.
+
+Its main purpose is to give you a **generated application-context interface** (`IAppDbContext`) that
+handlers depend on directly. That interface *is* your data-access abstraction: application code in the
+application layer queries `DbSet`s and calls `SaveChangesAsync` without referencing the infrastructure
+project that owns the concrete `DbContext`.
+
+<Callout type="info">
+  This is the recommended alternative to a per-entity repository layer. With full LINQ, projections,
+  and EF Core change tracking already available through `IAppDbContext`, a hand-written
+  `IClientRepository`/`IInvoiceRepository` per table usually adds indirection without adding value.
+  Introduce a dedicated abstraction only when a query genuinely needs to be reused or hidden behind a
+  domain operation. See [Handlers → Accessing data](/docs/concepts/handlers#accessing-data).
+</Callout>
+
+## Setup
+
+Reference the marker package and the generator analyzer in the project that owns your entities and
+context abstraction:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.EntityFrameworkCore" Version="0.1.0" />
+  <PackageReference Include="Elarion.EntityFrameworkCore.Generators" Version="0.1.0" PrivateAssets="all" />
+</ItemGroup>
+```
+
+## Marking entities
+
+Entities opt in explicitly with `[DbEntity]`:
+
+```csharp
+using Elarion.EntityFrameworkCore;
+
+namespace MyApp.Domain.Entities;
+
+[DbEntity]
+public sealed class Invoice {
+    public Guid Id { get; set; }
+}
+```
+
+## Generating DbSets
+
+Annotate an application-level context **interface** with `[GenerateDbSets]`. This is the single source
+of truth for generated `DbSet`s:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Elarion.EntityFrameworkCore;
+
+namespace MyApp.Application;
+
+[GenerateDbSets]
+public partial interface IAppDbContext {
+    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+    DbContext AsDbContext();
+}
+```
+
+The generator emits `DbSet<T>` members into the interface and matching concrete members into any
+partial `DbContext` class that implements it:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using MyApp.Application;
+
+namespace MyApp.Infrastructure.Data;
+
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
+    : DbContext(options), IAppDbContext {
+    public DbContext AsDbContext() => this;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
+        base.OnModelCreating(modelBuilder);
+        ConfigureEntities(modelBuilder);   // generated
+    }
+}
+```
+
+<Callout type="warn">
+  Do **not** add `[GenerateDbSets]` to the concrete context. Class generation is inferred from the
+  generated interface so applications have one declaration point.
+</Callout>
+
+## Multiple contexts with scopes
+
+For multiple contexts, use string-constant scopes so each context only sees the entities it owns:
+
+```csharp
+public static class PersistenceScopes {
+    public const string Main = "main";
+    public const string AiAgent = "ai-agent";
+}
+
+[DbEntity(PersistenceScopes.Main)]    public sealed class Invoice { /* ... */ }
+[DbEntity(PersistenceScopes.AiAgent)] public sealed class ChatSession { /* ... */ }
+[DbEntity(PersistenceScopes.Main, PersistenceScopes.AiAgent)] public sealed class User { /* ... */ }
+
+[GenerateDbSets(PersistenceScopes.Main)]    public partial interface IMainDbContext;
+[GenerateDbSets(PersistenceScopes.AiAgent)] public partial interface IAiAgentDbContext;
+```
+
+Scope behavior:
+
+- `[GenerateDbSets]` without scopes keeps global behavior and includes every `[DbEntity]`.
+- `[GenerateDbSets("scope")]` includes only entities whose `[DbEntity(...)]` scopes intersect.
+- `[DbEntity]` without scopes participates only in unscoped/global generated interfaces.
+- Shared entities can list multiple scopes.
+
+## Entity configuration
+
+The generator discovers `IEntityTypeConfiguration<T>` implementations in the current and referenced
+assemblies and emits direct calls, equivalent to:
+
+```csharp
+new InvoiceConfiguration().Configure(modelBuilder.Entity<Invoice>());
+```
+
+Unscoped interfaces apply every discovered configuration, including schema-only configuration types
+that are not exposed as `DbSet<T>`. Scoped interfaces filter configurations to the selected
+`[DbEntity]` set, so unrelated scoped contexts do not configure each other's entities.
+
+This avoids `ApplyConfigurationsFromAssembly(...)` reflection scanning and keeps model wiring
+inspectable and AOT-friendly. The trade-off is explicit participation: entities must opt in with
+`[DbEntity]`, and scoped contexts require matching scopes.

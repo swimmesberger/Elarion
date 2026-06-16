@@ -1,0 +1,126 @@
+---
+title: Overview
+description: JSON-RPC is a first-class optional transport — mark a handler with [RpcMethod] and Elarion takes it from dispatcher to typed TypeScript client.
+---
+
+JSON-RPC is a first-class, optional transport in Elarion. It lives outside the core framework package
+(`Elarion.JsonRpc` plus `Elarion.AspNetCore`) so applications that don't need it pay nothing for it.
+What makes it worthwhile is that the pipeline is **end-to-end and typed**, from a C# handler to a
+generated TypeScript client — with no hand-written DTOs in between.
+
+## Why JSON-RPC?
+
+Elarion's application model is a set of **handlers** — named use cases that take a request and return
+a `Result<T>`. JSON-RPC is the transport that mirrors that model most directly: it exposes
+**operations**, not resources. A method name like `clients.create` maps one-to-one to a handler. The
+transport reflects your application instead of forcing a resource/CRUD shape on top of it.
+
+That choice removes an entire category of API design work. With REST you decide, for every endpoint:
+
+- the **URL path** and how to model nesting and collections,
+- which **HTTP verb** fits (`GET`/`POST`/`PUT`/`PATCH`/`DELETE`) and what that implies,
+- how to map an outcome onto a **status code** (and what `200` vs `201` vs `204` vs `409` means here),
+- resource representations, content negotiation, and partial-update semantics.
+
+With JSON-RPC, none of that is a decision. `clients.create` is a method that takes a `Command` and
+returns a `Result`. Failures map once, centrally, from [`AppError.Kind`](/docs/concepts/results-and-errors#mapping-to-a-transport)
+to a JSON-RPC error code — not per endpoint.
+
+### It feels like calling the handler directly
+
+Because the [generated TypeScript client](/docs/json-rpc/typescript-client) is produced from the same
+schema the server dispatches, a frontend call is about as close as a network round-trip gets to
+invoking the C# handler — same parameter shape, same result type, validated by Zod:
+
+```ts
+// Frontend — the call mirrors the server-side GetClient handler
+const client = await rpc.clients.get({ id })
+//    ^? { id: string; name: string }   (typed from the C# Response)
+```
+
+```csharp
+// Backend — the handler the call above resolves to
+[RpcMethod("clients.get")]
+public sealed class GetClient(IAppDbContext db)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> { /* ... */ }
+```
+
+The iteration loop is short: add a handler, mark it `[RpcMethod]`, regenerate the client, and call it
+as a typed method. There is no route to design, no DTO to duplicate on the client, and no transport
+plumbing to write.
+
+### Where it fits — and where it doesn't
+
+This makes JSON-RPC an excellent fit for **internal, first-party APIs** where one team controls both
+the backend and the client (a web app talking to its own backend, a BFF, service-to-service calls).
+You trade REST's broad-ecosystem conventions for speed and a contract that tracks your code.
+
+Reach for REST/HTTP instead when you have **third-party or public consumers**, need HTTP caching /
+CDN semantics, resourceful URLs, or the wider tooling ecosystem around them. Elarion supports this
+too: JSON-RPC is optional and outside the core package, and modules can expose ordinary
+[Minimal API endpoints](/docs/concepts/modules#endpoints-in-modules) alongside — or instead of —
+JSON-RPC methods. You are not locked into one transport.
+
+## The end-to-end pipeline
+
+1. Application handlers declare `[RpcMethod("module.action")]`.
+2. `RpcMethodMapGenerator` emits the dispatcher registration map.
+3. The host configures a `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
+4. `JsonRpcSchemaExporter` (or the [build-time package](/docs/json-rpc/schema-generation)) exports
+   `rpc-schema.json` from the registered dispatcher.
+5. [`elarion-jsonrpc-client-generator`](/docs/json-rpc/typescript-client) converts that schema into
+   TypeScript types, Zod result schemas, and a typed fetch client.
+6. The frontend uses the generated client directly or wraps it in framework-specific helpers.
+
+Each stage has a single owner, which keeps the reusable contract small:
+
+- `Elarion.JsonRpc` owns runtime dispatch, telemetry, and schema export.
+- `Elarion.AspNetCore` owns HTTP endpoint mapping and ASP.NET Core transport behavior.
+- `Elarion.AspNetCore.SchemaGeneration` owns build-time schema export.
+- `elarion-jsonrpc-client-generator` owns schema-to-TypeScript generation.
+- Applications own server-function/auth/cache adapters around the generated client.
+
+## Marking a handler
+
+Add `[RpcMethod]` to a handler that follows the conventional shape:
+
+```csharp
+[RpcMethod("clients.create")]
+public sealed class CreateClient
+    : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
+    public sealed record Command(string Name);
+    public sealed record Response(Guid Id);
+
+    public ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        // ...
+    }
+}
+```
+
+The RPC generator expects:
+
+- a nested request type named `Command` or `Query`,
+- a nested response type named `Response`,
+- an `IHandler<TRequest, Result<TResponse>>` implementation.
+
+The generated map emits typed dispatcher calls:
+
+```csharp
+dispatcher.MapHandler<CreateClient.Command, CreateClient.Response>("clients.create");
+```
+
+## Errors are mapped by the host
+
+Each host provides the bridge from Elarion application results to JSON-RPC errors, so different
+applications can map domain failures to transport codes in their own way. Handlers stay
+transport-agnostic and return [`Result<T>`](/docs/concepts/results-and-errors); the host translates
+`AppError.Kind` into JSON-RPC error codes.
+
+## In this section
+
+<Cards>
+  <Card title="Hosting" href="/docs/json-rpc/hosting">Map the endpoint and freeze the dispatcher in ASP.NET Core.</Card>
+  <Card title="Serialization" href="/docs/json-rpc/serialization">Compose module JSON contexts into the runtime serializer.</Card>
+  <Card title="Schema generation" href="/docs/json-rpc/schema-generation">Export `rpc-schema.json` during `dotnet build`.</Card>
+  <Card title="TypeScript client" href="/docs/json-rpc/typescript-client">Generate a typed, portable fetch client and Zod schemas.</Card>
+</Cards>

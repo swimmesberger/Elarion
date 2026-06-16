@@ -1,0 +1,50 @@
+---
+title: Inspection
+description: Read scheduler state through IJobSchedulerInspector — snapshots, next-due times, and per-job status.
+---
+
+The scheduler exposes lightweight, read-only state through `IJobSchedulerInspector`. This is enough
+to build an admin dashboard or a job-status endpoint without a separate trigger API.
+
+## Snapshots
+
+```csharp
+var snapshot = schedulerInspector.GetSnapshot();
+var activeRuns = snapshot.ActiveRuns;
+var nextDue = snapshot.Jobs
+    .Single(job => job.Name == "reports.daily")
+    .NextDueTimeUtc;
+
+var job = schedulerInspector.GetJob(handle.JobId);
+```
+
+`NextDueTimeUtc` is the next queued due time known to the running in-memory scheduler — enough to show
+the next fire time for enabled recurring jobs. Runtime jobs with deferred retry expose their next
+retry due time through `ScheduledJobState.NextAttemptDueTimeUtc`.
+
+## Per-job status
+
+A status handler can inspect the logical job and surface it to a caller:
+
+```csharp
+var state = schedulerInspector.GetJob(jobId);
+if (state is null) {
+    return AppError.NotFound("Job state is no longer available.");
+}
+
+return new JobStatusResponse(
+    state.Status,
+    state.Attempt,
+    state.MaxAttempts,
+    state.NextAttemptDueTimeUtc,
+    state.LastError);
+```
+
+<Callout type="warn">
+  Job state is in-memory. A missing state can mean the id was never known, the process restarted, or
+  a terminal state aged out beyond `Scheduler:MaxRetainedCompletedJobs`. Use durable infrastructure if
+  status history must survive restarts.
+</Callout>
+
+Terminal states are `Succeeded`, `Failed`, `Cancelled`, or `Skipped`, retained in memory up to
+`Scheduler:MaxRetainedCompletedJobs`.

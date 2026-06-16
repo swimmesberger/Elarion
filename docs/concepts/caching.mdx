@@ -1,0 +1,128 @@
+---
+title: Caching
+description: Declarative handler result caching with [Cacheable] and tag-based invalidation with [CacheInvalidate], backed by HybridCache.
+---
+
+Elarion can cache handler results declaratively. Mark a read handler with `[Cacheable]` and the
+generator wraps it in a cache decorator; mark a write handler with `[CacheInvalidate]` and it clears
+the matching entries. Caching is opt-in per handler and integrates with the same
+[decorator pipeline](/docs/concepts/decorator-pipelines) as everything else.
+
+<Callout type="info">
+  Only **successful** `Result<T>` responses are cached. Validation and domain failures are returned
+  to the caller but never stored, so a transient failure cannot become sticky.
+</Callout>
+
+## Caching a read handler
+
+```csharp
+using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+using Microsoft.EntityFrameworkCore;
+
+[Cacheable("clients", DurationSeconds = 120)]
+[RpcMethod("clients.get")]
+public sealed class GetClient(IAppDbContext db)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> {
+    public sealed record Query(Guid Id);
+    public sealed record Response(Guid Id, string Name);
+
+    public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var client = await db.Clients
+            .Where(c => c.Id == query.Id)
+            .Select(c => new Response(c.Id, c.Name))
+            .FirstOrDefaultAsync(ct);
+
+        return client is null
+            ? AppError.NotFound($"Client {query.Id} was not found.")
+            : client;
+    }
+}
+```
+
+The generator emits an `IHandlerCachePolicy<GetClient.Query>` from the attribute metadata and inserts
+a `CacheDecorator<,>` into the handler's pipeline. The decorator computes a key from the request,
+looks it up, and only runs the handler on a miss.
+
+### `[Cacheable]` properties
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `tags` (constructor) | none | Logical cache tags for grouping and invalidation. |
+| `DurationSeconds` | `60` | Entry lifetime, applied to both the distributed and local cache layers. |
+| `Scope` | `CurrentUser` | Whether keys and tags are isolated per user or shared globally. |
+| `KeyProperties` | all public request properties | Which request properties contribute to the key. Invalid names are reported at build time. |
+
+Use `KeyProperties` when only some request fields affect the response:
+
+```csharp
+[Cacheable("reports", DurationSeconds = 300, KeyProperties = new[] { "Year", "Month" })]
+```
+
+## Cache scope
+
+`HandlerCacheScope` controls isolation:
+
+| Scope | Behavior |
+| --- | --- |
+| `CurrentUser` (default) | Entries and tags are isolated by the authenticated user. Requires an [`ICurrentUser`](/docs/concepts/current-user) with a user id; the id is hashed before it enters the physical cache key. |
+| `Global` | Entries are shared across all users. Use only for data that is not user-specific and carries no authorization context. |
+
+<Callout type="warn">
+  `CurrentUser` is the default precisely so that one user's cached response is never served to
+  another. Switch to `Global` deliberately, only for non-personalized data.
+</Callout>
+
+## Invalidating with tags
+
+A command handler clears cached entries by tag with `[CacheInvalidate]`. Invalidation is tag-based,
+so the writer does not need to know the concrete keys produced by read handlers:
+
+```csharp
+[CacheInvalidate("clients")]
+[RpcMethod("clients.update")]
+public sealed class UpdateClient(IAppDbContext db)
+    : IHandler<UpdateClient.Command, Result<UpdateClient.Response>> {
+    public sealed record Command(Guid Id, string Name);
+    public sealed record Response(Guid Id);
+
+    public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.Id == command.Id, ct);
+        if (client is null) {
+            return AppError.NotFound($"Client {command.Id} was not found.");
+        }
+
+        client.Name = command.Name;
+        await db.SaveChangesAsync(ct);
+        // The decorator invalidates the "clients" tag on success.
+        return new Response(client.Id);
+    }
+}
+```
+
+`[CacheInvalidate]` takes the same `tags` and `Scope` as `[Cacheable]`. Tag and scope must line up:
+a `CurrentUser`-scoped invalidation clears that user's `clients` entries; a `Global` one clears the
+shared entries.
+
+## Registering the cache runtime
+
+The attributes and generated policies are runtime-neutral. The host chooses the implementation. The
+default is backed by [`HybridCache`](https://learn.microsoft.com/aspnet/core/performance/caching/hybrid):
+
+```csharp
+builder.Services.AddElarionHandlerCaching();
+```
+
+This registers `HybridCache` and the default `IHandlerCache` (`HybridHandlerCache`). To use a
+different backing store, configure `HybridCache` with a distributed cache (for example Redis) as you
+normally would, or register your own `IHandlerCache` implementation.
+
+## How it composes
+
+`CacheDecorator<TRequest, TResponse>` and `CacheInvalidationDecorator<TRequest, TResponse>` are
+ordinary handler decorators inserted by the `[Cacheable]` / `[CacheInvalidate]` attributes. They sit
+in the generated pipeline alongside your application decorators, so caching composes deterministically
+with logging, validation, and transactions. Cache operations are also
+[trace-visible](/docs/telemetry): get/create spans report the precise outcome —
+`miss-factory-executed`, `miss-non-cacheable`, or `cached-or-coalesced` — and invalidation emits its
+own spans, all without leaking full keys or raw user ids into tags.

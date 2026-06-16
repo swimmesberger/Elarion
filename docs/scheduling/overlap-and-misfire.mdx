@@ -1,0 +1,63 @@
+---
+title: Overlap & misfire
+description: Control what happens when runs of the same job collide, and when grid schedules fall behind.
+---
+
+Two independent policies govern what happens under load: **overlap** (a new occurrence is due while
+one is still running) and **misfire** (a grid occurrence is observed so late that later ones are also
+due). They are separate because they answer different questions.
+
+## Overlap
+
+Overlap decides what to do when the same job already has an active occurrence. The default is `Skip`.
+
+| Policy | Behavior |
+| --- | --- |
+| `Skip` | Drop a recurring occurrence when the job is already running. |
+| `Queue` | Serialize occurrences of the same job; recurring queued occurrences coalesce so slow jobs do not pile up unlimited waiters. |
+| `AllowConcurrent` | Allow multiple occurrences to run at once, still subject to the global `MaxConcurrentExecutions`. |
+
+### Groups
+
+Use `Group` when *different* jobs must not overlap each other — for example because they share a
+mailbox, an export directory, or a third-party API quota:
+
+```csharp
+[ScheduledJob("imports.customerSync", FixedRate = "30s", Group = "imports")]
+public async ValueTask SyncCustomersAsync(CancellationToken ct) { /* ... */ }
+```
+
+### Bounding concurrency per job
+
+Use `MaxConcurrentRuns` with `AllowConcurrent` when a single job may overlap but should still be
+bounded:
+
+```csharp
+[ScheduledJob(
+    "imports.customerSync",
+    FixedRate = "30s",
+    Overlap = ScheduledJobOverlap.AllowConcurrent,
+    MaxConcurrentRuns = 2)]
+public async ValueTask SyncCustomersAsync(CancellationToken ct) {
+    await importer.SyncAsync(ct);
+}
+```
+
+## Misfire
+
+Misfire applies only to recurring **grid** schedules (`FixedRate` and `Cron`) when the scheduler
+observes a due occurrence *after* one or more later occurrences would also already be due — for
+example after an in-process pause or a large clock jump. Small timer jitter is **not** a misfire.
+`FixedDelay` schedules have no missed grid slots because the next due time is computed after
+completion.
+
+| Policy | Behavior |
+| --- | --- |
+| `FireOnce` (default) | Run one overdue occurrence, then schedule the next future occurrence and skip the intermediate slots. |
+| `Skip` | Do not run the stale overdue occurrence. Record a skipped outcome with reason `misfire`, then schedule the next future occurrence. |
+| `CatchUp` | Run missed occurrences in due-time order, respecting normal overlap/concurrency rules. Bounded by `Scheduler:MaxMisfireCatchUpRuns`; after the cap, the scheduler coalesces to the next future occurrence. |
+
+<Callout type="info">
+  Runtime one-off jobs scheduled through `IJobScheduler` do not use recurring misfire policy. A
+  one-off job with a due time in the past runs as soon as scheduler capacity is available.
+</Callout>

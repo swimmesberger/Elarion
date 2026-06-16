@@ -1,0 +1,81 @@
+---
+title: Source generation
+description: How Elarion's Roslyn generators turn attributes and conventions into deterministic, inspectable registration code.
+icon: Cpu
+---
+
+Source generation is the mechanism behind everything in Elarion. Instead of scanning assemblies with
+reflection at startup, the generators read your attributes and conventions at compile time and emit
+ordinary DI registration code. Startup is deterministic, AOT-friendly, and the generated code can be
+inspected like any other source.
+
+## Turning generators on
+
+An application project references the runtime package and the generators as an analyzer:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion" Version="0.1.0" />
+  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
+</ItemGroup>
+```
+
+(When building inside this repository, reference the generator project with
+`OutputItemType="Analyzer" ReferenceOutputAssembly="false"` instead.)
+
+Then add the full framework opt-in once in the assembly:
+
+```csharp
+using Elarion.Abstractions;
+using MyApp.Application.Pipeline;
+
+[assembly: DefaultPipeline]
+[assembly: UseElarion]
+```
+
+`[assembly: UseElarion]` enables the framework-owned assembly-level generators for module handlers,
+module services, module validators, and scheduled jobs. It intentionally does **not** replace
+application-owned policy attributes such as `[DefaultPipeline]`, nor class/interface-targeted triggers
+such as `[GenerateRpcMethodMap]`, `[GenerateModuleBootstrapper]`, or `[GenerateDbSets]`.
+
+## Narrow triggers
+
+Use the narrower triggers when an assembly intentionally wants only a subset of the generators:
+
+```csharp
+[assembly: GenerateModuleHandlers]
+[assembly: GenerateModuleServices]
+[assembly: GenerateModuleValidators]
+[assembly: GenerateScheduledJobs]
+[assembly: GenerateResiliencePolicies]
+```
+
+## Generator reference
+
+| Generator | Trigger | Generated API |
+| --- | --- | --- |
+| `HandlerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleHandlers]` | `Add{HandlerName}()` and `Add{ModuleName}Handlers()` extension methods. |
+| `ModuleServiceRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleServices]` | `Add{ServiceName}Service()` and `Add{ModuleName}Services()` extension methods. |
+| `ModuleValidatorRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleValidators]` | `Add{ModuleName}Validators()` extension methods. |
+| `SchedulerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateScheduledJobs]` | `Add{AssemblyName}ScheduledJobs()` registering descriptors and job types. |
+| `ResiliencePolicyGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |
+| `RpcMethodMapGenerator` | `[GenerateRpcMethodMap]` on a host partial class | `RpcMethodMap.RegisterAll(dispatcher)`. |
+| `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | `ConfigureAllServices`, `MapAllEndpoints`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, `GetAllModuleNames`. |
+| EF Core `DbSet` generator | `[GenerateDbSets]` on a partial interface | `DbSet<T>` members and entity configuration application. See [Entity Framework Core](/docs/entity-framework). |
+
+Generated code intentionally uses explicit type names and DI factory registrations. Startup behavior
+remains deterministic and AOT-friendly.
+
+## Diagnostics over surprises
+
+Because discovery is compile-time, mistakes surface as build diagnostics rather than runtime
+failures: a missing trigger attribute, an invalid service contract, a scoped hosted service, an
+unsupported generic service, or a handler outside its module namespace each produce an actionable
+message. The common cases and their fixes are listed in
+[Troubleshooting](/docs/reference/troubleshooting).
+
+<Callout type="info">
+  The generators ship analyzer release notes (`AnalyzerReleases.Shipped.md` /
+  `AnalyzerReleases.Unshipped.md`) so diagnostic IDs are tracked across versions — a small but real
+  signal that diagnostics are treated as a stable contract.
+</Callout>

@@ -1,0 +1,66 @@
+---
+title: Serialization
+description: Compose JSON-RPC envelope, host, and per-module JSON contexts into one runtime serializer for AOT-friendly serialization.
+---
+
+Elarion uses `System.Text.Json` source-generated metadata so request/response serialization is
+AOT-friendly and follows module boundaries. Each module contributes its own `JsonSerializerContext`;
+the host composes them into the runtime serializer.
+
+## Per-module JSON contexts
+
+Each module declares a source-generated context for its request/response and nested DTO types:
+
+```csharp
+using System.Text.Json.Serialization;
+
+namespace MyApp.Application.Modules.Clients;
+
+[JsonSerializable(typeof(GetClient.Query))]
+[JsonSerializable(typeof(GetClient.Response))]
+[JsonSerializable(typeof(CreateClient.Command))]
+[JsonSerializable(typeof(CreateClient.Response))]
+public sealed partial class ClientsJsonContext : JsonSerializerContext;
+```
+
+The module exposes it through `GetJsonTypeInfoResolver()`:
+
+```csharp
+public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => ClientsJsonContext.Default;
+```
+
+## Composing the runtime serializer
+
+The host combines the JSON-RPC envelope metadata, host metadata, every module resolver, and a
+fallback resolver:
+
+```csharp
+var moduleResolvers = ModuleBootstrapper.GetAllJsonTypeInfoResolvers(configuration);
+
+var resolvers = new IJsonTypeInfoResolver[2 + moduleResolvers.Length + 1];
+resolvers[0] = JsonRpcJsonContext.Default;
+resolvers[1] = HostJsonContext.Default;
+Array.Copy(moduleResolvers, 0, resolvers, 2, moduleResolvers.Length);
+resolvers[^1] = new DefaultJsonTypeInfoResolver();
+
+var options = new JsonSerializerOptions {
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    TypeInfoResolver = JsonTypeInfoResolver.Combine(resolvers),
+};
+```
+
+The **same** `JsonSerializerOptions` instance must be used by the runtime dispatcher and by schema
+export, so the exported schema matches what the server actually serializes.
+
+## AOT considerations
+
+<Callout type="warn">
+  For AOT-sensitive apps, register **every** command, query, response, and nested DTO type explicitly
+  with `[JsonSerializable(...)]`. The trailing `DefaultJsonTypeInfoResolver()` is a reflection-based
+  fallback — convenient in development, but do not rely on it for production-only types under AOT.
+</Callout>
+
+The project also sets `JsonSerializerIsReflectionEnabledByDefault=false`, which surfaces missing type
+metadata early rather than silently falling back to reflection.

@@ -1,0 +1,23 @@
+<svg width="252" height="64" viewBox="0 0 252 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Elarion">
+  <defs>
+    <linearGradient id="elarionTile" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#elarionTile)"/>
+  <g fill="#FFFFFF">
+    <rect x="15" y="13" width="8" height="38" rx="4"/>
+    <rect x="19" y="13" width="23" height="8" rx="4"/>
+    <rect x="19" y="28" width="16" height="8" rx="4"/>
+    <rect x="19" y="43" width="23" height="8" rx="4"/>
+  </g>
+  <g fill="#22D3EE">
+    <circle cx="46" cy="17" r="5"/>
+    <circle cx="39" cy="32" r="5"/>
+    <circle cx="46" cy="47" r="5"/>
+  </g>
+  <text x="84" y="42" fill="currentColor"
+        font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="34" font-weight="700" letter-spacing="-0.5">Elarion</text>
+</svg>

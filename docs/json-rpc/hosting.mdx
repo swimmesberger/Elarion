@@ -1,0 +1,100 @@
+---
+title: Hosting
+description: Wire the module bootstrapper, RPC method map, and JSON-RPC endpoint into an ASP.NET Core host.
+---
+
+The host turns generated registration code into a running JSON-RPC endpoint. It owns composition and
+transport; modules own application logic.
+
+## Host project references
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.JsonRpc" Version="0.1.0" />
+  <PackageReference Include="Elarion.AspNetCore" Version="0.1.0" />
+  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
+  <ProjectReference Include="..\MyApp.Application\MyApp.Application.csproj" />
+</ItemGroup>
+```
+
+## Generated host partials
+
+Two partial classes tell the generators to emit the cross-module wiring and the RPC map in the host
+assembly:
+
+```csharp
+using Elarion.AspNetCore;
+
+namespace MyApp.Api.Hosting;
+
+[GenerateModuleBootstrapper]
+public static partial class ModuleBootstrapper;
+```
+
+```csharp
+using Elarion.JsonRpc;
+
+namespace MyApp.Api.Rpc;
+
+[GenerateRpcMethodMap]
+public static partial class RpcMethodMap {
+    public static partial JsonRpcDispatcher RegisterAll(JsonRpcDispatcher dispatcher);
+}
+```
+
+`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints`, `GetAllJsonTypeInfoResolvers`,
+`IsModuleEnabled`, and `GetAllModuleNames`. `RpcMethodMap.RegisterAll` registers every `[RpcMethod]`
+handler on the dispatcher.
+
+## Composing the host
+
+```csharp
+var builder = WebApplication.CreateSlimBuilder(args);
+
+builder.Services.AddDbContext<AppDbContext>(/* provider setup */);
+builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<AppDbContext>());
+
+builder.Services.AddMyAppApplicationScheduledJobs();
+builder.Services.AddMyAppApplicationResiliencePolicies();
+builder.Services.AddInMemoryScheduler(builder.Configuration);
+builder.AddMyAppPlatformCapabilities();
+ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
+
+var serializerOptions = CreateSerializerOptions(builder.Configuration);
+builder.Services.AddSingleton(serializerOptions);
+builder.Services.AddJsonRpc(o => o.SerializerOptions = serializerOptions);
+
+var frozenDispatcher = RpcMethodMap
+    .RegisterAll(new JsonRpcDispatcher(serializerOptions))
+    .Freeze();
+
+builder.Services.AddSingleton(frozenDispatcher);
+
+var app = builder.Build();
+
+ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);
+app.MapJsonRpc();
+
+app.Run();
+```
+
+See [Serialization](/docs/json-rpc/serialization) for `CreateSerializerOptions`.
+
+<Callout type="info">
+  The dispatcher is **frozen** after registration. Freezing produces an immutable, thread-safe map
+  and lets the [build-time schema exporter](/docs/json-rpc/schema-generation) read a complete,
+  deterministic method set. A missing, unfrozen, or empty dispatcher is treated as an error rather
+  than producing a stale schema.
+</Callout>
+
+## What the host still owns
+
+Mapping the endpoint does not move platform concerns into the framework. The host remains responsible
+for:
+
+- authentication and authorization policy setup,
+- database provider configuration and migrations,
+- concrete platform capability providers,
+- middleware order,
+- health checks, telemetry exporters, and deployment integration,
+- JSON-RPC endpoint publication and transport-specific error mapping.

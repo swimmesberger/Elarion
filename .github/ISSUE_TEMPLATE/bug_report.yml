@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a defect in Elarion
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please search existing issues first to avoid duplicates.
+  - type: dropdown
+    id: package
+    attributes:
+      label: Affected package
+      description: Which package does this affect?
+      options:
+        - Elarion.Abstractions
+        - Elarion
+        - Elarion.Generators
+        - Elarion.JsonRpc
+        - Elarion.AspNetCore
+        - Elarion.AspNetCore.SchemaGeneration
+        - Elarion.EntityFrameworkCore
+        - Elarion.EntityFrameworkCore.Generators
+        - "@swimmesberger/elarion-jsonrpc-client-generator"
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Package version (and .NET SDK version, if relevant).
+      placeholder: "e.g. 0.1.0-preview.x, .NET 10.0.103"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including any error messages or generator diagnostics.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal repro is the fastest path to a fix. Include relevant attributes, code, and configuration.
+      render: csharp
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that helps — logs, OS, AOT/JIT, generated code excerpts.
+    validations:
+      required: false
