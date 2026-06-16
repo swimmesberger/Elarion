@@ -11,6 +11,7 @@ The central idea is simple: application assemblies define modules and handlers; 
 | `Elarion` | Handler, result, error, module, pipeline, RPC marker, scheduler, and decorator-list primitives. | Application-level abstractions without provider-specific decorator dependencies. |
 | `Elarion.Generators` | Roslyn source generators for handler registration, validator registration, scheduled jobs, RPC method maps, and module bootstrapping. | Analyzer-only reference from application or host projects. |
 | `Elarion.AspNetCore` | ASP.NET Core integration: JSON-RPC dispatcher/endpoint, batch execution strategy, current-user integration, telemetry, and schema export support. | ASP.NET Core abstractions and `System.Text.Json`. |
+| `Elarion.AspNetCore.SchemaGeneration` | Build-time JSON-RPC schema generation through MSBuild targets and a host-launching tool. | Private build-time package reference from ASP.NET Core host projects. |
 | `Elarion.EntityFrameworkCore` | EF Core marker attributes for generated DbSets and entity inclusion. | Marker-only package; consumers provide EF Core. |
 | `Elarion.EntityFrameworkCore.Generators` | Roslyn source generator for DbContext DbSet properties and AOT-friendly configuration application. | Analyzer-only reference from EF-consuming projects. |
 | `elarion-jsonrpc-client-generator` | TypeScript CLI that turns framework JSON-RPC schema documents into `RpcMethods` types, Zod result schemas, and a portable fetch client. | Node.js/TypeScript tool invoked by frontend applications. |
@@ -896,9 +897,61 @@ The framework JSON-RPC pipeline is intentionally end-to-end:
 1. Application handlers declare `[RpcMethod("module.action")]`.
 2. `RpcMethodMapGenerator` emits the dispatcher registration map.
 3. The host configures a `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
-4. `JsonRpcSchemaExporter` exports `rpc-schema.json` from the registered dispatcher.
+4. `JsonRpcSchemaExporter` or `Elarion.AspNetCore.SchemaGeneration` exports `rpc-schema.json` from the registered dispatcher.
 5. `elarion-jsonrpc-client-generator` converts that schema into frontend TypeScript/Zod artifacts and a typed fetch client.
 6. The frontend can use the generated client directly or wrap it in framework-specific server functions/cache hooks.
+
+### Build-time JSON-RPC schema generation
+
+Host projects can generate `rpc-schema.json` during `dotnet build` by adding the schema generation package as private build tooling:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.AspNetCore.SchemaGeneration"
+                    Version="0.1.0"
+                    PrivateAssets="all" />
+</ItemGroup>
+
+<PropertyGroup>
+  <ElarionJsonRpcGenerateSchema>true</ElarionJsonRpcGenerateSchema>
+  <ElarionJsonRpcSchemaOutputPath>$(MSBuildProjectDirectory)/../../rpc-schema.json</ElarionJsonRpcSchemaOutputPath>
+</PropertyGroup>
+```
+
+The package imports MSBuild targets that run after the host project is compiled. The target launches the built application, captures the host immediately after `builder.Build()`, resolves the registered `JsonRpcDispatcher`, and writes the schema using the dispatcher's runtime serializer options. Application code after `builder.Build()` does not run during generation.
+
+Useful properties:
+
+| Property | Default | Purpose |
+| --- | --- | --- |
+| `ElarionJsonRpcGenerateSchema` | `false` | Enables the package targets. |
+| `ElarionJsonRpcGenerateSchemaOnBuild` | Same as `ElarionJsonRpcGenerateSchema` | Controls automatic generation during `dotnet build`. |
+| `ElarionJsonRpcSchemaOutputPath` | `$(BaseIntermediateOutputPath)rpc-schema.json` | Exact schema file path. |
+| `ElarionJsonRpcSchemaOutputDirectory` | `$(BaseIntermediateOutputPath)` | Used with `ElarionJsonRpcSchemaFileName` when no explicit output path is set. |
+| `ElarionJsonRpcSchemaFileName` | `rpc-schema.json` | File name used with the output directory. |
+| `ElarionJsonRpcSchemaEnvironment` | `Development` | Value used for `DOTNET_ENVIRONMENT` and `ASPNETCORE_ENVIRONMENT` while loading the app. |
+| `ElarionJsonRpcSchemaApplicationArguments` | Empty | Optional arguments passed to the app entry point after `--`. |
+| `ElarionJsonRpcSchemaGenerationOptions` | Empty | Extra tool arguments for advanced scenarios. |
+
+Manual generation uses the same target:
+
+```bash
+dotnet msbuild src/MyApp.Api/MyApp.Api.csproj \
+  -t:GenerateElarionJsonRpcSchema \
+  -p:ElarionJsonRpcGenerateSchema=true
+```
+
+Because the application is loaded during the build, expensive or external startup work should be guarded when needed. `JsonRpcSchemaGeneration.IsRunning` checks the Elarion marker environment variable and the schema generation tool entry assembly name:
+
+```csharp
+var app = builder.Build();
+
+if (!JsonRpcSchemaGeneration.IsRunning) {
+    await app.Services.GetRequiredService<IStartupTask>().RunAsync();
+}
+```
+
+Schema generation requires the host to register a frozen `JsonRpcDispatcher` before `builder.Build()`. If the dispatcher is missing, unfrozen, or empty, the build target fails with an actionable error instead of writing a stale schema.
 
 The client generator is framework-owned because it interprets the framework schema format. It emits a generated API surface where dotted JSON-RPC method names become nested methods, for example `clients.get` becomes `rpc.clients.get(...)`. The generated runtime stays portable: it uses browser/Node.js `fetch`, accepts injected `fetch`, supports headers and `AbortSignal`, validates results through generated Zod schemas, and exposes JSON-RPC batching.
 
@@ -955,6 +1008,7 @@ const rpc = createRpcApi({
 This separation keeps the reusable framework contract small:
 
 - `Elarion.AspNetCore` owns runtime dispatch and schema export.
+- `Elarion.AspNetCore.SchemaGeneration` owns build-time schema export.
 - `elarion-jsonrpc-client-generator` owns schema-to-TypeScript/Zod/client generation.
 - Applications own server-function/auth/cache adapters around the generated client.
 
@@ -1185,7 +1239,7 @@ Before adding new public framework surface:
 
 - Keep application-specific generators, handlers, modules, and infrastructure out of the Elarion packages.
 - Add or update Roslyn generator tests for source-generation behavior.
-- Decide whether JSON-RPC schema export should remain a runtime API, become a build task/package target, or gain a dedicated CLI wrapper.
+- Add or update schema generation tests when changing JSON-RPC exporter behavior, build targets, or host-launching code.
 - Extend the generated JSON-RPC client deliberately when repeated frontend runtime adapter patterns emerge.
 
 ## Troubleshooting
@@ -1200,6 +1254,8 @@ Before adding new public framework surface:
 | Generic service registration fails generator diagnostics | `[Service]` is placed on a generic type or a type nested in a generic type. | Register open generics manually until the framework defines generated open-generic aliasing semantics. |
 | Validators are not registered | Validator is outside the module namespace or does not inherit `AbstractValidator<T>`. | Move it under the module namespace and ensure FluentValidation is referenced. |
 | RPC method is missing | Host lacks `[GenerateRpcMethodMap]`, handler lacks `[RpcMethod]`, or nested `Command`/`Query` and `Response` types are missing. | Add the marker and follow the handler shape convention. |
+| Build-time schema generation does not run | `ElarionJsonRpcGenerateSchema` is not true, the schema generation package is not referenced, or `ElarionJsonRpcGenerateSchemaOnBuild` was disabled. | Add the private package reference and set `ElarionJsonRpcGenerateSchema=true`, or invoke `GenerateElarionJsonRpcSchema` manually. |
+| Build-time schema generation fails after loading the app | Startup code before `builder.Build()` threw, or no frozen `JsonRpcDispatcher` was registered before build. | Register the dispatcher before `builder.Build()` and guard expensive startup work with `JsonRpcSchemaGeneration.IsRunning`. |
 | Generated frontend RPC types are stale | `rpc-schema.json` was updated but the client generator was not rerun. | Export the schema and run `npm run generate:rpc` in the frontend app. |
 | Client generator fails on schema composition | The schema uses unsupported JSON Schema constructs such as `oneOf`, `anyOf`, or `allOf`. | Extend the generator deliberately or adjust the exported DTO shape. |
 | Module services do not run | Module disabled by `Modules:{Name}:Enabled=false` or missing `[AppModule]`. | Check configuration and module attribute. |

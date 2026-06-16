@@ -2,6 +2,8 @@
   <Folder Name="/src/">
     <Project Path="src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
     <Project Path="src/Elarion.AspNetCore/Elarion.AspNetCore.csproj" />
+    <Project Path="src/Elarion.AspNetCore.SchemaGeneration/Elarion.AspNetCore.SchemaGeneration.csproj" />
+    <Project Path="src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Generators/Elarion.Generators.csproj" />
