@@ -1,0 +1,108 @@
+---
+title: Overview
+description: Source-generated scheduled jobs share one in-memory scheduler with typed invocation, explicit policies, and OpenTelemetry instrumentation.
+---
+
+Scheduled jobs are in-memory background work owned by one host-local scheduler. They are intended for
+recurring application tasks and delayed one-off jobs where persistence, dashboards, distributed locks,
+and cross-process catch-up are **not** required.
+
+The scheduler uses source-generated descriptors and invocation delegates — there is no runtime
+assembly scanning, `Type` activation, or reflection-based method invocation. Every run executes
+through an async DI scope, receives a cancellation token, is tracked during shutdown, and emits
+[scheduler telemetry](/docs/telemetry).
+
+## Implementation-neutral by design
+
+The source-generation surface is implementation-neutral. Application assemblies reference
+`Elarion.Abstractions` plus the generator analyzer to use `[ScheduledJob]`,
+`IScheduledJob<TPayload>`, generated descriptors, and scheduler contracts — without referencing the
+default in-memory scheduler. A host then chooses a runtime by registering `AddInMemoryScheduler(...)`
+or a custom `IJobScheduler` / `IJobSchedulerInspector` that consumes the generated descriptors.
+
+## Enabling and registering
+
+Enable scheduled job generation in the assembly that contains jobs:
+
+```csharp
+using Elarion.Abstractions;
+
+[assembly: UseElarion]
+```
+
+Register the generated descriptors and the chosen scheduler runtime in the host:
+
+```csharp
+builder.Services.AddMyAppApplicationScheduledJobs();   // descriptors only
+builder.Services.AddInMemoryScheduler(builder.Configuration);
+```
+
+<Callout type="info">
+  `AddMyAppApplicationScheduledJobs()` is descriptor registration only — it does not start a
+  scheduler, register a hosted service, or choose `InMemoryScheduler`. That separation is intentional
+  so a different scheduler runtime can reuse the same generated descriptors.
+</Callout>
+
+`AddInMemoryScheduler(IConfiguration)` reads the `Scheduler` section:
+
+```json
+{
+  "Scheduler": {
+    "Enabled": true,
+    "MaxConcurrentExecutions": 8,
+    "MaxRetainedCompletedJobs": 1024,
+    "MaxMisfireCatchUpRuns": 32
+  }
+}
+```
+
+## A recurring job
+
+A compile-time recurring job is an ordinary accessible method annotated with `[ScheduledJob]`. It
+must be non-generic, return `Task` or `ValueTask`, and accept only optional `IScheduledJobContext`
+and `CancellationToken` parameters.
+
+```csharp
+using Elarion.Abstractions.Scheduling;
+
+namespace MyApp.Application.Modules.Invoicing.Services;
+
+public sealed class RecurringBillingJob(
+    IRecurringBillingProcessor processor,
+    TimeProvider timeProvider) {
+    [ScheduledJob(
+        "invoicing.recurringBilling",
+        FixedRate = "1d",
+        Enabled = "${Modules:Invoicing:Enabled}")]
+    public async ValueTask RunAsync(IScheduledJobContext context, CancellationToken ct) {
+        var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        await processor.ProcessAllAsync(today, ct);
+    }
+}
+```
+
+## Operational characteristics
+
+- The scheduler is **in-memory only**. Queued runtime jobs and due recurring state are lost when the
+  process stops.
+- Fixed-rate and cron schedules **skip missed in-process slots** instead of replaying a burst (tunable
+  with [misfire policy](/docs/scheduling/overlap-and-misfire)).
+- There is **no global polling loop**. The runtime waits until the nearest due item and wakes early
+  when an earlier item is enqueued.
+- `TimeProvider` is used throughout, so tests can drive millisecond schedules deterministically with a
+  fake clock. Production precision is bounded by OS timer resolution and host load.
+- Scheduling, enqueue, cancel, and execution all emit [telemetry](/docs/telemetry).
+
+<Callout type="warn">
+  If you need durable queues, distributed coordination, or retry history that survives restarts, use
+  dedicated job infrastructure. Elarion's scheduler is deliberately in-process and lightweight.
+</Callout>
+
+## In this section
+
+<Cards>
+  <Card title="Schedules" href="/docs/scheduling/schedules">FixedRate, FixedDelay, Cron, initial delay, and config placeholders.</Card>
+  <Card title="Overlap & misfire" href="/docs/scheduling/overlap-and-misfire">What happens when runs collide or fall behind.</Card>
+  <Card title="Runtime jobs" href="/docs/scheduling/runtime-jobs">Typed one-off jobs scheduled at runtime with a payload.</Card>
+  <Card title="Inspection" href="/docs/scheduling/inspection">Snapshots, next-due times, and cancellation.</Card>
+</Cards>

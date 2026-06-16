@@ -1,0 +1,83 @@
+---
+title: Current user
+description: ICurrentUser gives handlers transport-neutral access to the authenticated user, without depending on HttpContext.
+---
+
+Handlers often need to know who is calling — for authorization, auditing, or
+[user-scoped caching](/docs/concepts/caching). Elarion exposes this through a transport-neutral
+`ICurrentUser` abstraction so application code never depends on `HttpContext` or
+`IHttpContextAccessor`.
+
+This follows the framework's boundary rule: `Elarion` owns the abstraction; `Elarion.AspNetCore`
+owns the HTTP integration that fills it in.
+
+## The abstraction
+
+```csharp
+namespace Elarion.Abstractions.Identity;
+
+public interface ICurrentUser {
+    string UserId { get; }
+    string? Email { get; }
+    IReadOnlyList<string> Roles { get; }
+    bool IsAuthenticated { get; }
+    bool IsInRole(string role);
+}
+```
+
+Inject it like any other service:
+
+```csharp
+[Service]
+public sealed class AuditTrail(ICurrentUser user) {
+    public AuditEntry Record(string action) =>
+        new(action, user.UserId, DateTimeOffset.UtcNow);
+}
+```
+
+## Wiring it in an ASP.NET Core host
+
+The default implementation reads claims from the authenticated principal into a scoped snapshot.
+Register it during service configuration and add the middleware after authentication:
+
+```csharp
+builder.Services.AddElarionCurrentUser();
+
+var app = builder.Build();
+
+app.UseAuthentication();
+app.UseElarionCurrentUser();   // after authentication, before endpoints
+app.UseAuthorization();
+```
+
+`UseElarionCurrentUser()` copies claim values into a scoped `CurrentUserSnapshot` once per request.
+Application handlers then read the snapshot, so they never touch `HttpContext` and stay testable —
+in a unit test you simply register a fake `ICurrentUser`.
+
+## Mapping claims
+
+By default the middleware maps standard claim types. Override them when your identity provider uses
+different ones:
+
+```csharp
+builder.Services.AddElarionCurrentUser(options => {
+    options.UserIdClaimType = "sub";
+    options.EmailClaimType = "email";
+    options.RoleClaimType = ClaimTypes.Role;
+    options.DefaultRolesWhenAuthenticated = ["user"];
+});
+```
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `UserIdClaimType` | `"sub"` | Claim used for `UserId`. |
+| `EmailClaimType` | `"email"` | Claim used for `Email`. |
+| `RoleClaimType` | `ClaimTypes.Role` | Claim used to populate `Roles`. |
+| `DefaultRolesWhenAuthenticated` | empty | Roles granted to any authenticated principal. |
+
+## Relationship to caching
+
+[`CurrentUser`-scoped caching](/docs/concepts/caching) depends on this abstraction: the cache uses
+`ICurrentUser.UserId` (hashed) to isolate entries per user. If you use `CurrentUser` scope, make sure
+`AddElarionCurrentUser()` and `UseElarionCurrentUser()` are wired and the principal carries a user id
+claim.

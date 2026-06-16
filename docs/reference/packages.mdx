@@ -1,0 +1,48 @@
+---
+title: Packages
+description: What each Elarion package contains, its expected dependencies, and when you need it.
+---
+
+Elarion is split into focused packages so you reference only what you use. Anything reusable moves
+toward the `Elarion` family; application-specific domain concepts, database conventions, and
+infrastructure stay in consuming projects.
+
+## .NET packages
+
+| Package | Purpose | Expected dependencies |
+| --- | --- | --- |
+| `Elarion.Abstractions` | Implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers. | Application-level abstractions without provider-specific dependencies. |
+| `Elarion` | Runtime primitives: handler caches, decorators, modules, resilience runtime, current-user access, and the in-memory scheduler. | `Elarion.Abstractions`; avoids ASP.NET Core, EF Core, and transport concerns. |
+| `Elarion.Generators` | Roslyn generators for handlers, validators, services, modules, RPC method maps, resilience policies, and scheduled jobs. | Analyzer-only reference (`netstandard2.0`). |
+| `Elarion.JsonRpc` | Transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and the RPC method-map trigger. | `System.Text.Json` and Microsoft logging abstractions. |
+| `Elarion.AspNetCore` | ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport. | ASP.NET Core abstractions plus `Elarion.JsonRpc`. |
+| `Elarion.AspNetCore.SchemaGeneration` | MSBuild package and host-launching tool for exporting JSON-RPC schemas during build. | Private build-time reference from ASP.NET Core hosts. |
+| `Elarion.EntityFrameworkCore` | Marker attributes for EF Core entity and `DbSet` generation. | Marker-only; consumers provide EF Core. |
+| `Elarion.EntityFrameworkCore.Generators` | Roslyn generator for `DbSet` properties and entity configuration. | Analyzer-only reference. |
+
+## npm package
+
+| Package | Purpose |
+| --- | --- |
+| `@swimmesberger/elarion-jsonrpc-client-generator` | TypeScript CLI/library that converts an exported `rpc-schema.json` into method contracts, Zod result schemas, and a portable fetch client. |
+
+## Architecture boundaries
+
+The package split enforces clean dependencies:
+
+- Core framework packages stay reusable and domain-neutral — they never reference a consuming app.
+- `Elarion.Abstractions` does not depend on runtime integration packages.
+- `Elarion` may depend on abstractions but avoids ASP.NET Core, EF Core, and transport specifics.
+- `Elarion.JsonRpc` owns JSON-RPC runtime contracts and schema export without ASP.NET Core.
+- `Elarion.AspNetCore` owns HTTP/JSON-RPC integration.
+- EF Core packages own only EF-specific markers and generation.
+- Generators emit deterministic, inspectable code and fail with diagnostics for unsupported patterns,
+  rather than scanning at runtime.
+
+## Typical references
+
+| Project | References |
+| --- | --- |
+| Application library | `Elarion` + `Elarion.Generators` (analyzer); optionally `Elarion.EntityFrameworkCore` + its generator. |
+| ASP.NET Core host | `Elarion.JsonRpc`, `Elarion.AspNetCore`, `Elarion.Generators` (analyzer); optionally `Elarion.AspNetCore.SchemaGeneration` (build tooling). |
+| Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`. |

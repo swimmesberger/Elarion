@@ -1,0 +1,315 @@
+---
+title: Quickstart
+description: Build a module, a handler, and a working JSON-RPC endpoint with Elarion in a few minutes.
+---
+
+This walkthrough builds a minimal but complete Elarion application: one module, one handler exposed
+over JSON-RPC, and a host that wires it together. By the end you can call the handler with a JSON-RPC
+request over HTTP.
+
+It assumes you have followed [Installation](/docs/getting-started/installation) and have two
+projects: an application library (`MyApp.Application`) and an ASP.NET Core host (`MyApp.Api`).
+
+<Steps>
+
+<Step>
+
+### Turn on the generators
+
+In the application project, opt in once. This enables generation for module handlers, services,
+validators, and scheduled jobs across the assembly.
+
+```csharp title="MyApp.Application/ElarionAssembly.cs"
+using Elarion.Abstractions;
+
+[assembly: UseElarion]
+```
+
+</Step>
+
+<Step>
+
+### Define a module
+
+A module is a static partial class marked with `[AppModule]`, placed at the root of a namespace that
+will contain your handlers and services. Modules are enabled by default.
+
+```csharp title="MyApp.Application/Modules/Clients/ClientsModule.cs"
+using System.Text.Json.Serialization.Metadata;
+using Elarion.Abstractions.Modules;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace MyApp.Application.Modules.Clients;
+
+[AppModule("Clients")]
+public static partial class ClientsModule {
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
+        services.AddClientsHandlers();   // generated
+    }
+
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() =>
+        ClientsJsonContext.Default;
+}
+```
+
+`AddClientsHandlers()` does not exist yet — the generator emits it from the handlers you add under the
+`Clients` namespace. It appears after your next build. (When the module has `[Service]` classes, also
+call the generated `AddClientsServices()`.)
+
+</Step>
+
+<Step>
+
+### Define the data model
+
+Handlers access data through a generated `IAppDbContext` interface — there is no repository layer.
+Mark an entity with `[DbEntity]`, declare the context interface with `[GenerateDbSets]`, and let the
+[EF Core generator](/docs/entity-framework) emit the `DbSet`s.
+
+```csharp title="MyApp.Application/Data/Client.cs"
+using Elarion.EntityFrameworkCore;
+
+namespace MyApp.Application.Data;
+
+[DbEntity]
+public sealed class Client {
+    public Guid Id { get; set; }
+    public required string Name { get; set; }
+}
+```
+
+```csharp title="MyApp.Application/Data/IAppDbContext.cs"
+using Microsoft.EntityFrameworkCore;
+using Elarion.EntityFrameworkCore;
+
+namespace MyApp.Application;
+
+[GenerateDbSets]
+public partial interface IAppDbContext {
+    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+    DbContext AsDbContext();
+}
+```
+
+```csharp title="MyApp.Application/Data/AppDbContext.cs"
+using Microsoft.EntityFrameworkCore;
+
+namespace MyApp.Application;
+
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
+    : DbContext(options), IAppDbContext {
+    public DbContext AsDbContext() => this;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
+        base.OnModelCreating(modelBuilder);
+        ConfigureEntities(modelBuilder);   // generated
+    }
+}
+```
+
+This step needs `Elarion.EntityFrameworkCore`, the `Elarion.EntityFrameworkCore.Generators` analyzer,
+and an EF Core provider — the quickstart uses `Microsoft.EntityFrameworkCore.InMemory`. In a real
+application the concrete `AppDbContext` lives in an infrastructure project; for the quickstart we keep
+it in the application project.
+
+</Step>
+
+<Step>
+
+### Write a handler
+
+Handlers are the unit of work. This one is exposed over JSON-RPC with `[RpcMethod]`, injects
+`IAppDbContext`, and returns a `Result<T>`.
+
+```csharp title="MyApp.Application/Modules/Clients/Handlers/GetClient.cs"
+using Elarion.Abstractions;
+using Microsoft.EntityFrameworkCore;
+using MyApp.Application;
+
+namespace MyApp.Application.Modules.Clients.Handlers;
+
+[RpcMethod("clients.get")]
+public sealed class GetClient(IAppDbContext db)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> {
+    public sealed record Query(Guid Id);
+    public sealed record Response(Guid Id, string Name);
+
+    public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var client = await db.Clients
+            .Where(c => c.Id == query.Id)
+            .Select(c => new Response(c.Id, c.Name))
+            .FirstOrDefaultAsync(ct);
+
+        return client is null
+            ? AppError.NotFound($"Client {query.Id} was not found.")
+            : client;
+    }
+}
+```
+
+The RPC generator requires the conventional shape: a nested `Query` (or `Command`) request type, a
+nested `Response` type, and an `IHandler<TRequest, Result<TResponse>>` implementation. The handler
+queries the generated `db.Clients` `DbSet` directly with EF Core async LINQ.
+
+</Step>
+
+<Step>
+
+### Add a JSON context
+
+Each module contributes source-generated JSON metadata for its request/response types. This keeps
+serialization AOT-friendly and scoped to the module.
+
+```csharp title="MyApp.Application/Modules/Clients/ClientsJsonContext.cs"
+using System.Text.Json.Serialization;
+using MyApp.Application.Modules.Clients.Handlers;
+
+namespace MyApp.Application.Modules.Clients;
+
+[JsonSerializable(typeof(GetClient.Query))]
+[JsonSerializable(typeof(GetClient.Response))]
+public sealed partial class ClientsJsonContext : JsonSerializerContext;
+```
+
+</Step>
+
+<Step>
+
+### Add the host bootstrapper and RPC map
+
+In the host, two small partial classes tell the generators to emit the cross-module wiring.
+
+```csharp title="MyApp.Api/Hosting/ModuleBootstrapper.cs"
+using Elarion.AspNetCore;
+
+namespace MyApp.Api.Hosting;
+
+[GenerateModuleBootstrapper]
+public static partial class ModuleBootstrapper;
+```
+
+```csharp title="MyApp.Api/Rpc/RpcMethodMap.cs"
+using Elarion.JsonRpc;
+
+namespace MyApp.Api.Rpc;
+
+[GenerateRpcMethodMap]
+public static partial class RpcMethodMap {
+    public static partial JsonRpcDispatcher RegisterAll(JsonRpcDispatcher dispatcher);
+}
+```
+
+</Step>
+
+<Step>
+
+### Wire the host
+
+The host composes modules, configures serialization, and publishes the JSON-RPC endpoint. The host
+owns infrastructure (here, the database provider); modules own application logic. The concrete
+`AppDbContext` is registered once and exposed to handlers through `IAppDbContext`.
+
+```csharp title="MyApp.Api/Program.cs"
+using Microsoft.EntityFrameworkCore;
+using MyApp.Api.Hosting;
+using MyApp.Api.Rpc;
+using MyApp.Application;
+using MyApp.Application.Data;
+
+var builder = WebApplication.CreateSlimBuilder(args);
+
+builder.Services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase("quickstart"));
+builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+
+ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
+
+var resolvers = ModuleBootstrapper.GetAllJsonTypeInfoResolvers(builder.Configuration);
+var serializerOptions = new JsonSerializerOptions {
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true,
+    TypeInfoResolver = JsonTypeInfoResolver.Combine(
+        [JsonRpcJsonContext.Default, .. resolvers, new DefaultJsonTypeInfoResolver()]),
+};
+
+builder.Services.AddSingleton(serializerOptions);
+builder.Services.AddJsonRpc(o => o.SerializerOptions = serializerOptions);
+builder.Services.AddSingleton(
+    RpcMethodMap.RegisterAll(new JsonRpcDispatcher(serializerOptions)).Freeze());
+
+var app = builder.Build();
+
+// Seed one client so the call below returns data.
+using (var scope = app.Services.CreateScope()) {
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Clients.Add(new Client {
+        Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
+        Name = "Acme Inc.",
+    });
+    db.SaveChanges();
+}
+
+ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);
+app.MapJsonRpc();
+
+app.Run();
+```
+
+<Callout type="warn">
+  `UseInMemoryDatabase` is for demos and tests only — it is not a real database. Swap in a persistent
+  provider such as `Npgsql`, SQL Server, or SQLite for an actual application.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Build and call it
+
+```bash
+dotnet run --project MyApp.Api
+```
+
+Then send a JSON-RPC request:
+
+```bash
+curl -s http://localhost:5000/rpc \
+  -H 'content-type: application/json' \
+  -d '{
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "clients.get",
+        "params": { "id": "00000000-0000-0000-0000-000000000001" }
+      }'
+```
+
+A registered client returns a result envelope; a missing one returns the JSON-RPC error your host
+mapped from `AppError.NotFound`.
+
+</Step>
+
+</Steps>
+
+## What you just built
+
+- A **module** that publishes its own handlers and services with no host-side registration list.
+- A **handler** that is simultaneously a use case, a DI registration, and a JSON-RPC method.
+- A host that **composes** modules and **maps** the transport — and owns nothing about `clients`
+  except the database provider.
+
+## Where to go next
+
+<Cards>
+  <Card title="Project structure" href="/docs/getting-started/project-structure">
+    The conventions generators rely on, and how to lay out a real application.
+  </Card>
+  <Card title="Core concepts" href="/docs/concepts">
+    Handlers, results, modules, services, validators, and pipelines in depth.
+  </Card>
+  <Card title="TypeScript client" href="/docs/json-rpc/typescript-client">
+    Export a schema and generate a typed frontend client for `clients.get`.
+  </Card>
+  <Card title="Scheduled jobs" href="/docs/scheduling">
+    Add recurring and one-off background work to your module.
+  </Card>
+</Cards>

@@ -1,0 +1,78 @@
+---
+title: Overview
+description: The three responsibilities Elarion separates, and why auto-detection is the default.
+---
+
+Elarion separates an application into three responsibilities and uses compile-time generation to
+connect them. Understanding this split makes every other concept fall into place.
+
+## The three responsibilities
+
+1. **Application module composition** lives beside the feature code. A module decides which handlers,
+   validators, JSON metadata, and module-owned services it exposes.
+2. **Compile-time discovery** replaces reflection-heavy startup scanning. Generators emit
+   deterministic registration methods from attributes and conventions.
+3. **Platform wiring** stays in the host. The host owns `WebApplication`, authentication, middleware,
+   capability providers, database setup, telemetry exporters, and endpoint publication.
+
+This keeps modules independent of the final host while still allowing real platform abstractions
+where they matter. For example, modules may declare Minimal API endpoints with `IEndpointRouteBuilder`
+directly, so ASP.NET Core endpoint conventions and source generation still work.
+
+## Why auto-detection is the default
+
+Elarion prefers **declaring application intent near the type** over maintaining a second registration
+list elsewhere. A handler already says "I handle this request"; a validator already says "I validate
+this command"; a `[Service]` class already says "this is a module service". Repeating those facts in
+`Program.cs` or hand-written `AddXyz()` methods creates a parallel model that drifts from the code it
+describes.
+
+This buys practical advantages:
+
+- **The module owns its application surface.** Adding a handler, validator, JSON context, or service
+  under a module namespace is enough to publish it through generated `Add{Module}…()` methods.
+- **Registration drift becomes a compile-time problem.** Missing trigger attributes, invalid service
+  contracts, wrong hosted-service lifetimes, and unsupported generic services produce generator
+  diagnostics instead of startup surprises.
+- **The host stops knowing feature internals.** It wires platform capabilities and transports; it
+  does not remember every application handler or module service.
+- **Generated code stays inspectable.** The result is ordinary DI registration code, emitted
+  deterministically rather than hidden behind runtime reflection.
+- **Refactoring follows structure.** Moving a type between modules changes ownership through
+  namespace containment; deleting a type deletes its registration on the next build.
+- **AOT and startup behavior are predictable.** Compile-time discovery avoids broad runtime scans and
+  keeps the dependency graph visible to the compiler and linker.
+
+Explicit registration still has a place when explicitness is the point: database contexts, external
+clients, provider-specific decorators, authentication, telemetry, and concrete capability providers
+should be wired by the platform. The bias is **auto-detect application patterns, explicitly wire
+platform capabilities**.
+
+<Callout type="info">
+  Developers coming from Spring Boot will find the model familiar — components under a namespace
+  boundary, annotations that declare their role, defaults for the common path — implemented with
+  .NET source generation rather than runtime classpath scanning.
+</Callout>
+
+## The trade-off
+
+You accept conventions. Handler names, nested `Command`/`Query` and `Response` types, module
+namespace containment, and pipeline attributes matter because generators use them. In exchange you
+get less host boilerplate, inherent modularity, fewer runtime scans, and a clear separation between
+application policy and host mechanics. The full comparison with idiomatic ASP.NET Core is in
+[How Elarion differs](/docs/reference/comparison).
+
+## The concepts
+
+The pages in this section cover each building block:
+
+<Cards>
+  <Card title="Handlers" href="/docs/concepts/handlers">The primary use-case unit.</Card>
+  <Card title="Results & errors" href="/docs/concepts/results-and-errors">`Result<T>` and transport-agnostic `AppError`.</Card>
+  <Card title="Modules" href="/docs/concepts/modules">Application boundaries and their lifecycle.</Card>
+  <Card title="Services" href="/docs/concepts/services">`[Service]` registration and hosted services.</Card>
+  <Card title="Validators" href="/docs/concepts/validators">FluentValidation grouped by module.</Card>
+  <Card title="Decorator pipelines" href="/docs/concepts/decorator-pipelines">Ordered cross-cutting behavior around handlers.</Card>
+  <Card title="Caching" href="/docs/concepts/caching">Declarative handler result caching and invalidation.</Card>
+  <Card title="Current user" href="/docs/concepts/current-user">Transport-neutral access to the authenticated user.</Card>
+</Cards>

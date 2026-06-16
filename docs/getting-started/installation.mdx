@@ -1,0 +1,124 @@
+---
+title: Installation
+description: Add Elarion's packages and source generators to an application project and an ASP.NET Core host.
+---
+
+Elarion is distributed as a set of focused NuGet packages plus one npm package for TypeScript
+client generation. You only install the pieces you use.
+
+## Prerequisites
+
+- **.NET 10 SDK** or later. The framework targets `net10.0`; the source generators target
+  `netstandard2.0` so they load in the Roslyn analyzer host.
+- An **ASP.NET Core** host project if you want the JSON-RPC HTTP transport (`Elarion.AspNetCore`).
+- **Node.js 18+** only if you generate the TypeScript JSON-RPC client.
+
+## Packages
+
+| Package | Install in | Purpose |
+| --- | --- | --- |
+| `Elarion.Abstractions` | Application | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
+| `Elarion` | Application / host | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user abstraction. |
+| `Elarion.Generators` | Application (analyzer) | Roslyn generators for handlers, services, validators, modules, RPC maps, resilience policies, and scheduled jobs. |
+| `Elarion.JsonRpc` | Host | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
+| `Elarion.AspNetCore` | Host | ASP.NET Core JSON-RPC endpoint mapping, batch execution, and current-user middleware. |
+| `Elarion.AspNetCore.SchemaGeneration` | Host (build tooling) | MSBuild target that exports `rpc-schema.json` during `dotnet build`. |
+| `Elarion.EntityFrameworkCore` | Application | Marker attributes for generated `DbSet`s and entity inclusion. |
+| `Elarion.EntityFrameworkCore.Generators` | Application (analyzer) | Roslyn generator for `DbSet` properties and entity configuration. |
+| `@swimmesberger/elarion-jsonrpc-client-generator` | Frontend (npm) | Generates TypeScript method contracts, Zod schemas, and a fetch client from a schema export. |
+
+<Callout type="info">
+  `Elarion.Abstractions` is referenced transitively by `Elarion`, so a typical application only
+  needs to install `Elarion` and `Elarion.Generators`.
+</Callout>
+
+## Application project
+
+An application (class library) holds your modules, handlers, services, and validators. Add the
+runtime package and the generators as an analyzer:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion" Version="0.1.0" />
+  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
+</ItemGroup>
+```
+
+`Elarion.Generators` is a development-only analyzer package, so `PrivateAssets="all"` keeps it out
+of your published output and downstream references.
+
+Then enable the framework generators once, anywhere in the assembly (commonly in a `Usings.cs` or
+`AssemblyInfo.cs`):
+
+```csharp
+using Elarion.Abstractions;
+
+[assembly: UseElarion]
+```
+
+`[assembly: UseElarion]` turns on generation for module handlers, services, validators, and
+scheduled jobs. If you want only a subset, use the narrower triggers instead — see
+[Source generation](/docs/source-generation).
+
+## Host project
+
+The ASP.NET Core host references your application, the JSON-RPC packages, and the generators (for
+the RPC map and module bootstrapper it emits in the host assembly):
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.JsonRpc" Version="0.1.0" />
+  <PackageReference Include="Elarion.AspNetCore" Version="0.1.0" />
+  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
+  <ProjectReference Include="..\MyApp.Application\MyApp.Application.csproj" />
+</ItemGroup>
+```
+
+The [Quickstart](/docs/getting-started/quickstart) wires these together into a working JSON-RPC
+endpoint.
+
+## Optional: build-time schema export
+
+To export `rpc-schema.json` automatically during `dotnet build`, add the schema generation package
+as private build tooling in the host:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.AspNetCore.SchemaGeneration"
+                    Version="0.1.0"
+                    PrivateAssets="all" />
+</ItemGroup>
+
+<PropertyGroup>
+  <ElarionJsonRpcGenerateSchema>true</ElarionJsonRpcGenerateSchema>
+</PropertyGroup>
+```
+
+See [JSON-RPC schema generation](/docs/json-rpc/schema-generation) for the full set of properties.
+
+## Optional: TypeScript client generator
+
+Install the generator in your frontend app and run it against an exported schema:
+
+```bash
+npm install --save-dev @swimmesberger/elarion-jsonrpc-client-generator
+npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated
+```
+
+The generated client imports `zod`, so install it as a runtime dependency. See
+[TypeScript client](/docs/json-rpc/typescript-client) for usage.
+
+## Building from source
+
+To build the framework itself rather than consume the published packages:
+
+```bash
+git clone https://github.com/swimmesberger/Elarion.git
+cd Elarion
+dotnet restore Elarion.slnx
+dotnet build Elarion.slnx --configuration Release
+dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release
+```
+
+When building from source, reference the generator projects with `OutputItemType="Analyzer"
+ReferenceOutputAssembly="false"` instead of a `PackageReference`.

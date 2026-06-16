@@ -1,0 +1,106 @@
+---
+title: Handlers
+description: Handlers are Elarion's primary use-case unit — a request in, a Result out, with no transport concerns.
+---
+
+A handler is the primary application use-case unit. It receives a request object and returns a
+response, usually a [`Result<T>`](/docs/concepts/results-and-errors). Handlers contain business
+orchestration — not transport, serialization, or HTTP concerns.
+
+```csharp
+using Elarion.Abstractions;
+using Microsoft.EntityFrameworkCore;
+
+[RpcMethod("clients.get")]
+public sealed class GetClient(IAppDbContext db)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> {
+    public sealed record Query(Guid Id);
+    public sealed record Response(Guid Id, string Name);
+
+    public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var client = await db.Clients
+            .Where(c => c.Id == query.Id)
+            .Select(c => new Response(c.Id, c.Name))
+            .FirstOrDefaultAsync(ct);
+
+        if (client is null) {
+            return AppError.NotFound($"Client {query.Id} was not found.");
+        }
+
+        return client;
+    }
+}
+```
+
+## The contract
+
+A handler implements `IHandler<TRequest, TResponse>`:
+
+```csharp
+public interface IHandler<in TRequest, TResponse> {
+    ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct);
+}
+```
+
+`ValueTask<TResponse>` keeps synchronous and cached paths allocation-free. Constructor parameters are
+injected by DI through the generated handler factory.
+
+## Conventions
+
+The generators discover and wire handlers from their shape and location:
+
+- The class lives **under a module namespace** so the module owns its registration.
+- It implements `IHandler<TRequest, TResponse>`.
+- For JSON-RPC, the request is a nested `Command` or `Query` and the response is a nested `Response`,
+  and the handler returns `Result<TResponse>`. See [JSON-RPC usage](/docs/json-rpc).
+
+The handler registration generator emits an `Add{HandlerName}()` method and aggregates them into the
+module's `Add{Module}Handlers()` method. You never register a handler by hand.
+
+## Command vs. query
+
+The nested request type is named by intent:
+
+- **`Command`** — a state change (`CreateClient.Command`, `CancelInvoice.Command`).
+- **`Query`** — a read (`GetClient.Query`, `SearchClients.Query`).
+
+This naming is a convention the RPC generator reads, and it pairs naturally with read-only vs.
+transactional [decorator pipelines](/docs/concepts/decorator-pipelines).
+
+## Accessing data
+
+Handlers query and persist through the generated `IAppDbContext` interface, injected like any other
+dependency. Elarion does **not** prescribe a repository layer — the
+[EF Core source generator](/docs/entity-framework) exists precisely so the application context
+interface *is* your data-access abstraction:
+
+```csharp
+// Read: query the generated DbSet directly with EF Core async LINQ
+var client = await db.Clients
+    .Where(c => c.Id == query.Id)
+    .Select(c => new Response(c.Id, c.Name))
+    .FirstOrDefaultAsync(ct);
+
+// Write: add/modify entities and persist
+db.Clients.Add(new Client { Id = Guid.NewGuid(), Name = command.Name });
+await db.SaveChangesAsync(ct);
+```
+
+The interface keeps handlers in the application layer — they query without referencing the
+infrastructure project that owns the concrete `DbContext`. For compiled queries or other advanced
+scenarios that need the concrete type, call `db.AsDbContext()`. See
+[Entity Framework Core](/docs/entity-framework) for how the interface and its `DbSet`s are generated.
+
+<Callout type="info">
+  Wrapping each table in a hand-written `IClientRepository` adds a layer that the generated
+  `IAppDbContext` already provides — with full LINQ, projections, and EF Core change tracking. Reach
+  for a dedicated abstraction only when a query genuinely needs to be reused or hidden behind a
+  domain operation.
+</Callout>
+
+## Keep handlers transport-agnostic
+
+A handler should not know whether it was invoked over JSON-RPC, HTTP, a scheduled job, or a test. It
+returns a `Result<T>`; the host decides how to map success and `AppError` failures onto the wire.
+Cross-cutting behavior — logging, validation, transactions, caching, resilience — belongs in
+[decorators](/docs/concepts/decorator-pipelines), not inside the handler body.

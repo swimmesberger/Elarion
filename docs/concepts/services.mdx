@@ -1,0 +1,86 @@
+---
+title: Services
+description: Annotate a class with [Service] and the generator emits its DI registration, with conventional contract and lifetime resolution.
+---
+
+A service is any module-owned class you want registered in DI. Annotate it with `[Service]` and the
+generator emits the registration — you never add it to a hand-written `AddXyz()` method.
+
+```csharp
+using Elarion.Abstractions;
+
+namespace MyApp.Application.Modules.Clients.Services;
+
+public interface IClientNumberGenerator {
+    string Next();
+}
+
+[Service(typeof(IClientNumberGenerator))]
+public sealed class ClientNumberGenerator : IClientNumberGenerator {
+    public string Next() => "C-001";
+}
+```
+
+When `[assembly: UseElarion]` or `[assembly: GenerateModuleServices]` is present, Elarion emits
+`Add{ServiceName}Service()` and aggregates them into `Add{ModuleName}Services()`.
+
+## Contract resolution
+
+The generator decides which contract(s) to register against using these rules, in order:
+
+1. If explicit contracts are given in `[Service(typeof(...))]`, those are used.
+2. Otherwise, directly implemented interfaces are used.
+3. Otherwise, the implementation type itself is registered.
+
+## Lifetime
+
+The default scope is `Scoped`. Override it with the `Scope` property:
+
+```csharp
+[Service(typeof(IClock), Scope = ServiceScope.Singleton)]
+public sealed class SystemClock : IClock { /* ... */ }
+```
+
+`ServiceScope` has `Scoped`, `Singleton`, and `Transient`.
+
+<Callout type="warn">
+  Generic service implementations are intentionally rejected by the generator until open-generic
+  aliasing semantics are defined. Register open generics manually for now.
+</Callout>
+
+## Hosted services
+
+A class that implements `IHostedService` or derives from `BackgroundService` is auto-detected as a
+hosted service. **Hosted services must be singletons** — the generator emits an error for
+scoped/transient hosted services.
+
+Generated hosted registration follows the standard pattern, registering the concrete service and an
+`IHostedService` forwarder:
+
+```csharp
+services.AddSingleton<IMailboxPollingService, MailboxPollingService>();
+services.AddSingleton<IHostedService>(
+    sp => (IHostedService)sp.GetRequiredService<IMailboxPollingService>());
+```
+
+To keep lifecycle methods hidden from ordinary consumers, implement `IHostedService` explicitly:
+
+```csharp
+public interface IMailboxPollingService {
+    Task PollNowAsync(CancellationToken ct);
+}
+
+[Service(typeof(IMailboxPollingService), Scope = ServiceScope.Singleton)]
+public sealed class MailboxPollingService : IMailboxPollingService, IHostedService {
+    Task IHostedService.StartAsync(CancellationToken ct) => Task.CompletedTask;
+    Task IHostedService.StopAsync(CancellationToken ct) => Task.CompletedTask;
+
+    public Task PollNowAsync(CancellationToken ct) => Task.CompletedTask;
+}
+```
+
+<Callout type="info">
+  For recurring or delayed background work, prefer [scheduled jobs](/docs/scheduling) over a
+  hand-rolled `BackgroundService` loop. Scheduled jobs share one scheduler with explicit overlap,
+  misfire, and resilience policies plus telemetry.
+</Callout>

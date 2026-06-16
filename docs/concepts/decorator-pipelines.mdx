@@ -1,0 +1,150 @@
+---
+title: Decorator pipelines
+description: Generated factories wrap each handler in an ordered decorator pipeline declared by assembly, module, or handler attributes.
+---
+
+Elarion registers handlers through generated factories that wrap the handler in an ordered pipeline
+of decorators. Decorators are how you apply cross-cutting behavior — logging, validation,
+transactions, idempotency, tenancy — without putting it inside handlers.
+
+## Pipeline scopes
+
+Pipeline attributes can be applied at three scopes, from least to most specific:
+
+1. **Assembly**
+2. **Module class**
+3. **Handler class**
+
+The most specific pipeline wins. This lets you set a default pipeline for the whole application and
+override it for individual modules or handlers.
+
+## Defining named pipelines
+
+The framework does **not** ship concrete decorators or default presets, because decorators usually
+depend on app choices (your logging, your `DbContext`, your tenancy model). Instead, define your
+decorators in the application and expose named pipeline attributes with `[DecoratorList]`:
+
+```csharp
+using MyApp.Application.Decorators;
+using Elarion.Abstractions.Pipeline;
+
+namespace MyApp.Application.Pipeline;
+
+[DecoratorList(
+    typeof(TransactionDecorator<,>),
+    typeof(DbConstraintDecorator<,>),
+    typeof(ValidationDecorator<,>))]
+[AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+public sealed class DefaultPipelineAttribute : Attribute;
+
+[DecoratorList(typeof(ValidationDecorator<,>))]
+[AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+public sealed class ReadOnlyPipelineAttribute : Attribute;
+```
+
+Apply the default at the assembly level:
+
+```csharp
+using MyApp.Application.Pipeline;
+using Elarion.Abstractions;
+
+[assembly: DefaultPipeline]
+[assembly: UseElarion]
+```
+
+And override it on a specific handler:
+
+```csharp
+[ReadOnlyPipeline]
+[RpcMethod("clients.search")]
+public sealed class SearchClients
+    : IHandler<SearchClients.Query, Result<SearchClients.Response>> {
+    // ...
+}
+```
+
+A read-only query gets just validation; a command gets the full transactional pipeline.
+
+## Writing a decorator
+
+A decorator implements `IHandler<TRequest, TResponse>` and takes the inner handler as a constructor
+parameter. Any additional constructor parameters are resolved from DI by the generated factory.
+
+```csharp
+using Microsoft.Extensions.Logging;
+using Elarion.Abstractions;
+
+public sealed class LoggingDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner,
+    ILogger<LoggingDecorator<TRequest, TResponse>> logger
+) : IHandler<TRequest, TResponse> {
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        logger.LogDebug("Handling {RequestType}", typeof(TRequest).Name);
+        var response = await inner.HandleAsync(request, ct);
+        logger.LogDebug("Handled {RequestType}", typeof(TRequest).Name);
+        return response;
+    }
+}
+```
+
+### Transaction decorator
+
+A transaction decorator commits on success and rolls back on failure, using `IResultLike` to inspect
+the outcome without knowing the concrete response type:
+
+```csharp
+public sealed class TransactionDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner,
+    DbContext db
+) : IHandler<TRequest, TResponse> {
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var response = await inner.HandleAsync(request, ct);
+
+        if (response is IResultLike { IsSuccess: true }) {
+            await transaction.CommitAsync(ct);
+        } else {
+            await transaction.RollbackAsync(ct);
+        }
+
+        return response;
+    }
+}
+```
+
+### Turning an `AppError` into `TResponse`
+
+Generic decorators (like validation) sometimes need to construct a failure `TResponse` from an
+`AppError`. Keep that helper local to your application — it is intentionally **not** part of the
+framework API yet:
+
+```csharp
+internal static class ResultFactory {
+    public static TResponse Failure<TResponse>(AppError error) {
+        var responseType = typeof(TResponse);
+        if (responseType.IsGenericType &&
+            responseType.GetGenericTypeDefinition() == typeof(Result<>)) {
+            var failureMethod = responseType.GetMethod(
+                nameof(Result<object>.Failure),
+                BindingFlags.Static | BindingFlags.Public)!;
+            return (TResponse)failureMethod.Invoke(null, [error])!;
+        }
+
+        throw new InvalidOperationException(
+            $"Cannot map AppError to {responseType.Name}. Handler must return Result<T>.");
+    }
+}
+```
+
+## Order matters
+
+Decorators run in the order listed in `[DecoratorList]`, outermost first. A pipeline of
+`[Transaction, DbConstraint, Validation]` validates innermost (closest to the handler) and wraps the
+transaction outermost — so validation failures never open a transaction. Choose the order
+deliberately; the generated code makes it explicit and inspectable.
+
+<Callout type="info">
+  Built-in [caching](/docs/concepts/caching) and [resilience](/docs/resilience) are themselves
+  decorators (`CacheDecorator`, `ResilienceDecorator`) inserted into this same pipeline by their
+  attributes — so they compose with your application decorators in a deterministic order.
+</Callout>

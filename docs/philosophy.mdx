@@ -1,0 +1,138 @@
+---
+title: Design & philosophy
+description: The reasoning behind Elarion's opinions — compile-time generation, handlers as the use-case boundary, result-based errors, JSON-RPC for internal APIs, and a thin host.
+icon: Compass
+---
+
+Elarion is opinionated on purpose. This page collects the reasoning behind those opinions in one
+place, so you can decide whether the trade-offs fit your project before adopting the framework. Each
+principle links to the page where it is applied.
+
+## The guiding principle
+
+> Auto-detect application patterns, explicitly wire platform capabilities.
+
+Your code already states its intent: a handler says "I handle this request", a validator says "I
+validate this command", a `[Service]` class says "this is a module service". Repeating those facts in
+a separate registration list (`Program.cs`, hand-written `AddXyz()` methods) creates a **parallel
+model that drifts** from the code it describes. Elarion declares intent next to the type and generates
+the wiring. The host stays a thin composition and transport shell.
+
+Everything below follows from that one idea.
+
+## Compile-time generation over runtime reflection
+
+Discovery happens at build time through Roslyn generators, not at startup through assembly scanning.
+
+**Why:** startup is deterministic and AOT-friendly; the generated code is ordinary DI registration you
+can read and step through; and mistakes — a missing trigger, an invalid contract, a scoped hosted
+service — become **build errors instead of runtime surprises**. Registration drift is caught by the
+compiler.
+
+→ [Source generation](/docs/source-generation) · [Why auto-detection is the default](/docs/concepts#why-auto-detection-is-the-default)
+
+## Handlers are the use-case boundary
+
+The unit of application logic is an `IHandler<TRequest, TResponse>`, not a controller, a route lambda,
+or a service method.
+
+**Why:** a handler is a single named use case with one entry point. It is transport-agnostic — it does
+not know whether it was called over JSON-RPC, HTTP, a scheduled job, or a test — which makes it
+trivial to test and to reuse across transports. Cross-cutting behavior lives in
+[decorators](/docs/concepts/decorator-pipelines) wrapped around it in a deterministic order, so the
+handler body stays focused on business orchestration.
+
+→ [Handlers](/docs/concepts/handlers)
+
+## Results over exceptions for expected failures
+
+Handlers return `Result<T>` carrying either a value or a transport-agnostic `AppError`, rather than
+throwing for expected outcomes like "not found" or "validation failed".
+
+**Why:** expected failures are normal return values, so they are explicit in the type and cheap to
+produce. `AppError.Kind` describes *what kind* of failure occurred, not how a protocol should report
+it — the host maps it to a JSON-RPC code or an HTTP status **once, centrally**. The same handler
+behaves correctly behind any transport.
+
+→ [Results & errors](/docs/concepts/results-and-errors)
+
+## Modules own their surface
+
+A module is a namespace plus an `[AppModule]` marker. Adding a handler, validator, service, or JSON
+context under that namespace is enough to publish it.
+
+**Why:** ownership follows structure. Moving a type between modules changes its ownership through
+namespace containment; deleting a type deletes its registration on the next build. The host never
+needs to know a module's internals — it composes modules and maps transports. Feature flags decide
+which modules are exposed.
+
+→ [Modules](/docs/concepts/modules) · [Project structure](/docs/getting-started/project-structure)
+
+## The context interface is the data abstraction
+
+Handlers query through a generated `IAppDbContext` interface and its `DbSet`s — there is no
+per-entity repository layer.
+
+**Why:** the generated interface already provides full LINQ, projections, and EF Core change tracking,
+while keeping handlers in the application layer (they never reference the infrastructure project that
+owns the concrete `DbContext`). A hand-written `IClientRepository` per table usually adds indirection
+without value. This is the reason the EF Core package exists.
+
+→ [Entity Framework Core](/docs/entity-framework) · [Handlers → Accessing data](/docs/concepts/handlers#accessing-data)
+
+## JSON-RPC for internal APIs
+
+When you need a network transport, JSON-RPC is offered as a first-class (but optional) one because it
+exposes **operations, not resources** — a method maps one-to-one to a handler.
+
+**Why:** it removes an entire category of REST design work (paths, verbs, status-code mapping, resource
+modeling). The generated, typed client makes a frontend call feel like invoking the handler directly,
+so the iteration loop is just *add handler → regenerate client → call it*. That fits internal,
+first-party APIs where one team controls both ends. It is deliberately optional and outside the core
+package, and modules can expose Minimal API endpoints instead when REST semantics are what you need.
+
+→ [Why JSON-RPC?](/docs/json-rpc#why-json-rpc)
+
+## Observability without lock-in
+
+The runtime emits OpenTelemetry-compatible traces and metrics through `System.Diagnostics`, but
+depends on **no** OpenTelemetry SDK.
+
+**Why:** the framework instruments its own boundaries (JSON-RPC, scheduling, caching, resilience)
+while letting the host choose exporters and which sources to collect. You get observability for free
+without the framework dictating your telemetry stack.
+
+→ [Telemetry & observability](/docs/telemetry)
+
+## A small reusable contract; the platform stays in the host
+
+The framework packages stay domain-neutral and small. Authentication, middleware, database providers,
+telemetry exporters, and concrete capability implementations are the host's job.
+
+**Why:** keeping platform mechanics out of the reusable packages is what lets modules move between
+hosts unchanged and keeps the framework's public surface stable. Explicit registration is preserved
+exactly where explicitness is the point.
+
+→ [Packages](/docs/reference/packages)
+
+## The trade-off
+
+The cost of all this is that **you accept conventions**: handler names, nested `Command`/`Query` and
+`Response` types, namespace containment, and pipeline attributes matter because the generators use
+them. In exchange you get less host boilerplate, inherent modularity, fewer runtime scans, and a clear
+line between application policy and host mechanics.
+
+If your project benefits from that structure — a modular application or service, AOT goals, a typed
+.NET↔TypeScript contract, in-process background work — the conventions pay for themselves. If you need
+maximum freedom in how each endpoint is shaped, or you are building a public/third-party API, idiomatic
+ASP.NET Core may fit better.
+
+→ [How Elarion differs from ASP.NET Core](/docs/reference/comparison)
+
+## Influences
+
+The model will feel familiar if you have used annotation-driven frameworks such as **Spring Boot** —
+components live below a namespace boundary, attributes declare their role, defaults cover the common
+path, and explicit configuration remains for the exceptional case. Elarion implements that philosophy
+with **.NET source generation** rather than runtime classpath scanning, which is what makes it
+deterministic and AOT-friendly.

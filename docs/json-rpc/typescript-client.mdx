@@ -1,0 +1,92 @@
+---
+title: TypeScript client
+description: Generate typed method contracts, Zod result schemas, and a portable fetch client from an exported rpc-schema.json.
+---
+
+`elarion-jsonrpc-client-generator` turns an exported [`rpc-schema.json`](/docs/json-rpc/schema-generation)
+into a typed TypeScript client. The frontend gets full type safety and runtime validation without
+hand-writing DTOs, and the generated runtime stays portable across browsers and Node.js.
+
+## Generating the client
+
+```bash
+npm install --save-dev @swimmesberger/elarion-jsonrpc-client-generator
+npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated
+```
+
+It emits three files:
+
+| File | Purpose |
+| --- | --- |
+| `rpc-types.ts` | `RpcMethods` interface mapping method names to params/result types. |
+| `rpc-schemas.ts` | `rpcResultSchemas` Zod map for runtime result validation. |
+| `rpc-client.ts` | Typed fetch client for single calls and batches. |
+
+The schema and client files import `zod`, so install it as a runtime dependency in the consuming app.
+
+## Calling methods
+
+Dotted JSON-RPC method names become nested properties, so `clients.get` is `rpc.clients.get(...)`:
+
+```ts
+import { createRpcApi } from './generated/rpc-client'
+
+const rpc = createRpcApi({
+  url: '/rpc',
+  headers: { Authorization: `Bearer ${token}` },
+})
+
+const abort = new AbortController()
+const client = await rpc.clients.get({ id }, { signal: abort.signal })
+```
+
+The client uses `globalThis.fetch` in browsers and modern Node.js. The lower-level
+`createRpcClient(...)` generic transport is also exported for advanced cases.
+
+## Batching
+
+Batch requests are built through generated `$request` helpers and preserve input order even when the
+server responds out of order. Each item resolves independently, so one failure does not reject the
+whole batch:
+
+```ts
+const [clientResult, projectsResult] = await rpc.$batch([
+  rpc.$request.clients.get({ id }),
+  rpc.$request.projects.list({ clientId: id }),
+] as const)
+```
+
+## Server-side and SSR usage
+
+Pass an injected `fetch` and dynamic headers for SSR, edge, or server-function deployments — for
+example to forward request-scoped authentication without forking the generated client:
+
+```ts
+const rpc = createRpcApi({
+  url: process.env.API_INTERNAL_URL + '/rpc',
+  fetch,
+  headers: () => ({ Authorization: `Bearer ${forwardedJwt}` }),
+  transformResult: normalizeRpcResultForSchema,
+})
+```
+
+## Result validation
+
+Result validation runs by default through `rpcResultSchemas`. Use `transformResult` for app-specific
+normalization before validation, or set `validateResults: false` when another layer validates
+responses.
+
+## Design boundaries
+
+The generated runtime stays framework-neutral: it uses standard `fetch`, accepts an injected
+transport and `AbortSignal`, validates with Zod, and supports batching — but never imports React,
+TanStack, Vite, or any downstream framework. Applications own the adapter layer: server functions,
+auth forwarding, UI-framework hooks, and result normalization wrap `createRpcApi(...)` rather than
+replacing the transport.
+
+<Callout type="warn">
+  The generator interprets the framework's schema format and does not support arbitrary JSON Schema
+  composition. Schemas using `oneOf`, `anyOf`, or `allOf` are rejected; adjust the exported DTO shape
+  or extend the generator deliberately. Re-run the generator whenever `rpc-schema.json` changes, or
+  the frontend types go stale.
+</Callout>

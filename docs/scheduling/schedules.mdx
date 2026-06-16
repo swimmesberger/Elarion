@@ -1,0 +1,98 @@
+---
+title: Schedules
+description: Define when a job runs with FixedRate, FixedDelay, Cron, or an initial-delay one-off — using compact duration literals and config placeholders.
+---
+
+Every schedule-bearing method sets exactly one of `FixedRate`, `FixedDelay`, `Cron`, or an
+`InitialDelay`-only one-time startup schedule. The authoring API is intentionally **string-based**.
+
+## Duration literals
+
+Use compact duration literals or invariant `TimeSpan` text:
+
+```text
+"1000ms"   "1s"   "15m"   "6h"   "1d"   "00:00:01"
+```
+
+There are no numeric `TimeUnit`-style variants — string values are the single API, because the same
+property must support literals *and* configuration placeholders.
+
+## Schedule properties
+
+| Property | Meaning |
+| --- | --- |
+| `FixedRate` | Grid-aligned interval between due times. Long runs or host pauses skip missed slots instead of producing a catch-up burst. |
+| `FixedDelay` | Delay measured from completion of one occurrence to the due time of the next. Matches polling loops that should wait after each pass. |
+| `Cron` | Five-field or six-field cron expression. Six fields include seconds; five-field Unix syntax defaults seconds to `0`. |
+| `InitialDelay` | Optional startup delay for `FixedRate` / `FixedDelay`. Not valid with `Cron`. |
+| `RunOnStart` | Whether an interval job is due immediately at host start. Defaults to `true`; not valid with `Cron`. |
+| `TimeZone` | Optional time zone id for cron evaluation. Defaults to UTC. |
+| `Enabled` | Boolean literal or placeholder evaluated before every occurrence. |
+| `Group` | Optional serialization key for jobs that share an external resource. |
+| `Overlap` | What to do when the same job already has an active occurrence. Defaults to `Skip`. |
+| `MisfirePolicy` | What to do when a grid occurrence is so late that later ones are also due. Defaults to `FireOnce`. |
+| `MaxConcurrentRuns` | Job-local cap when `Overlap = AllowConcurrent`. `0` means no job-local cap. |
+
+See [Overlap & misfire](/docs/scheduling/overlap-and-misfire) for the last few in detail.
+
+## Examples
+
+```csharp
+[ScheduledJob(
+    "mailbox.poll",
+    FixedDelay = "${Mailbox:PollingInterval:-15m}",
+    Group = "mailbox",
+    Enabled = "${Mailbox:Enabled:-false}",
+    Overlap = ScheduledJobOverlap.Skip)]
+public async ValueTask PollAsync(CancellationToken ct) {
+    await mailboxProcessor.PollAsync(ct);
+}
+
+[ScheduledJob(
+    "reports.daily",
+    Cron = "0 0 3 * * *",
+    TimeZone = "Europe/Vienna")]
+public async ValueTask RunDailyReportsAsync(CancellationToken ct) {
+    await reports.RunDailyAsync(ct);
+}
+
+[ScheduledJob("warmup.searchIndex", InitialDelay = "10s")]
+public async ValueTask WarmSearchIndexAsync(CancellationToken ct) {
+    await searchIndex.WarmAsync(ct);
+}
+```
+
+## Disabling a cron trigger
+
+Use `Cron = "-"` to disable a cron trigger (matching Spring's disabled-cron sentinel). This is most
+useful with a placeholder default:
+
+```csharp
+[ScheduledJob("reports.daily", Cron = "${Reports:DailyCron:--}")]
+public async ValueTask RunDailyReportsAsync(CancellationToken ct) {
+    await reports.RunDailyAsync(ct);
+}
+```
+
+## Configuration placeholders
+
+Placeholders use Spring-style syntax and are re-resolved for every recurring occurrence:
+
+| Placeholder | Behavior |
+| --- | --- |
+| `${Jobs:Interval}` | Resolve `Jobs:Interval`; throw during schedule resolution if not configured. |
+| `${Jobs:Interval:-15m}` | Resolve `Jobs:Interval`; use `15m` when not configured or blank. |
+
+<Callout type="info">
+  If a previously valid schedule later becomes invalid, the scheduler logs the error and keeps the
+  last valid schedule — the recurring chain does not die while configuration is being fixed.
+</Callout>
+
+## Job references
+
+Generated registries also emit job references so admin/manual-run code does not repeat string
+literals:
+
+```csharp
+var jobName = MyAppApplicationScheduledJobRegistrationJobReferences.ReportsDaily.Name;
+```

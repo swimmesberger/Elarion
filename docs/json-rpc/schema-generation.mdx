@@ -1,0 +1,74 @@
+---
+title: Schema generation
+description: Export rpc-schema.json automatically during dotnet build with the Elarion.AspNetCore.SchemaGeneration MSBuild package.
+---
+
+`rpc-schema.json` is the contract that drives the [TypeScript client](/docs/json-rpc/typescript-client).
+You can export it in code with `JsonRpcSchemaExporter`, or — more conveniently — have it written
+automatically during `dotnet build`.
+
+## Build-time export
+
+Add the schema generation package as private build tooling in the host project:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.AspNetCore.SchemaGeneration"
+                    Version="0.1.0"
+                    PrivateAssets="all" />
+</ItemGroup>
+
+<PropertyGroup>
+  <ElarionJsonRpcGenerateSchema>true</ElarionJsonRpcGenerateSchema>
+  <ElarionJsonRpcSchemaOutputPath>$(MSBuildProjectDirectory)/../../rpc-schema.json</ElarionJsonRpcSchemaOutputPath>
+</PropertyGroup>
+```
+
+The package imports MSBuild targets that run after the host compiles. The target launches the built
+application, captures the host immediately after `builder.Build()`, resolves the registered
+`JsonRpcDispatcher`, and writes the schema using the dispatcher's runtime serializer options.
+**Application code after `builder.Build()` does not run** during generation.
+
+## Properties
+
+| Property | Default | Purpose |
+| --- | --- | --- |
+| `ElarionJsonRpcGenerateSchema` | `false` | Enables the package targets. |
+| `ElarionJsonRpcGenerateSchemaOnBuild` | same as `ElarionJsonRpcGenerateSchema` | Controls automatic generation during `dotnet build`. |
+| `ElarionJsonRpcSchemaOutputPath` | `$(BaseIntermediateOutputPath)rpc-schema.json` | Exact schema file path. |
+| `ElarionJsonRpcSchemaOutputDirectory` | `$(BaseIntermediateOutputPath)` | Used with `ElarionJsonRpcSchemaFileName` when no explicit path is set. |
+| `ElarionJsonRpcSchemaFileName` | `rpc-schema.json` | File name used with the output directory. |
+| `ElarionJsonRpcSchemaEnvironment` | `Development` | Value for `DOTNET_ENVIRONMENT` / `ASPNETCORE_ENVIRONMENT` while loading the app. |
+| `ElarionJsonRpcSchemaApplicationArguments` | empty | Arguments passed to the app entry point after `--`. |
+| `ElarionJsonRpcSchemaGenerationOptions` | empty | Extra tool arguments for advanced scenarios. |
+
+## Manual generation
+
+The same target can be invoked directly:
+
+```bash
+dotnet msbuild src/MyApp.Api/MyApp.Api.csproj \
+  -t:GenerateElarionJsonRpcSchema \
+  -p:ElarionJsonRpcGenerateSchema=true
+```
+
+## Guarding startup work
+
+Because the application is loaded during the build, guard expensive or external startup work.
+`JsonRpcSchemaGeneration.IsRunning` checks the Elarion marker environment variable and the schema
+generation tool's entry assembly name:
+
+```csharp
+var app = builder.Build();
+
+if (!JsonRpcSchemaGeneration.IsRunning) {
+    await app.Services.GetRequiredService<IStartupTask>().RunAsync();
+}
+```
+
+## Requirements
+
+Schema generation requires the host to register a **frozen** `JsonRpcDispatcher` before
+`builder.Build()`. If the dispatcher is missing, unfrozen, or empty, the build target fails with an
+actionable error instead of writing a stale schema. See [Hosting](/docs/json-rpc/hosting) for the
+registration.

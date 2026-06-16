@@ -1,0 +1,110 @@
+---
+title: Modules
+description: A module is an application boundary marked with [AppModule] that owns and publishes its handlers, services, validators, endpoints, and JSON metadata.
+---
+
+A module is an application boundary: a static partial class marked with `[AppModule]`, sitting at the
+root of a namespace that contains the module's handlers, services, and validators. The module decides
+what it exposes; the host only composes modules.
+
+```csharp
+using System.Text.Json.Serialization.Metadata;
+using Elarion.Abstractions.Modules;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace MyApp.Application.Modules.Clients;
+
+[AppModule("Clients")]
+public static partial class ClientsModule {
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
+        services.AddClientsHandlers();
+        services.AddClientsServices();
+        services.AddClientsValidators();
+    }
+
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() =>
+        ClientsJsonContext.Default;
+}
+```
+
+## Convention-based hooks
+
+All module methods are optional and discovered by convention. The generated module bootstrapper calls
+the ones you define:
+
+| Method | Called by | Purpose |
+| --- | --- | --- |
+| `ConfigureServices(IServiceCollection, IConfiguration)` | generated bootstrapper | Register module handlers, services, validators, and app-level options. |
+| `MapEndpoints(IEndpointRouteBuilder)` | generated bootstrapper | Declare module-owned Minimal API endpoints. |
+| `GetJsonTypeInfoResolver()` | generated bootstrapper | Contribute source-generated `System.Text.Json` metadata. |
+
+The `Add{Module}Handlers()`, `Add{Module}Services()`, and `Add{Module}Validators()` methods are
+emitted by the generators into the module namespace — see [Source generation](/docs/source-generation).
+
+## Feature modules and flags
+
+Feature modules are **enabled by default** and can be disabled with configuration:
+
+```json
+{
+  "Modules": {
+    "Clients": {
+      "Enabled": false
+    }
+  }
+}
+```
+
+When a module is disabled, its handlers, endpoints, JSON metadata, and scheduled jobs are not exposed.
+
+## Core modules
+
+Core modules are required foundation modules. Declare them with `Kind = AppModuleKind.Core`:
+
+```csharp
+[AppModule("Core", Kind = AppModuleKind.Core)]
+public static partial class CoreModule {
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
+        services.AddCoreHandlers();
+        services.AddCoreValidators();
+    }
+}
+```
+
+Core modules are always enabled, ignore `Modules:{Name}:Enabled`, and initialize before feature
+modules.
+
+<Callout type="warn">
+  Do not add `DependsOn = "Core"` just to make a feature module see core services — core availability
+  is implicit from the module kind. Use `DependsOn` only for explicit ordering between feature modules
+  or between multiple core modules.
+</Callout>
+
+## Endpoints in modules
+
+A module can declare Minimal API endpoints directly with the real ASP.NET Core abstractions:
+
+```csharp
+[AppModule("Chat")]
+public static partial class ChatModule {
+    public static void MapEndpoints(IEndpointRouteBuilder endpoints) {
+        endpoints
+            .MapPost("/chat/stream", ChatEndpoint.HandleAsync)
+            .RequireAuthorization();
+    }
+}
+```
+
+Use real endpoint conventions, filters, typed results, and route handler source generation — Elarion
+does not introduce a reduced endpoint facade. Keep host lifecycle concerns out of modules: a module
+should never call `builder.Build()`, `app.UseAuthentication()`, `app.MapJsonRpc()`, or configure
+concrete infrastructure providers. Those belong to the host.
+
+## What stays in the host
+
+Concrete infrastructure is a **platform capability**, not a second module system. Feature flags
+decide which module handlers, endpoints, JSON metadata, and scheduled jobs are exposed; the platform
+registers capability providers up front, and unused providers stay dormant until a feature resolves
+the corresponding application port. See [Project structure](/docs/getting-started/project-structure)
+for the full dependency rules.

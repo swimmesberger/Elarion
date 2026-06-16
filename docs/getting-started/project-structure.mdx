@@ -1,0 +1,106 @@
+---
+title: Project structure
+description: How to lay out an Elarion solution and the conventions the source generators depend on.
+---
+
+Elarion discovers application code by **namespace containment** and **type conventions**. Getting the
+layout right is what lets the generators emit registration code without a central list.
+
+## A typical solution
+
+```text
+MyApp.sln
+├─ src/
+│  ├─ MyApp.Domain/            # entities, value objects — no framework dependency
+│  ├─ MyApp.Application/       # modules, handlers, services, validators  ← Elarion + generators
+│  ├─ MyApp.Infrastructure/    # concrete repositories, mail, storage, EF Core context
+│  └─ MyApp.Api/               # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore
+└─ tests/
+```
+
+The boundary that matters: **the application project declares intent; the host wires platform
+capabilities.** See [Dependency rules](#dependency-rules) below for where each kind of code belongs.
+
+## Module layout
+
+A module is a namespace plus an `[AppModule]` marker. Everything under that namespace belongs to the
+module. A common per-module layout:
+
+```text
+MyApp.Application/Modules/Clients/
+├─ ClientsModule.cs            # [AppModule("Clients")] + ConfigureServices / JSON resolver
+├─ ClientsJsonContext.cs       # [JsonSerializable(...)] per request/response type
+├─ Handlers/
+│  ├─ GetClient.cs             # [RpcMethod] IHandler<Query, Result<Response>>
+│  └─ CreateClient/
+│     ├─ CreateClient.cs       # handler
+│     └─ CreateClientValidator.cs
+└─ Services/
+   └─ ClientNumberGenerator.cs # [Service] implementation
+```
+
+Generators emit `Add{Module}Handlers()`, `Add{Module}Services()`, and `Add{Module}Validators()` into
+the module namespace, which `ConfigureServices` calls.
+
+## Conventions the generators rely on
+
+Because Elarion prefers convention over configuration, a handful of naming and placement rules are
+load-bearing:
+
+| Convention | Why it matters |
+| --- | --- |
+| Types live **under a module namespace** | Namespace containment decides which module owns a type and which generated `Add{Module}…()` method registers it. |
+| Handlers implement `IHandler<TRequest, TResponse>` | The handler generator matches on this interface. |
+| JSON-RPC handlers nest `Command`/`Query` and `Response` | The RPC generator reads these nested types to emit typed dispatcher calls. |
+| Services are annotated with `[Service]` | Marks the type for registration and contract resolution. |
+| Validators inherit `AbstractValidator<T>` | The validator generator matches FluentValidation validators. |
+| Hosted services use singleton scope | The generator rejects scoped/transient `IHostedService` with a diagnostic. |
+
+If a type is in the wrong namespace or breaks a convention, the result is a **build-time diagnostic
+or a missing generated method** — not a silent runtime failure. See
+[Troubleshooting](/docs/reference/troubleshooting) for the common cases.
+
+## Core vs. feature modules
+
+- **Feature modules** are enabled by default and can be switched off with
+  `Modules:{Name}:Enabled=false` in configuration.
+- **Core modules** declare `Kind = AppModuleKind.Core`, are always enabled, ignore the `Enabled`
+  flag, and initialize before feature modules.
+
+```csharp
+[AppModule("Core", Kind = AppModuleKind.Core)]
+public static partial class CoreModule { /* ... */ }
+```
+
+Do not add `DependsOn = "Core"` just to see core services — core availability is implicit. Use
+`DependsOn` only for explicit ordering between feature modules. See [Modules](/docs/concepts/modules)
+for the full lifecycle.
+
+## Dependency rules
+
+Use this table when deciding where code belongs:
+
+| Code | Location |
+| --- | --- |
+| Generic handler / result / module / pipeline / RPC primitives | `Elarion` (the framework) |
+| Feature module composition and business handlers | Application project |
+| Concrete database / blob / mail / PDF / external service implementations | Infrastructure, registered by the host as a platform capability |
+| Middleware, authentication, telemetry exporters, app lifetime | API host |
+| Application-specific domain types | Domain / application projects |
+
+Application modules may depend on abstractions — DI, configuration, `IEndpointRouteBuilder`, and
+`System.Text.Json` metadata. They should **not** depend on the API host, `WebApplicationBuilder`,
+concrete infrastructure classes, or deployment-specific packages.
+
+## Creating a new module
+
+1. Create a module namespace, e.g. `MyApp.Application.Modules.Billing`.
+2. Add `[AppModule("Billing")]` to a static partial `BillingModule` class.
+3. In `ConfigureServices`, call the generated `services.AddBillingHandlers()`,
+   `AddBillingServices()`, and `AddBillingValidators()`.
+4. Add a source-generated `BillingJsonContext`.
+5. Add services under the namespace and annotate them with `[Service]`.
+6. Add handlers implementing `IHandler<TRequest, Result<TResponse>>`.
+7. Add validators in the same namespace.
+8. Mark JSON-RPC handlers with `[RpcMethod("billing.someAction")]`.
+9. Build so the generators emit the registration code.
