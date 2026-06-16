@@ -22,12 +22,12 @@ public sealed class JsonRpcSchemaGenerationToolTests {
                 <ImplicitUsings>enable</ImplicitUsings>
               </PropertyGroup>
               <ItemGroup>
-                <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.AspNetCore", "Elarion.AspNetCore.csproj")}}" />
+                <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.JsonRpc", "Elarion.JsonRpc.csproj")}}" />
               </ItemGroup>
             </Project>
             """;
         var program = """
-            using Elarion.AspNetCore;
+            using Elarion.JsonRpc;
 
             Console.WriteLine(JsonRpcSchemaGeneration.IsRunning);
             """;
@@ -109,6 +109,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
               </PropertyGroup>
               <ItemGroup>
                 <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.AspNetCore", "Elarion.AspNetCore.csproj")}}" />
+                <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.JsonRpc", "Elarion.JsonRpc.csproj")}}" />
                 {{packageReference}}
               </ItemGroup>
             </Project>
@@ -117,6 +118,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
         var program = """
             using System.Text.Json;
             using Elarion.AspNetCore;
+            using Elarion.JsonRpc;
 
             var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
             var builder = WebApplication.CreateSlimBuilder(args);

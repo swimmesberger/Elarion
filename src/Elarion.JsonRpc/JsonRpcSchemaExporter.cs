@@ -4,7 +4,7 @@ using System.Text.Json.Schema;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
-namespace Elarion.AspNetCore;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Generates a JSON Schema document describing all registered JSON-RPC methods,

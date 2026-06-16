@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace Elarion.AspNetCore;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Helpers for detecting when an application is being launched by Elarion's build-time

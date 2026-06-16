@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Elarion.JsonRpc;
 
 namespace Elarion.AspNetCore;
 

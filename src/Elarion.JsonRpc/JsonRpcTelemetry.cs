@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
-namespace Elarion.AspNetCore;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Central OpenTelemetry instrumentation for JSON-RPC processing.

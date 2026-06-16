@@ -1,4 +1,4 @@
-namespace Elarion.AspNetCore;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Strongly typed result of a JSON-RPC method invocation — either a <typeparamref name="T"/> success

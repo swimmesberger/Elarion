@@ -1,4 +1,4 @@
-namespace Elarion.AspNetCore;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Represents a JSON-RPC 2.0 error with a numeric code, message, and optional data.

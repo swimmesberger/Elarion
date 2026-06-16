@@ -8,7 +8,8 @@ The repository contains reusable framework packages:
 
 - `Elarion.Abstractions` - implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers.
 - `Elarion` - runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, and the in-memory scheduler.
-- `Elarion.AspNetCore` - ASP.NET Core JSON-RPC dispatcher, endpoint mapping, current-user middleware, telemetry, and schema export support.
+- `Elarion.JsonRpc` - transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and RPC method-map trigger attribute.
+- `Elarion.AspNetCore` - ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport support.
 - `Elarion.AspNetCore.SchemaGeneration` - MSBuild package and host-launching tool for generating JSON-RPC schemas during build.
 - `Elarion.EntityFrameworkCore` - marker attributes for EF Core entity and DbSet generation.
 - `Elarion.Generators` - Roslyn source generators for handlers, validators, services, modules, RPC method maps, resilience policies, and scheduled jobs.
@@ -20,7 +21,8 @@ The repository contains reusable framework packages:
 - Core framework packages must stay reusable and domain-neutral.
 - `Elarion.Abstractions` must not depend on runtime integration packages.
 - `Elarion` may depend on abstractions, but should avoid ASP.NET Core, EF Core, and transport-specific concerns.
-- `Elarion.AspNetCore` owns HTTP/JSON-RPC integration and ASP.NET Core-specific behavior.
+- `Elarion.JsonRpc` owns JSON-RPC runtime contracts, dispatch, telemetry, and schema export without ASP.NET Core dependencies.
+- `Elarion.AspNetCore` owns HTTP/JSON-RPC endpoint integration and ASP.NET Core-specific behavior.
 - EF Core packages own only EF-specific marker APIs and source generation.
 - Source generators should emit deterministic, inspectable code and fail with diagnostics for unsupported patterns.
 - Do not add runtime reflection scanning where compile-time generation is feasible.
@@ -32,7 +34,7 @@ JSON-RPC is a first-class optional transport:
 1. Application handlers declare `[RpcMethod("module.action")]`.
 2. `RpcMethodMapGenerator` emits dispatcher registration code.
 3. Hosts configure `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
-4. `JsonRpcSchemaExporter` or `Elarion.AspNetCore.SchemaGeneration` exports `rpc-schema.json` from registered methods.
+4. `Elarion.JsonRpc.JsonRpcSchemaExporter` or `Elarion.AspNetCore.SchemaGeneration` exports `rpc-schema.json` from registered methods.
 5. `elarion-jsonrpc-client-generator` emits `rpc-types.ts`, `rpc-schemas.ts`, and `rpc-client.ts`.
 
 Generated TypeScript should remain portable across browser and Node.js server runtimes. Prefer standard `fetch`, injectable transport, `AbortSignal`, and small common dependencies such as Zod when they materially improve safety.
