@@ -1,8 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-using Elarion.Abstractions.Resilience;
 using Elarion.Abstractions.Scheduling;
 using Elarion.Resilience;
 
