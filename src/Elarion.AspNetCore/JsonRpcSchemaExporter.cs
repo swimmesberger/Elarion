@@ -19,12 +19,20 @@ public static class JsonRpcSchemaExporter {
     /// <param name="jsonOptions">Optional serializer options (used for type info resolution).</param>
     /// <returns>A formatted JSON string containing the schema document.</returns>
     public static string Generate(JsonRpcDispatcher dispatcher, JsonSerializerOptions? jsonOptions = null) {
-        var options = jsonOptions ?? new JsonSerializerOptions {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            Converters = { new JsonStringEnumConverter() },
-            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
-        };
-        var methods = dispatcher.GetRegisteredMethods();
+        var options = CreateSchemaOptions(jsonOptions);
+        IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType)> methods;
+        try {
+            methods = dispatcher.GetRegisteredMethods();
+        } catch (InvalidOperationException ex) {
+            throw new InvalidOperationException(
+                "Cannot export the JSON-RPC schema because the dispatcher is not frozen. Call Freeze() after registering all JSON-RPC methods.",
+                ex);
+        }
+
+        if (methods.Count == 0) {
+            throw new InvalidOperationException(
+                "Cannot export the JSON-RPC schema because the dispatcher has no registered methods.");
+        }
 
         var exporterOptions = new JsonSchemaExporterOptions {
             TreatNullObliviousAsNonNullable = true,
@@ -81,5 +89,20 @@ public static class JsonRpcSchemaExporter {
             : new JsonArray(remaining.Select(t => (JsonNode?)JsonValue.Create(t)).ToArray());
 
         return schema;
+    }
+
+    private static JsonSerializerOptions CreateSchemaOptions(JsonSerializerOptions? jsonOptions) {
+        var options = jsonOptions is null
+            ? new JsonSerializerOptions {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                Converters = { new JsonStringEnumConverter() },
+            }
+            : new JsonSerializerOptions(jsonOptions);
+
+        if (options.TypeInfoResolver is null && options.TypeInfoResolverChain.Count == 0) {
+            options.TypeInfoResolver = new DefaultJsonTypeInfoResolver();
+        }
+
+        return options;
     }
 }

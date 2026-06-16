@@ -1,0 +1,32 @@
+<Project>
+  <PropertyGroup>
+    <_ElarionJsonRpcSchemaTargetFramework Condition="'$(ElarionJsonRpcSchemaTargetFramework)' != ''">$(ElarionJsonRpcSchemaTargetFramework)</_ElarionJsonRpcSchemaTargetFramework>
+    <_ElarionJsonRpcSchemaTargetFramework Condition="'$(_ElarionJsonRpcSchemaTargetFramework)' == ''">$(TargetFrameworks.Trim(';').Split(';')[0])</_ElarionJsonRpcSchemaTargetFramework>
+    <ElarionJsonRpcGenerateSchemaOnBuild Condition="'$(ElarionJsonRpcGenerateSchemaOnBuild)' == ''">$(ElarionJsonRpcGenerateSchema)</ElarionJsonRpcGenerateSchemaOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(ElarionJsonRpcGenerateSchema)' == 'true'">
+    <ProjectCapability Include="ElarionJsonRpcGenerateSchema" />
+  </ItemGroup>
+
+  <Target Name="GenerateElarionJsonRpcSchema">
+    <MSBuild Projects="$(MSBuildProjectFile)"
+             Targets="GenerateElarionJsonRpcSchema"
+             Properties="TargetFramework=$(_ElarionJsonRpcSchemaTargetFramework)"
+             RemoveProperties="RuntimeIdentifier" />
+  </Target>
+
+  <Target Name="_GenerateElarionJsonRpcSchema"
+          AfterTargets="Build"
+          Condition="'$(ElarionJsonRpcGenerateSchemaOnBuild)' == 'true'"
+          DependsOnTargets="GenerateElarionJsonRpcSchema" />
+
+  <Target Name="ElarionJsonRpcGetSchemaDocuments" Returns="@(_ElarionJsonRpcSchemaDocuments)">
+    <MSBuild Projects="$(MSBuildProjectFile)"
+             Targets="ElarionJsonRpcGetSchemaDocuments"
+             Properties="TargetFramework=$(_ElarionJsonRpcSchemaTargetFramework)"
+             RemoveProperties="RuntimeIdentifier">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionJsonRpcSchemaDocuments" />
+    </MSBuild>
+  </Target>
+</Project>

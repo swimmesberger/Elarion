@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>dotnet-elarion-getrpcschema</AssemblyName>
+    <RootNamespace>Elarion.AspNetCore.SchemaGeneration.Tool</RootNamespace>
+    <Description>Build-time JSON-RPC schema generation tool for Elarion ASP.NET Core applications.</Description>
+    <IsPackable>false</IsPackable>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <UseAppHost>false</UseAppHost>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>

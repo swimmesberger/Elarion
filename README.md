@@ -9,6 +9,7 @@ Elarion is a .NET application framework for module-based handler pipelines, comp
 | `Elarion.Abstractions` | Implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers. |
 | `Elarion` | Runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, and the in-memory scheduler. |
 | `Elarion.AspNetCore` | ASP.NET Core JSON-RPC dispatcher, endpoint mapping, current-user middleware, telemetry, and schema export support. |
+| `Elarion.AspNetCore.SchemaGeneration` | MSBuild package for generating JSON-RPC schema files during `dotnet build`. |
 | `Elarion.EntityFrameworkCore` | Marker attributes for EF Core entity and DbSet generation. |
 | `Elarion.Generators` | Roslyn generators for handlers, validators, services, modules, RPC method maps, resilience policies, and scheduled jobs. |
 | `Elarion.EntityFrameworkCore.Generators` | Roslyn generator for DbSet properties and entity configuration application. |
@@ -24,6 +25,7 @@ Elarion emits OpenTelemetry-compatible tracing and metrics through `System.Diagn
 dotnet restore Elarion.slnx
 dotnet build Elarion.slnx --configuration Release
 dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release
+dotnet pack Elarion.slnx --configuration Release --no-build
 
 cd src/elarion-jsonrpc-client-generator
 npm ci
