@@ -1,4 +1,5 @@
 using System.Text;
+using Elarion.JsonRpc;
 
 namespace Elarion.AspNetCore.SchemaGeneration.Tool;
 

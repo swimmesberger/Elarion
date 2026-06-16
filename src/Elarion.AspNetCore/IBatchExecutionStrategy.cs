@@ -1,3 +1,5 @@
+using Elarion.JsonRpc;
+
 namespace Elarion.AspNetCore;
 
 /// <summary>

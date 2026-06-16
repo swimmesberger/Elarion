@@ -15,7 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
+    <ProjectReference Include="..\Elarion.JsonRpc\Elarion.JsonRpc.csproj" />
   </ItemGroup>
 
 </Project>

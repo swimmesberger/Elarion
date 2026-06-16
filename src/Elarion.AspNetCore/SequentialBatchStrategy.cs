@@ -1,3 +1,4 @@
+using Elarion.JsonRpc;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.AspNetCore;

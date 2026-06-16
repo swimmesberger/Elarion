@@ -10,7 +10,8 @@ The central idea is simple: application assemblies define modules and handlers; 
 | --- | --- | --- |
 | `Elarion` | Handler, result, error, module, pipeline, RPC marker, scheduler, and decorator-list primitives. | Application-level abstractions without provider-specific decorator dependencies. |
 | `Elarion.Generators` | Roslyn source generators for handler registration, validator registration, scheduled jobs, RPC method maps, and module bootstrapping. | Analyzer-only reference from application or host projects. |
-| `Elarion.AspNetCore` | ASP.NET Core integration: JSON-RPC dispatcher/endpoint, batch execution strategy, current-user integration, telemetry, and schema export support. | ASP.NET Core abstractions and `System.Text.Json`. |
+| `Elarion.JsonRpc` | Transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and RPC method-map trigger. | `System.Text.Json` and Microsoft logging abstractions. |
+| `Elarion.AspNetCore` | ASP.NET Core integration: JSON-RPC endpoint mapping, batch execution strategy, current-user integration, and HTTP transport support. | ASP.NET Core abstractions plus `Elarion.JsonRpc`. |
 | `Elarion.AspNetCore.SchemaGeneration` | Build-time JSON-RPC schema generation through MSBuild targets and a host-launching tool. | Private build-time package reference from ASP.NET Core host projects. |
 | `Elarion.EntityFrameworkCore` | EF Core marker attributes for generated DbSets and entity inclusion. | Marker-only package; consumers provide EF Core. |
 | `Elarion.EntityFrameworkCore.Generators` | Roslyn source generator for DbContext DbSet properties and AOT-friendly configuration application. | Analyzer-only reference from EF-consuming projects. |
@@ -46,7 +47,7 @@ Elarion is intentionally not a thin wrapper around the default ASP.NET Core styl
 | EF Core model wiring | Hand-written `DbSet<T>` properties and `ApplyConfigurationsFromAssembly(...)` are common. | Optional EF generator uses interface-first `[GenerateDbSets]`, explicit `[DbEntity]` markers, optional scopes, and direct `IEntityTypeConfiguration<T>` calls. |
 | Background work | Individual `BackgroundService` loops usually own their own timers, overlap behavior, logging, and cancellation. | Source-generated scheduled jobs share one in-memory scheduler runtime with typed invocation, explicit overlap policy, `TimeProvider`, and OpenTelemetry instrumentation. |
 | Error model | Exceptions, `ProblemDetails`, action results, or ad-hoc response DTOs. | Handlers return `Result<T>` with transport-agnostic `AppError`; the host maps errors to JSON-RPC, HTTP, or another transport. |
-| Transport | HTTP REST endpoints are usually the default application API. | JSON-RPC is a first-class optional transport via `Elarion.AspNetCore`, but it stays outside the core framework package. |
+| Transport | HTTP REST endpoints are usually the default application API. | JSON-RPC is a first-class optional transport via `Elarion.JsonRpc` plus `Elarion.AspNetCore`, but it stays outside the core framework package. |
 | Client contracts | Frontends often hand-write DTOs or call ad-hoc REST client helpers. | JSON-RPC clients consume generated TypeScript/Zod artifacts and a portable fetch client from the exported RPC schema. |
 
 The main tradeoff is that you accept conventions. Handler names, nested `Command`/`Query` and `Response` types, module namespace containment, and pipeline attributes matter because generators use them. In exchange, you get less host boilerplate, inherent modularity, fewer runtime scans, and a clearer separation between application policy and host mechanics.
@@ -813,10 +814,11 @@ Generated code intentionally uses explicit type names and DI factory registratio
 
 ## Host setup
 
-The host references the application, `Elarion.AspNetCore`, and the generator analyzer:
+The host references the application, `Elarion.JsonRpc`, `Elarion.AspNetCore`, and the generator analyzer:
 
 ```xml
 <ItemGroup>
+  <ProjectReference Include="..\Elarion.JsonRpc\Elarion.JsonRpc.csproj" />
   <ProjectReference Include="..\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
   <ProjectReference Include="..\MyApp.Application\MyApp.Application.csproj" />
   <ProjectReference Include="..\Elarion.Generators\Elarion.Generators.csproj"
@@ -839,7 +841,7 @@ public static partial class ModuleBootstrapper;
 Create an RPC method map partial:
 
 ```csharp
-using Elarion.AspNetCore;
+using Elarion.JsonRpc;
 
 namespace MyApp.Api.Rpc;
 
@@ -897,7 +899,7 @@ The framework JSON-RPC pipeline is intentionally end-to-end:
 1. Application handlers declare `[RpcMethod("module.action")]`.
 2. `RpcMethodMapGenerator` emits the dispatcher registration map.
 3. The host configures a `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
-4. `JsonRpcSchemaExporter` or `Elarion.AspNetCore.SchemaGeneration` exports `rpc-schema.json` from the registered dispatcher.
+4. `Elarion.JsonRpc.JsonRpcSchemaExporter` or `Elarion.AspNetCore.SchemaGeneration` exports `rpc-schema.json` from the registered dispatcher.
 5. `elarion-jsonrpc-client-generator` converts that schema into frontend TypeScript/Zod artifacts and a typed fetch client.
 6. The frontend can use the generated client directly or wrap it in framework-specific server functions/cache hooks.
 
@@ -1007,7 +1009,8 @@ const rpc = createRpcApi({
 
 This separation keeps the reusable framework contract small:
 
-- `Elarion.AspNetCore` owns runtime dispatch and schema export.
+- `Elarion.JsonRpc` owns runtime dispatch, telemetry, and schema export.
+- `Elarion.AspNetCore` owns HTTP endpoint mapping and ASP.NET Core transport behavior.
 - `Elarion.AspNetCore.SchemaGeneration` owns build-time schema export.
 - `elarion-jsonrpc-client-generator` owns schema-to-TypeScript/Zod/client generation.
 - Applications own server-function/auth/cache adapters around the generated client.
@@ -1212,6 +1215,7 @@ Use these rules when deciding where code belongs:
 | --- | --- |
 | Generic handler/result/module/pipeline/RPC primitives | `Elarion` |
 | Generic Elarion source generation | `Elarion.Generators` |
+| JSON-RPC core library | `Elarion.JsonRpc` |
 | JSON-RPC / ASP.NET integration library | `Elarion.AspNetCore` |
 | Generic EF Core DbSet/configuration source generation | `Elarion.EntityFrameworkCore` and `.Generators` |
 | Feature module composition and business handlers | Application project |

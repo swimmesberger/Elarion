@@ -7,6 +7,7 @@
     <Project Path="src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Generators/Elarion.Generators.csproj" />
+    <Project Path="src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <Project Path="src/Elarion/Elarion.csproj" />
   </Folder>
   <Folder Name="/tests/">

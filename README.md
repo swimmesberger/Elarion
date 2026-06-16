@@ -8,7 +8,8 @@ Elarion is a .NET application framework for module-based handler pipelines, comp
 | --- | --- |
 | `Elarion.Abstractions` | Implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers. |
 | `Elarion` | Runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, and the in-memory scheduler. |
-| `Elarion.AspNetCore` | ASP.NET Core JSON-RPC dispatcher, endpoint mapping, current-user middleware, telemetry, and schema export support. |
+| `Elarion.JsonRpc` | Transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and source-generation trigger. |
+| `Elarion.AspNetCore` | ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport support. |
 | `Elarion.AspNetCore.SchemaGeneration` | MSBuild package for generating JSON-RPC schema files during `dotnet build`. |
 | `Elarion.EntityFrameworkCore` | Marker attributes for EF Core entity and DbSet generation. |
 | `Elarion.Generators` | Roslyn generators for handlers, validators, services, modules, RPC method maps, resilience policies, and scheduled jobs. |

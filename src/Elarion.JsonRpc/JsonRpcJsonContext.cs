@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Elarion.AspNetCore;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Source-generated JSON serializer context for JSON-RPC 2.0 envelope types.

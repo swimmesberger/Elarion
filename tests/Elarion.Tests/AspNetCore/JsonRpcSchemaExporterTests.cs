@@ -1,6 +1,6 @@
 using System.Text.Json;
 using AwesomeAssertions;
-using Elarion.AspNetCore;
+using Elarion.JsonRpc;
 using Xunit;
 
 namespace Elarion.Tests.AspNetCore;
