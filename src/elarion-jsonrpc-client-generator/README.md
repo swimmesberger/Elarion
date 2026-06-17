@@ -56,3 +56,38 @@ const [clientResult, projectsResult] = await rpc.$batch([
 ```
 
 Result validation is enabled by default through `rpcResultSchemas`. Use `transformResult` for app-specific normalization before validation, or set `validateResults: false` when another layer validates responses.
+
+## Client-side tracing
+
+The generated client never imports an OpenTelemetry SDK. Instead it exposes an optional `instrumentation` hook so client-side tracing stays a host decision and adds zero dependencies. The client calls `startSpan` once per request (and once per batch), reads the returned span's `headers` to inject trace context into the outgoing request, then calls `setError`/`end` as the request settles:
+
+```ts
+interface RpcInstrumentation {
+  startSpan(context: { methods: readonly string[]; batch: boolean }): RpcClientSpan | undefined
+}
+
+interface RpcClientSpan {
+  readonly headers?: HeadersInit // e.g. { traceparent } — merged in last, so it stays authoritative
+  setError(error: unknown): void
+  end(): void
+}
+```
+
+Minimal, dependency-free W3C context propagation (continues the server trace; ASP.NET Core reads `traceparent` automatically):
+
+```ts
+const rpc = createRpcApi({
+  url: '/rpc',
+  instrumentation: {
+    startSpan() {
+      const traceId = crypto.getRandomValues(new Uint8Array(16))
+      const spanId = crypto.getRandomValues(new Uint8Array(8))
+      const hex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+      const traceparent = `00-${hex(traceId)}-${hex(spanId)}-01`
+      return { headers: { traceparent }, setError() {}, end() {} }
+    },
+  },
+})
+```
+
+Hosts that already run `@opentelemetry/api` pass a small adapter that starts a real `CLIENT` span and injects context via the API's propagator — still no SDK in the generated client. Per-item application errors in a batch are returned as data (`{ ok: false, error }`), so the batch span ends without `setError`; only transport/protocol failures mark the span as errored.

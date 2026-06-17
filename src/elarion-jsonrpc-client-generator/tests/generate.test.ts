@@ -30,6 +30,16 @@ interface BatchItemResultForTests {
   }
 }
 
+interface TestSpan {
+  headers?: HeadersInit
+  setError(error: unknown): void
+  end(): void
+}
+
+interface TestInstrumentation {
+  startSpan(context: { methods: readonly string[]; batch: boolean }): TestSpan | undefined
+}
+
 interface GeneratedClientModule {
   createRpcApi(options: {
     url: string
@@ -38,6 +48,7 @@ interface GeneratedClientModule {
     idGenerator?: () => string | number
     validateResults?: boolean
     transformResult?: (method: string, result: unknown) => unknown
+    instrumentation?: TestInstrumentation
   }): RpcApiForTests
   createRpcClient(options: {
     url: string
@@ -46,6 +57,7 @@ interface GeneratedClientModule {
     idGenerator?: () => string | number
     validateResults?: boolean
     transformResult?: (method: string, result: unknown) => unknown
+    instrumentation?: TestInstrumentation
   }): RpcClientForTests
   RpcError: new (code: number, message: string, data?: unknown) => Error & { code: number; data?: unknown }
   RpcTransportError: new (status: number, statusText: string, body: string) => Error
@@ -385,6 +397,101 @@ describe('JSON-RPC client generator', () => {
       name: 'RpcProtocolError',
       message: 'JSON-RPC batch response contains a duplicate id.',
     })
+  })
+
+  it('drives the instrumentation hook for single calls, injecting headers and recording outcome', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+
+    const events: string[] = []
+    const seenContexts: Array<{ methods: readonly string[]; batch: boolean }> = []
+    let seenTraceparent: string | null = null
+
+    const instrumentation: TestInstrumentation = {
+      startSpan(context) {
+        seenContexts.push(context)
+        events.push('start')
+        return {
+          headers: { traceparent: '00-trace-span-01' },
+          setError() {
+            events.push('error')
+          },
+          end() {
+            events.push('end')
+          },
+        }
+      },
+    }
+
+    const okClient = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async (_input, init) => {
+        seenTraceparent = new Headers(init?.headers).get('traceparent')
+        return jsonResponse({ jsonrpc: '2.0', id: 'request-1', result: 3 })
+      },
+      idGenerator: () => 'request-1',
+      instrumentation,
+    })
+
+    await expect(okClient.call('math.add', { left: 1, right: 2 })).resolves.toBe(3)
+    expect(seenTraceparent).toBe('00-trace-span-01')
+    expect(seenContexts).toEqual([{ methods: ['math.add'], batch: false }])
+    expect(events).toEqual(['start', 'end'])
+
+    events.length = 0
+    const errorClient = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async () => jsonResponse({
+        jsonrpc: '2.0',
+        id: 'request-2',
+        error: { code: -32602, message: 'Invalid params' },
+      }),
+      idGenerator: () => 'request-2',
+      instrumentation,
+    })
+
+    await expect(errorClient.call('math.add', { left: 1, right: 2 }))
+      .rejects.toMatchObject({ name: 'RpcError', code: -32602 })
+    expect(events).toEqual(['start', 'error', 'end'])
+  })
+
+  it('starts one span per batch and treats per-item errors as data, not span failures', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+
+    const events: string[] = []
+    const ids = ['request-1', 'request-2']
+
+    const rpc = clientModule.createRpcApi({
+      url: 'https://example.test/rpc',
+      fetch: async () => jsonResponse([
+        { jsonrpc: '2.0', id: 'request-1', result: 3 },
+        { jsonrpc: '2.0', id: 'request-2', error: { code: -32601, message: 'Method not found' } },
+      ]),
+      idGenerator: () => ids.shift() ?? 'unexpected',
+      instrumentation: {
+        startSpan(context) {
+          events.push(`start:${context.batch}:${context.methods.length}`)
+          return {
+            setError() {
+              events.push('error')
+            },
+            end() {
+              events.push('end')
+            },
+          }
+        },
+      },
+    })
+
+    const results = await rpc.$batch([
+      rpc.$request.math.add({ left: 1, right: 2 }),
+      rpc.$request.math.add({ left: 3, right: 4 }),
+    ] as const)
+
+    expect(results[0]).toMatchObject({ ok: true, result: 3 })
+    expect(results[1]).toMatchObject({ ok: false, error: { code: -32601 } })
+    expect(events).toEqual(['start:true:2', 'end'])
   })
 })
 

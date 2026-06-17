@@ -13,6 +13,7 @@ framework lightweight while making every framework-owned boundary observable.
 
 ```csharp
 using Elarion.AspNetCore;
+using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Scheduling;
 using Elarion.Caching;
 using Elarion.Resilience;
@@ -24,14 +25,16 @@ builder.Services
             JsonRpcTelemetry.ActivitySourceName,
             SchedulerTelemetry.ActivitySourceName,
             HandlerCacheTelemetry.ActivitySourceName,
-            ResilienceTelemetry.ActivitySourceName)
+            ResilienceTelemetry.ActivitySourceName,
+            HandlerTelemetry.ActivitySourceName)
         /* add exporters */)
     .WithMetrics(metrics => metrics
         .AddMeter(
             JsonRpcTelemetry.MeterName,
             SchedulerTelemetry.MeterName,
             HandlerCacheTelemetry.MeterName,
-            ResilienceTelemetry.MeterName)
+            ResilienceTelemetry.MeterName,
+            HandlerTelemetry.MeterName)
         /* add exporters */);
 ```
 
@@ -43,17 +46,24 @@ builder.Services
 | Scheduler | `SchedulerTelemetry` (`Elarion.Scheduling`) | Schedule/enqueue/cancel operations and job executions create spans. Runtime-scheduled jobs preserve scheduling trace context into the later execution span when possible. Fixed-rate, fixed-delay, cron, skipped, misfired/coalesced, retry, cancellation, and failure outcomes are trace-visible. |
 | Handler cache | `HandlerCacheTelemetry` (`Elarion.Caching`) | Cache get/create spans expose the precise outcome — `miss-factory-executed`, `miss-non-cacheable`, or `cached-or-coalesced`. Factory execution events, payload policy errors, and invalidation spans are trace-visible. Tags avoid full keys, raw user ids, and request values. |
 | Resilience | `ResilienceTelemetry` (`Elarion.Resilience`) | Named policy execution spans expose final outcome and duration. Retry and timeout callbacks add span events under the default Microsoft/Polly-backed runtime. |
+| Handler | `HandlerTelemetry` (`Elarion.Handlers`) | Every generated handler is wrapped in a `TracingDecorator` as the outermost decorator, emitting one `Internal` span per invocation that parents any cache/resilience/pipeline child spans, plus execution count/duration metrics. Bounded tags only: handler name, request type name, and `ok`/`error`/`exception` outcome — never request or response payloads. |
 
-## Why there are no blanket handler spans
+## Handler tracing
 
-Elarion intentionally does **not** wrap every generated handler invocation in a span by default. The
-JSON-RPC, scheduler, cache, and resilience spans already identify the framework-owned runtime
-boundaries, and unconditional handler spans can duplicate transport spans or add cardinality before a
-host has decided its tracing model. If you want handler-level spans, add an explicit decorator through
-the generated [pipeline](/docs/concepts/decorator-pipelines).
+Handler tracing follows the same "instrument always, collect on demand" model as the other surfaces:
+the generator wraps every handler in a `TracingDecorator` unconditionally, but the span is a no-op
+until a host registers the `Elarion.Handlers` source. To suppress handler telemetry, omit
+`HandlerTelemetry.ActivitySourceName`/`MeterName` from the OpenTelemetry registration. This mirrors
+how `HttpClient` and EF Core ship always-present `ActivitySource`s and leave collection to the host —
+no opt-in attribute required. The handler span adds the application-operation boundary as the stable
+parent of the decorator chain, so JSON-RPC, scheduler, cache, and resilience child spans all appear
+inside it.
 
 ## Client-side telemetry
 
-The TypeScript JSON-RPC client stays OpenTelemetry-package-free and framework-free. Browser or Node.js
-applications that need client-side tracing should wrap the generated transport/fetch boundary
-themselves — see [TypeScript client](/docs/json-rpc/typescript-client).
+The TypeScript JSON-RPC client stays OpenTelemetry-package-free and framework-free. It exposes an
+optional `instrumentation` hook (`RpcInstrumentation`) on `createRpcClient`/`createRpcApi`: supply an
+adapter — over `@opentelemetry/api`, or a hand-rolled W3C `traceparent` generator — to start a span
+per request/batch, inject trace-context headers, and record the outcome. The generated client never
+imports a tracing SDK, so client-side tracing stays a host decision. See
+[TypeScript client](/docs/json-rpc/typescript-client).

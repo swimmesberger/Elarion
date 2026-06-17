@@ -63,27 +63,13 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("        ServiceLifetime lifetime = ServiceLifetime.Scoped)");
         sb.AppendLine("    {");
 
-        if (HasDecoratorChain(handler)) {
-            AppendDecoratedRegistration(sb, handler);
-        } else {
-            AppendPlainRegistration(sb, handler);
-        }
+        // Every handler is registered through the decorator factory because tracing is applied
+        // unconditionally as the outermost decorator. The handler span is a no-op until a host
+        // registers the Elarion.Handlers source, so there is no plain (undecorated) fast path.
+        AppendDecoratedRegistration(sb, handler);
 
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");
-    }
-
-    private static bool HasDecoratorChain(HandlerInfo handler) =>
-        !handler.Decorators.IsEmpty ||
-        handler.ResiliencePolicyName is not null ||
-        handler.Cacheable is not null ||
-        handler.CacheInvalidation is not null;
-
-    private static void AppendPlainRegistration(StringBuilder sb, HandlerInfo handler) {
-        sb.AppendLine("        services.Add(new ServiceDescriptor(");
-        sb.AppendLine($"            typeof(global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}>),");
-        sb.AppendLine($"            typeof({handler.HandlerFqn}),");
-        sb.AppendLine("            lifetime));");
     }
 
     private static void AppendDecoratedRegistration(StringBuilder sb, HandlerInfo handler) {
@@ -100,6 +86,9 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendPipelineDecorators(sb, handler.Decorators);
         AppendResilienceDecorator(sb, handler);
         AppendCacheInvalidationDecorator(sb, handler);
+        // Note: tracing is emitted last so the handler span is the outermost decorator and parents
+        // any cache/resilience/pipeline child spans.
+        AppendTracingDecorator(sb, handler);
 
         sb.AppendLine("                return handler;");
         sb.AppendLine("            },");
@@ -136,6 +125,12 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Resilience.IResiliencePipelineRunner>(),");
         sb.AppendLine($"                    new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference {{ Name = {FormatStringLiteral(handler.ResiliencePolicyName)} }});");
+    }
+
+    private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {
+        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Diagnostics.TracingDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine($"                    {FormatStringLiteral(handler.HandlerName)});");
     }
 
     private static void AppendCacheInvalidationDecorator(StringBuilder sb, HandlerInfo handler) {
