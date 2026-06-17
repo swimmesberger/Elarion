@@ -129,6 +129,38 @@ public sealed class HandlerRegistrationGeneratorTests {
             .Should().BeLessThan(generated.IndexOf("ResilienceDecorator", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void GenerateRegistration_AnyHandler_EmitsTracingDecoratorOutermost() {
+        var source = CreateSource(
+            "[assembly: Sample.Pipeline.DefaultPipeline]",
+            modulePipelineAttribute: "",
+            handlerPipelineAttribute: "");
+
+        var generated = GenerateHandlerRegistrationSource(source);
+
+        // Tracing is applied unconditionally to every handler, with no opt-in attribute.
+        generated.Should().Contain("global::Elarion.Abstractions.Diagnostics.TracingDecorator<");
+        generated.Should().Contain("\"CreateOrder\"");
+        // Tracing is emitted last so its span parents the pipeline decorators.
+        generated.IndexOf("TransactionDecorator", StringComparison.Ordinal)
+            .Should().BeLessThan(generated.IndexOf("TracingDecorator", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GenerateRegistration_HandlerWithoutPipeline_StillEmitsTracingDecorator() {
+        var source = CreateSource(
+            assemblyPipelineAttribute: "",
+            modulePipelineAttribute: "",
+            handlerPipelineAttribute: "");
+
+        var generated = GenerateHandlerRegistrationSource(source);
+
+        // Default-on: tracing wraps the handler even when no other decorator applies.
+        generated.Should().Contain("global::Elarion.Abstractions.Diagnostics.TracingDecorator<");
+        generated.Should().NotContain("TransactionDecorator");
+        generated.Should().NotContain("ValidationDecorator");
+    }
+
     private static string GenerateHandlerRegistrationSource(string source) {
         var result = GenerateHandlerRegistrationRunResult(source);
         return GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_CreateOrder.g.cs");
