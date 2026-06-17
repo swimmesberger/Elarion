@@ -12,5 +12,5 @@ insert_final_newline = true
 indent_size = 4
 resharper_log_message_is_sentence_problem_highlighting = suggestion
 
-[*.{sln,csproj,props}]
+[*.{sln,slnx,csproj,props}]
 indent_size = 2
