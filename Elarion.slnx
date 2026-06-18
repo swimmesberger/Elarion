@@ -13,6 +13,7 @@
     <Project Path="src/Elarion.Generators/Elarion.Generators.csproj" />
     <Project Path="src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <Project Path="src/Elarion/Elarion.csproj" />
+    <Project Path="src/elarion-jsonrpc-client-generator/elarion-jsonrpc-client-generator.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Elarion.Tests/Elarion.Tests.csproj" />
