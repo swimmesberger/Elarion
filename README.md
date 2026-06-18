@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/public/brand/elarion-logo-horizontal-transparent.svg" width="512" alt="Elarion — Application framework for .NET" />
+<img src="docs/public/app-icon.svg" width="104" height="104" alt="Elarion logo" />
 
 # Elarion
 
