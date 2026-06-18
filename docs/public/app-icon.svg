@@ -16,9 +16,9 @@
       </filter>
     </defs>
     
+      <rect x="72" y="72" width="880" height="880" rx="190" fill="#07142E" filter="url(#softShadow)"/>
       
-      
-    <g transform="translate(190 190) scale(3.0)">
+    <g transform="translate(258 290) scale(2.35)">
       <circle cx="34" cy="52" r="14" fill="url(#elarionGradient)"/>
       <circle cx="34" cy="110" r="14" fill="url(#elarionGradient)" opacity="0.92"/>
       <circle cx="34" cy="168" r="14" fill="url(#elarionGradient)" opacity="0.84"/>
