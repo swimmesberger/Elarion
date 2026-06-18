@@ -1,10 +1,12 @@
 <div align="center">
 
-<img src="docs/public/app-icon.svg" width="104" height="104" alt="Elarion logo" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/public/brand/elarion-logo-horizontal-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/public/brand/elarion-logo-horizontal-transparent.svg">
+  <img src="docs/public/brand/elarion-logo-horizontal-transparent.svg" width="640" alt="Elarion — Application framework for .NET">
+</picture>
 
-# Elarion
-
-**A .NET application framework for module-based handler pipelines, compile-time registration, JSON-RPC hosting, MCP tools for AI agents, and scheduled jobs.**
+**Module-based handler pipelines, compile-time registration, JSON-RPC hosting, MCP tools for AI agents, and scheduled jobs.**
 
 Declare intent next to your code; let source generators do the wiring. No runtime reflection scanning.
 
