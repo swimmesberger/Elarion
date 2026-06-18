@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.Build.NoTargets/3.7.0">
+<Project Sdk="Microsoft.Build.NoTargets/3.7.134">
 
   <!--
     Wrapper for the @swimmesberger/elarion-jsonrpc-client-generator npm/TypeScript package. It surfaces the
