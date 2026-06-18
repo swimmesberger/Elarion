@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.JsonRpc\Elarion.JsonRpc.csproj" />
   </ItemGroup>
 
   <ItemGroup>

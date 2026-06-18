@@ -65,7 +65,7 @@ public static class JsonRpcSchemaExporter {
     /// read from either format. Since the API serialises all numerics as JSON numbers, this
     /// normalises those union types back to the plain numeric type (preserving nullability).
     /// </summary>
-    private static JsonNode NormalizeNumericType(JsonSchemaExporterContext ctx, JsonNode schema) {
+    internal static JsonNode NormalizeNumericType(JsonSchemaExporterContext ctx, JsonNode schema) {
         if (schema is not JsonObject obj ||
             obj["type"] is not JsonArray typeArr ||
             !obj.ContainsKey("pattern")) {
@@ -91,7 +91,7 @@ public static class JsonRpcSchemaExporter {
         return schema;
     }
 
-    private static JsonSerializerOptions CreateSchemaOptions(JsonSerializerOptions? jsonOptions) {
+    internal static JsonSerializerOptions CreateSchemaOptions(JsonSerializerOptions? jsonOptions) {
         var options = jsonOptions is null
             ? new JsonSerializerOptions {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

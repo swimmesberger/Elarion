@@ -49,6 +49,39 @@ public static class JsonRpcServiceExtensions {
     }
 
     /// <summary>
+    /// Adds JSON-RPC 2.0 services <em>and</em> registers the <see cref="JsonRpcDispatcher"/> singleton from the
+    /// generated <paramref name="registerAll"/> map — the one-call setup for a JSON-RPC host.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="serializerOptions">The serializer options used by the dispatcher and the endpoint.</param>
+    /// <param name="registerAll">The generated registration delegate (e.g. <c>RpcMethodMap.RegisterAll</c>).</param>
+    /// <param name="configure">Optional additional <see cref="JsonRpcOptions"/> configuration (e.g. endpoint path).</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
+    /// var app = builder.Build();
+    /// app.MapJsonRpc();
+    /// </code>
+    /// </example>
+    public static IServiceCollection AddJsonRpc(
+        this IServiceCollection services,
+        JsonSerializerOptions serializerOptions,
+        Func<JsonRpcDispatcher, JsonRpcDispatcher> registerAll,
+        Action<JsonRpcOptions>? configure = null
+    ) {
+        ArgumentNullException.ThrowIfNull(serializerOptions);
+        ArgumentNullException.ThrowIfNull(registerAll);
+
+        services.AddElarionJsonRpcDispatcher(serializerOptions, registerAll);
+
+        return services.AddJsonRpc(options => {
+            options.SerializerOptions = serializerOptions;
+            configure?.Invoke(options);
+        });
+    }
+
+    /// <summary>
     /// Maps the JSON-RPC 2.0 POST endpoint at the path specified in <see cref="JsonRpcOptions.EndpointPath"/>.
     /// </summary>
     /// <param name="app">The endpoint route builder (typically <see cref="WebApplication"/>).</param>

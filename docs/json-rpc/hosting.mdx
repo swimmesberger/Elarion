@@ -62,13 +62,9 @@ ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration)
 
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddJsonRpc(o => o.SerializerOptions = serializerOptions);
 
-var frozenDispatcher = RpcMethodMap
-    .RegisterAll(new JsonRpcDispatcher(serializerOptions))
-    .Freeze();
-
-builder.Services.AddSingleton(frozenDispatcher);
+// Registers JSON-RPC options and the frozen JsonRpcDispatcher singleton (built lazily with its logger).
+builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
 
 var app = builder.Build();
 

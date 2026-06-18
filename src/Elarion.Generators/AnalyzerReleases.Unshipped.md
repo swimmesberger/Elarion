@@ -11,6 +11,7 @@ ELSG006 | Elarion.Generators | Error | Invalid runtime scheduled job type
 ELSG007 | Elarion.Generators | Error | Duplicate scheduled job name
 ELSG008 | Elarion.Generators | Error | Invalid schedule specification
 ELSG009 | Elarion.Generators | Error | Invalid scheduled job concurrency
+ELMCP002 | Elarion.Mcp | Warning | Duplicate MCP tool name under the default tool-name transform
 WFRE001 | Elarion.Abstractions.Resilience | Error | Invalid resilience policy
 WFRE002 | Elarion.Abstractions.Resilience | Error | Duplicate resilience policy name
 WIMCACHE001 | Elarion.Abstractions.Caching | Error | Handler cannot be both cacheable and cache-invalidating
