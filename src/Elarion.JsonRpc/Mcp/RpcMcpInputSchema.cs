@@ -28,23 +28,17 @@ public static class RpcMcpInputSchema {
         IReadOnlyList<RpcMcpParameterDescriptor> parameterDescriptions) {
         var options = JsonRpcSchemaExporter.CreateSchemaOptions(jsonOptions);
 
-        Dictionary<string, string>? descriptionsByPropertyName = null;
+        Func<JsonSchemaExporterContext, JsonNode, JsonNode>? injectDescriptions = null;
         if (parameterDescriptions.Count > 0) {
-            descriptionsByPropertyName = new Dictionary<string, string>(StringComparer.Ordinal);
+            var descriptionsByPropertyName = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var descriptor in parameterDescriptions) {
                 descriptionsByPropertyName[descriptor.PropertyName] = descriptor.Description;
             }
+
+            injectDescriptions = (ctx, schema) => InjectDescription(ctx, schema, descriptionsByPropertyName);
         }
 
-        var exporterOptions = new JsonSchemaExporterOptions {
-            TreatNullObliviousAsNonNullable = true,
-            TransformSchemaNode = descriptionsByPropertyName is null
-                ? JsonRpcSchemaExporter.NormalizeNumericType
-                : (ctx, schema) => InjectDescription(
-                    ctx, JsonRpcSchemaExporter.NormalizeNumericType(ctx, schema), descriptionsByPropertyName),
-        };
-
-        var schemaNode = options.GetJsonSchemaAsNode(requestType, exporterOptions);
+        var schemaNode = JsonRpcSchemaExporter.BuildSchemaNode(requestType, options, injectDescriptions);
 
         // Parse + clone so the returned element owns its memory independently of the transient JsonNode.
         using var document = JsonDocument.Parse(schemaNode.ToJsonString());
