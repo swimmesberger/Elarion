@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
@@ -34,15 +35,10 @@ public static class JsonRpcSchemaExporter {
                 "Cannot export the JSON-RPC schema because the dispatcher has no registered methods.");
         }
 
-        var exporterOptions = new JsonSchemaExporterOptions {
-            TreatNullObliviousAsNonNullable = true,
-            TransformSchemaNode = NormalizeNumericType,
-        };
-
         var methodsObj = new JsonObject();
         foreach (var (methodName, requestType, responseType) in methods) {
-            var requestSchema = options.GetJsonSchemaAsNode(requestType, exporterOptions);
-            var responseSchema = options.GetJsonSchemaAsNode(responseType, exporterOptions);
+            var requestSchema = BuildSchemaNode(requestType, options, InjectReflectedDescription);
+            var responseSchema = BuildSchemaNode(responseType, options, InjectReflectedDescription);
 
             methodsObj[methodName] = new JsonObject {
                 ["params"] = requestSchema,
@@ -65,6 +61,42 @@ public static class JsonRpcSchemaExporter {
     /// read from either format. Since the API serialises all numerics as JSON numbers, this
     /// normalises those union types back to the plain numeric type (preserving nullability).
     /// </summary>
+    /// <summary>
+    /// Builds a JSON Schema node for <paramref name="type"/> using the shared exporter configuration
+    /// (null-oblivious-as-non-nullable + numeric normalization), optionally composing an additional transform
+    /// such as description injection. Single source of truth shared by the full schema export and the MCP
+    /// input-schema builder, so the two cannot drift on null-handling or normalization.
+    /// </summary>
+    internal static JsonNode BuildSchemaNode(
+        Type type,
+        JsonSerializerOptions options,
+        Func<JsonSchemaExporterContext, JsonNode, JsonNode>? extraTransform = null) {
+        var exporterOptions = new JsonSchemaExporterOptions {
+            TreatNullObliviousAsNonNullable = true,
+            TransformSchemaNode = extraTransform is null
+                ? NormalizeNumericType
+                : (ctx, schema) => extraTransform(ctx, NormalizeNumericType(ctx, schema)),
+        };
+
+        return options.GetJsonSchemaAsNode(type, exporterOptions);
+    }
+
+    /// <summary>
+    /// Injects a <c>"description"</c> from a property's <see cref="DescriptionAttribute"/> into its schema node.
+    /// Reads the attribute reflectively — appropriate for this build-time exporter (the runtime MCP path uses a
+    /// generated, reflection-free table instead).
+    /// </summary>
+    private static JsonNode InjectReflectedDescription(JsonSchemaExporterContext ctx, JsonNode schema) {
+        if (ctx.PropertyInfo?.AttributeProvider is { } provider &&
+            provider.GetCustomAttributes(typeof(DescriptionAttribute), inherit: false)
+                is [DescriptionAttribute { Description.Length: > 0 } description, ..] &&
+            schema is JsonObject obj) {
+            obj["description"] = description.Description;
+        }
+
+        return schema;
+    }
+
     internal static JsonNode NormalizeNumericType(JsonSchemaExporterContext ctx, JsonNode schema) {
         if (schema is not JsonObject obj ||
             obj["type"] is not JsonArray typeArr ||

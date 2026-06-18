@@ -48,7 +48,27 @@ public sealed class JsonRpcSchemaExporterTests {
             .WithMessage("*no registered methods*");
     }
 
+    [Fact]
+    public void Generate_InjectsPropertyDescriptions_FromDescriptionAttribute() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .Map<DescribedRequest, PingResponse>(
+                "sample.described",
+                (request, _, _) => Task.FromResult(RpcResult<PingResponse>.Success(new PingResponse(request.Message))))
+            .Freeze();
+
+        var schema = JsonRpcSchemaExporter.Generate(dispatcher, options);
+
+        // [Description] becomes a schema "description" (JSDoc source for the generated TypeScript client).
+        schema.Should().Contain("Human-readable message.");
+    }
+
     private sealed record PingRequest(string Message);
 
     private sealed record PingResponse(string Message);
+
+    private sealed record DescribedRequest {
+        [System.ComponentModel.Description("Human-readable message.")]
+        public required string Message { get; init; }
+    }
 }
