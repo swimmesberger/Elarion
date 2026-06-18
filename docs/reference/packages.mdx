@@ -16,6 +16,7 @@ infrastructure stay in consuming projects.
 | `Elarion.Generators` | Roslyn generators for handlers, validators, services, modules, RPC method maps, resilience policies, and scheduled jobs. | Analyzer-only reference (`netstandard2.0`). |
 | `Elarion.JsonRpc` | Transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and the RPC method-map trigger. | `System.Text.Json` and Microsoft logging abstractions. |
 | `Elarion.AspNetCore` | ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport. | ASP.NET Core abstractions plus `Elarion.JsonRpc`. |
+| `Elarion.AspNetCore.Mcp` | Exposes JSON-RPC handlers as a Model Context Protocol (MCP) server for AI agents over Streamable HTTP. | `Elarion.JsonRpc` plus `ModelContextProtocol.AspNetCore`; the only Elarion package that references the MCP SDK. |
 | `Elarion.AspNetCore.SchemaGeneration` | MSBuild package and host-launching tool for exporting JSON-RPC schemas during build. | Private build-time reference from ASP.NET Core hosts. |
 | `Elarion.EntityFrameworkCore` | Marker attributes for EF Core entity and `DbSet` generation. | Marker-only; consumers provide EF Core. |
 | `Elarion.EntityFrameworkCore.Generators` | Roslyn generator for `DbSet` properties and entity configuration. | Analyzer-only reference. |
@@ -35,6 +36,8 @@ The package split enforces clean dependencies:
 - `Elarion` may depend on abstractions but avoids ASP.NET Core, EF Core, and transport specifics.
 - `Elarion.JsonRpc` owns JSON-RPC runtime contracts and schema export without ASP.NET Core.
 - `Elarion.AspNetCore` owns HTTP/JSON-RPC integration.
+- `Elarion.AspNetCore.Mcp` is the only package that references the `ModelContextProtocol` SDK; the
+  transport-neutral MCP tool model and dispatch shim live in `Elarion.JsonRpc`.
 - EF Core packages own only EF-specific markers and generation.
 - Generators emit deterministic, inspectable code and fail with diagnostics for unsupported patterns,
   rather than scanning at runtime.
@@ -44,5 +47,5 @@ The package split enforces clean dependencies:
 | Project | References |
 | --- | --- |
 | Application library | `Elarion` + `Elarion.Generators` (analyzer); optionally `Elarion.EntityFrameworkCore` + its generator. |
-| ASP.NET Core host | `Elarion.JsonRpc`, `Elarion.AspNetCore`, `Elarion.Generators` (analyzer); optionally `Elarion.AspNetCore.SchemaGeneration` (build tooling). |
+| ASP.NET Core host | `Elarion.JsonRpc`, `Elarion.AspNetCore`, `Elarion.Generators` (analyzer); optionally `Elarion.AspNetCore.SchemaGeneration` (build tooling) and `Elarion.AspNetCore.Mcp` (MCP server). |
 | Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`. |

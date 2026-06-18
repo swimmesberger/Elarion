@@ -5,8 +5,8 @@ icon: BookOpen
 ---
 
 Elarion is a .NET application framework for **module-based handler pipelines, compile-time
-registration, JSON-RPC hosting, scheduled jobs, and optional Entity Framework Core source
-generation**.
+registration, JSON-RPC hosting, MCP tools for AI agents, scheduled jobs, and optional Entity
+Framework Core source generation**.
 
 The central idea is simple: your application assemblies define modules and handlers; your host
 assembly only wires infrastructure, transport, and deployment concerns. Everything that can be
@@ -34,8 +34,9 @@ public sealed class GetClient(IAppDbContext db)
 }
 ```
 
-That single class is a use case, a registered service, a JSON-RPC method, and (optionally) a
-schema-exported TypeScript contract — with no entry added to any `Program.cs` registration list.
+That single class is a use case, a registered service, a JSON-RPC method, an MCP tool for AI agents,
+and (optionally) a schema-exported TypeScript contract — with no entry added to any `Program.cs`
+registration list.
 
 ## Why Elarion
 
@@ -56,6 +57,11 @@ schema-exported TypeScript contract — with no entry added to any `Program.cs` 
   <Card title="End-to-end JSON-RPC" href="/docs/json-rpc">
     Mark a handler with `[RpcMethod]`, export a schema at build time, and generate a typed
     TypeScript + Zod client — without hand-writing DTOs.
+  </Card>
+  <Card title="AI-native, no extra code" href="/docs/json-rpc/mcp">
+    Expose the same `[RpcMethod]` handlers to AI agents as an MCP server. Tool names, descriptions,
+    and input schemas are generated from your handlers and `[Description]` attributes at compile
+    time — no separate tool layer, no duplicated schemas.
   </Card>
   <Card title="In-process scheduling" href="/docs/scheduling">
     Source-generated scheduled jobs share one scheduler with explicit overlap, misfire, and
@@ -91,6 +97,7 @@ use-case boundary, result-based errors, JSON-RPC for internal APIs, and a thin h
 - You value deterministic startup, AOT compatibility, and inspectable generated code over runtime
   reflection.
 - You want a typed RPC contract shared between a .NET backend and a TypeScript frontend.
+- You want to expose your application to AI agents as MCP tools without hand-writing a separate tool layer.
 - You want in-process recurring/background work without standing up external job infrastructure.
 
 It is intentionally **not** a thin wrapper around default ASP.NET Core. You trade some convention
