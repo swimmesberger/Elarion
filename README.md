@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/public/brand/elarion-logo-horizontal-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/public/brand/elarion-logo-horizontal-transparent.svg">
-  <img src="docs/public/brand/elarion-logo-horizontal-transparent.svg" width="640" alt="Elarion — Application framework for .NET">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/public/brand/elarion-banner-transparent-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/public/brand/elarion-banner-transparent-light.svg">
+  <img src="docs/public/brand/elarion-banner-transparent-light.svg" width="640" alt="Elarion — Application framework for .NET">
 </picture>
 
 **Module-based handler pipelines, compile-time registration, JSON-RPC hosting, MCP tools for AI agents, and scheduled jobs.**
