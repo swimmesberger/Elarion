@@ -325,16 +325,19 @@ internal static class HttpEndpointEmission
 
     private static IEnumerable<IPropertySymbol> PublicInstanceProperties(INamedTypeSymbol type)
     {
-        foreach (var member in type.GetMembers())
+        for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
         {
-            if (member is IPropertySymbol
-                {
-                    IsStatic: false,
-                    IsIndexer: false,
-                    DeclaredAccessibility: Accessibility.Public,
-                } property)
+            foreach (var member in current.GetMembers())
             {
-                yield return property;
+                if (member is IPropertySymbol
+                    {
+                        IsStatic: false,
+                        IsIndexer: false,
+                        DeclaredAccessibility: Accessibility.Public,
+                    } property)
+                {
+                    yield return property;
+                }
             }
         }
     }

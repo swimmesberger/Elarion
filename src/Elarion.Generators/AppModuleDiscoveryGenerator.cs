@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
@@ -37,7 +38,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private const string AppModuleAttributeMetadataName =
         "Elarion.Abstractions.Modules.AppModuleAttribute";
 
-    private const string UnmatchedModuleName = "Unmatched";
+    private const string UnmatchedModuleName = "<Unmatched>";
 
     private sealed record ClassTarget(string? Namespace, string ClassName);
 
@@ -750,13 +751,48 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return false;
     }
 
-    private static string HttpMethodName(string moduleName) => $"Map{moduleName}Http";
+    private static string HttpMethodName(string moduleName) => $"Map{ModuleMethodNamePart(moduleName)}Http";
 
-    private static string JsonRpcMethodName(string moduleName) => $"Add{moduleName}JsonRpc";
+    private static string JsonRpcMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}JsonRpc";
 
-    private static string McpMethodName(string moduleName) => $"Add{moduleName}Mcp";
+    private static string McpMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}Mcp";
 
-    private static string McpMetadataMethodName(string moduleName) => $"Get{moduleName}McpMetadata";
+    private static string McpMetadataMethodName(string moduleName) => $"Get{ModuleMethodNamePart(moduleName)}McpMetadata";
+
+    private static string ModuleMethodNamePart(string moduleName)
+    {
+        var sb = new StringBuilder(moduleName.Length);
+        var changed = moduleName.Length == 0;
+        foreach (var ch in moduleName)
+        {
+            if (SyntaxFacts.IsIdentifierPartCharacter(ch))
+            {
+                sb.Append(ch);
+            }
+            else
+            {
+                sb.Append('_');
+                changed = true;
+            }
+        }
+
+        if (!changed)
+            return moduleName;
+
+        return $"{sb}_{StableHash(moduleName)}";
+    }
+
+    private static string StableHash(string value)
+    {
+        var hash = 2166136261u;
+        foreach (var ch in value)
+        {
+            hash ^= ch;
+            hash *= 16777619u;
+        }
+
+        return hash.ToString("X8");
+    }
 
     private static void EmitModuleCall(StringBuilder sb, ModuleEntry entry, string statement)
     {

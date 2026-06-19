@@ -80,6 +80,28 @@ public sealed class HttpEndpointMapGeneratorTests {
                 Command request, System.Threading.CancellationToken ct) =>
                 System.Threading.Tasks.ValueTask.FromResult<Result<Response>>(new Response("u"));
         }
+
+        [HttpEndpoint("clients/{id}/inherited")]
+        public sealed class InheritedDtoMembers : IHandler<InheritedDtoMembers.Command, Result<InheritedDtoMembers.Response>> {
+            public abstract record BaseCommand {
+                [FromHeader(Name = "X-Tenant")]
+                public string? Tenant { get; init; }
+            }
+
+            public sealed record Command : BaseCommand {
+                public required System.Guid Id { get; init; }
+            }
+
+            public abstract record BaseResponse {
+                public required string Name { get; init; }
+            }
+
+            public sealed record Response : BaseResponse;
+
+            public System.Threading.Tasks.ValueTask<Result<Response>> HandleAsync(
+                Command request, System.Threading.CancellationToken ct) =>
+                System.Threading.Tasks.ValueTask.FromResult<Result<Response>>(new Response { Name = "n" });
+        }
         """;
 
     // The trigger class declaring the partial MapAll stub lives in the current compilation.
@@ -152,6 +174,20 @@ public sealed class HttpEndpointMapGeneratorTests {
         generated.Should().Contain(
             "[global::Microsoft.AspNetCore.Http.AsParameters] global::Sample.Handlers.UploadAvatar.Command request");
         generated.Should().Contain(".DisableAntiforgery()");
+    }
+
+    [Fact]
+    public void MapAll_InheritedDtoProperties_AffectBindingAndResponseShape() {
+        var generated = RunGenerator(HandlersSource, out _);
+
+        var endpoint = Slice(generated, "app.MapPost(\"clients/{id}/inherited\",");
+
+        endpoint.Should().Contain(
+            "[global::Microsoft.AspNetCore.Http.AsParameters] global::Sample.Handlers.InheritedDtoMembers.Command request");
+        endpoint.Should().Contain(
+            "global::Elarion.AspNetCore.ElarionHttpResults.ToResult(await handler.HandleAsync(request, ct))");
+        endpoint.Should().Contain(".Produces<global::Sample.Handlers.InheritedDtoMembers.Response>(200)");
+        endpoint.Should().NotContain("ToNoContentResult");
     }
 
     [Fact]
@@ -238,6 +274,14 @@ public sealed class HttpEndpointMapGeneratorTests {
         var driver = BuildDriver(handlersSource, handlersAssembly, out var hostCompilation);
         driver = driver.RunGenerators(hostCompilation, TestContext.Current.CancellationToken);
         return driver.GetRunResult().Diagnostics;
+    }
+
+    private static string Slice(string source, string marker) {
+        var start = source.IndexOf(marker, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0, "the emitted source should contain {0}", marker);
+
+        var nextEndpoint = source.IndexOf("app.Map", start + marker.Length, StringComparison.Ordinal);
+        return nextEndpoint < 0 ? source[start..] : source[start..nextEndpoint];
     }
 
     private static GeneratorDriver BuildDriver(string handlersSource, string handlersAssembly, out Compilation hostCompilation) {
