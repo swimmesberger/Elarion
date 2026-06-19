@@ -1,0 +1,404 @@
+---
+title: Write the features
+description: Build the Clients module end to end — a decorator pipeline, current-user scoping, handlers, validators, results, and per-user caching.
+---
+
+The Clients module is where most of Elarion's cross-cutting machinery earns its keep. You will set up
+a [decorator pipeline](/docs/concepts/decorator-pipelines) once, then write handlers that get
+validation, transactions, logging, current-user scoping, and caching **for free** — declared next to
+the code, generated into the wiring.
+
+This page builds Clients in full. The Invoicing module follows the same patterns and is built in
+[Background work](/docs/tutorial/background-work).
+
+<Steps>
+
+<Step>
+
+### Define the decorator pipeline
+
+Elarion ships no concrete decorators — they depend on *your* logging, *your* `DbContext`, *your*
+conventions. Define them in the application and expose named pipelines with `[DecoratorList]`.
+
+```csharp title="src/Billing.Application/Decorators/Decorators.cs"
+using System.Reflection;
+using Elarion.Abstractions;
+using FluentValidation;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace Billing.Application.Decorators;
+
+public sealed class LoggingDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner,
+    ILogger<LoggingDecorator<TRequest, TResponse>> logger
+) : IHandler<TRequest, TResponse> {
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        logger.LogInformation("Handling {Request}", typeof(TRequest).DeclaringType?.Name ?? typeof(TRequest).Name);
+        return await inner.HandleAsync(request, ct);
+    }
+}
+
+public sealed class ValidationDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner,
+    IEnumerable<IValidator<TRequest>> validators
+) : IHandler<TRequest, TResponse> {
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        var failures = new List<string>();
+        foreach (var validator in validators) {
+            var result = await validator.ValidateAsync(request, ct);
+            failures.AddRange(result.Errors.Select(e => e.ErrorMessage));
+        }
+
+        if (failures.Count == 0) {
+            return await inner.HandleAsync(request, ct);
+        }
+
+        return ResultFactory.Failure<TResponse>(
+            AppError.Validation(string.Join("; ", failures), failures));
+    }
+}
+
+public sealed class TransactionDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner,
+    DbContext db
+) : IHandler<TRequest, TResponse> {
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var response = await inner.HandleAsync(request, ct);
+
+        if (response is IResultLike { IsSuccess: true }) {
+            await transaction.CommitAsync(ct);
+        } else {
+            await transaction.RollbackAsync(ct);
+        }
+
+        return response;
+    }
+}
+
+internal static class ResultFactory {
+    public static TResponse Failure<TResponse>(AppError error) {
+        var responseType = typeof(TResponse);
+        if (responseType.IsGenericType &&
+            responseType.GetGenericTypeDefinition() == typeof(Result<>)) {
+            var failureMethod = responseType.GetMethod(
+                nameof(Result<object>.Failure), BindingFlags.Static | BindingFlags.Public)!;
+            return (TResponse)failureMethod.Invoke(null, [error])!;
+        }
+
+        throw new InvalidOperationException(
+            $"Cannot map AppError to {responseType.Name}. Handler must return Result<T>.");
+    }
+}
+```
+
+Now expose two named pipelines. The **default** applies to every command; the **read-only** pipeline
+skips the transaction for queries.
+
+```csharp title="src/Billing.Application/Pipeline/Pipelines.cs"
+using Billing.Application.Decorators;
+using Elarion.Abstractions.Pipeline;
+
+namespace Billing.Application.Pipeline;
+
+[DecoratorList(
+    typeof(LoggingDecorator<,>),
+    typeof(ValidationDecorator<,>),
+    typeof(TransactionDecorator<,>))]
+[AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+public sealed class DefaultPipelineAttribute : Attribute;
+
+[DecoratorList(
+    typeof(LoggingDecorator<,>),
+    typeof(ValidationDecorator<,>))]
+[AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+public sealed class ReadOnlyPipelineAttribute : Attribute;
+```
+
+Decorators run **outermost first**, in list order. Logging wraps everything; validation runs *before*
+the transaction, so a bad request is rejected without ever opening one; the transaction wraps only the
+handler. Apply the default across the whole assembly:
+
+```csharp title="src/Billing.Application/ElarionAssembly.cs"
+using Billing.Application.Pipeline;
+using Elarion.Abstractions;
+
+[assembly: DefaultPipeline]
+[assembly: UseElarion]
+```
+
+</Step>
+
+<Step>
+
+### Add the audit trail (Core module + current user)
+
+Command handlers should record *who* did *what*. The audit trail is a `[Service]` in the Core module
+that injects [`ICurrentUser`](/docs/concepts/current-user) — a transport-neutral view of the caller, so
+application code never touches `HttpContext`.
+
+```csharp title="src/Billing.Application/Modules/Core/Services/AuditTrail.cs"
+using Elarion.Abstractions;
+using Elarion.Abstractions.Identity;
+using Microsoft.Extensions.Logging;
+
+namespace Billing.Application.Modules.Core.Services;
+
+public interface IAuditTrail {
+    void Record(string action, string subjectId);
+}
+
+[Service(typeof(IAuditTrail))]
+public sealed class AuditTrail(ICurrentUser user, TimeProvider clock, ILogger<AuditTrail> logger)
+    : IAuditTrail {
+    public void Record(string action, string subjectId) =>
+        logger.LogInformation("{User} {Action} {Subject} at {At}",
+            user.UserId, action, subjectId, clock.GetUtcNow());
+}
+```
+
+`[Service(typeof(IAuditTrail))]` registers the implementation against the interface; the generator
+aggregates it into `AddCoreServices()`, which `CoreModule.ConfigureServices` already calls.
+
+</Step>
+
+<Step>
+
+### Add a module-owned service
+
+Clients get a human-friendly number like `C-000123`. A `[Service]` keeps that policy in one place.
+
+```csharp title="src/Billing.Application/Modules/Clients/Services/ClientNumberGenerator.cs"
+using Elarion.Abstractions;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Application.Modules.Clients.Services;
+
+public interface IClientNumberGenerator {
+    ValueTask<string> NextAsync(string ownerId, CancellationToken ct);
+}
+
+[Service(typeof(IClientNumberGenerator))]
+public sealed class ClientNumberGenerator(IAppDbContext db) : IClientNumberGenerator {
+    public async ValueTask<string> NextAsync(string ownerId, CancellationToken ct) {
+        var count = await db.Clients.CountAsync(c => c.OwnerId == ownerId, ct);
+        return $"C-{count + 1:D6}";
+    }
+}
+```
+
+</Step>
+
+<Step>
+
+### Write the command handler
+
+`CreateClient` is a state change, so its request is a nested `Command`. It runs through the default
+pipeline (logging → validation → transaction), scopes the row to the current user, invalidates the
+clients cache on success, and is exposed over JSON-RPC. The `[Description]` attributes flow straight
+through to the [MCP tool](/docs/json-rpc/mcp) surface.
+
+```csharp title="src/Billing.Application/Modules/Clients/Handlers/CreateClient.cs"
+using System.ComponentModel;
+using Billing.Application.Data;
+using Billing.Application.Modules.Clients.Services;
+using Billing.Application.Modules.Core.Services;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+using Elarion.Abstractions.Identity;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Application.Modules.Clients.Handlers;
+
+[RpcMethod("clients.create")]
+[CacheInvalidate("clients")]
+[Description("Creates a new client for the current account.")]
+public sealed class CreateClient(
+    IAppDbContext db,
+    ICurrentUser user,
+    IClientNumberGenerator numbers,
+    IAuditTrail audit,
+    TimeProvider clock
+) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
+    public sealed record Command {
+        [Description("The client's display name.")]
+        public required string Name { get; init; }
+
+        [Description("The client's billing email address.")]
+        public required string Email { get; init; }
+    }
+
+    public sealed record Response(Guid Id, string Number);
+
+    public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        var exists = await db.Clients
+            .AnyAsync(c => c.OwnerId == user.UserId && c.Email == command.Email, ct);
+        if (exists) {
+            return AppError.Conflict($"A client with email {command.Email} already exists.");
+        }
+
+        var client = new Client {
+            Id = Guid.NewGuid(),
+            OwnerId = user.UserId,
+            Number = await numbers.NextAsync(user.UserId, ct),
+            Name = command.Name,
+            Email = command.Email,
+            CreatedAt = clock.GetUtcNow(),
+        };
+
+        db.Clients.Add(client);
+        await db.SaveChangesAsync(ct);
+        audit.Record("client.created", client.Id.ToString());
+
+        return new Response(client.Id, client.Number);
+    }
+}
+```
+
+The handler returns a value, never throws for expected failures: a duplicate email becomes
+`AppError.Conflict`, which the host later maps to a JSON-RPC error code. Only a **successful** result
+triggers the `clients` cache invalidation.
+
+</Step>
+
+<Step>
+
+### Validate the command
+
+Rules live next to the handler with [FluentValidation](/docs/concepts/validators). The
+`ValidationDecorator` resolves and runs them before the handler executes.
+
+```csharp title="src/Billing.Application/Modules/Clients/Handlers/CreateClientValidator.cs"
+using FluentValidation;
+
+namespace Billing.Application.Modules.Clients.Handlers;
+
+public sealed class CreateClientValidator : AbstractValidator<CreateClient.Command> {
+    public CreateClientValidator() {
+        RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
+        RuleFor(x => x.Email).NotEmpty().EmailAddress().MaximumLength(320);
+    }
+}
+```
+
+</Step>
+
+<Step>
+
+### Write the cached read handlers
+
+Reads are `Query` types on the read-only pipeline (no transaction). `GetClient` is marked
+`[Cacheable]`: the generator inserts a cache decorator that keys off the request and only runs the
+handler on a miss. The default `CurrentUser` scope isolates entries per account, so one user's cached
+client is never served to another.
+
+```csharp title="src/Billing.Application/Modules/Clients/Handlers/GetClient.cs"
+using Billing.Application.Pipeline;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+using Elarion.Abstractions.Identity;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Application.Modules.Clients.Handlers;
+
+[ReadOnlyPipeline]
+[Cacheable("clients", DurationSeconds = 120)]
+[RpcMethod("clients.get")]
+public sealed class GetClient(IAppDbContext db, ICurrentUser user)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> {
+    public sealed record Query(Guid Id);
+    public sealed record Response(Guid Id, string Number, string Name, string Email);
+
+    public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var client = await db.Clients
+            .Where(c => c.OwnerId == user.UserId && c.Id == query.Id)
+            .Select(c => new Response(c.Id, c.Number, c.Name, c.Email))
+            .FirstOrDefaultAsync(ct);
+
+        return client is null
+            ? AppError.NotFound($"Client {query.Id} was not found.")
+            : client;
+    }
+}
+```
+
+`ListClients` is the read the frontend's table calls. It is cached under the same `clients` tag, so
+`CreateClient`'s `[CacheInvalidate("clients")]` clears it the moment a client is added.
+
+```csharp title="src/Billing.Application/Modules/Clients/Handlers/ListClients.cs"
+using System.Collections.Generic;
+using Billing.Application.Pipeline;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+using Elarion.Abstractions.Identity;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Application.Modules.Clients.Handlers;
+
+[ReadOnlyPipeline]
+[Cacheable("clients", DurationSeconds = 60)]
+[RpcMethod("clients.list")]
+public sealed class ListClients(IAppDbContext db, ICurrentUser user)
+    : IHandler<ListClients.Query, Result<ListClients.Response>> {
+    public sealed record Query;
+    public sealed record Item(Guid Id, string Number, string Name, string Email);
+    public sealed record Response(IReadOnlyList<Item> Clients);
+
+    public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var items = await db.Clients
+            .Where(c => c.OwnerId == user.UserId)
+            .OrderBy(c => c.Number)
+            .Select(c => new Item(c.Id, c.Number, c.Name, c.Email))
+            .ToListAsync(ct);
+
+        return new Response(items);
+    }
+}
+```
+
+<Callout type="info">
+  Caching is opt-in per handler and composes with the rest of the pipeline. The default `CurrentUser`
+  scope fits Billing perfectly. For genuinely shared, non-personalized data — say a list of supported
+  currencies — you would set `Scope = HandlerCacheScope.Global` so all accounts share one entry.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Register the JSON metadata
+
+Each module contributes [source-generated JSON metadata](/docs/json-rpc/serialization) for its
+request/response types. Add an entry per type the module exposes.
+
+```csharp title="src/Billing.Application/Modules/Clients/ClientsJsonContext.cs"
+using System.Text.Json.Serialization;
+using Billing.Application.Modules.Clients.Handlers;
+
+namespace Billing.Application.Modules.Clients;
+
+[JsonSerializable(typeof(CreateClient.Command))]
+[JsonSerializable(typeof(CreateClient.Response))]
+[JsonSerializable(typeof(GetClient.Query))]
+[JsonSerializable(typeof(GetClient.Response))]
+[JsonSerializable(typeof(ListClients.Query))]
+[JsonSerializable(typeof(ListClients.Response))]
+public sealed partial class ClientsJsonContext : JsonSerializerContext;
+```
+
+</Step>
+
+</Steps>
+
+## What you have so far
+
+- One handler that is simultaneously a use case, a DI registration, a JSON-RPC method, and an MCP tool.
+- A pipeline that applies logging, validation, and transactions to every command — declared once.
+- Per-user reads that are cached and invalidated by tag, with no manual key management.
+
+<Cards>
+  <Card title="Next: Background work" href="/docs/tutorial/background-work">
+    The Invoicing module: a resilient email job, runtime scheduling, and a nightly cron reminder.
+  </Card>
+</Cards>

@@ -1,0 +1,229 @@
+---
+title: Build a fullstack app
+description: A complete, end-to-end walkthrough that builds a small billing application with every opinionated Elarion feature, plus a typed React frontend.
+icon: Rocket
+---
+
+The [Quickstart](/docs/getting-started/quickstart) gets one handler onto the wire. This tutorial goes
+the whole way: a small but realistic **billing application** with a .NET backend and a typed React
+frontend, exercising every opinionated Elarion feature on its happy path.
+
+You will build **Billing** — a single-tenant-per-user app where a signed-in account manages its
+**clients** and issues **invoices**. Each feature below earns its place in that story; nothing is bolted
+on just to demo an attribute.
+
+## What you will build
+
+<Cards>
+  <Card title="A typed backend">
+    Two feature modules and a core module, handlers exposed over JSON-RPC, FluentValidation, a
+    transactional decorator pipeline, and per-user result caching.
+  </Card>
+  <Card title="Reliable background work">
+    Invoice emails sent through a resilient, retrying background job, plus a nightly cron job that
+    chases overdue invoices.
+  </Card>
+  <Card title="An AI-ready surface">
+    The same handlers exposed to AI agents as MCP tools, with OpenTelemetry traces across RPC,
+    caching, scheduling, and resilience.
+  </Card>
+  <Card title="A typed React frontend">
+    A Vite + React app using shadcn/ui and TanStack Query, calling a generated, Zod-validated client
+    with full request cancellation via `AbortSignal`.
+  </Card>
+</Cards>
+
+## How each feature maps to the app
+
+Every Elarion capability shows up exactly where it pulls its weight in a real billing flow:
+
+| App concern | Elarion feature | Where it appears |
+| --- | --- | --- |
+| Feature boundaries (`Clients`, `Invoicing`) and a shared foundation | [Modules](/docs/concepts/modules) (feature + core) | [Model the domain](/docs/tutorial/modeling) |
+| Reads and writes as named use cases | [Handlers](/docs/concepts/handlers) + [Results](/docs/concepts/results-and-errors) | [Write the features](/docs/tutorial/features) |
+| Data access without a repository layer | [EF Core `IAppDbContext`](/docs/entity-framework) | [Model the domain](/docs/tutorial/modeling) |
+| Rejecting bad input | [Validators](/docs/concepts/validators) | [Write the features](/docs/tutorial/features) |
+| Transactions + logging around every command | [Decorator pipelines](/docs/concepts/decorator-pipelines) | [Write the features](/docs/tutorial/features) |
+| "Who is calling?" for scoping and audit | [Current user](/docs/concepts/current-user) | [Write the features](/docs/tutorial/features) |
+| Fast, per-user reads that stay fresh on writes | [Caching](/docs/concepts/caching) | [Write the features](/docs/tutorial/features) |
+| Flaky SMTP that must not drop an invoice | [Resilience](/docs/resilience) | [Background work](/docs/tutorial/background-work) |
+| Send-in-the-background + nightly reminders | [Scheduling](/docs/scheduling) | [Background work](/docs/tutorial/background-work) |
+| A number generator, an email port | [Services](/docs/concepts/services) | [Background work](/docs/tutorial/background-work) |
+| A typed, optional transport | [JSON-RPC](/docs/json-rpc) | [Host the API](/docs/tutorial/hosting) |
+| The same handlers as AI tools | [MCP server](/docs/json-rpc/mcp) | [Host the API](/docs/tutorial/hosting) |
+| Traces and metrics, no SDK lock-in | [Telemetry](/docs/telemetry) | [Host the API](/docs/tutorial/hosting) |
+| A frontend that calls handlers like functions | [TypeScript client](/docs/json-rpc/typescript-client) | [Build the frontend](/docs/tutorial/frontend) |
+
+## The shape of the solution
+
+Billing follows the [recommended layout](/docs/getting-started/project-structure): the application
+project declares intent, infrastructure provides concrete capabilities, and the host wires platform
+concerns.
+
+```text
+billing/
+├─ Billing.sln
+├─ src/
+│  ├─ Billing.Application/      # modules, handlers, services, validators, jobs, policies  ← Elarion + generators
+│  ├─ Billing.Infrastructure/   # BillingDbContext (PostgreSQL), SMTP email sender
+│  └─ Billing.Api/              # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore (+ MCP)
+└─ web/                         # Vite + React + TanStack Query frontend
+```
+
+<Callout type="info">
+  The dependency direction is `Api → Infrastructure → Application`. The application project never
+  references the host or concrete infrastructure — that boundary is what lets the generators wire
+  modules without a central registration list.
+</Callout>
+
+## Prerequisites
+
+- **.NET 10 SDK** or later (see [Installation](/docs/getting-started/installation)).
+- **Node.js 20+** and **npm** for the frontend and client generator.
+- **Docker** (or a local PostgreSQL) for the database.
+- The EF Core CLI for migrations: `dotnet tool install --global dotnet-ef`.
+
+## Scaffold the solution
+
+<Steps>
+
+<Step>
+
+### Create the projects
+
+```bash
+mkdir billing && cd billing
+dotnet new sln -n Billing
+
+dotnet new classlib -n Billing.Application   -o src/Billing.Application
+dotnet new classlib -n Billing.Infrastructure -o src/Billing.Infrastructure
+dotnet new web      -n Billing.Api            -o src/Billing.Api
+
+dotnet sln add src/Billing.Application src/Billing.Infrastructure src/Billing.Api
+```
+
+</Step>
+
+<Step>
+
+### Wire project references
+
+The onion points inward — infrastructure and the host depend on the application, never the reverse.
+
+```bash
+dotnet add src/Billing.Infrastructure reference src/Billing.Application
+dotnet add src/Billing.Api            reference src/Billing.Infrastructure src/Billing.Application
+```
+
+</Step>
+
+<Step>
+
+### Add the Elarion packages
+
+The **application** project holds your modules and needs the runtime plus the generators. It also
+uses EF Core for data access and FluentValidation for input rules.
+
+```bash
+cd src/Billing.Application
+dotnet add package Elarion
+dotnet add package Elarion.Generators
+dotnet add package Elarion.EntityFrameworkCore
+dotnet add package Elarion.EntityFrameworkCore.Generators
+dotnet add package Microsoft.EntityFrameworkCore
+dotnet add package FluentValidation
+cd ../..
+```
+
+Mark the two generator packages as analyzer-only so they stay out of published output. Edit
+`src/Billing.Application/Billing.Application.csproj`:
+
+```xml title="src/Billing.Application/Billing.Application.csproj"
+<ItemGroup>
+  <PackageReference Include="Elarion.Generators" PrivateAssets="all" />
+  <PackageReference Include="Elarion.EntityFrameworkCore.Generators" PrivateAssets="all" />
+</ItemGroup>
+```
+
+The **infrastructure** project owns the concrete `DbContext` and the PostgreSQL provider:
+
+```bash
+cd src/Billing.Infrastructure
+dotnet add package Microsoft.EntityFrameworkCore
+dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
+cd ../..
+```
+
+The **host** project references the JSON-RPC transport, the ASP.NET Core integration, the MCP server,
+and the generators (it emits the RPC map and module bootstrapper). It also registers the scheduler,
+the Microsoft resilience runtime, and EF Core design-time tooling.
+
+```bash
+cd src/Billing.Api
+dotnet add package Elarion.JsonRpc
+dotnet add package Elarion.AspNetCore
+dotnet add package Elarion.AspNetCore.Mcp
+dotnet add package Elarion.Generators
+dotnet add package Microsoft.Extensions.Resilience
+dotnet add package Microsoft.EntityFrameworkCore.Design
+cd ../..
+```
+
+Mark `Elarion.Generators` as analyzer-only in the host too:
+
+```xml title="src/Billing.Api/Billing.Api.csproj"
+<ItemGroup>
+  <PackageReference Include="Elarion.Generators" PrivateAssets="all" />
+</ItemGroup>
+```
+
+</Step>
+
+<Step>
+
+### Turn on the generators
+
+Opt the application assembly into Elarion generation once. We will add the pipeline attribute to this
+file in [Write the features](/docs/tutorial/features).
+
+```csharp title="src/Billing.Application/ElarionAssembly.cs"
+using Elarion.Abstractions;
+
+[assembly: UseElarion]
+```
+
+`[assembly: UseElarion]` enables generation for module handlers, services, validators, scheduled
+jobs, and resilience policies across the assembly.
+
+</Step>
+
+<Step>
+
+### Start PostgreSQL
+
+```bash
+docker run --name billing-db -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=billing -p 5432:5432 -d postgres:17
+```
+
+Add the connection string to the host configuration:
+
+```json title="src/Billing.Api/appsettings.Development.json"
+{
+  "ConnectionStrings": {
+    "Billing": "Host=localhost;Database=billing;Username=postgres;Password=postgres"
+  }
+}
+```
+
+</Step>
+
+</Steps>
+
+The skeleton is in place. Next, model the domain and define the modules that own it.
+
+<Cards>
+  <Card title="Next: Model the domain" href="/docs/tutorial/modeling">
+    Entities, the generated `IAppDbContext`, and the Core / Clients / Invoicing modules.
+  </Card>
+</Cards>

@@ -1,0 +1,362 @@
+---
+title: Build the frontend
+description: Generate a typed client from the schema and call the Billing handlers from a React app with TanStack Query, AbortSignal cancellation, and shadcn/ui.
+---
+
+The backend exports `rpc-schema.json` on every build. The frontend turns that into a typed,
+Zod-validated client and calls handlers as if they were local async functions — with full request
+cancellation. We use **Vite**, **Tailwind v4**, **shadcn/ui**, and **TanStack Query**, all current and
+deliberately pragmatic.
+
+<Steps>
+
+<Step>
+
+### Scaffold the React app
+
+```bash
+npm create vite@latest web -- --template react-ts
+cd web
+npm install
+```
+
+</Step>
+
+<Step>
+
+### Add Tailwind v4 and shadcn/ui
+
+Install Tailwind and its Vite plugin, then point your CSS at it:
+
+```bash
+npm install tailwindcss @tailwindcss/vite
+npm install -D @types/node
+```
+
+```css title="web/src/index.css"
+@import "tailwindcss";
+```
+
+Register the plugin and the `@` path alias in Vite, and mirror the alias in `tsconfig`:
+
+```ts title="web/vite.config.ts"
+import path from "path"
+import tailwindcss from "@tailwindcss/vite"
+import react from "@vitejs/plugin-react"
+import { defineConfig } from "vite"
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+})
+```
+
+```json title="web/tsconfig.json (and tsconfig.app.json)"
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  }
+}
+```
+
+Initialize shadcn/ui and pull in the components the UI needs:
+
+```bash
+npx shadcn@latest init
+npx shadcn@latest add button input table dialog sonner
+```
+
+</Step>
+
+<Step>
+
+### Generate the typed client
+
+Install the generator and TanStack Query (plus Zod, which the generated schemas import):
+
+```bash
+npm install @tanstack/react-query zod
+npm install -D @swimmesberger/elarion-jsonrpc-client-generator
+```
+
+Add a script so regenerating is one command, and run it against the schema the backend emits:
+
+```json title="web/package.json"
+{
+  "scripts": {
+    "gen:rpc": "elarion-jsonrpc-client-generator --schema ../rpc-schema.json --out src/generated"
+  }
+}
+```
+
+```bash
+npm run gen:rpc
+```
+
+This writes `rpc-types.ts`, `rpc-schemas.ts`, and `rpc-client.ts` into `src/generated`. Re-run it
+whenever a handler's request/response shape changes — the frontend types follow the backend.
+
+</Step>
+
+<Step>
+
+### Wrap the client with auth
+
+`createRpcApi` is framework-neutral. Wrap it once with your base URL and a token resolver. Passing
+`headers` as a function means each request reads the current token.
+
+```ts title="web/src/lib/rpc.ts"
+import { createRpcApi } from "@/generated/rpc-client"
+import { getAccessToken } from "@/lib/auth"
+
+export const rpc = createRpcApi({
+  url: import.meta.env.VITE_API_URL + "/rpc",
+  headers: () => ({ Authorization: `Bearer ${getAccessToken()}` }),
+})
+```
+
+</Step>
+
+<Step>
+
+### Provide the query client
+
+```tsx title="web/src/main.tsx"
+import { StrictMode } from "react"
+import { createRoot } from "react-dom/client"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "@/components/ui/sonner"
+import App from "./App"
+import "./index.css"
+
+const queryClient = new QueryClient()
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <App />
+      <Toaster />
+    </QueryClientProvider>
+  </StrictMode>,
+)
+```
+
+</Step>
+
+<Step>
+
+### Write the data hooks
+
+TanStack Query hands every `queryFn` an `AbortSignal`. Forward it to the generated client, and a query
+that is no longer needed — a stale list, an unmounted view — **cancels its in-flight request**
+automatically. The result types come straight from the C# handlers.
+
+```ts title="web/src/hooks/useClients.ts"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { rpc } from "@/lib/rpc"
+
+export function useClients() {
+  return useQuery({
+    queryKey: ["clients"],
+    queryFn: ({ signal }) => rpc.clients.list({}, { signal }),
+    //         ^ AbortSignal forwarded to fetch — the request is cancelled on cleanup
+  })
+}
+
+export function useCreateClient() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { name: string; email: string }) => rpc.clients.create(input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
+  })
+}
+```
+
+The invoice flow adds a small twist: creating an invoice returns a `sendJobId`, and we poll its status
+until the background email lands.
+
+```ts title="web/src/hooks/useInvoices.ts"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { rpc } from "@/lib/rpc"
+
+export function useInvoices() {
+  return useQuery({
+    queryKey: ["invoices"],
+    queryFn: ({ signal }) => rpc.invoices.list({}, { signal }),
+  })
+}
+
+export function useCreateInvoice() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: {
+      clientId: string; amountCents: number; currency: string; dueDate: string
+    }) => rpc.invoices.create(input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["invoices"] }),
+  })
+}
+
+const SETTLED = new Set(["Succeeded", "Failed", "Cancelled"])
+
+export function useSendStatus(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ["send-status", jobId],
+    enabled: !!jobId,
+    queryFn: ({ signal }) => rpc.invoices.sendStatus({ jobId: jobId! }, { signal }),
+    // Poll while the job is still working; stop once it settles.
+    refetchInterval: (query) =>
+      query.state.data && SETTLED.has(query.state.data.status) ? false : 1500,
+  })
+}
+```
+
+</Step>
+
+<Step>
+
+### Build the UI
+
+The components are ordinary shadcn/ui. Here is the clients table and a create dialog wired to the
+hooks above.
+
+```tsx title="web/src/components/ClientsTable.tsx"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useClients } from "@/hooks/useClients"
+
+export function ClientsTable() {
+  const { data, isPending, isError } = useClients()
+
+  if (isPending) return <p className="text-muted-foreground">Loading clients…</p>
+  if (isError) return <p className="text-destructive">Failed to load clients.</p>
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Number</TableHead>
+          <TableHead>Name</TableHead>
+          <TableHead>Email</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {data.clients.map((c) => (
+          <TableRow key={c.id}>
+            <TableCell className="font-mono">{c.number}</TableCell>
+            <TableCell>{c.name}</TableCell>
+            <TableCell>{c.email}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+```
+
+```tsx title="web/src/components/CreateClientDialog.tsx"
+import { useState } from "react"
+import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog"
+import { useCreateClient } from "@/hooks/useClients"
+
+export function CreateClientDialog() {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const createClient = useCreateClient()
+
+  function submit() {
+    createClient.mutate({ name, email }, {
+      onSuccess: (res) => {
+        toast.success(`Created client ${res.number}`)
+        setOpen(false)
+        setName("")
+        setEmail("")
+      },
+      onError: (err) => toast.error(err.message),
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button>New client</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle>New client</DialogTitle></DialogHeader>
+        <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <DialogFooter>
+          <Button onClick={submit} disabled={createClient.isPending}>
+            {createClient.isPending ? "Creating…" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+```
+
+<Callout type="info">
+  `err.message` carries whatever your host mapped from `AppError` — a duplicate email
+  (`AppError.Conflict`) or a validation failure surfaces as a typed JSON-RPC error the mutation rejects
+  with, so the toast shows a real message without any extra plumbing.
+</Callout>
+
+</Step>
+
+<Step>
+
+### One round-trip for the dashboard
+
+The dashboard needs both lists at once. The generated `$batch` helper sends them in a single HTTP
+request and preserves order; each item resolves independently, so one failure does not sink the other.
+
+```ts title="web/src/hooks/useDashboard.ts"
+import { useQuery } from "@tanstack/react-query"
+import { rpc } from "@/lib/rpc"
+
+export function useDashboard() {
+  return useQuery({
+    queryKey: ["dashboard"],
+    queryFn: () =>
+      rpc.$batch([
+        rpc.$request.clients.list({}),
+        rpc.$request.invoices.list({}),
+      ] as const),
+  })
+}
+```
+
+</Step>
+
+</Steps>
+
+## What you built
+
+A fullstack billing app where a single C# handler is a use case, a DI registration, a JSON-RPC method,
+an MCP tool, a schema-exported contract, and — after `npm run gen:rpc` — a typed, cancellable frontend
+call. The backend pieces compose through generated wiring; the frontend stays a thin, type-safe shell
+over the same contract.
+
+From here, the natural next moves:
+
+<Cards>
+  <Card title="Telemetry" href="/docs/telemetry">
+    Point the OTLP exporter at a collector and watch RPC, cache, scheduler, and resilience spans nest
+    under each handler.
+  </Card>
+  <Card title="MCP server" href="/docs/json-rpc/mcp">
+    Refine tool names and descriptions, and connect an AI agent to the `/mcp` endpoint you exposed.
+  </Card>
+  <Card title="Scheduling" href="/docs/scheduling">
+    Tune overlap, misfire, and inspection for the jobs you added.
+  </Card>
+  <Card title="Design & philosophy" href="/docs/philosophy">
+    The reasoning behind compile-time wiring, handlers, and a thin host.
+  </Card>
+</Cards>

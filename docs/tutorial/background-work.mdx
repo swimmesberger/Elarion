@@ -1,0 +1,424 @@
+---
+title: Background work
+description: Build the Invoicing module — send invoice emails through a resilient retrying job, observe its status, and chase overdue invoices on a nightly cron.
+---
+
+Creating an invoice should return instantly; actually delivering the email — over flaky SMTP — should
+happen in the background and survive a transient failure. That is exactly what
+[scheduling](/docs/scheduling) and [resilience](/docs/resilience) are for. This page builds the
+Invoicing module around that flow, then adds a nightly cron job that flags overdue invoices.
+
+<Steps>
+
+<Step>
+
+### Define the email port
+
+The Invoicing module depends on an *interface* it owns; the concrete sender is a platform capability
+the host supplies. This keeps the flaky external dependency behind a port the resilience policy can
+wrap.
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Services/IInvoiceEmailSender.cs"
+namespace Billing.Application.Modules.Invoicing.Services;
+
+public interface IInvoiceEmailSender {
+    Task SendAsync(InvoiceEmail email, CancellationToken ct);
+}
+
+public sealed record InvoiceEmail {
+    public required string To { get; init; }
+    public required string InvoiceNumber { get; init; }
+    public required long AmountCents { get; init; }
+    public required string Currency { get; init; }
+}
+```
+
+The implementation lives in infrastructure and is registered by the host (see
+[Host the API](/docs/tutorial/hosting)). It is deliberately thin — the SMTP details are not the
+interesting part; the retry around them is.
+
+```csharp title="src/Billing.Infrastructure/Email/SmtpInvoiceEmailSender.cs"
+using Billing.Application.Modules.Invoicing.Services;
+using Microsoft.Extensions.Logging;
+
+namespace Billing.Infrastructure.Email;
+
+public sealed class SmtpInvoiceEmailSender(ILogger<SmtpInvoiceEmailSender> logger)
+    : IInvoiceEmailSender {
+    public async Task SendAsync(InvoiceEmail email, CancellationToken ct) {
+        // Swap this for MailKit / SES / SendGrid. The contract — and the cancellation token,
+        // which the resilience timeout depends on — stays the same.
+        logger.LogInformation("Sending invoice {Number} to {To}", email.InvoiceNumber, email.To);
+        await Task.Delay(TimeSpan.FromMilliseconds(200), ct);
+    }
+}
+```
+
+<Callout type="info">
+  The sender accepts and honors a `CancellationToken`. The resilience `Timeout` cancels that token when
+  an attempt runs too long, so a real SMTP call must pass it through to actually stop.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Declare the resilience policy
+
+A named [resilience policy](/docs/resilience) is neutral metadata the generator turns into a typed
+reference. This one retries up to four times with exponential backoff and jitter, and caps each
+attempt at 30 seconds.
+
+```csharp title="src/Billing.Application/Modules/Invoicing/InvoiceEmailPolicy.cs"
+using Elarion.Abstractions.Resilience;
+
+namespace Billing.Application.Modules.Invoicing;
+
+[ResiliencePolicy(
+    "invoice-email",
+    MaxRetryAttempts = 4,
+    Delay = "10s",
+    Backoff = ResilienceBackoffType.Exponential,
+    MaxDelay = "5m",
+    UseJitter = true,
+    Timeout = "30s")]
+public static partial class InvoiceEmailPolicy;
+```
+
+The generator emits `InvoiceEmailPolicy.Name` and `InvoiceEmailPolicy.Reference`, plus the registration
+method the host calls. You will reference both below.
+
+</Step>
+
+<Step>
+
+### Write the resilient send job
+
+The actual delivery is a runtime job — `IScheduledJob<TPayload>` — so it can be enqueued on demand with
+a typed payload. It loads the invoice, sends the email, and marks the invoice `Sent`. The
+no-op-if-not-`Draft` guard makes it **idempotent**, which matters because deferred retry may run a fresh
+attempt after a transient failure.
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Jobs/SendInvoiceEmailJob.cs"
+using Billing.Application.Data;
+using Billing.Application.Modules.Invoicing.Services;
+using Elarion.Abstractions.Scheduling;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Application.Modules.Invoicing.Jobs;
+
+public sealed record SendInvoiceEmailPayload {
+    public required Guid InvoiceId { get; init; }
+}
+
+[ScheduledJob("invoicing.sendInvoiceEmail")]
+public sealed class SendInvoiceEmailJob(
+    IAppDbContext db,
+    IInvoiceEmailSender email,
+    TimeProvider clock
+) : IScheduledJob<SendInvoiceEmailPayload> {
+    public async ValueTask ExecuteAsync(
+        SendInvoiceEmailPayload payload, IScheduledJobContext context, CancellationToken ct) {
+        var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == payload.InvoiceId, ct);
+        if (invoice is null || invoice.Status != InvoiceStatus.Draft) {
+            return;   // already sent, or rolled back — nothing to do
+        }
+
+        var client = await db.Clients.FirstAsync(c => c.Id == invoice.ClientId, ct);
+        await email.SendAsync(new InvoiceEmail {
+            To = client.Email,
+            InvoiceNumber = invoice.Number,
+            AmountCents = invoice.AmountCents,
+            Currency = invoice.Currency,
+        }, ct);
+
+        invoice.Status = InvoiceStatus.Sent;
+        invoice.SentAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+    }
+}
+```
+
+<Callout type="info">
+  Notice the job class itself carries no `[Resilient]` attribute and no reference to
+  `InvoiceEmailPolicy`. That is deliberate: it runs under **deferred retry**, where the policy is
+  supplied by the *caller* at enqueue time (`ResiliencePolicy = InvoiceEmailPolicy.Reference` in the
+  next step), not declared on the job. A job has no fixed resilience behavior of its own — different
+  callers could enqueue it with different policies, or none. Compare this to `OverdueReminderJob`
+  further down, which uses **inline** resilience via `[Resilient(InvoiceEmailPolicy.Name)]` directly on
+  the method, because there the schedule itself owns the retry behavior.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Create the invoice and enqueue the send
+
+`CreateInvoice` persists a `Draft` invoice and **enqueues** the send job with the resilience policy in
+**deferred-retry** mode. Deferred retry releases scheduler capacity between attempts and exposes a
+`WaitingRetry` status — the right model when the caller wants to observe progress. The handler returns
+the stable `JobId` so the frontend can poll it.
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/CreateInvoice.cs"
+using System.ComponentModel;
+using Billing.Application.Data;
+using Billing.Application.Modules.Core.Services;
+using Billing.Application.Modules.Invoicing.Jobs;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.Scheduling;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Application.Modules.Invoicing.Handlers;
+
+[RpcMethod("invoices.create")]
+[CacheInvalidate("invoices")]
+[Description("Creates a draft invoice and sends it to the client in the background.")]
+public sealed class CreateInvoice(
+    IAppDbContext db,
+    ICurrentUser user,
+    IJobScheduler scheduler,
+    IAuditTrail audit,
+    TimeProvider clock
+) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
+    public sealed record Command {
+        public required Guid ClientId { get; init; }
+        [Description("Invoice total in minor units, e.g. 1999 = €19.99.")]
+        public required long AmountCents { get; init; }
+        public required string Currency { get; init; }
+        public required DateOnly DueDate { get; init; }
+    }
+
+    public sealed record Response(Guid InvoiceId, string Number, Guid SendJobId);
+
+    public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        var clientExists = await db.Clients
+            .AnyAsync(c => c.OwnerId == user.UserId && c.Id == command.ClientId, ct);
+        if (!clientExists) {
+            return AppError.NotFound($"Client {command.ClientId} was not found.");
+        }
+
+        var count = await db.Invoices.CountAsync(i => i.OwnerId == user.UserId, ct);
+        var invoice = new Invoice {
+            Id = Guid.NewGuid(),
+            OwnerId = user.UserId,
+            ClientId = command.ClientId,
+            Number = $"INV-{count + 1:D6}",
+            AmountCents = command.AmountCents,
+            Currency = command.Currency,
+            Status = InvoiceStatus.Draft,
+            DueDate = command.DueDate,
+            CreatedAt = clock.GetUtcNow(),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync(ct);
+
+        var handle = await scheduler.EnqueueAsync<SendInvoiceEmailJob, SendInvoiceEmailPayload>(
+            new SendInvoiceEmailPayload { InvoiceId = invoice.Id },
+            new ScheduledJobOptions {
+                ResiliencePolicy = InvoiceEmailPolicy.Reference,
+                ResilienceMode = ScheduledJobResilienceMode.DeferredRetry,
+                CorrelationId = invoice.Id.ToString(),
+            },
+            ct);
+
+        audit.Record("invoice.created", invoice.Id.ToString());
+        return new Response(invoice.Id, invoice.Number, handle.JobId);
+    }
+}
+```
+
+Add the validator beside it:
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/CreateInvoiceValidator.cs"
+using FluentValidation;
+
+namespace Billing.Application.Modules.Invoicing.Handlers;
+
+public sealed class CreateInvoiceValidator : AbstractValidator<CreateInvoice.Command> {
+    public CreateInvoiceValidator() {
+        RuleFor(x => x.AmountCents).GreaterThan(0);
+        RuleFor(x => x.Currency).NotEmpty().Length(3);
+        RuleFor(x => x.DueDate).NotEmpty();
+    }
+}
+```
+
+</Step>
+
+<Step>
+
+### Observe the send
+
+The frontend wants to show "Sending…", "Sent", or "Retrying". Expose the scheduler's in-memory state
+through `IJobSchedulerInspector` as a plain query.
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/GetSendStatus.cs"
+using Billing.Application.Pipeline;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Scheduling;
+
+namespace Billing.Application.Modules.Invoicing.Handlers;
+
+[ReadOnlyPipeline]
+[RpcMethod("invoices.sendStatus")]
+public sealed class GetSendStatus(IJobSchedulerInspector scheduler)
+    : IHandler<GetSendStatus.Query, Result<GetSendStatus.Response>> {
+    public sealed record Query(Guid JobId);
+    public sealed record Response(
+        string Status, int Attempt, int MaxAttempts,
+        DateTimeOffset? NextAttemptAt, string? LastError);
+
+    public ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var state = scheduler.GetJob(query.JobId);
+        Result<Response> result = state is null
+            ? AppError.NotFound($"No send job {query.JobId} is currently tracked.")
+            : new Response(
+                state.Status.ToString(), state.Attempt, state.MaxAttempts,
+                state.NextAttemptDueTimeUtc, state.LastError);
+        return ValueTask.FromResult(result);
+    }
+}
+```
+
+<Callout type="warn">
+  Scheduler state is **in-memory**. `GetJob` returns `null` after the process restarts or once a
+  terminal state ages out of retention — which the `NotFound` branch handles. For status that must
+  survive restarts, persist it yourself; this is the lightweight, in-process model by design.
+</Callout>
+
+</Step>
+
+<Step>
+
+### List invoices (cached)
+
+The invoices table reads through a cached query, invalidated by the `invoices` tag whenever
+`CreateInvoice` succeeds.
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/ListInvoices.cs"
+using System.Collections.Generic;
+using Billing.Application.Data;
+using Billing.Application.Pipeline;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+using Elarion.Abstractions.Identity;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Application.Modules.Invoicing.Handlers;
+
+[ReadOnlyPipeline]
+[Cacheable("invoices", DurationSeconds = 30)]
+[RpcMethod("invoices.list")]
+public sealed class ListInvoices(IAppDbContext db, ICurrentUser user)
+    : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
+    public sealed record Query;
+    public sealed record Item(
+        Guid Id, string Number, long AmountCents, string Currency, string Status, DateOnly DueDate);
+    public sealed record Response(IReadOnlyList<Item> Invoices);
+
+    public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var items = await db.Invoices
+            .Where(i => i.OwnerId == user.UserId)
+            .OrderByDescending(i => i.CreatedAt)
+            .Select(i => new Item(
+                i.Id, i.Number, i.AmountCents, i.Currency, i.Status.ToString(), i.DueDate))
+            .ToListAsync(ct);
+
+        return new Response(items);
+    }
+}
+```
+
+</Step>
+
+<Step>
+
+### Chase overdue invoices nightly
+
+A recurring [scheduled job](/docs/scheduling/schedules) flags sent-but-unpaid invoices as overdue
+every morning. It uses **inline** resilience (`[Resilient]`) — short, idempotent work where one
+occurrence owns its retries — and a config placeholder for the schedule so operators can retune it
+without a redeploy.
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Jobs/OverdueReminderJob.cs"
+using Billing.Application.Data;
+using Elarion.Abstractions.Resilience;
+using Elarion.Abstractions.Scheduling;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace Billing.Application.Modules.Invoicing.Jobs;
+
+public sealed class OverdueReminderJob(
+    IAppDbContext db,
+    TimeProvider clock,
+    ILogger<OverdueReminderJob> logger
+) {
+    [Resilient(InvoiceEmailPolicy.Name)]
+    [ScheduledJob(
+        "invoicing.overdueReminders",
+        Cron = "${Invoicing:OverdueCron:-0 0 8 * * *}",
+        TimeZone = "Europe/Vienna",
+        Enabled = "${Modules:Invoicing:Enabled:-true}")]
+    public async ValueTask RunAsync(CancellationToken ct) {
+        var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+        var overdue = await db.Invoices
+            .Where(i => i.Status == InvoiceStatus.Sent && i.DueDate < today)
+            .ToListAsync(ct);
+
+        foreach (var invoice in overdue) {
+            invoice.Status = InvoiceStatus.Overdue;
+        }
+
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Flagged {Count} invoices as overdue", overdue.Count);
+    }
+}
+```
+
+The schedule defaults to `0 0 8 * * *` (daily at 08:00 `Europe/Vienna`) and re-resolves
+`Modules:Invoicing:Enabled` before every occurrence — so disabling the module also stops this job.
+
+</Step>
+
+<Step>
+
+### Register the JSON metadata
+
+```csharp title="src/Billing.Application/Modules/Invoicing/InvoicingJsonContext.cs"
+using System.Text.Json.Serialization;
+using Billing.Application.Modules.Invoicing.Handlers;
+
+namespace Billing.Application.Modules.Invoicing;
+
+[JsonSerializable(typeof(CreateInvoice.Command))]
+[JsonSerializable(typeof(CreateInvoice.Response))]
+[JsonSerializable(typeof(ListInvoices.Query))]
+[JsonSerializable(typeof(ListInvoices.Response))]
+[JsonSerializable(typeof(GetSendStatus.Query))]
+[JsonSerializable(typeof(GetSendStatus.Response))]
+public sealed partial class InvoicingJsonContext : JsonSerializerContext;
+```
+
+</Step>
+
+</Steps>
+
+## What you have so far
+
+- A create flow that returns immediately and delivers email in the background.
+- A retrying, idempotent send job that survives transient SMTP failures via deferred retry.
+- A pollable send status and a nightly cron job that keeps invoice state honest.
+
+All of this still runs nowhere until the host composes the modules and registers the scheduler and
+resilience runtimes — that is the next step.
+
+<Cards>
+  <Card title="Next: Host the API" href="/docs/tutorial/hosting">
+    Compose the modules, publish JSON-RPC, expose MCP tools, and wire telemetry.
+  </Card>
+</Cards>

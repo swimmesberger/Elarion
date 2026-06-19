@@ -1,0 +1,279 @@
+---
+title: Host the API
+description: Compose the modules in an ASP.NET Core host, publish a JSON-RPC endpoint, expose the same handlers as MCP tools, and wire OpenTelemetry.
+---
+
+The application project declared *what* the app does. The host wires *how* it runs: the database
+provider, the scheduler and resilience runtimes, caching, authentication, the JSON-RPC and MCP
+endpoints, and telemetry. None of this leaks back into the modules.
+
+<Steps>
+
+<Step>
+
+### Add the generated host partials
+
+Two partial classes tell the generators to emit the cross-module wiring and the RPC map **in the host
+assembly**.
+
+```csharp title="src/Billing.Api/Hosting/ModuleBootstrapper.cs"
+using Elarion.AspNetCore;
+
+namespace Billing.Api.Hosting;
+
+[GenerateModuleBootstrapper]
+public static partial class ModuleBootstrapper;
+```
+
+```csharp title="src/Billing.Api/Rpc/RpcMethodMap.cs"
+using Elarion.JsonRpc;
+
+namespace Billing.Api.Rpc;
+
+[GenerateRpcMethodMap]
+public static partial class RpcMethodMap {
+    public static partial JsonRpcDispatcher RegisterAll(JsonRpcDispatcher dispatcher);
+}
+```
+
+`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints`, and
+`GetAllJsonTypeInfoResolvers`. `RpcMethodMap` gains `RegisterAll` (every `[RpcMethod]` handler) and
+`McpMetadata()` (the tool table for MCP).
+
+</Step>
+
+<Step>
+
+### Install the remaining host packages
+
+The host adds authentication and OpenTelemetry on top of the Elarion packages from
+[the overview](/docs/tutorial#scaffold-the-solution):
+
+```bash
+cd src/Billing.Api
+dotnet add package Microsoft.AspNetCore.Authentication.JwtBearer
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+cd ../..
+```
+
+</Step>
+
+<Step>
+
+### Register the services
+
+Compose the host. Each block is a platform capability the modules consume through an abstraction.
+
+```csharp title="src/Billing.Api/Program.cs"
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using Billing.Api.Hosting;
+using Billing.Api.Rpc;
+using Billing.Application;
+using Billing.Application.Modules.Invoicing.Services;
+using Billing.Infrastructure.Data;
+using Billing.Infrastructure.Email;
+using Elarion.Abstractions.Diagnostics;
+using Elarion.Abstractions.Scheduling;
+using Elarion.AspNetCore;
+using Elarion.AspNetCore.Identity;
+using Elarion.AspNetCore.Mcp;
+using Elarion.Caching;
+using Elarion.JsonRpc;
+using Elarion.Resilience;
+using Elarion.Scheduling;
+using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
+
+var builder = WebApplication.CreateSlimBuilder(args);
+
+// Clock — used by handlers, jobs, and the current-user snapshot.
+builder.Services.AddSingleton(TimeProvider.System);
+
+// Database: the concrete context is infrastructure; handlers see only IAppDbContext.
+builder.Services.AddDbContext<BillingDbContext>(o =>
+    o.UseNpgsql(builder.Configuration.GetConnectionString("Billing")));
+builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+
+// Infrastructure capability: the concrete email sender behind the module's port.
+builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
+
+// Scheduler: descriptors (generated) + the in-memory runtime.
+builder.Services.AddBillingApplicationScheduledJobs();
+builder.Services.AddInMemoryScheduler(builder.Configuration);
+
+// Resilience: generated policy metadata + the Microsoft/Polly-backed runtime.
+builder.Services.AddBillingApplicationResiliencePolicies();
+builder.Services.AddMicrosoftResilienceRuntime();
+
+// Per-user handler caching, backed by HybridCache.
+builder.Services.AddElarionHandlerCaching();
+
+// Transport-neutral current user, filled from the authenticated principal.
+builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");
+
+// Authentication: a JWT bearer issuer of your choice (Entra, Auth0, Keycloak, …).
+builder.Services.AddAuthentication("Bearer")
+    .AddJwtBearer(options => {
+        options.Authority = builder.Configuration["Auth:Authority"];
+        options.Audience = builder.Configuration["Auth:Audience"];
+    });
+builder.Services.AddAuthorization();
+
+// Compose every module's services (handlers, services, validators).
+ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
+
+// JSON-RPC: one serializer for runtime dispatch and schema export.
+var serializerOptions = CreateSerializerOptions(builder.Configuration);
+builder.Services.AddSingleton(serializerOptions);
+builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
+
+// MCP: one tool per [RpcMethod] handler, sharing the same dispatcher.
+builder.Services.AddElarionMcp(
+    RpcMethodMap.McpMetadata(), serializerOptions, o => o.ServerName = "Billing");
+
+// Telemetry: register the Elarion sources/meters; the host owns the exporters.
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t
+        .AddSource(
+            JsonRpcTelemetry.ActivitySourceName,
+            SchedulerTelemetry.ActivitySourceName,
+            HandlerCacheTelemetry.ActivitySourceName,
+            ResilienceTelemetry.ActivitySourceName,
+            HandlerTelemetry.ActivitySourceName)
+        .AddAspNetCoreInstrumentation()
+        .AddOtlpExporter())
+    .WithMetrics(m => m
+        .AddMeter(
+            JsonRpcTelemetry.MeterName,
+            SchedulerTelemetry.MeterName,
+            HandlerCacheTelemetry.MeterName,
+            ResilienceTelemetry.MeterName,
+            HandlerTelemetry.MeterName)
+        .AddAspNetCoreInstrumentation()
+        .AddOtlpExporter());
+```
+
+</Step>
+
+<Step>
+
+### Build, order the middleware, and map endpoints
+
+`UseElarionCurrentUser()` must run **after** authentication so the principal exists, and before the
+endpoints so handlers can read it.
+
+```csharp title="src/Billing.Api/Program.cs (continued)"
+var app = builder.Build();
+
+app.UseAuthentication();
+app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
+app.UseAuthorization();
+
+ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);
+app.MapJsonRpc().RequireAuthorization();        // POST /rpc
+app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
+
+app.Run();
+
+static JsonSerializerOptions CreateSerializerOptions(IConfiguration configuration) {
+    var moduleResolvers = ModuleBootstrapper.GetAllJsonTypeInfoResolvers(configuration);
+    return new JsonSerializerOptions {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        TypeInfoResolver = JsonTypeInfoResolver.Combine(
+            [JsonRpcJsonContext.Default, .. moduleResolvers, new DefaultJsonTypeInfoResolver()]),
+    };
+}
+```
+
+<Callout type="info">
+  The **same** `serializerOptions` instance flows into the dispatcher, the MCP server, and schema
+  export — so the generated TypeScript types match exactly what the server serializes. `MapElarionMcp()`
+  only needs the dispatcher singleton; you could expose MCP without ever calling `MapJsonRpc()`.
+</Callout>
+
+Add the scheduler section to configuration so the in-memory runtime is enabled:
+
+```json title="src/Billing.Api/appsettings.json"
+{
+  "Scheduler": {
+    "Enabled": true,
+    "MaxConcurrentExecutions": 8
+  }
+}
+```
+
+</Step>
+
+<Step>
+
+### Export the schema on every build
+
+Wire the [build-time schema exporter](/docs/json-rpc/schema-generation) so `rpc-schema.json` is written
+to the repo root whenever the host compiles. The frontend client is generated from it.
+
+```xml title="src/Billing.Api/Billing.Api.csproj"
+<ItemGroup>
+  <PackageReference Include="Elarion.AspNetCore.SchemaGeneration" PrivateAssets="all" />
+</ItemGroup>
+
+<PropertyGroup>
+  <ElarionJsonRpcGenerateSchema>true</ElarionJsonRpcGenerateSchema>
+  <ElarionJsonRpcSchemaOutputPath>$(MSBuildProjectDirectory)/../../rpc-schema.json</ElarionJsonRpcSchemaOutputPath>
+</PropertyGroup>
+```
+
+The target launches the host up to `builder.Build()`, reads the frozen dispatcher, and writes the
+schema. Code after `builder.Build()` does not run during generation, so there is nothing to guard here.
+
+</Step>
+
+<Step>
+
+### Run it
+
+```bash
+dotnet run --project src/Billing.Api
+```
+
+With a valid bearer token, create a client over JSON-RPC:
+
+```bash
+curl -s http://localhost:5000/rpc \
+  -H 'authorization: Bearer <token>' \
+  -H 'content-type: application/json' \
+  -d '{
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "clients.create",
+        "params": { "name": "Acme Inc.", "email": "billing@acme.test" }
+      }'
+```
+
+A success returns `{ "id": "…", "number": "C-000001" }`; a duplicate email returns the JSON-RPC error
+your host mapped from `AppError.Conflict`. The MCP server is live at `/mcp` for any MCP client, exposing
+`clients.create`, `invoices.create`, and the rest as tools.
+
+</Step>
+
+</Steps>
+
+## What the host owns — and what it doesn't
+
+The host owns the database provider, authentication, middleware order, the scheduler/resilience/cache
+runtimes, telemetry exporters, and endpoint publication. It owns **nothing** about clients or invoices
+beyond registering one email capability. Swap PostgreSQL for SQL Server, or the OTLP exporter for
+Prometheus, without touching a single module.
+
+<Cards>
+  <Card title="Next: Build the frontend" href="/docs/tutorial/frontend">
+    Generate the typed client and call these handlers from React with TanStack Query.
+  </Card>
+</Cards>

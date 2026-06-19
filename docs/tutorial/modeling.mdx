@@ -1,0 +1,298 @@
+---
+title: Model the domain
+description: Define the billing entities, the generated IAppDbContext data-access interface, and the Core, Clients, and Invoicing modules.
+---
+
+Billing has two entities — `Client` and `Invoice` — and three modules. **Clients** and **Invoicing**
+are feature modules; **Core** is an always-on foundation module that owns shared services. In this step
+you define the data model and the module boundaries; the handlers come in
+[Write the features](/docs/tutorial/features).
+
+<Steps>
+
+<Step>
+
+### Define the entities
+
+Entities opt into generation with `[DbEntity]`. Both carry an `OwnerId` — the id of the signed-in
+account that owns the row — which is what later lets reads and caches be scoped per user.
+
+```csharp title="src/Billing.Application/Data/Client.cs"
+using Elarion.EntityFrameworkCore;
+
+namespace Billing.Application.Data;
+
+[DbEntity]
+public sealed class Client {
+    public Guid Id { get; set; }
+    public required string OwnerId { get; set; }
+    public required string Number { get; set; }
+    public required string Name { get; set; }
+    public required string Email { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+```
+
+```csharp title="src/Billing.Application/Data/Invoice.cs"
+using Elarion.EntityFrameworkCore;
+
+namespace Billing.Application.Data;
+
+[DbEntity]
+public sealed class Invoice {
+    public Guid Id { get; set; }
+    public required string OwnerId { get; set; }
+    public Guid ClientId { get; set; }
+    public required string Number { get; set; }
+    public long AmountCents { get; set; }
+    public required string Currency { get; set; }
+    public InvoiceStatus Status { get; set; }
+    public DateOnly DueDate { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? SentAt { get; set; }
+}
+
+public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Cancelled }
+```
+
+<Callout type="info">
+  Money is stored as integer minor units (`AmountCents`) to avoid floating-point rounding. The handlers
+  expose it as cents on the wire too, so the frontend formats it once at the edge.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Declare the data-access interface
+
+Handlers never see the concrete `DbContext`. They depend on a generated `IAppDbContext` interface —
+this *is* the data-access abstraction, so there is [no repository layer](/docs/concepts/handlers#accessing-data).
+Annotate the interface with `[GenerateDbSets]` and the
+[EF Core generator](/docs/entity-framework) emits a `DbSet<T>` for every `[DbEntity]`.
+
+```csharp title="src/Billing.Application/IAppDbContext.cs"
+using Elarion.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Application;
+
+[GenerateDbSets]
+public partial interface IAppDbContext {
+    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+    DbContext AsDbContext();
+}
+```
+
+After the next build the generator adds `DbSet<Client> Clients` and `DbSet<Invoice> Invoices` to this
+interface.
+
+</Step>
+
+<Step>
+
+### Add entity configuration
+
+Keep schema rules close to the entities with `IEntityTypeConfiguration<T>`. The generator discovers
+these and emits direct `Configure(...)` calls — no `ApplyConfigurationsFromAssembly` reflection.
+
+```csharp title="src/Billing.Application/Data/ClientConfiguration.cs"
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Billing.Application.Data;
+
+public sealed class ClientConfiguration : IEntityTypeConfiguration<Client> {
+    public void Configure(EntityTypeBuilder<Client> builder) {
+        builder.HasKey(c => c.Id);
+        builder.HasIndex(c => new { c.OwnerId, c.Number }).IsUnique();
+        builder.Property(c => c.Name).HasMaxLength(200);
+        builder.Property(c => c.Email).HasMaxLength(320);
+    }
+}
+```
+
+```csharp title="src/Billing.Application/Data/InvoiceConfiguration.cs"
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Billing.Application.Data;
+
+public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
+    public void Configure(EntityTypeBuilder<Invoice> builder) {
+        builder.HasKey(i => i.Id);
+        builder.HasIndex(i => new { i.OwnerId, i.Number }).IsUnique();
+        builder.HasIndex(i => new { i.OwnerId, i.Status, i.DueDate });
+        builder.Property(i => i.Currency).HasMaxLength(3);
+        builder.Property(i => i.Status).HasConversion<string>();
+    }
+}
+```
+
+</Step>
+
+<Step>
+
+### Implement the concrete context in infrastructure
+
+The concrete `BillingDbContext` lives in the infrastructure project and implements `IAppDbContext`.
+The generator emits the matching `DbSet` properties into this partial class and a `ConfigureEntities`
+call that applies every discovered configuration.
+
+```csharp title="src/Billing.Infrastructure/Data/BillingDbContext.cs"
+using Billing.Application;
+using Microsoft.EntityFrameworkCore;
+
+namespace Billing.Infrastructure.Data;
+
+public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> options)
+    : DbContext(options), IAppDbContext {
+    public DbContext AsDbContext() => this;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
+        base.OnModelCreating(modelBuilder);
+        ConfigureEntities(modelBuilder);   // generated
+    }
+}
+```
+
+<Callout type="warn">
+  Do **not** add `[GenerateDbSets]` to the concrete context. Class-side generation is inferred from the
+  interface, so the model has exactly one declaration point.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Define the modules
+
+A module is a static partial class marked with `[AppModule]` at the root of a namespace. Everything
+under that namespace belongs to the module, and the generators emit `Add{Module}Handlers()`,
+`Add{Module}Services()`, and `Add{Module}Validators()` for it to call.
+
+**Core** is a foundation module — `Kind = AppModuleKind.Core` keeps it always enabled and initialized
+before feature modules. It owns shared services such as the audit trail you will add next.
+
+```csharp title="src/Billing.Application/Modules/Core/CoreModule.cs"
+using Elarion.Abstractions.Modules;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Billing.Application.Modules.Core;
+
+[AppModule("Core", Kind = AppModuleKind.Core)]
+public static partial class CoreModule {
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
+        services.AddCoreServices();   // generated
+    }
+}
+```
+
+**Clients** and **Invoicing** are feature modules — enabled by default, switchable with configuration.
+Each publishes its handlers, services, validators, and JSON metadata.
+
+```csharp title="src/Billing.Application/Modules/Clients/ClientsModule.cs"
+using System.Text.Json.Serialization.Metadata;
+using Elarion.Abstractions.Modules;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Billing.Application.Modules.Clients;
+
+[AppModule("Clients")]
+public static partial class ClientsModule {
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
+        services.AddClientsHandlers();
+        services.AddClientsServices();
+        services.AddClientsValidators();
+    }
+
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => ClientsJsonContext.Default;
+}
+```
+
+```csharp title="src/Billing.Application/Modules/Invoicing/InvoicingModule.cs"
+using System.Text.Json.Serialization.Metadata;
+using Elarion.Abstractions.Modules;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Billing.Application.Modules.Invoicing;
+
+[AppModule("Invoicing")]
+public static partial class InvoicingModule {
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
+        services.AddInvoicingHandlers();
+        services.AddInvoicingServices();
+        services.AddInvoicingValidators();
+    }
+
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => InvoicingJsonContext.Default;
+}
+```
+
+The `ClientsJsonContext` and `InvoicingJsonContext` referenced above are created in the next step, as
+you add handlers — each module contributes its own [source-generated JSON metadata](/docs/json-rpc/serialization).
+
+<Callout type="info">
+  Because Invoicing is a feature module, an operator can switch it off entirely with
+  `"Modules": { "Invoicing": { "Enabled": false } }` — handlers, endpoints, JSON metadata, **and**
+  scheduled jobs disappear together. Core ignores that flag by design.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Create the migration
+
+With the model and context in place, generate the initial migration and apply it. The host is the
+startup project (it owns the connection string); the migration lands in infrastructure.
+
+The host needs to register `BillingDbContext` before EF tooling can find it. Add this to
+`Program.cs` for now (the [Host the API](/docs/tutorial/hosting) step fleshes the rest out):
+
+```csharp title="src/Billing.Api/Program.cs"
+using Billing.Application;
+using Billing.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateSlimBuilder(args);
+
+builder.Services.AddDbContext<BillingDbContext>(o =>
+    o.UseNpgsql(builder.Configuration.GetConnectionString("Billing")));
+builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+
+var app = builder.Build();
+app.Run();
+```
+
+`IAppDbContext` is registered as the application-facing abstraction; `DbContext` is also exposed so the
+transaction decorator (added next) can begin transactions without knowing the concrete type.
+
+```bash
+dotnet ef migrations add Initial \
+  --project src/Billing.Infrastructure \
+  --startup-project src/Billing.Api
+dotnet ef database update \
+  --project src/Billing.Infrastructure \
+  --startup-project src/Billing.Api
+```
+
+</Step>
+
+</Steps>
+
+## What you have so far
+
+- Two `[DbEntity]` types and a generated `IAppDbContext` that handlers will query directly.
+- A `BillingDbContext` whose `DbSet`s and configuration calls are generated, not reflected.
+- Three modules — one core, two feature — each owning its own surface.
+
+<Cards>
+  <Card title="Next: Write the features" href="/docs/tutorial/features">
+    Handlers, validators, the decorator pipeline, current-user, and per-user caching.
+  </Card>
+</Cards>
