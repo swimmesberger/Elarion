@@ -177,6 +177,41 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_SanitizesTransportMethodNamesForNonIdentifierModuleNames() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.BillingInvoicing {
+                [AppModule("Billing.Invoicing")]
+                public static class BillingInvoicingModule { }
+
+                [HttpEndpoint("invoices")]
+                [RpcMethod("invoices.list")]
+                public sealed class ListInvoices : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
+                    public sealed record Query;
+                    public sealed record Response(string Number);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("INV"));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        generated.Should().Contain("MapBilling_Invoicing_")
+            .And.Contain("AddBilling_Invoicing_");
+        generated.Should().NotContain("MapBilling.InvoicingHttp");
+        generated.Should().Contain("IsModuleEnabled(configuration, \"Billing.Invoicing\")");
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_GeneratedCodeCompiles() {
         RunGenerator(out var compilationWithGenerated);
 
@@ -217,8 +252,11 @@ public sealed class ModuleBootstrapperTransportTests {
         return source[braceStart..];
     }
 
-    private static string RunGenerator(out Compilation compilationWithGenerated) {
-        var modulesReference = CompileToImage(ModulesSource, "Sample.Modules");
+    private static string RunGenerator(out Compilation compilationWithGenerated) =>
+        RunGenerator(ModulesSource, out compilationWithGenerated);
+
+    private static string RunGenerator(string modulesSource, out Compilation compilationWithGenerated) {
+        var modulesReference = CompileToImage(modulesSource, "Sample.Modules");
 
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var hostTree = CSharpSyntaxTree.ParseText(HostSource, parseOptions);
