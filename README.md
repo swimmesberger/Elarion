@@ -98,6 +98,8 @@ JSON-RPC endpoint end to end.
 | --- | --- |
 | [`Elarion.Abstractions`](src/Elarion.Abstractions) | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
 | [`Elarion`](src/Elarion) | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user access. |
+| [`Elarion.Blobs`](src/Elarion.Blobs) | Provider-neutral blob storage contracts and DTOs. |
+| [`Elarion.Blobs.PostgreSql`](src/Elarion.Blobs.PostgreSql) | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O. |
 | [`Elarion.Generators`](src/Elarion.Generators) | Roslyn generators for handlers, services, validators, modules, RPC maps, HTTP endpoint maps, resilience policies, and scheduled jobs. |
 | [`Elarion.JsonRpc`](src/Elarion.JsonRpc) | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
 | [`Elarion.AspNetCore`](src/Elarion.AspNetCore) | ASP.NET Core JSON-RPC endpoint mapping, `[HttpEndpoint]` minimal-API mapping, batch execution, and current-user middleware. |
