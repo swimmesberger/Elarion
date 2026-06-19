@@ -64,9 +64,10 @@ registration list.**
 - **End-to-end JSON-RPC** — mark a handler with `[RpcMethod]`, export a schema at build time, and
   generate a typed TypeScript + Zod client.
 - **AI-native, no extra code** — expose the same `[RpcMethod]` handlers to AI agents as an
-  [MCP](https://modelcontextprotocol.io) server. Tool names, descriptions, and input schemas are
-  generated from your handlers and `[Description]` attributes at compile time — no separate tool
-  layer, no duplicated schemas, no runtime reflection. Rename or exclude a tool with `[McpMethod]`.
+  [MCP](https://modelcontextprotocol.io) server, an independent transport with its own dispatcher. Tool
+  names, descriptions, and input schemas are generated from your handlers and `[Description]` attributes at
+  compile time — no separate tool layer, no duplicated schemas, no runtime reflection. Choose a handler's
+  transports with `[RpcMethod(Transports = …)]` (JSON-RPC, MCP, or both) and rename a tool with `[McpMethod]`.
 - **In-process scheduling** — source-generated scheduled jobs with explicit overlap, misfire, and
   resilience policies.
 - **Observable by default** — JSON-RPC, scheduling, caching, and resilience emit

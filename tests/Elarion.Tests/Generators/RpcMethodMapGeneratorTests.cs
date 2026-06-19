@@ -43,8 +43,7 @@ public sealed class RpcMethodMapGeneratorTests {
                 System.Threading.Tasks.ValueTask.FromResult<Result<Response>>(new Response(System.Guid.Empty));
         }
 
-        [RpcMethod("admin.purge")]
-        [McpMethod(Enabled = false)]
+        [RpcMethod("admin.purge", Transports = RpcTransports.JsonRpc)]
         public sealed class PurgeEverything
             : IHandler<PurgeEverything.Command, Result<PurgeEverything.Response>> {
             public sealed record Command;
@@ -79,6 +78,9 @@ public sealed class RpcMethodMapGeneratorTests {
         generated.Should().Contain("using Elarion.JsonRpc;");
         generated.Should().Contain(
             ".MapHandler<global::Sample.Handlers.CreateClient.Command, global::Sample.Handlers.CreateClient.Response>(\"clients.create\")");
+        // JSON-RPC-only handlers are still registered on the /rpc dispatcher.
+        generated.Should().Contain(
+            ".MapHandler<global::Sample.Handlers.PurgeEverything.Command, global::Sample.Handlers.PurgeEverything.Response>(\"admin.purge\")");
     }
 
     [Fact]
@@ -103,12 +105,28 @@ public sealed class RpcMethodMapGeneratorTests {
     }
 
     [Fact]
-    public void McpMetadata_RespectsDisabledFlag() {
+    public void McpMetadata_ExcludesJsonRpcOnlyMethods() {
         var generated = RunGenerator(out _);
 
-        generated.Should().Contain("MethodName = \"admin.purge\"");
-        // admin.purge is the only [McpMethod(Enabled = false)] handler.
-        generated.Should().Contain("Enabled = false");
+        // The MCP table holds only MCP-surfaced methods; the per-entry Enabled flag no longer exists.
+        generated.Should().Contain("MethodName = \"clients.create\"");
+        generated.Should().NotContain("MethodName = \"admin.purge\"");
+        generated.Should().NotContain("Enabled = ");
+    }
+
+    [Fact]
+    public void RegisterMcpAll_EmitsOnlyMcpSurfacedHandlers() {
+        var generated = RunGenerator(out _);
+
+        generated.Should().Contain("public static JsonRpcDispatcher RegisterMcpAll(");
+        // clients.create is on both surfaces → mapped into both the /rpc and MCP dispatchers (twice total).
+        generated.Should().Contain(
+            ".MapHandler<global::Sample.Handlers.CreateClient.Command, global::Sample.Handlers.CreateClient.Response>(\"clients.create\")",
+            Exactly.Times(2));
+        // admin.purge is JSON-RPC-only → mapped only by RegisterAll, never into the MCP dispatcher.
+        generated.Should().Contain(
+            ".MapHandler<global::Sample.Handlers.PurgeEverything.Command, global::Sample.Handlers.PurgeEverything.Response>(\"admin.purge\")",
+            Exactly.Times(1));
     }
 
     [Fact]

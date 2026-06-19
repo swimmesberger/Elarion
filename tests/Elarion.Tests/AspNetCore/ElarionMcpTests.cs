@@ -22,12 +22,12 @@ public sealed class ElarionMcpTests {
 
     private sealed record PurgeCommand;
 
-    private sealed record PurgeResponse;
-
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
 
+    // The metadata table only ever contains MCP-surfaced methods (the generator filters out JSON-RPC-only ones),
+    // so a JSON-RPC-only handler like "admin.purge" simply never appears here.
     private static RpcMcpMetadataSource BuildMetadata() =>
         new([
             new RpcMcpMethodMetadata {
@@ -37,19 +37,13 @@ public sealed class ElarionMcpTests {
                 Description = "Creates a client.",
                 Parameters = [new RpcMcpParameterDescriptor("DisplayName", "The display name.")],
             },
-            new RpcMcpMethodMetadata {
-                MethodName = "admin.purge",
-                RequestType = typeof(PurgeCommand),
-                Enabled = false,
-            },
         ]);
 
     [Fact]
-    public void BuildTools_ProjectsMetadata_AndExcludesDisabledMethods() {
+    public void BuildTools_ProjectsMetadata() {
         var tools = ElarionMcpServiceExtensions.BuildTools(
             BuildMetadata(), Options, new ElarionMcpOptions { ServerName = "Test" });
 
-        // admin.purge is [McpMethod(Enabled = false)] → excluded; only clients.create surfaces.
         tools.Should().ContainSingle();
         var tool = tools[0].ProtocolTool;
         tool.Name.Should().Be("create_client");          // ToolName override honored
@@ -144,22 +138,25 @@ public sealed class ElarionMcpTests {
     [Fact]
     public void AddElarionMcp_IsSelfContained_WithoutJsonRpcEndpoint() {
         var services = new ServiceCollection();
-        services.AddElarionJsonRpcDispatcher(Options, d => d
-            .MapHandler<CreateClientCommand, CreateClientResponse>("clients.create")
-            .MapHandler<PurgeCommand, PurgeResponse>("admin.purge"));
 
-        var builder = services.AddElarionMcp(BuildMetadata(), Options, o => o.ServerName = "MyApp");
+        var builder = services.AddElarionMcp(
+            BuildMetadata(),
+            Options,
+            d => d.MapHandler<CreateClientCommand, CreateClientResponse>("clients.create"),
+            o => o.ServerName = "MyApp");
 
         builder.Should().NotBeNull();
         using var provider = services.BuildServiceProvider();
-        // No AddJsonRpc / MapJsonRpc anywhere — MCP needs only the dispatcher singleton.
+        // No AddJsonRpc / AddElarionJsonRpcDispatcher anywhere: MCP owns a dedicated dispatcher and never registers
+        // the unkeyed /rpc JsonRpcDispatcher.
         provider.GetRequiredService<ElarionMcpOptions>().ServerName.Should().Be("MyApp");
-        provider.GetRequiredService<JsonRpcDispatcher>().MethodNames.Should().Contain("clients.create");
+        provider.GetRequiredService<McpDispatcher>().Inner.MethodNames.Should().Contain("clients.create");
+        provider.GetService<JsonRpcDispatcher>().Should().BeNull();
     }
 
     [Fact]
     public void AddElarionMcp_Throws_WhenServerNameMissing() {
-        var act = () => new ServiceCollection().AddElarionMcp(BuildMetadata(), Options, _ => { });
+        var act = () => new ServiceCollection().AddElarionMcp(BuildMetadata(), Options, d => d, _ => { });
 
         act.Should().Throw<InvalidOperationException>();
     }

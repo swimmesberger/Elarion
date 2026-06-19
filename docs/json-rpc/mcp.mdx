@@ -3,13 +3,15 @@ title: MCP server
 description: Expose your JSON-RPC handlers as a Model Context Protocol (MCP) server, independent of the JSON-RPC HTTP endpoint.
 ---
 
-`Elarion.AspNetCore.Mcp` exposes the same `[RpcMethod]` handlers you already write as tools on an
+`Elarion.AspNetCore.Mcp` exposes the `[RpcMethod]` handlers you already write as tools on an
 [MCP](https://modelcontextprotocol.io) server, over Streamable HTTP. It is the only Elarion package that
 references the `ModelContextProtocol` SDK, so plain JSON-RPC hosts never pull it in.
 
-Nothing about a handler changes: a handler participates as a tool by virtue of its existing `[RpcMethod]`
-attribute. The MCP surface is an independent endpoint over the same dispatcher — you do **not** have to
-expose the public JSON-RPC endpoint to use it.
+MCP is a **fully independent transport**, a peer of the JSON-RPC and HTTP endpoints. It owns its own
+dispatcher (`McpDispatcher`, a dedicated `JsonRpcDispatcher` instance) built only from the handlers whose
+`[RpcMethod(Transports = ...)]` includes MCP. A handler therefore declares its method name **once** and
+chooses which transports expose it — JSON-RPC only, MCP only, or **both** (the default). You never have to
+mount (or even register) the public JSON-RPC endpoint to use MCP.
 
 ## Package reference
 
@@ -27,11 +29,16 @@ using Elarion.AspNetCore.Mcp;
 
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 
-// Registers JSON-RPC options and the frozen JsonRpcDispatcher singleton in one call.
+// The public JSON-RPC endpoint (optional, independent of MCP): registers the /rpc dispatcher with the
+// JSON-RPC-surfaced methods.
 builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
 
-// Registers the MCP server with one tool per [RpcMethod] handler.
-builder.Services.AddElarionMcp(RpcMethodMap.McpMetadata(), serializerOptions, o => o.ServerName = "MyApp");
+// The MCP server: a dedicated dispatcher built from the MCP-surfaced methods, with one tool per handler.
+builder.Services.AddElarionMcp(
+    RpcMethodMap.McpMetadata(),     // reflection-free tool table (MCP-surfaced methods only)
+    serializerOptions,
+    RpcMethodMap.RegisterMcpAll,    // builds the dedicated MCP dispatcher
+    o => o.ServerName = "MyApp");
 
 var app = builder.Build();
 
@@ -39,14 +46,33 @@ app.MapElarionMcp();   // mounts /mcp — calling MapJsonRpc() is optional and i
 app.Run();
 ```
 
-`RpcMethodMap.McpMetadata()` is generated alongside `RegisterAll` by the
-[source generator](/docs/source-generation): a reflection-free table of tool names, descriptions, and
-parameter metadata. There is no assembly scanning at runtime.
+`RpcMethodMap.McpMetadata()` and `RpcMethodMap.RegisterMcpAll` are generated alongside `RegisterAll` by the
+[source generator](/docs/source-generation): a reflection-free tool table plus the registration delegate for
+the dedicated MCP dispatcher. There is no assembly scanning at runtime.
 
 <Callout type="info">
-  The MCP endpoint shares only the `JsonRpcDispatcher` singleton. `MapElarionMcp()` does not require
-  `MapJsonRpc()` — you can expose MCP without exposing the public JSON-RPC endpoint at all.
+  MCP is self-contained: `AddElarionMcp` builds its **own** `McpDispatcher` and never touches the unkeyed
+  `/rpc` `JsonRpcDispatcher`. `MapElarionMcp()` does not require `MapJsonRpc()` — you can expose MCP without
+  exposing (or even registering) the public JSON-RPC endpoint at all.
 </Callout>
+
+## Module-based hosting
+
+In a [module-based](/docs/concepts/modules) host, the generated `ModuleBootstrapper` exposes the gated MCP
+peers alongside the JSON-RPC and HTTP ones:
+
+```csharp
+builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods); // /rpc (optional)
+
+builder.Services.AddElarionMcp(
+    ModuleBootstrapper.GetMcpMetadata(builder.Configuration), // gated tool table
+    serializerOptions,
+    ModuleBootstrapper.RegisterMcpMethods,                    // gated MCP dispatcher
+    o => o.ServerName = "MyApp");
+```
+
+`GetMcpMetadata` and `RegisterMcpMethods` only include the MCP-surfaced handlers of enabled modules, so a
+module disabled with `Modules:{Name}:Enabled = false` drops its tools entirely.
 
 ## Tool and parameter descriptions
 
@@ -72,30 +98,54 @@ public sealed class CreateClient(IAppDbContext db)
 The generator records the .NET property name; the JSON name is resolved at startup from your serializer's
 `PropertyNamingPolicy`, so descriptions attach correctly under any naming policy.
 
-## Controlling the MCP surface
+## Choosing which transports expose a handler
 
-The optional `[McpMethod]` attribute renames a tool or excludes a handler. It is purely additive — absent,
-the handler is exposed with a tool name derived from its method name.
+A handler declares its method name once with `[RpcMethod]` and selects its dispatcher-based surfaces with
+the `RpcTransports` flags (`JsonRpc`, `Mcp`, or `All`). The default is `All` — both JSON-RPC and MCP:
+
+```csharp
+using Elarion.Abstractions;
+
+[RpcMethod("clients.create")]                                   // both (default)
+public sealed class CreateClient : IHandler<...> { ... }
+
+[RpcMethod("clients.list", Transports = RpcTransports.JsonRpc)] // JSON-RPC only — absent from MCP
+public sealed class ListClients : IHandler<...> { ... }
+
+[RpcMethod("ai.summarize", Transports = RpcTransports.Mcp)]     // MCP only — absent from /rpc and the schema
+public sealed class Summarize : IHandler<...> { ... }
+```
+
+Because the MCP dispatcher is built only from MCP-surfaced methods, an MCP-only handler is genuinely absent
+from `/rpc` and the exported JSON-RPC schema, and a JSON-RPC-only handler is never dispatchable as a tool.
+
+REST is a separate opt-in via `[HttpEndpoint]`, since it needs route, verb, and parameter binding that don't
+fit a flags enum. A handler can be on all three transports at once — see [HTTP endpoints](/docs/http-endpoints).
+
+### Renaming a tool
+
+The optional `[McpMethod]` attribute customizes the MCP projection — currently the tool name. It is purely
+additive; absent, the tool name is derived from the method name via `ToolNameTransform`.
 
 ```csharp
 [RpcMethod("clients.create"), McpMethod(ToolName = "create_client")]
 public sealed class CreateClient : IHandler<...> { ... }
-
-// Keep a method on JSON-RPC but off the MCP surface:
-[RpcMethod("admin.purge"), McpMethod(Enabled = false)]
-public sealed class PurgeEverything : IHandler<...> { ... }
 ```
 
 ## Options
 
 ```csharp
-builder.Services.AddElarionMcp(RpcMethodMap.McpMetadata(), serializerOptions, o => {
-    o.ServerName = "MyApp";                            // required
-    o.ServerVersion = "1.0";
-    o.EndpointPath = "/mcp";
-    o.ToolNameTransform = m => m.Replace('.', '_');    // default
-    o.IncludeErrorDetails = true;                      // surface JSON-RPC error code/data as structured content
-});
+builder.Services.AddElarionMcp(
+    RpcMethodMap.McpMetadata(),
+    serializerOptions,
+    RpcMethodMap.RegisterMcpAll,
+    o => {
+        o.ServerName = "MyApp";                            // required
+        o.ServerVersion = "1.0";
+        o.EndpointPath = "/mcp";
+        o.ToolNameTransform = m => m.Replace('.', '_');    // default
+        o.IncludeErrorDetails = true;                      // surface JSON-RPC error code/data as structured content
+    });
 ```
 
 `MapElarionMcp()` returns the endpoint builder, so you apply authorization yourself:
@@ -106,10 +156,11 @@ app.MapElarionMcp().RequireAuthorization();
 
 ## How tool calls work
 
-Each tool call runs through the same dispatcher as a JSON-RPC request, in its own service scope (so scoped
-services such as a pooled `DbContext` are managed correctly). A successful handler result is returned as
-JSON text; a failure maps to an MCP error, preserving the JSON-RPC error code and data as structured
-content when `IncludeErrorDetails` is enabled.
+Each tool call runs through the dedicated MCP dispatcher, in its own service scope (so scoped services such
+as a pooled `DbContext` are managed correctly) — exactly as a JSON-RPC request is dispatched, but isolated
+from the `/rpc` dispatcher. A successful handler result is returned as JSON text; a failure maps to an MCP
+error, preserving the JSON-RPC error code and data as structured content when `IncludeErrorDetails` is
+enabled.
 
 <Callout type="warn">
   If two methods collapse to the same tool name (for example `a.b` and `a_b` under the default transform),

@@ -17,10 +17,9 @@ transport; modules own application logic.
 </ItemGroup>
 ```
 
-## Generated host partials
+## Generated host partial
 
-Two partial classes tell the generators to emit the cross-module wiring and the RPC map in the host
-assembly:
+A single partial class tells the generator to emit the cross-module wiring in the host assembly:
 
 ```csharp
 using Elarion.AspNetCore;
@@ -31,20 +30,16 @@ namespace MyApp.Api.Hosting;
 public static partial class ModuleBootstrapper;
 ```
 
-```csharp
-using Elarion.JsonRpc;
+`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints(endpoints, configuration)`,
+`RegisterRpcMethods(dispatcher, configuration)`, `RegisterMcpMethods(dispatcher, configuration)`,
+`GetMcpMetadata(configuration)`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, and `GetAllModuleNames`,
+plus per-module transport methods (`Map{Module}Http`, `Add{Module}JsonRpc`, `Add{Module}Mcp`,
+`Get{Module}McpMetadata`) for every module that owns `[HttpEndpoint]` / `[RpcMethod]` handlers.
 
-namespace MyApp.Api.Rpc;
-
-[GenerateRpcMethodMap]
-public static partial class RpcMethodMap {
-    public static partial JsonRpcDispatcher RegisterAll(JsonRpcDispatcher dispatcher);
-}
-```
-
-`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints`, `GetAllJsonTypeInfoResolvers`,
-`IsModuleEnabled`, and `GetAllModuleNames`. `RpcMethodMap.RegisterAll` registers every `[RpcMethod]`
-handler on the dispatcher.
+All transports are **module-scoped and feature-flag-gated** through the bootstrapper: a module disabled
+with `Modules:{Name}:Enabled = false` has its services, validators, `MapEndpoints`, `[HttpEndpoint]` routes,
+`[RpcMethod]` JSON-RPC methods, **and** MCP tools all left unmapped, so a disabled module disappears across
+every surface. Core modules are always mapped.
 
 ## Composing the host
 
@@ -63,8 +58,8 @@ ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration)
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
 
-// Registers JSON-RPC options and the frozen JsonRpcDispatcher singleton (built lazily with its logger).
-builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
+// Registers JSON-RPC options and the frozen JsonRpcDispatcher singleton, gated per module.
+builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
 
 var app = builder.Build();
 
@@ -76,12 +71,59 @@ app.Run();
 
 See [Serialization](/docs/json-rpc/serialization) for `CreateSerializerOptions`.
 
+`AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods)` is the **config-aware** overload: it
+resolves `IConfiguration` when the dispatcher singleton is built and registers only the enabled modules'
+JSON-RPC-surfaced `[RpcMethod]` handlers. `MapAllEndpoints` does the same gating for module `MapEndpoints`
+and generated `[HttpEndpoint]` routes. To expose the same handlers over MCP (an independent, equally gated
+transport), pair `ModuleBootstrapper.GetMcpMetadata(builder.Configuration)` with
+`ModuleBootstrapper.RegisterMcpMethods` via `AddElarionMcp` — see [MCP server](/docs/json-rpc/mcp).
+
 <Callout type="info">
   The dispatcher is **frozen** after registration. Freezing produces an immutable, thread-safe map
   and lets the [build-time schema exporter](/docs/json-rpc/schema-generation) read a complete,
   deterministic method set. A missing, unfrozen, or empty dispatcher is treated as an error rather
   than producing a stale schema.
+
+  The exporter reads the dispatcher as configured at build time. Because feature modules are
+  **enabled by default**, the schema stays the complete contract unless a module is explicitly disabled
+  in the configuration the schema build sees — wire the flat `RpcMethodMap.RegisterAll` (below) for the
+  schema build if you need the full contract regardless of runtime gating.
 </Callout>
+
+## Non-module hosts
+
+<Callout type="info">
+  The **module-based** host above is the recommended path for every transport — it keeps services,
+  validators, HTTP, JSON-RPC, and MCP feature-flag-gated together. Reach for the flat maps below only for
+  small hosts or tools that genuinely have no modules.
+</Callout>
+
+A host without modules wires the **flat** maps directly. They register *every* `[RpcMethod]` /
+`[HttpEndpoint]` handler, ungated:
+
+```csharp
+using Elarion.JsonRpc;
+using Elarion.AspNetCore;
+
+[GenerateRpcMethodMap]
+public static partial class RpcMethodMap {
+    public static partial JsonRpcDispatcher RegisterAll(JsonRpcDispatcher dispatcher);
+}
+
+[GenerateHttpEndpointMap]
+public static partial class HttpEndpointMap {
+    public static partial IEndpointRouteBuilder MapAll(IEndpointRouteBuilder app);
+}
+
+// Program.cs
+builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
+var app = builder.Build();
+HttpEndpointMap.MapAll(app);
+app.MapJsonRpc();
+```
+
+See [HTTP endpoints](/docs/http-endpoints) for the `[HttpEndpoint]` mapping and its per-module
+authorization hook.
 
 ## What the host still owns
 

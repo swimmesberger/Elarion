@@ -2,6 +2,7 @@ using System.Text.Json;
 using Elarion.JsonRpc;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 namespace Elarion.AspNetCore;
@@ -74,6 +75,40 @@ public static class JsonRpcServiceExtensions {
         ArgumentNullException.ThrowIfNull(registerAll);
 
         services.AddElarionJsonRpcDispatcher(serializerOptions, registerAll);
+
+        return services.AddJsonRpc(options => {
+            options.SerializerOptions = serializerOptions;
+            configure?.Invoke(options);
+        });
+    }
+
+    /// <summary>
+    /// Adds JSON-RPC 2.0 services and registers the dispatcher from a <paramref name="register"/> delegate that also
+    /// receives the application <see cref="IConfiguration"/> — the setup for a module-based host, where
+    /// <c>ModuleBootstrapper.RegisterRpcMethods</c> registers only the methods of enabled modules.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="serializerOptions">The serializer options used by the dispatcher and the endpoint.</param>
+    /// <param name="register">The registration delegate (e.g. <c>ModuleBootstrapper.RegisterRpcMethods</c>).</param>
+    /// <param name="configure">Optional additional <see cref="JsonRpcOptions"/> configuration (e.g. endpoint path).</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+    /// </code>
+    /// </example>
+    public static IServiceCollection AddJsonRpc(
+        this IServiceCollection services,
+        JsonSerializerOptions serializerOptions,
+        Func<JsonRpcDispatcher, IConfiguration, JsonRpcDispatcher> register,
+        Action<JsonRpcOptions>? configure = null
+    ) {
+        ArgumentNullException.ThrowIfNull(serializerOptions);
+        ArgumentNullException.ThrowIfNull(register);
+
+        services.AddElarionJsonRpcDispatcher(
+            serializerOptions,
+            (dispatcher, sp) => register(dispatcher, sp.GetRequiredService<IConfiguration>()));
 
         return services.AddJsonRpc(options => {
             options.SerializerOptions = serializerOptions;

@@ -40,4 +40,30 @@ public static class JsonRpcDispatcherServiceExtensions {
 
         return services;
     }
+
+    /// <summary>
+    /// Registers the dispatcher singleton using a registration delegate that also receives the
+    /// <see cref="IServiceProvider"/>, so registration can resolve services (e.g. configuration) at compose time —
+    /// for example to gate methods by a per-module feature flag. The transport-neutral
+    /// <c>Elarion.JsonRpc</c> package stays free of a configuration dependency; ASP.NET hosts get an
+    /// <c>IConfiguration</c>-flavored overload from <c>Elarion.AspNetCore</c>.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="serializerOptions">The serializer options the dispatcher uses for params/result handling.</param>
+    /// <param name="registerAll">The registration delegate, given the dispatcher and the request <see cref="IServiceProvider"/>.</param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddElarionJsonRpcDispatcher(
+        this IServiceCollection services,
+        JsonSerializerOptions serializerOptions,
+        Func<JsonRpcDispatcher, IServiceProvider, JsonRpcDispatcher> registerAll) {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(serializerOptions);
+        ArgumentNullException.ThrowIfNull(registerAll);
+
+        services.AddSingleton(sp =>
+            registerAll(new JsonRpcDispatcher(serializerOptions, sp.GetService<ILogger<JsonRpcDispatcher>>()), sp)
+                .Freeze());
+
+        return services;
+    }
 }

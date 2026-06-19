@@ -59,12 +59,22 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 | `ModuleValidatorRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleValidators]` | `Add{ModuleName}Validators()` extension methods. |
 | `SchedulerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateScheduledJobs]` | `Add{AssemblyName}ScheduledJobs()` registering descriptors and job types. |
 | `ResiliencePolicyGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |
-| `RpcMethodMapGenerator` | `[GenerateRpcMethodMap]` on a host partial class | `RpcMethodMap.RegisterAll(dispatcher)`. |
-| `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | `ConfigureAllServices`, `MapAllEndpoints`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, `GetAllModuleNames`. |
+| `RpcMethodMapGenerator` | `[GenerateRpcMethodMap]` on a host partial class | `RpcMethodMap.RegisterAll(dispatcher)` (JSON-RPC), plus `RpcMethodMap.RegisterMcpAll(dispatcher)` and `RpcMethodMap.McpMetadata()` (MCP). |
+| `HttpEndpointMapGenerator` | `[GenerateHttpEndpointMap]` on a host partial class | `HttpEndpointMap.MapAll(app)` — typed minimal-API `MapGet`/`MapPost`/... per `[HttpEndpoint]` handler. See [HTTP endpoints](/docs/http-endpoints). |
+| `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods`, `RegisterMcpMethods`, `GetMcpMetadata`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, `GetAllModuleNames`, plus per-module `Map{Module}Http` / `Add{Module}JsonRpc` / `Add{Module}Mcp` / `Get{Module}McpMetadata`. |
 | EF Core `DbSet` generator | `[GenerateDbSets]` on a partial interface | `DbSet<T>` members and entity configuration application. See [Entity Framework Core](/docs/entity-framework). |
 
 Generated code intentionally uses explicit type names and DI factory registrations. Startup behavior
 remains deterministic and AOT-friendly.
+
+When a host uses `[GenerateModuleBootstrapper]`, the bootstrapper also emits **module-scoped,
+feature-flag-gated** transport mapping: `MapAllEndpoints`, `RegisterRpcMethods`, and `RegisterMcpMethods`
+map each enabled module's generated `[HttpEndpoint]` routes, JSON-RPC-surfaced `[RpcMethod]` methods, and
+MCP-surfaced tools respectively (core modules always; feature modules gated by `Modules:{Name}:Enabled`).
+A handler picks its dispatcher surfaces with `[RpcMethod(Transports = ...)]`. The flat
+`HttpEndpointMap.MapAll` / `RpcMethodMap.RegisterAll` / `RpcMethodMap.RegisterMcpAll` maps are the
+**non-module path** — they register every handler, ungated. See [Hosting](/docs/json-rpc/hosting),
+[MCP server](/docs/json-rpc/mcp), and [HTTP endpoints](/docs/http-endpoints).
 
 ## Diagnostics over surprises
 
