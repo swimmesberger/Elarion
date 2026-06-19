@@ -13,6 +13,7 @@
     "---Features---",
     "source-generation",
     "json-rpc",
+    "http-endpoints",
     "scheduling",
     "resilience",
     "entity-framework",

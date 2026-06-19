@@ -1,0 +1,180 @@
+---
+title: HTTP endpoints
+description: Mark a handler with [HttpEndpoint] and Elarion generates the minimal-API MapGet/MapPost mapping — unwrapping the Query/Command and mapping AppError to RFC 7807 status codes.
+icon: Globe
+---
+
+HTTP/REST is a first-class, optional transport in Elarion — the sibling of [JSON-RPC](/docs/json-rpc).
+Mark a handler with `[HttpEndpoint]` and `HttpEndpointMapGenerator` emits the matching minimal-API
+registration: it unwraps the nested `Query`/`Command` into route/query/body parameters and translates
+the handler's [`Result<T>`](/docs/concepts/results-and-errors) into a response — `200`/`204` on success,
+or an RFC 7807 ProblemDetails with the right status code on failure.
+
+Like JSON-RPC, the mapping lives in `Elarion.AspNetCore` (plus the `[HttpEndpoint]` attribute in
+`Elarion.Abstractions`), so applications that don't need it pay nothing, and handlers stay
+transport-neutral — the same handler can carry both `[HttpEndpoint]` and `[RpcMethod]`.
+
+## Marking a handler
+
+Add `[HttpEndpoint]` to a handler that follows the conventional shape. The verb is **inferred** from
+the nested request type — `Query` maps to `GET`, `Command` maps to `POST` — and the route is explicit:
+
+```csharp
+[HttpEndpoint("clients/{id}")]                 // GET (inferred from the nested Query)
+public sealed class GetClient(IAppDbContext db)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> {
+    public sealed record Query {
+        public required Guid Id { get; init; }
+    }
+    public sealed record Response(Guid Id, string Name);
+
+    public ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) { /* ... */ }
+}
+
+[HttpEndpoint("clients")]                       // POST (inferred from the nested Command)
+public sealed class CreateClient : IHandler<CreateClient.Command, Result<CreateClient.Response>> { /* ... */ }
+```
+
+Override the verb when inference isn't what you want:
+
+```csharp
+[HttpEndpoint(HttpVerb.Delete, "clients/{id}")]
+public sealed class DeleteClient : IHandler<DeleteClient.Command, Result<DeleteClient.Response>> { /* ... */ }
+```
+
+The generator expects the same shape as JSON-RPC: a nested `Command` or `Query`, a nested `Response`,
+and an `IHandler<TRequest, Result<TResponse>>` implementation. A `Response` with no properties returns
+`204 No Content`; otherwise success returns `200 OK` with the response body.
+
+## Hosting
+
+There are two ways to map the generated endpoints, mirroring [JSON-RPC hosting](/docs/json-rpc/hosting).
+
+### Module hosts
+
+A host with modules maps `[HttpEndpoint]` handlers through the generated module bootstrapper, so they are
+**feature-flag-gated** like everything else a module owns. `MapAllEndpoints` calls each enabled module's
+`MapEndpoints` hook and its generated `Map{Module}Http` method; a module disabled with
+`Modules:{Name}:Enabled = false` drops its routes:
+
+```csharp
+[GenerateModuleBootstrapper]
+public static partial class ModuleBootstrapper;
+
+// Program.cs
+builder.Services.AddProblemDetails();   // RFC 7807 responses
+var app = builder.Build();
+
+ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);   // module routes, gated per module
+```
+
+### Non-module hosts
+
+A host without modules uses the flat map (prefer the module path above when the app has modules, so HTTP
+stays gated alongside the other transports). Declare a partial class with the `[GenerateHttpEndpointMap]`
+trigger and call the generated `MapAll` after building the app — it maps *every* `[HttpEndpoint]` handler,
+ungated:
+
+```csharp
+[GenerateHttpEndpointMap]
+public static partial class HttpEndpointMap {
+    public static partial IEndpointRouteBuilder MapAll(IEndpointRouteBuilder app);
+}
+
+// Program.cs
+builder.Services.AddProblemDetails();   // RFC 7807 responses
+var app = builder.Build();
+
+HttpEndpointMap.MapAll(app);            // or MapAll(app.MapGroup("/api")) to prefix every route
+```
+
+The generated registration is a strongly-typed minimal-API lambda per handler (no open generics, no
+runtime reflection binding), so it stays AOT/trimming friendly and works with the ASP.NET Core Request
+Delegate Generator. Each endpoint is also annotated with `.Produces<TResponse>(...)` and the full set of
+`.ProducesProblem(...)` responses, so it shows up correctly in OpenAPI.
+
+### Per-module authorization
+
+`MapAllEndpoints` maps every enabled module's routes onto the same route builder, leaving authentication
+and authorization to the host's middleware and global policies. When one module needs its own policy or
+route conventions on its generated routes, compose the per-module `Map{Module}Http` methods
+yourself instead of the aggregate, gating feature modules with `IsModuleEnabled`:
+
+```csharp
+// Core module: always mapped, on its own group + policy.
+ModuleBootstrapper.MapBillingHttp(
+    app.MapGroup("/billing").RequireAuthorization("billing"));
+
+// Feature module: gate it yourself, then map onto a configured group.
+if (ModuleBootstrapper.IsModuleEnabled(app.Configuration, "Shipping"))
+    ModuleBootstrapper.MapShippingHttp(app.MapGroup("/shipping"));
+```
+
+This is the same seam as a module's own `MapEndpoints` hook: the host owns authorization policy, and the
+generator never reads `[Authorize]`/`[AllowAnonymous]` from handlers.
+
+## Binding
+
+The defaults cover the common cases with no annotation:
+
+- `GET`/`DELETE` bind the request from **route tokens and the query string** (via `[AsParameters]`).
+- `POST`/`PUT`/`PATCH` bind the request from the **JSON body**.
+
+The request DTO stays the host's responsibility to keep in a `JsonSerializerContext` (the same
+requirement as JSON-RPC, since reflection-based JSON is off by default).
+
+### Customizing binding
+
+When you need more control — a header value, a renamed query parameter, or a file upload — opt the DTO
+into ASP.NET Core's binding-source attributes by referencing the
+`Microsoft.AspNetCore.Http.Abstractions` package (the `[From*]` attributes come with the
+`Microsoft.AspNetCore.App` framework reference). Decorating any property switches that endpoint to
+`[AsParameters]` binding:
+
+```csharp
+[HttpEndpoint("clients/{id}/avatar")]            // multipart upload
+public sealed class UploadAvatar : IHandler<UploadAvatar.Command, Result<UploadAvatar.Response>> {
+    public sealed record Command {
+        public required Guid Id { get; init; }    // from the route token
+        public required IFormFile File { get; init; }
+    }
+    public sealed record Response(string Url);
+}
+```
+
+The generator detects `IFormFile`/`IFormFileCollection` and `[FromForm]` members and adds
+`.DisableAntiforgery()` automatically. For a mutation that mixes a path id with a JSON payload, nest the
+payload in a `[FromBody]` property:
+
+```csharp
+public sealed record Command {
+    [FromRoute] public required Guid Id { get; init; }
+    [FromBody]  public required UpdateClientBody Body { get; init; }
+}
+```
+
+This opt-in is the deliberate tradeoff: the DTO references an ASP.NET abstraction package only when it
+needs HTTP-specific binding, and only then.
+
+## Errors map once, centrally
+
+Handlers stay transport-agnostic and return [`Result<T>`](/docs/concepts/results-and-errors); the
+generated endpoint translates a failed `AppError` to an RFC 7807 ProblemDetails response. The status
+code comes from `AppError.Kind`, mirroring how JSON-RPC maps the same kinds to its error codes:
+
+| `ErrorKind` | HTTP status |
+| --- | --- |
+| `Validation` | `400` (validation errors surface in the ProblemDetails `errors` map) |
+| `Forbidden` | `403` |
+| `NotFound` | `404` |
+| `Conflict` | `409` |
+| `BusinessRule` | `422` |
+| `Internal` | `500` |
+
+## HTTP or JSON-RPC?
+
+Both transports map the same handlers, so the choice is per-handler, not per-app. Reach for
+`[HttpEndpoint]` when you want resourceful URLs, HTTP caching/CDN semantics, file uploads, or
+third-party/public consumers; reach for [`[RpcMethod]`](/docs/json-rpc) when one team owns both ends and
+wants an operation-shaped, end-to-end-typed contract with a generated TypeScript client. A handler can
+expose both.

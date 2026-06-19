@@ -97,9 +97,9 @@ JSON-RPC endpoint end to end.
 | --- | --- |
 | [`Elarion.Abstractions`](src/Elarion.Abstractions) | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
 | [`Elarion`](src/Elarion) | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user access. |
-| [`Elarion.Generators`](src/Elarion.Generators) | Roslyn generators for handlers, services, validators, modules, RPC maps, resilience policies, and scheduled jobs. |
+| [`Elarion.Generators`](src/Elarion.Generators) | Roslyn generators for handlers, services, validators, modules, RPC maps, HTTP endpoint maps, resilience policies, and scheduled jobs. |
 | [`Elarion.JsonRpc`](src/Elarion.JsonRpc) | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
-| [`Elarion.AspNetCore`](src/Elarion.AspNetCore) | ASP.NET Core JSON-RPC endpoint mapping, batch execution, and current-user middleware. |
+| [`Elarion.AspNetCore`](src/Elarion.AspNetCore) | ASP.NET Core JSON-RPC endpoint mapping, `[HttpEndpoint]` minimal-API mapping, batch execution, and current-user middleware. |
 | [`Elarion.AspNetCore.Mcp`](src/Elarion.AspNetCore.Mcp) | Exposes your JSON-RPC handlers as a Model Context Protocol (MCP) server for AI agents, over Streamable HTTP. |
 | [`Elarion.AspNetCore.SchemaGeneration`](src/Elarion.AspNetCore.SchemaGeneration) | MSBuild package that exports `rpc-schema.json` during `dotnet build`. |
 | [`Elarion.EntityFrameworkCore`](src/Elarion.EntityFrameworkCore) | Marker attributes for generated `DbSet`s and entity inclusion. |
@@ -112,7 +112,7 @@ Full guides live in [`docs/`](docs/index.mdx) and are structured for a documenta
 
 - **[Introduction](docs/index.mdx)** · **[Installation](docs/getting-started/installation.mdx)** · **[Quickstart](docs/getting-started/quickstart.mdx)**
 - **Core concepts** — [handlers](docs/concepts/handlers.mdx), [results & errors](docs/concepts/results-and-errors.mdx), [modules](docs/concepts/modules.mdx), [services](docs/concepts/services.mdx), [validators](docs/concepts/validators.mdx), [pipelines](docs/concepts/decorator-pipelines.mdx), [caching](docs/concepts/caching.mdx), [current user](docs/concepts/current-user.mdx)
-- **Features** — [source generation](docs/source-generation.mdx), [JSON-RPC](docs/json-rpc/index.mdx), [MCP server](docs/json-rpc/mcp.mdx), [scheduling](docs/scheduling/index.mdx), [resilience](docs/resilience.mdx), [EF Core](docs/entity-framework.mdx), [telemetry](docs/telemetry.mdx)
+- **Features** — [source generation](docs/source-generation.mdx), [JSON-RPC](docs/json-rpc/index.mdx), [HTTP endpoints](docs/http-endpoints.mdx), [MCP server](docs/json-rpc/mcp.mdx), [scheduling](docs/scheduling/index.mdx), [resilience](docs/resilience.mdx), [EF Core](docs/entity-framework.mdx), [telemetry](docs/telemetry.mdx)
 - **Reference** — [packages](docs/reference/packages.mdx), [configuration](docs/reference/configuration.mdx), [vs. ASP.NET Core](docs/reference/comparison.mdx), [troubleshooting](docs/reference/troubleshooting.mdx)
 
 ## Requirements
