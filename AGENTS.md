@@ -17,7 +17,7 @@ and deployment quirks belong in consuming repositories, not here.
 
 ## Package layout
 
-- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers.
+- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts, result types, pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, and source-generation triggers.
 - `Elarion` — runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, and the in-memory scheduler.
 - `Elarion.Blobs` — implementation-neutral blob storage contracts and DTOs.
 - `Elarion.Blobs.PostgreSql` — PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O.
@@ -25,9 +25,10 @@ and deployment quirks belong in consuming repositories, not here.
 - `Elarion.AspNetCore` — ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, HTTP transport support, and minimal-API endpoint mapping for `[HttpEndpoint]` handlers (`HttpAppErrorMapper`, `ElarionHttpResults`, the `[GenerateHttpEndpointMap]` trigger).
 - `Elarion.AspNetCore.Mcp` — Model Context Protocol (MCP) server integration: exposes MCP-surfaced `[RpcMethod]` handlers as tools over Streamable HTTP via a dedicated `McpDispatcher`, independent of the JSON-RPC endpoint (`AddElarionMcp`, `MapElarionMcp`). The only package referencing the `ModelContextProtocol` SDK.
 - `Elarion.AspNetCore.SchemaGeneration` — MSBuild package and host-launching tool for generating JSON-RPC schemas during build.
-- `Elarion.EntityFrameworkCore` — marker attributes for EF Core entity and DbSet generation.
+- `Elarion.EntityFrameworkCore` — marker attributes for EF Core entity and DbSet generation, plus the assembly-level `[UseElarionEntityFrameworkCore(Provider = EfCoreProvider.Npgsql)]` opt-in (`EfCoreProvider` enum, default `Portable`) that lets EF generators emit provider-optimized variants. Dependency-free (no EF Core or runtime package references).
+- `Elarion.EntityFrameworkCore.Paging` — keyset (cursor) and offset pagination primitives: the `[Keyset]` attribute, `IKeysetDefinition<T>` plus generated-keyset support types, an opaque cursor codec, `SortMap`, and the `IQueryable` paging extensions that produce the transport-neutral `Page<T>`. Depends on EF Core (`Microsoft.EntityFrameworkCore.Relational`) and `Elarion.Abstractions`.
 - `Elarion.Generators` — Roslyn source generators for handlers, validators, services, modules, RPC method maps, HTTP endpoint maps, resilience policies, and scheduled jobs.
-- `Elarion.EntityFrameworkCore.Generators` — Roslyn generator for DbSet properties and entity configuration application.
+- `Elarion.EntityFrameworkCore.Generators` — Roslyn generators for DbSet properties and entity configuration application, and for keyset pagination definitions (the `[Keyset]` → `{Entity}Keyset` emitter targeting `Elarion.EntityFrameworkCore.Paging`). It also emits a per-entity `ToKeysetPageAsync` convenience overload (into the `Elarion.EntityFrameworkCore.Paging` namespace) that supplies `{Entity}Keyset.Definition` automatically, so handlers page an `IQueryable<TEntity>` without naming the generated keyset type (the explicit definition-taking overload remains). The keyset emitter is provider-aware: with `[assembly: UseElarionEntityFrameworkCore(Provider = EfCoreProvider.Npgsql)]` and a uniform-direction multi-column keyset it emits a PostgreSQL row-value seek (`EF.Functions.GreaterThan`/`LessThan` over `ValueTuple`s), otherwise it falls back to the portable lexicographic predicate.
 - `@swimmesberger/elarion-jsonrpc-client-generator` — TypeScript CLI/library that converts exported Elarion JSON-RPC schemas into method contracts, Zod result schemas, and a portable fetch client. Lives in `src/elarion-jsonrpc-client-generator`.
 
 ## Architecture boundaries
@@ -39,7 +40,7 @@ and deployment quirks belong in consuming repositories, not here.
 - `Elarion.JsonRpc` owns JSON-RPC runtime contracts, dispatch, telemetry, and schema export, and must stay transport-neutral (no ASP.NET Core dependency).
 - `Elarion.AspNetCore` owns HTTP/JSON-RPC endpoint integration and ASP.NET Core-specific behavior. Keep JSON-RPC runtime contracts, telemetry, and schema export in `Elarion.JsonRpc`.
 - `Elarion.AspNetCore.Mcp` owns MCP transport integration only; the dedicated-dispatcher wrapper (`McpDispatcher`) lives in `Elarion.JsonRpc`, and the `RpcTransports` flag plus `[McpMethod]`/`[RpcMethod]` attributes live in `Elarion.Abstractions`.
-- EF Core packages own only EF-specific marker APIs and source generation.
+- EF Core packages own only EF-specific marker APIs, pagination primitives, and source generation. Keep `Elarion.EntityFrameworkCore` dependency-free (markers only); EF Core-dependent runtime such as the pagination execution helpers belongs in `Elarion.EntityFrameworkCore.Paging`, while provider-neutral pagination contracts (`Page<T>`, keyset/offset requests) stay in `Elarion.Abstractions`.
 - Prefer compile-time generation over runtime reflection scanning. Source generators should emit deterministic, inspectable code and fail with diagnostics for unsupported patterns.
 - Preserve trimming and AOT friendliness on framework code paths. Avoid hidden runtime discovery and APIs that undermine linker safety.
 
