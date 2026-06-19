@@ -40,6 +40,16 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
     private const string UnmatchedModuleName = "<Unmatched>";
 
+    private static readonly DiagnosticDescriptor SharedModuleNamespace = new(
+        id: "ELMOD001",
+        title: "Multiple app modules share a namespace",
+        messageFormat:
+        "Modules '{0}' and '{1}' share namespace '{2}'; generated transport handlers in that namespace are "
+        + "associated with the alphabetically first matching module",
+        category: "Elarion.Modules",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     private sealed record ClassTarget(string? Namespace, string ClassName);
 
     private sealed record ModuleEntry(
@@ -108,7 +118,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
             var (target, compilation) = source;
-            var entries = CollectModuleEntries(compilation, spc.CancellationToken);
+            var entries = CollectModuleEntries(compilation, spc.ReportDiagnostic, spc.CancellationToken);
             var sorted = TopologicalSort(entries);
 
             var transport = CollectTransportMaps(compilation, entries, spc);
@@ -145,7 +155,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         var rpcByModule = new Dictionary<string, List<RpcMethodEmission.Model>>(StringComparer.Ordinal);
         var unmatchedRpc = new List<RpcMethodEmission.Model>();
-        foreach (var entry in RpcMethodEmission.Collect(compilation, ct))
+        foreach (var entry in RpcMethodEmission.Collect(compilation, spc.ReportDiagnostic, ct))
         {
             var module = FindBestModule(entry.HandlerNamespace, modules);
             if (module is null)
@@ -198,6 +208,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
     private static List<ModuleEntry> CollectModuleEntries(
         Compilation compilation,
+        Action<Diagnostic> report,
         CancellationToken ct)
     {
         var attributeType = compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
@@ -226,7 +237,25 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         entries.Sort(static (a, b) =>
             string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal));
 
+        ReportSharedModuleNamespaces(entries, report);
+
         return entries;
+    }
+
+    private static void ReportSharedModuleNamespaces(IEnumerable<ModuleEntry> entries, Action<Diagnostic> report)
+    {
+        var byNamespace = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            if (byNamespace.TryGetValue(entry.Namespace, out var existing))
+            {
+                report(Diagnostic.Create(SharedModuleNamespace, Location.None, existing, entry.ModuleName, entry.Namespace));
+            }
+            else
+            {
+                byNamespace[entry.Namespace] = entry.ModuleName;
+            }
+        }
     }
 
     private static void CollectFromNamespace(

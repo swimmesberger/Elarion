@@ -212,6 +212,26 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_WarnsWhenModulesShareNamespace() {
+        const string modulesSource =
+            """
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Inventory {
+                [AppModule("Inventory")]
+                public static class InventoryModule { }
+
+                [AppModule("Catalog")]
+                public static class CatalogModule { }
+            }
+            """;
+
+        var diagnostics = RunGeneratorDiagnostics(modulesSource);
+
+        diagnostics.Should().Contain(d => d.Id == "ELMOD001" && d.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
     public void Bootstrapper_GeneratedCodeCompiles() {
         RunGenerator(out var compilationWithGenerated);
 
@@ -281,6 +301,26 @@ public sealed class ModuleBootstrapperTransportTests {
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), "ModuleBootstrapper.g.cs", StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
+
+    private static IReadOnlyList<Diagnostic> RunGeneratorDiagnostics(string modulesSource) {
+        var modulesReference = CompileToImage(modulesSource, "Sample.Modules");
+
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var hostTree = CSharpSyntaxTree.ParseText(HostSource, parseOptions);
+        var references = CreateMetadataReferences().Append(modulesReference).ToArray();
+        var hostCompilation = CSharpCompilation.Create(
+            "Host",
+            [hostTree],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new AppModuleDiscoveryGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        driver = driver.RunGenerators(hostCompilation, TestContext.Current.CancellationToken);
+
+        return driver.GetRunResult().Diagnostics;
     }
 
     private static MetadataReference CompileToImage(string source, string assemblyName) {
