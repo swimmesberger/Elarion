@@ -16,6 +16,7 @@
     "scheduling",
     "resilience",
     "entity-framework",
+    "blob-storage",
     "telemetry",
     "---Reference---",
     "reference"

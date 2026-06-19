@@ -13,6 +13,8 @@ infrastructure stay in consuming projects.
 | --- | --- | --- |
 | `Elarion.Abstractions` | Implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers. | Application-level abstractions without provider-specific dependencies. |
 | `Elarion` | Runtime primitives: handler caches, decorators, modules, resilience runtime, current-user access, and the in-memory scheduler. | `Elarion.Abstractions`; avoids ASP.NET Core, EF Core, and transport concerns. |
+| `Elarion.Blobs` | Provider-neutral blob storage contracts and DTOs. | No provider-specific storage dependencies. |
+| `Elarion.Blobs.PostgreSql` | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O. | `Elarion.Blobs`, EF Core relational APIs, and Npgsql. |
 | `Elarion.Generators` | Roslyn generators for handlers, validators, services, modules, RPC method maps, resilience policies, and scheduled jobs. | Analyzer-only reference (`netstandard2.0`). |
 | `Elarion.JsonRpc` | Transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and the RPC method-map trigger. | `System.Text.Json` and Microsoft logging abstractions. |
 | `Elarion.AspNetCore` | ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport. | ASP.NET Core abstractions plus `Elarion.JsonRpc`. |
@@ -34,6 +36,7 @@ The package split enforces clean dependencies:
 - Core framework packages stay reusable and domain-neutral — they never reference a consuming app.
 - `Elarion.Abstractions` does not depend on runtime integration packages.
 - `Elarion` may depend on abstractions but avoids ASP.NET Core, EF Core, and transport specifics.
+- `Elarion.Blobs` stays provider-neutral; `Elarion.Blobs.PostgreSql` owns PostgreSQL-specific dependencies and schema configuration.
 - `Elarion.JsonRpc` owns JSON-RPC runtime contracts and schema export without ASP.NET Core.
 - `Elarion.AspNetCore` owns HTTP/JSON-RPC integration.
 - `Elarion.AspNetCore.Mcp` is the only package that references the `ModelContextProtocol` SDK; the
@@ -46,6 +49,6 @@ The package split enforces clean dependencies:
 
 | Project | References |
 | --- | --- |
-| Application library | `Elarion` + `Elarion.Generators` (analyzer); optionally `Elarion.EntityFrameworkCore` + its generator. |
-| ASP.NET Core host | `Elarion.JsonRpc`, `Elarion.AspNetCore`, `Elarion.Generators` (analyzer); optionally `Elarion.AspNetCore.SchemaGeneration` (build tooling) and `Elarion.AspNetCore.Mcp` (MCP server). |
+| Application library | `Elarion` + `Elarion.Generators` (analyzer); optionally `Elarion.Blobs`, `Elarion.EntityFrameworkCore` + its generator. |
+| ASP.NET Core host | `Elarion.JsonRpc`, `Elarion.AspNetCore`, `Elarion.Generators` (analyzer); optionally `Elarion.Blobs.PostgreSql`, `Elarion.AspNetCore.SchemaGeneration` (build tooling), and `Elarion.AspNetCore.Mcp` (MCP server). |
 | Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`. |

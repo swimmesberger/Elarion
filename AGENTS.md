@@ -19,6 +19,8 @@ and deployment quirks belong in consuming repositories, not here.
 
 - `Elarion.Abstractions` — implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers.
 - `Elarion` — runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, and the in-memory scheduler.
+- `Elarion.Blobs` — implementation-neutral blob storage contracts and DTOs.
+- `Elarion.Blobs.PostgreSql` — PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O.
 - `Elarion.JsonRpc` — transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and the RPC method-map trigger attribute.
 - `Elarion.AspNetCore` — ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport support.
 - `Elarion.AspNetCore.SchemaGeneration` — MSBuild package and host-launching tool for generating JSON-RPC schemas during build.
@@ -32,6 +34,7 @@ and deployment quirks belong in consuming repositories, not here.
 - Core framework packages must stay reusable and domain-neutral. Do not add consuming-application names, domain logic, deployment conventions, or app-specific dependencies.
 - `Elarion.Abstractions` must not depend on runtime integration packages.
 - `Elarion` may depend on abstractions but should avoid ASP.NET Core, EF Core, and transport-specific concerns.
+- `Elarion.Blobs` must stay provider-neutral. Provider implementations such as `Elarion.Blobs.PostgreSql` own storage-specific dependencies and schema configuration.
 - `Elarion.JsonRpc` owns JSON-RPC runtime contracts, dispatch, telemetry, and schema export, and must stay transport-neutral (no ASP.NET Core dependency).
 - `Elarion.AspNetCore` owns HTTP/JSON-RPC endpoint integration and ASP.NET Core-specific behavior. Keep JSON-RPC runtime contracts, telemetry, and schema export in `Elarion.JsonRpc`.
 - EF Core packages own only EF-specific marker APIs and source generation.

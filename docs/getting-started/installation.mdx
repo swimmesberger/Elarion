@@ -19,6 +19,8 @@ client generation. You only install the pieces you use.
 | --- | --- | --- |
 | `Elarion.Abstractions` | Application | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
 | `Elarion` | Application / host | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user abstraction. |
+| `Elarion.Blobs` | Application | Provider-neutral blob storage contracts and DTOs. |
+| `Elarion.Blobs.PostgreSql` | Infrastructure / host | PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O. |
 | `Elarion.Generators` | Application (analyzer) | Roslyn generators for handlers, services, validators, modules, RPC maps, resilience policies, and scheduled jobs. |
 | `Elarion.JsonRpc` | Host | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
 | `Elarion.AspNetCore` | Host | ASP.NET Core JSON-RPC endpoint mapping, batch execution, and current-user middleware. |

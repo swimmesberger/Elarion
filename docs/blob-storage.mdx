@@ -1,0 +1,131 @@
+---
+title: Blob storage
+description: Store binary content behind provider-neutral contracts, with an optional PostgreSQL-backed implementation.
+icon: Archive
+---
+
+Elarion's blob packages give application handlers a small, provider-neutral storage contract while
+keeping database-specific concerns in the host or infrastructure layer. Application code depends on
+`Elarion.Blobs`; the host chooses a provider such as `Elarion.Blobs.PostgreSql`.
+
+Use blob storage for files that should be addressed by reference from your domain model: generated
+documents, uploads, exports, attachments, and other binary content. Store the returned `BlobRef.Value`
+on your own entities rather than embedding file bytes in handler responses or domain rows.
+
+## Package split
+
+| Package | Use it in | Contains |
+| --- | --- | --- |
+| `Elarion.Blobs` | Application code | `IBlobStore`, `BlobRef`, `BlobMetadata`, and `BlobContent`. No provider dependency. |
+| `Elarion.Blobs.PostgreSql` | Infrastructure / host | `PostgreSqlBlobStore<TDbContext>`, DI registration, and EF Core model configuration for PostgreSQL. |
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.Blobs" Version="0.1.0" />
+  <PackageReference Include="Elarion.Blobs.PostgreSql" Version="0.1.0" />
+</ItemGroup>
+```
+
+If your solution separates application and infrastructure projects, put `Elarion.Blobs` in the
+application project and `Elarion.Blobs.PostgreSql` only where the concrete `DbContext` is configured.
+
+## Application contract
+
+Inject `IBlobStore` into handlers or services that need binary storage:
+
+```csharp
+using Elarion.Abstractions;
+using Elarion.Blobs;
+
+public sealed class UploadAttachment(IBlobStore blobs)
+    : IHandler<UploadAttachment.Command, Result<UploadAttachment.Response>> {
+    public sealed record Command(string FileName, string ContentType, byte[] Data);
+    public sealed record Response(string BlobId);
+
+    public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        var blobRef = await blobs.SaveAsync(
+            container: "attachments",
+            name: command.FileName,
+            contentType: command.ContentType,
+            content: command.Data,
+            cancellationToken: ct);
+
+        return new Response(blobRef.Value);
+    }
+}
+```
+
+`IBlobStore` supports:
+
+| Method | Purpose |
+| --- | --- |
+| `SaveAsync` | Stores bytes and returns a `BlobRef`. |
+| `SaveFromFileAsync` | Stores content from a local file path. |
+| `GetAsync` | Loads metadata plus bytes. |
+| `GetMetadataAsync` | Loads metadata without content bytes. |
+| `ExistsAsync` | Checks whether a reference exists. |
+| `DeleteAsync` | Deletes a referenced blob. |
+
+The PostgreSQL implementation replaces an existing blob when `container` and `name` match, preserving
+the blob id while updating content type, size, timestamp, and bytes.
+
+## PostgreSQL setup
+
+Configure the provider in the concrete EF Core context:
+
+```csharp
+using Elarion.Blobs.PostgreSql;
+using Microsoft.EntityFrameworkCore;
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.UsePostgreSqlBlobStorage();
+    }
+}
+```
+
+Then register the store in the host:
+
+```csharp
+using Elarion.Blobs.PostgreSql;
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
+
+builder.Services.AddPostgreSqlBlobStore<AppDbContext>();
+```
+
+`UsePostgreSqlBlobStorage()` adds two tables to the EF Core model:
+
+| Table | Purpose |
+| --- | --- |
+| `stored_blobs` | Metadata: id, container, name, content type, size, and created timestamp. |
+| `blob_contents` | Content bytes keyed by blob id, with cascade delete from `stored_blobs`. |
+
+Create and apply a normal EF Core migration after adding the model configuration.
+
+## Reading and deleting
+
+Store only blob ids in your own entities or DTOs, then reconstruct `BlobRef` at read time:
+
+```csharp
+var blob = await blobs.GetAsync(new BlobRef { Value = attachment.BlobId }, ct);
+if (blob is null) {
+    return AppError.NotFound($"Attachment {attachment.Id} was not found.");
+}
+
+return new DownloadAttachment.Response(
+    blob.Name,
+    blob.ContentType,
+    blob.Data);
+```
+
+Use `GetMetadataAsync` when you only need filename, content type, or size for a listing. Use
+`DeleteAsync` when the owning record is removed and the blob should not be retained.
+
+## Boundaries
+
+`Elarion.Blobs` deliberately does not mention PostgreSQL, EF Core, ASP.NET Core, HTTP uploads, or any
+application-specific file categories. Provider packages own storage schema and I/O details; handlers
+should depend only on `IBlobStore` unless they are part of infrastructure composition.
