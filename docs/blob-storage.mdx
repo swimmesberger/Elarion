@@ -103,7 +103,28 @@ builder.Services.AddPostgreSqlBlobStore<AppDbContext>();
 | `stored_blobs` | Metadata: id, container, name, content type, size, and created timestamp. |
 | `blob_contents` | Content bytes keyed by blob id, with cascade delete from `stored_blobs`. |
 
-Create and apply a normal EF Core migration after adding the model configuration.
+The blob entities are plain EF Core types configured by `UsePostgreSqlBlobStorage()`; they are
+**not** part of Elarion's `[DbEntity]` / `[GenerateDbSets]` source generation. Because the
+configuration runs inside your own `OnModelCreating`, the tables become part of your context's model
+and ride along with your normal migrations — there is no separate "blob migration" to manage.
+
+### Schema migration
+
+After adding `UsePostgreSqlBlobStorage()` to your context, create and apply a migration the usual way:
+
+```bash
+dotnet ef migrations add AddBlobStorage
+dotnet ef database update
+```
+
+The generated migration includes `stored_blobs`, `blob_contents`, the unique `(container, name)`
+index, and the cascade foreign key. For throwaway or test databases you can call
+`dbContext.Database.EnsureCreated()` instead of migrating, but use migrations for any schema that
+will evolve.
+
+The store talks to PostgreSQL directly for content bytes (it casts the context's connection to
+`NpgsqlConnection`), so the owning context must be configured with `UseNpgsql` — see the
+registration above.
 
 ## Reading and deleting
 
