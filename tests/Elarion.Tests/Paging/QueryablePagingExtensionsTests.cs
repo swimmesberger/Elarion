@@ -149,8 +149,8 @@ public sealed class QueryablePagingExtensionsTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static SortMap<TestEntity> DefaultSort =>
-        SortMap<TestEntity>.Create("createdAt", e => e.CreatedAt).Add("name", e => e.Name);
+    private static readonly SortMap<TestEntity> DefaultSort =
+        SortMap<TestEntity>.CreateBuilder("createdAt", e => e.CreatedAt).Add("name", e => e.Name).Build();
 
     private static readonly Expression<Func<TestEntity, TestDto>> Project = e => new TestDto(e.Id, e.Name);
 
