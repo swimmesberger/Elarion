@@ -14,6 +14,8 @@ minor releases may include breaking changes.
   reference material.
 - Dedicated documentation for handler caching (`[Cacheable]`, `[CacheInvalidate]`) and current-user
   access (`ICurrentUser`).
+- Provider-neutral blob storage contracts and a PostgreSQL-backed blob storage package with EF Core
+  model configuration.
 - Project health files: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, this changelog, and
   GitHub issue/PR templates.
 - Project logo and icon.
