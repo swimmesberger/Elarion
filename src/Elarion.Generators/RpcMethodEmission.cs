@@ -49,119 +49,71 @@ internal static class RpcMethodEmission
         IReadOnlyList<ParameterDescription> Parameters
     );
 
-    /// <summary>Scans referenced assemblies for <c>[RpcMethod]</c> handlers, sorted by method name.</summary>
-    public static List<Model> Collect(Compilation compilation, CancellationToken ct) =>
-        Collect(compilation, null, ct);
-
-    /// <summary>Scans referenced assemblies for <c>[RpcMethod]</c> handlers, sorted by method name.</summary>
-    public static List<Model> Collect(Compilation compilation, Action<Diagnostic>? report, CancellationToken ct)
-    {
-        var attributeType = compilation.GetTypeByMetadataName(RpcMethodAttributeMetadataName);
-        if (attributeType is null)
-            return [];
-
-        var mcpMethodType = compilation.GetTypeByMetadataName(McpMethodAttributeMetadataName);
-        var descriptionType = compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
-
-        var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
-        var entries = new List<Model>();
-
-        foreach (var reference in compilation.References)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
-                continue;
-
-            CollectFromNamespace(
-                assembly.GlobalNamespace,
-                attributeType,
-                mcpMethodType,
-                descriptionType,
-                fmt,
-                entries,
-                report,
-                ct);
-        }
-
-        entries.Sort(static (a, b) => string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal));
-
-        return entries;
-    }
-
     /// <summary>Emits a single statement-style <c>MapHandler</c> registration onto <paramref name="dispatcherVar"/>.</summary>
     public static void AppendMapHandler(StringBuilder sb, Model entry, string indent, string dispatcherVar) =>
         sb.AppendLine(
             $"{indent}{dispatcherVar}.MapHandler<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>({Literal(entry.MethodName)});");
 
-    private static void CollectFromNamespace(
-        INamespaceSymbol ns,
-        INamedTypeSymbol attributeType,
+    public static bool TryCreateModel(
+        INamedTypeSymbol type,
+        AttributeData attr,
         INamedTypeSymbol? mcpMethodType,
         INamedTypeSymbol? descriptionType,
         SymbolDisplayFormat fmt,
-        List<Model> entries,
         Action<Diagnostic>? report,
-        CancellationToken ct)
+        CancellationToken ct,
+        out Model? model)
     {
-        ct.ThrowIfCancellationRequested();
+        model = null;
 
-        foreach (var type in ns.GetTypeMembers())
-        foreach (var attr in type.GetAttributes())
+        if (attr.ConstructorArguments.Length == 0)
+            return false;
+
+        if (attr.ConstructorArguments[0].Value is not string methodName)
+            return false;
+
+        var (onJsonRpc, onMcp) = ReadTransports(attr);
+
+        INamedTypeSymbol? requestType = null;
+        INamedTypeSymbol? responseType = null;
+
+        foreach (var member in type.GetTypeMembers())
         {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, attributeType))
-                continue;
-            if (attr.ConstructorArguments.Length == 0)
-                continue;
+            ct.ThrowIfCancellationRequested();
 
-            if (attr.ConstructorArguments[0].Value is not string methodName)
-                continue;
-
-            var (onJsonRpc, onMcp) = ReadTransports(attr);
-
-            INamedTypeSymbol? requestType = null;
-            INamedTypeSymbol? responseType = null;
-
-            foreach (var member in type.GetTypeMembers())
-            {
-                ct.ThrowIfCancellationRequested();
-
-                if (member.Name is "Command" or "Query")
-                    requestType = member;
-                else if (member.Name == "Response")
-                    responseType = member;
-            }
-
-            if (requestType is null || responseType is null)
-                continue;
-
-            var (toolName, hasMcpMethod) = ReadMcpMethod(type, mcpMethodType);
-            if (hasMcpMethod && !onMcp)
-            {
-                report?.Invoke(Diagnostic.Create(
-                    McpCustomizationIgnored,
-                    Location.None,
-                    type.ToDisplayString(),
-                    methodName));
-            }
-
-            var description = GetDescription(type, descriptionType);
-            var parameters = CollectParameterDescriptions(requestType, descriptionType);
-
-            entries.Add(new Model(
-                methodName,
-                type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
-                requestType.ToDisplayString(fmt),
-                responseType.ToDisplayString(fmt),
-                toolName,
-                onJsonRpc,
-                onMcp,
-                description,
-                parameters));
+            if (member.Name is "Command" or "Query")
+                requestType = member;
+            else if (member.Name == "Response")
+                responseType = member;
         }
 
-        foreach (var sub in ns.GetNamespaceMembers())
-            CollectFromNamespace(sub, attributeType, mcpMethodType, descriptionType, fmt, entries, report, ct);
+        if (requestType is null || responseType is null)
+            return false;
+
+        var (toolName, hasMcpMethod) = ReadMcpMethod(type, mcpMethodType);
+        if (hasMcpMethod && !onMcp)
+        {
+            report?.Invoke(Diagnostic.Create(
+                McpCustomizationIgnored,
+                Location.None,
+                type.ToDisplayString(),
+                methodName));
+        }
+
+        var description = GetDescription(type, descriptionType);
+        var parameters = CollectParameterDescriptions(requestType, descriptionType);
+
+        model = new Model(
+            methodName,
+            type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
+            requestType.ToDisplayString(fmt),
+            responseType.ToDisplayString(fmt),
+            toolName,
+            onJsonRpc,
+            onMcp,
+            description,
+            parameters);
+        return true;
     }
 
     // RpcTransports flags: JsonRpc = 1, Mcp = 2, All = 3 (default when the named argument is absent).

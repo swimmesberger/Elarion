@@ -11,7 +11,7 @@ namespace Elarion.Tests.Generators;
 /// per-module <c>Map{Module}Http</c> / <c>Add{Module}JsonRpc</c> / <c>Add{Module}Mcp</c> / <c>Get{Module}McpMetadata</c>
 /// methods, gated aggregates (<c>MapAllEndpoints</c> / <c>RegisterRpcMethods</c> / <c>RegisterMcpMethods</c> /
 /// <c>GetMcpMetadata</c>), per-handler transport surface selection, and core modules always mapped. Handlers and
-/// modules live in a referenced image (the generator scans references, not the current compilation).
+/// modules live in referenced images and are consumed from generated Elarion manifest metadata.
 /// </summary>
 public sealed class ModuleBootstrapperTransportTests {
     private const string ModulesSource =
@@ -182,6 +182,8 @@ public sealed class ModuleBootstrapperTransportTests {
             """
             using System.Threading;
             using System.Threading.Tasks;
+            using System.Threading;
+            using System.Threading.Tasks;
             using Elarion.Abstractions;
             using Elarion.Abstractions.Modules;
 
@@ -232,6 +234,23 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_ConsumesReferencedAssemblyManifest() {
+        var manifestReference = CompileToImage(ManifestOnlySource(), "Sample.ManifestOnly");
+
+        var generated = RunGenerator([manifestReference], out var compilationWithGenerated);
+
+        generated.Should().Contain("MapManifestHttp(endpoints);");
+        generated.Should().Contain("AddManifestJsonRpc(dispatcher);");
+        generated.Should().Contain("AddManifestMcp(dispatcher);");
+        generated.Should().Contain("app.MapGet(\"manifest\",");
+        generated.Should().Contain(
+            "dispatcher.MapHandler<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\");");
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_GeneratedCodeCompiles() {
         RunGenerator(out var compilationWithGenerated);
 
@@ -277,10 +296,13 @@ public sealed class ModuleBootstrapperTransportTests {
 
     private static string RunGenerator(string modulesSource, out Compilation compilationWithGenerated) {
         var modulesReference = CompileToImage(modulesSource, "Sample.Modules");
+        return RunGenerator([modulesReference], out compilationWithGenerated);
+    }
 
+    private static string RunGenerator(IReadOnlyList<MetadataReference> moduleReferences, out Compilation compilationWithGenerated) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var hostTree = CSharpSyntaxTree.ParseText(HostSource, parseOptions);
-        var references = CreateMetadataReferences().Append(modulesReference).ToArray();
+        var references = CreateMetadataReferences().Concat(moduleReferences).ToArray();
         var hostCompilation = CSharpCompilation.Create(
             "Host",
             [hostTree],
@@ -301,6 +323,77 @@ public sealed class ModuleBootstrapperTransportTests {
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), "ModuleBootstrapper.g.cs", StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
+
+    private static string ManifestOnlySource() {
+        var module = EncodeFields(
+            "Manifest",
+            "ManifestOnly",
+            "global::ManifestOnly.ManifestModule",
+            null,
+            "0",
+            "0",
+            "0",
+            "0");
+        var http = EncodeFields(
+            "ManifestOnly.GetManifest",
+            "ManifestOnly",
+            "global::ManifestOnly.GetManifest.Query",
+            "global::ManifestOnly.GetManifest.Response",
+            "manifest",
+            "Get",
+            "1",
+            "0",
+            "0",
+            null);
+        var rpc = EncodeFields(
+            "manifest.get",
+            "ManifestOnly",
+            "global::ManifestOnly.GetManifest.Query",
+            "global::ManifestOnly.GetManifest.Response",
+            null,
+            "1",
+            "1",
+            null,
+            string.Empty);
+
+        return $$"""
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.HttpEndpoint.v1", "{{http}}")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
+
+            namespace ManifestOnly;
+
+            public static class ManifestModule { }
+
+            public sealed class GetManifest : IHandler<GetManifest.Query, Result<GetManifest.Response>> {
+                public sealed record Query { public required System.Guid Id { get; init; } }
+                public sealed record Response(string Name);
+                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Response>>(new Response("manifest"));
+            }
+            """;
+    }
+
+    private static string EncodeFields(params string?[] fields) {
+        var result = new System.Text.StringBuilder();
+        foreach (var field in fields) {
+            if (field is null) {
+                result.Append("-1:");
+                continue;
+            }
+
+            result.Append(field.Length);
+            result.Append(':');
+            result.Append(field);
+        }
+
+        return result.ToString();
     }
 
     private static IReadOnlyList<Diagnostic> RunGeneratorDiagnostics(string modulesSource) {
@@ -324,14 +417,25 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     private static MetadataReference CompileToImage(string source, string assemblyName) {
-        var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview));
-        var compilation = CSharpCompilation.Create(
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
+        Compilation compilation = CSharpCompilation.Create(
             assemblyName,
             [tree],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         compilation.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new ElarionManifestGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(
+            compilation, out compilation, out var diagnostics, TestContext.Current.CancellationToken);
+
+        diagnostics
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
