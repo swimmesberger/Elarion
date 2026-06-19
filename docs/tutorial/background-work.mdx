@@ -256,6 +256,15 @@ public sealed class CreateInvoiceValidator : AbstractValidator<CreateInvoice.Com
 The frontend wants to show "Sending…", "Sent", or "Retrying". Expose the scheduler's in-memory state
 through `IJobSchedulerInspector` as a plain query.
 
+The query takes the **`JobId`** the create handler returned — not the `RunId`. That distinction
+matters here: `JobId` identifies the *logical* "send this invoice's email" operation and stays stable
+across every deferred-retry attempt, while each attempt gets its own `RunId`. `GetJob(jobId)` returns
+the aggregate state — `WaitingRetry` between attempts, `Succeeded` only once an attempt actually
+delivers, `Failed` once retries are exhausted — which is exactly what a caller asking "is the whole
+send done yet?" needs. `RunId` is for operator/diagnostic tooling acting on one specific attempt from
+a [snapshot](/docs/scheduling/inspection); polling it would lose the handle the moment a retry starts
+a new run. See [JobId vs. RunId](/docs/scheduling/runtime-jobs#jobid-vs-runid).
+
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/GetSendStatus.cs"
 using Billing.Application.Pipeline;
 using Elarion.Abstractions;
