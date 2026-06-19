@@ -61,6 +61,7 @@ public sealed class ElarionMcpEndToEndTests {
                 },
             ]),
             Options,
+            d => d.MapHandler<EchoCommand, EchoResponse>("echo"),
             o => o.ServerName = "Test");
 
         await using var app = builder.Build();

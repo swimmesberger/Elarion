@@ -11,10 +11,9 @@ endpoints, and telemetry. None of this leaks back into the modules.
 
 <Step>
 
-### Add the generated host partials
+### Add the generated host partial
 
-Two partial classes tell the generators to emit the cross-module wiring and the RPC map **in the host
-assembly**.
+One partial class tells the generator to emit the cross-module wiring **in the host assembly**.
 
 ```csharp title="src/Billing.Api/Hosting/ModuleBootstrapper.cs"
 using Elarion.AspNetCore;
@@ -25,20 +24,9 @@ namespace Billing.Api.Hosting;
 public static partial class ModuleBootstrapper;
 ```
 
-```csharp title="src/Billing.Api/Rpc/RpcMethodMap.cs"
-using Elarion.JsonRpc;
-
-namespace Billing.Api.Rpc;
-
-[GenerateRpcMethodMap]
-public static partial class RpcMethodMap {
-    public static partial JsonRpcDispatcher RegisterAll(JsonRpcDispatcher dispatcher);
-}
-```
-
-`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints`, and
-`GetAllJsonTypeInfoResolvers`. `RpcMethodMap` gains `RegisterAll` (every `[RpcMethod]` handler) and
-`McpMetadata()` (the tool table for MCP).
+`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods` (JSON-RPC),
+`RegisterMcpMethods` and `GetMcpMetadata` (MCP), and `GetAllJsonTypeInfoResolvers`. Every transport is
+**feature-flag-gated per module**, so a disabled module disappears from all of them at once.
 
 </Step>
 
@@ -71,7 +59,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Billing.Api.Hosting;
-using Billing.Api.Rpc;
 using Billing.Application;
 using Billing.Application.Modules.Invoicing.Services;
 using Billing.Infrastructure.Data;
@@ -128,14 +115,17 @@ builder.Services.AddAuthorization();
 // Compose every module's services (handlers, services, validators).
 ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
 
-// JSON-RPC: one serializer for runtime dispatch and schema export.
+// JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
+builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
 
-// MCP: one tool per [RpcMethod] handler, sharing the same dispatcher.
+// MCP: an independent, equally gated transport with its own dispatcher.
 builder.Services.AddElarionMcp(
-    RpcMethodMap.McpMetadata(), serializerOptions, o => o.ServerName = "Billing");
+    ModuleBootstrapper.GetMcpMetadata(builder.Configuration),
+    serializerOptions,
+    ModuleBootstrapper.RegisterMcpMethods,
+    o => o.ServerName = "Billing");
 
 // Telemetry: register the Elarion sources/meters; the host owns the exporters.
 builder.Services.AddOpenTelemetry()
@@ -194,9 +184,9 @@ static JsonSerializerOptions CreateSerializerOptions(IConfiguration configuratio
 ```
 
 <Callout type="info">
-  The **same** `serializerOptions` instance flows into the dispatcher, the MCP server, and schema
-  export — so the generated TypeScript types match exactly what the server serializes. `MapElarionMcp()`
-  only needs the dispatcher singleton; you could expose MCP without ever calling `MapJsonRpc()`.
+  The **same** `serializerOptions` instance flows into the JSON-RPC dispatcher, the MCP server, and schema
+  export — so the generated TypeScript types match exactly what the server serializes. MCP owns its own
+  dispatcher, so you could expose it without ever calling `MapJsonRpc()`.
 </Callout>
 
 Add the scheduler section to configuration so the in-memory runtime is enabled:

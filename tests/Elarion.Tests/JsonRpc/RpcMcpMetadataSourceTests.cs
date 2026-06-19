@@ -16,7 +16,7 @@ public sealed class RpcMcpMetadataSourceTests {
                 Description = "Creates a client.",
                 Parameters = [new RpcMcpParameterDescriptor("DisplayName", "The name.")],
             },
-            new RpcMcpMethodMetadata { MethodName = "admin.purge", RequestType = typeof(object), Enabled = false },
+            new RpcMcpMethodMetadata { MethodName = "admin.purge", RequestType = typeof(object) },
         ]);
 
         source.Get("clients.create").Should().NotBeNull();
@@ -24,16 +24,14 @@ public sealed class RpcMcpMetadataSourceTests {
         source.Get("clients.create")!.ToolName.Should().Be("create_client");
         source.Get("clients.create")!.Parameters.Should().ContainSingle()
             .Which.PropertyName.Should().Be("DisplayName");
-        source.Get("admin.purge")!.Enabled.Should().BeFalse();
         source.Get("does.not.exist").Should().BeNull();
         source.All.Should().HaveCount(2);
     }
 
     [Fact]
-    public void RpcMcpMethodMetadata_DefaultsEnabledTrueWithNoParameters() {
+    public void RpcMcpMethodMetadata_DefaultsToNoParametersOrOverrides() {
         var metadata = new RpcMcpMethodMetadata { MethodName = "x.y", RequestType = typeof(object) };
 
-        metadata.Enabled.Should().BeTrue();
         metadata.Parameters.Should().BeEmpty();
         metadata.ToolName.Should().BeNull();
         metadata.Description.Should().BeNull();

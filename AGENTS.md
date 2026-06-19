@@ -20,10 +20,11 @@ and deployment quirks belong in consuming repositories, not here.
 - `Elarion.Abstractions` — implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers.
 - `Elarion` — runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, and the in-memory scheduler.
 - `Elarion.JsonRpc` — transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and the RPC method-map trigger attribute.
-- `Elarion.AspNetCore` — ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport support.
+- `Elarion.AspNetCore` — ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, HTTP transport support, and minimal-API endpoint mapping for `[HttpEndpoint]` handlers (`HttpAppErrorMapper`, `ElarionHttpResults`, the `[GenerateHttpEndpointMap]` trigger).
+- `Elarion.AspNetCore.Mcp` — Model Context Protocol (MCP) server integration: exposes MCP-surfaced `[RpcMethod]` handlers as tools over Streamable HTTP via a dedicated `McpDispatcher`, independent of the JSON-RPC endpoint (`AddElarionMcp`, `MapElarionMcp`). The only package referencing the `ModelContextProtocol` SDK.
 - `Elarion.AspNetCore.SchemaGeneration` — MSBuild package and host-launching tool for generating JSON-RPC schemas during build.
 - `Elarion.EntityFrameworkCore` — marker attributes for EF Core entity and DbSet generation.
-- `Elarion.Generators` — Roslyn source generators for handlers, validators, services, modules, RPC method maps, resilience policies, and scheduled jobs.
+- `Elarion.Generators` — Roslyn source generators for handlers, validators, services, modules, RPC method maps, HTTP endpoint maps, resilience policies, and scheduled jobs.
 - `Elarion.EntityFrameworkCore.Generators` — Roslyn generator for DbSet properties and entity configuration application.
 - `@swimmesberger/elarion-jsonrpc-client-generator` — TypeScript CLI/library that converts exported Elarion JSON-RPC schemas into method contracts, Zod result schemas, and a portable fetch client. Lives in `src/elarion-jsonrpc-client-generator`.
 
@@ -34,6 +35,7 @@ and deployment quirks belong in consuming repositories, not here.
 - `Elarion` may depend on abstractions but should avoid ASP.NET Core, EF Core, and transport-specific concerns.
 - `Elarion.JsonRpc` owns JSON-RPC runtime contracts, dispatch, telemetry, and schema export, and must stay transport-neutral (no ASP.NET Core dependency).
 - `Elarion.AspNetCore` owns HTTP/JSON-RPC endpoint integration and ASP.NET Core-specific behavior. Keep JSON-RPC runtime contracts, telemetry, and schema export in `Elarion.JsonRpc`.
+- `Elarion.AspNetCore.Mcp` owns MCP transport integration only; the dedicated-dispatcher wrapper (`McpDispatcher`) lives in `Elarion.JsonRpc`, and the `RpcTransports` flag plus `[McpMethod]`/`[RpcMethod]` attributes live in `Elarion.Abstractions`.
 - EF Core packages own only EF-specific marker APIs and source generation.
 - Prefer compile-time generation over runtime reflection scanning. Source generators should emit deterministic, inspectable code and fail with diagnostics for unsupported patterns.
 - Preserve trimming and AOT friendliness on framework code paths. Avoid hidden runtime discovery and APIs that undermine linker safety.
@@ -42,15 +44,72 @@ and deployment quirks belong in consuming repositories, not here.
 
 JSON-RPC is a first-class optional transport:
 
-1. Application handlers declare `[RpcMethod("module.action")]`.
+1. Application handlers declare `[RpcMethod("module.action")]`. The `Transports` flag (`RpcTransports.JsonRpc`/`Mcp`/`All`, default `All`) selects which dispatcher-based transports expose the handler — JSON-RPC, MCP, or both.
 2. `RpcMethodMapGenerator` emits dispatcher registration code.
 3. Hosts configure `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
 4. `Elarion.JsonRpc.JsonRpcSchemaExporter` or `Elarion.AspNetCore.SchemaGeneration` exports `rpc-schema.json` from registered methods.
 5. `elarion-jsonrpc-client-generator` emits `rpc-types.ts`, `rpc-schemas.ts`, and `rpc-client.ts`.
+6. When a host opts into `[GenerateModuleBootstrapper]`, RPC registration is **module-scoped and feature-flag-gated** — see [Module-aware transport gating](#module-aware-transport-gating).
 
 Generated TypeScript should remain portable across browser and Node.js server
 runtimes. Prefer standard `fetch`, injectable transport, `AbortSignal`, and small
 common dependencies such as Zod when they materially improve safety.
+
+## HTTP endpoint model
+
+Plain HTTP/REST is a parallel first-class optional transport that maps the same handlers:
+
+1. Application handlers declare `[HttpEndpoint("route")]` (verb inferred: nested `Command` → POST, `Query` → GET) or `[HttpEndpoint(HttpVerb.X, "route")]`.
+2. `HttpEndpointMapGenerator` emits a `MapAll(IEndpointRouteBuilder)` body of strongly-typed minimal-API registrations (one `MapGet`/`MapPost`/... per handler), triggered by `[GenerateHttpEndpointMap]` on a host partial class.
+3. Each emitted lambda binds the request (`[AsParameters]` for GET/DELETE and opt-in custom-bound requests; JSON body for default POST/PUT/PATCH) and translates `Result<T>` via `ElarionHttpResults` — `200`/`204` on success, RFC 7807 ProblemDetails on failure with the status from `HttpAppErrorMapper`.
+
+Keep the generator emitting concrete-typed lambdas (no open generics, no reflection
+binding) so output stays AOT/RDG friendly. The `[HttpEndpoint]` attribute lives in
+`Elarion.Abstractions` and must carry no ASP.NET dependency; per-property binding
+customization (`[FromRoute]`/`[FromHeader]`/`[FromForm]`/`IFormFile`, etc.) is the
+consuming DTO's opt-in via `Microsoft.AspNetCore.Http.Abstractions`, detected by the
+generator structurally through the `Microsoft.AspNetCore.Http.Metadata.IFrom*Metadata`
+interfaces and `IFormFile` types. When a host opts into `[GenerateModuleBootstrapper]`,
+HTTP mapping is **module-scoped and feature-flag-gated** — see
+[Module-aware transport gating](#module-aware-transport-gating).
+
+## MCP model
+
+MCP is a parallel first-class optional transport, a peer of JSON-RPC and HTTP, served by `Elarion.AspNetCore.Mcp`:
+
+1. A handler opts into MCP via its `[RpcMethod(Transports = ...)]` flag (default `All` includes MCP). `[McpMethod(ToolName = ...)]` customizes only the tool name — it carries no enable/disable flag (use `Transports` for that).
+2. `RpcMethodMapGenerator` emits `RegisterMcpAll(dispatcher)` (the MCP-surfaced registrations) and `McpMetadata()` (the reflection-free tool table), alongside the JSON-RPC `RegisterAll`.
+3. MCP owns a **dedicated dispatcher**: `McpDispatcher` (in `Elarion.JsonRpc`) wraps a separate `JsonRpcDispatcher` instance built only from MCP-surfaced methods. An MCP-only handler is therefore genuinely absent from `/rpc` and the exported JSON-RPC schema; a JSON-RPC-only handler is never dispatchable as a tool; a "both" handler is registered in both dispatchers.
+4. Hosts call `AddElarionMcp(metadata, serializerOptions, registerMcp, configure)` and `MapElarionMcp()`; `MapJsonRpc()` is never required. When a host opts into `[GenerateModuleBootstrapper]`, MCP registration is **module-scoped and feature-flag-gated** — see [Module-aware transport gating](#module-aware-transport-gating).
+
+REST stays a separate opt-in via `[HttpEndpoint]` (it needs route/verb/param binding that don't fit a flags enum); JSON-RPC and MCP share the single define-once `[RpcMethod]` identity and differ only by the `Transports` flag.
+
+## Module-aware transport gating
+
+All three transports become **module-scoped and feature-flag-gated** when a host opts in with
+`[GenerateModuleBootstrapper]`. `AppModuleDiscoveryGenerator` associates each `[RpcMethod]`/`[HttpEndpoint]`
+handler with a module by longest-prefix namespace match and emits, on the host bootstrapper partial:
+
+- per-module `Map{Module}Http(IEndpointRouteBuilder)`, `Add{Module}JsonRpc(JsonRpcDispatcher)`, `Add{Module}Mcp(JsonRpcDispatcher)`, and `Get{Module}McpMetadata()`;
+- aggregate `MapAllEndpoints(endpoints, configuration)` (module `MapEndpoints` + `[HttpEndpoint]`), `RegisterRpcMethods(dispatcher, configuration)`, `RegisterMcpMethods(dispatcher, configuration)`, and `GetMcpMetadata(configuration)`.
+
+Per-module JSON-RPC/MCP methods are additionally filtered by each handler's `Transports` flag, so the JSON-RPC
+dispatcher gets only JSON-RPC-surfaced handlers and the MCP dispatcher only MCP-surfaced ones. Core modules map
+unconditionally; feature modules are gated by `Modules:{Name}:Enabled` (via `IsModuleEnabled`), so a disabled
+module disappears across services, validators, `MapEndpoints`, `[HttpEndpoint]`, JSON-RPC, and MCP. Handlers
+whose namespace is under no module emit a warning (`ELHTTP003`/`ELRPC001`; MCP reuses `ELRPC001` since it is
+built on `[RpcMethod]`) and are mapped ungated so they are never silently dropped. The flat
+`HttpEndpointMap.MapAll` / `RpcMethodMap.RegisterAll` / `RpcMethodMap.RegisterMcpAll` maps stay the **ungated
+non-module path**, and `RegisterAll` remains what schema export reads for the complete contract (feature modules
+default to enabled, so the exported schema is complete unless a module is explicitly disabled at build time).
+
+Per-endpoint authorization/conventions are the host's job, via the per-module method on a configured group
+(e.g. `MapBillingHttp(app.MapGroup("/billing").RequireAuthorization(policy))`) plus the module
+`MapEndpoints` escape hatch — the generator never reads `[Authorize]`/`[AllowAnonymous]`. RPC/MCP gating needs
+`IConfiguration` at dispatcher-compose time, so `AddElarionJsonRpcDispatcher` (transport-neutral, via
+`IServiceProvider`) and `AddJsonRpc`/`AddElarionMcp` (ASP.NET, via `IConfiguration`) expose config-aware
+registration overloads, used as `AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods)` and
+`AddElarionMcp(ModuleBootstrapper.GetMcpMetadata(config), serializerOptions, ModuleBootstrapper.RegisterMcpMethods, configure)`.
 
 ## TypeScript client generator
 

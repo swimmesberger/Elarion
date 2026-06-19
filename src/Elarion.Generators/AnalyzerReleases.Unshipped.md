@@ -15,6 +15,7 @@ ELMCP002 | Elarion.Mcp | Warning | Duplicate MCP tool name under the default too
 ELHTTP001 | Elarion.Http | Warning | HTTP endpoint handler is missing a request/response shape
 ELHTTP002 | Elarion.Http | Warning | Duplicate HTTP endpoint route
 ELHTTP003 | Elarion.Http | Warning | HTTP endpoint handler is not in any module
+ELRPC001 | Elarion.JsonRpc | Warning | RPC method handler is not in any module
 WFRE001 | Elarion.Abstractions.Resilience | Error | Invalid resilience policy
 WFRE002 | Elarion.Abstractions.Resilience | Error | Duplicate resilience policy name
 WIMCACHE001 | Elarion.Abstractions.Caching | Error | Handler cannot be both cacheable and cache-invalidating

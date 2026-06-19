@@ -56,7 +56,9 @@ Feature modules are **enabled by default** and can be disabled with configuratio
 }
 ```
 
-When a module is disabled, its handlers, endpoints, JSON metadata, and scheduled jobs are not exposed.
+When a module is disabled, its handlers, `MapEndpoints` routes, generated `[HttpEndpoint]` routes,
+`[RpcMethod]` methods, JSON metadata, and scheduled jobs are all left unmapped — it disappears across
+every surface.
 
 ## Core modules
 
@@ -100,6 +102,18 @@ Use real endpoint conventions, filters, typed results, and route handler source 
 does not introduce a reduced endpoint facade. Keep host lifecycle concerns out of modules: a module
 should never call `builder.Build()`, `app.UseAuthentication()`, `app.MapJsonRpc()`, or configure
 concrete infrastructure providers. Those belong to the host.
+
+### Generated transport endpoints
+
+A module's handlers can also expose themselves over a transport with `[RpcMethod]`
+([JSON-RPC](/docs/json-rpc) and [MCP](/docs/json-rpc/mcp)) or `[HttpEndpoint]`
+([HTTP](/docs/http-endpoints)). A single `[RpcMethod]` covers both dispatcher transports; choose which ones
+with `[RpcMethod(Transports = ...)]` (default: both JSON-RPC and MCP). The generated module bootstrapper
+maps these the same way it calls `ConfigureServices` and `MapEndpoints`: each handler is associated with a
+module by namespace, and its route/method/tool is mapped only when the module is enabled. A feature module
+disabled with `Modules:{Name}:Enabled = false` therefore drops its generated routes, JSON-RPC methods, and
+MCP tools alongside its services. `MapEndpoints` stays the escape hatch when a module needs full control —
+custom authorization, conventions, or a hand-written route — over a specific endpoint.
 
 ## What stays in the host
 

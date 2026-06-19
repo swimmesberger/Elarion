@@ -176,9 +176,10 @@ public sealed partial class ClientsJsonContext : JsonSerializerContext;
 
 <Step>
 
-### Add the host bootstrapper and RPC map
+### Add the host bootstrapper
 
-In the host, two small partial classes tell the generators to emit the cross-module wiring.
+In the host, one small partial class tells the generator to emit the cross-module wiring — including the
+gated JSON-RPC registration, so disabling a module also removes its `[RpcMethod]` methods.
 
 ```csharp title="MyApp.Api/Hosting/ModuleBootstrapper.cs"
 using Elarion.AspNetCore;
@@ -187,17 +188,6 @@ namespace MyApp.Api.Hosting;
 
 [GenerateModuleBootstrapper]
 public static partial class ModuleBootstrapper;
-```
-
-```csharp title="MyApp.Api/Rpc/RpcMethodMap.cs"
-using Elarion.JsonRpc;
-
-namespace MyApp.Api.Rpc;
-
-[GenerateRpcMethodMap]
-public static partial class RpcMethodMap {
-    public static partial JsonRpcDispatcher RegisterAll(JsonRpcDispatcher dispatcher);
-}
 ```
 
 </Step>
@@ -213,7 +203,6 @@ owns infrastructure (here, the database provider); modules own application logic
 ```csharp title="MyApp.Api/Program.cs"
 using Microsoft.EntityFrameworkCore;
 using MyApp.Api.Hosting;
-using MyApp.Api.Rpc;
 using MyApp.Application;
 using MyApp.Application.Data;
 
@@ -233,9 +222,8 @@ var serializerOptions = new JsonSerializerOptions {
 };
 
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddJsonRpc(o => o.SerializerOptions = serializerOptions);
-builder.Services.AddSingleton(
-    RpcMethodMap.RegisterAll(new JsonRpcDispatcher(serializerOptions)).Freeze());
+// Gated dispatcher: only enabled modules' [RpcMethod] handlers are registered.
+builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
 
 var app = builder.Build();
 

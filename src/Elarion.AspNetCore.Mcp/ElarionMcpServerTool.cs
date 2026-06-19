@@ -41,7 +41,7 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
         // request.Services is the application root provider (not request-scoped); RpcToolInvoker scopes per call.
         var services = request.Services
             ?? throw new InvalidOperationException("MCP request has no service provider.");
-        var dispatcher = services.GetRequiredService<JsonRpcDispatcher>();
+        var dispatcher = services.GetRequiredService<McpDispatcher>().Inner;
         var jsonOptions = dispatcher.JsonOptions;
 
         // Convert the MCP argument dictionary into a JSON object for the dispatcher. The document is kept alive

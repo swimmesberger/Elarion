@@ -24,12 +24,6 @@ public sealed record RpcMcpMethodMetadata {
     /// </summary>
     public string? ToolName { get; init; }
 
-    /// <summary>
-    /// Whether the method is exposed as an MCP tool. From <c>[McpMethod(Enabled = ...)]</c>; defaults to
-    /// <see langword="true"/> when no <c>[McpMethod]</c> attribute is present.
-    /// </summary>
-    public bool Enabled { get; init; } = true;
-
     /// <summary>The tool description from a class-level <c>[Description]</c>, or <see langword="null"/> when absent.</summary>
     public string? Description { get; init; }
 
