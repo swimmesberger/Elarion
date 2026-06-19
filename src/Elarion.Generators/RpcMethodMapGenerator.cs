@@ -56,7 +56,7 @@ public sealed class RpcMethodMapGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
             var (target, compilation) = source;
-            var entries = RpcMethodEmission.Collect(compilation, spc.CancellationToken);
+            var entries = RpcMethodEmission.Collect(compilation, spc.ReportDiagnostic, spc.CancellationToken);
             if (entries.Count == 0)
                 return;
 

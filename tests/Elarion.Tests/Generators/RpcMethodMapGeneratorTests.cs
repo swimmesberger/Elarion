@@ -171,6 +171,29 @@ public sealed class RpcMethodMapGeneratorTests {
     }
 
     [Fact]
+    public void McpMetadata_WarnsWhenMcpMethodIsAppliedToJsonRpcOnlyHandler() {
+        const string ignoredMcpCustomization =
+            """
+            using Elarion.Abstractions;
+
+            namespace Sample.IgnoredMcp;
+
+            [RpcMethod("admin.purge", Transports = RpcTransports.JsonRpc)]
+            [McpMethod(ToolName = "purge")]
+            public sealed class PurgeEverything : IHandler<PurgeEverything.Command, Result<PurgeEverything.Response>> {
+                public sealed record Command;
+                public sealed record Response;
+                public System.Threading.Tasks.ValueTask<Result<Response>> HandleAsync(
+                    Command request, System.Threading.CancellationToken ct) => default;
+            }
+            """;
+
+        var diagnostics = RunGeneratorDiagnostics(ignoredMcpCustomization);
+
+        diagnostics.Should().Contain(d => d.Id == "ELMCP003" && d.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
     public void RegisterAll_IsDeterministic() {
         var first = RunGenerator(out _);
         var second = RunGenerator(out _);

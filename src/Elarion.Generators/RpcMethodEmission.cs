@@ -25,6 +25,16 @@ internal static class RpcMethodEmission
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor McpCustomizationIgnored = new(
+        id: "ELMCP003",
+        title: "MCP customization is ignored",
+        messageFormat:
+        "Handler '{0}' uses [McpMethod] but its [RpcMethod] transports exclude MCP; remove [McpMethod] or include "
+        + "RpcTransports.Mcp for method '{1}'",
+        category: "Elarion.Mcp",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public sealed record ParameterDescription(string PropertyName, string Description);
 
     public sealed record Model(
@@ -40,7 +50,11 @@ internal static class RpcMethodEmission
     );
 
     /// <summary>Scans referenced assemblies for <c>[RpcMethod]</c> handlers, sorted by method name.</summary>
-    public static List<Model> Collect(Compilation compilation, CancellationToken ct)
+    public static List<Model> Collect(Compilation compilation, CancellationToken ct) =>
+        Collect(compilation, null, ct);
+
+    /// <summary>Scans referenced assemblies for <c>[RpcMethod]</c> handlers, sorted by method name.</summary>
+    public static List<Model> Collect(Compilation compilation, Action<Diagnostic>? report, CancellationToken ct)
     {
         var attributeType = compilation.GetTypeByMetadataName(RpcMethodAttributeMetadataName);
         if (attributeType is null)
@@ -59,7 +73,15 @@ internal static class RpcMethodEmission
             if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
                 continue;
 
-            CollectFromNamespace(assembly.GlobalNamespace, attributeType, mcpMethodType, descriptionType, fmt, entries, ct);
+            CollectFromNamespace(
+                assembly.GlobalNamespace,
+                attributeType,
+                mcpMethodType,
+                descriptionType,
+                fmt,
+                entries,
+                report,
+                ct);
         }
 
         entries.Sort(static (a, b) => string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal));
@@ -79,6 +101,7 @@ internal static class RpcMethodEmission
         INamedTypeSymbol? descriptionType,
         SymbolDisplayFormat fmt,
         List<Model> entries,
+        Action<Diagnostic>? report,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -112,7 +135,16 @@ internal static class RpcMethodEmission
             if (requestType is null || responseType is null)
                 continue;
 
-            var toolName = ReadMcpToolName(type, mcpMethodType);
+            var (toolName, hasMcpMethod) = ReadMcpMethod(type, mcpMethodType);
+            if (hasMcpMethod && !onMcp)
+            {
+                report?.Invoke(Diagnostic.Create(
+                    McpCustomizationIgnored,
+                    Location.None,
+                    type.ToDisplayString(),
+                    methodName));
+            }
+
             var description = GetDescription(type, descriptionType);
             var parameters = CollectParameterDescriptions(requestType, descriptionType);
 
@@ -129,7 +161,7 @@ internal static class RpcMethodEmission
         }
 
         foreach (var sub in ns.GetNamespaceMembers())
-            CollectFromNamespace(sub, attributeType, mcpMethodType, descriptionType, fmt, entries, ct);
+            CollectFromNamespace(sub, attributeType, mcpMethodType, descriptionType, fmt, entries, report, ct);
     }
 
     // RpcTransports flags: JsonRpc = 1, Mcp = 2, All = 3 (default when the named argument is absent).
@@ -148,10 +180,10 @@ internal static class RpcMethodEmission
         return ((transports & 1) != 0, (transports & 2) != 0);
     }
 
-    private static string? ReadMcpToolName(INamedTypeSymbol type, INamedTypeSymbol? mcpMethodType)
+    private static (string? ToolName, bool HasMcpMethod) ReadMcpMethod(INamedTypeSymbol type, INamedTypeSymbol? mcpMethodType)
     {
         if (mcpMethodType is null)
-            return null;
+            return (null, false);
 
         foreach (var attr in type.GetAttributes())
         {
@@ -161,13 +193,13 @@ internal static class RpcMethodEmission
             foreach (var named in attr.NamedArguments)
             {
                 if (named.Key == "ToolName" && named.Value.Value is string name && name.Length > 0)
-                    return name;
+                    return (name, true);
             }
 
-            return null;
+            return (null, true);
         }
 
-        return null;
+        return (null, false);
     }
 
     private static string? GetDescription(ISymbol symbol, INamedTypeSymbol? descriptionType)

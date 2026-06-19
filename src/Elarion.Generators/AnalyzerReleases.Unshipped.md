@@ -12,9 +12,11 @@ ELSG007 | Elarion.Generators | Error | Duplicate scheduled job name
 ELSG008 | Elarion.Generators | Error | Invalid schedule specification
 ELSG009 | Elarion.Generators | Error | Invalid scheduled job concurrency
 ELMCP002 | Elarion.Mcp | Warning | Duplicate MCP tool name under the default tool-name transform
+ELMCP003 | Elarion.Mcp | Warning | MCP customization is ignored when the handler excludes MCP
 ELHTTP001 | Elarion.Http | Warning | HTTP endpoint handler is missing a request/response shape
 ELHTTP002 | Elarion.Http | Warning | Duplicate HTTP endpoint route
 ELHTTP003 | Elarion.Http | Warning | HTTP endpoint handler is not in any module
+ELMOD001 | Elarion.Modules | Warning | Multiple app modules share a namespace
 ELRPC001 | Elarion.JsonRpc | Warning | RPC method handler is not in any module
 WFRE001 | Elarion.Abstractions.Resilience | Error | Invalid resilience policy
 WFRE002 | Elarion.Abstractions.Resilience | Error | Duplicate resilience policy name
