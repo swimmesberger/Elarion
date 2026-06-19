@@ -6,8 +6,8 @@ using Microsoft.CodeAnalysis.Text;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Generates the implementing half of a flat <c>MapAll</c> partial method by inspecting referenced assemblies for
-/// every class annotated with <c>[Elarion.Abstractions.HttpEndpoint]</c> and emitting a strongly-typed minimal-API
+/// Generates the implementing half of a flat <c>MapAll</c> partial method by consuming referenced assembly manifests
+/// for <c>[Elarion.Abstractions.HttpEndpoint]</c> handlers and emitting a strongly-typed minimal-API
 /// <c>MapGet</c>/<c>MapPost</c>/... registration per handler (see <see cref="HttpEndpointEmission"/>).
 /// </summary>
 /// <remarks>
@@ -37,12 +37,26 @@ public sealed class HttpEndpointMapGenerator : IIncrementalGenerator
                         ctx.TargetSymbol.Name);
                 });
 
-        var combined = classProvider.Combine(context.CompilationProvider);
+        var manifestProvider = context.MetadataReferencesProvider
+            .Select(static (reference, ct) => ElarionManifestReader.Read(reference, ct))
+            .Collect();
+
+        var combined = classProvider.Combine(manifestProvider).Combine(context.CompilationProvider);
 
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var (target, compilation) = source;
-            var entries = HttpEndpointEmission.Collect(compilation, spc.ReportDiagnostic, spc.CancellationToken);
+            var ((target, manifests), _) = source;
+            var manifest = ElarionManifest.Data.Combine(manifests);
+            var entries = manifest.HttpEndpoints.ToList();
+            entries = Deduplicate(entries);
+            entries.Sort(static (a, b) =>
+            {
+                var byVerb = string.Compare(a.Verb, b.Verb, StringComparison.Ordinal);
+                if (byVerb != 0)
+                    return byVerb;
+                var byRoute = string.Compare(a.Route, b.Route, StringComparison.Ordinal);
+                return byRoute != 0 ? byRoute : string.Compare(a.EndpointName, b.EndpointName, StringComparison.Ordinal);
+            });
 
             HttpEndpointEmission.ReportDuplicateRoutes(entries, spc.ReportDiagnostic);
 
@@ -84,5 +98,25 @@ public sealed class HttpEndpointMapGenerator : IIncrementalGenerator
         sb.AppendLine("}");
 
         return sb.ToString();
+    }
+
+    private static List<HttpEndpointEmission.Model> Deduplicate(IEnumerable<HttpEndpointEmission.Model> entries)
+    {
+        var result = new List<HttpEndpointEmission.Model>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var key = string.Join(
+                "\u001f",
+                entry.EndpointName,
+                entry.RequestTypeFqn,
+                entry.ResponseTypeFqn,
+                entry.Verb,
+                entry.Route);
+            if (seen.Add(key))
+                result.Add(entry);
+        }
+
+        return result;
     }
 }

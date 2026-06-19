@@ -60,39 +60,6 @@ internal static class HttpEndpointEmission
         string? Description
     );
 
-    /// <summary>Scans referenced assemblies for <c>[HttpEndpoint]</c> handlers, sorted deterministically.</summary>
-    public static List<Model> Collect(Compilation compilation, Action<Diagnostic> report, CancellationToken ct)
-    {
-        var attributeType = compilation.GetTypeByMetadataName(HttpEndpointAttributeMetadataName);
-        if (attributeType is null)
-            return [];
-
-        var descriptionType = compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
-        var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
-        var entries = new List<Model>();
-
-        foreach (var reference in compilation.References)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
-                continue;
-
-            CollectFromNamespace(assembly.GlobalNamespace, attributeType, descriptionType, fmt, entries, report, ct);
-        }
-
-        entries.Sort(static (a, b) =>
-        {
-            var byVerb = string.Compare(a.Verb, b.Verb, StringComparison.Ordinal);
-            if (byVerb != 0)
-                return byVerb;
-            var byRoute = string.Compare(a.Route, b.Route, StringComparison.Ordinal);
-            return byRoute != 0 ? byRoute : string.Compare(a.EndpointName, b.EndpointName, StringComparison.Ordinal);
-        });
-
-        return entries;
-    }
-
     public static void ReportDuplicateRoutes(IEnumerable<Model> entries, Action<Diagnostic> report)
     {
         var seen = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -154,71 +121,62 @@ internal static class HttpEndpointEmission
         sb.AppendLine(";");
     }
 
-    private static void CollectFromNamespace(
-        INamespaceSymbol ns,
-        INamedTypeSymbol attributeType,
+    public static bool TryCreateModel(
+        INamedTypeSymbol type,
+        AttributeData attr,
         INamedTypeSymbol? descriptionType,
         SymbolDisplayFormat fmt,
-        List<Model> entries,
-        Action<Diagnostic> report,
-        CancellationToken ct)
+        Action<Diagnostic>? report,
+        CancellationToken ct,
+        out Model? model)
     {
-        ct.ThrowIfCancellationRequested();
+        model = null;
 
-        foreach (var type in ns.GetTypeMembers())
-        foreach (var attr in type.GetAttributes())
+        var (route, explicitVerb) = ReadHttpEndpoint(attr);
+        if (route is null)
+            return false;
+
+        INamedTypeSymbol? requestType = null;
+        INamedTypeSymbol? responseType = null;
+        string? requestKind = null;
+
+        foreach (var member in type.GetTypeMembers())
         {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, attributeType))
-                continue;
+            ct.ThrowIfCancellationRequested();
 
-            var (route, explicitVerb) = ReadHttpEndpoint(attr);
-            if (route is null)
-                continue;
-
-            INamedTypeSymbol? requestType = null;
-            INamedTypeSymbol? responseType = null;
-            string? requestKind = null;
-
-            foreach (var member in type.GetTypeMembers())
+            if (member.Name is "Command" or "Query")
             {
-                ct.ThrowIfCancellationRequested();
-
-                if (member.Name is "Command" or "Query")
-                {
-                    requestType = member;
-                    requestKind = member.Name;
-                }
-                else if (member.Name == "Response")
-                {
-                    responseType = member;
-                }
+                requestType = member;
+                requestKind = member.Name;
             }
-
-            if (requestType is null || responseType is null || requestKind is null)
+            else if (member.Name == "Response")
             {
-                report(Diagnostic.Create(
-                    MissingRequestResponse, type.Locations.FirstOrDefault() ?? Location.None, type.ToDisplayString()));
-                continue;
+                responseType = member;
             }
-
-            var verb = explicitVerb ?? (requestKind == "Command" ? "Post" : "Get");
-            var (useAsParameters, disableAntiforgery) = DetermineBinding(requestType, verb);
-
-            entries.Add(new Model(
-                type.ToDisplayString(),
-                type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
-                requestType.ToDisplayString(fmt),
-                responseType.ToDisplayString(fmt),
-                route,
-                verb,
-                useAsParameters,
-                disableAntiforgery,
-                IsResponseEmpty(responseType),
-                GetDescription(type, descriptionType)));
         }
 
-        foreach (var sub in ns.GetNamespaceMembers())
-            CollectFromNamespace(sub, attributeType, descriptionType, fmt, entries, report, ct);
+        if (requestType is null || responseType is null || requestKind is null)
+        {
+            report?.Invoke(Diagnostic.Create(
+                MissingRequestResponse, type.Locations.FirstOrDefault() ?? Location.None, type.ToDisplayString()));
+            return false;
+        }
+
+        var verb = explicitVerb ?? (requestKind == "Command" ? "Post" : "Get");
+        var (useAsParameters, disableAntiforgery) = DetermineBinding(requestType, verb);
+
+        model = new Model(
+            type.ToDisplayString(),
+            type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
+            requestType.ToDisplayString(fmt),
+            responseType.ToDisplayString(fmt),
+            route,
+            verb,
+            useAsParameters,
+            disableAntiforgery,
+            IsResponseEmpty(responseType),
+            GetDescription(type, descriptionType));
+        return true;
     }
 
     private static (string? Route, string? Verb) ReadHttpEndpoint(AttributeData attr)

@@ -7,8 +7,8 @@ using Microsoft.CodeAnalysis.Text;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Generates the implementing half of a flat <c>RegisterAll</c> partial method by inspecting referenced assemblies
-/// for every class annotated with <c>[Elarion.Abstractions.RpcMethodAttribute]</c> and emitting a typed
+/// Generates the implementing half of a flat <c>RegisterAll</c> partial method by consuming referenced assembly
+/// manifests for every class annotated with <c>[Elarion.Abstractions.RpcMethodAttribute]</c> and emitting a typed
 /// <c>.MapHandler&lt;TRequest, TResponse&gt;(methodName)</c> call per handler (discovery via
 /// <see cref="RpcMethodEmission"/>). The same pass emits a reflection-free MCP metadata table
 /// (<c>McpMetadata()</c>) carrying class/parameter descriptions and <c>[McpMethod]</c> options.
@@ -51,12 +51,19 @@ public sealed class RpcMethodMapGenerator : IIncrementalGenerator
                         ctx.TargetSymbol.Name);
                 });
 
-        var combined = classProvider.Combine(context.CompilationProvider);
+        var manifestProvider = context.MetadataReferencesProvider
+            .Select(static (reference, ct) => ElarionManifestReader.Read(reference, ct))
+            .Collect();
+
+        var combined = classProvider.Combine(manifestProvider).Combine(context.CompilationProvider);
 
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var (target, compilation) = source;
-            var entries = RpcMethodEmission.Collect(compilation, spc.ReportDiagnostic, spc.CancellationToken);
+            var ((target, manifests), _) = source;
+            var manifest = ElarionManifest.Data.Combine(manifests);
+            var entries = manifest.RpcMethods.ToList();
+            entries = Deduplicate(entries);
+            entries.Sort(static (a, b) => string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal));
             if (entries.Count == 0)
                 return;
 
@@ -89,6 +96,24 @@ public sealed class RpcMethodMapGenerator : IIncrementalGenerator
                 seen[toolName] = entry.MethodName;
             }
         }
+    }
+
+    private static List<RpcMethodEmission.Model> Deduplicate(IEnumerable<RpcMethodEmission.Model> entries)
+    {
+        var result = new List<RpcMethodEmission.Model>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var key = string.Join(
+                "\u001f",
+                entry.MethodName,
+                entry.RequestTypeFqn,
+                entry.ResponseTypeFqn);
+            if (seen.Add(key))
+                result.Add(entry);
+        }
+
+        return result;
     }
 
     private static string BuildSource(ClassTarget target, List<RpcMethodEmission.Model> entries)

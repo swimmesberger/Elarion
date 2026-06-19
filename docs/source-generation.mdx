@@ -59,6 +59,7 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 | `ModuleValidatorRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleValidators]` | `Add{ModuleName}Validators()` extension methods. |
 | `SchedulerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateScheduledJobs]` | `Add{AssemblyName}ScheduledJobs()` registering descriptors and job types. |
 | `ResiliencePolicyGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |
+| `ElarionManifestGenerator` | Any project containing `[AppModule]`, `[HttpEndpoint]`, or `[RpcMethod]` | Internal assembly metadata manifests consumed by host-side generators for referenced modules and transport handlers. |
 | `RpcMethodMapGenerator` | `[GenerateRpcMethodMap]` on a host partial class | `RpcMethodMap.RegisterAll(dispatcher)` (JSON-RPC), plus `RpcMethodMap.RegisterMcpAll(dispatcher)` and `RpcMethodMap.McpMetadata()` (MCP). |
 | `HttpEndpointMapGenerator` | `[GenerateHttpEndpointMap]` on a host partial class | `HttpEndpointMap.MapAll(app)` — typed minimal-API `MapGet`/`MapPost`/... per `[HttpEndpoint]` handler. See [HTTP endpoints](/docs/http-endpoints). |
 | `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods`, `RegisterMcpMethods`, `GetMcpMetadata`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, `GetAllModuleNames`, plus per-module `Map{Module}Http` / `Add{Module}JsonRpc` / `Add{Module}Mcp` / `Get{Module}McpMetadata`. |
@@ -66,6 +67,13 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 
 Generated code intentionally uses explicit type names and DI factory registrations. Startup behavior
 remains deterministic and AOT-friendly.
+
+Projects that contain modules or transport handlers emit compact compile-time manifests as assembly metadata.
+Host-side map/bootstrapper generators read those manifests from referenced assemblies instead of recursively
+scanning referenced symbols. This makes the manifest the compile-time contract for cross-assembly discovery:
+generators that create `[AppModule]`, `[HttpEndpoint]`, or `[RpcMethod]` types must also emit matching Elarion
+manifest metadata for those generated types. Hosts still read `[AppModule]` declarations in their own compilation
+directly because source generators cannot consume another generator's same-compilation output.
 
 When a host uses `[GenerateModuleBootstrapper]`, the bootstrapper also emits **module-scoped,
 feature-flag-gated** transport mapping: `MapAllEndpoints`, `RegisterRpcMethods`, and `RegisterMcpMethods`

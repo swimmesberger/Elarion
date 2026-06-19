@@ -9,10 +9,10 @@ namespace Elarion.Tests.Generators;
 
 /// <summary>
 /// Tests for <see cref="RpcMethodMapGenerator"/>, which emits the <c>RegisterAll</c> body that wires
-/// <c>[RpcMethod]</c> handlers (discovered in referenced assemblies) into a <c>JsonRpcDispatcher</c>.
+/// referenced <c>[RpcMethod]</c> handlers into a <c>JsonRpcDispatcher</c>.
 /// </summary>
 public sealed class RpcMethodMapGeneratorTests {
-    // Handlers live in a *referenced assembly* — this generator scans compilation.References, not source syntax.
+    // Handlers live in a referenced assembly and are consumed from generated Elarion manifest metadata.
     private const string HandlersSource =
         """
         using System.ComponentModel;
@@ -171,29 +171,6 @@ public sealed class RpcMethodMapGeneratorTests {
     }
 
     [Fact]
-    public void McpMetadata_WarnsWhenMcpMethodIsAppliedToJsonRpcOnlyHandler() {
-        const string ignoredMcpCustomization =
-            """
-            using Elarion.Abstractions;
-
-            namespace Sample.IgnoredMcp;
-
-            [RpcMethod("admin.purge", Transports = RpcTransports.JsonRpc)]
-            [McpMethod(ToolName = "purge")]
-            public sealed class PurgeEverything : IHandler<PurgeEverything.Command, Result<PurgeEverything.Response>> {
-                public sealed record Command;
-                public sealed record Response;
-                public System.Threading.Tasks.ValueTask<Result<Response>> HandleAsync(
-                    Command request, System.Threading.CancellationToken ct) => default;
-            }
-            """;
-
-        var diagnostics = RunGeneratorDiagnostics(ignoredMcpCustomization);
-
-        diagnostics.Should().Contain(d => d.Id == "ELMCP003" && d.Severity == DiagnosticSeverity.Warning);
-    }
-
-    [Fact]
     public void RegisterAll_IsDeterministic() {
         var first = RunGenerator(out _);
         var second = RunGenerator(out _);
@@ -201,12 +178,45 @@ public sealed class RpcMethodMapGeneratorTests {
         second.Should().Be(first);
     }
 
+    [Fact]
+    public void RegisterAll_ConsumesReferencedAssemblyManifest() {
+        var handlersReference = CompileToImage(ManifestOnlySource(), "Sample.Rpc.ManifestOnly");
+
+        var generated = RunGenerator([handlersReference], out var compilationWithGenerated);
+
+        generated.Should().Contain(
+            ".MapHandler<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\")",
+            Exactly.Times(2));
+        generated.Should().Contain("MethodName = \"manifest.get\"");
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RegisterAll_ConsumesCompilationReferenceManifest() {
+        var handlersReference = CompileToCompilationReference(ManifestOnlySource(), "Sample.Rpc.ManifestOnly");
+
+        var generated = RunGenerator([handlersReference], out var compilationWithGenerated);
+
+        generated.Should().Contain(
+            ".MapHandler<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\")",
+            Exactly.Times(2));
+        generated.Should().Contain("MethodName = \"manifest.get\"");
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
     private static string RunGenerator(out Compilation compilationWithGenerated) {
         var handlersReference = CompileToImage(HandlersSource, "Sample.Handlers");
+        return RunGenerator([handlersReference], out compilationWithGenerated);
+    }
 
+    private static string RunGenerator(IReadOnlyList<MetadataReference> handlerReferences, out Compilation compilationWithGenerated) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var hostTree = CSharpSyntaxTree.ParseText(HostSource, parseOptions);
-        var references = CreateMetadataReferences().Append(handlersReference).ToArray();
+        var references = CreateMetadataReferences().Concat(handlerReferences).ToArray();
         var hostCompilation = CSharpCompilation.Create(
             "Sample.Rpc",
             [hostTree],
@@ -233,6 +243,53 @@ public sealed class RpcMethodMapGeneratorTests {
             .ToString();
     }
 
+    private static string ManifestOnlySource() {
+        var rpc = EncodeFields(
+            "manifest.get",
+            "ManifestOnly",
+            "global::ManifestOnly.GetManifest.Query",
+            "global::ManifestOnly.GetManifest.Response",
+            null,
+            "1",
+            "1",
+            null,
+            string.Empty);
+
+        return $$"""
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
+
+            namespace ManifestOnly;
+
+            public sealed class GetManifest : IHandler<GetManifest.Query, Result<GetManifest.Response>> {
+                public sealed record Query { public required System.Guid Id { get; init; } }
+                public sealed record Response(string Name);
+                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Response>>(new Response("manifest"));
+            }
+            """;
+    }
+
+    private static string EncodeFields(params string?[] fields) {
+        var result = new System.Text.StringBuilder();
+        foreach (var field in fields) {
+            if (field is null) {
+                result.Append("-1:");
+                continue;
+            }
+
+            result.Append(field.Length);
+            result.Append(':');
+            result.Append(field);
+        }
+
+        return result.ToString();
+    }
+
     private static ImmutableArray<Diagnostic> RunGeneratorDiagnostics(string handlersSource) {
         var handlersReference = CompileToImage(handlersSource, "Sample.Collide");
 
@@ -250,8 +307,20 @@ public sealed class RpcMethodMapGeneratorTests {
     }
 
     private static MetadataReference CompileToImage(string source, string assemblyName) {
-        var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview));
-        var compilation = CSharpCompilation.Create(
+        var compilation = CompileWithManifest(source, assemblyName);
+
+        using var stream = new MemoryStream();
+        compilation.Emit(stream, cancellationToken: TestContext.Current.CancellationToken).Success.Should().BeTrue();
+        return MetadataReference.CreateFromImage(stream.ToArray());
+    }
+
+    private static MetadataReference CompileToCompilationReference(string source, string assemblyName) =>
+        CompileWithManifest(source, assemblyName).ToMetadataReference();
+
+    private static Compilation CompileWithManifest(string source, string assemblyName) {
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
+        Compilation compilation = CSharpCompilation.Create(
             assemblyName,
             [tree],
             CreateMetadataReferences(),
@@ -261,9 +330,17 @@ public sealed class RpcMethodMapGeneratorTests {
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        using var stream = new MemoryStream();
-        compilation.Emit(stream, cancellationToken: TestContext.Current.CancellationToken).Success.Should().BeTrue();
-        return MetadataReference.CreateFromImage(stream.ToArray());
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new ElarionManifestGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(
+            compilation, out compilation, out var diagnostics, TestContext.Current.CancellationToken);
+
+        diagnostics
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        return compilation;
     }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {

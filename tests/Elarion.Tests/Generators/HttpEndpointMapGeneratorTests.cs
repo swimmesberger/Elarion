@@ -9,10 +9,10 @@ namespace Elarion.Tests.Generators;
 
 /// <summary>
 /// Tests for <see cref="HttpEndpointMapGenerator"/>, which emits the <c>MapAll</c> body that wires
-/// <c>[HttpEndpoint]</c> handlers (discovered in referenced assemblies) into minimal-API endpoints.
+/// referenced <c>[HttpEndpoint]</c> handlers into minimal-API endpoints.
 /// </summary>
 public sealed class HttpEndpointMapGeneratorTests {
-    // Handlers live in a *referenced assembly* — this generator scans compilation.References, not source syntax.
+    // Handlers live in a referenced assembly and are consumed from generated Elarion manifest metadata.
     private const string HandlersSource =
         """
         using System.ComponentModel;
@@ -238,25 +238,37 @@ public sealed class HttpEndpointMapGeneratorTests {
     }
 
     [Fact]
-    public void MapAll_WarnsWhenRequestOrResponseShapeMissing() {
-        const string malformed =
-            """
-            using Elarion.Abstractions;
+    public void MapAll_ConsumesReferencedAssemblyManifest() {
+        var handlersReference = CompileToImage(ManifestOnlySource(), "Sample.Http.ManifestOnly");
 
-            namespace Sample.Bad;
+        var generated = RunGenerator([handlersReference], out var compilationWithGenerated);
 
-            [HttpEndpoint("orphan")]
-            public sealed class Orphan {
-            }
-            """;
-
-        var diagnostics = RunGeneratorDiagnostics(malformed, "Sample.Bad");
-
-        diagnostics.Should().Contain(d => d.Id == "ELHTTP001" && d.Severity == DiagnosticSeverity.Warning);
+        generated.Should().Contain("app.MapGet(\"manifest\",");
+        generated.Should().Contain(
+            "[global::Microsoft.AspNetCore.Http.AsParameters] global::ManifestOnly.GetManifest.Query request");
+        generated.Should().Contain(".Produces<global::ManifestOnly.GetManifest.Response>(200)");
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
     }
 
     private static string RunGenerator(string handlersSource, out Compilation compilationWithGenerated) {
         var driver = BuildDriver(handlersSource, "Sample.Handlers", out var hostCompilation);
+        driver = driver.RunGeneratorsAndUpdateCompilation(
+            hostCompilation, out compilationWithGenerated, out var diagnostics, TestContext.Current.CancellationToken);
+
+        diagnostics
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        return driver.GetRunResult().GeneratedTrees
+            .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), "HttpEndpointMap.g.cs", StringComparison.Ordinal))
+            .GetText()
+            .ToString();
+    }
+
+    private static string RunGenerator(IReadOnlyList<MetadataReference> handlerReferences, out Compilation compilationWithGenerated) {
+        var driver = BuildDriver(handlerReferences, out var hostCompilation);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             hostCompilation, out compilationWithGenerated, out var diagnostics, TestContext.Current.CancellationToken);
 
@@ -286,10 +298,13 @@ public sealed class HttpEndpointMapGeneratorTests {
 
     private static GeneratorDriver BuildDriver(string handlersSource, string handlersAssembly, out Compilation hostCompilation) {
         var handlersReference = CompileToImage(handlersSource, handlersAssembly);
+        return BuildDriver([handlersReference], out hostCompilation);
+    }
 
+    private static GeneratorDriver BuildDriver(IReadOnlyList<MetadataReference> handlerReferences, out Compilation hostCompilation) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var hostTree = CSharpSyntaxTree.ParseText(HostSource, parseOptions);
-        var references = CreateMetadataReferences().Append(handlersReference).ToArray();
+        var references = CreateMetadataReferences().Concat(handlerReferences).ToArray();
         hostCompilation = CSharpCompilation.Create(
             "Sample.Http",
             [hostTree],
@@ -301,15 +316,74 @@ public sealed class HttpEndpointMapGeneratorTests {
             parseOptions: parseOptions);
     }
 
+    private static string ManifestOnlySource() {
+        var http = EncodeFields(
+            "ManifestOnly.GetManifest",
+            "ManifestOnly",
+            "global::ManifestOnly.GetManifest.Query",
+            "global::ManifestOnly.GetManifest.Response",
+            "manifest",
+            "Get",
+            "1",
+            "0",
+            "0",
+            null);
+
+        return $$"""
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.HttpEndpoint.v1", "{{http}}")]
+
+            namespace ManifestOnly;
+
+            public sealed class GetManifest : IHandler<GetManifest.Query, Result<GetManifest.Response>> {
+                public sealed record Query { public required System.Guid Id { get; init; } }
+                public sealed record Response(string Name);
+                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Response>>(new Response("manifest"));
+            }
+            """;
+    }
+
+    private static string EncodeFields(params string?[] fields) {
+        var result = new System.Text.StringBuilder();
+        foreach (var field in fields) {
+            if (field is null) {
+                result.Append("-1:");
+                continue;
+            }
+
+            result.Append(field.Length);
+            result.Append(':');
+            result.Append(field);
+        }
+
+        return result.ToString();
+    }
+
     private static MetadataReference CompileToImage(string source, string assemblyName) {
-        var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview));
-        var compilation = CSharpCompilation.Create(
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
+        Compilation compilation = CSharpCompilation.Create(
             assemblyName,
             [tree],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         compilation.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new ElarionManifestGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(
+            compilation, out compilation, out var diagnostics, TestContext.Current.CancellationToken);
+
+        diagnostics
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 

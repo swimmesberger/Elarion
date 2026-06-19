@@ -25,8 +25,8 @@ namespace Elarion.Generators;
 /// </para>
 /// <para>
 /// Trigger: annotate a partial class with <c>[GenerateModuleBootstrapper]</c> in the host
-/// project. The generator scans all referenced assemblies for <c>[AppModule]</c> classes
-/// and topologically sorts them by declared dependencies.
+/// project. The generator consumes per-assembly Elarion manifests from references, directly reads modules in the
+/// current compilation, and topologically sorts discovered modules by declared dependencies.
 /// </para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
@@ -113,15 +113,24 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
                         ctx.TargetSymbol.Name);
                 });
 
-        var combined = classProvider.Combine(context.CompilationProvider);
+        var manifestProvider = context.MetadataReferencesProvider
+            .Select(static (reference, ct) => ElarionManifestReader.Read(reference, ct))
+            .Collect();
+
+        var combined = classProvider.Combine(manifestProvider).Combine(context.CompilationProvider);
 
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var (target, compilation) = source;
-            var entries = CollectModuleEntries(compilation, spc.ReportDiagnostic, spc.CancellationToken);
+            var ((target, manifests), compilation) = source;
+            var manifest = ElarionManifest.Data.Combine(manifests);
+            var entries = CollectModuleEntries(
+                compilation,
+                manifest.Modules,
+                spc.ReportDiagnostic,
+                spc.CancellationToken);
             var sorted = TopologicalSort(entries);
 
-            var transport = CollectTransportMaps(compilation, entries, spc);
+            var transport = CollectTransportMaps(manifest, entries, spc);
 
             var code = BuildSource(target, sorted, transport);
             spc.AddSource("ModuleBootstrapper.g.cs", SourceText.From(code, Encoding.UTF8));
@@ -129,15 +138,22 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     }
 
     private static TransportMaps CollectTransportMaps(
-        Compilation compilation,
+        ElarionManifest.Data manifest,
         List<ModuleEntry> modules,
         SourceProductionContext spc)
     {
-        var ct = spc.CancellationToken;
-
         var httpByModule = new Dictionary<string, List<HttpEndpointEmission.Model>>(StringComparer.Ordinal);
         var unmatchedHttp = new List<HttpEndpointEmission.Model>();
-        var httpEntries = HttpEndpointEmission.Collect(compilation, spc.ReportDiagnostic, ct);
+        var httpEntries = manifest.HttpEndpoints.ToList();
+        httpEntries = DeduplicateHttpEndpoints(httpEntries);
+        httpEntries.Sort(static (a, b) =>
+        {
+            var byVerb = string.Compare(a.Verb, b.Verb, StringComparison.Ordinal);
+            if (byVerb != 0)
+                return byVerb;
+            var byRoute = string.Compare(a.Route, b.Route, StringComparison.Ordinal);
+            return byRoute != 0 ? byRoute : string.Compare(a.EndpointName, b.EndpointName, StringComparison.Ordinal);
+        });
         HttpEndpointEmission.ReportDuplicateRoutes(httpEntries, spc.ReportDiagnostic);
         foreach (var entry in httpEntries)
         {
@@ -155,7 +171,10 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         var rpcByModule = new Dictionary<string, List<RpcMethodEmission.Model>>(StringComparer.Ordinal);
         var unmatchedRpc = new List<RpcMethodEmission.Model>();
-        foreach (var entry in RpcMethodEmission.Collect(compilation, spc.ReportDiagnostic, ct))
+        var rpcEntries = manifest.RpcMethods.ToList();
+        rpcEntries = DeduplicateRpcMethods(rpcEntries);
+        rpcEntries.Sort(static (a, b) => string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal));
+        foreach (var entry in rpcEntries)
         {
             var module = FindBestModule(entry.HandlerNamespace, modules);
             if (module is null)
@@ -208,30 +227,34 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
     private static List<ModuleEntry> CollectModuleEntries(
         Compilation compilation,
+        IReadOnlyList<ElarionManifest.Module> manifestModules,
         Action<Diagnostic> report,
         CancellationToken ct)
     {
+        var entries = new List<ModuleEntry>();
+
         var attributeType = compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
         if (attributeType is null)
-            return new List<ModuleEntry>();
+        {
+            foreach (var module in manifestModules)
+                entries.Add(ToModuleEntry(module));
 
-        var entries = new List<ModuleEntry>();
+            entries = DeduplicateModules(entries);
+            entries.Sort(static (a, b) =>
+                string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal));
+            ReportSharedModuleNamespaces(entries, report);
+            return entries;
+        }
 
         // Scan the current compilation's assembly first.
         CollectFromNamespace(
             compilation.Assembly.GlobalNamespace,
             attributeType, entries, ct);
 
-        // Then scan referenced assemblies.
-        foreach (var reference in compilation.References)
-        {
-            ct.ThrowIfCancellationRequested();
+        foreach (var module in manifestModules)
+            entries.Add(ToModuleEntry(module));
 
-            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
-                continue;
-
-            CollectFromNamespace(assembly.GlobalNamespace, attributeType, entries, ct);
-        }
+        entries = DeduplicateModules(entries);
 
         // Sort by name for deterministic output.
         entries.Sort(static (a, b) =>
@@ -240,6 +263,69 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         ReportSharedModuleNamespaces(entries, report);
 
         return entries;
+    }
+
+    private static ModuleEntry ToModuleEntry(ElarionManifest.Module module) =>
+        new(
+            module.ModuleName,
+            module.Namespace,
+            module.TypeFqn,
+            module.DependsOn,
+            module.IsCore,
+            module.HasConfigureServices,
+            module.HasMapEndpoints,
+            module.HasGetJsonTypeInfoResolver);
+
+    private static List<ModuleEntry> DeduplicateModules(IEnumerable<ModuleEntry> entries)
+    {
+        var result = new List<ModuleEntry>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var key = string.Join("\u001f", entry.ModuleName, entry.TypeFqn);
+            if (seen.Add(key))
+                result.Add(entry);
+        }
+
+        return result;
+    }
+
+    private static List<HttpEndpointEmission.Model> DeduplicateHttpEndpoints(IEnumerable<HttpEndpointEmission.Model> entries)
+    {
+        var result = new List<HttpEndpointEmission.Model>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var key = string.Join(
+                "\u001f",
+                entry.EndpointName,
+                entry.RequestTypeFqn,
+                entry.ResponseTypeFqn,
+                entry.Verb,
+                entry.Route);
+            if (seen.Add(key))
+                result.Add(entry);
+        }
+
+        return result;
+    }
+
+    private static List<RpcMethodEmission.Model> DeduplicateRpcMethods(IEnumerable<RpcMethodEmission.Model> entries)
+    {
+        var result = new List<RpcMethodEmission.Model>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var key = string.Join(
+                "\u001f",
+                entry.MethodName,
+                entry.RequestTypeFqn,
+                entry.ResponseTypeFqn);
+            if (seen.Add(key))
+                result.Add(entry);
+        }
+
+        return result;
     }
 
     private static void ReportSharedModuleNamespaces(IEnumerable<ModuleEntry> entries, Action<Diagnostic> report)
