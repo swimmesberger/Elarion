@@ -295,19 +295,25 @@ provider. The opt-in requires the `Npgsql.EntityFrameworkCore.PostgreSQL` packag
 
 When a UI needs random page access and a total count, use `ToOffsetPageAsync` with a `SortMap` — an
 AOT-safe whitelist that binds sort keys to typed selectors (no dynamic LINQ, and clients can only sort
-by columns you allow):
+by columns you allow). The map is a fixed whitelist that doesn't depend on the request, so build it
+once with `CreateBuilder(...).Add(...).Build()` and keep the immutable result in a `static readonly`
+field rather than rebuilding per call:
 
 ```csharp
-public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
-    var sort = SortMap<Client>
-        .Create("createdAt", c => c.CreatedAt)   // default sort
-        .Add("name", c => c.Name);
+private static readonly SortMap<Client> Sort = SortMap<Client>
+    .CreateBuilder("createdAt", c => c.CreatedAt)   // default sort
+    .Add("name", c => c.Name)
+    .Build();
 
+public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
     return await db.Clients
         .Where(c => c.OwnerId == user.UserId)
-        .ToOffsetPageAsync(query, c => new Item(c.Id, c.Name, c.CreatedAt), sort, maxSize: 100, ct);
+        .ToOffsetPageAsync(query, c => new Item(c.Id, c.Name, c.CreatedAt), Sort, maxSize: 100, ct);
 }
 ```
+
+`Build()` produces an immutable map backed by a `FrozenDictionary`, so a shared static instance is
+safe for concurrent requests.
 
 A request `sort` of `"-name"` orders by `Name` descending; unknown or blank keys fall back to the
 default. Offset pages fill `Total`; keyset pages fill the cursors instead.

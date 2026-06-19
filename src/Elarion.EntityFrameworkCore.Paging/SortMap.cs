@@ -1,58 +1,53 @@
+using System.Collections.Frozen;
 using System.Linq.Expressions;
 
 namespace Elarion.EntityFrameworkCore.Paging;
 
 /// <summary>
-/// An AOT-safe whitelist mapping offset-pagination sort keys to typed key selectors. Each key is
-/// bound to a strongly-typed <c>OrderBy</c>/<c>OrderByDescending</c> expression, so sorting never
-/// uses dynamic LINQ or reflection and clients can only sort by the columns the handler allows.
+/// An AOT-safe, immutable whitelist mapping offset-pagination sort keys to typed key selectors. Each
+/// key is bound to a strongly-typed <c>OrderBy</c>/<c>OrderByDescending</c> expression, so sorting
+/// never uses dynamic LINQ or reflection and clients can only sort by the columns the handler allows.
 /// </summary>
+/// <remarks>
+/// A sort map is a fixed whitelist that does not depend on the request, so build it once with
+/// <see cref="CreateBuilder{TKey}(string, Expression{Func{T, TKey}})"/> and reuse the result (for
+/// example in a <c>static readonly</c> field). The built map is backed by a
+/// <see cref="FrozenDictionary{TKey, TValue}"/> and is immutable, so <see cref="Apply"/> is safe to
+/// call concurrently from multiple requests.
+/// </remarks>
 /// <typeparam name="T">The entity type being sorted.</typeparam>
 /// <example>
 /// <code>
-/// var sort = SortMap&lt;Client&gt;
-///     .Create("createdAt", c =&gt; c.CreatedAt)   // the default sort
-///     .Add("name", c =&gt; c.Name);
+/// private static readonly SortMap&lt;Client&gt; Sort = SortMap&lt;Client&gt;
+///     .CreateBuilder("createdAt", c =&gt; c.CreatedAt)   // the default sort
+///     .Add("name", c =&gt; c.Name)
+///     .Build();
 /// // request.Sort == "-name" sorts by Name descending; unknown keys fall back to the default.
 /// </code>
 /// </example>
 public sealed class SortMap<T>
 {
-    private readonly Dictionary<string, Func<IQueryable<T>, bool, IOrderedQueryable<T>>> _entries =
-        new(StringComparer.OrdinalIgnoreCase);
-
+    private readonly FrozenDictionary<string, Func<IQueryable<T>, bool, IOrderedQueryable<T>>> _entries;
     private readonly string _defaultKey;
 
-    private SortMap(string defaultKey)
+    internal SortMap(
+        string defaultKey,
+        FrozenDictionary<string, Func<IQueryable<T>, bool, IOrderedQueryable<T>>> entries)
     {
         _defaultKey = defaultKey;
+        _entries = entries;
     }
 
-    /// <summary>Creates a sort map whose first entry is the default (applied when no/unknown sort is requested).</summary>
+    /// <summary>
+    /// Starts building a sort map whose first entry is the default sort, applied when the request
+    /// specifies no key or a key that is not whitelisted. Chain <see cref="SortMapBuilder{T}.Add{TKey}"/>
+    /// for each additional allowed key, then call <see cref="SortMapBuilder{T}.Build"/>.
+    /// </summary>
     /// <typeparam name="TKey">The type of the sort key.</typeparam>
     /// <param name="key">The default sort key, as clients reference it.</param>
     /// <param name="selector">The key selector for the default sort.</param>
-    public static SortMap<T> Create<TKey>(string key, Expression<Func<T, TKey>> selector)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        ArgumentNullException.ThrowIfNull(selector);
-        var map = new SortMap<T>(key);
-        map.Add(key, selector);
-        return map;
-    }
-
-    /// <summary>Adds an allowed sort key bound to <paramref name="selector"/>.</summary>
-    /// <typeparam name="TKey">The type of the sort key.</typeparam>
-    /// <param name="key">The sort key, as clients reference it.</param>
-    /// <param name="selector">The key selector for this sort.</param>
-    public SortMap<T> Add<TKey>(string key, Expression<Func<T, TKey>> selector)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        ArgumentNullException.ThrowIfNull(selector);
-        _entries[key] = (source, descending) =>
-            descending ? source.OrderByDescending(selector) : source.OrderBy(selector);
-        return this;
-    }
+    public static SortMapBuilder<T> CreateBuilder<TKey>(string key, Expression<Func<T, TKey>> selector)
+        => new SortMapBuilder<T>(key).Add(key, selector);
 
     /// <summary>
     /// Applies the sort named by <paramref name="sort"/> (a leading <c>-</c> requests descending),
