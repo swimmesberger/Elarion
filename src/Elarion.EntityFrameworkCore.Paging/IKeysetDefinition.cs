@@ -12,8 +12,9 @@ public sealed record KeysetEntry<TDto>(TDto Item, string Cursor);
 
 /// <summary>
 /// A compile-time keyset definition for an entity: ordering, seek predicate, and server-side
-/// projection. Implementations are emitted by the Elarion source generator from a <c>[Keyset]</c>
-/// attribute and contain no reflection on the query path — the ordering and seek predicate are plain
+/// projection. Implementations are emitted by the Elarion source generator from a
+/// <c>[Keyset&lt;TEntity&gt;]</c> attribute on a partial class and contain no reflection on the query
+/// path — the ordering and seek predicate are plain
 /// typed expressions the provider translates to SQL exactly like hand-written
 /// <c>OrderBy</c>/<c>Where</c> clauses.
 /// </summary>

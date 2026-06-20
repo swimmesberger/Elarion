@@ -66,4 +66,55 @@ public sealed class SortMapTests
 
         ids.Should().Equal(1, 2, 3);
     }
+
+    private sealed record RankedRow(int Id, int Rank);
+
+    private static readonly RankedRow[] RankedRows =
+    [
+        new(1, 5),
+        new(2, 5),
+        new(3, 1),
+    ];
+
+    [Fact]
+    public void Apply_DeclaredDescendingDefault_OrdersDescending()
+    {
+        var map = SortMap<RankedRow>.CreateBuilder("id", r => r.Id, SortDirection.Descending).Build();
+
+        var ids = map.Apply(RankedRows.AsQueryable(), null).Select(r => r.Id).ToArray();
+
+        ids.Should().Equal(3, 2, 1);
+    }
+
+    [Fact]
+    public void Apply_PlusPrefix_OverridesDeclaredDescendingToAscending()
+    {
+        var map = SortMap<RankedRow>.CreateBuilder("id", r => r.Id, SortDirection.Descending).Build();
+
+        var ids = map.Apply(RankedRows.AsQueryable(), "+id").Select(r => r.Id).ToArray();
+
+        ids.Should().Equal(1, 2, 3);
+    }
+
+    [Fact]
+    public void Apply_CompositeTiebreaker_BreaksTiesByTrailingColumn()
+    {
+        var map = SortMap<RankedRow>.CreateBuilder("rank", r => r.Rank).ThenBy(r => r.Id).Build();
+
+        var ids = map.Apply(RankedRows.AsQueryable(), "rank").Select(r => r.Id).ToArray();
+
+        // Rank ascending puts row 3 (rank 1) first; the rank-5 tie is broken by Id ascending.
+        ids.Should().Equal(3, 1, 2);
+    }
+
+    [Fact]
+    public void Apply_MinusPrefix_FlipsPrimaryButLeavesTiebreakerFixed()
+    {
+        var map = SortMap<RankedRow>.CreateBuilder("rank", r => r.Rank).ThenBy(r => r.Id).Build();
+
+        var ids = map.Apply(RankedRows.AsQueryable(), "-rank").Select(r => r.Id).ToArray();
+
+        // Rank descending puts the rank-5 group first; its tiebreaker stays Id ascending (1, 2), then rank 1.
+        ids.Should().Equal(1, 2, 3);
+    }
 }
