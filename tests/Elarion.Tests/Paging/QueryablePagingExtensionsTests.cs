@@ -171,7 +171,7 @@ public sealed class QueryablePagingExtensionsTests
 
     private sealed record TestDto(Guid Id, string Name);
 
-    /// <summary>Hand-written mirror of the generator's emission for <c>[Keyset("CreatedAt", "Id")]</c>.</summary>
+    /// <summary>Hand-written mirror of the generator's emission for <c>[Keyset&lt;TestEntity&gt;("CreatedAt", "Id")]</c>.</summary>
     private sealed class TestEntityKeyset : IKeysetDefinition<TestEntity>
     {
         public static TestEntityKeyset Definition { get; } = new();

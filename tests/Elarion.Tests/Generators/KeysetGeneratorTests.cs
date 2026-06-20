@@ -17,20 +17,24 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("-CreatedAt", "Id")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
                     public string Name { get; set; } = "";
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("-CreatedAt", "Id")]
+                public sealed partial class RecentClients { }
             }
             """);
 
         NoErrors(result);
-        var source = GetGeneratedSource(result, "Sample_Domain_Client.Keyset.g.cs");
+        var source = GetGeneratedSource(result, "Sample_Domain_RecentClients.Keyset.g.cs");
 
+        // The definition is emitted into the annotated partial class, not a separate {Entity}Keyset type.
         source.Should().Contain(
-            "public sealed class ClientKeyset : global::Elarion.EntityFrameworkCore.Paging.IKeysetDefinition<global::Sample.Domain.Client>");
+            "partial class RecentClients : global::Elarion.EntityFrameworkCore.Paging.IKeysetDefinition<global::Sample.Domain.Client>");
+        source.Should().Contain("public static RecentClients Definition { get; } = new();");
         source.Should().Contain(
             "? source.OrderByDescending(__e => __e.CreatedAt).ThenBy(__e => __e.Id)");
         source.Should().Contain(
@@ -54,17 +58,19 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("CreatedAt", "Id")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("CreatedAt", "Id")]
+                public sealed partial class ClientSeek { }
             }
             """,
             NpgsqlAssemblyAttribute);
 
         NoErrors(result);
-        var source = GetGeneratedSource(result, "Sample_Domain_Client.Keyset.g.cs");
+        var source = GetGeneratedSource(result, "Sample_Domain_ClientSeek.Keyset.g.cs");
 
         source.Should().Contain(
             "__e => global::Microsoft.EntityFrameworkCore.EF.Functions.GreaterThan(global::System.ValueTuple.Create(__e.CreatedAt, __e.Id), global::System.ValueTuple.Create(__key0, __key1))");
@@ -83,17 +89,19 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("-CreatedAt", "-Id")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("-CreatedAt", "-Id")]
+                public sealed partial class ClientSeek { }
             }
             """,
             NpgsqlAssemblyAttribute);
 
         NoErrors(result);
-        var source = GetGeneratedSource(result, "Sample_Domain_Client.Keyset.g.cs");
+        var source = GetGeneratedSource(result, "Sample_Domain_ClientSeek.Keyset.g.cs");
 
         source.Should().Contain(
             "__e => global::Microsoft.EntityFrameworkCore.EF.Functions.LessThan(global::System.ValueTuple.Create(__e.CreatedAt, __e.Id), global::System.ValueTuple.Create(__key0, __key1))");
@@ -110,17 +118,19 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("-CreatedAt", "Id")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("-CreatedAt", "Id")]
+                public sealed partial class ClientSeek { }
             }
             """,
             NpgsqlAssemblyAttribute);
 
         NoErrors(result);
-        var source = GetGeneratedSource(result, "Sample_Domain_Client.Keyset.g.cs");
+        var source = GetGeneratedSource(result, "Sample_Domain_ClientSeek.Keyset.g.cs");
 
         // Row values can't express mixed directions, so the portable predicate stands.
         source.Should().NotContain("EF.Functions");
@@ -134,16 +144,18 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("Sequence")]
                 public sealed class Event {
                     public long Sequence { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Event>("Sequence")]
+                public sealed partial class EventSeek { }
             }
             """,
             NpgsqlAssemblyAttribute);
 
         NoErrors(result);
-        var source = GetGeneratedSource(result, "Sample_Domain_Event.Keyset.g.cs");
+        var source = GetGeneratedSource(result, "Sample_Domain_EventSeek.Keyset.g.cs");
 
         // A single column gains nothing from a row value; keep the scalar comparison.
         source.Should().NotContain("EF.Functions");
@@ -156,16 +168,18 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("CreatedAt", "Id")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("CreatedAt", "Id")]
+                public sealed partial class ClientSeek { }
             }
             """);
 
         NoErrors(result);
-        var source = GetGeneratedSource(result, "Sample_Domain_Client.Keyset.g.cs");
+        var source = GetGeneratedSource(result, "Sample_Domain_ClientSeek.Keyset.g.cs");
 
         // Without the Npgsql opt-in, the seek stays provider-neutral.
         source.Should().NotContain("EF.Functions");
@@ -179,16 +193,18 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("CreatedAt", "Id")]
                 public sealed class Order {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Order>("CreatedAt", "Id")]
+                public sealed partial class OrderSeek { }
             }
             """);
 
         NoErrors(result);
-        var generated = GetGeneratedSource(result, "Sample_Domain_Order.Keyset.g.cs");
+        var generated = GetGeneratedSource(result, "Sample_Domain_OrderSeek.Keyset.g.cs");
 
         // Compile the generated keyset against a clean entity and the real runtime assembly.
         var entity =
@@ -205,43 +221,69 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_GeneratedPagingExtension_OmitsDefinitionAndCompiles()
+    public void Keyset_MultipleKeysetsOnSameEntity_GenerateDistinctDefinitions()
     {
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("CreatedAt", "Id")]
-                public sealed class Order {
+                public sealed class Post {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
+                    public string Title { get; set; } = "";
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Post>("-CreatedAt", "-Id")]
+                public sealed partial class RecentPosts { }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Post>("Title", "Id")]
+                public sealed partial class PostsByTitle { }
             }
             """);
 
         NoErrors(result);
-        var keyset = GetGeneratedSource(result, "Sample_Domain_Order.Keyset.g.cs");
-        var paging = GetGeneratedSource(result, "Sample_Domain_Order.KeysetPaging.g.cs");
 
-        // The convenience overload drops the keyset-definition parameter and supplies it from the
-        // generated definition, so callers never name the generated keyset type.
-        paging.Should().Contain("namespace Elarion.EntityFrameworkCore.Paging;");
-        paging.Should().Contain("public static class OrderKeysetPagingExtensions");
-        paging.Should().Contain("this global::System.Linq.IQueryable<global::Sample.Domain.Order> source");
-        paging.Should().NotContain("IKeysetDefinition");
-        paging.Should().Contain("global::Sample.Domain.OrderKeyset.Definition");
+        // The same entity yields two independent keyset definitions in two distinct files.
+        var recent = GetGeneratedSource(result, "Sample_Domain_RecentPosts.Keyset.g.cs");
+        var byTitle = GetGeneratedSource(result, "Sample_Domain_PostsByTitle.Keyset.g.cs");
+
+        recent.Should().Contain(
+            "partial class RecentPosts : global::Elarion.EntityFrameworkCore.Paging.IKeysetDefinition<global::Sample.Domain.Post>");
+        byTitle.Should().Contain(
+            "partial class PostsByTitle : global::Elarion.EntityFrameworkCore.Paging.IKeysetDefinition<global::Sample.Domain.Post>");
 
         var entity =
             """
             namespace Sample.Domain {
-                public sealed class Order {
+                public sealed class Post {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
+                    public string Title { get; set; } = "";
                 }
             }
             """;
 
-        // Entity + keyset + convenience extension must all compile against the real runtime.
-        CompileErrors(entity, keyset, paging).Should().BeEmpty();
+        // Both definitions, against the same entity, compile against the real runtime.
+        CompileErrors(entity, recent, byTitle).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Keyset_NonPartialClass_ReportsErrorAndGeneratesNothing()
+    {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Client {
+                    public System.Guid Id { get; set; }
+                    public System.DateTime CreatedAt { get; set; }
+                }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("CreatedAt", "Id")]
+                public sealed class NotPartial { }
+            }
+            """);
+
+        result.Diagnostics.Should().Contain(d => d.Id == "ELKEY005");
+        result.GeneratedTrees.Should().BeEmpty();
     }
 
     [Fact]
@@ -250,10 +292,12 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("Missing", "Id")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("Missing", "Id")]
+                public sealed partial class ClientSeek { }
             }
             """);
 
@@ -267,11 +311,13 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("Score", "Id")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                     public int? Score { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("Score", "Id")]
+                public sealed partial class ClientSeek { }
             }
             """);
 
@@ -285,11 +331,13 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("Active", "Id")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                     public bool Active { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("Active", "Id")]
+                public sealed partial class ClientSeek { }
             }
             """);
 
@@ -303,19 +351,21 @@ public sealed class KeysetGeneratorTests
         var result = Generate(
             """
             namespace Sample.Domain {
-                [Elarion.EntityFrameworkCore.Paging.Keyset("CreatedAt")]
                 public sealed class Client {
                     public System.Guid Id { get; set; }
                     public System.DateTime CreatedAt { get; set; }
                 }
+
+                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("CreatedAt")]
+                public sealed partial class ClientSeek { }
             }
             """);
 
         result.Diagnostics.Should().Contain(d => d.Id == "ELKEY004");
         result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
-        // The keyset definition and its convenience paging extension are both emitted.
+        // The keyset definition is still emitted.
         result.GeneratedTrees.Select(t => Path.GetFileName(t.FilePath))
-            .Should().BeEquivalentTo("Sample_Domain_Client.Keyset.g.cs", "Sample_Domain_Client.KeysetPaging.g.cs");
+            .Should().BeEquivalentTo("Sample_Domain_ClientSeek.Keyset.g.cs");
     }
 
     private static GeneratorDriverRunResult Generate(string testSource, string assemblyAttributes = "")
@@ -325,7 +375,7 @@ public sealed class KeysetGeneratorTests
             {{assemblyAttributes}}
             namespace Elarion.EntityFrameworkCore.Paging {
                 [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-                public sealed class KeysetAttribute : System.Attribute {
+                public sealed class KeysetAttribute<TEntity> : System.Attribute where TEntity : class {
                     public KeysetAttribute(params string[] columns) {
                     }
                 }

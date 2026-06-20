@@ -9,9 +9,21 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- Composite, multi-column offset sorts: `SortMapBuilder.ThenBy` chains fixed-direction tiebreakers and
+  a new `SortDirection` enum sets per-entry directions, so a non-unique sort column gets a stable
+  trailing key. A client `-`/`+` prefix now flips only the entry's primary column.
 - Restructured documentation into a navigable, multi-page guide under [`docs/`](docs/), covering
   getting started, core concepts, JSON-RPC, scheduling, resilience, EF Core, telemetry, and
   reference material.
+
+### Changed
+- **Breaking:** keyset pagination is declared off the entity. The `[Keyset]` attribute is now generic
+  (`[Keyset<TEntity>]`) and goes on a dedicated partial class that the generator fills with the
+  `IKeysetDefinition<TEntity>` implementation and a static `Definition`. An entity can have any number
+  of orderings, each in its own keyset class. Handlers pass the definition explicitly
+  (`source.ToKeysetPageAsync(request, MyKeyset.Definition, selector)`), making keyset symmetric with
+  offset paging; the per-entity zero-argument convenience overload is removed. A non-partial or nested
+  keyset class reports `ELKEY005`.
 - Dedicated documentation for handler caching (`[Cacheable]`, `[CacheInvalidate]`) and current-user
   access (`ICurrentUser`).
 - Provider-neutral blob storage contracts and a PostgreSQL-backed blob storage package with EF Core

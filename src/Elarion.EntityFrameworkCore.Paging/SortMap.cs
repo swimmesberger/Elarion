@@ -19,20 +19,22 @@ namespace Elarion.EntityFrameworkCore.Paging;
 /// <example>
 /// <code>
 /// private static readonly SortMap&lt;Client&gt; Sort = SortMap&lt;Client&gt;
-///     .CreateBuilder("createdAt", c =&gt; c.CreatedAt)   // the default sort
+///     .CreateBuilder("createdAt", c =&gt; c.CreatedAt, SortDirection.Descending)   // the default sort
+///     .ThenBy(c =&gt; c.Id, SortDirection.Descending)                             // stable tiebreaker
 ///     .Add("name", c =&gt; c.Name)
+///     .ThenBy(c =&gt; c.Id)
 ///     .Build();
-/// // request.Sort == "-name" sorts by Name descending; unknown keys fall back to the default.
+/// // request.Sort == "name" sorts by Name then Id; "-createdAt"/"+createdAt" flip the primary column.
 /// </code>
 /// </example>
 public sealed class SortMap<T>
 {
-    private readonly FrozenDictionary<string, Func<IQueryable<T>, bool, IOrderedQueryable<T>>> _entries;
+    private readonly FrozenDictionary<string, Func<IQueryable<T>, bool?, IOrderedQueryable<T>>> _entries;
     private readonly string _defaultKey;
 
     internal SortMap(
         string defaultKey,
-        FrozenDictionary<string, Func<IQueryable<T>, bool, IOrderedQueryable<T>>> entries)
+        FrozenDictionary<string, Func<IQueryable<T>, bool?, IOrderedQueryable<T>>> entries)
     {
         _defaultKey = defaultKey;
         _entries = entries;
@@ -40,32 +42,37 @@ public sealed class SortMap<T>
 
     /// <summary>
     /// Starts building a sort map whose first entry is the default sort, applied when the request
-    /// specifies no key or a key that is not whitelisted. Chain <see cref="SortMapBuilder{T}.Add{TKey}"/>
-    /// for each additional allowed key, then call <see cref="SortMapBuilder{T}.Build"/>.
+    /// specifies no key or a key that is not whitelisted. Chain <see cref="SortMapBuilder{T}.ThenBy{TKey}"/>
+    /// to add tiebreakers and <see cref="SortMapBuilder{T}.Add{TKey}"/> for each additional allowed key,
+    /// then call <see cref="SortMapBuilder{T}.Build"/>.
     /// </summary>
     /// <typeparam name="TKey">The type of the sort key.</typeparam>
     /// <param name="key">The default sort key, as clients reference it.</param>
-    /// <param name="selector">The key selector for the default sort.</param>
-    public static SortMapBuilder<T> CreateBuilder<TKey>(string key, Expression<Func<T, TKey>> selector)
-        => new SortMapBuilder<T>(key).Add(key, selector);
+    /// <param name="selector">The primary key selector for the default sort.</param>
+    /// <param name="direction">The default direction for the primary column.</param>
+    public static SortMapBuilder<T> CreateBuilder<TKey>(
+        string key, Expression<Func<T, TKey>> selector, SortDirection direction = SortDirection.Ascending)
+        => new SortMapBuilder<T>(key).Add(key, selector, direction);
 
     /// <summary>
-    /// Applies the sort named by <paramref name="sort"/> (a leading <c>-</c> requests descending),
-    /// falling back to the default key (ascending) when the key is blank or not whitelisted.
+    /// Applies the sort named by <paramref name="sort"/>, falling back to the default key when the key is
+    /// blank or not whitelisted. A leading <c>-</c> (descending) or <c>+</c> (ascending) flips the
+    /// entry's primary column; tiebreakers keep their declared direction. With no prefix the entry's
+    /// declared directions are used as-is.
     /// </summary>
     public IOrderedQueryable<T> Apply(IQueryable<T> source, string? sort)
     {
         ArgumentNullException.ThrowIfNull(source);
 
         var key = _defaultKey;
-        var descending = false;
+        bool? primaryDescendingOverride = null;
 
         if (!string.IsNullOrWhiteSpace(sort))
         {
             var parsed = sort.Trim();
             if (parsed[0] is '-' or '+')
             {
-                descending = parsed[0] == '-';
+                primaryDescendingOverride = parsed[0] == '-';
                 parsed = parsed[1..];
             }
 
@@ -75,10 +82,10 @@ public sealed class SortMap<T>
             }
             else
             {
-                descending = false;
+                primaryDescendingOverride = null;
             }
         }
 
-        return _entries[key](source, descending);
+        return _entries[key](source, primaryDescendingOverride);
     }
 }

@@ -1,21 +1,24 @@
 using System.Collections.Immutable;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 namespace Elarion.EntityFrameworkCore.Generators;
 
 /// <summary>
-/// Source generator that emits a strongly-typed keyset (seek) pagination definition for every entity
-/// annotated with <c>[Keyset]</c>. The generated <c>{Entity}Keyset</c> implements
+/// Source generator that fills every partial class annotated with <c>[Keyset&lt;TEntity&gt;]</c> with a
+/// strongly-typed keyset (seek) pagination definition. The class is completed as an
 /// <c>IKeysetDefinition&lt;TEntity&gt;</c> with a reflection-free ordering, seek predicate, and opaque
-/// cursor codec — plain typed expressions the query provider translates to SQL like hand-written code.
+/// cursor codec — plain typed expressions the query provider translates to SQL like hand-written code —
+/// plus a static <c>Definition</c> singleton. Keyset definitions live off the entity, so one entity can
+/// have any number of orderings.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class KeysetGenerator : IIncrementalGenerator
 {
-    private const string KeysetAttributeName = "Elarion.EntityFrameworkCore.Paging.KeysetAttribute";
+    private const string KeysetAttributeName = "Elarion.EntityFrameworkCore.Paging.KeysetAttribute`1";
     private const string KeysetNamespace = "global::Elarion.EntityFrameworkCore.Paging";
     private const string ProviderAttributeName = "Elarion.EntityFrameworkCore.UseElarionEntityFrameworkCoreAttribute";
 
@@ -53,6 +56,14 @@ public sealed class KeysetGenerator : IIncrementalGenerator
         messageFormat: "Entity '{0}' has a property 'Id' that is not part of its [Keyset]; append a unique column such as the key so paging is deterministic",
         category: "Elarion.EntityFrameworkCore",
         defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor InvalidKeysetClass = new(
+        id: "ELKEY005",
+        title: "Keyset class must be a top-level partial class",
+        messageFormat: "Keyset class '{0}' must be a non-nested partial class; the generator emits the keyset definition into it",
+        category: "Elarion.EntityFrameworkCore",
+        defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -134,65 +145,83 @@ public sealed class KeysetGenerator : IIncrementalGenerator
 
     private static KeysetTarget? GetTarget(GeneratorAttributeSyntaxContext ctx)
     {
-        if (ctx.TargetSymbol is not INamedTypeSymbol entity)
+        if (ctx.TargetSymbol is not INamedTypeSymbol keysetClass)
         {
             return null;
         }
 
-        var location = LocationModel.From(entity);
-        var columnSpecs = ReadColumns(ctx.Attributes);
-        if (columnSpecs.IsEmpty)
+        // The keyset class carries the definition; the entity comes from the generic type argument.
+        if (ctx.Attributes.Length == 0 ||
+            ctx.Attributes[0].AttributeClass is not { TypeArguments.Length: 1 } attributeClass ||
+            attributeClass.TypeArguments[0] is not INamedTypeSymbol entity)
         {
             return null;
         }
 
-        var properties = GetAccessibleProperties(entity);
-        var columns = ImmutableArray.CreateBuilder<ColumnModel>();
+        var location = LocationModel.From(keysetClass);
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticModel>();
-        var columnNames = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var spec in columnSpecs)
+        // The generator completes the class as a partial; a nested or non-partial class cannot be filled.
+        var isPartial = ctx.TargetNode is TypeDeclarationSyntax typeDecl &&
+            typeDecl.Modifiers.Any(SyntaxKind.PartialKeyword);
+        if (!isPartial || keysetClass.ContainingType is not null)
         {
-            columnNames.Add(spec.Name);
-            if (!properties.TryGetValue(spec.Name, out var property))
-            {
-                diagnostics.Add(DiagnosticModel.Create(UnknownColumn, location, entity.Name, spec.Name));
-                continue;
-            }
-
-            if (IsNullable(property.Type))
-            {
-                diagnostics.Add(DiagnosticModel.Create(NullableColumn, location, entity.Name, spec.Name));
-                continue;
-            }
-
-            var mapping = TypeMapping.For(property.Type);
-            if (mapping is null)
-            {
-                diagnostics.Add(DiagnosticModel.Create(
-                    UnsupportedColumnType, location, entity.Name, spec.Name, property.Type.ToDisplayString()));
-                continue;
-            }
-
-            columns.Add(new ColumnModel(
-                spec.Name,
-                spec.Descending,
-                property.Type.ToDisplayString(FullyQualified),
-                mapping.Value.WriteMethod,
-                mapping.Value.ReadMethod,
-                mapping.Value.NeedsCast,
-                mapping.Value.EncodeCast,
-                mapping.Value.UseCompareTo));
+            diagnostics.Add(DiagnosticModel.Create(InvalidKeysetClass, location, keysetClass.Name));
         }
 
-        if (properties.ContainsKey("Id") && !columnNames.Contains("Id"))
+        var columns = ImmutableArray.CreateBuilder<ColumnModel>();
+        var columnSpecs = ReadColumns(ctx.Attributes);
+        if (!columnSpecs.IsEmpty)
         {
-            diagnostics.Add(DiagnosticModel.Create(NonDeterministicKeyset, location, entity.Name));
+            var properties = GetAccessibleProperties(entity);
+            var columnNames = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var spec in columnSpecs)
+            {
+                columnNames.Add(spec.Name);
+                if (!properties.TryGetValue(spec.Name, out var property))
+                {
+                    diagnostics.Add(DiagnosticModel.Create(UnknownColumn, location, entity.Name, spec.Name));
+                    continue;
+                }
+
+                if (IsNullable(property.Type))
+                {
+                    diagnostics.Add(DiagnosticModel.Create(NullableColumn, location, entity.Name, spec.Name));
+                    continue;
+                }
+
+                var mapping = TypeMapping.For(property.Type);
+                if (mapping is null)
+                {
+                    diagnostics.Add(DiagnosticModel.Create(
+                        UnsupportedColumnType, location, entity.Name, spec.Name, property.Type.ToDisplayString()));
+                    continue;
+                }
+
+                columns.Add(new ColumnModel(
+                    spec.Name,
+                    spec.Descending,
+                    property.Type.ToDisplayString(FullyQualified),
+                    mapping.Value.WriteMethod,
+                    mapping.Value.ReadMethod,
+                    mapping.Value.NeedsCast,
+                    mapping.Value.EncodeCast,
+                    mapping.Value.UseCompareTo));
+            }
+
+            if (properties.ContainsKey("Id") && !columnNames.Contains("Id"))
+            {
+                diagnostics.Add(DiagnosticModel.Create(NonDeterministicKeyset, location, entity.Name));
+            }
         }
 
         return new KeysetTarget(
-            entity.Name,
-            entity.ContainingNamespace.IsGlobalNamespace ? string.Empty : entity.ContainingNamespace.ToDisplayString(),
+            keysetClass.Name,
+            keysetClass.ContainingNamespace.IsGlobalNamespace
+                ? string.Empty
+                : keysetClass.ContainingNamespace.ToDisplayString(),
+            keysetClass.ToDisplayString(FullyQualified),
             entity.ToDisplayString(FullyQualified),
             columns.ToImmutable(),
             diagnostics.ToImmutable());
@@ -261,7 +290,7 @@ public sealed class KeysetGenerator : IIncrementalGenerator
 
         var entity = target.EntityGlobalFqn;
         var useRowValues = provider == ProviderKind.Npgsql && CanUseRowValues(target);
-        var className = target.EntityName + "Keyset";
+        var className = target.ClassName;
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("#nullable enable");
@@ -269,14 +298,16 @@ public sealed class KeysetGenerator : IIncrementalGenerator
         sb.AppendLine("using System.Linq;");
         sb.AppendLine();
 
-        var hasNamespace = target.EntityNamespace.Length > 0;
+        var hasNamespace = target.ClassNamespace.Length > 0;
         if (hasNamespace)
         {
-            sb.AppendLine($"namespace {target.EntityNamespace};");
+            sb.AppendLine($"namespace {target.ClassNamespace};");
             sb.AppendLine();
         }
 
-        sb.AppendLine($"public sealed class {className} : {KeysetNamespace}.IKeysetDefinition<{entity}>");
+        // Complete the user's partial keyset class as the definition; the entity is referenced by its
+        // fully-qualified name, so it can live in any namespace and stays free of pagination attributes.
+        sb.AppendLine($"partial class {className} : {KeysetNamespace}.IKeysetDefinition<{entity}>");
         sb.AppendLine("{");
         sb.AppendLine($"    public static {className} Definition {{ get; }} = new();");
         sb.AppendLine();
@@ -295,57 +326,13 @@ public sealed class KeysetGenerator : IIncrementalGenerator
 
         sb.AppendLine("}");
 
-        var hint = target.EntityGlobalFqn
+        // Hint name keys on the keyset class (not the entity) so an entity with multiple keysets emits
+        // multiple distinct files.
+        var hint = target.ClassGlobalFqn
             .Replace("global::", string.Empty)
             .Replace('.', '_')
             .Replace('+', '_');
         context.AddSource($"{hint}.Keyset.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
-
-        EmitKeysetPagingExtensions(context, target, hint, className);
-    }
-
-    private static void EmitKeysetPagingExtensions(
-        SourceProductionContext context, KeysetTarget target, string hint, string className)
-    {
-        var entity = target.EntityGlobalFqn;
-        var keysetFqn = target.EntityNamespace.Length > 0
-            ? $"global::{target.EntityNamespace}.{className}"
-            : $"global::{className}";
-
-        var sb = new StringBuilder();
-        sb.AppendLine("// <auto-generated/>");
-        sb.AppendLine("#nullable enable");
-        sb.AppendLine();
-        // Emit into the paging namespace callers already import, so the overload is in scope without a
-        // new using and without ever naming the generated keyset type.
-        sb.AppendLine($"namespace {KeysetNamespace.Replace("global::", string.Empty)};");
-        sb.AppendLine();
-        sb.AppendLine("/// <summary>");
-        sb.AppendLine($"/// Generated convenience extensions that page <c>{target.EntityName}</c> queries with its");
-        sb.AppendLine($"/// <c>[Keyset]</c> definition supplied automatically (no explicit <c>{className}.Definition</c>).");
-        sb.AppendLine("/// </summary>");
-        sb.AppendLine($"public static class {target.EntityName}KeysetPagingExtensions");
-        sb.AppendLine("{");
-        sb.AppendLine("    /// <summary>");
-        sb.AppendLine($"    /// Reads one keyset page using the generated <c>{className}.Definition</c>. Equivalent to the");
-        sb.AppendLine("    /// explicit <c>ToKeysetPageAsync</c> overload with the keyset definition passed in.");
-        sb.AppendLine("    /// </summary>");
-        sb.AppendLine(
-            "    public static global::System.Threading.Tasks.Task<global::Elarion.Abstractions.Paging.Page<TDto>> ToKeysetPageAsync<TDto>(");
-        sb.AppendLine($"        this global::System.Linq.IQueryable<{entity}> source,");
-        sb.AppendLine("        global::Elarion.Abstractions.Paging.IKeysetPageRequest request,");
-        sb.AppendLine(
-            $"        global::System.Linq.Expressions.Expression<global::System.Func<{entity}, TDto>> selector,");
-        sb.AppendLine(
-            $"        int maxSize = {KeysetNamespace}.QueryablePagingExtensions.DefaultMaxSize,");
-        sb.AppendLine("        global::System.Threading.CancellationToken cancellationToken = default)");
-        sb.AppendLine(
-            $"        => {KeysetNamespace}.QueryablePagingExtensions.ToKeysetPageAsync(");
-        sb.AppendLine(
-            $"            source, request, {keysetFqn}.Definition, selector, maxSize, cancellationToken);");
-        sb.AppendLine("}");
-
-        context.AddSource($"{hint}.KeysetPaging.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 
     private static void EmitApplyOrder(StringBuilder sb, KeysetTarget target, string entity)
@@ -608,8 +595,9 @@ public sealed class KeysetGenerator : IIncrementalGenerator
         bool UseCompareTo);
 
     private sealed record KeysetTarget(
-        string EntityName,
-        string EntityNamespace,
+        string ClassName,
+        string ClassNamespace,
+        string ClassGlobalFqn,
         string EntityGlobalFqn,
         ImmutableArray<ColumnModel> Columns,
         ImmutableArray<DiagnosticModel> Diagnostics);

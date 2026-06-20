@@ -168,42 +168,42 @@ where a UI needs page numbers and a total count.
 
 ### Keyset pagination
 
-Declare the ordered key columns on the entity with `[Keyset]`. Columns are ascending by default;
-prefix a name with `-` for descending. The generator emits a reflection-free `{Entity}Keyset` whose
-ordering and seek predicate are plain typed expressions the provider translates to SQL like
-hand-written `OrderBy`/`Where`, plus an opaque cursor codec that carries the key values (no extra
-round-trip to reload a reference row):
+Declare the ordered key columns on a dedicated partial class with `[Keyset<TEntity>]` — the entity
+stays free of pagination concerns, and an entity can have any number of orderings. Columns are
+ascending by default; prefix a name with `-` for descending. The generator fills the class with a
+reflection-free `IKeysetDefinition<TEntity>` (ordering and seek predicate are plain typed expressions
+the provider translates to SQL like hand-written `OrderBy`/`Where`) plus a static `Definition`
+singleton and an opaque cursor codec that carries the key values (no extra round-trip to reload a
+reference row):
 
 ```csharp
 using Elarion.EntityFrameworkCore;          // [DbEntity]
-using Elarion.EntityFrameworkCore.Paging;   // [Keyset]
+using Elarion.EntityFrameworkCore.Paging;   // [Keyset<T>]
 
 [DbEntity]
-[Keyset(nameof(CreatedAt), nameof(Id))]   // CreatedAt, then Id to break ties
 public sealed class Client {
     public Guid Id { get; init; }
     public DateTime CreatedAt { get; init; }
     public string Name { get; init; } = "";
 }
+
+// one partial class per ordering, declared near the feature that pages it
+[Keyset<Client>(nameof(Client.CreatedAt), nameof(Client.Id))]   // CreatedAt, then Id to break ties
+public sealed partial class ClientsByCreated;
 ```
 
 For a "newest first" feed, prefix each column with `-` to sort descending. Keeping every column the
 same direction also lets the Npgsql provider use a row-value seek (see below):
 
 ```csharp
-[DbEntity]
-[Keyset("-CreatedAt", "-Id")]   // CreatedAt desc, then Id desc to break ties
-public sealed class Post {
-    public Guid Id { get; init; }
-    public DateTime CreatedAt { get; init; }
-}
+[Keyset<Post>("-CreatedAt", "-Id")]   // CreatedAt desc, then Id desc to break ties
+public sealed partial class RecentPosts;
 ```
 
-Handlers call `ToKeysetPageAsync` with a server-side projection. The generator emits a per-entity
-overload, so on an `IQueryable<Client>` you don't pass the keyset definition — it's supplied from the
-entity automatically (the explicit `ToKeysetPageAsync(..., ClientKeyset.Definition, ...)` overload
-still exists if you need it). The request implements `IKeysetPageRequest` so its `after`/`before`/`size`
-fields stay flat for HTTP GET query binding:
+Handlers call `ToKeysetPageAsync` with the keyset definition and a server-side projection. Passing the
+definition explicitly (`ClientsByCreated.Definition`) keeps keyset symmetric with offset paging — which
+passes a `SortMap` — and lets one handler choose among an entity's orderings. The request implements
+`IKeysetPageRequest` so its `after`/`before`/`size` fields stay flat for HTTP GET query binding:
 
 ```csharp
 [RpcMethod("clients.list")]
@@ -228,6 +228,7 @@ public sealed class ListClients(IAppDbContext db, ICurrentUser user)
 
         return await rows.ToKeysetPageAsync(
             query,
+            ClientsByCreated.Definition,
             c => new Item(c.Id, c.Name, c.CreatedAt),
             maxSize: 100, ct);
     }
@@ -280,7 +281,7 @@ With `Npgsql` selected, a keyset of two or more columns that share one direction
 `EF.Functions.GreaterThan`/`LessThan` over `ValueTuple`s, which Npgsql renders as a row value:
 
 ```csharp
-// [Keyset(nameof(CreatedAt), nameof(Id))] with the Npgsql provider:
+// [Keyset<Client>(nameof(Client.CreatedAt), nameof(Client.Id))] with the Npgsql provider:
 __e => EF.Functions.GreaterThan(
     ValueTuple.Create(__e.CreatedAt, __e.Id),
     ValueTuple.Create(__key0, __key1));
@@ -295,14 +296,17 @@ provider. The opt-in requires the `Npgsql.EntityFrameworkCore.PostgreSQL` packag
 
 When a UI needs random page access and a total count, use `ToOffsetPageAsync` with a `SortMap` — an
 AOT-safe whitelist that binds sort keys to typed selectors (no dynamic LINQ, and clients can only sort
-by columns you allow). The map is a fixed whitelist that doesn't depend on the request, so build it
+by columns you allow). Each entry may chain `ThenBy` tiebreakers (each with a `SortDirection`) for a
+stable composite order. The map is a fixed whitelist that doesn't depend on the request, so build it
 once with `CreateBuilder(...).Add(...).Build()` and keep the immutable result in a `static readonly`
 field rather than rebuilding per call:
 
 ```csharp
 private static readonly SortMap<Client> Sort = SortMap<Client>
-    .CreateBuilder("createdAt", c => c.CreatedAt)   // default sort
+    .CreateBuilder("createdAt", c => c.CreatedAt, SortDirection.Descending)   // default sort
+    .ThenBy(c => c.Id, SortDirection.Descending)                             // stable tiebreaker
     .Add("name", c => c.Name)
+    .ThenBy(c => c.Id)
     .Build();
 
 public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
@@ -315,5 +319,6 @@ public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, Cancellation
 `Build()` produces an immutable map backed by a `FrozenDictionary`, so a shared static instance is
 safe for concurrent requests.
 
-A request `sort` of `"-name"` orders by `Name` descending; unknown or blank keys fall back to the
-default. Offset pages fill `Total`; keyset pages fill the cursors instead.
+A request `sort` of `"name"` orders by `Name` then `Id`; a leading `-`/`+` flips only the entry's
+primary column (so `"-name"` sorts `Name` descending, `Id` ascending). Unknown or blank keys fall back
+to the default entry. Offset pages fill `Total`; keyset pages fill the cursors instead.
