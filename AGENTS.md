@@ -17,8 +17,8 @@ and deployment quirks belong in consuming repositories, not here.
 
 ## Package layout
 
-- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts, result types, pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, and source-generation triggers.
-- `Elarion` — runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, and the in-memory scheduler.
+- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts, result types, pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, messaging contracts (`IDomainEvent`/`IIntegrationEvent` markers, `IDomainEventBus`/`IIntegrationEventBus`, `IEventContext`, `IEventDispatchScope`, `[ConsumeEvent]`, `EventSubscriptionDescriptor`), and source-generation triggers.
+- `Elarion` — runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, the in-memory scheduler, and the in-memory event bus (inline domain dispatch plus an after-commit integration delivery pump).
 - `Elarion.Blobs` — implementation-neutral blob storage contracts and DTOs.
 - `Elarion.Blobs.PostgreSql` — PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O.
 - `Elarion.JsonRpc` — transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and the RPC method-map trigger attribute.
@@ -27,7 +27,7 @@ and deployment quirks belong in consuming repositories, not here.
 - `Elarion.AspNetCore.SchemaGeneration` — MSBuild package and host-launching tool for generating JSON-RPC schemas during build.
 - `Elarion.EntityFrameworkCore` — marker attributes for EF Core entity and DbSet generation, plus the assembly-level `[UseElarionEntityFrameworkCore(Provider = EfCoreProvider.Npgsql)]` opt-in (`EfCoreProvider` enum, default `Portable`) that lets EF generators emit provider-optimized variants. Dependency-free (no EF Core or runtime package references).
 - `Elarion.EntityFrameworkCore.Paging` — keyset (cursor) and offset pagination primitives: the `[Keyset]` attribute, `IKeysetDefinition<T>` plus generated-keyset support types, an opaque cursor codec, `SortMap`, and the `IQueryable` paging extensions that produce the transport-neutral `Page<T>`. Depends on EF Core (`Microsoft.EntityFrameworkCore.Relational`) and `Elarion.Abstractions`.
-- `Elarion.Generators` — Roslyn source generators for handlers, validators, services, modules, RPC method maps, HTTP endpoint maps, resilience policies, and scheduled jobs.
+- `Elarion.Generators` — Roslyn source generators for handlers, validators, services, modules, RPC method maps, HTTP endpoint maps, resilience policies, scheduled jobs, and event consumers.
 - `Elarion.EntityFrameworkCore.Generators` — Roslyn generators for DbSet properties and entity configuration application, and for keyset pagination definitions (the `[Keyset]` → `{Entity}Keyset` emitter targeting `Elarion.EntityFrameworkCore.Paging`). It also emits a per-entity `ToKeysetPageAsync` convenience overload (into the `Elarion.EntityFrameworkCore.Paging` namespace) that supplies `{Entity}Keyset.Definition` automatically, so handlers page an `IQueryable<TEntity>` without naming the generated keyset type (the explicit definition-taking overload remains). The keyset emitter is provider-aware: with `[assembly: UseElarionEntityFrameworkCore(Provider = EfCoreProvider.Npgsql)]` and a uniform-direction multi-column keyset it emits a PostgreSQL row-value seek (`EF.Functions.GreaterThan`/`LessThan` over `ValueTuple`s), otherwise it falls back to the portable lexicographic predicate.
 - `@swimmesberger/elarion-jsonrpc-client-generator` — TypeScript CLI/library that converts exported Elarion JSON-RPC schemas into method contracts, Zod result schemas, and a portable fetch client. Lives in `src/elarion-jsonrpc-client-generator`.
 
@@ -36,6 +36,7 @@ and deployment quirks belong in consuming repositories, not here.
 - Core framework packages must stay reusable and domain-neutral. Do not add consuming-application names, domain logic, deployment conventions, or app-specific dependencies.
 - `Elarion.Abstractions` must not depend on runtime integration packages.
 - `Elarion` may depend on abstractions but should avoid ASP.NET Core, EF Core, and transport-specific concerns.
+- The event bus stays split across the two packages: `Elarion.Abstractions` owns the transport-neutral messaging contracts and the domain/integration plane split, while `Elarion` owns only the in-memory implementation. An alternative backend (transactional outbox, message broker) replaces the in-memory runtime by implementing `IIntegrationEventBus` — the only broker-portable plane — without touching the abstractions.
 - `Elarion.Blobs` must stay provider-neutral. Provider implementations such as `Elarion.Blobs.PostgreSql` own storage-specific dependencies and schema configuration.
 - `Elarion.JsonRpc` owns JSON-RPC runtime contracts, dispatch, telemetry, and schema export, and must stay transport-neutral (no ASP.NET Core dependency).
 - `Elarion.AspNetCore` owns HTTP/JSON-RPC endpoint integration and ASP.NET Core-specific behavior. Keep JSON-RPC runtime contracts, telemetry, and schema export in `Elarion.JsonRpc`.
@@ -114,6 +115,50 @@ Per-endpoint authorization/conventions are the host's job, via the per-module me
 `IServiceProvider`) and `AddJsonRpc`/`AddElarionMcp` (ASP.NET, via `IConfiguration`) expose config-aware
 registration overloads, used as `AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods)` and
 `AddElarionMcp(ModuleBootstrapper.GetMcpMetadata(config), serializerOptions, ModuleBootstrapper.RegisterMcpMethods, configure)`.
+
+## Event / messaging model
+
+The event bus is an in-process eventing subsystem whose API is organized around its
+**relationship to the database transaction**, not around a verb. There are two planes,
+each its own interface in `Elarion.Abstractions.Messaging`; see
+[`docs/decisions/0001-event-transaction-phase.md`](docs/decisions/0001-event-transaction-phase.md)
+for the full rationale.
+
+1. **Plane A — domain events (`IDomainEventBus`).** In-process notifications dispatched
+   **inline within the caller's DI scope**, and therefore within the caller's transaction:
+   consumers share the scoped `DbContext`, their writes commit atomically with the command,
+   and a consumer failure fails the command. `PublishAsync<TEvent> where TEvent : IDomainEvent`
+   fans out to every consumer in ascending `[ConsumeEvent(Order = …)]`, aggregating failures;
+   `RequestAsync<TRequest, TResponse>` dispatches to a single responder returning
+   `Result<TResponse>`. Never broker-portable.
+2. **Plane B — integration events (`IIntegrationEventBus`).** Notifications **recorded within
+   the caller's unit of work and delivered after the transaction commits**, on a separate
+   scope, retried independently; a consumer failure never fails the command, and a rollback
+   discards the event. `PublishAsync<TEvent> where TEvent : IIntegrationEvent`. This is the
+   **only broker-portable plane** — an outbox or message-broker backend implements only this
+   interface.
+
+Marker interfaces `IDomainEvent` / `IIntegrationEvent` bind each event to exactly one plane;
+the generator rejects a type carrying both. Consumers are instance methods on `[Service]`
+classes annotated `[ConsumeEvent]`; the message type's marker selects the plane and the return
+type selects the role (`void`/`Task`/`ValueTask` → fan-out subscriber, `Result<TResponse>` →
+the single responder). The optional `IEventContext`/`IEventContext<TEvent>` and
+`CancellationToken` parameters are supplied by the runtime.
+
+`EventConsumerRegistrationGenerator` (triggered by `[GenerateEventConsumers]` or
+`[UseElarion]`) discovers consumers, validates signatures (diagnostics `ELEVT001`/`ELEVT002`/
+`ELEVT004`), and emits a reflection-free `Add{Assembly}EventConsumers(IServiceCollection)` that
+registers each consumer service plus an `EventSubscriptionDescriptor`. The in-memory runtime in
+`Elarion/Messaging` is wired by `AddInMemoryEventBus`: `InMemoryDomainEventBus` dispatches
+Plane A inline; `InMemoryIntegrationEventBus` buffers Plane B into the scoped
+`EventDispatchScope`, whose `FlushAsync`/`Discard` the app's transaction decorator calls after
+commit/on rollback to hand events to the `EventDispatchPump` (a hosted `BackgroundService` with a
+bounded channel) for after-commit delivery.
+
+Like the in-memory **scheduler**, event-consumer registration is currently **flat and
+assembly-wide** — it is **not** module-feature-gated (the descriptor already carries `Module?`
+so gating can be added later). Moving both the scheduler and the event bus onto per-module
+feature gating is a tracked deferred follow-up; see the ADR's "Deferred follow-ups" section.
 
 ## TypeScript client generator
 

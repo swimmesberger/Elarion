@@ -11,6 +11,9 @@ ELSG006 | Elarion.Generators | Error | Invalid runtime scheduled job type
 ELSG007 | Elarion.Generators | Error | Duplicate scheduled job name
 ELSG008 | Elarion.Generators | Error | Invalid schedule specification
 ELSG009 | Elarion.Generators | Error | Invalid scheduled job concurrency
+ELEVT001 | Elarion.Generators | Error | Event consumer must be declared on a [Service] class
+ELEVT002 | Elarion.Generators | Error | Invalid event consumer signature
+ELEVT004 | Elarion.Generators | Error | Duplicate request responder
 ELMCP002 | Elarion.Mcp | Warning | Duplicate MCP tool name under the default tool-name transform
 ELMCP003 | Elarion.Mcp | Warning | MCP customization is ignored when the handler excludes MCP
 ELHTTP001 | Elarion.Http | Warning | HTTP endpoint handler is missing a request/response shape
