@@ -14,8 +14,11 @@ namespace Elarion.Blobs.PostgreSql;
 /// <typeparam name="TDbContext">The EF Core context that owns the blob tables.</typeparam>
 /// <remarks>
 /// Content is stored in a <c>bytea</c> column. Writes stream a seekable source straight through the
-/// Npgsql binary protocol without buffering (a non-seekable source is buffered first only to learn
-/// its length, which the protocol requires up front). Reads are buffered into memory for now; the
+/// Npgsql binary protocol without buffering. A non-seekable source streams without buffering too when
+/// the caller supplies a <see cref="BlobUploadRequest.ContentLength"/> hint (the protocol requires the
+/// length up front; the actual bytes are verified against the hint so the recorded size stays
+/// truthful); without a hint it is buffered first only to learn its length. Reads are buffered into
+/// memory for now; the
 /// streaming upgrade path is <see cref="CommandBehavior.SequentialAccess"/> plus
 /// <c>NpgsqlDataReader.GetStream("data")</c> on a dedicated connection, attached to the returned
 /// <see cref="BlobDownload"/> as its owned resource so the reader and connection live exactly as
@@ -35,42 +38,62 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         ArgumentNullException.ThrowIfNull(content);
 
         // The bytea bind needs the exact length up front. A seekable source streams without
-        // buffering; a non-seekable one is buffered here so we know the length (and record the
-        // actual bytes either way). We never dispose the caller's stream — they own it.
-        Stream writeStream = content;
-        MemoryStream? bufferedStream = null;
-        long size;
+        // buffering. A non-seekable source streams without buffering too when the caller supplies a
+        // ContentLength hint (verified against the actual bytes); otherwise it is buffered here only
+        // to learn the length. We never dispose the caller's stream — they own it.
         if (content.CanSeek) {
-            size = content.Length - content.Position;
+            return await WriteAsync(request, content, content.Length - content.Position, hinted: null, cancellationToken);
         }
-        else {
-            bufferedStream = new MemoryStream();
+
+        if (request.ContentLength is long hint) {
+            ArgumentOutOfRangeException.ThrowIfNegative(hint, nameof(request));
+            var hintedStream = new HintedLengthStream(content, hint);
+            return await WriteAsync(request, hintedStream, hint, hintedStream, cancellationToken);
+        }
+
+        var bufferedStream = new MemoryStream();
+        try {
             await content.CopyToAsync(bufferedStream, cancellationToken);
             bufferedStream.Position = 0;
-            writeStream = bufferedStream;
-            size = bufferedStream.Length;
-        }
-
-        try {
-            var blobId = await SaveBlobAsync(
-                request,
-                size,
-                blobId => UpsertContentStreamAsync(blobId, writeStream, cancellationToken),
-                cancellationToken);
-
-            logger.LogInformation(
-                "Blob stored: {BlobId} ({Container}/{Name}, {Size} bytes)",
-                blobId,
-                request.Container,
-                request.Name,
-                size);
-
-            return new BlobRef { Value = blobId };
+            return await WriteAsync(request, bufferedStream, bufferedStream.Length, hinted: null, cancellationToken);
         }
         finally {
-            if (bufferedStream is not null) {
-                await bufferedStream.DisposeAsync();
-            }
+            await bufferedStream.DisposeAsync();
+        }
+    }
+
+    private async Task<BlobRef> WriteAsync(
+        BlobUploadRequest request,
+        Stream writeStream,
+        long size,
+        HintedLengthStream? hinted,
+        CancellationToken cancellationToken) {
+        var blobId = await SaveBlobAsync(
+            request,
+            size,
+            async id => {
+                await UpsertContentStreamAsync(id, writeStream, cancellationToken);
+                if (hinted is not null) {
+                    await VerifyHintAsync(hinted, size, cancellationToken);
+                }
+            },
+            cancellationToken);
+
+        logger.LogInformation(
+            "Blob stored: {BlobId} ({Container}/{Name}, {Size} bytes)",
+            blobId,
+            request.Container,
+            request.Name,
+            size);
+
+        return new BlobRef { Value = blobId };
+    }
+
+    private static async Task VerifyHintAsync(HintedLengthStream hinted, long hint, CancellationToken cancellationToken) {
+        if (hinted.BytesRead != hint || await hinted.HasUnreadInnerDataAsync(cancellationToken)) {
+            throw new InvalidOperationException(
+                $"The actual content length did not match the declared " +
+                $"{nameof(BlobUploadRequest)}.{nameof(BlobUploadRequest.ContentLength)} hint of {hint} bytes.");
         }
     }
 
