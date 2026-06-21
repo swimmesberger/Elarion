@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Elarion.Blobs;
 using Elarion.Blobs.PostgreSql;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -90,6 +91,55 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
     }
 
     [Fact]
+    public async Task SaveAsync_FromNonSeekableStream_WithContentLengthHint_StreamsAndRoundTrips() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var content = Bytes(5000);
+        var request = NewRequest() with { ContentLength = content.Length };
+
+        var blobRef = await store.SaveAsync(request, new NonSeekableStream(new MemoryStream(content)), ct);
+
+        (await store.GetMetadataAsync(blobRef, ct))!.Size.Should().Be(content.Length);
+        (await store.ReadAllBytesAsync(blobRef, ct)).Should().Equal(content);
+    }
+
+    [Fact]
+    public async Task SaveAsync_FromNonSeekableStream_WithTooSmallHint_FailsAndPersistsNothing() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var content = Bytes(5000);
+        var request = NewRequest() with { ContentLength = content.Length - 100 };
+
+        var act = async () =>
+            await store.SaveAsync(request, new NonSeekableStream(new MemoryStream(content)), ct);
+
+        await act.Should().ThrowAsync<Exception>();
+        await using var freshContext = fixture.CreateContext();
+        (await BlobExistsByName(freshContext, request, ct)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SaveAsync_FromNonSeekableStream_WithTooLargeHint_FailsAndPersistsNothing() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var content = Bytes(5000);
+        var request = NewRequest() with { ContentLength = content.Length + 100 };
+
+        var act = async () =>
+            await store.SaveAsync(request, new NonSeekableStream(new MemoryStream(content)), ct);
+
+        await act.Should().ThrowAsync<Exception>();
+        await using var freshContext = fixture.CreateContext();
+        (await BlobExistsByName(freshContext, request, ct)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task DeleteAsync_RemovesBlobAndContent() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var ct = TestContext.Current.CancellationToken;
@@ -106,6 +156,14 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
 
     private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
         new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+
+    private static Task<bool> BlobExistsByName(
+        IntegrationBlobDbContext context,
+        BlobUploadRequest request,
+        CancellationToken cancellationToken) =>
+        context.Set<StoredBlob>()
+            .AsNoTracking()
+            .AnyAsync(blob => blob.Container == request.Container && blob.Name == request.Name, cancellationToken);
 
     private static BlobUploadRequest NewRequest() =>
         new() {

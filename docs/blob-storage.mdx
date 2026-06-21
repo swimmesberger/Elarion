@@ -70,7 +70,10 @@ await blobs.SaveAsync(request, uploadStream, ct);
 ```
 
 `BlobUploadRequest.ContentLength` is an optional hint; the recorded `BlobMetadata.Size` is always the
-actual number of bytes written, so you can leave it `null` for unknown-length sources.
+actual number of bytes written, so you can leave it `null` for unknown-length sources. A store may use
+the hint to optimize the write — the PostgreSQL store streams a non-seekable source straight into
+`bytea` when the hint is present (verifying it against the actual bytes), and only buffers to learn the
+length when it is absent.
 
 The core `IBlobStore` is intentionally small:
 

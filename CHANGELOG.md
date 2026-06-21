@@ -43,8 +43,10 @@ minor releases may include breaking changes.
   `DownloadContentAsync`, `ReadAllBytesAsync`, `DownloadToAsync`), so `SaveFromFileAsync` no longer
   leaks a local-filesystem assumption onto the interface and a new backend implements only the
   primitives. `BlobUploadRequest.ContentLength` is an optional hint while the recorded `Size` is
-  always the actual bytes written. The PostgreSQL store streams seekable writes straight into `bytea`
-  (buffering a non-seekable source only to learn its length) and documents a `GetStream`
+  always the actual bytes written. The PostgreSQL store streams seekable writes straight into `bytea`,
+  and streams a non-seekable source without buffering when `ContentLength` is supplied (verifying it
+  against the actual bytes so `Size` stays truthful), buffering only when the hint is absent; it
+  documents a `GetStream`
   read-streaming upgrade path. The shape follows the major blob SDKs (S3/Azure/GCS) so an alternative
   backend drops in cleanly.
 - **Breaking:** keyset pagination is declared off the entity. The `[Keyset]` attribute is now generic
