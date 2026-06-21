@@ -12,6 +12,15 @@ namespace Elarion.Blobs.PostgreSql;
 /// PostgreSQL-backed <see cref="IBlobStore"/> implementation.
 /// </summary>
 /// <typeparam name="TDbContext">The EF Core context that owns the blob tables.</typeparam>
+/// <remarks>
+/// Content is stored in a <c>bytea</c> column. Writes stream a seekable source straight through the
+/// Npgsql binary protocol without buffering (a non-seekable source is buffered first only to learn
+/// its length, which the protocol requires up front). Reads are buffered into memory for now; the
+/// streaming upgrade path is <see cref="CommandBehavior.SequentialAccess"/> plus
+/// <c>NpgsqlDataReader.GetStream("data")</c> on a dedicated connection, attached to the returned
+/// <see cref="BlobDownload"/> as its owned resource so the reader and connection live exactly as
+/// long as the caller reads.
+/// </remarks>
 public sealed class PostgreSqlBlobStore<TDbContext>(
     TDbContext dbContext,
     ILogger<PostgreSqlBlobStore<TDbContext>> logger,
@@ -19,68 +28,54 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     where TDbContext : DbContext {
     /// <inheritdoc />
     public async Task<BlobRef> SaveAsync(
-        string container,
-        string name,
-        string contentType,
-        byte[] content,
+        BlobUploadRequest request,
+        Stream content,
         CancellationToken cancellationToken) {
-        ValidateBlobIdentity(container, name, contentType);
+        ValidateUploadRequest(request);
         ArgumentNullException.ThrowIfNull(content);
 
-        var blobId = await SaveBlobAsync(
-            container,
-            name,
-            contentType,
-            content.Length,
-            blobId => UpsertContentBytesAsync(blobId, content, cancellationToken),
-            cancellationToken);
-
-        logger.LogInformation(
-            "Blob stored: {BlobId} ({Container}/{Name}, {Size} bytes)",
-            blobId,
-            container,
-            name,
-            content.Length);
-
-        return new BlobRef { Value = blobId };
-    }
-
-    /// <inheritdoc />
-    public async Task<BlobRef> SaveFromFileAsync(
-        string container,
-        string name,
-        string contentType,
-        string filePath,
-        CancellationToken cancellationToken) {
-        ValidateBlobIdentity(container, name, contentType);
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-
-        var fileInfo = new FileInfo(filePath);
-        if (!fileInfo.Exists) {
-            throw new FileNotFoundException($"Source file not found: {filePath}", filePath);
+        // The bytea bind needs the exact length up front. A seekable source streams without
+        // buffering; a non-seekable one is buffered here so we know the length (and record the
+        // actual bytes either way). We never dispose the caller's stream — they own it.
+        Stream writeStream = content;
+        MemoryStream? bufferedStream = null;
+        long size;
+        if (content.CanSeek) {
+            size = content.Length - content.Position;
+        }
+        else {
+            bufferedStream = new MemoryStream();
+            await content.CopyToAsync(bufferedStream, cancellationToken);
+            bufferedStream.Position = 0;
+            writeStream = bufferedStream;
+            size = bufferedStream.Length;
         }
 
-        var blobId = await SaveBlobAsync(
-            container,
-            name,
-            contentType,
-            fileInfo.Length,
-            blobId => UpsertContentFileAsync(blobId, fileInfo, cancellationToken),
-            cancellationToken);
+        try {
+            var blobId = await SaveBlobAsync(
+                request,
+                size,
+                blobId => UpsertContentStreamAsync(blobId, writeStream, cancellationToken),
+                cancellationToken);
 
-        logger.LogInformation(
-            "Blob stored from file: {BlobId} ({Container}/{Name}, {Size} bytes, source: {FilePath})",
-            blobId,
-            container,
-            name,
-            fileInfo.Length,
-            filePath);
+            logger.LogInformation(
+                "Blob stored: {BlobId} ({Container}/{Name}, {Size} bytes)",
+                blobId,
+                request.Container,
+                request.Name,
+                size);
 
-        return new BlobRef { Value = blobId };
+            return new BlobRef { Value = blobId };
+        }
+        finally {
+            if (bufferedStream is not null) {
+                await bufferedStream.DisposeAsync();
+            }
+        }
     }
 
     /// <inheritdoc />
-    public async Task<BlobContent?> GetAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+    public async Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) {
         ValidateBlobRef(blobRef);
 
         var metadata = await dbContext.Set<StoredBlob>()
@@ -104,15 +99,9 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
 
         var data = (byte[])reader["data"];
 
-        return new BlobContent {
-            Id = metadata.Id,
-            Container = metadata.Container,
-            Name = metadata.Name,
-            ContentType = metadata.ContentType,
-            Size = metadata.Size,
-            CreatedAt = metadata.CreatedAt,
-            Data = data
-        };
+        // Buffered for now: the content is fully materialized, so the MemoryStream owns no
+        // backend resources and BlobDownload has nothing extra to dispose.
+        return new BlobDownload(ToMetadata(metadata), new MemoryStream(data, writable: false));
     }
 
     /// <inheritdoc />
@@ -123,18 +112,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             .AsNoTracking()
             .FirstOrDefaultAsync(storedBlob => storedBlob.Id == blobRef.Value, cancellationToken);
 
-        if (blob is null) {
-            return null;
-        }
-
-        return new BlobMetadata {
-            Id = blob.Id,
-            Container = blob.Container,
-            Name = blob.Name,
-            ContentType = blob.ContentType,
-            Size = blob.Size,
-            CreatedAt = blob.CreatedAt
-        };
+        return blob is null ? null : ToMetadata(blob);
     }
 
     /// <inheritdoc />
@@ -166,9 +144,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     }
 
     private async Task<string> SaveBlobAsync(
-        string container,
-        string name,
-        string contentType,
+        BlobUploadRequest request,
         long size,
         Func<string, Task> saveContent,
         CancellationToken cancellationToken) {
@@ -177,7 +153,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
             : null;
 
-        var blobId = await UpsertMetadataAsync(container, name, contentType, size, cancellationToken);
+        var blobId = await UpsertMetadataAsync(request, size, cancellationToken);
         await saveContent(blobId);
 
         if (transaction is not null) {
@@ -188,21 +164,25 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     }
 
     private async Task<string> UpsertMetadataAsync(
-        string container,
-        string name,
-        string contentType,
+        BlobUploadRequest request,
         long size,
         CancellationToken cancellationToken) {
         var existing = await dbContext.Set<StoredBlob>()
-            .FirstOrDefaultAsync(blob => blob.Container == container && blob.Name == name, cancellationToken);
+            .FirstOrDefaultAsync(
+                blob => blob.Container == request.Container && blob.Name == request.Name,
+                cancellationToken);
         var createdAt = timeProvider.GetUtcNow();
 
         if (existing is not null) {
-            existing.ContentType = contentType;
+            existing.ContentType = request.ContentType;
             existing.Size = size;
             existing.CreatedAt = createdAt;
 
-            logger.LogDebug("Updating existing blob {BlobId} ({Container}/{Name})", existing.Id, container, name);
+            logger.LogDebug(
+                "Updating existing blob {BlobId} ({Container}/{Name})",
+                existing.Id,
+                request.Container,
+                request.Name);
             await dbContext.SaveChangesAsync(cancellationToken);
 
             return existing.Id;
@@ -211,22 +191,22 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var blobId = Guid.NewGuid().ToString();
         dbContext.Set<StoredBlob>().Add(new StoredBlob {
             Id = blobId,
-            Container = container,
-            Name = name,
-            ContentType = contentType,
+            Container = request.Container,
+            Name = request.Name,
+            ContentType = request.ContentType,
             Size = size,
             CreatedAt = createdAt,
         });
 
-        logger.LogDebug("Creating new blob {BlobId} ({Container}/{Name})", blobId, container, name);
+        logger.LogDebug("Creating new blob {BlobId} ({Container}/{Name})", blobId, request.Container, request.Name);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return blobId;
     }
 
-    private async Task UpsertContentBytesAsync(
+    private async Task UpsertContentStreamAsync(
         string blobId,
-        byte[] content,
+        Stream content,
         CancellationToken cancellationToken) {
         var connection = await GetOpenNpgsqlConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -238,32 +218,6 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             """;
         command.Parameters.Add(new NpgsqlParameter { Value = blobId });
         command.Parameters.Add(new NpgsqlParameter { Value = content, NpgsqlDbType = NpgsqlDbType.Bytea });
-
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    private async Task UpsertContentFileAsync(
-        string blobId,
-        FileInfo fileInfo,
-        CancellationToken cancellationToken) {
-        var connection = await GetOpenNpgsqlConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.Transaction = GetCurrentNpgsqlTransaction();
-        command.CommandText = """
-            INSERT INTO blob_contents (blob_id, data)
-            VALUES ($1, $2)
-            ON CONFLICT (blob_id) DO UPDATE SET data = EXCLUDED.data
-            """;
-        command.Parameters.Add(new NpgsqlParameter { Value = blobId });
-
-        await using var fileStream = new FileStream(
-            fileInfo.FullName,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 1,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        command.Parameters.Add(new NpgsqlParameter { Value = fileStream, NpgsqlDbType = NpgsqlDbType.Bytea });
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -294,10 +248,21 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
                 $"{nameof(PostgreSqlBlobStore<TDbContext>)} requires a PostgreSQL database.");
     }
 
-    private static void ValidateBlobIdentity(string container, string name, string contentType) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(container);
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
+    private static BlobMetadata ToMetadata(StoredBlob blob) =>
+        new() {
+            Id = blob.Id,
+            Container = blob.Container,
+            Name = blob.Name,
+            ContentType = blob.ContentType,
+            Size = blob.Size,
+            CreatedAt = blob.CreatedAt
+        };
+
+    private static void ValidateUploadRequest(BlobUploadRequest request) {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Container, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Name, nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ContentType, nameof(request));
     }
 
     private static void ValidateBlobRef(BlobRef blobRef) {
