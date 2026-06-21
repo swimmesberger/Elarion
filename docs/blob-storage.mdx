@@ -16,7 +16,7 @@ on your own entities rather than embedding file bytes in handler responses or do
 
 | Package | Use it in | Contains |
 | --- | --- | --- |
-| `Elarion.Blobs` | Application code | `IBlobStore`, `BlobRef`, `BlobMetadata`, and `BlobContent`. No provider dependency. |
+| `Elarion.Blobs` | Application code | `IBlobStore`, `BlobRef`, `BlobUploadRequest`, `BlobDownload`, `BlobMetadata`, `BlobContent`, and `BlobStoreExtensions`. No provider dependency. |
 | `Elarion.Blobs.PostgreSql` | Infrastructure / host | `PostgreSqlBlobStore<TDbContext>`, DI registration, and EF Core model configuration for PostgreSQL. |
 
 ```xml
@@ -31,7 +31,10 @@ application project and `Elarion.Blobs.PostgreSql` only where the concrete `DbCo
 
 ## Application contract
 
-Inject `IBlobStore` into handlers or services that need binary storage:
+`IBlobStore` is **streaming-first**: content flows in and out as a `Stream`, so neither callers nor
+backends are forced to buffer a whole blob in memory. The shape mirrors the major blob SDKs (AWS S3,
+Azure Blob, Google Cloud Storage) so an alternative backend slots in cleanly. Inject `IBlobStore`
+into handlers or services that need binary storage:
 
 ```csharp
 using Elarion.Abstractions;
@@ -44,27 +47,51 @@ public sealed class UploadAttachment(IBlobStore blobs)
 
     public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
         var blobRef = await blobs.SaveAsync(
-            container: "attachments",
-            name: command.FileName,
-            contentType: command.ContentType,
-            content: command.Data,
-            cancellationToken: ct);
+            new BlobUploadRequest {
+                Container = "attachments",
+                Name = command.FileName,
+                ContentType = command.ContentType
+            },
+            command.Data,
+            ct);
 
         return new Response(blobRef.Value);
     }
 }
 ```
 
-`IBlobStore` supports:
+The identity and metadata of a blob ride in a `BlobUploadRequest` (mirroring S3 `PutObjectRequest` /
+Azure `BlobUploadOptions`), and the content is supplied separately. The core interface takes a
+`Stream`; the `byte[]` overload above is one of the conveniences in `BlobStoreExtensions`. When you
+already hold a stream — an incoming upload, for example — pass it straight to the core method:
+
+```csharp
+await blobs.SaveAsync(request, uploadStream, ct);
+```
+
+`BlobUploadRequest.ContentLength` is an optional hint; the recorded `BlobMetadata.Size` is always the
+actual number of bytes written, so you can leave it `null` for unknown-length sources.
+
+The core `IBlobStore` is intentionally small:
 
 | Method | Purpose |
 | --- | --- |
-| `SaveAsync` | Stores bytes and returns a `BlobRef`. |
-| `SaveFromFileAsync` | Stores content from a local file path. |
-| `GetAsync` | Loads metadata plus bytes. |
-| `GetMetadataAsync` | Loads metadata without content bytes. |
+| `SaveAsync(BlobUploadRequest, Stream)` | Streams content in and returns a `BlobRef`. |
+| `OpenReadAsync` | Opens a disposable `BlobDownload` carrying metadata plus an open content stream. |
+| `GetMetadataAsync` | Loads metadata without content. |
 | `ExistsAsync` | Checks whether a reference exists. |
 | `DeleteAsync` | Deletes a referenced blob. |
+
+`BlobStoreExtensions` layers the ergonomic call styles over those primitives, so every backend gets
+them for free:
+
+| Extension | Purpose |
+| --- | --- |
+| `SaveAsync(BlobUploadRequest, byte[])` | Stores an in-memory byte array. |
+| `SaveFromFileAsync` | Stores content from a local file path (opened as a stream, no backend file assumption). |
+| `DownloadContentAsync` | Loads metadata plus bytes into a `BlobContent`. |
+| `ReadAllBytesAsync` | Loads just the content bytes. |
+| `DownloadToAsync` | Copies content to a destination stream (for example an HTTP response body). |
 
 The PostgreSQL implementation replaces an existing blob when `container` and `name` match, preserving
 the blob id while updating content type, size, timestamp, and bytes.
@@ -124,14 +151,17 @@ will evolve.
 
 The store talks to PostgreSQL directly for content bytes (it casts the context's connection to
 `NpgsqlConnection`), so the owning context must be configured with `UseNpgsql` — see the
-registration above.
+registration above. Writes stream a seekable source (a file, an in-memory buffer) straight into the
+`bytea` column without buffering; reads are buffered for now, with a documented
+`NpgsqlDataReader.GetStream` upgrade path for true read streaming.
 
 ## Reading and deleting
 
-Store only blob ids in your own entities or DTOs, then reconstruct `BlobRef` at read time:
+Store only blob ids in your own entities or DTOs, then reconstruct `BlobRef` at read time. When the
+whole blob fits comfortably in memory, `DownloadContentAsync` buffers metadata plus bytes in one call:
 
 ```csharp
-var blob = await blobs.GetAsync(new BlobRef { Value = attachment.BlobId }, ct);
+var blob = await blobs.DownloadContentAsync(new BlobRef { Value = attachment.BlobId }, ct);
 if (blob is null) {
     return AppError.NotFound($"Attachment {attachment.Id} was not found.");
 }
@@ -140,6 +170,31 @@ return new DownloadAttachment.Response(
     blob.Name,
     blob.ContentType,
     blob.Data);
+```
+
+To avoid materializing large content, stream instead. `DownloadToAsync` copies straight to a
+destination such as the HTTP response body — the store opens, copies, and disposes the source for you:
+
+```csharp
+response.ContentType = "application/octet-stream";
+var found = await blobs.DownloadToAsync(blobRef, response.Body, ct);
+if (!found) {
+    return Results.NotFound();
+}
+```
+
+`OpenReadAsync` is the lower-level pull primitive: it hands you the open stream plus metadata. You own
+the `BlobDownload`, so dispose it once you have finished reading — keep the read inside the `using`
+scope so the stream is not disposed out from under a lazy consumer:
+
+```csharp
+await using var download = await blobs.OpenReadAsync(blobRef, ct);
+if (download is null) {
+    return;
+}
+
+response.ContentType = download.Metadata.ContentType;
+await download.Content.CopyToAsync(response.Body, ct);
 ```
 
 Use `GetMetadataAsync` when you only need filename, content type, or size for a listing. Use

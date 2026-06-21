@@ -17,6 +17,17 @@ minor releases may include breaking changes.
   reference material.
 
 ### Changed
+- **Breaking:** blob storage is now streaming-first. `IBlobStore.SaveAsync` takes a
+  `BlobUploadRequest` plus a `Stream`, and `GetAsync` is replaced by `OpenReadAsync` returning a
+  disposable `BlobDownload` (metadata + open content stream). The `byte[]`/file save styles and the
+  buffered/copy-to read styles move to `BlobStoreExtensions` (`SaveAsync(byte[])`, `SaveFromFileAsync`,
+  `DownloadContentAsync`, `ReadAllBytesAsync`, `DownloadToAsync`), so `SaveFromFileAsync` no longer
+  leaks a local-filesystem assumption onto the interface and a new backend implements only the
+  primitives. `BlobUploadRequest.ContentLength` is an optional hint while the recorded `Size` is
+  always the actual bytes written. The PostgreSQL store streams seekable writes straight into `bytea`
+  (buffering a non-seekable source only to learn its length) and documents a `GetStream`
+  read-streaming upgrade path. The shape follows the major blob SDKs (S3/Azure/GCS) so an alternative
+  backend drops in cleanly.
 - **Breaking:** keyset pagination is declared off the entity. The `[Keyset]` attribute is now generic
   (`[Keyset<TEntity>]`) and goes on a dedicated partial class that the generator fills with the
   `IKeysetDefinition<TEntity>` implementation and a static `Definition`. An entity can have any number
