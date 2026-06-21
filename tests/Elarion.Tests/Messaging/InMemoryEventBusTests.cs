@@ -1,7 +1,7 @@
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
-using Elarion.Messaging;
+using Elarion.Messaging.InMemory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -112,7 +112,7 @@ public sealed class InMemoryEventBusTests {
         var recorder = provider.GetRequiredService<EventRecorder>();
         using (var scope = provider.CreateScope()) {
             var bus = scope.ServiceProvider.GetRequiredService<IIntegrationEventBus>();
-            var dispatch = scope.ServiceProvider.GetRequiredService<IEventDispatchScope>();
+            var dispatch = scope.ServiceProvider.GetRequiredService<EventDispatchScope>();
 
             await bus.PublishAsync(new SampleIntegrationEvent("y"), cts.Token);
             recorder.Items.Should().BeEmpty();
@@ -137,7 +137,7 @@ public sealed class InMemoryEventBusTests {
 
         using (var scope = provider.CreateScope()) {
             var bus = scope.ServiceProvider.GetRequiredService<IIntegrationEventBus>();
-            var dispatch = scope.ServiceProvider.GetRequiredService<IEventDispatchScope>();
+            var dispatch = scope.ServiceProvider.GetRequiredService<EventDispatchScope>();
 
             await bus.PublishAsync(new SampleIntegrationEvent("y"), cts.Token);
             dispatch.Discard();

@@ -31,9 +31,9 @@ public sealed class SchedulerRegistrationGeneratorTests
             """);
 
         var result = Generate(source);
-        var generatedSource = GetGeneratedSource(result, "ScheduledJobRegistration.g.cs");
+        var generatedSource = AllGenerated(result);
 
-        generatedSource.Should().Contain("AddSchedulerRegistrationGeneratorTestsScheduledJobs");
+        generatedSource.Should().Contain("AddSampleScheduledJobs");
         generatedSource.Should().Contain("services.TryAddScoped<global::Sample.Jobs.BillingJobs>();");
         generatedSource.Should().Contain("Name = \"billing.daily\"");
         generatedSource.Should().Contain("ScheduledJobSchedule.FixedRate(\"1d\", null, true)");
@@ -54,6 +54,130 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
+    public void GenerateScheduledJobs_ModuleScoped_EmitsPerModuleMethodAndDefaultServicesFiller()
+    {
+        var source = CreateSource(
+            """
+            namespace Elarion.Abstractions.Modules {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class AppModuleAttribute : System.Attribute {
+                    public AppModuleAttribute(string name) { Name = name; }
+                    public string Name { get; }
+                }
+            }
+
+            namespace Sample.Jobs {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+
+                public sealed class BillingJobs {
+                    [Elarion.Abstractions.Scheduling.ScheduledJob("billing.daily", FixedRate = "1d")]
+                    public System.Threading.Tasks.ValueTask RunAsync(System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+
+        var perModule = GetGeneratedSource(result, "BillingScheduledJobExtensions.g.cs");
+        perModule.Should().Contain(
+            "public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddBillingScheduledJobs(");
+        perModule.Should().Contain("Name = \"billing.daily\"");
+        // Per-module methods do not carry the assembly-level job references type.
+        perModule.Should().NotContain("JobReferences");
+
+        var anyTree = string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+        anyTree.Should().Contain(
+            "global::Sample.Jobs.BillingScheduledJobExtensions.AddBillingScheduledJobs(services);");
+        anyTree.Should().Contain(
+            "static partial void AddScheduledJobs(global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+    }
+
+    [Fact]
+    public void GenerateScheduledJobs_UnmatchedModule_EmitsWarning()
+    {
+        var source = CreateSource(
+            """
+            namespace Elarion.Abstractions.Modules {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class AppModuleAttribute : System.Attribute {
+                    public AppModuleAttribute(string name) { Name = name; }
+                    public string Name { get; }
+                }
+            }
+
+            namespace Sample.Modules {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+            }
+
+            namespace Other.Jobs {
+                public sealed class StrayJobs {
+                    [Elarion.Abstractions.Scheduling.ScheduledJob("stray.daily", FixedRate = "1d")]
+                    public System.Threading.Tasks.ValueTask RunAsync(System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+
+        result.Diagnostics.Any(d => d.Id == "ELSG010" && d.Severity == DiagnosticSeverity.Warning)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateScheduledJobs_MatchedModule_DoesNotWarnUnmatched()
+    {
+        var source = CreateSource(
+            """
+            namespace Elarion.Abstractions.Modules {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class AppModuleAttribute : System.Attribute {
+                    public AppModuleAttribute(string name) { Name = name; }
+                    public string Name { get; }
+                }
+            }
+
+            namespace Sample.Jobs {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+
+                public sealed class BillingJobs {
+                    [Elarion.Abstractions.Scheduling.ScheduledJob("billing.daily", FixedRate = "1d")]
+                    public System.Threading.Tasks.ValueTask RunAsync(System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+
+        result.Diagnostics.Any(d => d.Id == "ELSG010").Should().BeFalse();
+    }
+
+    [Fact]
+    public void GenerateScheduledJobs_NoModules_DoesNotWarnUnmatched()
+    {
+        var source = CreateSource(
+            """
+            namespace Sample.Jobs {
+                public sealed class BillingJobs {
+                    [Elarion.Abstractions.Scheduling.ScheduledJob("billing.daily", FixedRate = "1d")]
+                    public System.Threading.Tasks.ValueTask RunAsync(System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """,
+            wrapInModule: false);
+
+        var result = Generate(source);
+
+        result.Diagnostics.Any(d => d.Id == "ELSG010").Should().BeFalse();
+    }
+
+    [Fact]
     public void GenerateScheduledJobs_UseElarion_EmitsTypedDescriptor()
     {
         var source = CreateSource(
@@ -69,7 +193,7 @@ public sealed class SchedulerRegistrationGeneratorTests
             "[assembly: Elarion.Abstractions.UseElarion]");
 
         var result = Generate(source);
-        var generatedSource = GetGeneratedSource(result, "ScheduledJobRegistration.g.cs");
+        var generatedSource = AllGenerated(result);
 
         generatedSource.Should().Contain("Name = \"billing.daily\"");
         generatedSource.Should().Contain("ScheduledJobSchedule.FixedRate(\"1d\", null, true)");
@@ -98,7 +222,7 @@ public sealed class SchedulerRegistrationGeneratorTests
             """);
 
         var result = Generate(source);
-        var generatedSource = GetGeneratedSource(result, "ScheduledJobRegistration.g.cs");
+        var generatedSource = AllGenerated(result);
 
         generatedSource.Should().Contain("services.TryAddScoped<global::Sample.Jobs.SendMailJob>();");
         generatedSource.Should().Contain("JobType = typeof(global::Sample.Jobs.SendMailJob)");
@@ -123,7 +247,7 @@ public sealed class SchedulerRegistrationGeneratorTests
             """);
 
         var result = Generate(source);
-        var generatedSource = GetGeneratedSource(result, "ScheduledJobRegistration.g.cs");
+        var generatedSource = AllGenerated(result);
 
         generatedSource.Should().Contain("ResiliencePolicy = new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference { Name = \"billing-resilience\" }");
     }
@@ -146,7 +270,7 @@ public sealed class SchedulerRegistrationGeneratorTests
             """);
 
         var result = Generate(source);
-        var generatedSource = GetGeneratedSource(result, "ScheduledJobRegistration.g.cs");
+        var generatedSource = AllGenerated(result);
 
         generatedSource.Should().Contain("ScheduledJobSchedule.Cron(\"0 0 3 * * *\", \"Europe/Vienna\")");
     }
@@ -166,7 +290,7 @@ public sealed class SchedulerRegistrationGeneratorTests
             """);
 
         var result = Generate(source);
-        var generatedSource = GetGeneratedSource(result, "ScheduledJobRegistration.g.cs");
+        var generatedSource = AllGenerated(result);
 
         generatedSource.Should().Contain("ScheduledJobSchedule.Cron(\"-\", null)");
     }
@@ -186,7 +310,7 @@ public sealed class SchedulerRegistrationGeneratorTests
             """);
 
         var result = Generate(source);
-        var generatedSource = GetGeneratedSource(result, "ScheduledJobRegistration.g.cs");
+        var generatedSource = AllGenerated(result);
 
         generatedSource.Should().Contain("ScheduledJobSchedule.Once(\"5s\")");
         generatedSource.Should().Contain("WarmupOnce { get; } = new() { Name = \"warmup.once\" };");
@@ -219,7 +343,7 @@ public sealed class SchedulerRegistrationGeneratorTests
             """);
 
         var result = Generate(source);
-        var generatedSource = GetGeneratedSource(result, "ScheduledJobRegistration.g.cs");
+        var generatedSource = AllGenerated(result);
 
         generatedSource.Should().Contain("_ { get; } = new() { Name = \"!!!\" };");
         generatedSource.Should().Contain("_123Import { get; } = new() { Name = \"123 import\" };");
@@ -398,8 +522,29 @@ public sealed class SchedulerRegistrationGeneratorTests
 
     private static string CreateSource(
         string testSource,
-        string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateScheduledJobs]") =>
-        $$"""
+        string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateScheduledJobs]",
+        bool wrapInModule = true)
+    {
+        // Jobs register only per module, so wrap the `Sample.Jobs` test namespace in a module by default.
+        // Skip when the test declares its own module attribute; tests asserting no-module behavior pass false.
+        var moduleDeclaration = wrapInModule && !testSource.Contains("AppModule(")
+            ? """
+            namespace Elarion.Abstractions.Modules {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class AppModuleAttribute : System.Attribute {
+                    public AppModuleAttribute(string name) { Name = name; }
+                    public string Name { get; }
+                }
+            }
+
+            namespace Sample.Jobs {
+                [Elarion.Abstractions.Modules.AppModule("Sample")]
+                public static class GeneratedTestModule { }
+            }
+            """
+            : "";
+
+        return $$"""
         {{assemblyTrigger}}
 
         namespace Elarion.Abstractions {
@@ -495,8 +640,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
         }
 
+        {{moduleDeclaration}}
+
         {{testSource}}
         """;
+    }
+
+    private static string AllGenerated(GeneratorDriverRunResult result) =>
+        string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
 
     private static GeneratorDriverRunResult Generate(
         string source,
@@ -516,7 +667,8 @@ public sealed class SchedulerRegistrationGeneratorTests
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(new SchedulerRegistrationGenerator())
+        GeneratorDriver driver = CSharpGeneratorDriver
+            .Create(new SchedulerRegistrationGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             compilation,

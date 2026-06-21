@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using Elarion.EntityFrameworkCore.Paging;
+using Elarion.Paging;
 using Xunit;
 
 namespace Elarion.Tests.Paging;

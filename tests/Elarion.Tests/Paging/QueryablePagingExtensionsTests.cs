@@ -1,7 +1,7 @@
 using System.Linq.Expressions;
 using AwesomeAssertions;
 using Elarion.Abstractions.Paging;
-using Elarion.EntityFrameworkCore.Paging;
+using Elarion.Paging;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 

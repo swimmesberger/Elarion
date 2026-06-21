@@ -69,6 +69,7 @@ using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
 using Elarion.Caching;
+using Elarion.Messaging.Outbox;
 using Elarion.JsonRpc;
 using Elarion.Resilience;
 using Elarion.Scheduling;
@@ -87,11 +88,14 @@ builder.Services.AddDbContext<BillingDbContext>(o =>
 builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 
+// Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
+builder.Services.AddElarionOutbox<BillingDbContext>();
+
 // Infrastructure capability: the concrete email sender behind the module's port.
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
-// Scheduler: descriptors (generated) + the in-memory runtime.
-builder.Services.AddBillingApplicationScheduledJobs();
+// Scheduler runtime. Job descriptors and event consumers are composed per module by
+// ModuleBootstrapper.ConfigureAllServices below — there is no explicit Add…ScheduledJobs call.
 builder.Services.AddInMemoryScheduler(builder.Configuration);
 
 // Resilience: generated policy metadata + the Microsoft/Polly-backed runtime.
@@ -112,7 +116,8 @@ builder.Services.AddAuthentication("Bearer")
     });
 builder.Services.AddAuthorization();
 
-// Compose every module's services (handlers, services, validators).
+// Compose every module's services — handlers, services, validators, scheduled jobs, and event
+// consumers — each gated by Modules:{Name}:Enabled.
 ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
 
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.

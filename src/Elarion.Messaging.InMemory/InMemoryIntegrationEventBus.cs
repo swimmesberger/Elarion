@@ -1,6 +1,7 @@
 using Elarion.Abstractions.Messaging;
+using Elarion.Messaging;
 
-namespace Elarion.Messaging;
+namespace Elarion.Messaging.InMemory;
 
 /// <summary>
 /// In-process <see cref="IIntegrationEventBus"/>: records integration events into the scope's

@@ -18,8 +18,8 @@ namespace Elarion.EntityFrameworkCore.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class KeysetGenerator : IIncrementalGenerator
 {
-    private const string KeysetAttributeName = "Elarion.EntityFrameworkCore.Paging.KeysetAttribute`1";
-    private const string KeysetNamespace = "global::Elarion.EntityFrameworkCore.Paging";
+    private const string KeysetAttributeName = "Elarion.Paging.KeysetAttribute`1";
+    private const string KeysetNamespace = "global::Elarion.Paging";
     private const string ProviderAttributeName = "Elarion.EntityFrameworkCore.UseElarionEntityFrameworkCoreAttribute";
 
     // ValueTuple.Create has direct overloads up to 7 elements; row-value seek is only emitted within

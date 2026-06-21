@@ -29,7 +29,7 @@ public sealed class ModuleValidatorRegistrationGenerator : IIncrementalGenerator
     private const string AppModuleAttributeMetadataName =
         "Elarion.Abstractions.Modules.AppModuleAttribute";
 
-    private sealed record ModuleInfo(string Name, string Namespace);
+    private sealed record ModuleInfo(string Name, string Namespace, string TypeName);
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -68,8 +68,10 @@ public sealed class ModuleValidatorRegistrationGenerator : IIncrementalGenerator
                     if (moduleAttr.ConstructorArguments.Length > 0 &&
                         moduleAttr.ConstructorArguments[0].Value is string moduleName)
                     {
-                        var ns = typeSymbol.ContainingNamespace?.ToDisplayString() ?? "";
-                        modules.Add(new ModuleInfo(moduleName, ns));
+                        var ns = typeSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
+                            ? containing.ToDisplayString()
+                            : "";
+                        modules.Add(new ModuleInfo(moduleName, ns, typeSymbol.Name));
                     }
                 }
             }
@@ -158,6 +160,15 @@ public sealed class ModuleValidatorRegistrationGenerator : IIncrementalGenerator
                 sb.AppendLine("}");
 
                 spc.AddSource($"{moduleName}ValidatorExtensions.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+
+                var nsPrefix = module.Namespace.Length > 0 ? $"global::{module.Namespace}." : "global::";
+                ModuleDefaultsEmitter.EmitFiller(
+                    spc,
+                    module.Namespace,
+                    module.TypeName,
+                    ModuleDefaultsEmitter.AddValidatorsMethod,
+                    "Validators",
+                    $"{nsPrefix}{moduleName}ValidatorExtensions.Add{moduleName}Validators(services);");
             }
         });
     }

@@ -1,7 +1,7 @@
 using System.Collections.Frozen;
 using System.Linq.Expressions;
 
-namespace Elarion.EntityFrameworkCore.Paging;
+namespace Elarion.Paging;
 
 /// <summary>
 /// Mutable, fluent builder for <see cref="SortMap{T}"/>. Create one with

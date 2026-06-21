@@ -9,6 +9,25 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- `Elarion.Messaging.InMemory`: the simple, best-effort **in-memory integration-event
+  (Plane B) bus**, commit-gated by the EF Core DbContext transaction (`AddInMemoryIntegrationEventBus`;
+  `AddInMemoryEventBus` also wires the `Elarion` domain tier). Events are buffered per scope and
+  delivered after commit by a hosted pump, with the package's EF Core interceptors flushing after
+  commit and discarding on rollback automatically — no hand-written transaction decorator and no
+  public dispatch-scope seam. A non-durable sibling of the EF Core outbox.
+- `Elarion.Messaging.Outbox`: a durable EF Core transactional outbox `IIntegrationEventBus`
+  (Plane B). Each integration event is recorded as an `OutboxMessage` row in the caller's `DbContext`
+  (committed atomically with the business data, discarded on rollback) and delivered after commit by a
+  hosted worker that polls, claims via a provider-neutral conditional-update lease (safe across
+  instances, reclaimed after a crash), dispatches to integration consumers on isolated scopes
+  (at-least-once — consumers must be idempotent), and finalizes/purges. `UseElarionOutbox(ModelBuilder)`
+  adds the table (partial pending index); `AddElarionOutbox<TDbContext>()` wires the tier.
+- Per-module `ConfigureDefaultServices` aggregation (`ModuleDefaultServicesGenerator`) that auto-wires
+  and feature-gates each module's handlers, services, validators, scheduled jobs, and event consumers,
+  so a disabled module registers none of them and authors no longer hand-wire `Add{Module}…` calls.
+  Scheduled jobs and event consumers are now module-feature-gated and module-scoped only — the previous
+  flat assembly-wide registration methods were removed; a job/consumer that falls under no module is
+  reported (`ELSG010`/`ELEVT003`).
 - Composite, multi-column offset sorts: `SortMapBuilder.ThenBy` chains fixed-direction tiebreakers and
   a new `SortDirection` enum sets per-entry directions, so a non-unique sort column gets a stable
   trailing key. A client `-`/`+` prefix now flips only the entry's primary column.

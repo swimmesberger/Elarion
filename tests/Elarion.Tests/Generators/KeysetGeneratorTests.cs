@@ -23,7 +23,7 @@ public sealed class KeysetGeneratorTests
                     public string Name { get; set; } = "";
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("-CreatedAt", "Id")]
+                [Elarion.Paging.Keyset<Client>("-CreatedAt", "Id")]
                 public sealed partial class RecentClients { }
             }
             """);
@@ -33,7 +33,7 @@ public sealed class KeysetGeneratorTests
 
         // The definition is emitted into the annotated partial class, not a separate {Entity}Keyset type.
         source.Should().Contain(
-            "partial class RecentClients : global::Elarion.EntityFrameworkCore.Paging.IKeysetDefinition<global::Sample.Domain.Client>");
+            "partial class RecentClients : global::Elarion.Paging.IKeysetDefinition<global::Sample.Domain.Client>");
         source.Should().Contain("public static RecentClients Definition { get; } = new();");
         source.Should().Contain(
             "? source.OrderByDescending(__e => __e.CreatedAt).ThenBy(__e => __e.Id)");
@@ -63,7 +63,7 @@ public sealed class KeysetGeneratorTests
                     public System.DateTime CreatedAt { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("CreatedAt", "Id")]
+                [Elarion.Paging.Keyset<Client>("CreatedAt", "Id")]
                 public sealed partial class ClientSeek { }
             }
             """,
@@ -94,7 +94,7 @@ public sealed class KeysetGeneratorTests
                     public System.DateTime CreatedAt { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("-CreatedAt", "-Id")]
+                [Elarion.Paging.Keyset<Client>("-CreatedAt", "-Id")]
                 public sealed partial class ClientSeek { }
             }
             """,
@@ -123,7 +123,7 @@ public sealed class KeysetGeneratorTests
                     public System.DateTime CreatedAt { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("-CreatedAt", "Id")]
+                [Elarion.Paging.Keyset<Client>("-CreatedAt", "Id")]
                 public sealed partial class ClientSeek { }
             }
             """,
@@ -148,7 +148,7 @@ public sealed class KeysetGeneratorTests
                     public long Sequence { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Event>("Sequence")]
+                [Elarion.Paging.Keyset<Event>("Sequence")]
                 public sealed partial class EventSeek { }
             }
             """,
@@ -173,7 +173,7 @@ public sealed class KeysetGeneratorTests
                     public System.DateTime CreatedAt { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("CreatedAt", "Id")]
+                [Elarion.Paging.Keyset<Client>("CreatedAt", "Id")]
                 public sealed partial class ClientSeek { }
             }
             """);
@@ -198,7 +198,7 @@ public sealed class KeysetGeneratorTests
                     public System.DateTime CreatedAt { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Order>("CreatedAt", "Id")]
+                [Elarion.Paging.Keyset<Order>("CreatedAt", "Id")]
                 public sealed partial class OrderSeek { }
             }
             """);
@@ -232,10 +232,10 @@ public sealed class KeysetGeneratorTests
                     public string Title { get; set; } = "";
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Post>("-CreatedAt", "-Id")]
+                [Elarion.Paging.Keyset<Post>("-CreatedAt", "-Id")]
                 public sealed partial class RecentPosts { }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Post>("Title", "Id")]
+                [Elarion.Paging.Keyset<Post>("Title", "Id")]
                 public sealed partial class PostsByTitle { }
             }
             """);
@@ -247,9 +247,9 @@ public sealed class KeysetGeneratorTests
         var byTitle = GetGeneratedSource(result, "Sample_Domain_PostsByTitle.Keyset.g.cs");
 
         recent.Should().Contain(
-            "partial class RecentPosts : global::Elarion.EntityFrameworkCore.Paging.IKeysetDefinition<global::Sample.Domain.Post>");
+            "partial class RecentPosts : global::Elarion.Paging.IKeysetDefinition<global::Sample.Domain.Post>");
         byTitle.Should().Contain(
-            "partial class PostsByTitle : global::Elarion.EntityFrameworkCore.Paging.IKeysetDefinition<global::Sample.Domain.Post>");
+            "partial class PostsByTitle : global::Elarion.Paging.IKeysetDefinition<global::Sample.Domain.Post>");
 
         var entity =
             """
@@ -277,7 +277,7 @@ public sealed class KeysetGeneratorTests
                     public System.DateTime CreatedAt { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("CreatedAt", "Id")]
+                [Elarion.Paging.Keyset<Client>("CreatedAt", "Id")]
                 public sealed class NotPartial { }
             }
             """);
@@ -296,7 +296,7 @@ public sealed class KeysetGeneratorTests
                     public System.Guid Id { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("Missing", "Id")]
+                [Elarion.Paging.Keyset<Client>("Missing", "Id")]
                 public sealed partial class ClientSeek { }
             }
             """);
@@ -316,7 +316,7 @@ public sealed class KeysetGeneratorTests
                     public int? Score { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("Score", "Id")]
+                [Elarion.Paging.Keyset<Client>("Score", "Id")]
                 public sealed partial class ClientSeek { }
             }
             """);
@@ -336,7 +336,7 @@ public sealed class KeysetGeneratorTests
                     public bool Active { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("Active", "Id")]
+                [Elarion.Paging.Keyset<Client>("Active", "Id")]
                 public sealed partial class ClientSeek { }
             }
             """);
@@ -356,7 +356,7 @@ public sealed class KeysetGeneratorTests
                     public System.DateTime CreatedAt { get; set; }
                 }
 
-                [Elarion.EntityFrameworkCore.Paging.Keyset<Client>("CreatedAt")]
+                [Elarion.Paging.Keyset<Client>("CreatedAt")]
                 public sealed partial class ClientSeek { }
             }
             """);
@@ -373,7 +373,7 @@ public sealed class KeysetGeneratorTests
         var source =
             $$"""
             {{assemblyAttributes}}
-            namespace Elarion.EntityFrameworkCore.Paging {
+            namespace Elarion.Paging {
                 [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
                 public sealed class KeysetAttribute<TEntity> : System.Attribute where TEntity : class {
                     public KeysetAttribute(params string[] columns) {
@@ -443,7 +443,7 @@ public sealed class KeysetGeneratorTests
     {
         var references = PlatformReferences().ToList();
         references.Add(MetadataReference.CreateFromFile(
-            typeof(Elarion.EntityFrameworkCore.Paging.CursorWriter).Assembly.Location));
+            typeof(Elarion.Paging.CursorWriter).Assembly.Location));
         references.Add(MetadataReference.CreateFromFile(
             typeof(Elarion.Abstractions.Paging.Page<>).Assembly.Location));
         return references;

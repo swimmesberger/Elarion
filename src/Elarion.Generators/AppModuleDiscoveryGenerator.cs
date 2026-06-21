@@ -60,7 +60,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         bool IsCore,
         bool HasConfigureServices,
         bool HasMapEndpoints,
-        bool HasGetJsonTypeInfoResolver
+        bool HasGetJsonTypeInfoResolver,
+        bool EmitDefaultServices
     );
 
     /// <summary>Grouped transport handlers, keyed by owning module name, plus the unmatched buckets.</summary>
@@ -237,7 +238,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         if (attributeType is null)
         {
             foreach (var module in manifestModules)
-                entries.Add(ToModuleEntry(module));
+                entries.Add(ToModuleEntry(module, SiblingExists(compilation, module.TypeFqn)));
 
             entries = DeduplicateModules(entries);
             entries.Sort(static (a, b) =>
@@ -252,7 +253,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             attributeType, entries, ct);
 
         foreach (var module in manifestModules)
-            entries.Add(ToModuleEntry(module));
+            entries.Add(ToModuleEntry(module, SiblingExists(compilation, module.TypeFqn)));
 
         entries = DeduplicateModules(entries);
 
@@ -265,7 +266,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return entries;
     }
 
-    private static ModuleEntry ToModuleEntry(ElarionManifest.Module module) =>
+    private static ModuleEntry ToModuleEntry(ElarionManifest.Module module, bool emitDefaultServices) =>
         new(
             module.ModuleName,
             module.Namespace,
@@ -274,7 +275,21 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             module.IsCore,
             module.HasConfigureServices,
             module.HasMapEndpoints,
-            module.HasGetJsonTypeInfoResolver);
+            module.HasGetJsonTypeInfoResolver,
+            emitDefaultServices);
+
+    /// <summary>
+    /// Whether the module's generated <c>ConfigureDefaultServices</c> sibling exists for a referenced module.
+    /// Current-compilation modules always emit it (the skeleton runs in the same pass); for referenced modules
+    /// the public sibling type is visible in metadata only when that assembly was built with the skeleton generator.
+    /// </summary>
+    private static bool SiblingExists(Compilation compilation, string typeFqn)
+    {
+        var metadataName =
+            (typeFqn.StartsWith("global::", StringComparison.Ordinal) ? typeFqn.Substring(8) : typeFqn)
+            + ModuleDefaultsEmitter.ClassSuffix;
+        return compilation.GetTypeByMetadataName(metadataName) is not null;
+    }
 
     private static List<ModuleEntry> DeduplicateModules(IEnumerable<ModuleEntry> entries)
     {
@@ -388,7 +403,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             entries.Add(new ModuleEntry(
                 moduleName, moduleNamespace, fqn, dependsOn,
                 isCore,
-                hasConfigureServices, hasMapEndpoints, hasGetJsonTypeInfoResolver));
+                hasConfigureServices, hasMapEndpoints, hasGetJsonTypeInfoResolver,
+                // Current-compilation modules: the ConfigureDefaultServices skeleton is generated in the same pass.
+                EmitDefaultServices: true));
         }
 
         foreach (var sub in ns.GetNamespaceMembers())
@@ -568,13 +585,20 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    {");
         foreach (var entry in entries)
         {
-            if (!entry.HasConfigureServices)
-                continue;
+            // Generated defaults (handlers, services, validators, scheduled jobs, event consumers) first,
+            // then the module's optional hand-written ConfigureServices for custom registrations. Both gated.
+            // The sibling is skipped for referenced modules whose assembly predates the skeleton generator.
+            if (entry.EmitDefaultServices)
+                EmitModuleCall(
+                    sb,
+                    entry,
+                    $"{entry.TypeFqn}{ModuleDefaultsEmitter.ClassSuffix}.ConfigureDefaultServices(services);");
 
-            EmitModuleCall(
-                sb,
-                entry,
-                $"{entry.TypeFqn}.ConfigureServices(services, configuration);");
+            if (entry.HasConfigureServices)
+                EmitModuleCall(
+                    sb,
+                    entry,
+                    $"{entry.TypeFqn}.ConfigureServices(services, configuration);");
         }
 
         sb.AppendLine("    }");

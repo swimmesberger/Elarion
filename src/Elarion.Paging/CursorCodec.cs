@@ -3,7 +3,7 @@ using System.Buffers.Text;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace Elarion.EntityFrameworkCore.Paging;
+namespace Elarion.Paging;
 
 /// <summary>
 /// Writes keyset column values into a compact binary buffer rendered as an opaque, URL-safe cursor

@@ -86,9 +86,20 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor JobNotInModule = new(
+        id: "ELSG010",
+        title: "Scheduled job is not in any module",
+        messageFormat:
+        "Scheduled job '{0}' is annotated with [ScheduledJob] but its namespace is not under any [AppModule]; "
+        + "under a module-bootstrapper host it will not be registered (only the flat Add{Assembly}ScheduledJobs method registers it)",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     private sealed record ScheduledJobInfo(
         string Name,
         string HintName,
+        string Namespace,
         string? JobTypeFqn,
         string? PayloadTypeFqn,
         string? MethodContainingTypeFqn,
@@ -158,10 +169,72 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
                 return;
             }
 
-            var source = GenerateSource(compilation.AssemblyName ?? "Generated", jobs);
-            spc.AddSource("ScheduledJobRegistration.g.cs", SourceText.From(source, Encoding.UTF8));
+            // Jobs are registered per module via ConfigureDefaultServices; only the assembly-level typed job
+            // references remain at the assembly scope.
+            var references = GenerateReferences(compilation.AssemblyName ?? "Generated", jobs);
+            spc.AddSource("ScheduledJobReferences.g.cs", SourceText.From(references, Encoding.UTF8));
+
+            EmitPerModule(spc, ModuleScanner.Collect(compilation, spc.CancellationToken), jobs);
         });
     }
+
+    private static void EmitPerModule(
+        SourceProductionContext spc,
+        IReadOnlyList<ModuleScanner.Module> modules,
+        IReadOnlyList<ScheduledJobInfo> jobs)
+    {
+        if (modules.Count == 0)
+        {
+            return;
+        }
+
+        var byModule = new Dictionary<ModuleScanner.Module, List<ScheduledJobInfo>>();
+        foreach (var job in jobs)
+        {
+            var module = ModuleScanner.FindBest(job.Namespace, modules);
+            if (module is null)
+            {
+                // Modules exist (guarded above) but this job matches none: the per-module path is the
+                // only one a module-bootstrapper host calls, so warn that it would be silently dropped.
+                spc.ReportDiagnostic(Diagnostic.Create(JobNotInModule, Location.None, job.Name));
+                continue;
+            }
+
+            if (!byModule.TryGetValue(module, out var list))
+            {
+                list = [];
+                byModule[module] = list;
+            }
+
+            list.Add(job);
+        }
+
+        foreach (var kvp in byModule.OrderBy(x => x.Key.Name, StringComparer.Ordinal))
+        {
+            var module = kvp.Key;
+            var className = $"{module.Name}ScheduledJobExtensions";
+            var methodName = $"Add{module.Name}ScheduledJobs";
+            var ns = module.Namespace.Length > 0 ? module.Namespace : null;
+
+            // Per-module methods register only this module's jobs; the typed job references stay assembly-level.
+            var source = GenerateRegistration(ns, className, methodName, kvp.Value);
+            spc.AddSource($"{module.Name}ScheduledJobExtensions.g.cs", SourceText.From(source, Encoding.UTF8));
+
+            var nsPrefix = module.Namespace.Length > 0 ? $"global::{module.Namespace}." : "global::";
+            ModuleDefaultsEmitter.EmitFiller(
+                spc,
+                module.Namespace,
+                module.TypeName,
+                ModuleDefaultsEmitter.AddScheduledJobsMethod,
+                "ScheduledJobs",
+                $"{nsPrefix}{className}.{methodName}(services);");
+        }
+    }
+
+    private static string GetNamespace(INamedTypeSymbol type) =>
+        type.ContainingNamespace is { IsGlobalNamespace: false } containing
+            ? containing.ToDisplayString()
+            : string.Empty;
 
     private static List<ScheduledJobInfo> CollectJobs(
         Compilation compilation,
@@ -318,6 +391,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         return new ScheduledJobInfo(
             Name: GetRequiredName(attribute),
             HintName: GetHintName(type) + "_" + method.Name,
+            Namespace: GetNamespace(type),
             JobTypeFqn: null,
             PayloadTypeFqn: null,
             MethodContainingTypeFqn: type.ToDisplayString(fmt),
@@ -401,6 +475,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         return new ScheduledJobInfo(
             Name: GetRequiredName(attribute),
             HintName: GetHintName(type),
+            Namespace: GetNamespace(type),
             JobTypeFqn: type.ToDisplayString(fmt),
             PayloadTypeFqn: matchingInterfaces[0].TypeArguments[0].ToDisplayString(fmt),
             MethodContainingTypeFqn: null,
@@ -505,12 +580,30 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         }
     }
 
-    private static string GenerateSource(string assemblyName, IReadOnlyList<ScheduledJobInfo> jobs)
+    private static string GenerateReferences(string assemblyName, IReadOnlyList<ScheduledJobInfo> jobs)
     {
-        var registrationType = SanitizeIdentifier(assemblyName) + "ScheduledJobRegistration";
-        var registrationMethod = "Add" + SanitizeIdentifier(assemblyName) + "ScheduledJobs";
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("// Source: Elarion.Generators.SchedulerRegistrationGenerator");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
         var ns = TryGetNamespaceFromAssemblyName(assemblyName);
+        if (ns is not null)
+        {
+            sb.AppendLine($"namespace {ns};");
+            sb.AppendLine();
+        }
 
+        AppendJobReferences(sb, SanitizeIdentifier(assemblyName) + "ScheduledJobRegistration", jobs);
+        return sb.ToString();
+    }
+
+    private static string GenerateRegistration(
+        string? ns,
+        string className,
+        string methodName,
+        IReadOnlyList<ScheduledJobInfo> jobs)
+    {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// Source: Elarion.Generators.SchedulerRegistrationGenerator");
@@ -525,9 +618,9 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        sb.AppendLine($"public static class {registrationType}");
+        sb.AppendLine($"public static class {className}");
         sb.AppendLine("{");
-        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {registrationMethod}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("    {");
 
         foreach (var job in jobs.OrderBy(job => job.HintName, StringComparer.Ordinal))
@@ -551,7 +644,6 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");
         sb.AppendLine("}");
-        AppendJobReferences(sb, registrationType, jobs);
 
         return sb.ToString();
     }

@@ -157,9 +157,10 @@ remaining gap (loss on process crash) is closed **only** by the durable tier.
 
 Two mechanisms, one call site — an honest distinction:
 
-- The **in-memory outbox** flushes *after* commit, so its flushing decorator sits
-  **outermost**, wrapping the transaction decorator and gated on
-  `IResultLike.IsSuccess`. Pure framework, EF-agnostic.
+- The **in-memory integration tier** flushes *after* commit, driven by EF Core
+  interceptors (`SaveChangesInterceptor`/`DbTransactionInterceptor`) in
+  `Elarion.Messaging.InMemory`, so it needs the app's DbContext lifecycle but
+  no hand-written decorator. Best-effort: buffered, lost on crash.
 - The **transactional outbox** must write *inside* the transaction, so it uses an EF
   **`SaveChangesInterceptor`**, not a decorator. This is why the durable tier needs the
   app's `DbContext` — registered the MassTransit way, e.g. `AddElarionOutbox<TDbContext>()`.
@@ -183,10 +184,13 @@ Elarion.Abstractions (EF-free, transport-neutral)
   IIntegrationEventBus.PublishAsync         — Plane B
   EventSubscriptionDescriptor               — the neutral seam
         │
-        ├── InMemoryDomainEventBus + InMemoryIntegrationEventBus (Elarion)
-        │      Plane A inline; Plane B commit-gated in-memory outbox + pump
+        ├── InMemoryDomainEventBus (Elarion) — Plane A inline
+        │      + shared EventSubscriptionRegistry / EventContext
         │
-        ├── Elarion.EntityFrameworkCore.Outbox  (durable, no broker)
+        ├── InMemoryIntegrationEventBus (Elarion.Messaging.InMemory)
+        │      Plane B commit-gated in-memory bus + pump, driven by EF Core interceptors
+        │
+        ├── Elarion.Messaging.Outbox  (durable, no broker)
         │      SaveChanges interceptor → OutboxMessage in tx
         │      OutboxDeliveryService (IHostedService) → in-process [ConsumeEvent]
         │
@@ -197,14 +201,14 @@ Elarion.Abstractions (EF-free, transport-neutral)
 `EventSubscriptionDescriptor` stays the shared seam for in-process consumers (InMemory
 and EFCore.Outbox). A MassTransit backend maps the **same** descriptors to MassTransit
 consumers (one routed consumer per event type fanning out), so neither the annotation
-nor the generator changes when the backend changes. The `Elarion.EntityFrameworkCore.Outbox`
+nor the generator changes when the backend changes. The `Elarion.Messaging.Outbox`
 package parallels the existing `Elarion.Blobs` / `Elarion.Blobs.PostgreSql` split.
 
 ### Can our outbox be backed by MassTransit's outbox?
 
 Yes. `Elarion.MassTransit` would implement Plane B's `IIntegrationEventBus.PublishAsync`
 over the scoped `IPublishEndpoint` and configure `AddEntityFrameworkOutbox().UseBusOutbox()` —
-MassTransit's outbox *is* ours. The first-party `Elarion.EntityFrameworkCore.Outbox` is
+MassTransit's outbox *is* ours. The first-party `Elarion.Messaging.Outbox` is
 the **broker-free** durable alternative for apps that want durable after-commit dispatch
 to in-process `[ConsumeEvent]` handlers without adopting a broker (delivered by our own
 `IHostedService`, mirroring `InMemoryScheduler`).
@@ -296,39 +300,26 @@ public sealed class CreateInvoice(
 }
 ```
 
-The application's transaction decorator owns the commit and, for the in-memory tier,
-the after-commit flush of Plane B:
+The in-memory integration tier is commit-gated automatically: the EF Core interceptors
+shipped in `Elarion.Messaging.InMemory` flush the per-scope buffer to the
+delivery pump after the DbContext commits and discard it on rollback. The buffer is an
+internal implementation detail — there is no public dispatch-scope seam and no
+hand-written transaction decorator. Conceptually the interceptors do this:
 
 ```csharp
-public sealed class TransactionDecorator<TRequest, TResponse>(
-    IHandler<TRequest, TResponse> inner,
-    AppDbContext db,
-    IEventDispatchScope dispatch // framework seam: buffers Plane B events for this scope
-) : IHandler<TRequest, TResponse> {
-    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var response = await inner.HandleAsync(request, ct);
-
-        if (response is not IResultLike { IsSuccess: true }) {
-            await tx.RollbackAsync(ct);
-            dispatch.Discard();          // buffered Plane B events dropped on failure
-            return response;
-        }
-
-        await tx.CommitAsync(ct);        // durable boundary
-        await dispatch.FlushAsync(ct);   // in-memory tier: hand Plane B events to the pump
-        return response;                 // durable tier: rows already written in-tx by interceptor
-    }
-}
+// after a successful SaveChanges / transaction commit:
+await scope.FlushAsync(ct);   // hand buffered Plane B events to the pump
+// on SaveChanges failure / transaction rollback:
+scope.Discard();              // drop buffered Plane B events
 ```
 
 Host chooses the Plane B guarantee without touching the handler:
 
 ```csharp
-builder.Services.AddInMemoryEventBus();                 // in-memory outbox (best-effort)
+builder.Services.AddInMemoryEventBus();                 // domain + in-memory integration (best-effort)
 // or
-builder.Services.AddInMemoryEventBus()
-    .AddElarionOutbox<AppDbContext>();                  // durable transactional outbox
+builder.Services.AddInMemoryDomainEventBus()            // domain (Plane A) only
+    .AddElarionOutbox<AppDbContext>();                  // durable transactional outbox (Plane B)
 ```
 
 > [!WARNING]
@@ -368,21 +359,35 @@ builder.Services.AddInMemoryEventBus()
 
 ## Deferred follow-ups
 
-The first cut ships event consumers with a **flat, assembly-wide** registration
+The first cut shipped event consumers with a **flat, assembly-wide** registration
 (`Add{Assembly}EventConsumers`), exactly mirroring the in-memory scheduler's
-`Add{Assembly}ScheduledJobs`. Neither is module-feature-gated yet.
+`Add{Assembly}ScheduledJobs`. Neither was module-feature-gated.
 
-- **Module feature-gating for scheduled jobs and event consumers.** Move *both*
-  subsystems from flat registration to per-module, feature-flag gating — the same model
-  RPC/HTTP/MCP already use via `AppModuleDiscoveryGenerator` + `ElarionManifest`. Goal:
-  when a module is disabled (`Modules:{Name}:Enabled = false`), **its scheduled jobs do
-  not run and its events are not consumed**. This means per-module
-  `Add{Module}ScheduledJobs` / `Add{Module}EventConsumers`, an aggregate config-gated
-  registration that consults `IsModuleEnabled`, manifest entries for jobs and events, and
-  the `ELEVT003` ungated-consumer warning. `EventSubscriptionDescriptor` already carries
-  `Module?`, so this is additive and non-breaking.
-- **Durable `Elarion.EntityFrameworkCore.Outbox`** (Plane B reliability) and a
-  **MassTransit backend**, as described above.
+- **Module feature-gating for scheduled jobs and event consumers — done.** Both
+  subsystems now emit a per-module `Add{Module}ScheduledJobs` / `Add{Module}EventConsumers`
+  (longest-prefix namespace match), wired into the module's generated `ConfigureDefaultServices`,
+  which the bootstrapper calls gated by `IsModuleEnabled`. So when a module is disabled
+  (`Modules:{Name}:Enabled = false`), **its scheduled jobs do not run and its events are not
+  consumed**. The mechanism is a cross-generator partial-method aggregation
+  (`ModuleDefaultServicesGenerator` + per-category filler partials), **not** new manifest entries —
+  jobs/events stay out of the `ElarionManifest` codec; only the thin module identity the host already
+  has is needed. The flat assembly-wide `Add{Assembly}…` methods were **removed**: like handlers,
+  services, and validators, jobs and consumers are module-scoped only (the scheduler still emits the
+  assembly-level typed job-references type). A job or consumer whose namespace falls under no module
+  is reported (`ELSG010`/`ELEVT003`, symmetric with `ELHTTP003`/`ELRPC001`) and left unregistered.
+- **Durable `Elarion.Messaging.Outbox` (Plane B reliability) — done.** Ships a
+  transactional outbox `IIntegrationEventBus`: each integration event is written as an
+  `OutboxMessage` row in the caller's `DbContext` and committed atomically with the business
+  data (discarded on rollback), then a hosted `OutboxDeliveryService` polls, claims via a
+  provider-neutral conditional `ExecuteUpdate` lease (safe across instances, reclaimed after a
+  crash), dispatches to integration consumers on isolated scopes, and finalizes/purges.
+  Delivery is at-least-once, so consumers must be idempotent. Deliberately scoped down from the
+  MassTransit reference: no inbox/dedup table, no broker, no provider-specific `SKIP LOCKED` —
+  just the essential capture/deliver/retry. An `IOutboxStore` seam keeps the EF Core SQL
+  isolated and the bus/dispatcher/delivery loop database-agnostic and unit-testable.
+- **A message-broker backend** (e.g. MassTransit) remains a possible future Plane B backend;
+  it would likewise implement only `IIntegrationEventBus`. Not currently planned — the EF Core
+  outbox covers the durable in-process need.
 
 ## References
 
