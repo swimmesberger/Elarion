@@ -1,10 +1,10 @@
 using System.Threading.Channels;
-using Elarion.Abstractions.Messaging;
+using Elarion.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Elarion.Messaging;
+namespace Elarion.Messaging.InMemory;
 
 /// <summary>
 /// Drains flushed integration events and delivers each to its registered consumers on a fresh DI
@@ -13,8 +13,8 @@ namespace Elarion.Messaging;
 /// <remarks>
 /// This is the in-memory delivery tier. It is best-effort: events flushed but not yet delivered
 /// when the process exits are lost. A consumer failure is logged and isolated so it neither fails
-/// the originating command nor blocks other consumers; the in-memory tier does not retry. Use a
-/// durable delivery tier for at-least-once guarantees.
+/// the originating command nor blocks other consumers; the in-memory tier does not retry. Use the
+/// EF Core transactional outbox for at-least-once guarantees.
 /// </remarks>
 internal sealed class EventDispatchPump : BackgroundService {
     private readonly EventSubscriptionRegistry _registry;

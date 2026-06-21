@@ -48,6 +48,7 @@ Every Elarion capability shows up exactly where it pulls its weight in a real bi
 | Fast, per-user reads that stay fresh on writes | [Caching](/docs/concepts/caching) | [Write the features](/docs/tutorial/features) |
 | Flaky SMTP that must not drop an invoice | [Resilience](/docs/resilience) | [Background work](/docs/tutorial/background-work) |
 | Send-in-the-background + nightly reminders | [Scheduling](/docs/scheduling) | [Background work](/docs/tutorial/background-work) |
+| After-commit reactions that must not be lost | [Events](/docs/events) (durable outbox) | [Background work](/docs/tutorial/background-work) |
 | A number generator, an email port | [Services](/docs/concepts/services) | [Background work](/docs/tutorial/background-work) |
 | A typed, optional transport | [JSON-RPC](/docs/json-rpc) | [Host the API](/docs/tutorial/hosting) |
 | The same handlers as AI tools | [MCP server](/docs/json-rpc/mcp) | [Host the API](/docs/tutorial/hosting) |
@@ -145,12 +146,14 @@ Mark the two generator packages as analyzer-only so they stay out of published o
 </ItemGroup>
 ```
 
-The **infrastructure** project owns the concrete `DbContext` and the PostgreSQL provider:
+The **infrastructure** project owns the concrete `DbContext` and the PostgreSQL provider, plus the EF
+Core integration-event outbox:
 
 ```bash
 cd src/Billing.Infrastructure
 dotnet add package Microsoft.EntityFrameworkCore
 dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add package Elarion.Messaging.Outbox
 cd ../..
 ```
 

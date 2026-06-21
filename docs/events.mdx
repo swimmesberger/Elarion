@@ -1,0 +1,274 @@
+---
+title: Events
+description: An in-process eventing subsystem split by its relationship to the database transaction — inline domain events and after-commit integration events, with a durable EF Core outbox for reliable delivery.
+---
+
+Elarion's event bus is organized around one question: **when does the event run relative to the
+database transaction?** That split — not a verb like *publish* or *notify* — is the whole API. There
+are two planes, each its own interface in `Elarion.Abstractions.Messaging`, and an event binds to
+exactly one of them through a marker interface.
+
+| Plane | Interface | Marker | Runs |
+| --- | --- | --- | --- |
+| **Domain** | `IDomainEventBus` | `IDomainEvent` | **inline**, in the caller's scope and transaction |
+| **Integration** | `IIntegrationEventBus` | `IIntegrationEvent` | **after the transaction commits**, on a separate scope |
+
+Consumers are reflection-free: a source generator discovers them, validates the signatures, and emits
+the registration and invocation delegates. There is no runtime assembly scanning or reflective method
+dispatch.
+
+## Declaring an event and a consumer
+
+An event is a plain type carrying exactly one marker. A consumer is an **instance method on a
+`[Service]` class**, annotated `[ConsumeEvent]`:
+
+```csharp
+using Elarion.Abstractions;
+using Elarion.Abstractions.Messaging;
+
+public sealed record InvoiceCreated(Guid InvoiceId, string ClientEmail) : IIntegrationEvent;
+
+[Service]
+public sealed class InvoiceNotifications(ILogger<InvoiceNotifications> logger) {
+    [ConsumeEvent]
+    public async ValueTask OnInvoiceCreated(InvoiceCreated e, CancellationToken ct) {
+        await NotifyAsync(e.ClientEmail, ct);
+    }
+}
+```
+
+The message's marker selects the plane; the **return type selects the role**:
+
+- `void` / `Task` / `ValueTask` → a **fan-out subscriber** (every matching consumer runs).
+- `Result<TResponse>` / `Task<Result<TResponse>>` / `ValueTask<Result<TResponse>>` → a **responder**
+  for `IDomainEventBus.RequestAsync` (exactly one allowed; domain plane only).
+
+Beyond the message parameter, a consumer may optionally declare — in any order — an `IEventContext`
+(or `IEventContext<TEvent>`) for the correlation id, and a `CancellationToken`. Both are supplied by
+the runtime; omit what you don't need. Use `[ConsumeEvent(Order = n)]` to order fan-out subscribers.
+
+<Callout type="info">
+  What the `CancellationToken` *means* differs by plane. For **domain** consumers it is the
+  originating command's token (cancelling the command cancels the consumer). For **integration**
+  consumers it is the delivery host's shutdown token — delivery is decoupled from and after the
+  command, so the token signals "wind down," not "the request was cancelled."
+</Callout>
+
+## Plane A — domain events (inline)
+
+`IDomainEventBus` dispatches **within the caller's DI scope**, and therefore within the caller's
+transaction. Consumers share the scoped `DbContext`, their writes commit atomically with the command,
+and **a consumer failure fails the command**. This is the right plane for in-aggregate invariants and
+synchronous side effects that must be part of the same unit of work.
+
+```csharp
+await domainEvents.PublishAsync(new OrderLineAdded(orderId, lineId), ct);   // fan-out, inline
+
+var price = await domainEvents.RequestAsync<PriceQuote, Money>(new PriceQuote(sku), ct);   // single responder
+```
+
+Domain events are **never broker-portable** — they are an in-process, in-transaction mechanism by
+definition.
+
+## Plane B — integration events (after commit)
+
+`IIntegrationEventBus` **records** the event in the caller's unit of work and delivers it **after the
+transaction commits**, on a fresh scope, retried independently. A consumer failure never fails the
+command, and **a rollback discards the event**. This is the plane for independent, after-the-fact
+reactions — notifications, read-model projections, outbound webhooks, cross-module fan-out.
+
+```csharp
+await integrationEvents.PublishAsync(new InvoiceCreated(invoice.Id, client.Email), ct);
+```
+
+Because delivery happens later on its own scope, integration consumers run **at-least-once** and
+**without an ordering guarantee** — write them to be idempotent and order-independent.
+
+This is the **only broker-portable plane**: an alternative backend implements *only*
+`IIntegrationEventBus`. Two backends ship.
+
+### Choosing an integration backend
+
+<Callout type="info">
+  **Recommended: the EF Core outbox** for anything that must not be lost. The in-memory tier is a
+  best-effort convenience for events you can afford to drop on a crash.
+</Callout>
+
+| | In-memory (`Elarion.Messaging.InMemory`) | EF Core outbox (`Elarion.Messaging.Outbox`) |
+| --- | --- | --- |
+| Durability | best-effort; flushed-but-undelivered events are **lost on crash** | **at-least-once**; survives restarts |
+| How it captures | a per-scope buffer flushed after commit | a row written in the **same transaction** as your data |
+| Delivery | a hosted channel pump | a hosted worker that polls, leases, dispatches, retries |
+| Use when | events are advisory and loss is acceptable | events drive real side effects that must happen |
+
+Register the in-memory tier with `AddInMemoryEventBus()` from `Elarion.Messaging.InMemory`.
+This wires the domain plane plus the in-memory integration plane, whose after-commit delivery is
+commit-gated by the database transaction without a hand-written decorator: the package's EF Core
+interceptors are registered automatically and flush buffered events after the DbContext commits and
+discard them on rollback.
+
+```csharp
+builder.Services.AddInMemoryEventBus();   // domain plane + in-memory integration plane (interceptors included)
+```
+
+The rest of this page covers the durable outbox.
+
+## The EF Core outbox
+
+The outbox makes integration delivery durable by writing each event as a row in **your** `DbContext`,
+committed atomically with the business data. A background worker delivers it after commit.
+
+**1. Add the table** to the context that owns your business entities, in `OnModelCreating`:
+
+```csharp
+protected override void OnModelCreating(ModelBuilder modelBuilder) {
+    base.OnModelCreating(modelBuilder);
+    modelBuilder.UseElarionOutbox();   // adds elarion_outbox_messages + a partial pending index
+}
+```
+
+**2. Register the tier** in the host, generic over that context:
+
+```csharp
+builder.Services.AddElarionOutbox<BillingDbContext>(o => {
+    o.SerializerOptions = serializerOptions;   // reuse the host's source-generated options for AOT
+    // o.PollingInterval = TimeSpan.FromSeconds(1);
+    // o.LeaseDuration   = TimeSpan.FromMinutes(2);
+    // o.BatchSize       = 100;
+    // o.RetentionPeriod = TimeSpan.FromDays(7);   // null = keep delivered rows forever
+});
+```
+
+This registers the durable `IIntegrationEventBus`, the storage, the dispatcher, and the hosted
+delivery worker. The **consumer descriptors** are registered separately — automatically and
+feature-gated when you use `[GenerateModuleBootstrapper]` (see [Module gating](#module-gating)), or
+explicitly via the generated `Add{Assembly}EventConsumers()`.
+
+<Callout type="warn">
+  **Publish before you save.** `PublishAsync` only *tracks* the outbox row — it does not call
+  `SaveChanges`. Your unit of work must persist it **within the same transaction** as the business
+  data, so publish before the `SaveChanges` that commits the command:
+
+  ```csharp
+  db.Invoices.Add(invoice);
+  await integrationEvents.PublishAsync(new InvoiceCreated(invoice.Id, client.Email), ct);
+  await db.SaveChangesAsync(ct);   // persists the invoice and the outbox row atomically
+  ```
+
+  If the transaction rolls back, both the invoice and the event vanish together — no half-published
+  notifications. The in-memory tier's per-scope flush/discard buffer is irrelevant here; the database
+  transaction provides the commit-gating directly.
+</Callout>
+
+The worker claims pending messages with a provider-neutral conditional update and a short lease, so
+running a couple of instances (or overlapping old/new during a deploy) never double-delivers. Defaults
+are tuned for low/single-instance deployments. The `UseElarionOutbox` pending index is a *partial*
+(filtered) index — supported on PostgreSQL, SQL Server, and SQLite; on MySQL, supply an unfiltered
+index in your own model.
+
+### Domain and integration together
+
+The domain plane is always in-memory and inline. When the outbox owns the integration plane, register
+the domain plane on its own with `AddInMemoryDomainEventBus()` (from `Elarion`) — no in-memory
+integration pump, so only the outbox delivers Plane B:
+
+```csharp
+builder.Services.AddInMemoryDomainEventBus();          // domain plane + registry
+builder.Services.AddElarionOutbox<BillingDbContext>(); // integration plane (durable)
+```
+
+If you only publish integration events, you don't need the in-memory tier at all — the outbox and
+the consumer descriptors are enough.
+
+## Handling duplicates
+
+Delivery is **at-least-once**: a consumer can see the same message more than once — a worker crash
+after the consumer ran but before the message was finalized, a fan-out consumer that threw and retried
+the whole message, or a lease that expired under multiple instances. There is no exactly-once
+*delivery*; you build exactly-once *effect* by making the consumer idempotent. Every redelivery carries
+the **same** `IEventContext.CorrelationId`, so that id is your stable deduplication key.
+
+Pick the cheapest mechanism the side effect allows — an inbox table is the last resort, not the
+default.
+
+**1. Make the operation idempotent (prefer this).** A conditional state transition or an upsert is
+self-deduplicating — running it twice is the same as once, with no extra bookkeeping:
+
+```csharp
+[ConsumeEvent]
+public async ValueTask OnInvoicePaid(InvoicePaid e, CancellationToken ct) {
+    // "Mark paid only if not already paid" — a second delivery updates zero rows.
+    await db.Invoices
+        .Where(i => i.Id == e.InvoiceId && i.Status != InvoiceStatus.Paid)
+        .ExecuteUpdateAsync(s => s.SetProperty(i => i.Status, InvoiceStatus.Paid), ct);
+}
+```
+
+**2. Delegate to the downstream's idempotency key.** External systems that charge cards or send mail
+take a dedup key; pass the correlation id and let them collapse duplicates. Declare an `IEventContext`
+to receive it:
+
+```csharp
+[ConsumeEvent]
+public async ValueTask OnInvoiceCreated(
+    InvoiceCreated e, IEventContext context, CancellationToken ct) {
+    await payments.ChargeAsync(
+        e.InvoiceId, idempotencyKey: context.CorrelationId.ToString("N"), ct);
+}
+```
+
+**3. Guard with a local dedup table — a lightweight inbox.** Only when the effect is neither idempotent
+nor has a downstream key: record the handled id in **the same transaction** as the consumer's write.
+Because the consumer runs in-process on your `DbContext`, this is a unique-constrained insert, not a
+message broker's inbox machinery:
+
+```csharp
+[ConsumeEvent]
+public async ValueTask OnInvoiceCreated(
+    InvoiceCreated e, IEventContext context, CancellationToken ct) {
+    db.ProcessedEvents.Add(new ProcessedEvent {
+        Consumer = nameof(InvoiceNotifications),
+        CorrelationId = context.CorrelationId,   // unique index on (Consumer, CorrelationId)
+    });
+    DoTheSideEffect(e);
+    try {
+        await db.SaveChangesAsync(ct);
+    }
+    catch (DbUpdateException) {
+        // The unique constraint rejected a duplicate — already processed, so let the message finalize.
+    }
+}
+```
+
+<Callout type="info">
+  The case where a guard earns its keep: when a message has **several** fan-out consumers and one
+  throws, the *whole* message is retried, so consumers that already succeeded run again. Idempotent
+  operations (1) absorb this for free; a consumer that genuinely cannot be made idempotent should keep
+  its own guard keyed by `(consumer, CorrelationId)` so it skips work it already did.
+</Callout>
+
+## Module gating
+
+When the host opts into `[GenerateModuleBootstrapper]`, event consumers are associated with their
+owning module and registered through that module's generated `ConfigureDefaultServices`, gated by
+`Modules:{Name}:Enabled`. So **disabling a module also stops its events from being consumed** — no
+separate wiring, and consistent with how handlers, services, validators, and scheduled jobs gate. A
+consumer whose namespace falls under no module is reported (`ELEVT003`) so it is never silently
+dropped.
+
+## What to remember
+
+- Pick the plane by transaction relationship: **domain** when it must be part of the command,
+  **integration** when it should happen reliably *after* the command.
+- Integration delivery is **at-least-once and unordered** — make consumers idempotent; see
+  [Handling duplicates](#handling-duplicates).
+- With the outbox, **publish before `SaveChanges`** so the event commits with your data.
+
+<Cards>
+  <Card title="Tutorial: Background work" href="/docs/tutorial/background-work">
+    Publish an integration event on invoice creation and deliver it durably through the outbox.
+  </Card>
+  <Card title="ADR 0001 — Event transaction phase" href="/docs/decisions/0001-event-transaction-phase">
+    The full rationale for splitting the API by transaction phase.
+  </Card>
+</Cards>

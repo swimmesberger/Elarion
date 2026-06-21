@@ -26,9 +26,9 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             """);
 
         var result = Generate(source);
-        var generated = GetGeneratedSource(result, "EventConsumerRegistration.g.cs");
+        var generated = AllGenerated(result);
 
-        generated.Should().Contain("AddEventConsumerRegistrationGeneratorTestsEventConsumers");
+        generated.Should().Contain("AddSampleEventConsumers");
         generated.Should().Contain("services.TryAddScoped<global::Sample.Events.InvoiceProjections>();");
         generated.Should().Contain("EventType = typeof(global::Sample.Events.InvoiceCreating)");
         generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Domain");
@@ -56,10 +56,118 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             """);
 
         var result = Generate(source);
-        var generated = GetGeneratedSource(result, "EventConsumerRegistration.g.cs");
+        var generated = AllGenerated(result);
 
         generated.Should().Contain("service.OnPing((global::Sample.Events.Pinged)@event);");
         generated.Should().Contain("return global::System.Threading.Tasks.ValueTask.CompletedTask;");
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_ModuleScoped_EmitsPerModuleMethodAndDefaultServicesFiller() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+
+                public sealed record InvoiceCreating(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class InvoiceProjections {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnCreating(
+                        InvoiceCreating e,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+
+        var perModule = GetGeneratedSource(result, "BillingEventConsumerExtensions.g.cs");
+        perModule.Should().Contain(
+            "public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddBillingEventConsumers(");
+        perModule.Should().Contain("EventType = typeof(global::Sample.Events.InvoiceCreating)");
+
+        var anyTree = string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+        anyTree.Should().Contain(
+            "global::Sample.Events.BillingEventConsumerExtensions.AddBillingEventConsumers(services);");
+        anyTree.Should().Contain(
+            "static partial void AddEventConsumers(global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_UnmatchedModule_EmitsWarning() {
+        var source = CreateSource(
+            """
+            namespace Sample.Modules {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+            }
+
+            namespace Other.Events {
+                public sealed record Stray(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class StrayConsumer {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnStray(Stray e) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+
+        result.Diagnostics.Any(d => d.Id == "ELEVT003" && d.Severity == DiagnosticSeverity.Warning)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_MatchedModule_DoesNotWarnUnmatched() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+
+                public sealed record InvoiceCreating(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class InvoiceProjections {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnCreating(InvoiceCreating e) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+
+        result.Diagnostics.Any(d => d.Id == "ELEVT003").Should().BeFalse();
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_NoModules_DoesNotWarnUnmatched() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record Stray(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class StrayConsumer {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnStray(Stray e) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """,
+            wrapInModule: false);
+
+        var result = Generate(source);
+
+        result.Diagnostics.Any(d => d.Id == "ELEVT003").Should().BeFalse();
     }
 
     [Fact]
@@ -81,7 +189,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             """);
 
         var result = Generate(source);
-        var generated = GetGeneratedSource(result, "EventConsumerRegistration.g.cs");
+        var generated = AllGenerated(result);
 
         generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Integration");
         generated.Should().Contain("return new global::System.Threading.Tasks.ValueTask(service.OnCreated((global::Sample.Events.InvoiceCreated)@event, context));");
@@ -106,7 +214,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             """);
 
         var result = Generate(source);
-        var generated = GetGeneratedSource(result, "EventConsumerRegistration.g.cs");
+        var generated = AllGenerated(result);
 
         generated.Should().Contain(
             "service.OnTick((global::Sample.Events.Tick)@event, (global::Elarion.Abstractions.Messaging.IEventContext<global::Sample.Events.Tick>)context)");
@@ -129,7 +237,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             """);
 
         var result = Generate(source);
-        var generated = GetGeneratedSource(result, "EventConsumerRegistration.g.cs");
+        var generated = AllGenerated(result);
 
         generated.Should().Contain("ResponseType = typeof(int)");
         generated.Should().Contain("InvokeRequestAsync = static (serviceProvider, request, context, ct) =>");
@@ -156,7 +264,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             """);
 
         var result = Generate(source);
-        var generated = GetGeneratedSource(result, "EventConsumerRegistration.g.cs");
+        var generated = AllGenerated(result);
 
         generated.Should().Contain("ResponseType = typeof(string)");
         generated.Should().Contain("InvokeRequestAsync = static async (serviceProvider, request, context, ct) =>");
@@ -181,7 +289,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             "[assembly: Elarion.Abstractions.UseElarion]");
 
         var result = Generate(source);
-        var generated = GetGeneratedSource(result, "EventConsumerRegistration.g.cs");
+        var generated = AllGenerated(result);
 
         generated.Should().Contain("EventType = typeof(global::Sample.Events.Boom)");
     }
@@ -283,12 +391,31 @@ public sealed class EventConsumerRegistrationGeneratorTests {
 
     private static string CreateSource(
         string testSource,
-        string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateEventConsumers]") =>
-        $"""
+        string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateEventConsumers]",
+        bool wrapInModule = true)
+    {
+        // Consumers register only per module, so wrap the `Sample.Events` test namespace in a module by default.
+        // Skip when the test already declares a module; tests asserting no-module behavior pass false.
+        var moduleDeclaration = wrapInModule && !testSource.Contains("AppModule(")
+            ? """
+            namespace Sample.Events {
+                [Elarion.Abstractions.Modules.AppModule("Sample")]
+                public static class GeneratedTestModule { }
+            }
+            """
+            : "";
+
+        return $"""
         {assemblyTrigger}
+
+        {moduleDeclaration}
 
         {testSource}
         """;
+    }
+
+    private static string AllGenerated(GeneratorDriverRunResult result) =>
+        string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
 
     private static GeneratorDriverRunResult Generate(
         string source,
@@ -307,7 +434,8 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(new EventConsumerRegistrationGenerator())
+        GeneratorDriver driver = CSharpGeneratorDriver
+            .Create(new EventConsumerRegistrationGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             compilation,

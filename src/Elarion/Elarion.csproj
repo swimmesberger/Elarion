@@ -18,4 +18,8 @@
     <PackageReference Include="Microsoft.Extensions.Resilience" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Messaging.InMemory" />
+  </ItemGroup>
+
 </Project>

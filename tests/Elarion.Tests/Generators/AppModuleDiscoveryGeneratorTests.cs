@@ -93,6 +93,20 @@ public sealed class AppModuleDiscoveryGeneratorTests {
             .BeLessThan(generated.IndexOf(
                 "global::Sample.Modules.AiAgent.AiAgentModule.ConfigureServices",
                 StringComparison.Ordinal));
+
+        // Generated defaults are wired unconditionally for core modules and gated for feature modules,
+        // and always before the module's optional hand-written ConfigureServices.
+        generated.Should().Contain(
+            "global::Sample.Modules.Core.CoreModuleElarionModuleServices.ConfigureDefaultServices(services);");
+        generated.Should().Contain(
+            "global::Sample.Modules.AiAgent.AiAgentModuleElarionModuleServices.ConfigureDefaultServices(services);");
+        generated.IndexOf(
+                "global::Sample.Modules.Core.CoreModuleElarionModuleServices.ConfigureDefaultServices",
+                StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(generated.IndexOf(
+                "global::Sample.Modules.Core.CoreModule.ConfigureServices",
+                StringComparison.Ordinal));
     }
 
     private static string GenerateModuleBootstrapperSource(string source) {
@@ -108,8 +122,10 @@ public sealed class AppModuleDiscoveryGeneratorTests {
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
+        // The skeleton generator ships in the same assembly and emits each module's ConfigureDefaultServices
+        // sibling that the bootstrapper invokes, so it runs alongside the host generator here.
         GeneratorDriver driver = CSharpGeneratorDriver
-            .Create(new AppModuleDiscoveryGenerator())
+            .Create(new AppModuleDiscoveryGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             compilation,

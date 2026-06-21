@@ -1,6 +1,6 @@
 using System.Linq.Expressions;
 
-namespace Elarion.EntityFrameworkCore.Paging;
+namespace Elarion.Paging;
 
 /// <summary>
 /// A single projected row paired with its opaque keyset cursor.

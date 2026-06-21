@@ -1,6 +1,6 @@
 using Elarion.Abstractions.Messaging;
 
-namespace Elarion.Messaging;
+namespace Elarion.Messaging.InMemory;
 
 /// <summary>
 /// One integration event captured for after-commit delivery.

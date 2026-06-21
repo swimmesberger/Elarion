@@ -158,11 +158,11 @@ where a UI needs page numbers and a total count.
   it (plus the generators analyzer) in the project that owns your entities and handlers:
 
   ```xml
-  <PackageReference Include="Elarion.EntityFrameworkCore.Paging" Version="0.1.0" />
+  <PackageReference Include="Elarion.Paging" Version="0.1.0" />
   <PackageReference Include="Elarion.EntityFrameworkCore.Generators" Version="0.1.0" PrivateAssets="all" />
   ```
 
-  Runtime types live in `Elarion.EntityFrameworkCore.Paging`; the `Page<T>` envelope and request
+  Runtime types live in `Elarion.Paging`; the `Page<T>` envelope and request
   contracts live in `Elarion.Abstractions.Paging`.
 </Callout>
 
@@ -178,7 +178,7 @@ reference row):
 
 ```csharp
 using Elarion.EntityFrameworkCore;          // [DbEntity]
-using Elarion.EntityFrameworkCore.Paging;   // [Keyset<T>]
+using Elarion.Paging;   // [Keyset<T>]
 
 [DbEntity]
 public sealed class Client {

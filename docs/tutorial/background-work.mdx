@@ -6,7 +6,9 @@ description: Build the Invoicing module — send invoice emails through a resili
 Creating an invoice should return instantly; actually delivering the email — over flaky SMTP — should
 happen in the background and survive a transient failure. That is exactly what
 [scheduling](/docs/scheduling) and [resilience](/docs/resilience) are for. This page builds the
-Invoicing module around that flow, then adds a nightly cron job that flags overdue invoices.
+Invoicing module around that flow, announces each creation as a durable
+[integration event](/docs/events) delivered after commit, and adds a nightly cron job that flags
+overdue invoices.
 
 <Steps>
 
@@ -153,6 +155,72 @@ public sealed class SendInvoiceEmailJob(
 
 <Step>
 
+### React after commit with an integration event
+
+Sending the email is one reaction to a new invoice; there will be others — a search-index update, an
+activity feed, an outbound webhook — and none of them should be wired into the create handler or block
+it. That is what [integration events](/docs/events) are for: published inside the command, delivered
+**after it commits**, on their own scope, retried independently.
+
+The event is a record carrying the marker that binds it to the after-commit plane:
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Events/InvoiceCreated.cs"
+using Elarion.Abstractions.Messaging;
+
+namespace Billing.Application.Modules.Invoicing.Events;
+
+public sealed record InvoiceCreated(Guid InvoiceId) : IIntegrationEvent;
+```
+
+A consumer is an instance method on a `[Service]` class, annotated `[ConsumeEvent]`. It runs on a fresh
+scope once the invoice has committed, so it reads its own data and its failures never touch the original
+command:
+
+```csharp title="src/Billing.Application/Modules/Invoicing/Events/InvoiceNotifications.cs"
+using Billing.Application.Data;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Messaging;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace Billing.Application.Modules.Invoicing.Events;
+
+[Service]
+public sealed class InvoiceNotifications(
+    IAppDbContext db,
+    ILogger<InvoiceNotifications> logger
+) {
+    [ConsumeEvent]
+    public async ValueTask OnInvoiceCreated(InvoiceCreated e, CancellationToken ct) {
+        var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == e.InvoiceId, ct);
+        if (invoice is null) {
+            return;
+        }
+
+        var client = await db.Clients.FirstAsync(c => c.Id == invoice.ClientId, ct);
+        // A real consumer would push to a webhook, search index, or notification service.
+        logger.LogInformation("Invoice {Number} created for {Email}", invoice.Number, client.Email);
+    }
+}
+```
+
+<Callout type="info">
+  Delivery is **at-least-once** — the consumer may run more than once for one event (a retry, or a
+  redelivery after a crash). Keep it idempotent. The `CancellationToken` here is the delivery host's
+  shutdown token, not the create request's; by the time this runs, that request is long done.
+</Callout>
+
+`CreateInvoice` (next step) publishes this **immediately before `SaveChanges`**, so the event row is
+written in the same transaction as the invoice — commit them both, or neither. The consumer is a
+`[ConsumeEvent]` on a `[Service]`, so it is discovered, registered, and module-gated automatically; the
+host only chooses *how* delivery happens by wiring the [EF Core outbox](/docs/events#the-ef-core-outbox)
+in [Host the API](/docs/tutorial/hosting), which is what makes the event survive a crash between commit
+and delivery.
+
+</Step>
+
+<Step>
+
 ### Create the invoice and enqueue the send
 
 `CreateInvoice` persists a `Draft` invoice and **enqueues** the send job with the resilience policy in
@@ -164,10 +232,12 @@ the stable `JobId` so the frontend can poll it.
 using System.ComponentModel;
 using Billing.Application.Data;
 using Billing.Application.Modules.Core.Services;
+using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;
 
@@ -180,6 +250,7 @@ public sealed class CreateInvoice(
     IAppDbContext db,
     ICurrentUser user,
     IJobScheduler scheduler,
+    IIntegrationEventBus integrationEvents,
     IAuditTrail audit,
     TimeProvider clock
 ) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
@@ -214,6 +285,8 @@ public sealed class CreateInvoice(
         };
 
         db.Invoices.Add(invoice);
+        // Record the integration event in the same unit of work — it commits with the invoice, or not at all.
+        await integrationEvents.PublishAsync(new InvoiceCreated(invoice.Id), ct);
         await db.SaveChangesAsync(ct);
 
         var handle = await scheduler.EnqueueAsync<SendInvoiceEmailJob, SendInvoiceEmailPayload>(
@@ -421,6 +494,8 @@ public sealed partial class InvoicingJsonContext : JsonSerializerContext;
 
 - A create flow that returns immediately and delivers email in the background.
 - A retrying, idempotent send job that survives transient SMTP failures via deferred retry.
+- An `InvoiceCreated` integration event, published in the same transaction and delivered durably after
+  commit through the EF Core outbox — the seam for any further after-the-fact reactions.
 - A pollable send status and a nightly cron job that keeps invoice state honest.
 
 All of this still runs nowhere until the host composes the modules and registers the scheduler and

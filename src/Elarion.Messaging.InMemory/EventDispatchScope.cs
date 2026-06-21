@@ -1,12 +1,15 @@
-using Elarion.Abstractions.Messaging;
-
-namespace Elarion.Messaging;
+namespace Elarion.Messaging.InMemory;
 
 /// <summary>
 /// Scoped buffer that holds integration events until the unit of work commits, then hands them to
 /// the <see cref="EventDispatchPump"/> for after-commit delivery.
 /// </summary>
-internal sealed class EventDispatchScope(EventDispatchPump pump) : IEventDispatchScope {
+/// <remarks>
+/// The EF Core interceptors drive this buffer from the DbContext lifecycle: <see cref="FlushAsync"/>
+/// runs after a successful commit and <see cref="Discard"/> runs on rollback. It is an internal
+/// implementation detail of the in-memory integration tier, not a public seam.
+/// </remarks>
+internal sealed class EventDispatchScope(EventDispatchPump pump) {
     private readonly List<EventEnvelope> _buffer = [];
 
     public void Add(EventEnvelope envelope) => _buffer.Add(envelope);

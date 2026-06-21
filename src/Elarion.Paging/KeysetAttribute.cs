@@ -1,4 +1,4 @@
-namespace Elarion.EntityFrameworkCore.Paging;
+namespace Elarion.Paging;
 
 /// <summary>
 /// Declares an ordered keyset (seek) definition for <typeparamref name="TEntity"/> on the annotated

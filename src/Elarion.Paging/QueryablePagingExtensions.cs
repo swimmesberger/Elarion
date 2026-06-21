@@ -2,7 +2,7 @@ using System.Linq.Expressions;
 using Elarion.Abstractions.Paging;
 using Microsoft.EntityFrameworkCore;
 
-namespace Elarion.EntityFrameworkCore.Paging;
+namespace Elarion.Paging;
 
 /// <summary>
 /// Executes keyset (seek) and offset pagination against an EF Core <see cref="IQueryable{T}"/>,

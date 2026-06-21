@@ -15,7 +15,9 @@
     <Project Path="src/Elarion.Blobs/Elarion.Blobs.csproj" />
     <Project Path="src/Elarion.Blobs.PostgreSql/Elarion.Blobs.PostgreSql.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
-    <Project Path="src/Elarion.EntityFrameworkCore.Paging/Elarion.EntityFrameworkCore.Paging.csproj" />
+    <Project Path="src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />
+    <Project Path="src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />
+    <Project Path="src/Elarion.Paging/Elarion.Paging.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Generators/Elarion.Generators.csproj" />
     <Project Path="src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />

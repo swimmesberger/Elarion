@@ -76,6 +76,16 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor ConsumerNotInModule = new(
+        id: "ELEVT003",
+        title: "Event consumer is not in any module",
+        messageFormat:
+        "Event consumer '{0}' is annotated with [ConsumeEvent] but its namespace is not under any [AppModule]; "
+        + "under a module-bootstrapper host it will not be registered (only the flat Add{Assembly}EventConsumers method registers it)",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     private enum ParameterKind {
         Message,
         Context,
@@ -94,6 +104,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
 
     private sealed record EventConsumerInfo(
         string ServiceTypeFqn,
+        string ServiceNamespace,
         string MethodName,
         string EventTypeFqn,
         string Plane,
@@ -121,9 +132,64 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
                 return;
             }
 
-            var source = GenerateSource(compilation.AssemblyName ?? "Generated", consumers);
-            spc.AddSource("EventConsumerRegistration.g.cs", SourceText.From(source, Encoding.UTF8));
+            // Consumers are registered per module via ConfigureDefaultServices; there is no assembly-wide method.
+            EmitPerModule(spc, ModuleScanner.Collect(compilation, spc.CancellationToken), consumers);
         });
+    }
+
+    private static void EmitPerModule(
+        SourceProductionContext spc,
+        IReadOnlyList<ModuleScanner.Module> modules,
+        IReadOnlyList<EventConsumerInfo> consumers)
+    {
+        if (modules.Count == 0)
+        {
+            return;
+        }
+
+        var byModule = new Dictionary<ModuleScanner.Module, List<EventConsumerInfo>>();
+        foreach (var consumer in consumers)
+        {
+            var module = ModuleScanner.FindBest(consumer.ServiceNamespace, modules);
+            if (module is null)
+            {
+                // Modules exist (guarded above) but this consumer matches none: the per-module path
+                // is the only one a module-bootstrapper host calls, so warn that it would be dropped.
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    ConsumerNotInModule,
+                    Location.None,
+                    $"{consumer.ServiceTypeFqn.Replace("global::", string.Empty)}.{consumer.MethodName}"));
+                continue;
+            }
+
+            if (!byModule.TryGetValue(module, out var list))
+            {
+                list = [];
+                byModule[module] = list;
+            }
+
+            list.Add(consumer);
+        }
+
+        foreach (var kvp in byModule.OrderBy(x => x.Key.Name, StringComparer.Ordinal))
+        {
+            var module = kvp.Key;
+            var className = $"{module.Name}EventConsumerExtensions";
+            var methodName = $"Add{module.Name}EventConsumers";
+            var ns = module.Namespace.Length > 0 ? module.Namespace : null;
+
+            var source = GenerateRegistration(ns, className, methodName, kvp.Value);
+            spc.AddSource($"{module.Name}EventConsumerExtensions.g.cs", SourceText.From(source, Encoding.UTF8));
+
+            var nsPrefix = module.Namespace.Length > 0 ? $"global::{module.Namespace}." : "global::";
+            ModuleDefaultsEmitter.EmitFiller(
+                spc,
+                module.Namespace,
+                module.TypeName,
+                ModuleDefaultsEmitter.AddEventConsumersMethod,
+                "EventConsumers",
+                $"{nsPrefix}{className}.{methodName}(services);");
+        }
     }
 
     private sealed record KnownSymbols(
@@ -259,11 +325,15 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var order = GetIntNamedArgument(consumeAttribute, "Order", 0);
         var eventFqn = eventType!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var serviceFqn = containingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var serviceNamespace = containingType.ContainingNamespace is { IsGlobalNamespace: false } containing
+            ? containing.ToDisplayString()
+            : string.Empty;
         var responseFqn = responseType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var hintName = $"{GetHintName(containingType)}__{method.Name}__{GetHintName(eventType!)}";
 
         return new EventConsumerInfo(
             serviceFqn,
+            serviceNamespace,
             method.Name,
             eventFqn,
             plane,
@@ -404,11 +474,11 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         }
     }
 
-    private static string GenerateSource(string assemblyName, IReadOnlyList<EventConsumerInfo> consumers) {
-        var registrationType = SanitizeIdentifier(assemblyName) + "EventConsumerRegistration";
-        var registrationMethod = "Add" + SanitizeIdentifier(assemblyName) + "EventConsumers";
-        var ns = TryGetNamespaceFromAssemblyName(assemblyName);
-
+    private static string GenerateRegistration(
+        string? ns,
+        string className,
+        string methodName,
+        IReadOnlyList<EventConsumerInfo> consumers) {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// Source: Elarion.Generators.EventConsumerRegistrationGenerator");
@@ -422,9 +492,9 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             sb.AppendLine();
         }
 
-        sb.AppendLine($"public static class {registrationType}");
+        sb.AppendLine($"public static class {className}");
         sb.AppendLine("{");
-        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {registrationMethod}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("    {");
 
         foreach (var serviceFqn in consumers.Select(consumer => consumer.ServiceTypeFqn).Distinct(StringComparer.Ordinal)) {
@@ -555,38 +625,4 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             .Replace(">", "_")
             .Replace(",", "_")
             .Replace(" ", string.Empty);
-
-    private static string? TryGetNamespaceFromAssemblyName(string assemblyName) {
-        var parts = assemblyName.Split('.');
-        if (parts.Length == 0 || parts.Any(part => !IsValidIdentifier(part))) {
-            return null;
-        }
-
-        return string.Join(".", parts);
-    }
-
-    private static string SanitizeIdentifier(string value) {
-        var sb = new StringBuilder(value.Length);
-        foreach (var c in value) {
-            if (char.IsLetterOrDigit(c) || c == '_') {
-                sb.Append(c);
-            }
-        }
-
-        if (sb.Length == 0 || !IsIdentifierStart(sb[0])) {
-            sb.Insert(0, '_');
-        }
-
-        return sb.ToString();
-    }
-
-    private static bool IsValidIdentifier(string value) {
-        if (string.IsNullOrWhiteSpace(value) || !IsIdentifierStart(value[0])) {
-            return false;
-        }
-
-        return value.Skip(1).All(c => char.IsLetterOrDigit(c) || c == '_');
-    }
-
-    private static bool IsIdentifierStart(char c) => char.IsLetter(c) || c == '_';
 }

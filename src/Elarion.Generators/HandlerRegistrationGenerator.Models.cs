@@ -51,7 +51,7 @@ public sealed partial class HandlerRegistrationGenerator {
         object?[] MessageArgs
     );
 
-    private sealed record ModuleInfo(string Name, string Namespace);
+    private sealed record ModuleInfo(string Name, string Namespace, string TypeName);
 
     private static readonly DiagnosticDescriptor CacheableAndInvalidatingDescriptor = new(
         "WIMCACHE001",

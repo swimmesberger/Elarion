@@ -1,4 +1,4 @@
-namespace Elarion.EntityFrameworkCore.Paging;
+namespace Elarion.Paging;
 
 /// <summary>The order in which a sort column is applied.</summary>
 public enum SortDirection

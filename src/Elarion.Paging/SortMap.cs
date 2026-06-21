@@ -1,7 +1,7 @@
 using System.Collections.Frozen;
 using System.Linq.Expressions;
 
-namespace Elarion.EntityFrameworkCore.Paging;
+namespace Elarion.Paging;
 
 /// <summary>
 /// An AOT-safe, immutable whitelist mapping offset-pagination sort keys to typed key selectors. Each

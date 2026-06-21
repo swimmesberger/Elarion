@@ -466,7 +466,10 @@ public sealed class ModuleServiceRegistrationGeneratorTests
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(new ModuleServiceRegistrationGenerator())
+        // The ConfigureDefaultServices skeleton ships in the same generator assembly and supplies the partial-method
+        // declarations the service generator's filler implements, so it must run alongside here.
+        GeneratorDriver driver = CSharpGeneratorDriver
+            .Create(new ModuleServiceRegistrationGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             compilation,

@@ -16,6 +16,7 @@
     "http-endpoints",
     "scheduling",
     "resilience",
+    "events",
     "entity-framework",
     "blob-storage",
     "telemetry",

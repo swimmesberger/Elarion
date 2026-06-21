@@ -24,6 +24,19 @@ public sealed partial class HandlerRegistrationGenerator {
         foreach (var kvp in moduleHandlers.OrderBy(x => x.Key.Name, StringComparer.Ordinal)) {
             var code = GenerateModuleAggregation(kvp.Key, kvp.Value);
             spc.AddSource($"{kvp.Key.Name}HandlerExtensions.g.cs", SourceText.From(code, Encoding.UTF8));
+
+            if (kvp.Value.Count == 0)
+                continue;
+
+            var module = kvp.Key;
+            var nsPrefix = module.Namespace.Length > 0 ? $"global::{module.Namespace}." : "global::";
+            ModuleDefaultsEmitter.EmitFiller(
+                spc,
+                module.Namespace,
+                module.TypeName,
+                ModuleDefaultsEmitter.AddHandlersMethod,
+                "Handlers",
+                $"{nsPrefix}{module.Name}HandlerExtensions.Add{module.Name}Handlers(services);");
         }
     }
 
@@ -50,8 +63,10 @@ public sealed partial class HandlerRegistrationGenerator {
                     continue;
                 }
 
-                var ns = typeSymbol.ContainingNamespace?.ToDisplayString() ?? "";
-                modules.Add(new ModuleInfo(moduleName, ns));
+                var ns = typeSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
+                    ? containing.ToDisplayString()
+                    : "";
+                modules.Add(new ModuleInfo(moduleName, ns, typeSymbol.Name));
             }
         }
 

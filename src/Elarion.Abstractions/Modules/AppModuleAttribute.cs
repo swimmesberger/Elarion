@@ -5,12 +5,21 @@ namespace Elarion.Abstractions.Modules;
 /// Source generators use this attribute to group handlers and validators, resolve module
 /// pipeline defaults, and emit host bootstrapping calls.
 /// <para>
+/// A generated <c>{ModuleType}ElarionModuleServices.ConfigureDefaultServices(IServiceCollection)</c>
+/// sibling registers the module's discovered handlers, services, validators, scheduled jobs, and event
+/// consumers automatically. When the host opts into <c>[GenerateModuleBootstrapper]</c>, the bootstrapper
+/// calls it gated by <c>Modules:{Name}:Enabled</c>, so a disabled module registers none of them — there is
+/// no need to wire these by hand. <c>ConfigureServices</c> below is therefore reserved for additional,
+/// non-generated registrations (options binding, third-party libraries, manual decorators) and runs after
+/// the generated defaults.
+/// </para>
+/// <para>
 /// The annotated class may implement any of these static methods. All methods are optional
 /// and convention-based:
 /// <list type="bullet">
 ///   <item>
 ///     <c>static void ConfigureServices(IServiceCollection services, IConfiguration configuration)</c>
-///     — register application services for this module using dependency injection abstractions.
+///     — register <em>additional</em> application services for this module beyond the generated defaults.
 ///   </item>
 ///   <item>
 ///     <c>static void MapEndpoints(IEndpointRouteBuilder endpoints)</c>

@@ -141,6 +141,7 @@ call that applies every discovered configuration.
 
 ```csharp title="src/Billing.Infrastructure/Data/BillingDbContext.cs"
 using Billing.Application;
+using Elarion.Messaging.Outbox;
 using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Infrastructure.Data;
@@ -152,6 +153,7 @@ public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> 
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         base.OnModelCreating(modelBuilder);
         ConfigureEntities(modelBuilder);   // generated
+        modelBuilder.UseElarionOutbox();   // integration-event outbox table (Elarion.Messaging.Outbox)
     }
 }
 ```

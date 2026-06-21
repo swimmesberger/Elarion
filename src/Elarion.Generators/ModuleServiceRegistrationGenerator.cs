@@ -58,7 +58,7 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
-    private sealed record ModuleInfo(string Name, string Namespace);
+    private sealed record ModuleInfo(string Name, string Namespace, string TypeName);
 
     private sealed record ServiceInfo(
         string ServiceIdentifier,
@@ -166,7 +166,7 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
                     moduleAttr.ConstructorArguments[0].Value is string moduleName)
                 {
                     var ns = GetNamespace(typeSymbol);
-                    modules.Add(new ModuleInfo(moduleName, ns));
+                    modules.Add(new ModuleInfo(moduleName, ns, typeSymbol.Name));
                 }
             }
         }
@@ -512,6 +512,15 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
             sb.AppendLine("}");
 
             spc.AddSource($"{moduleName}ServiceExtensions.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+
+            var nsPrefix = module.Namespace.Length > 0 ? $"global::{module.Namespace}." : "global::";
+            ModuleDefaultsEmitter.EmitFiller(
+                spc,
+                module.Namespace,
+                module.TypeName,
+                ModuleDefaultsEmitter.AddServicesMethod,
+                "Services",
+                $"{nsPrefix}{moduleName}ServiceExtensions.Add{moduleName}Services(services);");
         }
     }
 
