@@ -12,8 +12,9 @@ namespace Elarion;
 /// This glue lives in the <c>Elarion</c> application-runtime package — not <c>Elarion.JsonRpc</c> — so the
 /// JSON-RPC core stays free of the handler / <see cref="Result{T}"/> / <see cref="AppError"/> contract and
 /// remains usable with the raw <see cref="JsonRpcDispatcher.Map{TRequest,TResponse}"/> delegate API.
-/// The generated <c>RpcMethodMap.RegisterAll</c> body (see <c>Elarion.Generators.RpcMethodMapGenerator</c>)
-/// emits one <see cref="MapHandler{TRequest,TResponse}"/> call per discovered handler.
+/// The generated <c>ModuleBootstrapper.RegisterRpcMethods</c> body (see
+/// <c>Elarion.Generators.AppModuleDiscoveryGenerator</c>) emits one
+/// <see cref="MapHandler{TRequest,TResponse}"/> call per discovered handler.
 /// </remarks>
 public static class RpcDispatcherExtensions {
     /// <summary>

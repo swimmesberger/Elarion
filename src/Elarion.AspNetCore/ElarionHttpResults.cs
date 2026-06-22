@@ -10,7 +10,7 @@ namespace Elarion.AspNetCore;
 /// ProblemDetails response whose status code comes from <see cref="HttpAppErrorMapper"/>.
 /// </summary>
 /// <remarks>
-/// These helpers are invoked by the code emitted by <c>Elarion.Generators.HttpEndpointMapGenerator</c>; they
+/// These helpers are invoked by the code emitted by <c>Elarion.Generators.AppModuleDiscoveryGenerator</c>; they
 /// are public so the generated endpoint lambdas can call them. Validation failures carrying
 /// <see cref="ValidationErrorData"/> are surfaced through the standard ProblemDetails <c>errors</c> map.
 /// </remarks>

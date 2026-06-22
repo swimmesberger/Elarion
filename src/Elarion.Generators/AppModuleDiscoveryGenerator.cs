@@ -61,6 +61,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         bool HasConfigureServices,
         bool HasMapEndpoints,
         bool HasGetJsonTypeInfoResolver,
+        bool HasConfigureEndpointGroup,
         bool EmitDefaultServices
     );
 
@@ -276,6 +277,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             module.HasConfigureServices,
             module.HasMapEndpoints,
             module.HasGetJsonTypeInfoResolver,
+            module.HasConfigureEndpointGroup,
             emitDefaultServices);
 
     /// <summary>
@@ -396,6 +398,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             var hasConfigureServices = HasStaticMethod(type, "ConfigureServices", 2);
             var hasMapEndpoints = HasStaticMethod(type, "MapEndpoints", 1);
             var hasGetJsonTypeInfoResolver = HasStaticMethod(type, "GetJsonTypeInfoResolver", 0);
+            var hasConfigureEndpointGroup = HasStaticMethod(type, "ConfigureEndpointGroup", 1);
 
             var fqn = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             var moduleNamespace = type.ContainingNamespace?.ToDisplayString() ?? string.Empty;
@@ -403,7 +406,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             entries.Add(new ModuleEntry(
                 moduleName, moduleNamespace, fqn, dependsOn,
                 isCore,
-                hasConfigureServices, hasMapEndpoints, hasGetJsonTypeInfoResolver,
+                hasConfigureServices, hasMapEndpoints, hasGetJsonTypeInfoResolver, hasConfigureEndpointGroup,
                 // Current-compilation modules: the ConfigureDefaultServices skeleton is generated in the same pass.
                 EmitDefaultServices: true));
         }
@@ -611,13 +614,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
         foreach (var entry in entries)
-        {
-            if (entry.HasMapEndpoints)
-                EmitModuleCall(sb, entry, $"{entry.TypeFqn}.MapEndpoints(endpoints);");
-
-            if (transport.HttpByModule.ContainsKey(entry.ModuleName))
-                EmitModuleCall(sb, entry, $"{HttpMethodName(entry.ModuleName)}(endpoints);");
-        }
+            EmitModuleEndpointMapping(sb, entry, transport.HttpByModule.ContainsKey(entry.ModuleName));
 
         if (transport.UnmatchedHttp.Count > 0)
             sb.AppendLine($"        {HttpMethodName(UnmatchedModuleName)}(endpoints);");
@@ -944,6 +941,58 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine(
             $"        if (IsModuleEnabled(configuration, {SourceString(entry.ModuleName)}))");
         sb.AppendLine($"            {statement}");
+    }
+
+    /// <summary>
+    /// Emits a module's endpoint mapping (its optional <c>MapEndpoints</c> hook and its generated
+    /// <c>[HttpEndpoint]</c> routes) inside the module's feature gate. When the module declares a
+    /// <c>ConfigureEndpointGroup</c> hook, both are mapped onto the builder it returns, so the module owns
+    /// its own route group/policy/conventions; otherwise they map onto the root <c>endpoints</c> builder.
+    /// </summary>
+    private static void EmitModuleEndpointMapping(StringBuilder sb, ModuleEntry entry, bool hasHttp)
+    {
+        if (!entry.HasMapEndpoints && !hasHttp)
+            return;
+
+        // The group hook is only meaningful when the module actually maps something.
+        var useGroup = entry.HasConfigureEndpointGroup;
+        var target = "endpoints";
+        var statements = new List<string>();
+        if (useGroup)
+        {
+            target = $"{ModuleMethodNamePart(entry.ModuleName)}Endpoints";
+            statements.Add($"var {target} = {entry.TypeFqn}.ConfigureEndpointGroup(endpoints);");
+        }
+
+        if (entry.HasMapEndpoints)
+            statements.Add($"{entry.TypeFqn}.MapEndpoints({target});");
+        if (hasHttp)
+            statements.Add($"{HttpMethodName(entry.ModuleName)}({target});");
+
+        if (entry.IsCore)
+        {
+            // Core modules with a group hook need a block to scope the local; otherwise emit flat.
+            if (useGroup)
+            {
+                sb.AppendLine("        {");
+                foreach (var statement in statements)
+                    sb.AppendLine($"            {statement}");
+                sb.AppendLine("        }");
+            }
+            else
+            {
+                foreach (var statement in statements)
+                    sb.AppendLine($"        {statement}");
+            }
+
+            return;
+        }
+
+        sb.AppendLine($"        if (IsModuleEnabled(configuration, {SourceString(entry.ModuleName)}))");
+        sb.AppendLine("        {");
+        foreach (var statement in statements)
+            sb.AppendLine($"            {statement}");
+        sb.AppendLine("        }");
     }
 
     private static string SourceString(string value) =>

@@ -17,7 +17,8 @@ rather than a runtime failure. This table maps the common symptoms to fixes.
 | Hosted service registration fails a diagnostic | The hosted service uses `Scoped`/`Transient` scope. | Use `Scope = ServiceScope.Singleton`. |
 | Generic service registration fails a diagnostic | `[Service]` is on a generic type or one nested in a generic type. | Register open generics manually for now. |
 | Validators are not registered | The validator is outside the module namespace or does not inherit `AbstractValidator<T>`. | Move it under the module namespace; reference FluentValidation. |
-| RPC method is missing | The host lacks `[GenerateRpcMethodMap]`, the handler lacks `[RpcMethod]`, or nested `Command`/`Query` and `Response` types are missing. | Add the marker and follow the handler shape convention. |
+| Event consumer never runs (`ELEVT003`) | The `[ConsumeEvent]` method's namespace is under no `[AppModule]`, so it is not registered. | Move the consumer under a module's namespace so that module wires it. |
+| RPC method is missing | The host lacks `[GenerateModuleBootstrapper]`, the handler lacks `[RpcMethod]`, the handler's namespace is under no `[AppModule]`, or nested `Command`/`Query` and `Response` types are missing. | Add the trigger, move the handler under a module, add the marker, and follow the handler shape convention. |
 | Module services do not run | The module is disabled via `Modules:{Name}:Enabled=false`, or `[AppModule]` is missing. | Check configuration and the module attribute. |
 
 ## JSON-RPC and schema generation

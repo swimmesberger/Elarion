@@ -2,7 +2,7 @@ namespace Elarion.JsonRpc.Mcp;
 
 /// <summary>
 /// Compile-time MCP metadata for a single registered JSON-RPC method, produced by the Elarion source
-/// generator (<c>RpcMethodMapGenerator</c>) — no runtime reflection or assembly scanning.
+/// generator (<c>AppModuleDiscoveryGenerator</c>) — no runtime reflection or assembly scanning.
 /// </summary>
 /// <remarks>
 /// This type is transport-neutral and carries no <c>ModelContextProtocol</c> SDK dependency; the ASP.NET MCP
@@ -41,7 +41,7 @@ public readonly record struct RpcMcpParameterDescriptor(string PropertyName, str
 
 /// <summary>
 /// Reflection-free lookup over the generated <see cref="RpcMcpMethodMetadata"/> table. The implementation is
-/// produced by generated code (<c>RpcMethodMap.McpMetadata()</c>).
+/// produced by generated code (<c>ModuleBootstrapper.GetMcpMetadata(configuration)</c>).
 /// </summary>
 public interface IRpcMcpMetadataSource {
     /// <summary>All method metadata, ordered by method name.</summary>

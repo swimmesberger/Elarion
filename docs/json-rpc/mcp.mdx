@@ -23,6 +23,9 @@ mount (or even register) the public JSON-RPC endpoint to use MCP.
 
 ## Setup
 
+The MCP server is wired through the generated `ModuleBootstrapper` ([modules are the single hosting
+path](/docs/json-rpc/hosting)), which exposes the gated MCP peers alongside the JSON-RPC and HTTP ones:
+
 ```csharp
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Mcp;
@@ -30,14 +33,14 @@ using Elarion.AspNetCore.Mcp;
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 
 // The public JSON-RPC endpoint (optional, independent of MCP): registers the /rpc dispatcher with the
-// JSON-RPC-surfaced methods.
-builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
+// JSON-RPC-surfaced methods of enabled modules.
+builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
 
 // The MCP server: a dedicated dispatcher built from the MCP-surfaced methods, with one tool per handler.
 builder.Services.AddElarionMcp(
-    RpcMethodMap.McpMetadata(),     // reflection-free tool table (MCP-surfaced methods only)
+    ModuleBootstrapper.GetMcpMetadata(builder.Configuration), // reflection-free, gated tool table
     serializerOptions,
-    RpcMethodMap.RegisterMcpAll,    // builds the dedicated MCP dispatcher
+    ModuleBootstrapper.RegisterMcpMethods,                    // builds the dedicated, gated MCP dispatcher
     o => o.ServerName = "MyApp");
 
 var app = builder.Build();
@@ -46,33 +49,17 @@ app.MapElarionMcp();   // mounts /mcp — calling MapJsonRpc() is optional and i
 app.Run();
 ```
 
-`RpcMethodMap.McpMetadata()` and `RpcMethodMap.RegisterMcpAll` are generated alongside `RegisterAll` by the
-[source generator](/docs/source-generation): a reflection-free tool table plus the registration delegate for
-the dedicated MCP dispatcher. There is no assembly scanning at runtime.
+`GetMcpMetadata` and `RegisterMcpMethods` are generated alongside `RegisterRpcMethods` by the
+[source generator](/docs/source-generation): a reflection-free tool table plus the registration delegate
+for the dedicated MCP dispatcher, both including only the MCP-surfaced handlers of enabled modules. A
+module disabled with `Modules:{Name}:Enabled = false` drops its tools entirely, and there is no assembly
+scanning at runtime.
 
 <Callout type="info">
   MCP is self-contained: `AddElarionMcp` builds its **own** `McpDispatcher` and never touches the unkeyed
   `/rpc` `JsonRpcDispatcher`. `MapElarionMcp()` does not require `MapJsonRpc()` — you can expose MCP without
   exposing (or even registering) the public JSON-RPC endpoint at all.
 </Callout>
-
-## Module-based hosting
-
-In a [module-based](/docs/concepts/modules) host, the generated `ModuleBootstrapper` exposes the gated MCP
-peers alongside the JSON-RPC and HTTP ones:
-
-```csharp
-builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods); // /rpc (optional)
-
-builder.Services.AddElarionMcp(
-    ModuleBootstrapper.GetMcpMetadata(builder.Configuration), // gated tool table
-    serializerOptions,
-    ModuleBootstrapper.RegisterMcpMethods,                    // gated MCP dispatcher
-    o => o.ServerName = "MyApp");
-```
-
-`GetMcpMetadata` and `RegisterMcpMethods` only include the MCP-surfaced handlers of enabled modules, so a
-module disabled with `Modules:{Name}:Enabled = false` drops its tools entirely.
 
 ## Tool and parameter descriptions
 
@@ -136,9 +123,9 @@ public sealed class CreateClient : IHandler<...> { ... }
 
 ```csharp
 builder.Services.AddElarionMcp(
-    RpcMethodMap.McpMetadata(),
+    ModuleBootstrapper.GetMcpMetadata(builder.Configuration),
     serializerOptions,
-    RpcMethodMap.RegisterMcpAll,
+    ModuleBootstrapper.RegisterMcpMethods,
     o => {
         o.ServerName = "MyApp";                            // required
         o.ServerVersion = "1.0";

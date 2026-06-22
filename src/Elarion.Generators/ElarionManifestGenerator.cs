@@ -84,7 +84,8 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
                 isCore,
                 HasStaticMethod(type, "ConfigureServices", 2),
                 HasStaticMethod(type, "MapEndpoints", 1),
-                HasStaticMethod(type, "GetJsonTypeInfoResolver", 0));
+                HasStaticMethod(type, "GetJsonTypeInfoResolver", 0),
+                HasStaticMethod(type, "ConfigureEndpointGroup", 1));
         }
 
         return null;

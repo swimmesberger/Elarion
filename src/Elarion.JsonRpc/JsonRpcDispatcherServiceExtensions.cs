@@ -17,13 +17,13 @@ public static class JsonRpcDispatcherServiceExtensions {
     /// <param name="services">The service collection.</param>
     /// <param name="serializerOptions">The serializer options the dispatcher uses for params/result handling.</param>
     /// <param name="registerAll">
-    /// The generated registration delegate (e.g. <c>RpcMethodMap.RegisterAll</c>) that maps all handlers onto the
-    /// dispatcher and returns it for chaining.
+    /// The generated registration delegate (e.g. <c>ModuleBootstrapper.RegisterRpcMethods</c>) that maps the enabled
+    /// modules' handlers onto the dispatcher and returns it for chaining.
     /// </param>
     /// <returns>The service collection for chaining.</returns>
     /// <example>
     /// <code>
-    /// builder.Services.AddElarionJsonRpcDispatcher(serializerOptions, RpcMethodMap.RegisterAll);
+    /// builder.Services.AddElarionJsonRpcDispatcher(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
     /// </code>
     /// </example>
     public static IServiceCollection AddElarionJsonRpcDispatcher(

@@ -34,9 +34,9 @@ using MyApp.Application.Pipeline;
 ```
 
 `[assembly: UseElarion]` enables the framework-owned assembly-level generators for module handlers,
-module services, module validators, and scheduled jobs. It intentionally does **not** replace
-application-owned policy attributes such as `[DefaultPipeline]`, nor class/interface-targeted triggers
-such as `[GenerateRpcMethodMap]`, `[GenerateModuleBootstrapper]`, or `[GenerateDbSets]`.
+module services, module validators, scheduled jobs, event consumers, and resilience policies. It
+intentionally does **not** replace application-owned policy attributes such as `[DefaultPipeline]`, nor
+the class-targeted host trigger `[GenerateModuleBootstrapper]` or `[GenerateDbSets]`.
 
 ## Narrow triggers
 
@@ -47,6 +47,7 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 [assembly: GenerateModuleServices]
 [assembly: GenerateModuleValidators]
 [assembly: GenerateScheduledJobs]
+[assembly: GenerateEventConsumers]
 [assembly: GenerateResiliencePolicies]
 ```
 
@@ -58,11 +59,10 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 | `ModuleServiceRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleServices]` | `Add{ServiceName}Service()` and `Add{ModuleName}Services()` extension methods. |
 | `ModuleValidatorRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleValidators]` | `Add{ModuleName}Validators()` extension methods. |
 | `SchedulerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateScheduledJobs]` | `Add{AssemblyName}ScheduledJobs()` registering descriptors and job types. |
+| `EventConsumerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateEventConsumers]` | Per-module `Add{Module}EventConsumers()` registering each `[ConsumeEvent]` service plus its `EventSubscriptionDescriptor`. See [Events](/docs/events). |
 | `ResiliencePolicyGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |
 | `ElarionManifestGenerator` | Any project containing `[AppModule]`, `[HttpEndpoint]`, or `[RpcMethod]` | Internal assembly metadata manifests consumed by host-side generators for referenced modules and transport handlers. |
-| `RpcMethodMapGenerator` | `[GenerateRpcMethodMap]` on a host partial class | `RpcMethodMap.RegisterAll(dispatcher)` (JSON-RPC), plus `RpcMethodMap.RegisterMcpAll(dispatcher)` and `RpcMethodMap.McpMetadata()` (MCP). |
-| `HttpEndpointMapGenerator` | `[GenerateHttpEndpointMap]` on a host partial class | `HttpEndpointMap.MapAll(app)` — typed minimal-API `MapGet`/`MapPost`/... per `[HttpEndpoint]` handler. See [HTTP endpoints](/docs/http-endpoints). |
-| `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods`, `RegisterMcpMethods`, `GetMcpMetadata`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, `GetAllModuleNames`, plus per-module `Map{Module}Http` / `Add{Module}JsonRpc` / `Add{Module}Mcp` / `Get{Module}McpMetadata`. |
+| `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods`, `RegisterMcpMethods`, `GetMcpMetadata`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, `GetAllModuleNames`, plus per-module `Map{Module}Http` / `Add{Module}JsonRpc` / `Add{Module}Mcp` / `Get{Module}McpMetadata`. The single transport-wiring path for `[HttpEndpoint]`, JSON-RPC, and MCP. See [Hosting](/docs/json-rpc/hosting) and [HTTP endpoints](/docs/http-endpoints). |
 | EF Core `DbSet` generator | `[GenerateDbSets]` on a partial interface | `DbSet<T>` members and entity configuration application. See [Entity Framework Core](/docs/entity-framework). |
 
 Generated code intentionally uses explicit type names and DI factory registrations. Startup behavior
@@ -75,14 +75,14 @@ generators that create `[AppModule]`, `[HttpEndpoint]`, or `[RpcMethod]` types m
 manifest metadata for those generated types. Hosts still read `[AppModule]` declarations in their own compilation
 directly because source generators cannot consume another generator's same-compilation output.
 
-When a host uses `[GenerateModuleBootstrapper]`, the bootstrapper also emits **module-scoped,
-feature-flag-gated** transport mapping: `MapAllEndpoints`, `RegisterRpcMethods`, and `RegisterMcpMethods`
-map each enabled module's generated `[HttpEndpoint]` routes, JSON-RPC-surfaced `[RpcMethod]` methods, and
+A host wires every transport through `[GenerateModuleBootstrapper]`, which emits **module-scoped,
+feature-flag-gated** mapping: `MapAllEndpoints`, `RegisterRpcMethods`, and `RegisterMcpMethods` map each
+enabled module's generated `[HttpEndpoint]` routes, JSON-RPC-surfaced `[RpcMethod]` methods, and
 MCP-surfaced tools respectively (core modules always; feature modules gated by `Modules:{Name}:Enabled`).
-A handler picks its dispatcher surfaces with `[RpcMethod(Transports = ...)]`. The flat
-`HttpEndpointMap.MapAll` / `RpcMethodMap.RegisterAll` / `RpcMethodMap.RegisterMcpAll` maps are the
-**non-module path** — they register every handler, ungated. See [Hosting](/docs/json-rpc/hosting),
-[MCP server](/docs/json-rpc/mcp), and [HTTP endpoints](/docs/http-endpoints).
+A handler picks its dispatcher surfaces with `[RpcMethod(Transports = ...)]`. Modules are the only path —
+a host with no modules declares a single core `[AppModule]` (which maps unconditionally). See
+[Hosting](/docs/json-rpc/hosting), [MCP server](/docs/json-rpc/mcp), and
+[HTTP endpoints](/docs/http-endpoints).
 
 ## Diagnostics over surprises
 

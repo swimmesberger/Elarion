@@ -5,10 +5,9 @@ using Microsoft.CodeAnalysis.CSharp;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Shared discovery and emission for <c>[Elarion.Abstractions.HttpEndpoint]</c> handlers, used by both
-/// <see cref="HttpEndpointMapGenerator"/> (flat <c>MapAll</c>) and <see cref="AppModuleDiscoveryGenerator"/>
-/// (module-grouped, feature-flag-gated mapping). Keeps the binding-mode detection and the emitted minimal-API
-/// lambda in one place so both paths stay identical.
+/// Shared discovery and emission for <c>[Elarion.Abstractions.HttpEndpoint]</c> handlers, consumed by
+/// <see cref="AppModuleDiscoveryGenerator"/> for the module-grouped, feature-flag-gated mapping (the only
+/// transport-wiring path). Keeps the binding-mode detection and the emitted minimal-API lambda in one place.
 /// </summary>
 internal static class HttpEndpointEmission
 {

@@ -113,9 +113,18 @@ default is backed by [`HybridCache`](https://learn.microsoft.com/aspnet/core/per
 builder.Services.AddElarionHandlerCaching();
 ```
 
-This registers `HybridCache` and the default `IHandlerCache` (`HybridHandlerCache`). To use a
-different backing store, configure `HybridCache` with a distributed cache (for example Redis) as you
-normally would, or register your own `IHandlerCache` implementation.
+This registers `HybridCache` and the default `IHandlerCache` (`HybridHandlerCache`). There are three
+ways to change the backing store, from least to most invasive:
+
+- **Configure `HybridCache` with a distributed cache** (for example Redis) as you normally would — the
+  default two-tier behavior, just with an L2 added.
+- **Swap the `HybridCache` implementation itself.** `HybridCache` is the abstraction, and
+  `HybridHandlerCache` simply resolves whatever `HybridCache` is in the container. Register your own
+  `HybridCache` *before* `AddElarionHandlerCaching()` — its `AddHybridCache()` call uses
+  `TryAddSingleton`, so it adds the default only when one is not already registered, and your
+  implementation wins.
+- **Replace `IHandlerCache` entirely** when you want to bypass `HybridCache` and own the whole caching
+  contract.
 
 ## How it composes
 

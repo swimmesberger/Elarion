@@ -6,8 +6,8 @@ namespace Elarion.Generators;
 
 /// <summary>
 /// Shared discovery for <c>[Elarion.Abstractions.RpcMethod]</c> handlers (including MCP metadata) and statement-style
-/// <c>MapHandler</c> emission, used by both <see cref="RpcMethodMapGenerator"/> (flat <c>RegisterAll</c>) and
-/// <see cref="AppModuleDiscoveryGenerator"/> (module-grouped, feature-flag-gated registration).
+/// <c>MapHandler</c> emission, consumed by <see cref="AppModuleDiscoveryGenerator"/> for the module-grouped,
+/// feature-flag-gated registration (the only transport-wiring path).
 /// </summary>
 internal static class RpcMethodEmission
 {
