@@ -100,7 +100,10 @@ JSON-RPC endpoint end to end.
 | [`Elarion`](src/Elarion) | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user access. |
 | [`Elarion.Blobs`](src/Elarion.Blobs) | Provider-neutral blob storage contracts and DTOs. |
 | [`Elarion.Blobs.PostgreSql`](src/Elarion.Blobs.PostgreSql) | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O. |
-| [`Elarion.Generators`](src/Elarion.Generators) | Roslyn generators for handlers, services, validators, modules, RPC maps, HTTP endpoint maps, resilience policies, and scheduled jobs. |
+| [`Elarion.Messaging.InMemory`](src/Elarion.Messaging.InMemory) | In-memory integration-event bus (best-effort, commit-gated by the EF Core transaction). |
+| [`Elarion.Messaging.Outbox`](src/Elarion.Messaging.Outbox) | EF Core transactional outbox: a durable, at-least-once integration-event bus with a polling delivery worker. |
+| [`Elarion.Paging`](src/Elarion.Paging) | Keyset (cursor) and offset pagination primitives, opaque cursor codec, and `IQueryable` paging extensions. |
+| [`Elarion.Generators`](src/Elarion.Generators) | Roslyn generators for handlers, services, validators, modules, RPC maps, HTTP endpoint maps, resilience policies, scheduled jobs, and event consumers. |
 | [`Elarion.JsonRpc`](src/Elarion.JsonRpc) | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
 | [`Elarion.AspNetCore`](src/Elarion.AspNetCore) | ASP.NET Core JSON-RPC endpoint mapping, `[HttpEndpoint]` minimal-API mapping, batch execution, and current-user middleware. |
 | [`Elarion.AspNetCore.Mcp`](src/Elarion.AspNetCore.Mcp) | Exposes your JSON-RPC handlers as a Model Context Protocol (MCP) server for AI agents, over Streamable HTTP. |
@@ -115,7 +118,7 @@ Full guides live in [`docs/`](docs/index.mdx) and are structured for a documenta
 
 - **[Introduction](docs/index.mdx)** · **[Installation](docs/getting-started/installation.mdx)** · **[Quickstart](docs/getting-started/quickstart.mdx)**
 - **Core concepts** — [handlers](docs/concepts/handlers.mdx), [results & errors](docs/concepts/results-and-errors.mdx), [modules](docs/concepts/modules.mdx), [services](docs/concepts/services.mdx), [validators](docs/concepts/validators.mdx), [pipelines](docs/concepts/decorator-pipelines.mdx), [caching](docs/concepts/caching.mdx), [current user](docs/concepts/current-user.mdx)
-- **Features** — [source generation](docs/source-generation.mdx), [JSON-RPC](docs/json-rpc/index.mdx), [HTTP endpoints](docs/http-endpoints.mdx), [MCP server](docs/json-rpc/mcp.mdx), [scheduling](docs/scheduling/index.mdx), [resilience](docs/resilience.mdx), [EF Core](docs/entity-framework.mdx), [telemetry](docs/telemetry.mdx)
+- **Features** — [source generation](docs/source-generation.mdx), [JSON-RPC](docs/json-rpc/index.mdx), [HTTP endpoints](docs/http-endpoints.mdx), [MCP server](docs/json-rpc/mcp.mdx), [events & messaging](docs/events.mdx), [blob storage](docs/blob-storage.mdx), [scheduling](docs/scheduling/index.mdx), [resilience](docs/resilience.mdx), [EF Core](docs/entity-framework.mdx), [telemetry](docs/telemetry.mdx)
 - **Reference** — [packages](docs/reference/packages.mdx), [configuration](docs/reference/configuration.mdx), [vs. ASP.NET Core](docs/reference/comparison.mdx), [troubleshooting](docs/reference/troubleshooting.mdx)
 
 ## Requirements

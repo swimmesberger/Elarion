@@ -64,7 +64,7 @@ JSON-RPC methods. You are not locked into one transport.
 ## The end-to-end pipeline
 
 1. Application handlers declare `[RpcMethod("module.action")]`.
-2. `RpcMethodMapGenerator` emits the dispatcher registration map.
+2. `AppModuleDiscoveryGenerator` (via `[GenerateModuleBootstrapper]`) emits the gated dispatcher registration map.
 3. The host configures a `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
 4. `JsonRpcSchemaExporter` (or the [build-time package](/docs/json-rpc/schema-generation)) exports
    `rpc-schema.json` from the registered dispatcher.

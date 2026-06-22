@@ -25,17 +25,17 @@ public static class ElarionMcpServiceExtensions {
     /// <summary>
     /// Registers an MCP server (Streamable HTTP) whose tools are the MCP-exposed methods in the generated
     /// <paramref name="metadata"/> table, backed by a dedicated <see cref="McpDispatcher"/> built from
-    /// <paramref name="registerMcp"/> (e.g. <c>RpcMethodMap.RegisterMcpAll</c>).
+    /// <paramref name="registerMcp"/> (e.g. <c>ModuleBootstrapper.RegisterMcpMethods</c>).
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="metadata">The generated MCP metadata table (e.g. <c>RpcMethodMap.McpMetadata()</c>).</param>
+    /// <param name="metadata">The generated MCP metadata table (e.g. <c>ModuleBootstrapper.GetMcpMetadata(configuration)</c>).</param>
     /// <param name="serializerOptions">
     /// The same serializer options the dispatcher uses; used here to build tool input schemas and by the MCP
     /// dispatcher for params/result handling.
     /// </param>
     /// <param name="registerMcp">
     /// The generated MCP registration delegate that maps the MCP-exposed handlers onto the dispatcher and returns it
-    /// (e.g. <c>RpcMethodMap.RegisterMcpAll</c>).
+    /// (e.g. <c>ModuleBootstrapper.RegisterMcpMethods</c>).
     /// </param>
     /// <param name="configure">Configures the server identity and behavior. <see cref="ElarionMcpOptions.ServerName"/> is required.</param>
     /// <returns>The underlying <see cref="IMcpServerBuilder"/> for further composition (e.g. auth filters).</returns>

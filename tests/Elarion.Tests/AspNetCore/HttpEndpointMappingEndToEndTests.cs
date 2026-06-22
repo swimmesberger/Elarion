@@ -18,7 +18,7 @@ namespace Elarion.Tests.AspNetCore;
 
 /// <summary>
 /// End-to-end test that boots a real Kestrel host and maps endpoints exactly as
-/// <c>HttpEndpointMapGenerator</c> emits them — proving the runtime contract the generator targets works over the
+/// <c>AppModuleDiscoveryGenerator</c> emits them — proving the runtime contract the generator targets works over the
 /// wire: <c>[AsParameters]</c> binding of a <c>required</c>-member query record, body binding, <c>[FromServices]</c>
 /// handler resolution, and <see cref="AppError"/> → RFC 7807 ProblemDetails translation.
 /// </summary>
@@ -67,7 +67,7 @@ public sealed class HttpEndpointMappingEndToEndTests {
 
         await using var app = builder.Build();
 
-        // Mirrors the lambdas emitted by HttpEndpointMapGenerator.
+        // Mirrors the lambdas emitted by AppModuleDiscoveryGenerator.
         app.MapGet("/widgets/{id}", static async (
             [AsParameters] GetWidgetQuery request,
             [FromServices] IHandler<GetWidgetQuery, Result<WidgetResponse>> handler,

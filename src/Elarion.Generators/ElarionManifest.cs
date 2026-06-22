@@ -19,7 +19,8 @@ internal static class ElarionManifest
         bool IsCore,
         bool HasConfigureServices,
         bool HasMapEndpoints,
-        bool HasGetJsonTypeInfoResolver
+        bool HasGetJsonTypeInfoResolver,
+        bool HasConfigureEndpointGroup
     );
 
     public sealed record Data(
@@ -86,7 +87,8 @@ internal static class ElarionManifest
             EncodeBool(module.IsCore),
             EncodeBool(module.HasConfigureServices),
             EncodeBool(module.HasMapEndpoints),
-            EncodeBool(module.HasGetJsonTypeInfoResolver));
+            EncodeBool(module.HasGetJsonTypeInfoResolver),
+            EncodeBool(module.HasConfigureEndpointGroup));
 
     public static string EncodeHttpEndpoint(HttpEndpointEmission.Model model) =>
         ElarionManifestCodec.EncodeFields(
@@ -116,14 +118,15 @@ internal static class ElarionManifest
     public static bool TryDecodeModule(string value, out Module? module)
     {
         module = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 8)
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 9)
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null)
             return false;
         if (!TryDecodeBool(fields[4], out var isCore) ||
             !TryDecodeBool(fields[5], out var hasConfigureServices) ||
             !TryDecodeBool(fields[6], out var hasMapEndpoints) ||
-            !TryDecodeBool(fields[7], out var hasGetJsonTypeInfoResolver))
+            !TryDecodeBool(fields[7], out var hasGetJsonTypeInfoResolver) ||
+            !TryDecodeBool(fields[8], out var hasConfigureEndpointGroup))
         {
             return false;
         }
@@ -136,7 +139,8 @@ internal static class ElarionManifest
             isCore,
             hasConfigureServices,
             hasMapEndpoints,
-            hasGetJsonTypeInfoResolver);
+            hasGetJsonTypeInfoResolver,
+            hasConfigureEndpointGroup);
         return true;
     }
 

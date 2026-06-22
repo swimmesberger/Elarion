@@ -81,7 +81,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         title: "Event consumer is not in any module",
         messageFormat:
         "Event consumer '{0}' is annotated with [ConsumeEvent] but its namespace is not under any [AppModule]; "
-        + "under a module-bootstrapper host it will not be registered (only the flat Add{Assembly}EventConsumers method registers it)",
+        + "it will not be registered. Move the consumer under a module's namespace so it is wired by that module",
         category: "Elarion.Generators",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);

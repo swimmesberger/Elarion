@@ -55,12 +55,12 @@ public static class JsonRpcServiceExtensions {
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="serializerOptions">The serializer options used by the dispatcher and the endpoint.</param>
-    /// <param name="registerAll">The generated registration delegate (e.g. <c>RpcMethodMap.RegisterAll</c>).</param>
+    /// <param name="registerAll">The generated registration delegate (e.g. <c>ModuleBootstrapper.RegisterRpcMethods</c>).</param>
     /// <param name="configure">Optional additional <see cref="JsonRpcOptions"/> configuration (e.g. endpoint path).</param>
     /// <returns>The service collection for chaining.</returns>
     /// <example>
     /// <code>
-    /// builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
+    /// builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
     /// var app = builder.Build();
     /// app.MapJsonRpc();
     /// </code>

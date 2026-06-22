@@ -4,10 +4,10 @@ using Microsoft.CodeAnalysis.CSharp;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Shared emission for the reflection-free MCP metadata table (<c>RpcMcpMethodMetadata[]</c>), used by both
-/// <see cref="RpcMethodMapGenerator"/> (flat <c>McpMetadata()</c>) and <see cref="AppModuleDiscoveryGenerator"/>
-/// (per-module <c>Get{Module}McpMetadata</c> + the gated <c>GetMcpMetadata</c> aggregate). Only entries whose
-/// <see cref="RpcMethodEmission.Model.OnMcp"/> is set are emitted.
+/// Shared emission for the reflection-free MCP metadata table (<c>RpcMcpMethodMetadata[]</c>), consumed by
+/// <see cref="AppModuleDiscoveryGenerator"/> (per-module <c>Get{Module}McpMetadata</c> + the gated
+/// <c>GetMcpMetadata</c> aggregate). Only entries whose <see cref="RpcMethodEmission.Model.OnMcp"/> is set
+/// are emitted.
 /// </summary>
 internal static class McpMetadataEmission
 {

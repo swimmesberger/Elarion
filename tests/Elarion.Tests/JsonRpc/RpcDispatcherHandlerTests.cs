@@ -10,7 +10,7 @@ namespace Elarion.Tests.JsonRpc;
 
 /// <summary>
 /// Runtime tests for the <c>Elarion</c>-core handler bridge (<see cref="RpcDispatcherExtensions.MapHandler{TRequest,TResponse}"/>)
-/// and <see cref="AppErrorMapper"/>. These exercise the glue the generated <c>RegisterAll</c> depends on.
+/// and <see cref="AppErrorMapper"/>. These exercise the glue the generated <c>RegisterRpcMethods</c> map depends on.
 /// </summary>
 public sealed class RpcDispatcherHandlerTests {
     private sealed record EchoCommand {

@@ -214,6 +214,65 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_RoutesModuleEndpointsThroughConfigureEndpointGroupHook() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Microsoft.AspNetCore.Routing;
+
+            namespace Sample.Billing {
+                [AppModule("Billing", Kind = AppModuleKind.Core)]
+                public static class BillingModule {
+                    public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder root) => root;
+                }
+
+                [HttpEndpoint("invoices/{id}")]
+                public sealed class GetInvoice : IHandler<GetInvoice.Query, Result<GetInvoice.Response>> {
+                    public sealed record Query { public required System.Guid Id { get; init; } }
+                    public sealed record Response(string Number);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("INV"));
+                }
+            }
+
+            namespace Sample.Shipping {
+                [AppModule("Shipping")]
+                public static class ShippingModule {
+                    public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder root) => root;
+                }
+
+                [HttpEndpoint("shipments")]
+                public sealed class CreateShipment : IHandler<CreateShipment.Command, Result<CreateShipment.Response>> {
+                    public sealed record Command { public required string Address { get; init; } }
+                    public sealed record Response(System.Guid Id);
+                    public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(System.Guid.Empty));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        // The core module's generated routes are mapped onto the builder its hook returns, not the root.
+        generated.Should().Contain(
+            "var BillingEndpoints = global::Sample.Billing.BillingModule.ConfigureEndpointGroup(endpoints);");
+        generated.Should().Contain("MapBillingHttp(BillingEndpoints);");
+
+        // The feature module's hook is invoked inside its feature gate.
+        generated.Should().Contain("if (IsModuleEnabled(configuration, \"Shipping\"))");
+        generated.Should().Contain(
+            "var ShippingEndpoints = global::Sample.Shipping.ShippingModule.ConfigureEndpointGroup(endpoints);");
+        generated.Should().Contain("MapShippingHttp(ShippingEndpoints);");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_WarnsWhenModulesShareNamespace() {
         const string modulesSource =
             """
@@ -331,6 +390,7 @@ public sealed class ModuleBootstrapperTransportTests {
             "ManifestOnly",
             "global::ManifestOnly.ManifestModule",
             null,
+            "0",
             "0",
             "0",
             "0",

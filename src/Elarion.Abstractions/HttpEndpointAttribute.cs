@@ -15,8 +15,9 @@ public enum HttpVerb {
 }
 
 /// <summary>
-/// Marks a handler class as an HTTP endpoint, discoverable by <c>Elarion.Generators.HttpEndpointMapGenerator</c>,
-/// which emits the matching minimal-API <c>MapGet</c>/<c>MapPost</c>/... registration. The handler must also
+/// Marks a handler class as an HTTP endpoint, discoverable by <c>Elarion.Generators.AppModuleDiscoveryGenerator</c>,
+/// which emits the matching minimal-API <c>MapGet</c>/<c>MapPost</c>/... registration through the module
+/// bootstrapper. The handler must also
 /// implement <see cref="IHandler{TRequest, TResponse}"/> and nest its request type as <c>Command</c> or
 /// <c>Query</c> plus a <c>Response</c> type (same convention as <see cref="RpcMethodAttribute"/>).
 /// </summary>

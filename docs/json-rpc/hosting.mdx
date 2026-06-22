@@ -86,44 +86,18 @@ transport), pair `ModuleBootstrapper.GetMcpMetadata(builder.Configuration)` with
 
   The exporter reads the dispatcher as configured at build time. Because feature modules are
   **enabled by default**, the schema stays the complete contract unless a module is explicitly disabled
-  in the configuration the schema build sees — wire the flat `RpcMethodMap.RegisterAll` (below) for the
-  schema build if you need the full contract regardless of runtime gating.
+  in the configuration the schema build sees — make sure every module is enabled for the schema build if
+  you need the full contract regardless of runtime gating.
 </Callout>
 
-## Non-module hosts
+## Modules are the only hosting path
 
-<Callout type="info">
-  The **module-based** host above is the recommended path for every transport — it keeps services,
-  validators, HTTP, JSON-RPC, and MCP feature-flag-gated together. Reach for the flat maps below only for
-  small hosts or tools that genuinely have no modules.
-</Callout>
-
-A host without modules wires the **flat** maps directly. They register *every* `[RpcMethod]` /
-`[HttpEndpoint]` handler, ungated:
-
-```csharp
-using Elarion.JsonRpc;
-using Elarion.AspNetCore;
-
-[GenerateRpcMethodMap]
-public static partial class RpcMethodMap {
-    public static partial JsonRpcDispatcher RegisterAll(JsonRpcDispatcher dispatcher);
-}
-
-[GenerateHttpEndpointMap]
-public static partial class HttpEndpointMap {
-    public static partial IEndpointRouteBuilder MapAll(IEndpointRouteBuilder app);
-}
-
-// Program.cs
-builder.Services.AddJsonRpc(serializerOptions, RpcMethodMap.RegisterAll);
-var app = builder.Build();
-HttpEndpointMap.MapAll(app);
-app.MapJsonRpc();
-```
-
-See [HTTP endpoints](/docs/http-endpoints) for the `[HttpEndpoint]` mapping and its per-module
-authorization hook.
+Every transport — services, validators, HTTP, JSON-RPC, and MCP — is wired through
+`[GenerateModuleBootstrapper]`, so it all stays feature-flag-gated together. There is no flat,
+ungated map: a host that conceptually has "no modules" simply declares a single **core** `[AppModule]`
+(core modules map unconditionally), which gives the same always-on behavior while keeping one consistent
+path. Handlers whose namespace falls under no module are reported (`ELHTTP003`/`ELRPC001`) so they are
+never silently dropped.
 
 ## What the host still owns
 
