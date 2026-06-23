@@ -47,6 +47,45 @@ and deployment quirks belong in consuming repositories, not here.
 - Prefer compile-time generation over runtime reflection scanning. Source generators should emit deterministic, inspectable code and fail with diagnostics for unsupported patterns.
 - Preserve trimming and AOT friendliness on framework code paths. Avoid hidden runtime discovery and APIs that undermine linker safety.
 
+## Source generator conventions
+
+A generator runs on **every keystroke** in the IDE, so incrementality is correctness, not an
+optimization. Follow these when adding or changing any generator in `Elarion.Generators` or
+`Elarion.EntityFrameworkCore.Generators`. The full rationale and the rejected alternatives are in
+[ADR-0006](docs/decisions/0006-incremental-source-generator-conventions.md); copy a reference generator
+(`AppModuleDiscoveryGenerator`, `ElarionManifestGenerator`, `ModuleDefaultServicesGenerator`, or any of
+the six registration generators), not the old "scan and emit" shape.
+
+- **Discover through the syntax provider, never off `CompilationProvider`.** Use
+  `context.SyntaxProvider.ForAttributeWithMetadataName(...)` for attribute triggers (one call handles an
+  attribute on methods *and* types — branch on `ctx.TargetSymbol`), or a predicate-filtered
+  `CreateSyntaxProvider` when the trigger is a base type (validators, handlers). **Never**
+  `RegisterSourceOutput(context.CompilationProvider, …)` with a `foreach (compilation.SyntaxTrees)`
+  scan — that re-binds every file on every edit with no caching.
+- **Every pipeline value must be value-equatable.** `ImmutableArray<T>.Equals` is *reference* equality
+  and silently kills the cache — use `EquatableArray<T>` for every collection field (nest it all the
+  way down). Carry **strings** (FQNs via `SymbolDisplayFormat.FullyQualifiedFormat`), never `ISymbol`,
+  `Compilation`, `SyntaxNode`, `Location`, or `object?[]` in a model.
+- **Diagnostics are data.** Transforms stay pure (no `spc.ReportDiagnostic`): return
+  `EquatableArray<DiagnosticInfo>` (built with `DiagnosticInfo.Create`, capturing `LocationInfo`) and
+  report it (`diagnostic.ToDiagnostic()`) or compute cross-item diagnostics in the `RegisterSourceOutput`
+  callback.
+- **Reuse shared discovery.** Source modules from `ModuleProviders.CollectModules(context)` and match
+  with `ModuleScanner.FindBest`/`IsInScope`; gate assembly opt-ins with `ModuleProviders.HasTrigger`
+  (a projected `bool`). Do not hand-roll a `ModuleInfo` record, a module scan, or a namespace
+  `StartsWith` matcher.
+- **Output is a byte-identical contract, and caching is tested.** Keep generated text byte-identical
+  across refactors (preserve every emit-time `OrderBy`/`Sort` — provider order is unspecified). Tag
+  collect/combine nodes with `.WithTrackingName(…)` and add a
+  `GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit` test — it is the only check that catches a
+  re-introduced non-equatable model. Run the generator's `*GeneratorTests.cs` after each change.
+- **AOT/trim and cross-assembly.** Emit concrete, statically-typed code (no reflection/open generics in
+  generated hot paths). For cross-assembly discovery emit/read assembly metadata rather than scanning
+  referenced symbol trees — emit `[assembly: AssemblyMetadata(key, value)]` and read referenced assemblies
+  via `context.MetadataReferencesProvider` (cached per reference; a source edit re-reads nothing).
+  `ElarionManifest` (handlers/modules/RPC) and `DbEntityManifest` (`[DbEntity]` for DbContext cross-assembly
+  discovery) are the two existing examples; `ElarionManifestReader` is the PE-metadata reader to copy.
+
 ## JSON-RPC model
 
 JSON-RPC is a first-class optional transport:

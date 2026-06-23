@@ -1,4 +1,3 @@
-using System.Reflection.Metadata;
 using Microsoft.CodeAnalysis;
 
 namespace Elarion.Generators;
@@ -203,7 +202,7 @@ internal static class ElarionManifest
             onJsonRpc,
             onMcp,
             fields[7],
-            parameters);
+            parameters.ToEquatableArray());
         return true;
     }
 
@@ -329,82 +328,14 @@ internal static class ElarionManifestReader
 {
     public static ElarionManifest.Data Read(MetadataReference reference, CancellationToken ct)
     {
-        if (reference is CompilationReference compilationReference)
-            return ReadCompilation(compilationReference.Compilation, ct);
-
-        if (reference is PortableExecutableReference portable)
-            return ReadPortableExecutable(portable, ct);
-
-        return ElarionManifest.Data.Empty;
-    }
-
-    private static ElarionManifest.Data ReadCompilation(Compilation compilation, CancellationToken ct)
-    {
         var modules = new List<ElarionManifest.Module>();
         var httpEndpoints = new List<HttpEndpointEmission.Model>();
         var rpcMethods = new List<RpcMethodEmission.Model>();
 
-        foreach (var attribute in compilation.Assembly.GetAttributes())
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (!IsAssemblyMetadataAttribute(attribute) || attribute.ConstructorArguments.Length != 2)
-                continue;
-
-            if (attribute.ConstructorArguments[0].Value is not string key ||
-                attribute.ConstructorArguments[1].Value is not string value)
-            {
-                continue;
-            }
-
+        foreach (var (key, value) in AssemblyMetadataReader.ReadRawEntries(reference, ct))
             AddEntry(key, value, modules, httpEndpoints, rpcMethods);
-        }
 
         return CreateData(modules, httpEndpoints, rpcMethods);
-    }
-
-    private static ElarionManifest.Data ReadPortableExecutable(PortableExecutableReference portable, CancellationToken ct)
-    {
-        try
-        {
-            if (portable.GetMetadata() is not AssemblyMetadata metadata)
-                return ElarionManifest.Data.Empty;
-
-            var modules = new List<ElarionManifest.Module>();
-            var httpEndpoints = new List<HttpEndpointEmission.Model>();
-            var rpcMethods = new List<RpcMethodEmission.Model>();
-
-            foreach (var module in metadata.GetModules())
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var reader = module.GetMetadataReader();
-                if (!reader.IsAssembly)
-                    continue;
-
-                var assemblyDefinition = reader.GetAssemblyDefinition();
-                foreach (var attributeHandle in assemblyDefinition.GetCustomAttributes())
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    var attribute = reader.GetCustomAttribute(attributeHandle);
-                    if (!TryReadAssemblyMetadata(reader, attribute, out var key, out var value))
-                        continue;
-
-                    AddEntry(key, value, modules, httpEndpoints, rpcMethods);
-                }
-            }
-
-            return CreateData(modules, httpEndpoints, rpcMethods);
-        }
-        catch (BadImageFormatException)
-        {
-            return ElarionManifest.Data.Empty;
-        }
-        catch (IOException)
-        {
-            return ElarionManifest.Data.Empty;
-        }
     }
 
     private static ElarionManifest.Data CreateData(
@@ -439,79 +370,4 @@ internal static class ElarionManifestReader
         }
     }
 
-    private static bool IsAssemblyMetadataAttribute(AttributeData attribute) =>
-        attribute.AttributeClass is
-        {
-            Name: "AssemblyMetadataAttribute",
-            ContainingNamespace:
-            {
-                Name: "Reflection",
-                ContainingNamespace:
-                {
-                    Name: "System",
-                    ContainingNamespace.IsGlobalNamespace: true
-                }
-            }
-        };
-
-    private static bool TryReadAssemblyMetadata(
-        MetadataReader reader,
-        CustomAttribute attribute,
-        out string key,
-        out string value)
-    {
-        key = string.Empty;
-        value = string.Empty;
-
-        if (!IsAssemblyMetadataAttribute(reader, attribute.Constructor))
-            return false;
-
-        var blob = reader.GetBlobReader(attribute.Value);
-        if (blob.RemainingBytes < 2 || blob.ReadUInt16() != 1)
-            return false;
-
-        var metadataKey = blob.ReadSerializedString();
-        var metadataValue = blob.ReadSerializedString();
-        if (metadataKey is null || metadataValue is null)
-            return false;
-
-        key = metadataKey;
-        value = metadataValue;
-        return true;
-    }
-
-    private static bool IsAssemblyMetadataAttribute(MetadataReader reader, EntityHandle constructor)
-    {
-        EntityHandle typeHandle;
-        switch (constructor.Kind)
-        {
-            case HandleKind.MemberReference:
-                typeHandle = reader.GetMemberReference((MemberReferenceHandle)constructor).Parent;
-                break;
-            case HandleKind.MethodDefinition:
-                typeHandle = reader.GetMethodDefinition((MethodDefinitionHandle)constructor).GetDeclaringType();
-                break;
-            default:
-                return false;
-        }
-
-        return IsType(reader, typeHandle, "System.Reflection", "AssemblyMetadataAttribute");
-    }
-
-    private static bool IsType(MetadataReader reader, EntityHandle typeHandle, string ns, string name)
-    {
-        switch (typeHandle.Kind)
-        {
-            case HandleKind.TypeDefinition:
-                var typeDefinition = reader.GetTypeDefinition((TypeDefinitionHandle)typeHandle);
-                return reader.GetString(typeDefinition.Namespace) == ns &&
-                       reader.GetString(typeDefinition.Name) == name;
-            case HandleKind.TypeReference:
-                var typeReference = reader.GetTypeReference((TypeReferenceHandle)typeHandle);
-                return reader.GetString(typeReference.Namespace) == ns &&
-                       reader.GetString(typeReference.Name) == name;
-            default:
-                return false;
-        }
-    }
 }

@@ -5,13 +5,41 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Elarion.Generators;
 
 public sealed partial class HandlerRegistrationGenerator {
-    private static HandlerInfo? GetHandlerInfo(
-        ClassDeclarationSyntax classDecl,
+    /// <summary>
+    /// Resolves every handler in one pass. The compilation is combined in for correctness (a handler's
+    /// decorator pipeline depends on cross-file [DecoratorList] state), but the module [DecoratorList] map is
+    /// built once here rather than rescanned per handler. The result is value-equatable, so emission is
+    /// skipped when no handler model changed.
+    /// </summary>
+    private static EquatableArray<HandlerInfo> ResolveHandlers(
+        ImmutableArray<ClassDeclarationSyntax> nodes,
         Compilation compilation,
         CancellationToken ct) {
-        var semanticModel = compilation.GetSemanticModel(classDecl.SyntaxTree);
+        if (nodes.IsDefaultOrEmpty)
+            return EquatableArray<HandlerInfo>.Empty;
+
+        var moduleDecoratorLists = BuildModuleDecoratorMap(compilation, ct);
+        var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
+        foreach (var node in nodes) {
+            ct.ThrowIfCancellationRequested();
+            var semanticModel = compilation.GetSemanticModel(node.SyntaxTree);
+            var info = GetHandlerInfo(node, semanticModel, moduleDecoratorLists, ct);
+            if (info is not null)
+                builder.Add(info);
+        }
+
+        return builder.ToImmutable();
+    }
+
+    private static HandlerInfo? GetHandlerInfo(
+        ClassDeclarationSyntax classDecl,
+        SemanticModel semanticModel,
+        IReadOnlyList<(string Namespace, AttributeData DecoratorList)> moduleDecoratorLists,
+        CancellationToken ct) {
         if (semanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol classSymbol)
             return null;
+
+        var compilation = semanticModel.Compilation;
 
         if (classSymbol.IsAbstract)
             return null;
@@ -32,9 +60,9 @@ public sealed partial class HandlerRegistrationGenerator {
         var handlerName = classSymbol.Name;
         var ns = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
 
-        var diagnostics = ImmutableArray.CreateBuilder<HandlerDiagnosticInfo>();
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
-        var decoratorListAttr = ResolveDecoratorListFromPipelineAttributes(classSymbol, compilation, ct);
+        var decoratorListAttr = ResolveDecoratorListFromPipelineAttributes(classSymbol, compilation, moduleDecoratorLists);
         var decorators = decoratorListAttr is not null
             ? ParseDecorators(decoratorListAttr, requestType, responseType, compilation, diagnostics, fmt)
             : ImmutableArray<DecoratorInfo>.Empty;

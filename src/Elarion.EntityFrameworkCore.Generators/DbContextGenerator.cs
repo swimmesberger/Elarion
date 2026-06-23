@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using Elarion.Generators;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -29,12 +30,52 @@ public sealed class DbContextGenerator : IIncrementalGenerator
 
         var inferredClassTargets = context.SyntaxProvider
             .CreateSyntaxProvider(
-                static (node, _) => node is ClassDeclarationSyntax,
+                // Narrow to plausible DbContext-derived partials syntactically before paying for the
+                // semantic transform; GetInferredClassTarget still does the authoritative confirmation.
+                static (node, _) => node is ClassDeclarationSyntax c
+                    && c.Modifiers.Any(SyntaxKind.PartialKeyword)
+                    && c.BaseList is not null,
                 static (ctx, _) => GetInferredClassTarget(ctx))
             .Where(static target => target is not null);
 
-        var entitiesAndConfigs = context.CompilationProvider
-            .Select(static (compilation, _) => CollectEntitiesAndConfigs(compilation));
+        // In-compilation entities/configs are discovered through the syntax providers (incremental: only the
+        // edited declaration re-runs). Entities/configs in referenced assemblies are not visible to those, so a
+        // separate pass reads them; its result is value-equatable so it does not force a re-emit.
+        var inCompilationEntities = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                DbEntityAttributeName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => CreateEntity(ctx))
+            .Where(static entity => entity is not null)
+            .Select(static (entity, _) => entity!.Value)
+            .Collect();
+
+        var inCompilationConfigs = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
+                static (ctx, ct) => CreateConfig(ctx, ct))
+            .Where(static config => config is not null)
+            .Select(static (config, _) => config!.Value)
+            .Collect();
+
+        // Referenced entities are read from each reference's emitted manifest (a per-assembly metadata
+        // attribute) instead of scanning its symbol tree. MetadataReferencesProvider caches per reference, so
+        // a source edit re-reads nothing — only a changed reference is re-read.
+        var referencedData = context.MetadataReferencesProvider
+            .Select(static (reference, ct) => ReadManifest(reference, ct))
+            .Collect()
+            .WithTrackingName("ReferencedEntities");
+
+        // Advertise this assembly's entities/configurations so a DbContext in another assembly can read them.
+        context.RegisterSourceOutput(
+            inCompilationEntities.Combine(inCompilationConfigs),
+            static (spc, pair) => EmitManifest(spc, pair.Left, pair.Right));
+
+        var entitiesAndConfigs = inCompilationEntities
+            .Combine(inCompilationConfigs)
+            .Combine(referencedData)
+            .Select(static (source, _) => MergeCollected(source.Left.Left, source.Left.Right, source.Right))
+            .WithTrackingName("EntitiesAndConfigs");
 
         context.RegisterSourceOutput(
             interfaceTargets.Collect().Combine(entitiesAndConfigs),
@@ -115,127 +156,203 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             CombineInterfaceScopes(generatedInterfaces));
     }
 
-    private static CollectedData CollectEntitiesAndConfigs(Compilation compilation)
+    private static EntityInfo? CreateEntity(GeneratorAttributeSyntaxContext ctx)
     {
-        var dbEntityAttribute = compilation.GetTypeByMetadataName(DbEntityAttributeName);
-        var configInterface = compilation.GetTypeByMetadataName(EntityTypeConfigurationName);
+        if (ctx.TargetSymbol is not INamedTypeSymbol type || type.IsAbstract || ctx.Attributes.Length == 0)
+        {
+            return null;
+        }
 
+        return new EntityInfo(
+            type.Name,
+            type.ToDisplayString(),
+            type.ContainingNamespace.ToDisplayString(),
+            GetScopes(ctx.Attributes[0]));
+    }
+
+    private static ConfigInfo? CreateConfig(GeneratorSyntaxContext ctx, CancellationToken ct)
+    {
+        if (ctx.Node is not ClassDeclarationSyntax classDeclaration ||
+            ctx.SemanticModel.GetDeclaredSymbol(classDeclaration, ct) is not INamedTypeSymbol type ||
+            type.IsAbstract)
+        {
+            return null;
+        }
+
+        var configInterface = ctx.SemanticModel.Compilation.GetTypeByMetadataName(EntityTypeConfigurationName);
+        if (configInterface is null)
+        {
+            return null;
+        }
+
+        var configuredEntity = GetConfiguredEntityType(type, configInterface);
+        if (configuredEntity is null)
+        {
+            return null;
+        }
+
+        return new ConfigInfo(type.ToDisplayString(), type.ContainingNamespace.ToDisplayString(), configuredEntity);
+    }
+
+    private static ReferencedData ReadManifest(MetadataReference reference, CancellationToken ct)
+    {
+        var entities = ImmutableArray.CreateBuilder<EntityInfo>();
+        var configs = ImmutableArray.CreateBuilder<ConfigInfo>();
+
+        foreach (var (key, value) in DbEntityManifest.ReadEntries(reference, ct))
+        {
+            switch (key)
+            {
+                case DbEntityManifest.EntityKey:
+                    if (TryDecodeEntity(value, out var entity))
+                    {
+                        entities.Add(entity);
+                    }
+
+                    break;
+                case DbEntityManifest.ConfigKey:
+                    if (TryDecodeConfig(value, out var config))
+                    {
+                        configs.Add(config);
+                    }
+
+                    break;
+            }
+        }
+
+        return new ReferencedData(entities.ToImmutable(), configs.ToImmutable());
+    }
+
+    private static bool TryDecodeEntity(string value, out EntityInfo entity)
+    {
+        entity = default;
+        if (!DbEntityManifest.TryDecodeFields(value, out var fields) ||
+            fields.Count < 3 ||
+            fields[0] is null || fields[1] is null || fields[2] is null)
+        {
+            return false;
+        }
+
+        var scopes = ImmutableArray.CreateBuilder<string>();
+        for (var i = 3; i < fields.Count; i++)
+        {
+            if (fields[i] is { } scope)
+            {
+                scopes.Add(scope);
+            }
+        }
+
+        entity = new EntityInfo(fields[0]!, fields[1]!, fields[2]!, scopes.ToImmutable());
+        return true;
+    }
+
+    private static bool TryDecodeConfig(string value, out ConfigInfo config)
+    {
+        config = default;
+        if (!DbEntityManifest.TryDecodeFields(value, out var fields) ||
+            fields.Count != 3 ||
+            fields[0] is null || fields[1] is null || fields[2] is null)
+        {
+            return false;
+        }
+
+        config = new ConfigInfo(fields[0]!, fields[1]!, fields[2]!);
+        return true;
+    }
+
+    private static void EmitManifest(
+        SourceProductionContext spc,
+        ImmutableArray<EntityInfo> entities,
+        ImmutableArray<ConfigInfo> configs)
+    {
+        if (entities.IsEmpty && configs.IsEmpty)
+        {
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("// Source: Elarion.EntityFrameworkCore.Generators.DbContextGenerator (entity manifest)");
+        sb.AppendLine("// Do not edit this file manually.");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
+
+        foreach (var entity in entities.OrderBy(static e => e.FullName, StringComparer.Ordinal))
+        {
+            AppendAssemblyMetadata(
+                sb,
+                DbEntityManifest.EntityKey,
+                DbEntityManifest.EncodeEntity(entity.Name, entity.FullName, entity.Namespace, entity.Scopes));
+        }
+
+        foreach (var config in configs.OrderBy(static c => c.FullName, StringComparer.Ordinal))
+        {
+            AppendAssemblyMetadata(
+                sb,
+                DbEntityManifest.ConfigKey,
+                DbEntityManifest.EncodeConfig(config.FullName, config.Namespace, config.EntityTypeFqn));
+        }
+
+        spc.AddSource("ElarionDbEntityManifest.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+    }
+
+    private static void AppendAssemblyMetadata(StringBuilder sb, string key, string value)
+    {
+        sb.Append("[assembly: global::System.Reflection.AssemblyMetadataAttribute(");
+        sb.Append(SymbolDisplay.FormatLiteral(key, quote: true));
+        sb.Append(", ");
+        sb.Append(SymbolDisplay.FormatLiteral(value, quote: true));
+        sb.AppendLine(")]");
+    }
+
+    private static CollectedData MergeCollected(
+        ImmutableArray<EntityInfo> inCompilationEntities,
+        ImmutableArray<ConfigInfo> inCompilationConfigs,
+        ImmutableArray<ReferencedData> referenced)
+    {
         var entities = ImmutableArray.CreateBuilder<EntityInfo>();
         var configs = ImmutableArray.CreateBuilder<ConfigInfo>();
         var seenEntities = new HashSet<string>(StringComparer.Ordinal);
         var seenConfigs = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var syntaxTree in compilation.SyntaxTrees)
+        foreach (var entity in inCompilationEntities)
         {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot();
-
-            foreach (var classDeclaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+            if (seenEntities.Add(entity.FullName))
             {
-                var symbol = semanticModel.GetDeclaredSymbol(classDeclaration);
-                if (symbol is not INamedTypeSymbol classSymbol || classSymbol.IsAbstract)
-                {
-                    continue;
-                }
-
-                CollectEntity(classSymbol, dbEntityAttribute, entities, seenEntities);
-                CollectConfiguration(classSymbol, configInterface, configs, seenConfigs);
+                entities.Add(entity);
             }
         }
 
-        foreach (var reference in compilation.References)
+        foreach (var config in inCompilationConfigs)
         {
-            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assemblySymbol)
+            if (seenConfigs.Add(config.FullName))
             {
-                continue;
+                configs.Add(config);
+            }
+        }
+
+        foreach (var data in referenced)
+        {
+            foreach (var entity in data.Entities)
+            {
+                if (seenEntities.Add(entity.FullName))
+                {
+                    entities.Add(entity);
+                }
             }
 
-            CollectFromNamespace(
-                assemblySymbol.GlobalNamespace,
-                dbEntityAttribute,
-                configInterface,
-                entities,
-                configs,
-                seenEntities,
-                seenConfigs);
+            foreach (var config in data.Configs)
+            {
+                if (seenConfigs.Add(config.FullName))
+                {
+                    configs.Add(config);
+                }
+            }
         }
 
         return new CollectedData(
             entities.ToImmutable().Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal)),
             configs.ToImmutable().Sort((a, b) => string.Compare(a.FullName, b.FullName, StringComparison.Ordinal)));
-    }
-
-    private static void CollectFromNamespace(
-        INamespaceSymbol ns,
-        INamedTypeSymbol? dbEntityAttribute,
-        INamedTypeSymbol? configInterface,
-        ImmutableArray<EntityInfo>.Builder entities,
-        ImmutableArray<ConfigInfo>.Builder configs,
-        HashSet<string> seenEntities,
-        HashSet<string> seenConfigs)
-    {
-        foreach (var type in ns.GetTypeMembers())
-        {
-            if (type.TypeKind != TypeKind.Class || type.IsAbstract)
-            {
-                continue;
-            }
-
-            CollectEntity(type, dbEntityAttribute, entities, seenEntities);
-            CollectConfiguration(type, configInterface, configs, seenConfigs);
-        }
-
-        foreach (var nestedNs in ns.GetNamespaceMembers())
-        {
-            CollectFromNamespace(nestedNs, dbEntityAttribute, configInterface, entities, configs, seenEntities, seenConfigs);
-        }
-    }
-
-    private static void CollectEntity(
-        INamedTypeSymbol type,
-        INamedTypeSymbol? dbEntityAttribute,
-        ImmutableArray<EntityInfo>.Builder entities,
-        HashSet<string> seenEntities)
-    {
-        if (dbEntityAttribute is null)
-        {
-            return;
-        }
-
-        var attribute = TryGetAttribute(type, dbEntityAttribute);
-        if (attribute is null || !seenEntities.Add(type.ToDisplayString()))
-        {
-            return;
-        }
-
-        entities.Add(new EntityInfo(
-            type.Name,
-            type.ToDisplayString(),
-            type.ContainingNamespace.ToDisplayString(),
-            GetScopes(attribute)));
-    }
-
-    private static void CollectConfiguration(
-        INamedTypeSymbol type,
-        INamedTypeSymbol? configInterface,
-        ImmutableArray<ConfigInfo>.Builder configs,
-        HashSet<string> seenConfigs)
-    {
-        if (configInterface is null)
-        {
-            return;
-        }
-
-        var configuredEntity = GetConfiguredEntityType(type, configInterface);
-        if (configuredEntity is null || !seenConfigs.Add(type.ToDisplayString()))
-        {
-            return;
-        }
-
-        configs.Add(new ConfigInfo(
-            type.ToDisplayString(),
-            type.ContainingNamespace.ToDisplayString(),
-            configuredEntity));
     }
 
     private static string? GetConfiguredEntityType(INamedTypeSymbol type, INamedTypeSymbol configInterface)
@@ -557,17 +674,21 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         string Name,
         string Namespace,
         string FullName,
-        ImmutableArray<string> Scopes);
+        EquatableArray<string> Scopes);
 
     private readonly record struct EntityInfo(
         string Name,
         string FullName,
         string Namespace,
-        ImmutableArray<string> Scopes);
+        EquatableArray<string> Scopes);
 
     private readonly record struct ConfigInfo(string FullName, string Namespace, string EntityTypeFqn);
 
     private readonly record struct CollectedData(
-        ImmutableArray<EntityInfo> Entities,
-        ImmutableArray<ConfigInfo> Configurations);
+        EquatableArray<EntityInfo> Entities,
+        EquatableArray<ConfigInfo> Configurations);
+
+    private readonly record struct ReferencedData(
+        EquatableArray<EntityInfo> Entities,
+        EquatableArray<ConfigInfo> Configs);
 }

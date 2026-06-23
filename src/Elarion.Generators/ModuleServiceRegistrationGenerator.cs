@@ -22,9 +22,6 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
     private const string ServiceScopeMetadataName =
         "Elarion.Abstractions.ServiceScope";
 
-    private const string AppModuleAttributeMetadataName =
-        "Elarion.Abstractions.Modules.AppModuleAttribute";
-
     private const string HostedServiceMetadataName =
         "Microsoft.Extensions.Hosting.IHostedService";
 
@@ -58,8 +55,6 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
-    private sealed record ModuleInfo(string Name, string Namespace, string TypeName);
-
     private sealed record ServiceInfo(
         string ServiceIdentifier,
         string Namespace,
@@ -68,7 +63,7 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         string HintName,
         ServiceScope Scope,
         bool IsHostedService,
-        ImmutableArray<string> ContractsForRegistration)
+        EquatableArray<string> ContractsForRegistration)
     {
         public string RegistrationTypeName => $"{ServiceIdentifier}ServiceRegistration";
 
@@ -82,210 +77,162 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         Transient = 2
     }
 
+    /// <summary>A discovered service: either a registration model or the diagnostics that rejected it.</summary>
+    private sealed record ServiceResult(ServiceInfo? Service, EquatableArray<DiagnosticInfo> Diagnostics);
+
+    private static class TrackingNames
+    {
+        public const string Services = "Services";
+        public const string Combined = "ServicesCombined";
+    }
+
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context.RegisterSourceOutput(context.CompilationProvider, static (spc, compilation) =>
+        var services = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ServiceAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => CreateServiceResult(ctx))
+            .Where(static result => result is not null)
+            .Select(static (result, _) => result!)
+            .Collect()
+            .WithTrackingName(TrackingNames.Services);
+
+        var modules = ModuleProviders.CollectModules(context);
+        var trigger = ModuleProviders.HasTrigger(context, TriggerAttributeMetadataName);
+
+        var combined = services.Combine(modules).Combine(trigger).WithTrackingName(TrackingNames.Combined);
+
+        context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var hasTrigger = FrameworkFeatureTriggers.HasAssemblyTrigger(compilation, TriggerAttributeMetadataName);
+            var ((results, modules), hasTrigger) = source;
             if (!hasTrigger)
             {
                 return;
             }
 
-            var serviceAttributeSymbol = compilation.GetTypeByMetadataName(ServiceAttributeMetadataName);
-            if (serviceAttributeSymbol is null)
+            foreach (var result in results)
             {
-                return;
+                foreach (var diagnostic in result.Diagnostics)
+                {
+                    spc.ReportDiagnostic(diagnostic.ToDiagnostic());
+                }
             }
 
-            var serviceScopeSymbol = compilation.GetTypeByMetadataName(ServiceScopeMetadataName);
-            if (serviceScopeSymbol is null)
+            var serviceList = new List<ServiceInfo>();
+            foreach (var result in results)
             {
-                return;
+                if (result.Service is not null)
+                {
+                    serviceList.Add(result.Service);
+                }
             }
 
-            var hostedServiceSymbol = compilation.GetTypeByMetadataName(HostedServiceMetadataName);
-            var backgroundServiceSymbol = compilation.GetTypeByMetadataName(BackgroundServiceMetadataName);
-            var appModuleAttributeSymbol = compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
-            if (appModuleAttributeSymbol is null)
-            {
-                return;
-            }
-
-            var modules = CollectModules(compilation, appModuleAttributeSymbol);
-            var services = CollectServices(
-                compilation,
-                serviceAttributeSymbol,
-                serviceScopeSymbol,
-                hostedServiceSymbol,
-                backgroundServiceSymbol,
-                spc);
-
-            foreach (var service in services.OrderBy(s => s.HintName, StringComparer.Ordinal))
+            foreach (var service in serviceList.OrderBy(s => s.HintName, StringComparer.Ordinal))
             {
                 var code = GeneratePerServiceRegistration(service);
                 spc.AddSource($"{service.HintName}.g.cs", SourceText.From(code, Encoding.UTF8));
             }
 
-            GenerateModuleAggregations(spc, services, modules);
+            GenerateModuleAggregations(spc, serviceList, modules);
         });
     }
 
-    private static List<ModuleInfo> CollectModules(
-        Compilation compilation,
-        INamedTypeSymbol appModuleAttributeSymbol)
+    private static ServiceResult? CreateServiceResult(GeneratorAttributeSyntaxContext ctx)
     {
-        var modules = new List<ModuleInfo>();
-        var seenSymbols = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-        foreach (var syntaxTree in compilation.SyntaxTrees)
+        if (ctx.TargetSymbol is not INamedTypeSymbol classSymbol || classSymbol.IsAbstract || ctx.Attributes.Length == 0)
         {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot();
-
-            foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
-            {
-                if (semanticModel.GetDeclaredSymbol(typeDecl) is not INamedTypeSymbol typeSymbol)
-                {
-                    continue;
-                }
-
-                if (!seenSymbols.Add(typeSymbol))
-                {
-                    continue;
-                }
-
-                var moduleAttr = typeSymbol.GetAttributes()
-                    .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, appModuleAttributeSymbol));
-                if (moduleAttr is null)
-                {
-                    continue;
-                }
-
-                if (moduleAttr.ConstructorArguments.Length > 0 &&
-                    moduleAttr.ConstructorArguments[0].Value is string moduleName)
-                {
-                    var ns = GetNamespace(typeSymbol);
-                    modules.Add(new ModuleInfo(moduleName, ns, typeSymbol.Name));
-                }
-            }
+            return null;
         }
 
-        return modules;
-    }
+        var compilation = ctx.SemanticModel.Compilation;
+        var serviceScopeSymbol = compilation.GetTypeByMetadataName(ServiceScopeMetadataName);
+        if (serviceScopeSymbol is null)
+        {
+            return null;
+        }
 
-    private static List<ServiceInfo> CollectServices(
-        Compilation compilation,
-        INamedTypeSymbol serviceAttributeSymbol,
-        INamedTypeSymbol serviceScopeSymbol,
-        INamedTypeSymbol? hostedServiceSymbol,
-        INamedTypeSymbol? backgroundServiceSymbol,
-        SourceProductionContext spc)
-    {
+        var hostedServiceSymbol = compilation.GetTypeByMetadataName(HostedServiceMetadataName);
+        var backgroundServiceSymbol = compilation.GetTypeByMetadataName(BackgroundServiceMetadataName);
+
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
-        var infos = new List<ServiceInfo>();
-        var seenSymbols = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+        var serviceAttr = ctx.Attributes[0];
+        var location = (ctx.TargetNode as ClassDeclarationSyntax)?.Identifier.GetLocation();
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
-        foreach (var syntaxTree in compilation.SyntaxTrees)
+        if (IsGenericOrNestedInGenericType(classSymbol))
         {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot();
-
-            foreach (var classDecl in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
-            {
-                if (semanticModel.GetDeclaredSymbol(classDecl) is not INamedTypeSymbol classSymbol ||
-                    classSymbol.IsAbstract)
-                {
-                    continue;
-                }
-
-                var serviceAttr = classSymbol.GetAttributes()
-                    .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, serviceAttributeSymbol));
-                if (serviceAttr is null)
-                {
-                    continue;
-                }
-
-                if (!seenSymbols.Add(classSymbol))
-                {
-                    continue;
-                }
-
-                if (IsGenericOrNestedInGenericType(classSymbol))
-                {
-                    spc.ReportDiagnostic(Diagnostic.Create(
-                        GenericServicesAreNotSupported,
-                        classDecl.Identifier.GetLocation(),
-                        classSymbol.ToDisplayString(fmt)));
-                    continue;
-                }
-
-                var scope = ParseScope(serviceAttr, serviceScopeSymbol);
-                var explicitContracts = GetExplicitContracts(serviceAttr).ToImmutableArray();
-                var hasInvalidExplicitContracts = false;
-                foreach (var explicitContract in explicitContracts)
-                {
-                    if (IsAssignableTo(classSymbol, explicitContract))
-                    {
-                        continue;
-                    }
-
-                    spc.ReportDiagnostic(Diagnostic.Create(
-                        InvalidExplicitServiceContract,
-                        classDecl.Identifier.GetLocation(),
-                        explicitContract.ToDisplayString(fmt),
-                        classSymbol.ToDisplayString(fmt)));
-                    hasInvalidExplicitContracts = true;
-                }
-
-                if (hasInvalidExplicitContracts)
-                {
-                    continue;
-                }
-
-                var resolvedContracts = ResolveContracts(classSymbol, explicitContracts, fmt);
-                var isHostedService = IsHostedService(classSymbol, hostedServiceSymbol, backgroundServiceSymbol);
-                if (isHostedService && scope != ServiceScope.Singleton)
-                {
-                    spc.ReportDiagnostic(Diagnostic.Create(
-                        HostedServiceScopeMustBeSingleton,
-                        classDecl.Identifier.GetLocation(),
-                        classSymbol.ToDisplayString(fmt),
-                        scope));
-                    continue;
-                }
-
-                var contractsForRegistration = RemoveHostedServiceContract(resolvedContracts);
-                if (contractsForRegistration.IsEmpty)
-                {
-                    contractsForRegistration = ImmutableArray.Create(classSymbol.ToDisplayString(fmt));
-                }
-
-                var anchor = contractsForRegistration[0];
-                var implementationFqn = classSymbol.ToDisplayString(fmt);
-                var serviceIdentifier = GetServiceIdentifier(classSymbol);
-                var ns = GetNamespace(classSymbol);
-                var hintName = classSymbol.ToDisplayString(fmt)
-                    .Replace("global::", string.Empty)
-                    .Replace(".", "_")
-                    .Replace("<", "_")
-                    .Replace(">", "_")
-                    .Replace(",", "_")
-                    .Replace(" ", string.Empty);
-
-                infos.Add(new ServiceInfo(
-                    serviceIdentifier,
-                    ns,
-                    implementationFqn,
-                    anchor,
-                    hintName,
-                    scope,
-                    isHostedService,
-                    contractsForRegistration));
-            }
+            diagnostics.Add(DiagnosticInfo.Create(
+                GenericServicesAreNotSupported,
+                location,
+                classSymbol.ToDisplayString(fmt)));
+            return new ServiceResult(null, diagnostics.ToImmutable());
         }
 
-        return infos;
+        var scope = ParseScope(serviceAttr, serviceScopeSymbol);
+        var explicitContracts = GetExplicitContracts(serviceAttr).ToImmutableArray();
+        var hasInvalidExplicitContracts = false;
+        foreach (var explicitContract in explicitContracts)
+        {
+            if (IsAssignableTo(classSymbol, explicitContract))
+            {
+                continue;
+            }
+
+            diagnostics.Add(DiagnosticInfo.Create(
+                InvalidExplicitServiceContract,
+                location,
+                explicitContract.ToDisplayString(fmt),
+                classSymbol.ToDisplayString(fmt)));
+            hasInvalidExplicitContracts = true;
+        }
+
+        if (hasInvalidExplicitContracts)
+        {
+            return new ServiceResult(null, diagnostics.ToImmutable());
+        }
+
+        var resolvedContracts = ResolveContracts(classSymbol, explicitContracts, fmt);
+        var isHostedService = IsHostedService(classSymbol, hostedServiceSymbol, backgroundServiceSymbol);
+        if (isHostedService && scope != ServiceScope.Singleton)
+        {
+            diagnostics.Add(DiagnosticInfo.Create(
+                HostedServiceScopeMustBeSingleton,
+                location,
+                classSymbol.ToDisplayString(fmt),
+                scope.ToString()));
+            return new ServiceResult(null, diagnostics.ToImmutable());
+        }
+
+        var contractsForRegistration = RemoveHostedServiceContract(resolvedContracts);
+        if (contractsForRegistration.IsEmpty)
+        {
+            contractsForRegistration = ImmutableArray.Create(classSymbol.ToDisplayString(fmt));
+        }
+
+        var anchor = contractsForRegistration[0];
+        var implementationFqn = classSymbol.ToDisplayString(fmt);
+        var serviceIdentifier = GetServiceIdentifier(classSymbol);
+        var ns = GetNamespace(classSymbol);
+        var hintName = classSymbol.ToDisplayString(fmt)
+            .Replace("global::", string.Empty)
+            .Replace(".", "_")
+            .Replace("<", "_")
+            .Replace(">", "_")
+            .Replace(",", "_")
+            .Replace(" ", string.Empty);
+
+        var service = new ServiceInfo(
+            serviceIdentifier,
+            ns,
+            implementationFqn,
+            anchor,
+            hintName,
+            scope,
+            isHostedService,
+            contractsForRegistration);
+        return new ServiceResult(service, ImmutableArray<DiagnosticInfo>.Empty);
     }
 
     private static ServiceScope ParseScope(AttributeData serviceAttr, INamedTypeSymbol serviceScopeSymbol)
@@ -456,12 +403,12 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
     private static void GenerateModuleAggregations(
         SourceProductionContext spc,
         IReadOnlyList<ServiceInfo> services,
-        IReadOnlyList<ModuleInfo> modules)
+        IReadOnlyList<ModuleScanner.Module> modules)
     {
         var moduleServices = modules.ToDictionary(module => module, _ => new List<ServiceInfo>());
         foreach (var service in services)
         {
-            ModuleInfo? bestMatch = null;
+            ModuleScanner.Module? bestMatch = null;
             foreach (var module in modules)
             {
                 if (!IsNamespaceInScope(service.Namespace, module.Namespace) ||
@@ -579,20 +526,9 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
-    private static bool IsNamespaceInScope(string candidateNamespace, string scopeNamespace)
-    {
-        if (scopeNamespace.Length == 0)
-        {
-            return true;
-        }
-
-        if (candidateNamespace == scopeNamespace)
-        {
-            return true;
-        }
-
-        return candidateNamespace.StartsWith(scopeNamespace + ".", StringComparison.Ordinal);
-    }
+    // Delegate to the canonical matcher so this generator cannot drift from the shared namespace-scope rule.
+    private static bool IsNamespaceInScope(string candidateNamespace, string scopeNamespace) =>
+        ModuleScanner.IsInScope(candidateNamespace, scopeNamespace);
 
     private static string GetRegistrationTypeReference(ServiceInfo service)
     {

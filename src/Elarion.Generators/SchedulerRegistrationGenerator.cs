@@ -106,7 +106,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         string? MethodName,
         bool IsStaticMethod,
         string ReturnKind,
-        ImmutableArray<MethodParameterKind> MethodParameters,
+        EquatableArray<MethodParameterKind> MethodParameters,
         string? ScheduleKind,
         string? ScheduleValue,
         string? TimeZone,
@@ -125,43 +125,64 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         CancellationToken
     }
 
+    /// <summary>A discovered job: either a registration model or the diagnostics that rejected it.</summary>
+    private sealed record JobResult(ScheduledJobInfo? Job, EquatableArray<DiagnosticInfo> Diagnostics);
+
+    private static class TrackingNames
+    {
+        public const string Jobs = "ScheduledJobs";
+        public const string Combined = "ScheduledJobsCombined";
+    }
+
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context.RegisterSourceOutput(context.CompilationProvider, static (spc, compilation) =>
+        // [ScheduledJob] applies to both methods (compile-time jobs) and types (runtime jobs); a single
+        // attribute-index pass discovers both, and the transform branches on the target symbol kind.
+        var results = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ScheduledJobAttributeMetadataName,
+                static (node, _) => node is MethodDeclarationSyntax or ClassDeclarationSyntax,
+                static (ctx, ct) => CreateJobResult(ctx, ct))
+            .Where(static result => result is not null)
+            .Select(static (result, _) => result!)
+            .Collect()
+            .WithTrackingName(TrackingNames.Jobs);
+
+        var modules = ModuleProviders.CollectModules(context);
+        var trigger = ModuleProviders.HasTrigger(context, TriggerAttributeMetadataName);
+        var assemblyName = context.CompilationProvider.Select(static (compilation, _) => compilation.AssemblyName);
+
+        var combined = results.Combine(modules).Combine(trigger).Combine(assemblyName)
+            .WithTrackingName(TrackingNames.Combined);
+
+        // Note 50: The scheduler generator is assembly opt-in, which keeps unrelated projects free of generated registrations.
+        context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            // Note 50: The scheduler generator is assembly opt-in, which keeps unrelated projects free of generated registrations.
-            var hasTrigger = FrameworkFeatureTriggers.HasAssemblyTrigger(compilation, TriggerAttributeMetadataName);
+            var (((results, modules), hasTrigger), assemblyName) = source;
             if (!hasTrigger)
             {
                 return;
             }
 
-            var scheduledJobAttribute = compilation.GetTypeByMetadataName(ScheduledJobAttributeMetadataName);
-            var scheduledJobInterface = compilation.GetTypeByMetadataName(ScheduledJobInterfaceMetadataName);
-            var contextType = compilation.GetTypeByMetadataName(ScheduledJobContextMetadataName);
-            var cancellationTokenType = compilation.GetTypeByMetadataName(CancellationTokenMetadataName);
-            var taskType = compilation.GetTypeByMetadataName(TaskMetadataName);
-            var valueTaskType = compilation.GetTypeByMetadataName(ValueTaskMetadataName);
-            if (scheduledJobAttribute is null ||
-                scheduledJobInterface is null ||
-                contextType is null ||
-                cancellationTokenType is null ||
-                taskType is null ||
-                valueTaskType is null)
+            foreach (var result in results)
             {
-                return;
+                foreach (var diagnostic in result.Diagnostics)
+                {
+                    spc.ReportDiagnostic(diagnostic.ToDiagnostic());
+                }
             }
 
-            var jobs = CollectJobs(
-                compilation,
-                scheduledJobAttribute,
-                scheduledJobInterface,
-                contextType,
-                cancellationTokenType,
-                taskType,
-                valueTaskType,
-                spc);
+            var jobs = new List<ScheduledJobInfo>();
+            foreach (var result in results)
+            {
+                if (result.Job is not null)
+                {
+                    jobs.Add(result.Job);
+                }
+            }
+
+            jobs.Sort(static (left, right) => string.Compare(left.Name, right.Name, StringComparison.Ordinal));
 
             ReportDuplicateNames(jobs, spc);
             if (jobs.Count == 0)
@@ -171,11 +192,55 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
 
             // Jobs are registered per module via ConfigureDefaultServices; only the assembly-level typed job
             // references remain at the assembly scope.
-            var references = GenerateReferences(compilation.AssemblyName ?? "Generated", jobs);
+            var references = GenerateReferences(assemblyName ?? "Generated", jobs);
             spc.AddSource("ScheduledJobReferences.g.cs", SourceText.From(references, Encoding.UTF8));
 
-            EmitPerModule(spc, ModuleScanner.Collect(compilation, spc.CancellationToken), jobs);
+            EmitPerModule(spc, modules, jobs);
         });
+    }
+
+    private static JobResult? CreateJobResult(GeneratorAttributeSyntaxContext ctx, CancellationToken ct)
+    {
+        if (ctx.Attributes.Length == 0)
+        {
+            return null;
+        }
+
+        var attribute = ctx.Attributes[0];
+        var compilation = ctx.SemanticModel.Compilation;
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        if (ctx.TargetSymbol is IMethodSymbol method)
+        {
+            var contextType = compilation.GetTypeByMetadataName(ScheduledJobContextMetadataName);
+            var cancellationTokenType = compilation.GetTypeByMetadataName(CancellationTokenMetadataName);
+            var taskType = compilation.GetTypeByMetadataName(TaskMetadataName);
+            var valueTaskType = compilation.GetTypeByMetadataName(ValueTaskMetadataName);
+            if (contextType is null || cancellationTokenType is null || taskType is null || valueTaskType is null)
+            {
+                return null;
+            }
+
+            var location = (ctx.TargetNode as MethodDeclarationSyntax)?.Identifier.GetLocation();
+            var job = TryCreateMethodJob(
+                method, attribute, contextType, cancellationTokenType, taskType, valueTaskType, location, diagnostics);
+            return new JobResult(job, diagnostics.ToImmutable());
+        }
+
+        if (ctx.TargetSymbol is INamedTypeSymbol type)
+        {
+            var scheduledJobInterface = compilation.GetTypeByMetadataName(ScheduledJobInterfaceMetadataName);
+            if (scheduledJobInterface is null)
+            {
+                return null;
+            }
+
+            var location = (ctx.TargetNode as ClassDeclarationSyntax)?.Identifier.GetLocation();
+            var job = TryCreateRuntimeJob(type, attribute, scheduledJobInterface, location, diagnostics);
+            return new JobResult(job, diagnostics.ToImmutable());
+        }
+
+        return null;
     }
 
     private static void EmitPerModule(
@@ -236,87 +301,6 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             ? containing.ToDisplayString()
             : string.Empty;
 
-    private static List<ScheduledJobInfo> CollectJobs(
-        Compilation compilation,
-        INamedTypeSymbol scheduledJobAttribute,
-        INamedTypeSymbol scheduledJobInterface,
-        INamedTypeSymbol contextType,
-        INamedTypeSymbol cancellationTokenType,
-        INamedTypeSymbol taskType,
-        INamedTypeSymbol valueTaskType,
-        SourceProductionContext spc)
-    {
-        var jobs = new List<ScheduledJobInfo>();
-        var seenMethods = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-        var seenTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-
-        foreach (var syntaxTree in compilation.SyntaxTrees)
-        {
-            // Note 51: Syntax finds candidate declarations quickly; symbols below provide semantic validation.
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot(spc.CancellationToken);
-
-            foreach (var methodDeclaration in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
-            {
-                if (semanticModel.GetDeclaredSymbol(methodDeclaration, spc.CancellationToken) is not IMethodSymbol method ||
-                    !seenMethods.Add(method))
-                {
-                    continue;
-                }
-
-                var attribute = GetScheduledJobAttribute(method, scheduledJobAttribute);
-                if (attribute is null)
-                {
-                    continue;
-                }
-
-                var job = TryCreateMethodJob(
-                    method,
-                    attribute,
-                    contextType,
-                    cancellationTokenType,
-                    taskType,
-                    valueTaskType,
-                    methodDeclaration.Identifier.GetLocation(),
-                    spc);
-                if (job is not null)
-                {
-                    jobs.Add(job);
-                }
-            }
-
-            foreach (var classDeclaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
-            {
-                if (semanticModel.GetDeclaredSymbol(classDeclaration, spc.CancellationToken) is not INamedTypeSymbol type ||
-                    !seenTypes.Add(type))
-                {
-                    continue;
-                }
-
-                var attribute = GetScheduledJobAttribute(type, scheduledJobAttribute);
-                if (attribute is null)
-                {
-                    continue;
-                }
-
-                var job = TryCreateRuntimeJob(
-                    type,
-                    attribute,
-                    scheduledJobInterface,
-                    classDeclaration.Identifier.GetLocation(),
-                    spc);
-                if (job is not null)
-                {
-                    jobs.Add(job);
-                }
-            }
-        }
-
-        jobs.Sort(static (left, right) =>
-            string.Compare(left.Name, right.Name, StringComparison.Ordinal));
-        return jobs;
-    }
-
     private static ScheduledJobInfo? TryCreateMethodJob(
         IMethodSymbol method,
         AttributeData attribute,
@@ -324,8 +308,8 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         INamedTypeSymbol cancellationTokenType,
         INamedTypeSymbol taskType,
         INamedTypeSymbol valueTaskType,
-        Location location,
-        SourceProductionContext spc)
+        Location? location,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
     {
         var type = method.ContainingType;
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -335,7 +319,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             !IsAccessible(type.DeclaredAccessibility) ||
             !IsSupportedReturnType(method.ReturnType, taskType, valueTaskType))
         {
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 InvalidScheduledJobMethodSignature,
                 location,
                 method.ToDisplayString(fmt)));
@@ -362,7 +346,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
                 continue;
             }
 
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 InvalidScheduledJobMethodSignature,
                 location,
                 method.ToDisplayString(fmt)));
@@ -371,7 +355,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
 
         if (!TryGetScheduleSpec(attribute, scheduleRequired: true, out var scheduleKind, out var scheduleValue))
         {
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 InvalidScheduleSpecification,
                 location,
                 GetRequiredName(attribute)));
@@ -381,7 +365,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         var maxConcurrentRuns = GetIntNamedArgument(attribute, "MaxConcurrentRuns", 0);
         if (maxConcurrentRuns < 0)
         {
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 InvalidMaxConcurrentRuns,
                 location,
                 GetRequiredName(attribute)));
@@ -416,13 +400,13 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         INamedTypeSymbol type,
         AttributeData attribute,
         INamedTypeSymbol scheduledJobInterface,
-        Location location,
-        SourceProductionContext spc)
+        Location? location,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
     {
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         if (IsGenericOrNestedInGenericType(type))
         {
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 GenericScheduledJobType,
                 location,
                 type.ToDisplayString(fmt)));
@@ -431,7 +415,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
 
         if (!IsAccessible(type.DeclaredAccessibility))
         {
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 InvalidRuntimeScheduledJobType,
                 location,
                 type.ToDisplayString(fmt)));
@@ -446,7 +430,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         // Note 53: Runtime-scheduled jobs still need exactly one typed payload so the generated delegate can cast safely.
         if (matchingInterfaces.Length != 1 || matchingInterfaces[0].TypeArguments.Length != 1)
         {
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 InvalidRuntimeScheduledJobType,
                 location,
                 type.ToDisplayString(fmt)));
@@ -455,7 +439,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
 
         if (!TryGetScheduleSpec(attribute, scheduleRequired: false, out var scheduleKind, out var scheduleValue))
         {
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 InvalidScheduleSpecification,
                 location,
                 GetRequiredName(attribute)));
@@ -465,7 +449,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         var maxConcurrentRuns = GetIntNamedArgument(attribute, "MaxConcurrentRuns", 0);
         if (maxConcurrentRuns < 0)
         {
-            spc.ReportDiagnostic(Diagnostic.Create(
+            diagnostics.Add(DiagnosticInfo.Create(
                 InvalidMaxConcurrentRuns,
                 location,
                 GetRequiredName(attribute)));
@@ -762,13 +746,6 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
 
         sb.AppendLine("}");
     }
-
-    private static AttributeData? GetScheduledJobAttribute(
-        ISymbol symbol,
-        INamedTypeSymbol scheduledJobAttribute) =>
-        symbol.GetAttributes()
-            .FirstOrDefault(attribute =>
-                SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, scheduledJobAttribute));
 
     private static string? GetResiliencePolicyName(ISymbol symbol)
     {

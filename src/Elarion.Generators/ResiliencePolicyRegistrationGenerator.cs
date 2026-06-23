@@ -20,7 +20,7 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
         "Elarion.Abstractions.Resilience.ResiliencePolicyAttribute";
 
     private static readonly DiagnosticDescriptor InvalidPolicyDescriptor = new(
-        id: "WFRE001",
+        id: "ELRES001",
         title: "Invalid resilience policy",
         messageFormat: "Resilience policy '{0}' is invalid: {1}",
         category: "Elarion.Abstractions.Resilience",
@@ -28,7 +28,7 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
         isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor DuplicatePolicyNameDescriptor = new(
-        id: "WFRE002",
+        id: "ELRES002",
         title: "Duplicate resilience policy name",
         messageFormat: "Resilience policy name '{0}' is used more than once",
         category: "Elarion.Abstractions.Resilience",
@@ -41,8 +41,8 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
         string Name,
         RetryInfo? Retry,
         TimeoutInfo? Timeout,
-        Location? Location,
-        ImmutableArray<PolicyDiagnosticInfo> Diagnostics);
+        LocationInfo Location,
+        EquatableArray<DiagnosticInfo> Diagnostics);
 
     private sealed record RetryInfo(
         int MaxRetryAttempts,
@@ -53,34 +53,44 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
 
     private sealed record TimeoutInfo(long TimeoutTicks);
 
-    private sealed record PolicyDiagnosticInfo(
-        DiagnosticDescriptor Descriptor,
-        Location? Location,
-        object?[] MessageArgs);
-
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context.RegisterSourceOutput(context.CompilationProvider, static (spc, compilation) =>
+        // Discover policies via the attribute index: the transform only re-runs for changed
+        // [ResiliencePolicy] declarations, not on every keystroke.
+        var policies = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ResiliencePolicyAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => ctx.TargetSymbol is INamedTypeSymbol classSymbol && ctx.Attributes.Length > 0
+                    ? CreatePolicyInfo(classSymbol, ctx.Attributes[0])
+                    : null)
+            .Where(static policy => policy is not null)
+            .Select(static (policy, _) => policy!)
+            .Collect()
+            .WithTrackingName(TrackingNames.Policies);
+
+        // Note 43: This generator is opt-in, so projects do not pay generation cost unless they request resilience policies.
+        // The trigger and assembly name project off the compilation to small equatable values, so they stay
+        // "unchanged" across edits that do not touch the opt-in or the assembly name.
+        var trigger = ModuleProviders.HasTrigger(context, TriggerAttributeMetadataName);
+        var assemblyName = context.CompilationProvider.Select(static (compilation, _) => compilation.AssemblyName);
+
+        var combined = policies.Combine(trigger).Combine(assemblyName).WithTrackingName(TrackingNames.Combined);
+
+        context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            // Note 43: This generator is opt-in, so projects do not pay generation cost unless they request resilience policies.
-            if (!FrameworkFeatureTriggers.HasAssemblyTrigger(compilation, TriggerAttributeMetadataName))
+            var ((policyList, hasTrigger), assemblyName) = source;
+            if (!hasTrigger)
             {
                 return;
             }
 
-            var policyAttribute = compilation.GetTypeByMetadataName(ResiliencePolicyAttributeMetadataName);
-            if (policyAttribute is null)
-            {
-                return;
-            }
-
-            var policies = CollectPolicies(compilation, policyAttribute, spc.CancellationToken);
-            ReportDiagnostics(policies, spc);
-            ReportDuplicateNames(policies, spc);
+            ReportDiagnostics(policyList, spc);
+            ReportDuplicateNames(policyList, spc);
 
             // Note 44: Invalid policies still report diagnostics, but no invalid registration code is emitted.
-            var validPolicies = policies
+            var validPolicies = policyList
                 .Where(static policy => policy.Diagnostics.IsEmpty)
                 .ToArray();
             if (validPolicies.Length == 0)
@@ -88,49 +98,21 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
                 return;
             }
 
-            var source = GenerateSource(compilation.AssemblyName ?? "Generated", validPolicies);
-            spc.AddSource("ResiliencePolicyRegistration.g.cs", SourceText.From(source, Encoding.UTF8));
+            // Note 45: Roslyn symbols provide semantic information, avoiding fragile text parsing of attribute syntax.
+            var generated = GenerateSource(assemblyName ?? "Generated", validPolicies);
+            spc.AddSource("ResiliencePolicyRegistration.g.cs", SourceText.From(generated, Encoding.UTF8));
         });
     }
 
-    private static List<PolicyInfo> CollectPolicies(
-        Compilation compilation,
-        INamedTypeSymbol policyAttribute,
-        CancellationToken ct)
+    private static class TrackingNames
     {
-        var policies = new List<PolicyInfo>();
-
-        foreach (var syntaxTree in compilation.SyntaxTrees)
-        {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot(ct);
-
-            foreach (var classDeclaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
-            {
-                if (semanticModel.GetDeclaredSymbol(classDeclaration, ct) is not INamedTypeSymbol classSymbol)
-                {
-                    continue;
-                }
-
-                var attribute = classSymbol.GetAttributes()
-                    .FirstOrDefault(candidate =>
-                        SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, policyAttribute));
-                if (attribute is null)
-                {
-                    continue;
-                }
-
-                // Note 45: Roslyn symbols provide semantic information, avoiding fragile text parsing of attribute syntax.
-                policies.Add(CreatePolicyInfo(classSymbol, attribute));
-            }
-        }
-
-        return policies;
+        public const string Policies = "ResiliencePolicies";
+        public const string Combined = "ResiliencePoliciesCombined";
     }
 
     private static PolicyInfo CreatePolicyInfo(INamedTypeSymbol classSymbol, AttributeData attribute)
     {
-        var diagnostics = ImmutableArray.CreateBuilder<PolicyDiagnosticInfo>();
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
         var name = GetRequiredName(attribute);
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -155,14 +137,14 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
             name,
             retry,
             timeout,
-            classSymbol.Locations.FirstOrDefault(),
+            LocationInfo.From(classSymbol),
             diagnostics.ToImmutable());
     }
 
     private static RetryInfo? ParseRetry(
         INamedTypeSymbol classSymbol,
         AttributeData attribute,
-        ImmutableArray<PolicyDiagnosticInfo>.Builder diagnostics)
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
     {
         if (!HasAnyNamedArgument(attribute, "MaxRetryAttempts", "Delay", "Backoff", "MaxDelay", "UseJitter"))
         {
@@ -198,7 +180,7 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
     private static TimeoutInfo? ParseTimeout(
         INamedTypeSymbol classSymbol,
         AttributeData attribute,
-        ImmutableArray<PolicyDiagnosticInfo>.Builder diagnostics)
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
     {
         var timeoutText = GetStringNamedArgument(attribute, "Timeout");
         if (timeoutText is null)
@@ -220,7 +202,7 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
 
     private static TimeSpan? ParseDuration(
         INamedTypeSymbol classSymbol,
-        ImmutableArray<PolicyDiagnosticInfo>.Builder diagnostics,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics,
         string value,
         string propertyName)
     {
@@ -291,10 +273,7 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
         {
             foreach (var diagnostic in policy.Diagnostics)
             {
-                spc.ReportDiagnostic(Diagnostic.Create(
-                    diagnostic.Descriptor,
-                    diagnostic.Location,
-                    diagnostic.MessageArgs));
+                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
             }
         }
     }
@@ -312,7 +291,7 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DuplicatePolicyNameDescriptor,
-                    policy.Location,
+                    policy.Location.ToLocation(),
                     group.Key));
             }
         }
@@ -423,11 +402,12 @@ public sealed class ResiliencePolicyRegistrationGenerator : IIncrementalGenerato
             sb.AppendLine("        });");
     }
 
-    private static PolicyDiagnosticInfo CreateDiagnostic(INamedTypeSymbol classSymbol, string reason) =>
-        new(
+    private static DiagnosticInfo CreateDiagnostic(INamedTypeSymbol classSymbol, string reason) =>
+        DiagnosticInfo.Create(
             InvalidPolicyDescriptor,
-            classSymbol.Locations.FirstOrDefault(),
-            [classSymbol.Name, reason]);
+            LocationInfo.From(classSymbol),
+            classSymbol.Name,
+            reason);
 
     private static string GetRequiredName(AttributeData attribute) =>
         attribute.ConstructorArguments.Length > 0 &&

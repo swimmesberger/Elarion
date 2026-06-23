@@ -56,6 +56,109 @@ public sealed class ModuleValidatorRegistrationGeneratorTests
             "services.AddScoped<IValidator<global::Sample.Modules.Billing.CreateInvoiceCommand>, global::Sample.Modules.Billing.CreateInvoiceValidator>();");
     }
 
+    [Fact]
+    public void GenerateValidators_PrefixSiblingNamespace_IsNotAssignedToModule()
+    {
+        // Regression: 'Sample.Modules.BillingPlus' must not match module 'Sample.Modules.Billing' —
+        // a bare StartsWith without the '.' boundary would wrongly fold the sibling into Billing.
+        const string source =
+            """
+            [assembly: Elarion.Abstractions.UseElarion]
+
+            namespace Elarion.Abstractions {
+                [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                public sealed class GenerateModuleValidatorsAttribute : System.Attribute;
+
+                [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                public sealed class UseElarionAttribute : System.Attribute;
+            }
+
+            namespace Elarion.Abstractions.Modules {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class AppModuleAttribute(string name) : System.Attribute {
+                    public string Name { get; } = name;
+                }
+            }
+
+            namespace FluentValidation {
+                public interface IValidator<in T>;
+
+                public abstract class AbstractValidator<T> : IValidator<T>;
+            }
+
+            namespace Sample.Modules.Billing {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static partial class BillingModule {
+                }
+
+                public sealed record CreateInvoiceCommand;
+
+                public sealed class CreateInvoiceValidator : FluentValidation.AbstractValidator<CreateInvoiceCommand> {
+                }
+            }
+
+            namespace Sample.Modules.BillingPlus {
+                public sealed record SiblingCommand;
+
+                public sealed class SiblingValidator : FluentValidation.AbstractValidator<SiblingCommand> {
+                }
+            }
+            """;
+
+        var result = Generate(source);
+        var generated = GetGeneratedSource(result, "BillingValidatorExtensions.g.cs");
+
+        generated.Should().Contain("global::Sample.Modules.Billing.CreateInvoiceValidator");
+        generated.Should().NotContain("SiblingValidator");
+    }
+
+    [Fact]
+    public void GenerateValidators_IrrelevantEdit_ReusesPipeline()
+    {
+        const string source =
+            """
+            [assembly: Elarion.Abstractions.UseElarion]
+
+            namespace Elarion.Abstractions {
+                [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                public sealed class GenerateModuleValidatorsAttribute : System.Attribute;
+
+                [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                public sealed class UseElarionAttribute : System.Attribute;
+            }
+
+            namespace Elarion.Abstractions.Modules {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class AppModuleAttribute(string name) : System.Attribute {
+                    public string Name { get; } = name;
+                }
+            }
+
+            namespace FluentValidation {
+                public interface IValidator<in T>;
+
+                public abstract class AbstractValidator<T> : IValidator<T>;
+            }
+
+            namespace Sample.Modules.Billing {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static partial class BillingModule {
+                }
+
+                public sealed record CreateInvoiceCommand;
+
+                public sealed class CreateInvoiceValidator : FluentValidation.AbstractValidator<CreateInvoiceCommand> {
+                }
+            }
+            """;
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new ModuleValidatorRegistrationGenerator(),
+            source,
+            "Validators",
+            "ValidatorsCombined");
+    }
+
     private static GeneratorDriverRunResult Generate(string source)
     {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);

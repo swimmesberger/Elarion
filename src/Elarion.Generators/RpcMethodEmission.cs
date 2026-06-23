@@ -56,7 +56,7 @@ internal static class RpcMethodEmission
         bool OnJsonRpc,
         bool OnMcp,
         string? Description,
-        IReadOnlyList<ParameterDescription> Parameters
+        EquatableArray<ParameterDescription> Parameters
     );
 
     /// <summary>Emits a single statement-style <c>MapHandler</c> registration onto <paramref name="dispatcherVar"/>.</summary>
@@ -174,12 +174,12 @@ internal static class RpcMethodEmission
         return null;
     }
 
-    private static IReadOnlyList<ParameterDescription> CollectParameterDescriptions(
+    private static EquatableArray<ParameterDescription> CollectParameterDescriptions(
         INamedTypeSymbol requestType,
         INamedTypeSymbol? descriptionType)
     {
         if (descriptionType is null)
-            return [];
+            return EquatableArray<ParameterDescription>.Empty;
 
         var byParameterName = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var ctor in requestType.InstanceConstructors)
@@ -211,7 +211,7 @@ internal static class RpcMethodEmission
                 result.Add(new ParameterDescription(property.Name, description));
         }
 
-        return result;
+        return result.ToEquatableArray();
     }
 
     private static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);

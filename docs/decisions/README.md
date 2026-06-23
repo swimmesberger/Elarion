@@ -26,3 +26,4 @@ designs that are not yet implemented.
 - [ADR-0003: Predicate-based decorator attachment (`AppliesTo`)](0003-decorator-attachment-predicates.md)
 - [ADR-0004: Handler result caching](0004-handler-result-caching.md)
 - [ADR-0005: Cross-module error channel (`Result` vs exceptions) and gRPC mapping](0005-cross-module-error-channel.md)
+- [ADR-0006: Incremental source generator conventions](0006-incremental-source-generator-conventions.md)

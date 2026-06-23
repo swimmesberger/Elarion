@@ -167,7 +167,101 @@ public sealed class DbContextGeneratorTests
 
         var result = Generate(source);
 
-        result.GeneratedTrees.Should().BeEmpty();
+        // The DbContext implements no [GenerateDbSets] interface, so no DbSet/context members are generated.
+        // (The entity is still advertised via the assembly manifest for cross-assembly discovery.)
+        result.GeneratedTrees
+            .Select(tree => Path.GetFileName(tree.FilePath))
+            .Should()
+            .NotContain(name => name.EndsWith(".DbSets.g.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GenerateDbSets_IrrelevantEdit_ReusesCollectedData()
+    {
+        var source = CreateSource(
+            """
+            namespace Sample.Domain {
+                [Elarion.EntityFrameworkCore.DbEntity]
+                public sealed class Company {
+                }
+
+                [Elarion.EntityFrameworkCore.DbEntity]
+                public sealed class Invoice {
+                }
+            }
+
+            namespace Sample.Application {
+                [Elarion.EntityFrameworkCore.GenerateDbSets]
+                public partial interface IAppDbContext {
+                }
+            }
+            """);
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new DbContextGenerator(),
+            source,
+            "EntitiesAndConfigs");
+    }
+
+    [Fact]
+    public void GenerateDbSets_EntitiesFromReferencedAssembly_DiscoveredViaManifest()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var references = CreateMetadataReferences();
+
+        // Assembly A defines the markers + a [DbEntity]. Running the generator emits A's entity manifest;
+        // A is then emitted to an image and referenced by B.
+        var sourceA = CreateSource(
+            """
+            namespace Sample.Domain {
+                [Elarion.EntityFrameworkCore.DbEntity]
+                public sealed class Invoice {
+                }
+            }
+            """);
+        var compilationA = CSharpCompilation.Create(
+            "AssemblyA",
+            [CSharpSyntaxTree.ParseText(sourceA, parseOptions, cancellationToken: ct)],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driverA = CSharpGeneratorDriver.Create(new DbContextGenerator())
+            .WithUpdatedParseOptions(parseOptions);
+        driverA = driverA.RunGeneratorsAndUpdateCompilation(compilationA, out var outputA, out _, ct);
+
+        using var image = new MemoryStream();
+        var emitResult = outputA.Emit(image, cancellationToken: ct);
+        emitResult.Success.Should().BeTrue(
+            string.Join("\n", emitResult.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)));
+        var referenceA = MetadataReference.CreateFromImage(image.ToArray());
+
+        // Assembly B has no entities of its own; it must discover Invoice solely from A's manifest.
+        const string sourceB =
+            """
+            namespace Sample.Application {
+                [Elarion.EntityFrameworkCore.GenerateDbSets]
+                public partial interface IAppDbContext {
+                }
+            }
+
+            namespace Sample.Infrastructure {
+                public sealed partial class AppDbContext
+                    : Microsoft.EntityFrameworkCore.DbContext, Sample.Application.IAppDbContext {
+                }
+            }
+            """;
+        var compilationB = CSharpCompilation.Create(
+            "AssemblyB",
+            [CSharpSyntaxTree.ParseText(sourceB, parseOptions, cancellationToken: ct)],
+            [.. references, referenceA],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driverB = CSharpGeneratorDriver.Create(new DbContextGenerator());
+        driverB = driverB.RunGenerators(compilationB, ct);
+
+        var generated = string.Concat(driverB.GetRunResult().GeneratedTrees.Select(tree => tree.GetText().ToString()));
+        generated.Should().Contain("DbSet<Invoice> Invoices");
     }
 
     private static string CreateSource(string testSource) =>
