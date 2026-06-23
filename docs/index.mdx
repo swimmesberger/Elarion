@@ -41,7 +41,7 @@ registration list.
 ## Why Elarion
 
 <Cards>
-  <Card title="Compile-time, not reflection" href="/docs/source-generation">
+  <Card title="Compile-time, not reflection" href="/docs/concepts/source-generation">
     Handlers, services, validators, modules, RPC maps, and scheduled jobs are generated as
     ordinary DI code. Startup is deterministic and AOT-friendly; missing wiring is a build error,
     not a runtime surprise.
@@ -54,24 +54,24 @@ registration list.
     Handlers return `Result<T>` with a transport-agnostic `AppError`. The host maps failures to
     JSON-RPC, HTTP, or any other protocol.
   </Card>
-  <Card title="End-to-end JSON-RPC" href="/docs/json-rpc">
+  <Card title="End-to-end JSON-RPC" href="/docs/capabilities/transports/json-rpc">
     Mark a handler with `[RpcMethod]`, export a schema at build time, and generate a typed
     TypeScript + Zod client — without hand-writing DTOs.
   </Card>
-  <Card title="AI-native, no extra code" href="/docs/json-rpc/mcp">
+  <Card title="AI-native, no extra code" href="/docs/capabilities/transports/mcp">
     Expose the same `[RpcMethod]` handlers to AI agents as an MCP server. Tool names, descriptions,
     and input schemas are generated from your handlers and `[Description]` attributes at compile
     time — no separate tool layer, no duplicated schemas.
   </Card>
-  <Card title="In-process scheduling" href="/docs/scheduling">
+  <Card title="In-process scheduling" href="/docs/capabilities/scheduling">
     Source-generated scheduled jobs share one scheduler with explicit overlap, misfire, and
     resilience policies — and full OpenTelemetry instrumentation.
   </Card>
-  <Card title="Blob storage" href="/docs/blob-storage">
+  <Card title="Blob storage" href="/docs/capabilities/blob-storage">
     Depend on provider-neutral blob contracts in application code and choose PostgreSQL-backed
     storage in the host.
   </Card>
-  <Card title="Observable by default" href="/docs/telemetry">
+  <Card title="Observable by default" href="/docs/capabilities/telemetry">
     JSON-RPC, scheduling, caching, and resilience emit OpenTelemetry-compatible traces and metrics
     through `System.Diagnostics` — no SDK dependency forced on you.
   </Card>
@@ -93,7 +93,7 @@ the common path — implemented with .NET source generation instead of runtime c
 
 For the full reasoning behind each design decision — compile-time generation, handlers as the
 use-case boundary, result-based errors, JSON-RPC for internal APIs, and a thin host — see
-[Design & philosophy](/docs/philosophy).
+[Design & philosophy](/docs/why-elarion).
 
 ## When Elarion is a good fit
 
@@ -106,7 +106,7 @@ use-case boundary, result-based errors, JSON-RPC for internal APIs, and a thin h
 
 It is intentionally **not** a thin wrapper around default ASP.NET Core. You trade some convention
 freedom for less host boilerplate, inherent modularity, and a clear line between application policy
-and host mechanics. See [How Elarion differs from ASP.NET Core](/docs/reference/comparison) for the
+and host mechanics. See [How Elarion differs from ASP.NET Core](/docs/why-elarion#how-elarion-differs-from-aspnet-core) for the
 full trade-off table.
 
 ## Next steps

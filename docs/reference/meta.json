@@ -1,4 +1,14 @@
 {
   "title": "Reference",
-  "pages": ["packages", "configuration", "comparison", "troubleshooting"]
+  "icon": "FileText",
+  "pages": [
+    "index",
+    "packages",
+    "configuration",
+    "attributes",
+    "diagnostics",
+    "conventions",
+    "result-and-errors",
+    "troubleshooting"
+  ]
 }

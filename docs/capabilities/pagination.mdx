@@ -1,0 +1,218 @@
+---
+title: Pagination
+description: Transport-neutral keyset (cursor) and offset paging that produces a Page<T>, with composite sorts and an opaque cursor codec.
+---
+
+Every list handler returns one shared, transport-neutral envelope, `Page<T>` (from
+`Elarion.Abstractions.Paging`), so a list looks identical across JSON-RPC, MCP, HTTP, and the
+generated TypeScript client:
+
+```csharp title="Elarion.Abstractions.Paging.Page<T>"
+public sealed record Page<T> {
+    public required IReadOnlyList<T> Items { get; init; }
+    public string? StartCursor { get; init; }   // keyset only
+    public string? EndCursor { get; init; }      // keyset only
+    public bool HasNext { get; init; }
+    public bool HasPrevious { get; init; }
+    public int? Total { get; init; }             // offset only
+}
+```
+
+The cursors follow the Relay convention: `StartCursor`/`EndCursor` are opaque tokens for the first
+and last items, populated for keyset pagination and `null` for offset pagination, where `Total` is
+populated instead. `Page<T>.Empty` is a ready-made empty page.
+
+Keyset (seek) pagination is the default for feeds and large lists; offset pagination is available
+where a UI needs page numbers and a total count.
+
+<Callout type="info">
+  Pagination ships in a **separate package** (`Elarion.Paging`) so the EF Core marker package stays
+  dependency-free. The execution helpers depend on EF Core (`Microsoft.EntityFrameworkCore.Relational`),
+  while the provider-neutral `Page<T>` envelope and the `IKeysetPageRequest`/`IOffsetPageRequest`
+  contracts live in `Elarion.Abstractions.Paging`. Reference the runtime package (plus the generators
+  analyzer, which emits keyset definitions) in the project that owns your entities and handlers:
+
+  ```xml
+  <PackageReference Include="Elarion.Paging" Version="0.1.0" />
+  <PackageReference Include="Elarion.EntityFrameworkCore.Generators" Version="0.1.0" PrivateAssets="all" />
+  ```
+</Callout>
+
+## Keyset pagination
+
+Declare the ordered key columns on a dedicated partial class with `[Keyset<TEntity>]` — the entity
+stays free of pagination concerns, and an entity can have any number of orderings. Columns are
+ascending by default; prefix a name with `-` for descending. The generator
+([`KeysetGenerator`](/docs/concepts/source-generation)) fills the class with a reflection-free
+`IKeysetDefinition<TEntity>` (ordering and seek predicate are plain typed expressions the provider
+translates to SQL like hand-written `OrderBy`/`Where`) plus a static `Definition` singleton and an
+opaque cursor codec that carries the key values (no extra round-trip to reload a reference row):
+
+```csharp
+using Elarion.EntityFrameworkCore;   // [DbEntity]
+using Elarion.Paging;                 // [Keyset<T>]
+
+[DbEntity]
+public sealed class Client {
+    public Guid Id { get; init; }
+    public DateTime CreatedAt { get; init; }
+    public string Name { get; init; } = "";
+}
+
+// one partial class per ordering, declared near the feature that pages it
+[Keyset<Client>(nameof(Client.CreatedAt), nameof(Client.Id))]   // CreatedAt, then Id to break ties
+public sealed partial class ClientsByCreated;
+```
+
+For a "newest first" feed, prefix each column with `-` to sort descending. Keeping every column the
+same direction also lets the Npgsql provider use a row-value seek (see below):
+
+```csharp
+[Keyset<Post>("-CreatedAt", "-Id")]   // CreatedAt desc, then Id desc to break ties
+public sealed partial class RecentPosts;
+```
+
+Handlers call `ToKeysetPageAsync` with the keyset definition and a server-side projection. Passing
+the definition explicitly (`ClientsByCreated.Definition`) keeps keyset symmetric with offset paging —
+which passes a `SortMap` — and lets one handler choose among an entity's orderings. The request
+implements `IKeysetPageRequest`, so its `After`/`Before`/`Size` fields stay flat for HTTP GET query
+binding (`KeysetPageRequest` is a ready-made implementation for handlers that need no extra filters):
+
+```csharp
+[RpcMethod("clients.list")]
+[HttpEndpoint("clients")]
+public sealed class ListClients(IAppDbContext db, ICurrentUser user)
+    : IHandler<ListClients.Query, Result<Page<ListClients.Item>>> {
+
+    public sealed record Query : IKeysetPageRequest {
+        public string? After { get; init; }
+        public string? Before { get; init; }
+        public int Size { get; init; } = 20;
+        public string? Search { get; init; }
+    }
+
+    public sealed record Item(Guid Id, string Name, DateTime CreatedAt);
+
+    public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
+        var rows = db.Clients.Where(c => c.OwnerId == user.UserId);
+        if (!string.IsNullOrEmpty(query.Search)) {
+            rows = rows.Where(c => c.Name.Contains(query.Search));
+        }
+
+        return await rows.ToKeysetPageAsync(
+            query,
+            ClientsByCreated.Definition,
+            c => new Item(c.Id, c.Name, c.CreatedAt),
+            maxSize: 100, ct);
+    }
+}
+```
+
+The `selector` is the only projection — it runs server-side, composed with the key columns so the
+query reads just your columns plus the keys (untracked, no extra round-trip) and encodes the boundary
+cursors from those keys. That is why it is passed in rather than applied as a separate `.Select`
+before paging: the cursor needs the key values your DTO does not carry.
+
+Pass `After` (an `EndCursor` from a prior page) to page forward, `Before` (a `StartCursor`) to page
+backward, or neither for the first page. `Size` is clamped to `maxSize` (defaulting to
+`QueryablePagingExtensions.DefaultMaxSize`, which is `100`).
+
+<Callout type="warn">
+  Cursors are opaque but **not** a security boundary — they encode the boundary row's key values and
+  are neither signed nor encrypted. Keep applying your own authorization filter (e.g.
+  `Where(c => c.OwnerId == user.UserId)`); never trust a cursor for access control.
+</Callout>
+
+### Keyset column rules
+
+The generator enforces the column rules at compile time, so a typo or a column that breaks
+deterministic ordering is a **build error**, not a runtime bug:
+
+- Column names must match a property (`ELKEY001`), so a typo — or a rename you forget to propagate —
+  fails the build. That is why the `"-Column"` string form needs no `nameof`.
+- Columns must be **non-nullable** (`ELKEY003`) for deterministic SQL ordering.
+- If the entity has an `Id` property that is not part of the keyset, the generator warns (`ELKEY004`)
+  that paging may skip or repeat rows; append a unique column such as the key.
+- Supported column types are the integral types (`int`, `long`, `short`, `byte`),
+  `decimal`/`double`/`float`, `string`, `Guid`, `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`,
+  and enums; others report `ELKEY002`.
+- The keyset class must be a **top-level, non-nested partial class** (`ELKEY005`) so the generator can
+  emit the definition into it.
+
+### Provider-optimized seek (Npgsql row values)
+
+By default the seek predicate is a portable lexicographic comparison
+(`a > x || (a == x && b > y)`) that every provider can translate. PostgreSQL can do better: a
+[row-value expression](https://www.npgsql.org/efcore/release-notes/7.0.html#row-value-expressions)
+`(a, b) > (x, y)` is a single comparison that a composite index on `(a, b)` satisfies directly. EF
+Core has no provider-neutral row-value API yet ([dotnet/efcore#26822](https://github.com/dotnet/efcore/issues/26822)),
+so this is an explicit opt-in that keeps the default output provider-neutral.
+
+Add the assembly-level attribute (typically in the project that owns your entities) to switch the
+generated seek to row values:
+
+```csharp
+using Elarion.EntityFrameworkCore;
+
+[assembly: UseElarionEntityFrameworkCore(Provider = EfCoreProvider.Npgsql)]
+```
+
+With `Npgsql` selected, a keyset of two or more columns (up to seven) that share one direction emits
+`EF.Functions.GreaterThan`/`LessThan` over `ValueTuple`s, which Npgsql renders as a row value:
+
+```csharp
+// [Keyset<Client>(nameof(Client.CreatedAt), nameof(Client.Id))] with the Npgsql provider:
+__e => EF.Functions.GreaterThan(
+    ValueTuple.Create(__e.CreatedAt, __e.Id),
+    ValueTuple.Create(__key0, __key1));
+```
+
+The generator falls back to the portable predicate automatically when row values do not apply: a
+single-column keyset, mixed sort directions (e.g. `-CreatedAt, Id`), a keyset of more than seven
+columns, or the default `Portable` provider. The opt-in requires the
+`Npgsql.EntityFrameworkCore.PostgreSQL` package, which supplies the
+`EF.Functions.GreaterThan(ValueTuple, ValueTuple)` overloads the generated code calls.
+
+## Offset pagination
+
+When a UI needs random page access and a total count, use `ToOffsetPageAsync` with a `SortMap` — an
+AOT-safe whitelist that binds sort keys to typed selectors (no dynamic LINQ, and clients can only sort
+by columns you allow). Each entry may chain `ThenBy` tiebreakers (each with a `SortDirection`) for a
+stable composite order. The map is a fixed whitelist that doesn't depend on the request, so build it
+once with `CreateBuilder(...).Add(...).Build()` and keep the immutable result in a `static readonly`
+field rather than rebuilding per call:
+
+```csharp
+private static readonly SortMap<Client> Sort = SortMap<Client>
+    .CreateBuilder("createdAt", c => c.CreatedAt, SortDirection.Descending)   // default sort
+    .ThenBy(c => c.Id, SortDirection.Descending)                             // stable tiebreaker
+    .Add("name", c => c.Name)
+    .ThenBy(c => c.Id)
+    .Build();
+
+public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
+    return await db.Clients
+        .Where(c => c.OwnerId == user.UserId)
+        .ToOffsetPageAsync(query, c => new Item(c.Id, c.Name, c.CreatedAt), Sort, maxSize: 100, ct);
+}
+```
+
+The request implements `IOffsetPageRequest` — flat `Page` (1-based), `Size`, and `Sort` fields, again
+to keep HTTP GET query binding simple (`OffsetPageRequest` is the ready-made implementation).
+`Build()` produces an immutable map backed by a `FrozenDictionary`, so a shared static instance is
+safe for concurrent requests; the mutable `SortMapBuilder` is single-threaded and used only at
+startup.
+
+A request `Sort` of `"name"` orders by `Name` then `Id`; a leading `-` (descending) or `+`
+(ascending) flips only the entry's primary column, while declared tiebreakers keep their direction (so
+`"-name"` sorts `Name` descending, `Id` ascending). Unknown or blank keys fall back to the default
+entry. Offset pages fill `Total`; keyset pages fill the cursors instead.
+
+<Cards>
+  <Card title="Entity Framework Core" href="/docs/capabilities/entity-framework">
+    Generated `DbSet`s and the interface-first `IAppDbContext` that handlers page against.
+  </Card>
+  <Card title="Handlers" href="/docs/concepts/handlers">
+    How list handlers accept a paging request and return `Result<Page<T>>`.
+  </Card>
+</Cards>

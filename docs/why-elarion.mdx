@@ -1,6 +1,6 @@
 ---
-title: Design & philosophy
-description: The reasoning behind Elarion's opinions — compile-time generation, handlers as the use-case boundary, result-based errors, JSON-RPC for internal APIs, and a thin host.
+title: Why Elarion
+description: The reasoning behind Elarion's opinions, how it differs from idiomatic ASP.NET Core, and whether the trade-offs fit your project.
 icon: Compass
 ---
 
@@ -29,7 +29,7 @@ can read and step through; and mistakes — a missing trigger, an invalid contra
 service — become **build errors instead of runtime surprises**. Registration drift is caught by the
 compiler.
 
-→ [Source generation](/docs/source-generation) · [Why auto-detection is the default](/docs/concepts#why-auto-detection-is-the-default)
+→ [Source generation](/docs/concepts/source-generation) · [Why auto-detection is the default](/docs/concepts#why-auto-detection-is-the-default)
 
 ## Handlers are the use-case boundary
 
@@ -78,7 +78,7 @@ while keeping handlers in the application layer (they never reference the infras
 owns the concrete `DbContext`). A hand-written `IClientRepository` per table usually adds indirection
 without value. This is the reason the EF Core package exists.
 
-→ [Entity Framework Core](/docs/entity-framework) · [Handlers → Accessing data](/docs/concepts/handlers#accessing-data)
+→ [Entity Framework Core](/docs/capabilities/entity-framework) · [Handlers → Accessing data](/docs/concepts/handlers#accessing-data)
 
 ## JSON-RPC for internal APIs
 
@@ -91,7 +91,7 @@ so the iteration loop is just *add handler → regenerate client → call it*. T
 first-party APIs where one team controls both ends. It is deliberately optional and outside the core
 package, and modules can expose Minimal API endpoints instead when REST semantics are what you need.
 
-→ [Why JSON-RPC?](/docs/json-rpc#why-json-rpc)
+→ [Why JSON-RPC?](/docs/capabilities/transports/json-rpc#why-json-rpc)
 
 ## Observability without lock-in
 
@@ -102,7 +102,7 @@ depends on **no** OpenTelemetry SDK.
 while letting the host choose exporters and which sources to collect. You get observability for free
 without the framework dictating your telemetry stack.
 
-→ [Telemetry & observability](/docs/telemetry)
+→ [Telemetry & observability](/docs/capabilities/telemetry)
 
 ## A small reusable contract; the platform stays in the host
 
@@ -119,15 +119,57 @@ exactly where explicitness is the point.
 
 The cost of all this is that **you accept conventions**: handler names, nested `Command`/`Query` and
 `Response` types, namespace containment, and pipeline attributes matter because the generators use
-them. In exchange you get less host boilerplate, inherent modularity, fewer runtime scans, and a clear
-line between application policy and host mechanics.
+them. In exchange you get less host boilerplate, inherent modularity, fewer runtime scans and faster,
+more predictable startup, and a clear line between application policy and host mechanics.
 
-If your project benefits from that structure — a modular application or service, AOT goals, a typed
-.NET↔TypeScript contract, in-process background work — the conventions pay for themselves. If you need
-maximum freedom in how each endpoint is shaped, or you are building a public/third-party API, idiomatic
-ASP.NET Core may fit better.
+## How Elarion differs from ASP.NET Core
 
-→ [How Elarion differs from ASP.NET Core](/docs/reference/comparison)
+Elarion is intentionally **not** a thin wrapper around the default ASP.NET Core style. It chooses a
+more application-centric architecture where modules and handlers are the source of truth, while the
+ASP.NET Core host becomes a composition and transport shell. The differences below are the same
+principles above, viewed against idiomatic ASP.NET Core.
+
+| Topic | Idiomatic ASP.NET Core | Elarion |
+| --- | --- | --- |
+| Registration | Explicit `services.AddScoped<…>()`, endpoint maps, and feature wiring in `Program.cs`. | Source-generated auto-registration from handler, validator, module, and RPC attributes. Explicit registration remains for infrastructure. |
+| Application shape | Controllers, Minimal API lambdas, or endpoint classes are the use-case boundary. | `IHandler<TRequest, TResponse>` is the use-case boundary; transport adapters call handlers. |
+| Modularity | Folder/project organization plus manually maintained `AddXyz()` methods. | First-class modules with `[AppModule]`: feature flags, ordering, handler/validator aggregation, endpoint hooks, JSON metadata hooks. |
+| Cross-cutting behavior | Middleware, endpoint filters, MVC filters, MediatR behaviors, or nested services. | Generated decorator pipelines wrap handlers in a deterministic order chosen by assembly, module, or handler. |
+| Discovery | Runtime reflection scanning for validators, handlers, controllers, endpoint modules. | Compile-time source generation for deterministic startup, AOT friendliness, and inspectable code. |
+| Host responsibilities | The host often knows every feature and registers most feature services. | The host owns platform capabilities, middleware, auth, telemetry, database setup, and transports; modules own composition. |
+| Serialization metadata | Global JSON options plus reflection fallback. | Modules contribute `JsonSerializerContext` resolvers following the module boundary. |
+| EF Core model wiring | Hand-written `DbSet<T>` and `ApplyConfigurationsFromAssembly(…)`. | Optional generator with interface-first `[GenerateDbSets]`, explicit `[DbEntity]`, optional scopes, and direct configuration calls. |
+| Background work | Individual `BackgroundService` loops own their timers, overlap, logging, and cancellation. | Source-generated scheduled jobs share one scheduler with typed invocation, explicit overlap, `TimeProvider`, and telemetry. |
+| Error model | Exceptions, `ProblemDetails`, action results, or ad-hoc DTOs. | Handlers return `Result<T>` with transport-agnostic `AppError`; the host maps errors per transport. |
+| Transport | HTTP REST is the default API. | HTTP, JSON-RPC, and MCP are parallel first-class optional transports over the same handlers; JSON-RPC and MCP live outside the core package. |
+| Client contracts | Frontends hand-write DTOs or ad-hoc REST helpers. | JSON-RPC clients consume generated TypeScript/Zod artifacts and a portable fetch client from the schema. |
+
+## Is Elarion for me?
+
+Elarion pays for its conventions when your application's *shape* is the thing you want to keep stable,
+and it gets in the way when each endpoint needs to be bespoke.
+
+**A good fit if you are building:**
+
+- a modular application or service where features should register, gate, and move as units;
+- a first-party, internal API where one team controls both ends and a typed
+  [.NET↔TypeScript contract](/docs/capabilities/transports/typescript-client) removes hand-written DTOs;
+- something with AOT or trimming goals, where [compile-time generation](/docs/concepts/source-generation)
+  and a reflection-free startup matter;
+- an app with [in-process background work](/docs/capabilities/scheduling), domain/integration
+  [events](/docs/capabilities/events), or cross-cutting concerns you want expressed as
+  [decorator pipelines](/docs/concepts/decorator-pipelines) instead of scattered middleware.
+
+**Probably not a good fit if you need:**
+
+- maximum freedom in how each endpoint is shaped — bespoke routes, verbs, content negotiation, and
+  status-code mapping per operation;
+- a public or third-party REST API where resource modeling and stable URLs are part of the contract;
+- to stay on the idiomatic ASP.NET Core path with controllers/Minimal APIs as the use-case boundary
+  and explicit registration everywhere.
+
+In those cases idiomatic ASP.NET Core fits better. Elarion does not try to be a universal web
+framework — it is opinionated where the opinions buy you modularity and a thin host.
 
 ## Influences
 

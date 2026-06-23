@@ -1,12 +1,14 @@
 ---
 title: Services
-description: Annotate a class with [Service] and the generator emits its DI registration, with conventional contract and lifetime resolution.
+description: Annotate a class with [Service] and the generator registers it in DI — with conventional contract and lifetime resolution — through the module's ConfigureDefaultServices.
 ---
 
-A service is any module-owned class you want registered in DI. Annotate it with `[Service]` and the
-generator emits the registration — you never add it to a hand-written `AddXyz()` method.
+A service is any module-owned class you want in DI that is not a [handler](/docs/concepts/handlers),
+[validator](/docs/concepts/validators), or scheduled job. `[Service]` is an auto-detected application
+pattern: annotate the class and Elarion emits its registration and wires it into the owning module
+automatically — you never hand-write an `Add…()` call or touch a service collection.
 
-```csharp
+```csharp title="ClientNumberGenerator.cs"
 using Elarion.Abstractions;
 
 namespace MyApp.Application.Modules.Clients.Services;
@@ -15,72 +17,135 @@ public interface IClientNumberGenerator {
     string Next();
 }
 
-[Service(typeof(IClientNumberGenerator))]
+[Service]
 public sealed class ClientNumberGenerator : IClientNumberGenerator {
     public string Next() => "C-001";
 }
 ```
 
-When `[assembly: UseElarion]` or `[assembly: GenerateModuleServices]` is present, Elarion emits
-`Add{ServiceName}Service()` and aggregates them into `Add{ModuleName}Services()`.
+That is the whole opt-in. The class implements one interface, so it registers against
+`IClientNumberGenerator` with the default `Scoped` lifetime, and any handler or other service in the
+module can inject `IClientNumberGenerator`.
+
+## How registration is wired
+
+`ModuleServiceRegistrationGenerator` runs when `[assembly: UseElarion]` or
+`[assembly: GenerateModuleServices]` is present. It emits a per-service registration helper and an
+aggregating `Add{Module}Services()` per module (longest-prefix namespace match places each service in
+its module). You never call these directly: the generator also contributes the `AddServices` filler
+to the module's generated `ConfigureDefaultServices(IServiceCollection)`, which the host bootstrapper
+invokes — gated by `IsModuleEnabled` — for every `[AppModule]`. So a `[Service]` in a disabled feature
+module disappears alongside its handlers, validators, jobs, and consumers.
+
+`ConfigureDefaultServices` aggregates all of a module's discovered registrations (handlers, services,
+validators, scheduled jobs, event consumers, module API); a module's hand-written `ConfigureServices`
+is reserved for the non-generated registrations only. See
+[Modules](/docs/concepts/modules) and [Source generation](/docs/concepts/source-generation).
+
+<Callout type="info">
+  A service whose namespace falls under no `[AppModule]` is not picked up by any module aggregation, so
+  it never reaches DI. Keep `[Service]` classes inside a module's namespace.
+</Callout>
 
 ## Contract resolution
 
-The generator decides which contract(s) to register against using these rules, in order:
+The generator decides which contract(s) to register the implementation against, in order:
 
-1. If explicit contracts are given in `[Service(typeof(...))]`, those are used.
-2. Otherwise, directly implemented interfaces are used.
-3. Otherwise, the implementation type itself is registered.
+<Steps>
+<Step>**Explicit contracts.** If `[Service(typeof(...))]` lists service types, those are used. Each must be assignable from the implementation, or the generator reports [`ELSG002`](/docs/reference/diagnostics).</Step>
+<Step>**Directly implemented interfaces.** Otherwise every interface the class implements directly becomes a contract (base-class interfaces are not treated as explicit contracts).</Step>
+<Step>**Self.** Otherwise the implementation type registers as itself.</Step>
+</Steps>
+
+When more than one contract is registered, the first is the concrete anchor and the rest resolve to the
+same instance, so all contracts share one object per scope. Pin the contracts explicitly when a class
+implements several interfaces but should only be injectable through some of them:
+
+```csharp title="SystemClock.cs"
+[Service(typeof(IClock), Scope = ServiceScope.Singleton)]
+public sealed class SystemClock : IClock, IDisposable {
+    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+    public void Dispose() { }
+}
+```
 
 ## Lifetime
 
-The default scope is `Scoped`. Override it with the `Scope` property:
+The default scope is `Scoped`. Override it with the `Scope` property; `ServiceScope` has `Scoped`,
+`Singleton`, and `Transient`:
 
 ```csharp
 [Service(typeof(IClock), Scope = ServiceScope.Singleton)]
 public sealed class SystemClock : IClock { /* ... */ }
 ```
 
-`ServiceScope` has `Scoped`, `Singleton`, and `Transient`.
+Use `Singleton` only when the service and its dependencies are thread-safe and hold no scoped state
+such as a `DbContext`. For the full contract and lifetime rules, see
+[Conventions](/docs/reference/conventions).
 
 <Callout type="warn">
-  Generic service implementations are intentionally rejected by the generator until open-generic
-  aliasing semantics are defined. Register open generics manually for now.
+  Generic service implementations are rejected ([`ELSG003`](/docs/reference/diagnostics)) until
+  open-generic aliasing semantics are defined. Register open generics manually for now.
 </Callout>
 
 ## Hosted services
 
 A class that implements `IHostedService` or derives from `BackgroundService` is auto-detected as a
-hosted service. **Hosted services must be singletons** — the generator emits an error for
-scoped/transient hosted services.
+hosted service. **Hosted services must be singletons** — a scoped or transient hosted service is an
+error ([`ELSG001`](/docs/reference/diagnostics)).
 
-Generated hosted registration follows the standard pattern, registering the concrete service and an
-`IHostedService` forwarder:
+The generator registers the concrete service (and any non-`IHostedService` contracts) and adds a
+singleton `IHostedService` forwarder that resolves the same instance, so the host runs its
+`StartAsync`/`StopAsync` while ordinary consumers inject the typed contract:
 
-```csharp
-services.AddSingleton<IMailboxPollingService, MailboxPollingService>();
-services.AddSingleton<IHostedService>(
-    sp => (IHostedService)sp.GetRequiredService<IMailboxPollingService>());
-```
-
-To keep lifecycle methods hidden from ordinary consumers, implement `IHostedService` explicitly:
-
-```csharp
+```csharp title="MailboxPollingService.cs"
 public interface IMailboxPollingService {
-    Task PollNowAsync(CancellationToken ct);
+    Task PollNowAsync(CancellationToken cancellationToken);
 }
 
 [Service(typeof(IMailboxPollingService), Scope = ServiceScope.Singleton)]
 public sealed class MailboxPollingService : IMailboxPollingService, IHostedService {
-    Task IHostedService.StartAsync(CancellationToken ct) => Task.CompletedTask;
-    Task IHostedService.StopAsync(CancellationToken ct) => Task.CompletedTask;
+    Task IHostedService.StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    Task IHostedService.StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public Task PollNowAsync(CancellationToken ct) => Task.CompletedTask;
+    public Task PollNowAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 ```
 
+Implementing `IHostedService` explicitly (as above) keeps the lifecycle methods off the public
+contract, so callers see only `PollNowAsync`. `IHostedService` is never registered as an injectable
+contract itself — only as the lifecycle forwarder.
+
 <Callout type="info">
-  For recurring or delayed background work, prefer [scheduled jobs](/docs/scheduling) over a
+  For recurring or delayed background work, prefer [scheduled jobs](/docs/capabilities/scheduling) over a
   hand-rolled `BackgroundService` loop. Scheduled jobs share one scheduler with explicit overlap,
   misfire, and resilience policies plus telemetry.
 </Callout>
+
+## Reacting to events from a service
+
+A `[Service]` can host a lightweight **event consumer** for a small side effect: an instance method
+annotated with `[ConsumeEvent]`. The marker interface on the event selects the plane
+(`IDomainEvent` → inline; `IIntegrationEvent` → after commit) and the return type selects the role
+(`void`/`Task`/`ValueTask` → fan-out subscriber; `Result<TResponse>` → the single `RequestAsync`
+responder). Optional `IEventContext` and `CancellationToken` parameters are supplied by the runtime:
+
+```csharp title="ClientNotifier.cs"
+[Service]
+public sealed class ClientNotifier {
+    [ConsumeEvent]
+    public Task OnClientCreated(ClientCreated @event, CancellationToken cancellationToken)
+        => Task.CompletedTask;
+}
+```
+
+`[ConsumeEvent]` is only valid on a `[Service]` class for the method form — a consumer method elsewhere
+reports [`ELEVT001`](/docs/reference/diagnostics). Unlike the handler form, the method form runs **no
+decorator pipeline**: reach for a handler-based consumer when the consumer is first-class business
+logic that needs tracing, validation, resilience, or cache invalidation. See
+[Consuming events](/docs/capabilities/events/consuming-events).
+
+<Cards>
+  <Card title="Conventions" href="/docs/reference/conventions">Full contract and lifetime resolution rules for `[Service]`.</Card>
+  <Card title="Modules" href="/docs/concepts/modules">How `ConfigureDefaultServices` gates and aggregates a module's registrations.</Card>
+</Cards>

@@ -1,0 +1,19 @@
+{
+  "title": "Capabilities",
+  "icon": "Boxes",
+  "pages": [
+    "index",
+    "hosting",
+    "serialization",
+    "current-user",
+    "caching",
+    "transports",
+    "scheduling",
+    "resilience",
+    "events",
+    "entity-framework",
+    "pagination",
+    "blob-storage",
+    "telemetry"
+  ]
+}

@@ -13,7 +13,7 @@ MyApp.sln
 ├─ src/
 │  ├─ MyApp.Domain/            # entities, value objects — no framework dependency
 │  ├─ MyApp.Application/       # modules, handlers, services, validators  ← Elarion + generators
-│  ├─ MyApp.Infrastructure/    # concrete repositories, mail, storage, EF Core context
+│  ├─ MyApp.Infrastructure/    # EF Core context, mail, blob storage, external services
 │  └─ MyApp.Api/               # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore
 └─ tests/
 ```
@@ -39,8 +39,11 @@ MyApp.Application/Modules/Clients/
    └─ ClientNumberGenerator.cs # [Service] implementation
 ```
 
-Generators emit `Add{Module}Handlers()`, `Add{Module}Services()`, and `Add{Module}Validators()` into
-the module namespace, which `ConfigureServices` calls.
+For each `[AppModule]`, the generators emit a `{Module}ElarionModuleServices.ConfigureDefaultServices(IServiceCollection)`
+method that auto-wires the module's handlers, services, validators, scheduled jobs, and event
+consumers. The host bootstrapper calls it for every enabled module — you do not hand-write any
+`Add{Module}…()` calls. The optional `ConfigureServices` method on the module is reserved for
+non-generated registrations. See [Modules](/docs/concepts/modules) for the full model.
 
 ## Conventions the generators rely on
 
@@ -50,14 +53,14 @@ load-bearing:
 | Convention | Why it matters |
 | --- | --- |
 | Types live **under a module namespace** | Namespace containment decides which module owns a type and which generated `Add{Module}…()` method registers it. |
-| Handlers implement `IHandler<TRequest, TResponse>` | The handler generator matches on this interface. |
-| JSON-RPC handlers nest `Command`/`Query` and `Response` | The RPC generator reads these nested types to emit typed dispatcher calls. |
+| Handlers implement `IHandler<TRequest, TResponse>` | The handler generator matches on this interface, and reads the request/response shape from it — the types may be nested in the handler or top-level. |
 | Services are annotated with `[Service]` | Marks the type for registration and contract resolution. |
 | Validators inherit `AbstractValidator<T>` | The validator generator matches FluentValidation validators. |
 | Hosted services use singleton scope | The generator rejects scoped/transient `IHostedService` with a diagnostic. |
 
 If a type is in the wrong namespace or breaks a convention, the result is a **build-time diagnostic
 or a missing generated method** — not a silent runtime failure. See
+[Conventions](/docs/reference/conventions) for the full convention tables and diagnostic ids, and
 [Troubleshooting](/docs/reference/troubleshooting) for the common cases.
 
 ## Core vs. feature modules
@@ -84,7 +87,7 @@ Use this table when deciding where code belongs:
 | --- | --- |
 | Generic handler / result / module / pipeline / RPC primitives | `Elarion` (the framework) |
 | Feature module composition and business handlers | Application project |
-| Concrete database / blob / mail / PDF / external service implementations | Infrastructure, registered by the host as a platform capability |
+| Concrete database / blob / mail / external service implementations | Infrastructure, registered by the host as a platform capability |
 | Middleware, authentication, telemetry exporters, app lifetime | API host |
 | Application-specific domain types | Domain / application projects |
 
@@ -96,11 +99,10 @@ concrete infrastructure classes, or deployment-specific packages.
 
 1. Create a module namespace, e.g. `MyApp.Application.Modules.Billing`.
 2. Add `[AppModule("Billing")]` to a static partial `BillingModule` class.
-3. In `ConfigureServices`, call the generated `services.AddBillingHandlers()`,
-   `AddBillingServices()`, and `AddBillingValidators()`.
-4. Add a source-generated `BillingJsonContext`.
-5. Add services under the namespace and annotate them with `[Service]`.
-6. Add handlers implementing `IHandler<TRequest, Result<TResponse>>`.
-7. Add validators in the same namespace.
-8. Mark JSON-RPC handlers with `[RpcMethod("billing.someAction")]`.
-9. Build so the generators emit the registration code.
+3. Add a source-generated `BillingJsonContext`.
+4. Add services under the namespace and annotate them with `[Service]`.
+5. Add handlers implementing `IHandler<TRequest, Result<TResponse>>`.
+6. Add validators in the same namespace.
+7. Mark handlers for a transport, e.g. `[RpcMethod("billing.someAction")]` or `[HttpEndpoint("billing")]`.
+8. Build. The generators emit the module's `ConfigureDefaultServices`, which the host bootstrapper
+   calls automatically — there is no registration list to maintain.

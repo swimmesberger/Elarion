@@ -1,0 +1,132 @@
+---
+title: Events
+description: An in-process eventing subsystem split by its relationship to the database transaction — inline domain events and after-commit integration events.
+---
+
+Elarion's event bus is organized around one question: **when does the event run relative to the
+database transaction?** That split — not a verb like *publish* or *notify* — is the whole API. There
+are two planes, each its own interface in `Elarion.Abstractions.Messaging`, and an event binds to
+exactly one of them through a marker interface.
+
+| Plane | Interface | Marker | Runs |
+| --- | --- | --- | --- |
+| **Domain** | `IDomainEventBus` | `IDomainEvent` | **inline**, in the caller's scope and transaction |
+| **Integration** | `IIntegrationEventBus` | `IIntegrationEvent` | **after the transaction commits**, on a separate scope |
+
+Consumers are reflection-free: the `EventConsumerRegistrationGenerator` discovers them, validates the
+signatures, and emits the registration and invocation delegates. There is no runtime assembly scanning
+or reflective method dispatch.
+
+## Binding an event to a plane
+
+An event is a plain type carrying exactly **one** marker interface. The marker decides which plane
+delivers it; the generator rejects a type that carries both.
+
+```csharp
+using Elarion.Abstractions.Messaging;
+
+// Recorded in the unit of work, delivered after commit:
+public sealed record InvoiceCreated(Guid InvoiceId, string ClientEmail) : IIntegrationEvent;
+
+// Dispatched inline, inside the publisher's transaction:
+public sealed record InvoiceLineAdded(Guid InvoiceId, decimal Amount) : IDomainEvent;
+```
+
+`[ConsumeEvent]` is the **single, unified way to subscribe** — you never pick a bus or a plane on the
+consumer. The event type's marker decides the plane, and the consumer's return type decides the role, so
+a consumer reads identically whether it runs inline or after commit. See
+[Consuming events](/docs/capabilities/events/consuming-events) for the consumer model.
+
+## Plane A — domain events (inline)
+
+`IDomainEventBus` dispatches **within the caller's DI scope**, and therefore within the caller's
+transaction. Consumers share the scoped `DbContext`, their writes commit atomically with the command,
+and **a consumer failure fails the command**. This is the right plane for in-aggregate invariants and
+synchronous side effects that must be part of the same unit of work.
+
+```csharp
+// Inside a command handler, within the unit of work — RecalculateTotals runs now,
+// same scope, same transaction, and commits together with the line:
+await domainEvents.PublishAsync(new InvoiceLineAdded(c.InvoiceId, c.Amount), ct);
+
+// Request/response is the other domain role — exactly one responder answers:
+var price = await domainEvents.RequestAsync<PriceQuote, Money>(new PriceQuote(sku), ct);
+```
+
+`PublishAsync<TEvent> where TEvent : IDomainEvent` fans out to every consumer in ascending
+`[ConsumeEvent(Order = …)]`, awaiting each in turn; if one or more consumers throw, the rest still run
+and the exceptions are aggregated and rethrown. `RequestAsync<TRequest, TResponse>` dispatches to a
+single responder and returns its `Result<TResponse>`. Domain events are **never broker-portable** — they
+are an in-process, in-transaction mechanism by definition.
+
+<Callout type="warn">
+  **A domain-event handler runs nested in the command's pipeline.** Because the domain plane dispatches
+  inline in the publisher's scope, a handler-form consumer's decorator pipeline runs *inside* the command
+  that published the event — same scope, same `DbContext`, same transaction. So a domain-event handler
+  must **not** open its own transaction or resilience scope; a nested transaction, or retrying writes
+  against the already-dirty `DbContext`, would corrupt the command's unit of work. The clean way is a
+  transaction decorator with an `AppliesTo` predicate that matches commands and integration events but
+  not domain events — see
+  [decorator pipelines](/docs/concepts/decorator-pipelines#conditional-attachment-with-appliesto).
+</Callout>
+
+## Plane B — integration events (after commit)
+
+`IIntegrationEventBus` **records** the event in the caller's unit of work and delivers it **after the
+transaction commits**, on a fresh scope, retried independently. A consumer failure never fails the
+command, and **a rollback discards the event**. This is the plane for independent, after-the-fact
+reactions — notifications, read-model projections, outbound webhooks, cross-module fan-out.
+
+```csharp
+await integrationEvents.PublishAsync(new InvoiceCreated(invoice.Id, client.Email), ct);
+```
+
+`PublishAsync<TEvent> where TEvent : IIntegrationEvent` only **records** the event; the configured
+backend delivers it after commit. Because delivery happens later on its own scope, integration consumers
+run **at-least-once** and **without an ordering guarantee** — write them to be idempotent and
+order-independent (see [Consuming events](/docs/capabilities/events/consuming-events#handling-duplicates)).
+Unlike a domain-event handler, an integration-event handler runs on a **fresh post-commit scope** with
+its own `DbContext` and transaction, so the **full** pipeline — including a transaction decorator — is
+exactly right.
+
+This is the **only broker-portable plane**: an alternative backend implements *only*
+`IIntegrationEventBus`. Two backends ship — a best-effort in-memory tier and the durable EF Core outbox.
+See [Event backends](/docs/capabilities/events/backends) for the choice and the wiring.
+
+## Choosing a plane
+
+| Use the **domain** plane when… | Use the **integration** plane when… |
+| --- | --- |
+| the reaction must be **atomic** with the command | the reaction should happen **after** the command commits |
+| a failure should **fail** the command | a failure must **not** fail the command |
+| consumers must share the command's `DbContext`/transaction | consumers run on their own scope and unit of work |
+| in-aggregate invariants, synchronous side effects | notifications, projections, webhooks, cross-module fan-out |
+
+When in doubt: if the side effect should be undone when the command rolls back, it is a **domain** event;
+if it should be retried until it succeeds *after* the command is durably committed, it is an
+**integration** event.
+
+## Module gating
+
+When the host opts into `[GenerateModuleBootstrapper]`, event consumers are associated with their owning
+module and registered through that module's generated `ConfigureDefaultServices`, gated by
+`Modules:{Name}:Enabled`. So **disabling a module also stops its events from being consumed** — no
+separate wiring, consistent with how handlers, services, validators, and scheduled jobs gate. A consumer
+whose namespace falls under no module is reported (`ELEVT003`, warning) so it is never silently dropped.
+
+## Where to next
+
+<Cards>
+  <Card title="Consuming events" href="/docs/capabilities/events/consuming-events">
+    Declare consumers in the handler form or the method form, on either plane, and keep them idempotent.
+  </Card>
+  <Card title="Event backends" href="/docs/capabilities/events/backends">
+    Choose between the best-effort in-memory integration bus and the durable EF Core outbox, and wire it.
+  </Card>
+  <Card title="ADR 0001 — Event transaction phase" href="https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0001-event-transaction-phase.md">
+    The full rationale for splitting the API by transaction phase.
+  </Card>
+  <Card title="Tutorial: Background work" href="/docs/tutorial/background-work">
+    Publish an integration event on invoice creation and deliver it durably through the outbox.
+  </Card>
+</Cards>

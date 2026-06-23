@@ -1,7 +1,6 @@
 ---
 title: Resilience
 description: Declare named retry/timeout policies as metadata, apply them to handlers and jobs, and back them with a runtime of your choice.
-icon: ShieldCheck
 ---
 
 Resilience is a framework-level capability expressed as **neutral policy metadata** plus an
@@ -151,5 +150,5 @@ attempt with a new `RunId` and the same `JobId`. `Timeout` remains per attempt:
   terminal state aged out. Use durable infrastructure if retry history must survive restarts.
 </Callout>
 
-Resilience execution is also [trace-visible](/docs/telemetry): named policy spans expose the final
+Resilience execution is also [trace-visible](/docs/capabilities/telemetry): named policy spans expose the final
 outcome and duration, and retry/timeout callbacks add span events under the default runtime.

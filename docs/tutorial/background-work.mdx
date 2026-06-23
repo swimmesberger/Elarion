@@ -5,9 +5,9 @@ description: Build the Invoicing module — send invoice emails through a resili
 
 Creating an invoice should return instantly; actually delivering the email — over flaky SMTP — should
 happen in the background and survive a transient failure. That is exactly what
-[scheduling](/docs/scheduling) and [resilience](/docs/resilience) are for. This page builds the
+[scheduling](/docs/capabilities/scheduling) and [resilience](/docs/capabilities/resilience) are for. This page builds the
 Invoicing module around that flow, announces each creation as a durable
-[integration event](/docs/events) delivered after commit, and adds a nightly cron job that flags
+[integration event](/docs/capabilities/events) delivered after commit, and adds a nightly cron job that flags
 overdue invoices.
 
 <Steps>
@@ -67,7 +67,7 @@ public sealed class SmtpInvoiceEmailSender(ILogger<SmtpInvoiceEmailSender> logge
 
 ### Declare the resilience policy
 
-A named [resilience policy](/docs/resilience) is neutral metadata the generator turns into a typed
+A named [resilience policy](/docs/capabilities/resilience) is neutral metadata the generator turns into a typed
 reference. This one retries up to four times with exponential backoff and jitter, and caps each
 attempt at 30 seconds.
 
@@ -159,7 +159,7 @@ public sealed class SendInvoiceEmailJob(
 
 Sending the email is one reaction to a new invoice; there will be others — a search-index update, an
 activity feed, an outbound webhook — and none of them should be wired into the create handler or block
-it. That is what [integration events](/docs/events) are for: published inside the command, delivered
+it. That is what [integration events](/docs/capabilities/events) are for: published inside the command, delivered
 **after it commits**, on their own scope, retried independently.
 
 The event is a record carrying the marker that binds it to the after-commit plane:
@@ -217,7 +217,7 @@ public sealed class InvoiceNotifications(
 written in the same transaction as the invoice — commit them both, or neither. The consumer is a
 `[ConsumeEvent]` handler, so it is discovered, registered, and module-gated automatically like every
 other handler; the
-host only chooses *how* delivery happens by wiring the [EF Core outbox](/docs/events#the-ef-core-outbox)
+host only chooses *how* delivery happens by wiring the [EF Core outbox](/docs/capabilities/events#the-ef-core-outbox)
 in [Host the API](/docs/tutorial/hosting), which is what makes the event survive a crash between commit
 and delivery.
 
@@ -339,8 +339,8 @@ across every deferred-retry attempt, while each attempt gets its own `RunId`. `G
 the aggregate state — `WaitingRetry` between attempts, `Succeeded` only once an attempt actually
 delivers, `Failed` once retries are exhausted — which is exactly what a caller asking "is the whole
 send done yet?" needs. `RunId` is for operator/diagnostic tooling acting on one specific attempt from
-a [snapshot](/docs/scheduling/inspection); polling it would lose the handle the moment a retry starts
-a new run. See [JobId vs. RunId](/docs/scheduling/runtime-jobs#jobid-vs-runid).
+a [snapshot](/docs/capabilities/scheduling/inspection); polling it would lose the handle the moment a retry starts
+a new run. See [JobId vs. RunId](/docs/capabilities/scheduling/runtime-jobs#jobid-vs-runid).
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/GetSendStatus.cs"
 using Elarion.Abstractions;
@@ -421,7 +421,7 @@ public sealed class ListInvoices(IAppDbContext db, ICurrentUser user)
 
 ### Chase overdue invoices nightly
 
-A recurring [scheduled job](/docs/scheduling/schedules) flags sent-but-unpaid invoices as overdue
+A recurring [scheduled job](/docs/capabilities/scheduling/schedules) flags sent-but-unpaid invoices as overdue
 every morning. It uses **inline** resilience (`[Resilient]`) — short, idempotent work where one
 occurrence owns its retries — and a config placeholder for the schedule so operators can retune it
 without a redeploy.

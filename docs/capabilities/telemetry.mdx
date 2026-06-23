@@ -1,7 +1,6 @@
 ---
 title: Telemetry & observability
 description: Elarion emits OpenTelemetry-compatible traces and metrics through System.Diagnostics — the host chooses exporters, the runtime forces no SDK dependency.
-icon: Activity
 ---
 
 Elarion emits OpenTelemetry-compatible signals through `System.Diagnostics.ActivitySource` and
@@ -66,4 +65,4 @@ optional `instrumentation` hook (`RpcInstrumentation`) on `createRpcClient`/`cre
 adapter — over `@opentelemetry/api`, or a hand-rolled W3C `traceparent` generator — to start a span
 per request/batch, inject trace-context headers, and record the outcome. The generated client never
 imports a tracing SDK, so client-side tracing stays a host decision. See
-[TypeScript client](/docs/json-rpc/typescript-client).
+[TypeScript client](/docs/capabilities/transports/typescript-client).

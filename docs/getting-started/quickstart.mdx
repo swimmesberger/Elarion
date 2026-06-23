@@ -37,25 +37,21 @@ will contain your handlers and services. Modules are enabled by default.
 ```csharp title="MyApp.Application/Modules/Clients/ClientsModule.cs"
 using System.Text.Json.Serialization.Metadata;
 using Elarion.Abstractions.Modules;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace MyApp.Application.Modules.Clients;
 
 [AppModule("Clients")]
 public static partial class ClientsModule {
-    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
-        services.AddClientsHandlers();   // generated
-    }
-
     public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() =>
         ClientsJsonContext.Default;
 }
 ```
 
-`AddClientsHandlers()` does not exist yet — the generator emits it from the handlers you add under the
-`Clients` namespace. It appears after your next build. (When the module has `[Service]` classes, also
-call the generated `AddClientsServices()`.)
+That is the whole module declaration. You don't register its handlers, services, or validators by hand —
+under `[GenerateModuleBootstrapper]` (added below) the generators emit a `ConfigureDefaultServices` that
+the host bootstrapper calls for you, gated by `Modules:Clients:Enabled`. The optional `ConfigureServices`
+hook is reserved for additional, non-generated wiring (options binding, third-party libraries). See
+[Conventions](/docs/reference/conventions).
 
 </Step>
 
@@ -65,7 +61,7 @@ call the generated `AddClientsServices()`.)
 
 Handlers access data through a generated `IAppDbContext` interface — there is no repository layer.
 Mark an entity with `[DbEntity]`, declare the context interface with `[GenerateDbSets]`, and let the
-[EF Core generator](/docs/entity-framework) emit the `DbSet`s.
+[EF Core generator](/docs/capabilities/entity-framework) emit the `DbSet`s.
 
 ```csharp title="MyApp.Application/Data/Client.cs"
 using Elarion.EntityFrameworkCore;
@@ -148,9 +144,10 @@ public sealed class GetClient(IAppDbContext db)
 }
 ```
 
-The RPC generator requires the conventional shape: a nested `Query` (or `Command`) request type, a
-nested `Response` type, and an `IHandler<TRequest, Result<TResponse>>` implementation. The handler
-queries the generated `db.Clients` `DbSet` directly with EF Core async LINQ.
+The RPC generator reads the request and response straight from the
+`IHandler<TRequest, Result<TResponse>>` interface — here the nested `Query` and `Response` types, though
+they could equally be top-level; nesting carries no semantic weight. The handler queries the generated
+`db.Clients` `DbSet` directly with EF Core async LINQ.
 
 </Step>
 
@@ -294,10 +291,10 @@ mapped from `AppError.NotFound`.
   <Card title="Core concepts" href="/docs/concepts">
     Handlers, results, modules, services, validators, and pipelines in depth.
   </Card>
-  <Card title="TypeScript client" href="/docs/json-rpc/typescript-client">
+  <Card title="TypeScript client" href="/docs/capabilities/transports/typescript-client">
     Export a schema and generate a typed frontend client for `clients.get`.
   </Card>
-  <Card title="Scheduled jobs" href="/docs/scheduling">
+  <Card title="Scheduled jobs" href="/docs/capabilities/scheduling">
     Add recurring and one-off background work to your module.
   </Card>
 </Cards>

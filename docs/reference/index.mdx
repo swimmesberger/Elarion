@@ -1,0 +1,32 @@
+---
+title: Reference
+description: Exhaustive, lookup-oriented facts — packages, configuration keys, attributes, diagnostics, conventions, and the result/error model.
+---
+
+Reference pages are for looking things up while you work — accurate and complete, with no tutorials
+or opinions. For the reasoning behind the design, see [Why Elarion](/docs/why-elarion); to learn by
+building, see the [Tutorial](/docs/tutorial).
+
+<Cards>
+  <Card title="Packages" href="/docs/reference/packages">
+    What each Elarion package contains, its dependencies, and when you need it.
+  </Card>
+  <Card title="Configuration" href="/docs/reference/configuration">
+    Every configuration key and MSBuild property Elarion reads, with defaults.
+  </Card>
+  <Card title="Attributes" href="/docs/reference/attributes">
+    The full attribute catalog — parameters, defaults, and what each one triggers.
+  </Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">
+    Every `EL*` generator and analyzer diagnostic, what it means, and how to fix it.
+  </Card>
+  <Card title="Conventions & layout" href="/docs/reference/conventions">
+    The naming and namespace conventions the generators depend on, and the dependency rules.
+  </Card>
+  <Card title="Result & error model" href="/docs/reference/result-and-errors">
+    `Result<T>`, `AppError`, and `ErrorKind` — and how each kind maps to JSON-RPC and HTTP.
+  </Card>
+  <Card title="Troubleshooting" href="/docs/reference/troubleshooting">
+    Common symptoms when wiring Elarion, their likely cause, and the fix.
+  </Card>
+</Cards>

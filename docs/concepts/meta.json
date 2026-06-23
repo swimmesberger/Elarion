@@ -1,15 +1,15 @@
 {
-  "title": "Core Concepts",
+  "title": "Concepts",
+  "icon": "Lightbulb",
   "pages": [
     "index",
+    "source-generation",
     "handlers",
     "results-and-errors",
     "modules",
     "services",
     "validators",
     "decorator-pipelines",
-    "cross-module-communication",
-    "caching",
-    "current-user"
+    "cross-module-communication"
   ]
 }

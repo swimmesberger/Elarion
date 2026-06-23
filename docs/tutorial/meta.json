@@ -1,11 +1,5 @@
 {
   "title": "Tutorial",
-  "pages": [
-    "index",
-    "modeling",
-    "features",
-    "background-work",
-    "hosting",
-    "frontend"
-  ]
+  "icon": "GraduationCap",
+  "pages": ["index", "modeling", "features", "background-work", "hosting", "frontend"]
 }

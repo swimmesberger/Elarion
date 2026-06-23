@@ -59,7 +59,7 @@ These two identifiers serve different purposes:
   cancellation API: it cancels a queued job, a waiting retry attempt, or the active attempt without
   the caller needing to know the current state.
 - **`RunId`** identifies *one* scheduler attempt, for diagnostics and snapshots. With
-  [deferred retry](/docs/resilience), each attempt gets a new `RunId` but keeps the same `JobId`.
+  [deferred retry](/docs/capabilities/resilience), each attempt gets a new `RunId` but keeps the same `JobId`.
 
 `CancelRunAsync(runId, ct)` targets one concrete attempt — use it for operator/diagnostic workflows
 acting on a specific run shown in a snapshot. Job code can also request cancellation through
@@ -69,5 +69,5 @@ acting on a specific run shown in a snapshot. Job code can also request cancella
 
 Runtime jobs can opt into scheduler-deferred retry, which releases scheduler concurrency between
 attempts and exposes `WaitingRetry` status — the right model when another handler needs to observe
-progress. See [Resilience](/docs/resilience#scheduler-resilience) for `EnqueueAsync` with a policy
+progress. See [Resilience](/docs/capabilities/resilience#scheduler-resilience) for `EnqueueAsync` with a policy
 reference and `ScheduledJobResilienceMode.DeferredRetry`.

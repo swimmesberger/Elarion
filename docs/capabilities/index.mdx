@@ -1,0 +1,68 @@
+---
+title: Capabilities
+description: The opt-in platform pieces you wire into a host — transports, scheduling, events, EF Core, caching, telemetry, and more.
+---
+
+[Concepts](/docs/concepts) covers the application model you cannot avoid: every Elarion app has
+handlers, results, modules, and the source generation that wires them. **Capabilities are different —
+they are the platform pieces you opt into and explicitly wire.** You can ship a working application
+without any of them, and add each one only when a real requirement calls for it.
+
+That line is the framework's guiding principle in practice:
+
+> Auto-detect application patterns, explicitly wire platform capabilities.
+
+Each capability below is independent. Add the package, opt the relevant handlers in with an attribute,
+and wire the runtime in your host.
+
+## Expose your handlers
+
+<Cards>
+  <Card title="Hosting & composition" href="/docs/capabilities/hosting">
+    Compose modules into an ASP.NET Core host with the generated bootstrapper, feature gating, and
+    endpoint mapping.
+  </Card>
+  <Card title="Serialization & AOT" href="/docs/capabilities/serialization">
+    Compose per-module JSON contexts into one AOT-friendly serializer shared across transports.
+  </Card>
+  <Card title="Transports" href="/docs/capabilities/transports">
+    Map the same handler over HTTP, JSON-RPC, or MCP — and decide which one fits.
+  </Card>
+</Cards>
+
+## Application capabilities
+
+<Cards>
+  <Card title="Current user" href="/docs/capabilities/current-user">
+    Transport-neutral access to the authenticated caller, without depending on `HttpContext`.
+  </Card>
+  <Card title="Caching" href="/docs/capabilities/caching">
+    Declarative handler result caching with `[Cacheable]` and tag-based invalidation.
+  </Card>
+  <Card title="Scheduling" href="/docs/capabilities/scheduling">
+    Source-generated recurring and one-off jobs on one in-memory scheduler.
+  </Card>
+  <Card title="Resilience" href="/docs/capabilities/resilience">
+    Named retry and timeout policies applied to handlers and jobs.
+  </Card>
+  <Card title="Events & messaging" href="/docs/capabilities/events">
+    In-process domain events and after-commit integration events, with a durable EF Core outbox.
+  </Card>
+</Cards>
+
+## Data & storage
+
+<Cards>
+  <Card title="Entity Framework Core" href="/docs/capabilities/entity-framework">
+    Generated `DbSet`s and entity configuration behind an interface-first `IAppDbContext`.
+  </Card>
+  <Card title="Pagination" href="/docs/capabilities/pagination">
+    Transport-neutral keyset and offset paging that produces a `Page<T>`.
+  </Card>
+  <Card title="Blob storage" href="/docs/capabilities/blob-storage">
+    Provider-neutral, streaming-first blob contracts with a PostgreSQL implementation.
+  </Card>
+  <Card title="Telemetry" href="/docs/capabilities/telemetry">
+    OpenTelemetry-compatible traces and metrics through `System.Diagnostics` — no SDK lock-in.
+  </Card>
+</Cards>

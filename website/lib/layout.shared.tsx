@@ -16,8 +16,8 @@ export function baseOptions(): BaseLayoutProps {
         active: 'nested-url',
       },
       {
-        text: 'Philosophy',
-        url: '/docs/philosophy',
+        text: 'Why Elarion',
+        url: '/docs/why-elarion',
       },
       {
         text: 'Packages',

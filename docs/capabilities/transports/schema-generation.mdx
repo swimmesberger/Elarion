@@ -3,7 +3,7 @@ title: Schema generation
 description: Export rpc-schema.json automatically during dotnet build with the Elarion.AspNetCore.SchemaGeneration MSBuild package.
 ---
 
-`rpc-schema.json` is the contract that drives the [TypeScript client](/docs/json-rpc/typescript-client).
+`rpc-schema.json` is the contract that drives the [TypeScript client](/docs/capabilities/transports/typescript-client).
 You can export it in code with `JsonRpcSchemaExporter`, or — more conveniently — have it written
 automatically during `dotnet build`.
 
@@ -70,5 +70,5 @@ if (!JsonRpcSchemaGeneration.IsRunning) {
 
 Schema generation requires the host to register a **frozen** `JsonRpcDispatcher` before
 `builder.Build()`. If the dispatcher is missing, unfrozen, or empty, the build target fails with an
-actionable error instead of writing a stale schema. See [Hosting](/docs/json-rpc/hosting) for the
+actionable error instead of writing a stale schema. See [Hosting](/docs/capabilities/hosting) for the
 registration.
