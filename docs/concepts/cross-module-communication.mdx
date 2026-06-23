@@ -105,6 +105,51 @@ public partial interface IReportingApi;
 | `ELAPI004` | Two handlers map to one method name on the facade. |
 | `ELMOD002` | A type depends on another module's internal type instead of a `[ModuleContract]` (warning). |
 
+## Error handling on the contract surface
+
+A contract method's **error channel** is part of its public shape, so choose it deliberately. **Prefer
+returning `Result<T>`** — it matches the handler layer (the implementation is a pure map, no `try/catch`),
+makes the success/error union explicit and total in the signature, and carries the transport-neutral
+`AppError`/`ErrorKind` taxonomy that survives a later move out of process.
+
+```csharp
+[ModuleContract]
+public interface ICustomerLookup {
+    ValueTask<Result<Customer>> GetAsync(CustomerId id, CancellationToken ct = default);   // preferred
+}
+```
+
+You **can** instead publish an exception-based contract — return the bare value and throw on failure — to
+keep the interface free of the `Result<T>` dependency. `Result` then leaves the interface and the
+in-process implementation maps the handler's `Result` to value-or-throw:
+
+```csharp
+[ModuleContract]
+public interface ICustomerLookup {
+    ValueTask<Customer> GetAsync(CustomerId id, CancellationToken ct = default);           // throws on failure
+}
+
+[Service]
+internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
+    public async ValueTask<Customer> GetAsync(CustomerId id, CancellationToken ct = default) {
+        var result = await api.GetCustomer(new GetCustomer.Query(id.Value), ct);
+        if (!result.IsSuccess) throw MapToException(result.Error);   // module-owned mapping
+        var r = result.Value;
+        return new Customer(r.Id, r.Name);
+    }
+}
+```
+
+<Callout type="info">
+  Either way the **interface stays stable across a later gRPC extraction** — only the implementation's
+  mapping changes. A `Result<T>` contract maps elegantly to a protobuf `oneof` response (success *or*
+  error, the on-the-wire `Result`); an exception contract maps to the
+  [Google Rich Error Model](https://grpc.io/docs/guides/error/) (`google.rpc.Status`). See
+  [ADR-0005](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0005-cross-module-error-channel.md)
+  for the `.proto` shapes and the `ErrorKind` → `google.rpc.Code` table. **Prefer `Result`; only drop it
+  when a concrete need calls for it.**
+</Callout>
+
 ## Why not `IDomainEventBus.RequestAsync`?
 
 `RequestAsync` is a mediator-style in-process request/response, but Plane A is **in-process by nature**
