@@ -17,7 +17,7 @@ and deployment quirks belong in consuming repositories, not here.
 
 ## Package layout
 
-- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts, result types, pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, messaging contracts (`IDomainEvent`/`IIntegrationEvent` markers, `IDomainEventBus`/`IIntegrationEventBus`, `IEventContext`, `[ConsumeEvent]`, `EventSubscriptionDescriptor`), and source-generation triggers.
+- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts (`IHandler<TRequest, TResponse>` plus the `IHandler<T>` no-content convenience that inherits `IHandler<T, Result<Unit>>` via a default interface method bridging the non-generic `Result` — so the handler generator and decorators stay unchanged), result types (`Result<T>`, the non-generic `Result`, and the `Unit` no-value payload), pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, messaging contracts (`IDomainEvent`/`IIntegrationEvent` markers, `IDomainEventBus`/`IIntegrationEventBus`, `IEventContext`, `[ConsumeEvent]`, `EventConsumerFailedException`, `EventSubscriptionDescriptor`), and source-generation triggers.
 - `Elarion` — runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, the in-memory scheduler, and the in-memory **domain** event bus (Plane A inline dispatch, `AddInMemoryDomainEventBus`) plus the shared `EventSubscriptionRegistry`/`EventContext`. EF-agnostic: the in-memory integration tier lives in `Elarion.Messaging.InMemory`.
 - `Elarion.Blobs` — implementation-neutral, streaming-first blob storage contracts and DTOs. `IBlobStore` is a minimal core (`SaveAsync(BlobUploadRequest, Stream)`, `OpenReadAsync` returning a disposable `BlobDownload` of metadata + an open content stream, plus metadata/delete/exists), so callers never have to buffer a whole blob and backends implement only the primitives. Ergonomic `byte[]`/file saves and buffered/copy-to reads (`SaveFromFileAsync`, `DownloadContentAsync`, `ReadAllBytesAsync`, `DownloadToAsync`) live as `BlobStoreExtensions` over that core; `BlobUploadRequest.ContentLength` is an optional hint while the recorded `Size` is always the actual bytes written.
 - `Elarion.Blobs.PostgreSql` — PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O. Writes stream a seekable source straight into the `bytea` column without buffering, and stream a non-seekable source without buffering too when the caller supplies a `BlobUploadRequest.ContentLength` hint (the bind requires the length up front; the actual bytes are verified against the hint so the recorded `Size` stays truthful), buffering only when the hint is absent; reads are buffered for now, with a documented `CommandBehavior.SequentialAccess` + `NpgsqlDataReader.GetStream` upgrade path that attaches the reader/connection to the returned `BlobDownload`.
@@ -156,11 +156,34 @@ for the full rationale.
    provides the commit-gating the in-memory scope buffer otherwise supplies.
 
 Marker interfaces `IDomainEvent` / `IIntegrationEvent` bind each event to exactly one plane;
-the generator rejects a type carrying both. Consumers are instance methods on `[Service]`
-classes annotated `[ConsumeEvent]`; the message type's marker selects the plane and the return
-type selects the role (`void`/`Task`/`ValueTask` → fan-out subscriber, `Result<TResponse>` →
-the single responder). The optional `IEventContext`/`IEventContext<TEvent>` and
-`CancellationToken` parameters are supplied by the runtime.
+the generator rejects a type carrying both. `[ConsumeEvent]` applies in two forms, and the
+**handler form is the preferred way** — a consumer is a first-class unit of business logic with
+the full decorator pipeline, exactly like a command/query handler. The consumer is a class
+implementing `IHandler<TEvent, Result<T>>` (or the `IHandler<TEvent>` sugar) whose request type
+*is* the event, annotated with a class-level `[ConsumeEvent]`. It is dispatched through its full
+decorator pipeline (tracing, resilience, validation, cache-invalidation) — the generated
+descriptor resolves the `IHandler<,>` interface from DI so the decorated chain runs — and its
+role is inferred from the response type: `Result<Unit>` (or the `IHandler<TEvent>` sugar) is a
+**fan-out subscriber** whose failed `Result` surfaces as an `EventConsumerFailedException` (each
+backend handles it per its plane — domain aggregates and rethrows, failing the command; the
+in-memory integration pump logs and isolates; the outbox retries), while a domain handler
+returning `Result<T>` (`T ≠ Unit`) is the **single `RequestAsync` responder**, returning its
+typed `Result<T>` to the caller without throwing. Integration events are fan-out only, so an
+integration handler returning a non-`Unit` `Result<T>` is rejected (`ELEVT005`). A class-level
+`[ConsumeEvent]` on a non-handler is reported (`ELEVT005`).
+
+Because the domain plane dispatches **inline in the publisher's scope**, a domain-event handler's
+decorator pipeline runs **nested within the command's** (same scope, `DbContext`, and transaction):
+give domain consumers a read-only/minimal pipeline (no transaction/resilience — an app transaction
+decorator must *join* the ambient transaction, never nest), while integration consumers run on a
+**fresh post-commit scope** and correctly take the full pipeline (their own transaction).
+
+The **method form** is a lightweight alternative for a small side effect on an existing
+`[Service]`: the consumer is an instance method on a `[Service]` class (no decorator pipeline);
+the marker selects the plane and the return type selects the role (`void`/`Task`/`ValueTask` →
+fan-out subscriber, `Result<TResponse>` → the single responder). Its optional
+`IEventContext`/`IEventContext<TEvent>` and `CancellationToken` parameters are supplied by the
+runtime.
 
 `EventConsumerRegistrationGenerator` (triggered by `[GenerateEventConsumers]` or
 `[UseElarion]`) discovers consumers, validates signatures (diagnostics `ELEVT001`/`ELEVT002`/

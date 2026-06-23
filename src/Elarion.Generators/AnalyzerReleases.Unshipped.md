@@ -16,7 +16,7 @@ ELEVT001 | Elarion.Generators | Error | Event consumer must be declared on a [Se
 ELEVT002 | Elarion.Generators | Error | Invalid event consumer signature
 ELEVT003 | Elarion.Generators | Warning | Event consumer is not in any module
 ELEVT004 | Elarion.Generators | Error | Duplicate request responder
-ELMCP002 | Elarion.Mcp | Warning | Duplicate MCP tool name under the default tool-name transform
+ELEVT005 | Elarion.Generators | Error | Invalid handler-form event consumer
 ELMCP003 | Elarion.Mcp | Warning | MCP customization is ignored when the handler excludes MCP
 ELHTTP001 | Elarion.Http | Warning | HTTP endpoint handler is missing a request/response shape
 ELHTTP002 | Elarion.Http | Warning | Duplicate HTTP endpoint route

@@ -172,9 +172,9 @@ namespace Billing.Application.Modules.Invoicing.Events;
 public sealed record InvoiceCreated(Guid InvoiceId) : IIntegrationEvent;
 ```
 
-A consumer is an instance method on a `[Service]` class, annotated `[ConsumeEvent]`. It runs on a fresh
-scope once the invoice has committed, so it reads its own data and its failures never touch the original
-command:
+A consumer is a handler whose request *is* the event — an `IHandler<InvoiceCreated>` annotated with a
+class-level `[ConsumeEvent]`, returning `Result`. It runs on a fresh scope once the invoice has
+committed, so it reads its own data and its failures never touch the original command:
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Events/InvoiceNotifications.cs"
 using Billing.Application.Data;
@@ -185,21 +185,21 @@ using Microsoft.Extensions.Logging;
 
 namespace Billing.Application.Modules.Invoicing.Events;
 
-[Service]
+[ConsumeEvent]
 public sealed class InvoiceNotifications(
     IAppDbContext db,
     ILogger<InvoiceNotifications> logger
-) {
-    [ConsumeEvent]
-    public async ValueTask OnInvoiceCreated(InvoiceCreated e, CancellationToken ct) {
+) : IHandler<InvoiceCreated> {
+    public async ValueTask<Result> HandleAsync(InvoiceCreated e, CancellationToken ct) {
         var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == e.InvoiceId, ct);
         if (invoice is null) {
-            return;
+            return Result.Success();
         }
 
         var client = await db.Clients.FirstAsync(c => c.Id == invoice.ClientId, ct);
         // A real consumer would push to a webhook, search index, or notification service.
         logger.LogInformation("Invoice {Number} created for {Email}", invoice.Number, client.Email);
+        return Result.Success();
     }
 }
 ```
@@ -212,7 +212,8 @@ public sealed class InvoiceNotifications(
 
 `CreateInvoice` (next step) publishes this **immediately before `SaveChanges`**, so the event row is
 written in the same transaction as the invoice — commit them both, or neither. The consumer is a
-`[ConsumeEvent]` on a `[Service]`, so it is discovered, registered, and module-gated automatically; the
+`[ConsumeEvent]` handler, so it is discovered, registered, and module-gated automatically like every
+other handler; the
 host only chooses *how* delivery happens by wiring the [EF Core outbox](/docs/events#the-ef-core-outbox)
 in [Host the API](/docs/tutorial/hosting), which is what makes the event survive a crash between commit
 and delivery.

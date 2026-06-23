@@ -389,6 +389,169 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             .Should().BeTrue();
     }
 
+    [Fact]
+    public void GenerateEventConsumers_HandlerForm_DomainEvent_EmitsHandlerInvoker() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record InvoiceCreated(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Messaging.ConsumeEvent(Order = 2)]
+                public sealed class ProjectInvoice : Elarion.Abstractions.IHandler<InvoiceCreated> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                        InvoiceCreated request,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        generated.Should().Contain("EventType = typeof(global::Sample.Events.InvoiceCreated)");
+        generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Domain");
+        generated.Should().Contain("Order = 2");
+        generated.Should().Contain(
+            "ServiceType = typeof(global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Unit>>)");
+        generated.Should().Contain("InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
+        generated.Should().Contain(
+            "var handler = serviceProvider.GetRequiredService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Unit>>>();");
+        generated.Should().Contain(
+            "var result = await handler.HandleAsync((global::Sample.Events.InvoiceCreated)@event, ct).ConfigureAwait(false);");
+        generated.Should().Contain(
+            "throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+        // The handler is registered by the handler generator, not re-registered here.
+        generated.Should().NotContain("TryAddScoped<global::Elarion.Abstractions.IHandler");
+        generated.Should().NotContain("TryAddScoped<global::Sample.Events.ProjectInvoice>");
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_HandlerForm_IntegrationEvent_EmitsIntegrationPlane() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record InvoiceShipped(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class NotifyShipment : Elarion.Abstractions.IHandler<InvoiceShipped> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                        InvoiceShipped request,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Integration");
+        generated.Should().Contain("InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_HandlerForm_DomainTypedResponse_EmitsResponder() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record Recompute(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class RecomputeTotals
+                    : Elarion.Abstractions.IHandler<Recompute, Elarion.Abstractions.Result<int>> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result<int>> HandleAsync(
+                        Recompute request,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result<int>.Success(0));
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        // A domain handler returning Result<T> (T != Unit) is the single RequestAsync responder.
+        generated.Should().Contain("ResponseType = typeof(int)");
+        generated.Should().Contain("InvokeRequestAsync = static async (serviceProvider, request, context, ct) =>");
+        generated.Should().Contain(
+            "var handler = serviceProvider.GetRequiredService<global::Elarion.Abstractions.IHandler<global::Sample.Events.Recompute, global::Elarion.Abstractions.Result<int>>>();");
+        generated.Should().Contain(
+            "return (object)await handler.HandleAsync((global::Sample.Events.Recompute)request, ct).ConfigureAwait(false);");
+        // A responder hands its Result<T> back to the caller; it never throws on failure.
+        generated.Should().NotContain("EventConsumerFailedException");
+        generated.Should().NotContain("if (!result.IsSuccess)");
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_HandlerForm_IntegrationTypedResponse_EmitsDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record Notified(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class BadIntegrationResponder
+                    : Elarion.Abstractions.IHandler<Notified, Elarion.Abstractions.Result<int>> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result<int>> HandleAsync(
+                        Notified request,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result<int>.Success(0));
+                }
+            }
+            """);
+
+        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT005"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELEVT005" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_HandlerForm_DuplicateResponder_EmitsDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record GetTotal(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class FirstTotals : Elarion.Abstractions.IHandler<GetTotal, Elarion.Abstractions.Result<int>> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result<int>> HandleAsync(
+                        GetTotal request, System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result<int>.Success(1));
+                }
+
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class SecondTotals : Elarion.Abstractions.IHandler<GetTotal, Elarion.Abstractions.Result<int>> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result<int>> HandleAsync(
+                        GetTotal request, System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result<int>.Success(2));
+                }
+            }
+            """);
+
+        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT004"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELEVT004" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_HandlerForm_NotAHandler_EmitsDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class NotAHandler { }
+            }
+            """);
+
+        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT005"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELEVT005" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
     private static string CreateSource(
         string testSource,
         string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateEventConsumers]",

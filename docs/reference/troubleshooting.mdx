@@ -17,7 +17,8 @@ rather than a runtime failure. This table maps the common symptoms to fixes.
 | Hosted service registration fails a diagnostic | The hosted service uses `Scoped`/`Transient` scope. | Use `Scope = ServiceScope.Singleton`. |
 | Generic service registration fails a diagnostic | `[Service]` is on a generic type or one nested in a generic type. | Register open generics manually for now. |
 | Validators are not registered | The validator is outside the module namespace or does not inherit `AbstractValidator<T>`. | Move it under the module namespace; reference FluentValidation. |
-| Event consumer never runs (`ELEVT003`) | The `[ConsumeEvent]` method's namespace is under no `[AppModule]`, so it is not registered. | Move the consumer under a module's namespace so that module wires it. |
+| Event consumer never runs (`ELEVT003`) | The `[ConsumeEvent]` consumer's namespace is under no `[AppModule]`, so it is not registered. | Move the consumer under a module's namespace so that module wires it. |
+| Handler-form consumer fails a diagnostic (`ELEVT005`) | A class-level `[ConsumeEvent]` is not on an `IHandler<TEvent, Result<T>>` (or `IHandler<TEvent>`) whose request is an event, or an integration handler returns a non-`Unit` `Result<T>` (integration events are fan-out only). | Implement the handler interface with an event request, and have integration handlers return `Result` / `Result<Unit>`. |
 | RPC method is missing | The host lacks `[GenerateModuleBootstrapper]`, the handler lacks `[RpcMethod]`, the handler's namespace is under no `[AppModule]`, or nested `Command`/`Query` and `Response` types are missing. | Add the trigger, move the handler under a module, add the marker, and follow the handler shape convention. |
 | Module services do not run | The module is disabled via `Modules:{Name}:Enabled=false`, or `[AppModule]` is missing. | Check configuration and the module attribute. |
 
