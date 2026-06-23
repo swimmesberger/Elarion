@@ -61,15 +61,15 @@ function Hero() {
         style={{ animationDelay: '2s' }}
       />
 
-      <div className="mx-auto grid w-full max-w-7xl items-center gap-14 px-6 py-20 lg:grid-cols-[1.05fr_1fr] lg:py-28">
-        <div className="flex flex-col items-start">
+      <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-14 px-6 py-20 lg:grid-cols-[1.05fr_1fr] lg:py-28">
+        <div className="flex min-w-0 flex-col items-start">
           <span className="rise eyebrow flex items-center gap-2" style={{ animationDelay: '0ms' }}>
             <span className="size-1.5 rounded-full bg-aqua" />
             Application framework for .NET
           </span>
 
           <h1
-            className="rise mt-6 font-display text-5xl font-semibold leading-[1.02] tracking-[-0.03em] text-fd-foreground sm:text-6xl lg:text-[4.4rem]"
+            className="rise mt-6 font-display text-4xl font-semibold leading-[1.04] tracking-[-0.03em] text-fd-foreground sm:text-6xl sm:leading-[1.02] lg:text-[4.4rem]"
             style={{ animationDelay: '80ms' }}
           >
             Declare intent.
@@ -114,7 +114,7 @@ function Hero() {
           </div>
         </div>
 
-        <div className="rise lg:justify-self-end" style={{ animationDelay: '260ms' }}>
+        <div className="rise min-w-0 lg:justify-self-end" style={{ animationDelay: '260ms' }}>
           <CodeWindow filename="Clients/GetClient.cs" badge="C# 14" className="w-full max-w-xl">
             <HandlerSnippet />
           </CodeWindow>
@@ -226,8 +226,8 @@ function TrustStrip() {
 function Fanout() {
   return (
     <section className="relative border-b border-fd-border py-24">
-      <div className="mx-auto grid w-full max-w-7xl items-center gap-14 px-6 lg:grid-cols-[0.85fr_1.15fr]">
-        <Reveal className="flex flex-col items-start">
+      <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-14 px-6 lg:grid-cols-[0.85fr_1.15fr]">
+        <Reveal className="flex min-w-0 flex-col items-start">
           <SectionEyebrow>The core idea</SectionEyebrow>
           <h2 className="mt-4 max-w-md font-display text-4xl font-semibold tracking-[-0.02em] text-fd-foreground">
             One class. <span className="text-gradient">Every surface.</span>
@@ -258,7 +258,7 @@ function Fanout() {
           </Link>
         </Reveal>
 
-        <Reveal delay={120} className="rounded-3xl border border-fd-border bg-fd-card/40 p-5 sm:p-8">
+        <Reveal delay={120} className="min-w-0 rounded-3xl border border-fd-border bg-fd-card/40 p-5 sm:p-8">
           <FanoutDiagram />
         </Reveal>
       </div>
