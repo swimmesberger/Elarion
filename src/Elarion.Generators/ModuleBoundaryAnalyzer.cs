@@ -25,7 +25,7 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
     private const string ServiceAttributeMetadataName = "Elarion.Abstractions.ServiceAttribute";
     private const string ModuleContractAttributeMetadataName = "Elarion.Abstractions.Modules.ModuleContractAttribute";
     private const string DbEntityAttributeMetadataName = "Elarion.EntityFrameworkCore.DbEntityAttribute";
-    private const string HandlerInterfaceDisplay = "Elarion.Abstractions.IHandler<TRequest, TResponse>";
+    private const string HandlerInterfaceMetadataName = "Elarion.Abstractions.IHandler`2";
 
     private static readonly DiagnosticDescriptor CrossModuleInternalReference = new(
         "ELMOD002",
@@ -38,9 +38,11 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         "A module should collaborate with another module through a published [ModuleContract], not by " +
         "injecting or depending on the other module's internal [Service], handler, or entity types.");
 
-    /// <inheritdoc />
-    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
+    private static readonly ImmutableArray<DiagnosticDescriptor> SupportedDiagnosticsArray =
         ImmutableArray.Create(CrossModuleInternalReference);
+
+    /// <inheritdoc />
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => SupportedDiagnosticsArray;
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context)
@@ -53,15 +55,16 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
             if (appModule is null)
                 return;
 
-            var modules = CollectModules(start.Compilation, appModule);
+            var modules = CollectModules(start.Compilation, appModule, start.CancellationToken);
             if (modules.Count < 2)
                 return; // A single module (or none) has no cross-module boundary to enforce.
 
             var serviceAttr = start.Compilation.GetTypeByMetadataName(ServiceAttributeMetadataName);
             var contractAttr = start.Compilation.GetTypeByMetadataName(ModuleContractAttributeMetadataName);
             var entityAttr = start.Compilation.GetTypeByMetadataName(DbEntityAttributeMetadataName);
+            var handlerInterface = start.Compilation.GetTypeByMetadataName(HandlerInterfaceMetadataName);
 
-            var state = new BoundaryState(modules, serviceAttr, contractAttr, entityAttr);
+            var state = new BoundaryState(modules, serviceAttr, contractAttr, entityAttr, handlerInterface);
             start.RegisterSymbolAction(symbolContext => AnalyzeType(symbolContext, state), SymbolKind.NamedType);
         });
     }
@@ -146,9 +149,12 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         if (HasAttribute(type, state.ServiceAttribute) || HasAttribute(type, state.EntityAttribute))
             return true;
 
+        if (state.HandlerInterface is null)
+            return false;
+
         foreach (var iface in type.AllInterfaces)
         {
-            if (iface.OriginalDefinition.ToDisplayString() == HandlerInterfaceDisplay)
+            if (SymbolEqualityComparer.Default.Equals(iface.OriginalDefinition, state.HandlerInterface))
                 return true;
         }
 
@@ -169,23 +175,25 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
-    private static List<ModuleInfo> CollectModules(Compilation compilation, INamedTypeSymbol appModule)
+    private static List<ModuleInfo> CollectModules(Compilation compilation, INamedTypeSymbol appModule, CancellationToken ct)
     {
         var modules = new List<ModuleInfo>();
-        Walk(compilation.Assembly.GlobalNamespace, appModule, modules);
+        Walk(compilation.Assembly.GlobalNamespace, appModule, modules, ct);
         return modules;
     }
 
-    private static void Walk(INamespaceSymbol namespaceSymbol, INamedTypeSymbol appModule, List<ModuleInfo> modules)
+    private static void Walk(INamespaceSymbol namespaceSymbol, INamedTypeSymbol appModule, List<ModuleInfo> modules, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         foreach (var type in namespaceSymbol.GetTypeMembers())
-            Inspect(type, appModule, modules);
+            Inspect(type, appModule, modules, ct);
 
         foreach (var nested in namespaceSymbol.GetNamespaceMembers())
-            Walk(nested, appModule, modules);
+            Walk(nested, appModule, modules, ct);
     }
 
-    private static void Inspect(INamedTypeSymbol type, INamedTypeSymbol appModule, List<ModuleInfo> modules)
+    private static void Inspect(INamedTypeSymbol type, INamedTypeSymbol appModule, List<ModuleInfo> modules, CancellationToken ct)
     {
         foreach (var data in type.GetAttributes())
         {
@@ -204,7 +212,7 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         }
 
         foreach (var nested in type.GetTypeMembers())
-            Inspect(nested, appModule, modules);
+            Inspect(nested, appModule, modules, ct);
     }
 
     private static ModuleInfo? FindBest(string candidateNamespace, IReadOnlyList<ModuleInfo> modules)
@@ -232,5 +240,6 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         IReadOnlyList<ModuleInfo> Modules,
         INamedTypeSymbol? ServiceAttribute,
         INamedTypeSymbol? ContractAttribute,
-        INamedTypeSymbol? EntityAttribute);
+        INamedTypeSymbol? EntityAttribute,
+        INamedTypeSymbol? HandlerInterface);
 }

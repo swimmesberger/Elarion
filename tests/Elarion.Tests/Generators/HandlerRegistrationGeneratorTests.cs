@@ -362,6 +362,19 @@ public sealed class HandlerRegistrationGeneratorTests {
         generated.Should().Contain("global::Elarion.Abstractions.Diagnostics.TracingDecorator<");
     }
 
+    [Fact]
+    public void GenerateRegistration_IrrelevantEdit_ReusesPipeline() {
+        var source = CreateSource(
+            "[assembly: Sample.Pipeline.DefaultPipeline]",
+            modulePipelineAttribute: "",
+            handlerPipelineAttribute: "");
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new HandlerRegistrationGenerator(),
+            source,
+            "Handlers");
+    }
+
     private static string GenerateHandlerRegistrationSource(string source) {
         var result = GenerateHandlerRegistrationRunResult(source);
         return GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_CreateOrder.g.cs");

@@ -209,6 +209,38 @@ public sealed class ModuleApiGeneratorTests
         generated.Should().NotContain("OrderResult> GetOrder(");
     }
 
+    [Fact]
+    public void ModuleApi_IrrelevantEdit_ReusesPipeline()
+    {
+        var source = CreateSource(
+            """
+            namespace Sample.Things {
+                [Elarion.Abstractions.Modules.AppModule("Things")]
+                public static class ThingsModule { }
+
+                public sealed record GetThingQuery(int Id);
+                public sealed record GetThingResult(string Name);
+
+                public sealed class GetThing
+                    : Elarion.Abstractions.IHandler<GetThingQuery, GetThingResult> {
+                    public System.Threading.Tasks.ValueTask<GetThingResult> HandleAsync(
+                        GetThingQuery request, System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(new GetThingResult("x"));
+                }
+
+                [Elarion.Abstractions.Modules.GenerateModuleApi]
+                public partial interface IThingsApi;
+            }
+            """);
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new ModuleApiGenerator(),
+            source,
+            "Facades",
+            "Handlers",
+            "ModuleApiCombined");
+    }
+
     private static string CreateSource(
         string testSource,
         string assemblyTrigger = "[assembly: Elarion.Abstractions.UseElarion]",

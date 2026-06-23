@@ -9,10 +9,7 @@ namespace Elarion.Generators;
 public sealed partial class HandlerRegistrationGenerator {
     private static void EmitHandlerRegistration(SourceProductionContext spc, HandlerInfo handler) {
         foreach (var diagnostic in handler.Diagnostics) {
-            spc.ReportDiagnostic(Diagnostic.Create(
-                diagnostic.Descriptor,
-                diagnostic.Location,
-                diagnostic.MessageArgs));
+            spc.ReportDiagnostic(diagnostic.ToDiagnostic());
         }
 
         var code = GenerateRegistration(handler);

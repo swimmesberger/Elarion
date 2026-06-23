@@ -520,6 +520,29 @@ public sealed class SchedulerRegistrationGeneratorTests
             .Should().BeTrue();
     }
 
+    [Fact]
+    public void GenerateScheduledJobs_IrrelevantEdit_ReusesPipeline()
+    {
+        var source = CreateSource(
+            """
+            namespace Sample.Jobs {
+                public sealed class BillingJobs {
+                    [Elarion.Abstractions.Scheduling.ScheduledJob("billing.daily", FixedRate = "1d")]
+                    public System.Threading.Tasks.ValueTask RunAsync(
+                        Elarion.Abstractions.Scheduling.IScheduledJobContext context,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new SchedulerRegistrationGenerator(),
+            source,
+            "ScheduledJobs",
+            "ScheduledJobsCombined");
+    }
+
     private static string CreateSource(
         string testSource,
         string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateScheduledJobs]",

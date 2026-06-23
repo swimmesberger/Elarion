@@ -8,28 +8,29 @@ public sealed partial class HandlerRegistrationGenerator {
     private static AttributeData? ResolveDecoratorListFromPipelineAttributes(
         INamedTypeSymbol classSymbol,
         Compilation compilation,
-        CancellationToken ct) {
+        IReadOnlyList<(string Namespace, AttributeData DecoratorList)> moduleDecoratorLists) {
         var decoratorListMeta = compilation.GetTypeByMetadataName(DecoratorListAttributeMetadataName);
         if (decoratorListMeta is null)
             return null;
 
         return FindDecoratorListFromPipelineAttributes(classSymbol.GetAttributes(), decoratorListMeta)
-            ?? FindModuleDecoratorListFromPipelineAttributes(classSymbol, compilation, decoratorListMeta, ct)
+            ?? FindModuleDecoratorList(classSymbol, moduleDecoratorLists)
             ?? FindDecoratorListFromPipelineAttributes(compilation.Assembly.GetAttributes(), decoratorListMeta);
     }
 
-    private static AttributeData? FindModuleDecoratorListFromPipelineAttributes(
-        INamedTypeSymbol classSymbol,
+    /// <summary>
+    /// Builds the module [DecoratorList] map once per resolution pass — the [AppModule] types that carry a
+    /// pipeline attribute, with their namespace — so <see cref="FindModuleDecoratorList"/> is a longest-prefix
+    /// lookup instead of a per-handler full-compilation scan.
+    /// </summary>
+    private static List<(string Namespace, AttributeData DecoratorList)> BuildModuleDecoratorMap(
         Compilation compilation,
-        INamedTypeSymbol decoratorListMeta,
         CancellationToken ct) {
+        var result = new List<(string, AttributeData)>();
+        var decoratorListMeta = compilation.GetTypeByMetadataName(DecoratorListAttributeMetadataName);
         var moduleAttrSymbol = compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
-        if (moduleAttrSymbol is null)
-            return null;
-
-        var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
-        AttributeData? bestDecoratorList = null;
-        var bestNamespaceLength = -1;
+        if (decoratorListMeta is null || moduleAttrSymbol is null)
+            return result;
 
         foreach (var syntaxTree in compilation.SyntaxTrees) {
             var semanticModel = compilation.GetSemanticModel(syntaxTree);
@@ -44,19 +45,35 @@ public sealed partial class HandlerRegistrationGenerator {
                 if (!hasAppModule)
                     continue;
 
-                var moduleNamespace = typeSymbol.ContainingNamespace?.ToDisplayString() ?? "";
-                if (!IsNamespaceInScope(handlerNamespace, moduleNamespace) ||
-                    moduleNamespace.Length <= bestNamespaceLength) {
-                    continue;
-                }
-
                 var decoratorList = FindDecoratorListFromPipelineAttributes(typeSymbol.GetAttributes(), decoratorListMeta);
                 if (decoratorList is null)
                     continue;
 
-                bestDecoratorList = decoratorList;
-                bestNamespaceLength = moduleNamespace.Length;
+                var moduleNamespace = typeSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
+                    ? containing.ToDisplayString()
+                    : "";
+                result.Add((moduleNamespace, decoratorList));
             }
+        }
+
+        return result;
+    }
+
+    private static AttributeData? FindModuleDecoratorList(
+        INamedTypeSymbol classSymbol,
+        IReadOnlyList<(string Namespace, AttributeData DecoratorList)> moduleDecoratorLists) {
+        var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
+        AttributeData? bestDecoratorList = null;
+        var bestNamespaceLength = -1;
+
+        foreach (var (moduleNamespace, decoratorList) in moduleDecoratorLists) {
+            if (!IsNamespaceInScope(handlerNamespace, moduleNamespace) ||
+                moduleNamespace.Length <= bestNamespaceLength) {
+                continue;
+            }
+
+            bestDecoratorList = decoratorList;
+            bestNamespaceLength = moduleNamespace.Length;
         }
 
         return bestDecoratorList;
@@ -92,7 +109,7 @@ public sealed partial class HandlerRegistrationGenerator {
         ITypeSymbol requestType,
         ITypeSymbol responseType,
         Compilation compilation,
-        ImmutableArray<HandlerDiagnosticInfo>.Builder diagnostics,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics,
         SymbolDisplayFormat fmt) {
         var builder = ImmutableArray.CreateBuilder<DecoratorInfo>();
 
@@ -120,8 +137,8 @@ public sealed partial class HandlerRegistrationGenerator {
             // and may use any logic — including reflection over the request type's attributes.
             var predicate = DecoratorPredicate.Detect(definition, compilation, out var predicateLocation);
             if (predicate == DecoratorPredicate.Result.NotPublic) {
-                diagnostics.Add(new HandlerDiagnosticInfo(
-                    NonPublicAppliesToPredicate, predicateLocation, [definition.Name]));
+                diagnostics.Add(DiagnosticInfo.Create(
+                    NonPublicAppliesToPredicate, predicateLocation, definition.Name));
                 continue;
             }
 

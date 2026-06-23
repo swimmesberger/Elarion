@@ -450,6 +450,28 @@ public sealed class ModuleServiceRegistrationGeneratorTests
         {{testSource}}
         """;
 
+    [Fact]
+    public void GenerateModuleServices_IrrelevantEdit_ReusesPipeline() {
+        var source = CreateSource(
+            """
+            namespace Sample.Modules.Billing {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static partial class BillingModule {
+                }
+
+                [Elarion.Abstractions.Service]
+                public sealed class InvoiceService {
+                }
+            }
+            """);
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new ModuleServiceRegistrationGenerator(),
+            source,
+            "Services",
+            "ServicesCombined");
+    }
+
     private static GeneratorDriverRunResult Generate(
         string source,
         bool assertGeneratedOutputCompiles = true)
