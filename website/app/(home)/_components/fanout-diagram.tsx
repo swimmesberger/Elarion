@@ -8,7 +8,62 @@ const surfaces = [
   { label: 'TypeScript + Zod client', sub: 'schema-exported', y: 484 },
 ];
 
-const EMIT_X = 408;
+// Syntax palette (kept tight so colors read as intentional, not noisy).
+const C = {
+  attr: '#6fd6ff',
+  string: '#9fe6a0',
+  keyword: '#c79bff',
+  ident: '#e9eef9',
+  punct: '#8398bd',
+  comment: '#5d6e94',
+};
+
+// One uniform monospace grid: every line shares the same font size and the same
+// baseline step, so the block reads as real source rather than ragged text.
+// Indents are expressed in character columns (not literal spaces) to dodge SVG
+// whitespace collapsing.
+const codeLines: { indent: number; segs: { t: string; c: string }[] }[] = [
+  {
+    indent: 0,
+    segs: [
+      { t: '[RpcMethod(', c: C.attr },
+      { t: '"clients.get"', c: C.string },
+      { t: ')]', c: C.attr },
+    ],
+  },
+  {
+    indent: 0,
+    segs: [
+      { t: 'sealed class ', c: C.keyword },
+      { t: 'GetClient', c: C.ident },
+    ],
+  },
+  {
+    indent: 2,
+    segs: [
+      { t: ': ', c: C.punct },
+      { t: 'IHandler', c: C.attr },
+      { t: '<Query, Result<…>>', c: C.punct },
+    ],
+  },
+  { indent: 0, segs: [] },
+  { indent: 0, segs: [{ t: '// one class. one source of truth.', c: C.comment }] },
+];
+
+const CARD_X = 48;
+const CARD_Y = 156;
+const CARD_W = 360;
+const CARD_H = 248;
+
+const CODE_FONT = 13;
+const CHAR_W = 7.8; // JetBrains Mono advance at CODE_FONT
+const LINE_H = 27;
+const FIRST_BASELINE = 250;
+const GUTTER_NUM_X = CARD_X + 34;
+const GUTTER_RULE_X = CARD_X + 46;
+const CODE_X = CARD_X + 60;
+
+const EMIT_X = CARD_X + CARD_W; // emit node sits on the card's right edge
 const EMIT_Y = 280;
 const PILL_X = 636;
 
@@ -62,46 +117,76 @@ export function FanoutDiagram({ className }: { className?: string }) {
         </g>
       ))}
 
-      {/* source handler card */}
+      {/* source handler card, styled as a code-editor pane */}
       <rect
-        x={48}
-        y={170}
-        width={360}
-        height={220}
+        x={CARD_X}
+        y={CARD_Y}
+        width={CARD_W}
+        height={CARD_H}
         rx={18}
         fill="#0a1124"
         stroke="rgba(124,150,210,0.28)"
       />
-      {/* brand node motif on the card edge */}
-      {[212, 280, 348].map((cy, i) => (
-        <circle
-          key={cy}
-          cx={78}
-          cy={cy}
-          r={9}
-          fill="url(#emit-grad)"
-          className="node-pulse"
-          style={{ animationDelay: `${i * 0.5}s`, opacity: 0.92 - i * 0.08 }}
-        />
-      ))}
-      <text x={110} y={210} fontSize={15} fill="#6fd6ff">
-        [RpcMethod(
-        <tspan fill="#9fe6a0">&quot;clients.get&quot;</tspan>)]
-      </text>
-      <text x={110} y={262} fontSize={15} fill="#c79bff">
-        sealed class{' '}
-        <tspan fill="#e9eef9">GetClient</tspan>
-      </text>
-      <text x={110} y={300} fontSize={13.5} fill="#8398bd">
-        : IHandler&lt;Query, Result&lt;…&gt;&gt;
-      </text>
-      <text x={110} y={352} fontSize={12.5} fill="#647499">
-        // one class. one source of truth.
-      </text>
 
-      {/* emit node */}
+      {/* window chrome: control dots + filename tab */}
+      {['#6e45f6', '#2e68ff', '#2fd6e8'].map((fill, i) => (
+        <circle key={fill} cx={CARD_X + 26 + i * 18} cy={CARD_Y + 21} r={4.5} fill={fill} fillOpacity={0.85} />
+      ))}
+      <text x={CARD_X + CARD_W - 22} y={CARD_Y + 26} fontSize={12} fill="#647499" textAnchor="end">
+        GetClient.cs
+      </text>
+      <line
+        x1={CARD_X}
+        y1={CARD_Y + 42}
+        x2={CARD_X + CARD_W}
+        y2={CARD_Y + 42}
+        stroke="rgba(124,150,210,0.18)"
+        strokeWidth={1}
+      />
+
+      {/* line-number gutter rule */}
+      <line
+        x1={GUTTER_RULE_X}
+        y1={FIRST_BASELINE - 18}
+        x2={GUTTER_RULE_X}
+        y2={FIRST_BASELINE + (codeLines.length - 1) * LINE_H + 8}
+        stroke="rgba(124,150,210,0.14)"
+        strokeWidth={1}
+      />
+
+      {/* code, on a uniform monospace grid */}
+      {codeLines.map((line, i) => {
+        const baseline = FIRST_BASELINE + i * LINE_H;
+        return (
+          <g key={i}>
+            <text x={GUTTER_NUM_X} y={baseline} fontSize={11} fill="#43506e" textAnchor="end">
+              {i + 1}
+            </text>
+            {line.segs.length > 0 && (
+              <text x={CODE_X + line.indent * CHAR_W} y={baseline} fontSize={CODE_FONT}>
+                {line.segs.map((seg, j) => (
+                  <tspan key={j} fill={seg.c}>
+                    {seg.t}
+                  </tspan>
+                ))}
+              </text>
+            )}
+          </g>
+        );
+      })}
+
+      {/* emit node — the brand pulse lives here, where the fan-out originates */}
+      <circle
+        cx={EMIT_X}
+        cy={EMIT_Y}
+        r={20}
+        fill="none"
+        stroke="url(#emit-grad)"
+        strokeOpacity={0.4}
+        className="node-pulse"
+        style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+      />
       <circle cx={EMIT_X} cy={EMIT_Y} r={11} fill="url(#emit-grad)" />
-      <circle cx={EMIT_X} cy={EMIT_Y} r={20} fill="none" stroke="url(#emit-grad)" strokeOpacity={0.4} />
 
       {/* surface pills */}
       {surfaces.map((s) => (
@@ -125,7 +210,7 @@ export function FanoutDiagram({ className }: { className?: string }) {
         </g>
       ))}
 
-      <text x={48} y={430} fontSize={12.5} fill="#647499" letterSpacing="0.16em">
+      <text x={CARD_X} y={446} fontSize={12.5} fill="#647499" letterSpacing="0.16em">
         SOURCE-GENERATED · AOT-SAFE · NO RUNTIME REFLECTION
       </text>
     </svg>
