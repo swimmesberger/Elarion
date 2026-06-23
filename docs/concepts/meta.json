@@ -8,6 +8,7 @@
     "services",
     "validators",
     "decorator-pipelines",
+    "cross-module-communication",
     "caching",
     "current-user"
   ]

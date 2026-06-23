@@ -19,10 +19,20 @@ internal static class HttpEndpointEmission
 
     public static readonly DiagnosticDescriptor MissingRequestResponse = new(
         id: "ELHTTP001",
-        title: "HTTP endpoint handler is missing a request/response shape",
+        title: "HTTP endpoint handler has no resolvable request/response shape",
         messageFormat:
-        "Handler '{0}' is annotated with [HttpEndpoint] but does not nest a 'Command' or 'Query' request type "
-        + "together with a 'Response' type; no endpoint will be generated",
+        "Handler '{0}' is annotated with [HttpEndpoint] but does not implement IHandler<TRequest, TResponse> with a "
+        + "Result<T> response; no endpoint will be generated",
+        category: "Elarion.Http",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor CannotInferVerb = new(
+        id: "ELHTTP004",
+        title: "Cannot infer HTTP verb",
+        messageFormat:
+        "Handler '{0}' has [HttpEndpoint] without an explicit verb and its request implements neither ICommand "
+        + "(POST) nor IQuery (GET); specify a verb on [HttpEndpoint] or implement ICommand/IQuery",
         category: "Elarion.Http",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
@@ -135,47 +145,51 @@ internal static class HttpEndpointEmission
         if (route is null)
             return false;
 
-        INamedTypeSymbol? requestType = null;
-        INamedTypeSymbol? responseType = null;
-        string? requestKind = null;
-
-        foreach (var member in type.GetTypeMembers())
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (member.Name is "Command" or "Query")
-            {
-                requestType = member;
-                requestKind = member.Name;
-            }
-            else if (member.Name == "Response")
-            {
-                responseType = member;
-            }
-        }
-
-        if (requestType is null || responseType is null || requestKind is null)
+        ct.ThrowIfCancellationRequested();
+        if (!HandlerShape.TryResolve(type, out var requestType, out var responseInner, out _))
         {
             report?.Invoke(Diagnostic.Create(
                 MissingRequestResponse, type.Locations.FirstOrDefault() ?? Location.None, type.ToDisplayString()));
             return false;
         }
 
-        var verb = explicitVerb ?? (requestKind == "Command" ? "Post" : "Get");
+        var verb = explicitVerb ?? InferVerb(requestType);
+        if (verb is null)
+        {
+            report?.Invoke(Diagnostic.Create(
+                CannotInferVerb, type.Locations.FirstOrDefault() ?? Location.None, type.ToDisplayString()));
+            return false;
+        }
+
         var (useAsParameters, disableAntiforgery) = DetermineBinding(requestType, verb);
+        var responseNamed = responseInner as INamedTypeSymbol;
 
         model = new Model(
             type.ToDisplayString(),
             type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
             requestType.ToDisplayString(fmt),
-            responseType.ToDisplayString(fmt),
+            responseInner.ToDisplayString(fmt),
             route,
             verb,
             useAsParameters,
             disableAntiforgery,
-            IsResponseEmpty(responseType),
+            responseNamed is not null && IsResponseEmpty(responseNamed),
             GetDescription(type, descriptionType));
         return true;
+    }
+
+    private const string CommandMarkerDisplay = "Elarion.Abstractions.ICommand";
+    private const string QueryMarkerDisplay = "Elarion.Abstractions.IQuery";
+
+    // Verb inference is marker-based only: a request implementing ICommand maps to POST, IQuery to GET.
+    // Naming/nesting carry no semantic weight; an unmarked request needs an explicit verb on [HttpEndpoint].
+    private static string? InferVerb(INamedTypeSymbol requestType)
+    {
+        if (HandlerShape.Implements(requestType, CommandMarkerDisplay))
+            return "Post";
+        if (HandlerShape.Implements(requestType, QueryMarkerDisplay))
+            return "Get";
+        return null;
     }
 
     private static (string? Route, string? Verb) ReadHttpEndpoint(AttributeData attr)

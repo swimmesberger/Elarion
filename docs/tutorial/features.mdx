@@ -18,11 +18,16 @@ This page builds Clients in full. The Invoicing module follows the same patterns
 ### Define the decorator pipeline
 
 Elarion ships no concrete decorators — they depend on *your* logging, *your* `DbContext`, *your*
-conventions. Define them in the application and expose named pipelines with `[DecoratorList]`.
+conventions. Define them in the application and expose a pipeline with `[DecoratorList]`. A decorator
+can declare *where it attaches* — by a generic constraint (`where TRequest : ICommand`) or a
+`static bool AppliesTo(Type request)` predicate the generator evaluates at compile time — so **one**
+pipeline serves commands, queries, and event handlers alike.
 
 ```csharp title="src/Billing.Application/Decorators/Decorators.cs"
+using System;
 using System.Reflection;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Messaging;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -63,6 +68,11 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
     DbContext db
 ) : IHandler<TRequest, TResponse> {
+    // Attach only where a new unit of work is needed — commands and integration-event handlers. The
+    // generator evaluates this at compile time, so queries and domain-event handlers never get it.
+    public static bool AppliesTo(Type request) =>
+        request.IsAssignableTo(typeof(ICommand)) || request.IsAssignableTo(typeof(IIntegrationEvent));
+
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var response = await inner.HandleAsync(request, ct);
@@ -93,8 +103,10 @@ internal static class ResultFactory {
 }
 ```
 
-Now expose two named pipelines. The **default** applies to every command; the **read-only** pipeline
-skips the transaction for queries.
+Now expose **one** pipeline for the whole application. `TransactionDecorator` declares a
+`static bool AppliesTo` predicate, so the generator attaches it at compile time only to commands and
+integration-event handlers — queries and domain-event handlers skip it automatically. A single
+pipeline is correct everywhere, with no second "read-only" pipeline to define and no per-handler tag.
 
 ```csharp title="src/Billing.Application/Pipeline/Pipelines.cs"
 using Billing.Application.Decorators;
@@ -108,17 +120,13 @@ namespace Billing.Application.Pipeline;
     typeof(TransactionDecorator<,>))]
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
 public sealed class DefaultPipelineAttribute : Attribute;
-
-[DecoratorList(
-    typeof(LoggingDecorator<,>),
-    typeof(ValidationDecorator<,>))]
-[AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
-public sealed class ReadOnlyPipelineAttribute : Attribute;
 ```
 
 Decorators run **outermost first**, in list order. Logging wraps everything; validation runs *before*
 the transaction, so a bad request is rejected without ever opening one; the transaction wraps only the
-handler. Apply the default across the whole assembly:
+handler — and only on commands and integration-event handlers, since its `AppliesTo` predicate keeps
+the generator from attaching it to queries or domain-event handlers. Apply the pipeline across the
+whole assembly:
 
 ```csharp title="src/Billing.Application/ElarionAssembly.cs"
 using Billing.Application.Pipeline;
@@ -221,7 +229,7 @@ public sealed class CreateClient(
     IAuditTrail audit,
     TimeProvider clock
 ) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
-    public sealed record Command {
+    public sealed record Command : ICommand {
         [Description("The client's display name.")]
         public required string Name { get; init; }
 
@@ -288,13 +296,12 @@ public sealed class CreateClientValidator : AbstractValidator<CreateClient.Comma
 
 ### Write the cached read handlers
 
-Reads are `Query` types on the read-only pipeline (no transaction). `GetClient` is marked
-`[Cacheable]`: the generator inserts a cache decorator that keys off the request and only runs the
-handler on a miss. The default `CurrentUser` scope isolates entries per account, so one user's cached
+Reads are `IQuery` types, so `TransactionDecorator`'s `AppliesTo` predicate excludes them — no
+per-handler tag, no transaction around a read. `GetClient` is marked `[Cacheable]`: the generator
+inserts a cache decorator that keys off the request and only runs the handler on a miss. The default `CurrentUser` scope isolates entries per account, so one user's cached
 client is never served to another.
 
 ```csharp title="src/Billing.Application/Modules/Clients/Handlers/GetClient.cs"
-using Billing.Application.Pipeline;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -302,12 +309,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Application.Modules.Clients.Handlers;
 
-[ReadOnlyPipeline]
 [Cacheable("clients", DurationSeconds = 120)]
 [RpcMethod("clients.get")]
 public sealed class GetClient(IAppDbContext db, ICurrentUser user)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
-    public sealed record Query(Guid Id);
+    public sealed record Query(Guid Id) : IQuery;
     public sealed record Response(Guid Id, string Number, string Name, string Email);
 
     public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
@@ -328,7 +334,6 @@ public sealed class GetClient(IAppDbContext db, ICurrentUser user)
 
 ```csharp title="src/Billing.Application/Modules/Clients/Handlers/ListClients.cs"
 using System.Collections.Generic;
-using Billing.Application.Pipeline;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -336,12 +341,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Application.Modules.Clients.Handlers;
 
-[ReadOnlyPipeline]
 [Cacheable("clients", DurationSeconds = 60)]
 [RpcMethod("clients.list")]
 public sealed class ListClients(IAppDbContext db, ICurrentUser user)
     : IHandler<ListClients.Query, Result<ListClients.Response>> {
-    public sealed record Query;
+    public sealed record Query : IQuery;
     public sealed record Item(Guid Id, string Number, string Name, string Email);
     public sealed record Response(IReadOnlyList<Item> Clients);
 

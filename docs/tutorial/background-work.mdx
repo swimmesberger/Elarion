@@ -174,7 +174,10 @@ public sealed record InvoiceCreated(Guid InvoiceId) : IIntegrationEvent;
 
 A consumer is a handler whose request *is* the event — an `IHandler<InvoiceCreated>` annotated with a
 class-level `[ConsumeEvent]`, returning `Result`. It runs on a fresh scope once the invoice has
-committed, so it reads its own data and its failures never touch the original command:
+committed, so it reads its own data and its failures never touch the original command. Its request is
+an `IIntegrationEvent`, which `TransactionDecorator`'s `AppliesTo` predicate
+([defined earlier](/docs/tutorial/features#define-the-decorator-pipeline)) matches — so it runs inside
+a transaction: a consumer that *writes* commits atomically, while this read-only one simply doesn't use it:
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Events/InvoiceNotifications.cs"
 using Billing.Application.Data;
@@ -255,7 +258,7 @@ public sealed class CreateInvoice(
     IAuditTrail audit,
     TimeProvider clock
 ) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
-    public sealed record Command {
+    public sealed record Command : ICommand {
         public required Guid ClientId { get; init; }
         [Description("Invoice total in minor units, e.g. 1999 = €19.99.")]
         public required long AmountCents { get; init; }
@@ -340,17 +343,15 @@ a [snapshot](/docs/scheduling/inspection); polling it would lose the handle the 
 a new run. See [JobId vs. RunId](/docs/scheduling/runtime-jobs#jobid-vs-runid).
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/GetSendStatus.cs"
-using Billing.Application.Pipeline;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Scheduling;
 
 namespace Billing.Application.Modules.Invoicing.Handlers;
 
-[ReadOnlyPipeline]
 [RpcMethod("invoices.sendStatus")]
 public sealed class GetSendStatus(IJobSchedulerInspector scheduler)
     : IHandler<GetSendStatus.Query, Result<GetSendStatus.Response>> {
-    public sealed record Query(Guid JobId);
+    public sealed record Query(Guid JobId) : IQuery;
     public sealed record Response(
         string Status, int Attempt, int MaxAttempts,
         DateTimeOffset? NextAttemptAt, string? LastError);
@@ -385,7 +386,6 @@ The invoices table reads through a cached query, invalidated by the `invoices` t
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/ListInvoices.cs"
 using System.Collections.Generic;
 using Billing.Application.Data;
-using Billing.Application.Pipeline;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -393,12 +393,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Application.Modules.Invoicing.Handlers;
 
-[ReadOnlyPipeline]
 [Cacheable("invoices", DurationSeconds = 30)]
 [RpcMethod("invoices.list")]
 public sealed class ListInvoices(IAppDbContext db, ICurrentUser user)
     : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
-    public sealed record Query;
+    public sealed record Query : IQuery;
     public sealed record Item(
         Guid Id, string Number, long AmountCents, string Currency, string Status, DateOnly DueDate);
     public sealed record Response(IReadOnlyList<Item> Invoices);

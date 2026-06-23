@@ -63,7 +63,13 @@ public sealed class SearchClients
 }
 ```
 
-A read-only query gets just validation; a command gets the full transactional pipeline.
+A read-only query gets just validation; a command gets the full transactional pipeline. Named
+pipelines suit per-handler overrides and axes the request type can't express. For the common
+read/write split you usually don't need a second pipeline at all: make the decorator itself decide —
+either by a compile-time generic constraint ([Filtering by request kind](#filtering-by-request-kind))
+or, for richer cases like the transaction decorator, by an
+[`AppliesTo` predicate](#conditional-attachment-with-appliesto) so one decorator is correct for
+commands, queries, and both kinds of event handler.
 
 ## Writing a decorator
 
@@ -90,13 +96,21 @@ public sealed class LoggingDecorator<TRequest, TResponse>(
 ### Transaction decorator
 
 A transaction decorator commits on success and rolls back on failure, using `IResultLike` to inspect
-the outcome without knowing the concrete response type:
+the outcome without knowing the concrete response type. "Should this handler open a unit of work?" is
+true for **commands and integration-event handlers** and false for **queries and domain-event
+handlers** (which run inside the publisher's transaction) — a *union* no `where` clause can express. A
+[`static bool AppliesTo`](#conditional-attachment-with-appliesto) predicate states it exactly, so the
+decorator body stays trivial:
 
 ```csharp
 public sealed class TransactionDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
     DbContext db
 ) : IHandler<TRequest, TResponse> {
+    // Attach only where a new unit of work is needed. The generator calls this once per handler type.
+    public static bool AppliesTo(Type request) =>
+        request.IsAssignableTo(typeof(ICommand)) || request.IsAssignableTo(typeof(IIntegrationEvent));
+
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var response = await inner.HandleAsync(request, ct);
@@ -111,6 +125,17 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
     }
 }
 ```
+
+| Handler | `AppliesTo` | Result |
+|---|---|---|
+| Command (`ICommand`) | true | opens a transaction |
+| Query (`IQuery`) | false | not attached |
+| Domain-event handler (`IDomainEvent`, inline in the command) | false | not attached — rides the publisher's transaction |
+| Integration-event handler (`IIntegrationEvent`, fresh post-commit scope) | true | opens its own transaction |
+
+No runtime check, no empty transaction on a query, and domain-event handlers get no decorator at all —
+the chains show exactly what attached. (The one residual wart: a *read-only* integration consumer is
+still an `IIntegrationEvent`, so it opens a transaction it never uses — harmless.)
 
 ### Turning an `AppError` into `TResponse`
 
@@ -142,6 +167,73 @@ Decorators run in the order listed in `[DecoratorList]`, outermost first. A pipe
 `[Transaction, DbConstraint, Validation]` validates innermost (closest to the handler) and wraps the
 transaction outermost — so validation failures never open a transaction. Choose the order
 deliberately; the generated code makes it explicit and inspectable.
+
+## Filtering by request kind
+
+A decorator can constrain its `TRequest` type parameter, and the generator applies it **only to
+handlers whose request satisfies the constraint** — skipping it for the rest at compile time, with no
+runtime check and no allocation in the chains it doesn't apply to. This is the tool for a decorator
+that is meaningful for exactly one request kind, using the
+[`ICommand`/`IQuery` markers](/docs/concepts/handlers#command-vs-query):
+
+```csharp
+// Compile-time filtered: only command handlers ever get an audit entry; queries skip it entirely.
+public sealed class AuditDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner,
+    IAuditTrail audit
+) : IHandler<TRequest, TResponse>
+    where TRequest : ICommand {
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        var response = await inner.HandleAsync(request, ct);
+        if (response is IResultLike { IsSuccess: true }) audit.Record(typeof(TRequest).Name);
+        return response;
+    }
+}
+```
+
+A query handler never has `AuditDecorator` in its generated chain — the filtering is resolved when the
+pipeline is emitted. Decorators with no constraints (the common case) apply to every handler.
+
+A `where` clause expresses a single bound (an AND of "implements X"). When attachment is a **union** or
+a **negation** — like the transaction decorator's "commands *or* integration events" — reach for
+`AppliesTo` below.
+
+## Conditional attachment with `AppliesTo`
+
+A decorator may declare a static predicate that the generator **calls once at pipeline-build time** to
+decide attachment per handler:
+
+```csharp
+public static bool AppliesTo(System.Type request);
+```
+
+When present, the decorator is attached only to handlers whose request type makes it return `true`. The
+predicate is **called, not parsed**, so any C# is allowed — including reflection over the request type.
+The generator evaluates it **once per closed handler type** (caching the result in a generated
+`static readonly bool` initialized at type init), never per request, and the emitted code is a direct
+static call plus `typeof`, so it stays NativeAOT- and trim-safe. It composes with `where`: the
+constraint governs what the body may *call*; `AppliesTo` governs *whether to attach*. See
+[ADR-0003](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0003-decorator-attachment-predicates.md).
+
+The method must be `public static`, return `bool`, and take one `System.Type` parameter; a non-`public`
+`AppliesTo` is reported as `ELPIPE001` (a build error). Because it is plain runnable C#, you can
+unit-test it directly: `TransactionDecorator<,>.AppliesTo(typeof(CreateOrder.Command))`.
+
+Because the predicate is called rather than interpreted, it can check anything reflection exposes — for
+example a custom `[Transactional]` attribute on the request type:
+
+```csharp
+public static bool AppliesTo(Type request) =>
+    request.IsDefined(typeof(TransactionalAttribute), inherit: true);
+```
+
+<Callout type="info">
+  `AppliesTo` works for decorators shipped in **referenced packages** too — a `public static` method is
+  callable across the metadata boundary even though its body isn't readable as source. Attachment is a
+  **runtime** decision, so the decorator type is referenced (behind the cached `if`) in every in-scope
+  handler's chain rather than compile-time elided. When the rule is a single interface bound and you
+  want elision/trimming, prefer a `where` constraint.
+</Callout>
 
 <Callout type="info">
   Built-in [caching](/docs/concepts/caching) and [resilience](/docs/resilience) are themselves

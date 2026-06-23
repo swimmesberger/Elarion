@@ -78,10 +78,21 @@ public sealed partial class HandlerRegistrationGenerator {
         return null;
     }
 
+    private static readonly DiagnosticDescriptor NonPublicAppliesToPredicate = new(
+        "ELPIPE001",
+        "Decorator AppliesTo predicate must be public",
+        "Decorator '{0}' declares an 'AppliesTo' predicate that is not public; make it a "
+        + "'public static bool AppliesTo(System.Type request)' so the generated registration can call it",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     private static ImmutableArray<DecoratorInfo> ParseDecorators(
         AttributeData decoratorListAttr,
         ITypeSymbol requestType,
         ITypeSymbol responseType,
+        Compilation compilation,
+        ImmutableArray<HandlerDiagnosticInfo>.Builder diagnostics,
         SymbolDisplayFormat fmt) {
         var builder = ImmutableArray.CreateBuilder<DecoratorInfo>();
 
@@ -96,13 +107,31 @@ public sealed partial class HandlerRegistrationGenerator {
             if (typeArg.Value is not INamedTypeSymbol openDecoratorType)
                 continue;
 
-            var definition = openDecoratorType.IsUnboundGenericType
-                ? openDecoratorType.OriginalDefinition
-                : openDecoratorType;
+            var definition = openDecoratorType.OriginalDefinition;
+
+            // Compile-time decorator filtering: skip a decorator whose generic constraints the handler's
+            // request/response don't satisfy (e.g. `where TRequest : ICommand` on a query handler). This lets a
+            // module-wide [DecoratorList] carry kind-specific decorators that only wrap the matching handlers.
+            if (!SatisfiesConstraints(definition, requestType, responseType))
+                continue;
+
+            // A decorator may narrow attachment with a `public static bool AppliesTo(Type request)` predicate,
+            // called once at pipeline-build time (see ADR-0003). It expresses unions/negations a `where` cannot,
+            // and may use any logic — including reflection over the request type's attributes.
+            var predicate = DecoratorPredicate.Detect(definition, compilation, out var predicateLocation);
+            if (predicate == DecoratorPredicate.Result.NotPublic) {
+                diagnostics.Add(new HandlerDiagnosticInfo(
+                    NonPublicAppliesToPredicate, predicateLocation, [definition.Name]));
+                continue;
+            }
+
             var closedType = definition.Construct(requestType, responseType);
             var decoratorFqn = closedType.ToDisplayString(fmt);
 
-            builder.Add(new DecoratorInfo(decoratorFqn, GetDecoratorExtraDependencies(closedType, fmt)));
+            builder.Add(new DecoratorInfo(
+                decoratorFqn,
+                GetDecoratorExtraDependencies(closedType, fmt),
+                predicate == DecoratorPredicate.Result.Conditional));
         }
 
         return builder.ToImmutable();
@@ -126,6 +155,69 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         return extraDeps.ToImmutable();
+    }
+
+    // A decorator is `Decorator<TRequest, TResponse>`; it applies to a handler only if the handler's request
+    // (TRequest) and response (TResponse) satisfy the decorator's type-parameter constraints.
+    private static bool SatisfiesConstraints(INamedTypeSymbol definition, ITypeSymbol requestType, ITypeSymbol responseType) {
+        var typeParameters = definition.TypeParameters;
+        if (typeParameters.Length != 2)
+            return true; // Not the expected shape; stay permissive rather than drop the decorator.
+
+        return SatisfiesParameter(typeParameters[0], requestType)
+            && SatisfiesParameter(typeParameters[1], responseType);
+    }
+
+    private static bool SatisfiesParameter(ITypeParameterSymbol parameter, ITypeSymbol argument) {
+        if (parameter.HasReferenceTypeConstraint && argument.IsValueType)
+            return false;
+        if (parameter.HasValueTypeConstraint && !argument.IsValueType)
+            return false;
+
+        foreach (var constraint in parameter.ConstraintTypes) {
+            // A constraint that references another type parameter (e.g. `where TRequest : IFoo<TResponse>`) can't be
+            // reliably substituted here; stay permissive so a valid decorator is never dropped.
+            if (ReferencesTypeParameter(constraint))
+                continue;
+            if (!SatisfiesType(argument, constraint))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool SatisfiesType(ITypeSymbol argument, ITypeSymbol constraint) {
+        if (constraint.TypeKind == TypeKind.Interface) {
+            if (SymbolEqualityComparer.Default.Equals(argument, constraint))
+                return true;
+            foreach (var iface in argument.AllInterfaces) {
+                if (SymbolEqualityComparer.Default.Equals(iface, constraint))
+                    return true;
+            }
+
+            return false;
+        }
+
+        for (ITypeSymbol? current = argument; current is not null; current = current.BaseType) {
+            if (SymbolEqualityComparer.Default.Equals(current, constraint))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ReferencesTypeParameter(ITypeSymbol type) {
+        if (type is ITypeParameterSymbol)
+            return true;
+
+        if (type is INamedTypeSymbol named) {
+            foreach (var argument in named.TypeArguments) {
+                if (ReferencesTypeParameter(argument))
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsNamespaceInScope(string candidateNamespace, string scopeNamespace) =>

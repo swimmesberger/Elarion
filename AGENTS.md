@@ -17,7 +17,7 @@ and deployment quirks belong in consuming repositories, not here.
 
 ## Package layout
 
-- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts (`IHandler<TRequest, TResponse>` plus the `IHandler<T>` no-content convenience that inherits `IHandler<T, Result<Unit>>` via a default interface method bridging the non-generic `Result` — so the handler generator and decorators stay unchanged), result types (`Result<T>`, the non-generic `Result`, and the `Unit` no-value payload), pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, messaging contracts (`IDomainEvent`/`IIntegrationEvent` markers, `IDomainEventBus`/`IIntegrationEventBus`, `IEventContext`, `[ConsumeEvent]`, `EventConsumerFailedException`, `EventSubscriptionDescriptor`), and source-generation triggers.
+- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts (`IHandler<TRequest, TResponse>` plus the `IHandler<T>` no-content convenience that inherits `IHandler<T, Result<Unit>>` via a default interface method bridging the non-generic `Result` — so the handler generator and decorators stay unchanged — plus optional CQRS request markers `IRequest`/`ICommand`/`IQuery` that drive HTTP verb inference, decorator generic constraints, and runtime branching), result types (`Result<T>`, the non-generic `Result`, and the `Unit` no-value payload), pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, messaging contracts (`IDomainEvent`/`IIntegrationEvent` markers, `IDomainEventBus`/`IIntegrationEventBus`, `IEventContext`, `[ConsumeEvent]`, `EventConsumerFailedException`, `EventSubscriptionDescriptor`), cross-module communication markers (`[ModuleContract]`, `[ModuleApi]`, `[GenerateModuleApi]`), and source-generation triggers.
 - `Elarion` — runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, the in-memory scheduler, and the in-memory **domain** event bus (Plane A inline dispatch, `AddInMemoryDomainEventBus`) plus the shared `EventSubscriptionRegistry`/`EventContext`. EF-agnostic: the in-memory integration tier lives in `Elarion.Messaging.InMemory`.
 - `Elarion.Blobs` — implementation-neutral, streaming-first blob storage contracts and DTOs. `IBlobStore` is a minimal core (`SaveAsync(BlobUploadRequest, Stream)`, `OpenReadAsync` returning a disposable `BlobDownload` of metadata + an open content stream, plus metadata/delete/exists), so callers never have to buffer a whole blob and backends implement only the primitives. Ergonomic `byte[]`/file saves and buffered/copy-to reads (`SaveFromFileAsync`, `DownloadContentAsync`, `ReadAllBytesAsync`, `DownloadToAsync`) live as `BlobStoreExtensions` over that core; `BlobUploadRequest.ContentLength` is an optional hint while the recorded `Size` is always the actual bytes written.
 - `Elarion.Blobs.PostgreSql` — PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O. Writes stream a seekable source straight into the `bytea` column without buffering, and stream a non-seekable source without buffering too when the caller supplies a `BlobUploadRequest.ContentLength` hint (the bind requires the length up front; the actual bytes are verified against the hint so the recorded `Size` stays truthful), buffering only when the hint is absent; reads are buffered for now, with a documented `CommandBehavior.SequentialAccess` + `NpgsqlDataReader.GetStream` upgrade path that attaches the reader/connection to the returned `BlobDownload`.
@@ -29,7 +29,7 @@ and deployment quirks belong in consuming repositories, not here.
 - `Elarion.Paging` — keyset (cursor) and offset pagination primitives: the `[Keyset<TEntity>]` attribute (declared on a dedicated partial class, not the entity, so an entity may have any number of orderings), `IKeysetDefinition<T>` plus generated-keyset support types, an opaque cursor codec, `SortMap`/`SortMapBuilder` (composite multi-column sorts with per-entry tiebreakers and a `SortDirection`), and the `IQueryable` paging extensions that produce the transport-neutral `Page<T>`. Both keyset and offset paging take an explicit definition (`MyKeyset.Definition` / a `SortMap`). Depends on EF Core (`Microsoft.EntityFrameworkCore.Relational`) and `Elarion.Abstractions`.
 - `Elarion.Messaging.InMemory` — the simple, best-effort **in-memory integration-event (Plane B) bus**, commit-gated by the EF Core DbContext transaction (`AddInMemoryIntegrationEventBus`; `AddInMemoryEventBus` also wires the `Elarion` domain tier). A non-durable sibling of the EF Core outbox: `InMemoryIntegrationEventBus` buffers events into an internal per-scope `EventDispatchScope`, which EF Core interceptors (`EventDispatchSaveChangesInterceptor`/`EventDispatchTransactionInterceptor`, registered automatically) flush to the hosted `EventDispatchPump` after commit and discard on rollback. There is no public dispatch-scope seam. Depends on EF Core (`Microsoft.EntityFrameworkCore.Relational`), `Elarion` (for the shared registry/context), and `Elarion.Abstractions`; not needed with the transactional outbox.
 - `Elarion.Messaging.Outbox` — EF Core transactional outbox: a durable `IIntegrationEventBus` (Plane B) that records each integration event as an `OutboxMessage` row in the caller's `DbContext` (committed atomically with the business data, discarded on rollback) and a hosted `OutboxDeliveryService` that polls, claims via a provider-neutral conditional `ExecuteUpdate` lease, dispatches to integration consumers on isolated scopes (at-least-once), and finalizes/purges. An `IOutboxStore` seam isolates the EF Core SQL so the bus, dispatcher, and delivery loop stay database-agnostic and unit-testable. `UseElarionOutbox(ModelBuilder)` adds the table (with a partial index over pending rows so the poll stays an indexed probe); `AddElarionOutbox<TDbContext>(...)` wires the tier. The claim/delivery logic is provider-neutral; the partial index assumes a provider that supports filtered indexes (PostgreSQL/SQL Server/SQLite — MySQL users supply an unfiltered index). Depends on EF Core (`Microsoft.EntityFrameworkCore.Relational`) and `Elarion.Abstractions`.
-- `Elarion.Generators` — Roslyn source generators for handlers, validators, services, modules, the module-scoped RPC/HTTP/MCP transport maps (`AppModuleDiscoveryGenerator`), resilience policies, scheduled jobs, and event consumers, plus the per-module `ConfigureDefaultServices` aggregation (`ModuleDefaultServicesGenerator`) that auto-wires and feature-gates all of a module's registrations.
+- `Elarion.Generators` — Roslyn source generators for handlers, validators, services, modules, the module-scoped RPC/HTTP/MCP transport maps (`AppModuleDiscoveryGenerator`), resilience policies, scheduled jobs, and event consumers, plus the per-module `ConfigureDefaultServices` aggregation (`ModuleDefaultServicesGenerator`) that auto-wires and feature-gates all of a module's registrations. Also hosts the cross-module communication tooling: the `ModuleApiGenerator` (a typed in-process API per `[GenerateModuleApi]` facade) and the `ModuleBoundaryAnalyzer` (the repo's first `DiagnosticAnalyzer`, `ELMOD002`). See [Cross-module communication](#cross-module-communication).
 - `Elarion.EntityFrameworkCore.Generators` — Roslyn generators for DbSet properties and entity configuration application, and for keyset pagination definitions (the `[Keyset<TEntity>]` emitter targeting `Elarion.Paging`). It fills each annotated partial class with the `IKeysetDefinition<TEntity>` implementation and a static `Definition` singleton, so handlers page with the explicit `source.ToKeysetPageAsync(request, MyKeyset.Definition, selector)` overload (symmetric with offset paging, which passes a `SortMap`). The keyset class is decoupled from the entity, so multiple orderings per entity each emit a distinct definition; a non-partial or nested keyset class is reported (`ELKEY005`). The keyset emitter is provider-aware: with `[assembly: UseElarionEntityFrameworkCore(Provider = EfCoreProvider.Npgsql)]` and a uniform-direction multi-column keyset it emits a PostgreSQL row-value seek (`EF.Functions.GreaterThan`/`LessThan` over `ValueTuple`s), otherwise it falls back to the portable lexicographic predicate.
 - `@swimmesberger/elarion-jsonrpc-client-generator` — TypeScript CLI/library that converts exported Elarion JSON-RPC schemas into method contracts, Zod result schemas, and a portable fetch client. Lives in `src/elarion-jsonrpc-client-generator`.
 
@@ -51,7 +51,7 @@ and deployment quirks belong in consuming repositories, not here.
 
 JSON-RPC is a first-class optional transport:
 
-1. Application handlers declare `[RpcMethod("module.action")]`. The `Transports` flag (`RpcTransports.JsonRpc`/`Mcp`/`All`, default `All`) selects which dispatcher-based transports expose the handler — JSON-RPC, MCP, or both.
+1. Application handlers declare `[RpcMethod("module.action")]`. The `Transports` flag (`RpcTransports.JsonRpc`/`Mcp`/`All`, default `All`) selects which dispatcher-based transports expose the handler — JSON-RPC, MCP, or both. Request/response are read from the handler's `IHandler<TRequest, Result<TResponse>>` interface (success type unwrapped from `Result<T>`), so they may be nested or top-level; a handler with no resolvable shape reports `ELRPC002`.
 2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits the module-scoped, feature-flag-gated dispatcher registration code.
 3. Hosts configure `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
 4. `Elarion.JsonRpc.JsonRpcSchemaExporter` or `Elarion.AspNetCore.SchemaGeneration` exports `rpc-schema.json` from registered methods.
@@ -66,7 +66,7 @@ common dependencies such as Zod when they materially improve safety.
 
 Plain HTTP/REST is a parallel first-class optional transport that maps the same handlers:
 
-1. Application handlers declare `[HttpEndpoint("route")]` (verb inferred: nested `Command` → POST, `Query` → GET) or `[HttpEndpoint(HttpVerb.X, "route")]`.
+1. Application handlers declare `[HttpEndpoint("route")]` or `[HttpEndpoint(HttpVerb.X, "route")]`. The request/response are read from the handler's `IHandler<TRequest, Result<TResponse>>` interface (success type unwrapped from `Result<T>`), so they may be nested or top-level — nesting/naming carry no semantic weight. Verb precedence: an explicit verb wins; else the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); else `ELHTTP004`. A handler with no resolvable shape reports `ELHTTP001`.
 2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits per-module `Map{Module}Http(IEndpointRouteBuilder)` bodies of strongly-typed minimal-API registrations (one `MapGet`/`MapPost`/... per handler), aggregated and feature-gated by `MapAllEndpoints`.
 3. Each emitted lambda binds the request (`[AsParameters]` for GET/DELETE and opt-in custom-bound requests; JSON body for default POST/PUT/PATCH) and translates `Result<T>` via `ElarionHttpResults` — `200`/`204` on success, RFC 7807 ProblemDetails on failure with the status from `HttpAppErrorMapper`.
 
@@ -173,10 +173,14 @@ integration handler returning a non-`Unit` `Result<T>` is rejected (`ELEVT005`).
 `[ConsumeEvent]` on a non-handler is reported (`ELEVT005`).
 
 Because the domain plane dispatches **inline in the publisher's scope**, a domain-event handler's
-decorator pipeline runs **nested within the command's** (same scope, `DbContext`, and transaction):
-give domain consumers a read-only/minimal pipeline (no transaction/resilience — an app transaction
-decorator must *join* the ambient transaction, never nest), while integration consumers run on a
-**fresh post-commit scope** and correctly take the full pipeline (their own transaction).
+decorator pipeline runs **nested within the command's** (same scope, `DbContext`, and transaction), so
+a domain consumer must not open its own transaction or resilience scope. The recommended way is a
+transaction decorator that declares a `static bool AppliesTo(Type request)` predicate matching only
+`ICommand`/`IIntegrationEvent` (see [ADR-0003](docs/decisions/0003-decorator-attachment-predicates.md)
+and [decorator pipelines](docs/concepts/decorator-pipelines.mdx)): the generator then never attaches it
+to a domain-event handler, while integration consumers run on a **fresh post-commit scope** and
+correctly take the transaction (their request is an `IIntegrationEvent`). Generic `where` constraints
+and the `AppliesTo` predicate are both evaluated at compile time by `HandlerRegistrationGenerator`.
 
 The **method form** is a lightweight alternative for a small side effect on an existing
 `[Service]`: the consumer is an instance method on a `[Service]` class (no decorator pipeline);
@@ -214,8 +218,8 @@ module author wiring them by hand. The mechanism is a cross-generator partial-me
 
 - `ModuleDefaultServicesGenerator` emits, per `[AppModule]`, a sibling
   `public static partial class {ModuleType}ElarionModuleServices` with
-  `ConfigureDefaultServices(IServiceCollection)` calling five `static partial void` hooks
-  (`AddHandlers`/`AddServices`/`AddValidators`/`AddScheduledJobs`/`AddEventConsumers`). Its
+  `ConfigureDefaultServices(IServiceCollection)` calling six `static partial void` hooks
+  (`AddHandlers`/`AddServices`/`AddValidators`/`AddScheduledJobs`/`AddEventConsumers`/`AddModuleApi`). Its
   fully-qualified name is exactly the module's `TypeFqn + "ElarionModuleServices"`, so the host needs
   no extra manifest metadata to call it.
 - Each category generator contributes a filler partial implementing its hook (calling the existing
@@ -227,6 +231,40 @@ module author wiring them by hand. The mechanism is a cross-generator partial-me
   for non-generated registrations). For a referenced module whose assembly predates the skeleton
   generator, the host omits the call (it probes for the public sibling via `GetTypeByMetadataName`);
   current-compilation modules always emit it since the skeleton runs in the same pass.
+
+## Cross-module communication
+
+Direct, synchronous module-to-module calls (the in-process analog of a gRPC call) go through a
+**published contract**, not through another module's internals or `IDomainEventBus.RequestAsync`
+(Plane A is in-process by nature and not an extraction path). See
+[ADR-0002](docs/decisions/0002-cross-module-communication.md). The framework owns the convention and
+the analyzer; mapping between a contract's DTOs and a module's handler DTOs is the **module's concern**
+(hand-written or any mapper) — there is no generated forwarder and no mapper dependency.
+
+- **`[ModuleContract]`** marks an interface (or class) as a module's published cross-module surface.
+  The owning module keeps the implementation `internal` and registers it (commonly a thin `[Service]`
+  adapter that maps to, and forwards to, the module's handlers); other modules inject the contract.
+- **`ModuleBoundaryAnalyzer` (`ELMOD002`, warning)** reports when a type in one module depends on
+  another module's **internal** type — a `[Service]`, a handler, or a `[DbEntity]` entity — instead of
+  a `[ModuleContract]`. It inspects only the dependency surface (constructor parameters, fields,
+  properties) to stay precise; types under no `[AppModule]` (framework/shared kernel) are never flagged.
+  This is the repo's first `DiagnosticAnalyzer`; new analyzer diagnostics must be tracked in
+  `AnalyzerReleases.Unshipped.md` (RS2008).
+- **`[GenerateModuleApi]` (optional ergonomic layer)** generates a typed in-process API over a module's
+  own handlers so intra-module code (notably a contract implementation) can call handlers by name. It is
+  **not a transport** — it dispatches typed-direct to the decorated `IHandler<,>` (full pipeline), crosses
+  no serialization boundary, and is absent from the JSON-RPC/MCP schema. Because its methods expose
+  handler DTOs it is module-internal and must not cross a boundary. `ModuleApiGenerator` emits the method
+  declarations (one per handler, named after the handler type), an `internal` forwarder, and a DI
+  registration wired into the module's gated `ConfigureDefaultServices` (the `AddModuleApi` hook).
+- **Membership mirrors `[DbEntity]`/`[GenerateDbSets]`** with the same scope vocabulary, but **opt-out**
+  by default (handlers are structural, so every non-excluded handler is in the module's default facade).
+  `[ModuleApi]` is a pure configurator: `Exclude = true` removes a handler from every facade; scope tags
+  place it on the matching `[GenerateModuleApi("scope")]` facades (additively — it stays in the default
+  facade). A default `[GenerateModuleApi]` facade includes every non-excluded handler in the owning
+  module (longest-prefix namespace match); a scoped facade includes handlers whose tags intersect, and is
+  the ISP-friendly way to expose a narrow surface. Diagnostics: `ELAPI001` (must be partial), `ELAPI002`
+  (must be top-level), `ELAPI003` (not under any module — warning), `ELAPI004` (duplicate method name).
 
 ## TypeScript client generator
 

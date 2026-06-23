@@ -17,29 +17,33 @@ public enum HttpVerb {
 /// <summary>
 /// Marks a handler class as an HTTP endpoint, discoverable by <c>Elarion.Generators.AppModuleDiscoveryGenerator</c>,
 /// which emits the matching minimal-API <c>MapGet</c>/<c>MapPost</c>/... registration through the module
-/// bootstrapper. The handler must also
-/// implement <see cref="IHandler{TRequest, TResponse}"/> and nest its request type as <c>Command</c> or
-/// <c>Query</c> plus a <c>Response</c> type (same convention as <see cref="RpcMethodAttribute"/>).
+/// bootstrapper. The handler must implement <see cref="IHandler{TRequest, TResponse}"/> with a
+/// <c>Result&lt;TResponse&gt;</c> response; the request and response types are read from that interface, so they
+/// may be nested or top-level.
 /// </summary>
 /// <remarks>
 /// When the verb is omitted (the <see cref="HttpEndpointAttribute(string)"/> constructor), it is inferred from
-/// the nested request type: <c>Command</c> maps to <see cref="HttpVerb.Post"/> and <c>Query</c> maps to
-/// <see cref="HttpVerb.Get"/>. This type lives in <c>Elarion.Abstractions</c> and intentionally carries no
-/// ASP.NET Core dependency — it is pure declarative metadata. A handler may carry both this attribute and
-/// <see cref="RpcMethodAttribute"/> to be exposed over both transports.
+/// the request's CQRS marker: <see cref="ICommand"/> maps to <see cref="HttpVerb.Post"/> and <see cref="IQuery"/>
+/// maps to <see cref="HttpVerb.Get"/>. A request that implements neither marker must be given an explicit verb.
+/// This type lives in <c>Elarion.Abstractions</c> and intentionally carries no ASP.NET Core dependency — it is
+/// pure declarative metadata. A handler may carry both this attribute and <see cref="RpcMethodAttribute"/> to be
+/// exposed over both transports.
 /// </remarks>
 /// <example>
 /// <code>
-/// [HttpEndpoint("clients/{id}")]                       // verb inferred from the nested Query -> GET
-/// public sealed class GetClient : IHandler&lt;GetClient.Query, Result&lt;GetClient.Response&gt;&gt; { ... }
+/// [HttpEndpoint("clients/{id}")]                       // verb inferred from IQuery -> GET
+/// public sealed class GetClient : IHandler&lt;GetClient.Query, Result&lt;GetClient.Response&gt;&gt; {
+///     public sealed record Query : IQuery { public required Guid Id { get; init; } }
+///     // ...
+/// }
 ///
-/// [HttpEndpoint(HttpVerb.Delete, "clients/{id}")]      // verb explicit
+/// [HttpEndpoint(HttpVerb.Delete, "clients/{id}")]      // verb explicit; request needs no marker
 /// public sealed class DeleteClient : IHandler&lt;DeleteClient.Command, Result&lt;DeleteClient.Response&gt;&gt; { ... }
 /// </code>
 /// </example>
 [AttributeUsage(AttributeTargets.Class)]
 public sealed class HttpEndpointAttribute : Attribute {
-    /// <summary>Maps the handler at <paramref name="route"/>, inferring the verb from the nested request type.</summary>
+    /// <summary>Maps the handler at <paramref name="route"/>, inferring the verb from the request's <see cref="ICommand"/>/<see cref="IQuery"/> marker.</summary>
     /// <param name="route">The route pattern (e.g. <c>"clients/{id}"</c>).</param>
     public HttpEndpointAttribute(string route) => Route = route;
 

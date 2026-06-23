@@ -24,7 +24,7 @@ public sealed class ModuleDefaultServicesGeneratorTests
         generated.Should().Contain("public static partial class BillingModuleElarionModuleServices");
         generated.Should().Contain(
             "public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection ConfigureDefaultServices(");
-        foreach (var hook in new[] { "AddHandlers", "AddServices", "AddValidators", "AddScheduledJobs", "AddEventConsumers" })
+        foreach (var hook in new[] { "AddHandlers", "AddServices", "AddValidators", "AddScheduledJobs", "AddEventConsumers", "AddModuleApi" })
         {
             generated.Should().Contain($"        {hook}(services);");
             generated.Should().Contain(

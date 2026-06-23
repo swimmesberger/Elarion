@@ -1,0 +1,113 @@
+---
+title: Cross-module communication
+description: Direct, synchronous module-to-module calls go through a published [ModuleContract]; an analyzer keeps modules honest, and an optional generated typed in-process API lets a module call its own handlers by name.
+---
+
+Modules collaborate **asynchronously** through the [event planes](/docs/events). For **direct,
+synchronous** module-to-module calls — the in-process analog of a gRPC call — Elarion's answer is a
+**published contract**: a module exposes an interface, keeps the implementation internal, and other
+modules depend on the contract, never on the module's internals.
+
+The framework owns the convention (`[ModuleContract]`) and an analyzer that enforces it. Mapping
+between a contract's DTOs and a module's handler DTOs is the **module's concern** — write it by hand
+or with any mapper. There is no generated forwarder for the contract and no mapper dependency. See
+[ADR-0002](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0002-cross-module-communication.md)
+for the rationale.
+
+## The contract
+
+Mark a module's published surface with `[ModuleContract]` and keep the implementation `internal`:
+
+```csharp
+using Elarion.Abstractions;
+using Elarion.Abstractions.Modules;
+
+namespace Sales;
+
+// Module A — the published contract (stable, public).
+[ModuleContract]
+public interface ICustomerLookup {
+    ValueTask<Result<Customer>> GetAsync(CustomerId id, CancellationToken ct = default);
+}
+```
+
+```csharp
+namespace Orders;
+
+// Module B — depends only on the contract.
+[Service]
+internal sealed class OrderPricer(ICustomerLookup customers) {
+    // ...
+}
+```
+
+Injecting Module A's internal `[Service]`, a handler, or a `[DbEntity]` from Module B instead of a
+`[ModuleContract]` is reported by the boundary analyzer (`ELMOD002`, a warning). The analyzer inspects
+the dependency surface (constructor parameters, fields, properties); framework and shared-kernel types
+(anything under no `[AppModule]`) are never flagged.
+
+## Implementing a contract with the typed module API
+
+A `[ModuleContract]` implementation is a small, hand-written adapter: it forwards to the module's
+handlers and maps to/from the contract's DTOs. To call handlers by name instead of resolving verbose
+`IHandler<,>` types, opt the module into a generated **typed in-process API** with `[GenerateModuleApi]`:
+
+```csharp
+namespace Sales;
+
+// Generated: one method per handler in this module, dispatched typed-direct to IHandler<,>.
+[GenerateModuleApi]
+public partial interface ISalesApi;
+
+// The contract implementation — internal, auto-registered and module-gated via [Service].
+[Service]
+internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
+    public async ValueTask<Result<Customer>> GetAsync(CustomerId id, CancellationToken ct = default) {
+        var result = await api.GetCustomer(new GetCustomer.Query(id.Value), ct);  // full handler pipeline
+        return result.Map(r => new Customer(r.Id, r.Name));                       // module-owned mapping
+    }
+}
+```
+
+<Callout type="info">
+  The typed module API is **not a transport**. It dispatches typed-direct to the decorated
+  `IHandler<,>` (so the full decorator pipeline runs), crosses no serialization boundary, and is
+  absent from the JSON-RPC/MCP schema. Because its methods expose handler DTOs it is module-internal —
+  never inject it across a module boundary.
+</Callout>
+
+Handlers are resolved **lazily, per call**, from the service provider — a default facade can span the
+whole module, so the forwarder never builds a handler's pipeline until you invoke that method.
+
+## Choosing which handlers appear
+
+Membership is **opt-out** and uses the same scope vocabulary as `[DbEntity]`/`[GenerateDbSets]`:
+
+- A default `[GenerateModuleApi]` facade includes **every handler** in the owning module.
+- `[ModuleApi(Exclude = true)]` on a handler removes it from every facade.
+- `[ModuleApi("Reporting")]` tags a handler into the `Reporting` scope (additively — it stays in the
+  default facade). A `[GenerateModuleApi("Reporting")]` facade then includes only handlers whose tags
+  intersect, which is the ISP-friendly way to expose a narrow surface to one collaborator.
+
+```csharp
+[ModuleApi("Reporting")]
+public sealed class GetRevenue : IHandler<GetRevenue.Query, Result<GetRevenue.Response>> { /* ... */ }
+
+[GenerateModuleApi("Reporting")]            // only [ModuleApi("Reporting")] handlers
+public partial interface IReportingApi;
+```
+
+| Diagnostic | Meaning |
+| --- | --- |
+| `ELAPI001` | `[GenerateModuleApi]` interface must be `partial`. |
+| `ELAPI002` | `[GenerateModuleApi]` interface must be top-level (not nested). |
+| `ELAPI003` | Interface namespace is under no `[AppModule]`; left empty (warning). |
+| `ELAPI004` | Two handlers map to one method name on the facade. |
+| `ELMOD002` | A type depends on another module's internal type instead of a `[ModuleContract]` (warning). |
+
+## Why not `IDomainEventBus.RequestAsync`?
+
+`RequestAsync` is a mediator-style in-process request/response, but Plane A is **in-process by nature**
+and not an extraction path (see [events](/docs/events)). A `[ModuleContract]` is the stable seam that
+survives extraction: to split a module out of process later, keep the interface and swap the in-process
+implementation for a generated client — consumers never change.

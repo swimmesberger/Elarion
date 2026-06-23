@@ -29,6 +29,7 @@ internal static class ModuleDefaultsEmitter
     public const string AddValidatorsMethod = "AddValidators";
     public const string AddScheduledJobsMethod = "AddScheduledJobs";
     public const string AddEventConsumersMethod = "AddEventConsumers";
+    public const string AddModuleApiMethod = "AddModuleApi";
 
     public const string ServiceCollectionFqn =
         "global::Microsoft.Extensions.DependencyInjection.IServiceCollection";
@@ -40,7 +41,8 @@ internal static class ModuleDefaultsEmitter
         AddServicesMethod,
         AddValidatorsMethod,
         AddScheduledJobsMethod,
-        AddEventConsumersMethod
+        AddEventConsumersMethod,
+        AddModuleApiMethod
     ];
 
     public static string SiblingClassName(string moduleTypeName) => moduleTypeName + ClassSuffix;

@@ -22,3 +22,6 @@ designs that are not yet implemented.
 ## Index
 
 - [ADR-0001: Event dispatch timing and transactional delivery](0001-event-transaction-phase.md)
+- [ADR-0002: Direct cross-module communication](0002-cross-module-communication.md)
+- [ADR-0003: Predicate-based decorator attachment (`AppliesTo`)](0003-decorator-attachment-predicates.md)
+- [ADR-0004: Handler result caching](0004-handler-result-caching.md)
