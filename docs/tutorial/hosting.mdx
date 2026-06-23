@@ -211,7 +211,7 @@ Add the scheduler section to configuration so the in-memory runtime is enabled:
 
 ### Export the schema on every build
 
-Wire the [build-time schema exporter](/docs/json-rpc/schema-generation) so `rpc-schema.json` is written
+Wire the [build-time schema exporter](/docs/capabilities/transports/schema-generation) so `rpc-schema.json` is written
 to the repo root whenever the host compiles. The frontend client is generated from it.
 
 ```xml title="src/Billing.Api/Billing.Api.csproj"

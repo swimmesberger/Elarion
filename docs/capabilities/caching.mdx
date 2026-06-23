@@ -65,7 +65,7 @@ Use `KeyProperties` when only some request fields affect the response:
 
 | Scope | Behavior |
 | --- | --- |
-| `CurrentUser` (default) | Entries and tags are isolated by the authenticated user. Requires an [`ICurrentUser`](/docs/concepts/current-user) with a user id; the id is hashed before it enters the physical cache key. |
+| `CurrentUser` (default) | Entries and tags are isolated by the authenticated user. Requires an [`ICurrentUser`](/docs/capabilities/current-user) with a user id; the id is hashed before it enters the physical cache key. |
 | `Global` | Entries are shared across all users. Use only for data that is not user-specific and carries no authorization context. |
 
 <Callout type="warn">
@@ -132,6 +132,6 @@ ways to change the backing store, from least to most invasive:
 ordinary handler decorators inserted by the `[Cacheable]` / `[CacheInvalidate]` attributes. They sit
 in the generated pipeline alongside your application decorators, so caching composes deterministically
 with logging, validation, and transactions. Cache operations are also
-[trace-visible](/docs/telemetry): get/create spans report the precise outcome —
+[trace-visible](/docs/capabilities/telemetry): get/create spans report the precise outcome —
 `miss-factory-executed`, `miss-non-cacheable`, or `cached-or-coalesced` — and invalidation emits its
 own spans, all without leaking full keys or raw user ids into tags.

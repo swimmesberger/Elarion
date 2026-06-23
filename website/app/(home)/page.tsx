@@ -95,7 +95,7 @@ function Hero() {
               Get started
               <ArrowRight className="size-4" />
             </Link>
-            <Link href="/docs/philosophy" className="btn-ghost">
+            <Link href="/docs/why-elarion" className="btn-ghost">
               Read the philosophy
             </Link>
             <a
@@ -250,7 +250,7 @@ function Fanout() {
             ))}
           </ul>
           <Link
-            href="/docs/source-generation"
+            href="/docs/concepts/source-generation"
             className="group mt-8 inline-flex items-center gap-2 font-medium text-fd-primary"
           >
             How source generation works
@@ -281,7 +281,7 @@ const features: Feature[] = [
     icon: Binary,
     title: 'Compile-time, not reflection',
     body: 'Handlers, services, validators, modules, RPC maps, and scheduled jobs are generated as ordinary DI code. Startup is deterministic and AOT-friendly; missing wiring is a build error.',
-    href: '/docs/source-generation',
+    href: '/docs/concepts/source-generation',
     span: 'lg:col-span-3',
   },
   {
@@ -295,14 +295,14 @@ const features: Feature[] = [
     icon: Plug,
     title: 'End-to-end JSON-RPC',
     body: 'Mark a handler, export a schema at build time, and generate a typed TypeScript + Zod client — without hand-writing DTOs.',
-    href: '/docs/json-rpc',
+    href: '/docs/capabilities/transports/json-rpc',
     span: 'lg:col-span-2',
   },
   {
     icon: Bot,
     title: 'AI-native MCP tools',
     body: 'Expose the same handlers to AI agents as an MCP server. Tool names, descriptions, and schemas are generated from your code.',
-    href: '/docs/json-rpc/mcp',
+    href: '/docs/capabilities/transports/mcp',
     span: 'lg:col-span-2',
   },
   {
@@ -316,21 +316,21 @@ const features: Feature[] = [
     icon: CalendarClock,
     title: 'In-process scheduling',
     body: 'Source-generated jobs share one scheduler with explicit overlap, misfire, and resilience policies — fully instrumented.',
-    href: '/docs/scheduling',
+    href: '/docs/capabilities/scheduling',
     span: 'lg:col-span-2',
   },
   {
     icon: Database,
     title: 'EF Core & blob storage',
     body: 'Generate DbSets and entity configuration, page with keyset cursors, and depend on provider-neutral, streaming-first blob contracts.',
-    href: '/docs/entity-framework',
+    href: '/docs/capabilities/entity-framework',
     span: 'lg:col-span-2',
   },
   {
     icon: Activity,
     title: 'Observable by default',
     body: 'JSON-RPC, scheduling, caching, and resilience emit OpenTelemetry-compatible traces and metrics through System.Diagnostics.',
-    href: '/docs/telemetry',
+    href: '/docs/capabilities/telemetry',
     span: 'lg:col-span-2',
   },
 ];
@@ -470,7 +470,7 @@ function Philosophy() {
             declares intent next to the type and generates the wiring.
           </p>
           <Link
-            href="/docs/philosophy"
+            href="/docs/why-elarion"
             className="group mt-9 inline-flex items-center gap-2 font-medium text-fd-primary"
           >
             Read the full design rationale
@@ -611,16 +611,16 @@ const footerColumns: { heading: string; links: { label: string; href: string }[]
       { label: 'Introduction', href: '/docs' },
       { label: 'Getting started', href: '/docs/getting-started/installation' },
       { label: 'Core concepts', href: '/docs/concepts' },
-      { label: 'Philosophy', href: '/docs/philosophy' },
+      { label: 'Philosophy', href: '/docs/why-elarion' },
     ],
   },
   {
     heading: 'Features',
     links: [
-      { label: 'Source generation', href: '/docs/source-generation' },
-      { label: 'JSON-RPC & MCP', href: '/docs/json-rpc' },
-      { label: 'Scheduling', href: '/docs/scheduling' },
-      { label: 'Events', href: '/docs/events' },
+      { label: 'Source generation', href: '/docs/concepts/source-generation' },
+      { label: 'JSON-RPC & MCP', href: '/docs/capabilities/transports/json-rpc' },
+      { label: 'Scheduling', href: '/docs/capabilities/scheduling' },
+      { label: 'Events', href: '/docs/capabilities/events' },
     ],
   },
   {
@@ -628,7 +628,7 @@ const footerColumns: { heading: string; links: { label: string; href: string }[]
     links: [
       { label: 'Packages', href: '/docs/reference/packages' },
       { label: 'Configuration', href: '/docs/reference/configuration' },
-      { label: 'vs. ASP.NET Core', href: '/docs/reference/comparison' },
+      { label: 'vs. ASP.NET Core', href: '/docs/why-elarion#how-elarion-differs-from-aspnet-core' },
       { label: 'Troubleshooting', href: '/docs/reference/troubleshooting' },
     ],
   },

@@ -1,7 +1,6 @@
 ---
 title: Source generation
 description: How Elarion's Roslyn generators turn attributes and conventions into deterministic, inspectable registration code.
-icon: Cpu
 ---
 
 Source generation is the mechanism behind everything in Elarion. Instead of scanning assemblies with
@@ -59,11 +58,11 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 | `ModuleServiceRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleServices]` | `Add{ServiceName}Service()` and `Add{ModuleName}Services()` extension methods. |
 | `ModuleValidatorRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleValidators]` | `Add{ModuleName}Validators()` extension methods. |
 | `SchedulerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateScheduledJobs]` | `Add{AssemblyName}ScheduledJobs()` registering descriptors and job types. |
-| `EventConsumerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateEventConsumers]` | Per-module `Add{Module}EventConsumers()` registering each `[ConsumeEvent]` consumer (handler or `[Service]` method) plus its `EventSubscriptionDescriptor`. See [Events](/docs/events). |
+| `EventConsumerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateEventConsumers]` | Per-module `Add{Module}EventConsumers()` registering each `[ConsumeEvent]` consumer (handler or `[Service]` method) plus its `EventSubscriptionDescriptor`. See [Events](/docs/capabilities/events). |
 | `ResiliencePolicyGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |
 | `ElarionManifestGenerator` | Any project containing `[AppModule]`, `[HttpEndpoint]`, or `[RpcMethod]` | Internal assembly metadata manifests consumed by host-side generators for referenced modules and transport handlers. |
-| `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods`, `RegisterMcpMethods`, `GetMcpMetadata`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, `GetAllModuleNames`, plus per-module `Map{Module}Http` / `Add{Module}JsonRpc` / `Add{Module}Mcp` / `Get{Module}McpMetadata`. The single transport-wiring path for `[HttpEndpoint]`, JSON-RPC, and MCP. See [Hosting](/docs/json-rpc/hosting) and [HTTP endpoints](/docs/http-endpoints). |
-| EF Core `DbSet` generator | `[GenerateDbSets]` on a partial interface | `DbSet<T>` members and entity configuration application. See [Entity Framework Core](/docs/entity-framework). |
+| `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods`, `RegisterMcpMethods`, `GetMcpMetadata`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, `GetAllModuleNames`, plus per-module `Map{Module}Http` / `Add{Module}JsonRpc` / `Add{Module}Mcp` / `Get{Module}McpMetadata`. The single transport-wiring path for `[HttpEndpoint]`, JSON-RPC, and MCP. See [Hosting](/docs/capabilities/hosting) and [HTTP endpoints](/docs/capabilities/transports/http-endpoints). |
+| EF Core `DbSet` generator | `[GenerateDbSets]` on a partial interface | `DbSet<T>` members and entity configuration application. See [Entity Framework Core](/docs/capabilities/entity-framework). |
 
 Generated code intentionally uses explicit type names and DI factory registrations. Startup behavior
 remains deterministic and AOT-friendly.
@@ -81,8 +80,8 @@ enabled module's generated `[HttpEndpoint]` routes, JSON-RPC-surfaced `[RpcMetho
 MCP-surfaced tools respectively (core modules always; feature modules gated by `Modules:{Name}:Enabled`).
 A handler picks its dispatcher surfaces with `[RpcMethod(Transports = ...)]`. Modules are the only path —
 a host with no modules declares a single core `[AppModule]` (which maps unconditionally). See
-[Hosting](/docs/json-rpc/hosting), [MCP server](/docs/json-rpc/mcp), and
-[HTTP endpoints](/docs/http-endpoints).
+[Hosting](/docs/capabilities/hosting), [MCP server](/docs/capabilities/transports/mcp), and
+[HTTP endpoints](/docs/capabilities/transports/http-endpoints).
 
 ## Diagnostics over surprises
 

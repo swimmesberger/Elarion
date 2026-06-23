@@ -1,0 +1,172 @@
+---
+title: Event backends
+description: Choose between the best-effort in-memory integration bus and the durable EF Core transactional outbox, and wire the one you pick.
+---
+
+The **domain** plane (`IDomainEventBus`) is always in-memory and inline — there is no backend choice to
+make there. The **integration** plane (`IIntegrationEventBus`) is the only broker-portable plane, and it
+is where you pick a backend. Two ship: a best-effort **in-memory** tier and the durable **EF Core
+transactional outbox**. (For the plane model itself, see the [events overview](/docs/capabilities/events).)
+
+## Choosing a backend
+
+<Callout type="info">
+  **Recommended: the EF Core outbox** for anything that must not be lost. The in-memory tier is a
+  best-effort convenience for events you can afford to drop on a crash.
+</Callout>
+
+| | In-memory (`Elarion.Messaging.InMemory`) | EF Core outbox (`Elarion.Messaging.Outbox`) |
+| --- | --- | --- |
+| Durability | best-effort; flushed-but-undelivered events are **lost on crash** | **at-least-once**; survives restarts |
+| How it captures | a per-scope buffer flushed after commit | a row written in the **same transaction** as your data |
+| Delivery | a hosted channel pump (`EventDispatchPump`) | a hosted worker that polls, leases, dispatches, retries (`OutboxDeliveryService`) |
+| EF Core | needs interceptors on your `DbContext` (registered for you) | needs the outbox table on your `DbContext` |
+| Use when | events are advisory and loss is acceptable | events drive real side effects that must happen |
+
+Both deliver **at-least-once and unordered** to consumers, so consumers must be idempotent either way —
+see [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
+
+## In-memory integration bus
+
+Register the in-memory tier with `AddInMemoryEventBus()` from `Elarion.Messaging.InMemory`. This wires the
+domain plane (`AddInMemoryDomainEventBus`) **plus** the in-memory integration plane, whose after-commit
+delivery is commit-gated by the database transaction without a hand-written decorator: the package's EF
+Core interceptors are registered automatically and flush buffered events after the `DbContext` commits and
+discard them on rollback.
+
+```csharp title="Program.cs"
+builder.Services.AddInMemoryEventBus();   // domain plane + in-memory integration plane (interceptors included)
+```
+
+`InMemoryIntegrationEventBus.PublishAsync` buffers each event into a per-scope `EventDispatchScope`; the
+`EventDispatchSaveChangesInterceptor`/`EventDispatchTransactionInterceptor` flush that buffer to the hosted
+`EventDispatchPump` after commit (and discard it on rollback). The pump drains a bounded channel and
+dispatches each event on an isolated scope.
+
+A configuration overload reads the `EventBus` section — `EventBus:Enabled` (default `true`) and
+`EventBus:DeliveryChannelCapacity` (default `1024`, the back-pressure bound on flushed-but-undelivered
+events) — and throws on a non-boolean/non-integer value:
+
+```csharp
+builder.Services.AddInMemoryEventBus(builder.Configuration);
+```
+
+If you only need the integration tier (the domain plane is already wired elsewhere), call
+`AddInMemoryIntegrationEventBus()` directly; it registers `IIntegrationEventBus`, the scope buffer, the
+pump, and the two interceptors, sharing the same `EventSubscriptionRegistry`.
+
+<Callout type="warn">
+  The interceptors are resolved per scope by `AddDbContext`, so the in-memory integration tier needs an EF
+  Core context registered the normal way. Events flushed but not yet delivered when the process exits are
+  **lost** — reach for the outbox when that is unacceptable.
+</Callout>
+
+## EF Core transactional outbox
+
+The outbox makes integration delivery durable by writing each event as a row in **your** `DbContext`,
+committed atomically with the business data. A background worker delivers it after commit. It **replaces**
+the in-memory integration tier; the domain plane and the generated consumer descriptors are registered
+separately.
+
+<Steps>
+
+<Step>
+
+**Add the table** to the context that owns your business entities, in `OnModelCreating`:
+
+```csharp title="BillingDbContext.cs"
+protected override void OnModelCreating(ModelBuilder modelBuilder) {
+    base.OnModelCreating(modelBuilder);
+    modelBuilder.UseElarionOutbox();   // adds elarion_outbox_messages + a partial pending index
+}
+```
+
+</Step>
+
+<Step>
+
+**Register the tier** in the host, generic over that context:
+
+```csharp title="Program.cs"
+builder.Services.AddElarionOutbox<BillingDbContext>(o => {
+    o.SerializerOptions     = serializerOptions;        // reuse the host's source-generated options for AOT
+    // o.PollingInterval    = TimeSpan.FromSeconds(1);  // idle poll interval
+    // o.BatchSize          = 100;                       // messages claimed per poll
+    // o.LeaseDuration      = TimeSpan.FromMinutes(2);   // claim lease before another worker may reclaim
+    // o.MaxDeliveryAttempts = 10;                       // attempts before a message is left for inspection
+    // o.RetentionPeriod    = TimeSpan.FromDays(7);     // null = keep delivered rows forever
+});
+```
+
+This registers the durable `IIntegrationEventBus` (`OutboxIntegrationEventBus`), the storage
+(`IOutboxStore` / `EfCoreOutboxStore<TDbContext>`), the dispatcher (`OutboxEventDispatcher`), and the
+hosted `OutboxDeliveryService`. The bus is registered last-wins, so the outbox is authoritative even if an
+in-memory integration bus was registered for the domain plane's sake.
+
+</Step>
+
+<Step>
+
+**Register the domain plane and the consumers.** The domain plane is always in-memory and inline — wire it
+on its own so only the outbox delivers Plane B:
+
+```csharp title="Program.cs"
+builder.Services.AddInMemoryDomainEventBus();          // domain plane + registry
+builder.Services.AddElarionOutbox<BillingDbContext>(); // integration plane (durable)
+```
+
+Consumer **descriptors** are registered separately — automatically and feature-gated when you use
+`[GenerateModuleBootstrapper]` (see [Module gating](/docs/capabilities/events#module-gating)), or
+explicitly via the generated `Add{Assembly}EventConsumers()`. If you only publish integration events you
+don't need the in-memory tier at all — the outbox and the consumer descriptors are enough.
+
+</Step>
+
+</Steps>
+
+<Callout type="warn">
+  **Publish before you save.** `PublishAsync` only *tracks* the outbox row — it does not call
+  `SaveChanges`. Your unit of work must persist it **within the same transaction** as the business data, so
+  publish before the `SaveChanges` that commits the command:
+
+  ```csharp
+  db.Invoices.Add(invoice);
+  await integrationEvents.PublishAsync(new InvoiceCreated(invoice.Id, client.Email), ct);
+  await db.SaveChangesAsync(ct);   // persists the invoice and the outbox row atomically
+  ```
+
+  If the transaction rolls back, both the invoice and the event vanish together — no half-published
+  notifications. The database transaction provides the commit-gating directly, so the outbox needs no
+  per-scope flush/discard buffer.
+</Callout>
+
+### How delivery stays safe
+
+The `OutboxDeliveryService` claims pending messages with a provider-neutral conditional `ExecuteUpdate`
+lease and a short `LeaseDuration`, dispatches them to integration consumers on isolated scopes, then
+finalizes and purges. Running a couple of instances (or overlapping old/new during a deploy) never
+double-delivers, and a crashed worker's in-flight messages are retried once their lease expires. A message
+that fails past `MaxDeliveryAttempts` is left for inspection and no longer retried. Defaults are tuned for
+low/single-instance deployments — in multi-instance deployments keep `LeaseDuration` comfortably above the
+time to deliver a full `BatchSize` batch.
+
+The `UseElarionOutbox` pending index is a **partial (filtered) index** (`processed_on_utc IS NULL`), so the
+worker's "oldest undelivered first" scan stays a tiny indexed probe regardless of how many delivered rows
+await retention purge. Filtered indexes are supported on PostgreSQL, SQL Server, and SQLite; on MySQL,
+supply an unfiltered index in your own model.
+
+<Callout type="info">
+  **Serializer options.** `OutboxOptions.SerializerOptions` defaults to `JsonSerializerDefaults.Web` with a
+  reflection-based `DefaultJsonTypeInfoResolver`. For trimming/AOT, supply the host's source-generated
+  `IJsonTypeInfoResolver` — the same options used at runtime. See
+  [serialization](/docs/capabilities/serialization).
+</Callout>
+
+<Cards>
+  <Card title="Consuming events" href="/docs/capabilities/events/consuming-events">
+    The consumer model both backends deliver to, and how to keep consumers idempotent.
+  </Card>
+  <Card title="Serialization" href="/docs/capabilities/serialization">
+    Source-generated `JsonSerializerOptions` to reuse for the outbox payload serializer.
+  </Card>
+</Cards>

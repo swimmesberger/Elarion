@@ -1,5 +1,5 @@
 ---
-title: Overview
+title: JSON-RPC
 description: JSON-RPC is a first-class optional transport — mark a handler with [RpcMethod] and Elarion takes it from dispatcher to typed TypeScript client.
 ---
 
@@ -28,7 +28,7 @@ to a JSON-RPC error code — not per endpoint.
 
 ### It feels like calling the handler directly
 
-Because the [generated TypeScript client](/docs/json-rpc/typescript-client) is produced from the same
+Because the [generated TypeScript client](/docs/capabilities/transports/typescript-client) is produced from the same
 schema the server dispatches, a frontend call is about as close as a network round-trip gets to
 invoking the C# handler — same parameter shape, same result type, validated by Zod:
 
@@ -66,9 +66,9 @@ JSON-RPC methods. You are not locked into one transport.
 1. Application handlers declare `[RpcMethod("module.action")]`.
 2. `AppModuleDiscoveryGenerator` (via `[GenerateModuleBootstrapper]`) emits the gated dispatcher registration map.
 3. The host configures a `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
-4. `JsonRpcSchemaExporter` (or the [build-time package](/docs/json-rpc/schema-generation)) exports
+4. `JsonRpcSchemaExporter` (or the [build-time package](/docs/capabilities/transports/schema-generation)) exports
    `rpc-schema.json` from the registered dispatcher.
-5. [`elarion-jsonrpc-client-generator`](/docs/json-rpc/typescript-client) converts that schema into
+5. [`elarion-jsonrpc-client-generator`](/docs/capabilities/transports/typescript-client) converts that schema into
    TypeScript types, Zod result schemas, and a typed fetch client.
 6. The frontend uses the generated client directly or wraps it in framework-specific helpers.
 
@@ -119,8 +119,8 @@ transport-agnostic and return [`Result<T>`](/docs/concepts/results-and-errors); 
 ## In this section
 
 <Cards>
-  <Card title="Hosting" href="/docs/json-rpc/hosting">Map the endpoint and freeze the dispatcher in ASP.NET Core.</Card>
-  <Card title="Serialization" href="/docs/json-rpc/serialization">Compose module JSON contexts into the runtime serializer.</Card>
-  <Card title="Schema generation" href="/docs/json-rpc/schema-generation">Export `rpc-schema.json` during `dotnet build`.</Card>
-  <Card title="TypeScript client" href="/docs/json-rpc/typescript-client">Generate a typed, portable fetch client and Zod schemas.</Card>
+  <Card title="Hosting" href="/docs/capabilities/hosting">Map the endpoint and freeze the dispatcher in ASP.NET Core.</Card>
+  <Card title="Serialization" href="/docs/capabilities/serialization">Compose module JSON contexts into the runtime serializer.</Card>
+  <Card title="Schema generation" href="/docs/capabilities/transports/schema-generation">Export `rpc-schema.json` during `dotnet build`.</Card>
+  <Card title="TypeScript client" href="/docs/capabilities/transports/typescript-client">Generate a typed, portable fetch client and Zod schemas.</Card>
 </Cards>

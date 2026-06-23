@@ -1,7 +1,6 @@
 ---
 title: Build a fullstack app
 description: A complete, end-to-end walkthrough that builds a small billing application with every opinionated Elarion feature, plus a typed React frontend.
-icon: Rocket
 ---
 
 The [Quickstart](/docs/getting-started/quickstart) gets one handler onto the wire. This tutorial goes
@@ -41,19 +40,19 @@ Every Elarion capability shows up exactly where it pulls its weight in a real bi
 | --- | --- | --- |
 | Feature boundaries (`Clients`, `Invoicing`) and a shared foundation | [Modules](/docs/concepts/modules) (feature + core) | [Model the domain](/docs/tutorial/modeling) |
 | Reads and writes as named use cases | [Handlers](/docs/concepts/handlers) + [Results](/docs/concepts/results-and-errors) | [Write the features](/docs/tutorial/features) |
-| Data access without a repository layer | [EF Core `IAppDbContext`](/docs/entity-framework) | [Model the domain](/docs/tutorial/modeling) |
+| Data access without a repository layer | [EF Core `IAppDbContext`](/docs/capabilities/entity-framework) | [Model the domain](/docs/tutorial/modeling) |
 | Rejecting bad input | [Validators](/docs/concepts/validators) | [Write the features](/docs/tutorial/features) |
 | Transactions + logging around every command | [Decorator pipelines](/docs/concepts/decorator-pipelines) | [Write the features](/docs/tutorial/features) |
-| "Who is calling?" for scoping and audit | [Current user](/docs/concepts/current-user) | [Write the features](/docs/tutorial/features) |
-| Fast, per-user reads that stay fresh on writes | [Caching](/docs/concepts/caching) | [Write the features](/docs/tutorial/features) |
-| Flaky SMTP that must not drop an invoice | [Resilience](/docs/resilience) | [Background work](/docs/tutorial/background-work) |
-| Send-in-the-background + nightly reminders | [Scheduling](/docs/scheduling) | [Background work](/docs/tutorial/background-work) |
-| After-commit reactions that must not be lost | [Events](/docs/events) (durable outbox) | [Background work](/docs/tutorial/background-work) |
+| "Who is calling?" for scoping and audit | [Current user](/docs/capabilities/current-user) | [Write the features](/docs/tutorial/features) |
+| Fast, per-user reads that stay fresh on writes | [Caching](/docs/capabilities/caching) | [Write the features](/docs/tutorial/features) |
+| Flaky SMTP that must not drop an invoice | [Resilience](/docs/capabilities/resilience) | [Background work](/docs/tutorial/background-work) |
+| Send-in-the-background + nightly reminders | [Scheduling](/docs/capabilities/scheduling) | [Background work](/docs/tutorial/background-work) |
+| After-commit reactions that must not be lost | [Events](/docs/capabilities/events) (durable outbox) | [Background work](/docs/tutorial/background-work) |
 | A number generator, an email port | [Services](/docs/concepts/services) | [Background work](/docs/tutorial/background-work) |
-| A typed, optional transport | [JSON-RPC](/docs/json-rpc) | [Host the API](/docs/tutorial/hosting) |
-| The same handlers as AI tools | [MCP server](/docs/json-rpc/mcp) | [Host the API](/docs/tutorial/hosting) |
-| Traces and metrics, no SDK lock-in | [Telemetry](/docs/telemetry) | [Host the API](/docs/tutorial/hosting) |
-| A frontend that calls handlers like functions | [TypeScript client](/docs/json-rpc/typescript-client) | [Build the frontend](/docs/tutorial/frontend) |
+| A typed, optional transport | [JSON-RPC](/docs/capabilities/transports/json-rpc) | [Host the API](/docs/tutorial/hosting) |
+| The same handlers as AI tools | [MCP server](/docs/capabilities/transports/mcp) | [Host the API](/docs/tutorial/hosting) |
+| Traces and metrics, no SDK lock-in | [Telemetry](/docs/capabilities/telemetry) | [Host the API](/docs/tutorial/hosting) |
+| A frontend that calls handlers like functions | [TypeScript client](/docs/capabilities/transports/typescript-client) | [Build the frontend](/docs/tutorial/frontend) |
 
 ## The shape of the solution
 

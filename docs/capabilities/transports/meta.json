@@ -1,0 +1,4 @@
+{
+  "title": "Transports",
+  "pages": ["index", "http-endpoints", "json-rpc", "mcp", "schema-generation", "typescript-client"]
+}

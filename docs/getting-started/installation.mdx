@@ -60,7 +60,7 @@ using Elarion.Abstractions;
 
 `[assembly: UseElarion]` turns on generation for module handlers, services, validators, and
 scheduled jobs. If you want only a subset, use the narrower triggers instead — see
-[Source generation](/docs/source-generation).
+[Source generation](/docs/concepts/source-generation).
 
 ## Host project
 
@@ -96,7 +96,7 @@ as private build tooling in the host:
 </PropertyGroup>
 ```
 
-See [JSON-RPC schema generation](/docs/json-rpc/schema-generation) for the full set of properties.
+See [JSON-RPC schema generation](/docs/capabilities/transports/schema-generation) for the full set of properties.
 
 ## Optional: TypeScript client generator
 
@@ -108,7 +108,7 @@ npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generate
 ```
 
 The generated client imports `zod`, so install it as a runtime dependency. See
-[TypeScript client](/docs/json-rpc/typescript-client) for usage.
+[TypeScript client](/docs/capabilities/transports/typescript-client) for usage.
 
 ## Building from source
 

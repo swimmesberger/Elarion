@@ -1,0 +1,59 @@
+---
+title: Transports
+description: Map the same handler over HTTP, JSON-RPC, or MCP — three peer transports that share one handler shape and differ only in how they reach the network.
+---
+
+A handler is transport-neutral: a request in, a `Result<T>` out, with no knowledge of how it was
+called. A **transport** is what puts that handler on the network. Elarion offers three, and they are
+peers — the same handler can be exposed over any combination of them with no change to its body.
+
+<Cards>
+  <Card title="HTTP endpoints" href="/docs/capabilities/transports/http-endpoints">
+    REST-style routes generated from `[HttpEndpoint]` — verbs, route binding, and RFC 7807 errors.
+  </Card>
+  <Card title="JSON-RPC" href="/docs/capabilities/transports/json-rpc">
+    Operation-shaped methods from `[RpcMethod]`, with a build-time schema and a typed TypeScript client.
+  </Card>
+  <Card title="MCP" href="/docs/capabilities/transports/mcp">
+    The same `[RpcMethod]` handlers exposed to AI agents as Model Context Protocol tools.
+  </Card>
+</Cards>
+
+## The shared handler shape
+
+All three transports read the same thing: a handler implementing
+`IHandler<TRequest, Result<TResponse>>`. The request and response types may be nested inside the
+handler or declared top-level — the nesting carries no meaning. The transport unwraps the success
+value from `Result<T>` and maps an `AppError` to its own failure representation centrally, so the
+handler never encodes protocol concerns.
+
+JSON-RPC and MCP share a single identity. A handler opts into them with one `[RpcMethod("module.action")]`
+attribute, and the `Transports` flag (`RpcTransports.JsonRpc`, `RpcTransports.Mcp`, or `RpcTransports.All`,
+the default) selects which of the two surface it. HTTP is a separate opt-in via `[HttpEndpoint]` because
+it needs route, verb, and parameter binding that do not fit a flags enum.
+
+## Which transport should I use?
+
+<Cards>
+  <Card title="HTTP / REST">
+    Choose when you need resource-shaped URLs, standard verbs and status codes, or you are serving a
+    public or third-party API where REST conventions are expected.
+  </Card>
+  <Card title="JSON-RPC">
+    Choose for internal, first-party APIs where one team owns both ends. A method maps one-to-one to a
+    handler, and the generated typed client makes a frontend call feel like invoking the handler directly.
+  </Card>
+  <Card title="MCP">
+    Choose to expose your operations to AI agents as tools, with names, descriptions, and input schemas
+    generated from your handlers — no separate tool layer.
+  </Card>
+</Cards>
+
+They are not exclusive. A handler can be a REST endpoint, a JSON-RPC method, and an MCP tool at once.
+
+## Wiring
+
+All three transports are **module-scoped and feature-flag-gated** when a host opts into
+`[GenerateModuleBootstrapper]`: a disabled module disappears from every transport at once. See
+[Hosting & composition](/docs/capabilities/hosting) for how the generated bootstrapper maps each
+transport into the host.

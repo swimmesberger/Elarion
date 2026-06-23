@@ -1,13 +1,18 @@
 ---
 title: Modules
-description: A module is an application boundary marked with [AppModule] that owns and publishes its handlers, services, validators, endpoints, and JSON metadata.
+description: A module is an application boundary marked with [AppModule]. Its handlers, services, validators, scheduled jobs, and event consumers are discovered and registered automatically, and feature-gated as one unit.
 ---
 
 A module is an application boundary: a static partial class marked with `[AppModule]`, sitting at the
-root of a namespace that contains the module's handlers, services, and validators. The module decides
-what it exposes; the host only composes modules.
+root of a namespace that contains the module's handlers, services, validators, scheduled jobs, and
+event consumers. The module decides what it exposes; the host only composes modules.
 
-```csharp
+You do **not** wire a module's own building blocks by hand. Everything a module declares is discovered
+by namespace and registered for you, gated as a single unit by the module's feature flag. A module's
+optional `ConfigureServices` is reserved for the few registrations that source generation can't see —
+options binding, third-party libraries, manual decorators.
+
+```csharp title="ClientsModule.cs"
 using System.Text.Json.Serialization.Metadata;
 using Elarion.Abstractions.Modules;
 using Microsoft.Extensions.Configuration;
@@ -17,10 +22,9 @@ namespace MyApp.Application.Modules.Clients;
 
 [AppModule("Clients")]
 public static partial class ClientsModule {
+    // Optional: only for registrations the generators can't discover.
     public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
-        services.AddClientsHandlers();
-        services.AddClientsServices();
-        services.AddClientsValidators();
+        services.Configure<ClientsOptions>(configuration.GetSection("Clients"));
     }
 
     public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() =>
@@ -28,25 +32,51 @@ public static partial class ClientsModule {
 }
 ```
 
-## Convention-based hooks
+## Generated default services
 
-All module methods are optional and discovered by convention. The generated module bootstrapper calls
-the ones you define:
+For every `[AppModule]`, the generators emit a sibling partial class named by appending
+`ElarionModuleServices` to the module's type name — for `ClientsModule` that is
+`ClientsModuleElarionModuleServices` — with a single
+`ConfigureDefaultServices(IServiceCollection)` method. Its fully-qualified name is exactly the
+module's type name plus that suffix, so the host bootstrapper can always find and call it without any
+extra manifest metadata.
 
-| Method | Called by | Purpose |
-| --- | --- | --- |
-| `ConfigureServices(IServiceCollection, IConfiguration)` | generated bootstrapper | Register module handlers, services, validators, and app-level options. |
-| `MapEndpoints(IEndpointRouteBuilder)` | generated bootstrapper | Declare module-owned Minimal API endpoints. |
-| `GetJsonTypeInfoResolver()` | generated bootstrapper | Contribute source-generated `System.Text.Json` metadata. |
+`ConfigureDefaultServices` aggregates the module's discovered building blocks through six
+`static partial void` hooks, invoked in this deterministic order:
 
-The `Add{Module}Handlers()`, `Add{Module}Services()`, and `Add{Module}Validators()` methods are
-emitted by the generators into the module namespace — see [Source generation](/docs/source-generation).
+| Hook | Registers |
+| --- | --- |
+| `AddHandlers` | The module's [handlers](/docs/concepts/handlers) (and their decorator pipeline). |
+| `AddServices` | The module's `[Service]` registrations — see [services](/docs/concepts/services). |
+| `AddValidators` | The module's [validators](/docs/concepts/validators). |
+| `AddScheduledJobs` | The module's [scheduled jobs](/docs/capabilities/scheduling). |
+| `AddEventConsumers` | The module's [event consumers](/docs/capabilities/events/consuming-events). |
+| `AddModuleApi` | The module's generated [module API](/docs/concepts/cross-module-communication) facades. |
 
-## Feature modules and flags
+Each category generator contributes the filler partial that implements its hook (calling the existing
+per-module `Add{Module}…` registration method). A hook for a category the module doesn't use elides to
+a no-op, so a module that declares, say, only handlers and services costs nothing for the rest. The
+skeleton is emitted unconditionally for every module, so the host call always compiles.
 
-Feature modules are **enabled by default** and can be disabled with configuration:
+<Callout type="info">
+  There is no hand-written `ConfigureServices` that calls `AddClientsHandlers()` /
+  `AddClientsServices()` / `AddClientsValidators()` anymore. Those per-module methods still exist, but
+  the generated `ConfigureDefaultServices` is what calls them — you should not.
+</Callout>
 
-```json
+### How the host invokes it
+
+When the host opts into `[GenerateModuleBootstrapper]`, the generated bootstrapper's
+`ConfigureAllServices` calls each module's `ConfigureDefaultServices(services)` — gated by the
+module's feature flag — and then, only if the module declares one, its hand-written
+`ConfigureServices(services, configuration)`. The generated defaults always run **before** your custom
+registrations. See [Hosting](/docs/capabilities/hosting) for the host-side wiring.
+
+## Feature gating
+
+Feature modules are **enabled by default** and disabled with configuration:
+
+```json title="appsettings.json"
 {
   "Modules": {
     "Clients": {
@@ -56,26 +86,49 @@ Feature modules are **enabled by default** and can be disabled with configuratio
 }
 ```
 
-When a module is disabled, its handlers, `MapEndpoints` routes, generated `[HttpEndpoint]` routes,
-`[RpcMethod]` methods, JSON metadata, and scheduled jobs are all left unmapped — it disappears across
-every surface.
+The generated bootstrapper resolves this through a single `IsModuleEnabled(configuration, name)`
+predicate that reads `Modules:{Name}:Enabled`, defaulting to `true`. Every surface is gated by that one
+predicate, so a disabled feature module disappears completely and consistently:
+
+- its generated default services (handlers, `[Service]` registrations, validators, scheduled jobs,
+  event consumers, module API) are never registered;
+- its hand-written `ConfigureServices` is never called;
+- its `MapEndpoints` routes and its generated `[HttpEndpoint]` routes are never mapped;
+- its `[RpcMethod]` JSON-RPC methods are never registered;
+- its `[RpcMethod]` MCP tools (and their metadata) are never registered;
+- its `GetJsonTypeInfoResolver()` contribution is left out.
+
+This is the canonical statement of the gating contract: a module is enabled or disabled **as one
+unit**, across services, endpoints, and every transport. Handlers whose namespace falls under no module
+are reported with a diagnostic and mapped ungated so they are never silently dropped — see
+[Module-aware transport gating](/docs/reference/conventions) for the per-surface diagnostic ids.
 
 ## Core modules
 
 Core modules are required foundation modules. Declare them with `Kind = AppModuleKind.Core`:
 
-```csharp
+```csharp title="CoreModule.cs"
 [AppModule("Core", Kind = AppModuleKind.Core)]
 public static partial class CoreModule {
-    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
-        services.AddCoreHandlers();
-        services.AddCoreValidators();
-    }
 }
 ```
 
 Core modules are always enabled, ignore `Modules:{Name}:Enabled`, and initialize before feature
-modules.
+modules. A host that conceptually has "no modules" still declares one core `[AppModule]`, since
+`[GenerateModuleBootstrapper]` is the single transport-wiring path and core modules map
+unconditionally.
+
+## Ordering with DependsOn
+
+`[AppModule]` accepts an optional comma-separated `DependsOn` list of module names. The generator
+topologically sorts modules so dependencies initialize first; within that order, core modules precede
+feature modules.
+
+```csharp
+[AppModule("Billing", DependsOn = "Catalog,Pricing")]
+public static partial class BillingModule {
+}
+```
 
 <Callout type="warn">
   Do not add `DependsOn = "Core"` just to make a feature module see core services — core availability
@@ -85,7 +138,18 @@ modules.
 
 ## Endpoints in modules
 
-A module can declare Minimal API endpoints directly with the real ASP.NET Core abstractions:
+A module's handlers expose themselves over a transport with `[RpcMethod]`
+([JSON-RPC](/docs/capabilities/transports/json-rpc) and [MCP](/docs/capabilities/transports/mcp)) or
+`[HttpEndpoint]` ([HTTP](/docs/capabilities/transports/http-endpoints)). A single `[RpcMethod]` covers
+both dispatcher transports; choose which ones with `[RpcMethod(Transports = ...)]` (default: both
+JSON-RPC and MCP). The generated bootstrapper associates each handler with a module by namespace and
+maps its route/method/tool only when the module is enabled — the same feature gate that governs the
+module's services.
+
+### Hand-written endpoints
+
+A module can also declare Minimal API endpoints directly with the real ASP.NET Core abstractions, as an
+escape hatch when it needs full control — custom authorization, conventions, or a hand-written route:
 
 ```csharp
 [AppModule("Chat")]
@@ -103,22 +167,56 @@ does not introduce a reduced endpoint facade. Keep host lifecycle concerns out o
 should never call `builder.Build()`, `app.UseAuthentication()`, `app.MapJsonRpc()`, or configure
 concrete infrastructure providers. Those belong to the host.
 
-### Generated transport endpoints
+### Owning the route group
 
-A module's handlers can also expose themselves over a transport with `[RpcMethod]`
-([JSON-RPC](/docs/json-rpc) and [MCP](/docs/json-rpc/mcp)) or `[HttpEndpoint]`
-([HTTP](/docs/http-endpoints)). A single `[RpcMethod]` covers both dispatcher transports; choose which ones
-with `[RpcMethod(Transports = ...)]` (default: both JSON-RPC and MCP). The generated module bootstrapper
-maps these the same way it calls `ConfigureServices` and `MapEndpoints`: each handler is associated with a
-module by namespace, and its route/method/tool is mapped only when the module is enabled. A feature module
-disabled with `Modules:{Name}:Enabled = false` therefore drops its generated routes, JSON-RPC methods, and
-MCP tools alongside its services. `MapEndpoints` stays the escape hatch when a module needs full control —
-custom authorization, conventions, or a hand-written route — over a specific endpoint.
+A module can own the route group, authorization policy, and conventions for **all** of its mapped
+endpoints — both its generated `[HttpEndpoint]` routes and its hand-written `MapEndpoints` routes — by
+declaring an optional `ConfigureEndpointGroup` hook:
+
+```csharp
+[AppModule("Billing")]
+public static partial class BillingModule {
+    public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder endpoints) =>
+        endpoints.MapGroup("/billing").RequireAuthorization("billing");
+}
+```
+
+When present, the bootstrapper maps the module's endpoints onto the builder it returns; absent the
+hook, they map onto the root builder. There are no per-module URL prefixes by default — each
+`[HttpEndpoint]` carries its full route template and modules share a flat URL space. A conventions-only
+group (`MapGroup("")`) adds policy without a prefix, while `MapGroup("/billing")` opts the whole module
+into a prefix. The generator never reads `[Authorize]`/`[AllowAnonymous]` from handlers; per-endpoint
+authorization is the host's or the module's job.
+
+## Convention-based hooks
+
+Every module hook is optional and discovered structurally by signature:
+
+| Hook | Purpose |
+| --- | --- |
+| `ConfigureServices(IServiceCollection, IConfiguration)` | Register **additional, non-generated** services (options, third-party libraries, manual decorators). Runs after the generated defaults. |
+| `MapEndpoints(IEndpointRouteBuilder)` | Declare module-owned Minimal API endpoints. |
+| `ConfigureEndpointGroup(IEndpointRouteBuilder) → IEndpointRouteBuilder` | Return a route group (prefix, policy, conventions) onto which the module's endpoints are mapped. |
+| `GetJsonTypeInfoResolver() → IJsonTypeInfoResolver` | Contribute the module's source-generated `System.Text.Json` metadata. |
 
 ## What stays in the host
 
-Concrete infrastructure is a **platform capability**, not a second module system. Feature flags
-decide which module handlers, endpoints, JSON metadata, and scheduled jobs are exposed; the platform
-registers capability providers up front, and unused providers stay dormant until a feature resolves
-the corresponding application port. See [Project structure](/docs/getting-started/project-structure)
-for the full dependency rules.
+Concrete infrastructure is a **platform capability**, not a second module system. Feature flags decide
+which module handlers, endpoints, JSON metadata, scheduled jobs, and event consumers are exposed; the
+platform registers capability providers up front, and unused providers stay dormant until a feature
+resolves the corresponding application port.
+
+<Cards>
+  <Card title="Hosting" href="/docs/capabilities/hosting">
+    How the host composes modules and calls the generated bootstrapper.
+  </Card>
+  <Card title="Conventions" href="/docs/reference/conventions">
+    Naming, discovery, and gating convention tables and diagnostic ids.
+  </Card>
+  <Card title="Project structure" href="/docs/getting-started/project-structure">
+    The full dependency rules between modules, host, and infrastructure.
+  </Card>
+  <Card title="Source generation" href="/docs/concepts/source-generation">
+    How discovery and the per-module registration methods are emitted.
+  </Card>
+</Cards>

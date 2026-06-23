@@ -56,11 +56,11 @@ platform capabilities**.
 
 ## The trade-off
 
-You accept conventions. Handler names, nested `Command`/`Query` and `Response` types, module
+You accept conventions. Handler names, the `IHandler<,>` request/response shape, module
 namespace containment, and pipeline attributes matter because generators use them. In exchange you
 get less host boilerplate, inherent modularity, fewer runtime scans, and a clear separation between
 application policy and host mechanics. The full comparison with idiomatic ASP.NET Core is in
-[How Elarion differs](/docs/reference/comparison).
+[How Elarion differs](/docs/why-elarion#how-elarion-differs-from-aspnet-core).
 
 ## The concepts
 
@@ -73,6 +73,6 @@ The pages in this section cover each building block:
   <Card title="Services" href="/docs/concepts/services">`[Service]` registration and hosted services.</Card>
   <Card title="Validators" href="/docs/concepts/validators">FluentValidation grouped by module.</Card>
   <Card title="Decorator pipelines" href="/docs/concepts/decorator-pipelines">Ordered cross-cutting behavior around handlers.</Card>
-  <Card title="Caching" href="/docs/concepts/caching">Declarative handler result caching and invalidation.</Card>
-  <Card title="Current user" href="/docs/concepts/current-user">Transport-neutral access to the authenticated user.</Card>
+  <Card title="Caching" href="/docs/capabilities/caching">Declarative handler result caching and invalidation.</Card>
+  <Card title="Current user" href="/docs/capabilities/current-user">Transport-neutral access to the authenticated user.</Card>
 </Cards>

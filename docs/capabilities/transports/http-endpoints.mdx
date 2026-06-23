@@ -1,10 +1,9 @@
 ---
 title: HTTP endpoints
 description: Mark a handler with [HttpEndpoint] and Elarion generates the minimal-API MapGet/MapPost mapping — unwrapping the Query/Command and mapping AppError to RFC 7807 status codes.
-icon: Globe
 ---
 
-HTTP/REST is a first-class, optional transport in Elarion — the sibling of [JSON-RPC](/docs/json-rpc).
+HTTP/REST is a first-class, optional transport in Elarion — the sibling of [JSON-RPC](/docs/capabilities/transports/json-rpc).
 Mark a handler with `[HttpEndpoint]` and the module bootstrapper generator emits the matching minimal-API
 registration: it unwraps the nested `Query`/`Command` into route/query/body parameters and translates
 the handler's [`Result<T>`](/docs/concepts/results-and-errors) into a response — `200`/`204` on success,
@@ -52,7 +51,7 @@ interface (the success type is unwrapped from `Result<T>`); the types may be nes
 ## Hosting
 
 `[HttpEndpoint]` handlers are mapped through the generated module bootstrapper, so they are
-**feature-flag-gated** like everything else a module owns ([modules are the single hosting path](/docs/json-rpc/hosting)).
+**feature-flag-gated** like everything else a module owns ([modules are the single hosting path](/docs/capabilities/hosting)).
 `MapAllEndpoints` calls each enabled module's `MapEndpoints` hook and its generated `Map{Module}Http`
 method; a module disabled with `Modules:{Name}:Enabled = false` drops its routes:
 
@@ -166,6 +165,6 @@ code comes from `AppError.Kind`, mirroring how JSON-RPC maps the same kinds to i
 
 Both transports map the same handlers, so the choice is per-handler, not per-app. Reach for
 `[HttpEndpoint]` when you want resourceful URLs, HTTP caching/CDN semantics, file uploads, or
-third-party/public consumers; reach for [`[RpcMethod]`](/docs/json-rpc) when one team owns both ends and
+third-party/public consumers; reach for [`[RpcMethod]`](/docs/capabilities/transports/json-rpc) when one team owns both ends and
 wants an operation-shaped, end-to-end-typed contract with a generated TypeScript client. A handler can
 expose both.

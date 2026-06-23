@@ -1,0 +1,198 @@
+---
+title: Result & error model
+description: Lookup reference for Result<T>, Result, Unit, AppError, and ErrorKind, with each kind's mapping to JSON-RPC error codes and HTTP status.
+---
+
+A lookup reference for the result and error types. For the conceptual model and how these flow
+through handlers and decorators, see [Results & errors](/docs/concepts/results-and-errors).
+
+All four core types live in `Elarion.Abstractions`. The two mappers live in the transport packages:
+`Elarion.AppErrorMapper` (JSON-RPC) and `Elarion.AspNetCore.HttpAppErrorMapper` (HTTP).
+
+## `Result<T>`
+
+`Elarion.Abstractions.Result<T>` — a `readonly struct` wrapping either a success value or an
+`AppError`. It implements `IResultLike` and `IResultFailureFactory<Result<T>>`.
+
+```csharp title="Result<T>"
+public readonly struct Result<T> : IResultLike, IResultFailureFactory<Result<T>> {
+    public bool IsSuccess { get; }
+    public T Value { get; }       // valid only when IsSuccess is true
+    public AppError Error { get; } // valid only when IsSuccess is false
+
+    public static Result<T> Success(T value);
+    public static Result<T> Failure(AppError error);
+
+    public static implicit operator Result<T>(T value);      // success
+    public static implicit operator Result<T>(AppError error); // failure
+}
+```
+
+The implicit conversions let a handler return a response value or an `AppError` directly:
+
+```csharp
+return new Response(project.Id);                 // implicit Success
+return AppError.NotFound($"Project {id} not found"); // implicit Failure
+```
+
+## `Result` (non-generic)
+
+`Elarion.Abstractions.Result` — the no-value companion for operations that produce no response,
+returned by the `IHandler<T>` convenience interface. It converts to `Result<Unit>` so it never
+enters the generic dispatch/decorator pipeline.
+
+```csharp title="Result"
+public readonly struct Result : IResultLike, IResultFailureFactory<Result> {
+    public bool IsSuccess { get; }
+    public AppError Error { get; } // valid only when IsSuccess is false
+
+    public static Result Success();
+    public static Result Failure(AppError error);
+
+    public static implicit operator Result(AppError error); // failure
+
+    public Result<Unit> ToResultUnit();
+    public static implicit operator Result<Unit>(Result result);
+}
+```
+
+## `Unit`
+
+`Elarion.Abstractions.Unit` — a `readonly struct` with exactly one value, used as the "no value"
+payload for `Result<Unit>`. All `Unit` values are equal.
+
+```csharp title="Unit"
+public readonly struct Unit : IEquatable<Unit> {
+    public static Unit Value => default; // the single value
+    // == always true, != always false, ToString() => "()"
+}
+```
+
+## `IResultLike`
+
+`Elarion.Abstractions.IResultLike` — the non-generic seam decorators use to inspect success/failure
+without knowing `T`:
+
+```csharp title="IResultLike"
+public interface IResultLike {
+    bool IsSuccess { get; }
+}
+```
+
+Both `Result<T>` and `Result` implement it, so a decorator can branch on the outcome:
+
+```csharp
+if (response is IResultLike { IsSuccess: true }) {
+    await transaction.CommitAsync(ct);
+} else {
+    await transaction.RollbackAsync(ct);
+}
+```
+
+## `AppError`
+
+`Elarion.Abstractions.AppError` — a transport-agnostic `sealed record` describing the *kind* of
+failure, not how a protocol should report it:
+
+```csharp title="AppError"
+public sealed record AppError {
+    public required ErrorKind Kind { get; init; }
+    public required string Message { get; init; }
+    public object? Data { get; init; }
+
+    // Shared singleton for the generic internal-failure case.
+    public static readonly AppError InternalError; // Kind = Internal, Message = "Internal error"
+}
+```
+
+### Factory methods
+
+| Factory | `Kind` | Notes |
+| --- | --- | --- |
+| `AppError.Validation(string message, object? data = null)` | `Validation` | Optional structured `Data` payload. |
+| `AppError.Validation(string message, IReadOnlyList<string> errors)` | `Validation` | Wraps `errors` in `ValidationErrorData` as `Data`. |
+| `AppError.NotFound(string message)` | `NotFound` | |
+| `AppError.Conflict(string message)` | `Conflict` | |
+| `AppError.Forbidden(string message)` | `Forbidden` | |
+| `AppError.BusinessRule(string message, object? data = null)` | `BusinessRule` | Optional structured `Data` payload. |
+| `AppError.Internal(string message, object? data = null)` | `Internal` | Optional structured `Data` payload. |
+
+```csharp
+AppError.Validation("Invalid command.", new[] { "Name is required.", "Email is invalid." });
+AppError.NotFound($"Client {id} was not found.");
+AppError.BusinessRule("Credit limit exceeded.", data: limitInfo);
+```
+
+`ValidationErrorData` is the payload shape for the list-of-messages overload:
+
+```csharp title="ValidationErrorData"
+public sealed record ValidationErrorData {
+    public required IReadOnlyList<string> Errors { get; init; }
+}
+```
+
+## `ErrorKind`
+
+`Elarion.Abstractions.ErrorKind` — the semantic category. The transport layer maps it to
+protocol-specific codes.
+
+| `ErrorKind` | Meaning |
+| --- | --- |
+| `Validation` | Invalid input or constraint violation. |
+| `NotFound` | The requested resource does not exist. |
+| `Conflict` | The operation conflicts with existing state (duplicate, concurrent modification). |
+| `Forbidden` | The caller is not authorized to perform this operation. |
+| `BusinessRule` | A domain business rule was violated. |
+| `Internal` | An unexpected internal error occurred. |
+
+## `ErrorKind` mappings
+
+`Kind` is the seam between application semantics and protocol codes. Each host owns its mapping; the
+tables below are the framework defaults. The unknown/default branch of both mappers falls through to
+the `Internal` row.
+
+### JSON-RPC error code
+
+From `Elarion.AppErrorMapper.MapToCode(ErrorKind)`. Protocol-level kinds reuse the JSON-RPC 2.0 spec
+codes; the remaining application kinds use the reserved server range (`-32000` to `-32099`).
+`AppErrorMapper.ToRpcError(AppError)` wraps the code with the error's `Message` and `Data`.
+
+| `ErrorKind` | JSON-RPC code | Note |
+| --- | --- | --- |
+| `Validation` | `-32602` | Spec "Invalid params". |
+| `NotFound` | `-32001` | Server range. |
+| `Conflict` | `-32002` | Server range. |
+| `Forbidden` | `-32003` | Server range. |
+| `BusinessRule` | `-32004` | Server range. |
+| `Internal` | `-32603` | Spec "Internal error". |
+| *(default)* | `-32603` | Falls back to internal error. |
+
+### HTTP status code
+
+From `Elarion.AspNetCore.HttpAppErrorMapper.MapToStatusCode(ErrorKind)`, used by `ElarionHttpResults`
+when translating a failed `Result<T>` into an RFC 7807 ProblemDetails response.
+
+| `ErrorKind` | HTTP status |
+| --- | --- |
+| `Validation` | `400 Bad Request` |
+| `NotFound` | `404 Not Found` |
+| `Conflict` | `409 Conflict` |
+| `Forbidden` | `403 Forbidden` |
+| `BusinessRule` | `422 Unprocessable Entity` |
+| `Internal` | `500 Internal Server Error` |
+| *(default)* | `500 Internal Server Error` |
+
+<Callout type="info">
+  The JSON-RPC table is the default used by `RpcDispatcherExtensions.MapHandler`. Applications that
+  need different codes register methods via the raw `JsonRpcDispatcher.Map` API and supply their own
+  mapping.
+</Callout>
+
+<Cards>
+  <Card title="Results & errors (concept)" href="/docs/concepts/results-and-errors">
+    Why handlers return outcomes as values and how errors stay transport-agnostic.
+  </Card>
+  <Card title="Decorator pipelines" href="/docs/concepts/decorator-pipelines">
+    How decorators inspect a Result through IResultLike.
+  </Card>
+</Cards>
