@@ -51,21 +51,31 @@ The generators discover and wire handlers from their shape and location:
 
 - The class lives **under a module namespace** so the module owns its registration.
 - It implements `IHandler<TRequest, TResponse>`.
-- For JSON-RPC, the request is a nested `Command` or `Query` and the response is a nested `Response`,
-  and the handler returns `Result<TResponse>`. See [JSON-RPC usage](/docs/json-rpc).
+- For transports (JSON-RPC, HTTP, MCP) the handler returns `Result<TResponse>`; the request and
+  response types are read from the `IHandler<,>` interface itself, so they may be declared anywhere —
+  nesting them (as `Command`/`Query`/`Response`) is an organizational convention, **not** a
+  requirement. See [JSON-RPC usage](/docs/json-rpc).
 
 The handler registration generator emits an `Add{HandlerName}()` method and aggregates them into the
 module's `Add{Module}Handlers()` method. You never register a handler by hand.
 
 ## Command vs. query
 
-The nested request type is named by intent:
+A request declares its CQRS kind by implementing a marker interface (optional, but it is the only
+thing the framework reads — naming and nesting carry no semantic weight):
 
-- **`Command`** — a state change (`CreateClient.Command`, `CancelInvoice.Command`).
-- **`Query`** — a read (`GetClient.Query`, `SearchClients.Query`).
+- **`ICommand`** — a state change. Maps to HTTP `POST`.
+- **`IQuery`** — a read. Maps to HTTP `GET`.
 
-This naming is a convention the RPC generator reads, and it pairs naturally with read-only vs.
-transactional [decorator pipelines](/docs/concepts/decorator-pipelines).
+```csharp
+public sealed record Command(string Name) : ICommand;   // CreateClient.Command
+public sealed record Query(Guid Id) : IQuery;            // GetClient.Query
+```
+
+The marker is read structurally at compile time, so it drives HTTP verb inference, decorator generic
+constraints (`where TRequest : ICommand`), and runtime branching (`request is IQuery`) — see
+[decorator pipelines](/docs/concepts/decorator-pipelines). Naming the nested type `Command`/`Query`
+remains a useful readability convention, but a request without the marker is treated as kind-less.
 
 ## Accessing data
 

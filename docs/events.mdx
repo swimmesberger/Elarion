@@ -85,19 +85,22 @@ non-`Unit` response is reported as `ELEVT005`.
   consumer's decorator pipeline runs *inside* the command that published the event — same scope, same
   `DbContext`, same transaction. Give domain-event handlers a **read-only / minimal pipeline**: they
   are already inside the command's unit of work and resilience scope, so a nested **transaction** or
-  **resilience** decorator is wrong — a transaction decorator must *join* the ambient transaction
-  (never open or commit a nested one), and a retry would re-run writes against the already-dirty
-  `DbContext`. Tracing, validation, and cache-invalidation nest safely.
+  **resilience** decorator is wrong — opening a nested transaction, or retrying writes against the
+  already-dirty `DbContext`, would corrupt the command's unit of work. Tracing, validation, and
+  cache-invalidation nest safely.
 
   Integration-event handlers are the opposite: they run on a **fresh scope after commit** (their own
   `DbContext` and transaction), so the **full** pipeline — including a transaction decorator — is
   exactly right. There the pipeline running again *is* the new unit of work.
 </Callout>
 
-**Sidestepping it — give the handler a minimal pipeline.** Pipeline attributes are
-most-specific-wins ([decorator pipelines](/docs/concepts/decorator-pipelines)), so override the
-default on a domain-event handler with a read-only pipeline that omits the transaction (and
-resilience) decorators. Define the attribute once in your application:
+**Handling it — let the transaction decorator declare where it attaches.** The clean default is a
+[transaction decorator with an `AppliesTo` predicate](/docs/concepts/decorator-pipelines#conditional-attachment-with-appliesto)
+that matches commands and integration-event handlers but **not** domain-event handlers — so the
+handler below gets no transaction decorator at all and runs inside the publisher's transaction, with
+**no** pipeline annotation. If you'd rather be explicit, a named read-only pipeline that omits the
+transaction (and resilience) decorators works too, since pipeline attributes are most-specific-wins
+([decorator pipelines](/docs/concepts/decorator-pipelines)):
 
 ```csharp
 using Elarion.Abstractions.Pipeline;
@@ -127,10 +130,10 @@ public sealed class RecalculateTotals(IAppDbContext db) : IHandler<InvoiceLineAd
 }
 ```
 
-An integration-event handler needs no annotation — on its fresh post-commit scope the default full
-pipeline (transaction included) is exactly right. If you'd rather run one pipeline everywhere, make
-your transaction decorator **ambient-aware** instead: when `db.Database.CurrentTransaction is not
-null`, join it and skip the nested begin/commit.
+An integration-event handler needs no annotation either: its request is an `IIntegrationEvent`, which
+the predicate matches, so it opens its own transaction on its fresh post-commit scope. One decorator,
+attached precisely at compile time, covers commands, queries, domain events, and integration events
+with no per-handler pipeline tags.
 
 ### Method form (alternative)
 

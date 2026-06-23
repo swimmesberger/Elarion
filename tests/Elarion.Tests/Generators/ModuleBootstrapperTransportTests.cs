@@ -27,7 +27,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
             [HttpEndpoint("invoices/{id}")]
             public sealed class GetInvoice : IHandler<GetInvoice.Query, Result<GetInvoice.Response>> {
-                public sealed record Query { public required System.Guid Id { get; init; } }
+                public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
                 public sealed record Response(string Number);
                 public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
                     ValueTask.FromResult<Result<Response>>(new Response("INV"));
@@ -64,7 +64,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
             [HttpEndpoint("shipments")]
             public sealed class CreateShipment : IHandler<CreateShipment.Command, Result<CreateShipment.Response>> {
-                public sealed record Command { public required string Address { get; init; } }
+                public sealed record Command : ICommand { public required string Address { get; init; } }
                 public sealed record Response(System.Guid Id);
                 public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
                     ValueTask.FromResult<Result<Response>>(new Response(System.Guid.Empty));
@@ -110,8 +110,10 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain(
             "global::Elarion.JsonRpc.Mcp.RpcMcpMethodMetadata[] GetBillingMcpMetadata()");
 
-        // The per-module HTTP method maps that module's [HttpEndpoint] handler.
+        // The per-module HTTP method maps that module's [HttpEndpoint] handler; the verb comes from the
+        // request's CQRS marker (IQuery -> GET, ICommand -> POST).
         generated.Should().Contain("app.MapGet(\"invoices/{id}\",");
+        generated.Should().Contain("app.MapPost(\"shipments\",");
         generated.Should().Contain(
             "[global::Microsoft.AspNetCore.Http.AsParameters] global::Sample.Billing.GetInvoice.Query request");
         // The per-module RPC method registers that module's [RpcMethod] handler.
@@ -194,7 +196,7 @@ public sealed class ModuleBootstrapperTransportTests {
                 [HttpEndpoint("invoices")]
                 [RpcMethod("invoices.list")]
                 public sealed class ListInvoices : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
-                    public sealed record Query;
+                    public sealed record Query : IQuery;
                     public sealed record Response(string Number);
                     public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
                         ValueTask.FromResult<Result<Response>>(new Response("INV"));
@@ -231,7 +233,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
                 [HttpEndpoint("invoices/{id}")]
                 public sealed class GetInvoice : IHandler<GetInvoice.Query, Result<GetInvoice.Response>> {
-                    public sealed record Query { public required System.Guid Id { get; init; } }
+                    public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
                     public sealed record Response(string Number);
                     public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
                         ValueTask.FromResult<Result<Response>>(new Response("INV"));
@@ -246,7 +248,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
                 [HttpEndpoint("shipments")]
                 public sealed class CreateShipment : IHandler<CreateShipment.Command, Result<CreateShipment.Response>> {
-                    public sealed record Command { public required string Address { get; init; } }
+                    public sealed record Command : ICommand { public required string Address { get; init; } }
                     public sealed record Response(System.Guid Id);
                     public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
                         ValueTask.FromResult<Result<Response>>(new Response(System.Guid.Empty));

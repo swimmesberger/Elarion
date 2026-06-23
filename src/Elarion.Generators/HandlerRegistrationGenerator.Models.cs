@@ -22,12 +22,13 @@ public sealed partial class HandlerRegistrationGenerator {
         string? ResiliencePolicyName,
         CacheableInfo? Cacheable,
         CacheInvalidationInfo? CacheInvalidation,
-        ImmutableArray<CacheDiagnosticInfo> Diagnostics
+        ImmutableArray<HandlerDiagnosticInfo> Diagnostics
     );
 
     private sealed record DecoratorInfo(
         string DecoratorFqn,
-        ImmutableArray<string> ExtraDependencyFqns
+        ImmutableArray<string> ExtraDependencyFqns,
+        bool HasAppliesTo
     );
 
     private sealed record CacheableInfo(
@@ -45,7 +46,8 @@ public sealed partial class HandlerRegistrationGenerator {
 
     private sealed record CacheKeyPropertyInfo(string Name);
 
-    private sealed record CacheDiagnosticInfo(
+    /// <summary>A diagnostic discovered while building a handler's registration (cache, pipeline, …).</summary>
+    private sealed record HandlerDiagnosticInfo(
         DiagnosticDescriptor Descriptor,
         Location? Location,
         object?[] MessageArgs

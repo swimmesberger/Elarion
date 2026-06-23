@@ -32,15 +32,17 @@ public sealed partial class HandlerRegistrationGenerator {
         var handlerName = classSymbol.Name;
         var ns = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
 
+        var diagnostics = ImmutableArray.CreateBuilder<HandlerDiagnosticInfo>();
+
         var decoratorListAttr = ResolveDecoratorListFromPipelineAttributes(classSymbol, compilation, ct);
         var decorators = decoratorListAttr is not null
-            ? ParseDecorators(decoratorListAttr, requestType, responseType, fmt)
+            ? ParseDecorators(decoratorListAttr, requestType, responseType, compilation, diagnostics, fmt)
             : ImmutableArray<DecoratorInfo>.Empty;
 
         var cacheable = ParseCacheable(classSymbol, requestType, responseType, compilation, fmt);
         var cacheInvalidation = ParseCacheInvalidation(classSymbol, compilation);
         var resiliencePolicyName = ParseResilient(classSymbol);
-        var diagnostics = ValidateCacheMetadata(classSymbol, cacheable, cacheInvalidation);
+        diagnostics.AddRange(ValidateCacheMetadata(classSymbol, cacheable, cacheInvalidation));
 
         return new HandlerInfo(
             handlerFqn,
@@ -52,7 +54,7 @@ public sealed partial class HandlerRegistrationGenerator {
             resiliencePolicyName,
             cacheable,
             cacheInvalidation,
-            diagnostics);
+            diagnostics.ToImmutable());
     }
 
     private static INamedTypeSymbol? FindHandlerInterface(INamedTypeSymbol classSymbol) {

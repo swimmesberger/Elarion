@@ -162,6 +162,182 @@ public sealed class HandlerRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateRegistration_ConstrainedDecorator_AppliesOnlyToMatchingRequestKind() {
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.Abstractions.Pipeline;
+
+            [assembly: UseElarion]
+            [assembly: Sample.App.CommandPipeline]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed class CommandOnlyDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                    : IHandler<TRequest, TResponse>
+                    where TRequest : ICommand {
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                [DecoratorList(typeof(CommandOnlyDecorator<,>))]
+                [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class)]
+                public sealed class CommandPipelineAttribute : System.Attribute { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+
+                public sealed class DoThing : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+
+                public sealed record ReadThingQuery(int Id) : IQuery;
+                public sealed record ReadThingResponse(string Name);
+
+                public sealed class ReadThing : IHandler<ReadThingQuery, Result<ReadThingResponse>> {
+                    public ValueTask<Result<ReadThingResponse>> HandleAsync(ReadThingQuery request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<ReadThingResponse>.Success(new ReadThingResponse("x")));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+        var doThing = GetGeneratedSource(result, "Sample_App_DoThing.g.cs");
+        var readThing = GetGeneratedSource(result, "Sample_App_ReadThing.g.cs");
+
+        // The `where TRequest : ICommand` decorator wraps the command handler but is filtered out of the query handler.
+        doThing.Should().Contain("global::Sample.App.CommandOnlyDecorator<");
+        readThing.Should().NotContain("CommandOnlyDecorator");
+    }
+
+    [Fact]
+    public void GenerateRegistration_AppliesToPredicate_EmitsCachedRuntimeConditional() {
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Messaging;
+            using Elarion.Abstractions.Modules;
+            using Elarion.Abstractions.Pipeline;
+
+            [assembly: UseElarion]
+            [assembly: Sample.App.UnitOfWorkPipeline]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                // Attaches to commands and integration-event handlers, but not queries — a union no `where` can state.
+                public sealed class TxDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                    : IHandler<TRequest, TResponse> {
+                    public static bool AppliesTo(Type request) =>
+                        request.IsAssignableTo(typeof(ICommand)) || request.IsAssignableTo(typeof(IIntegrationEvent));
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                [DecoratorList(typeof(TxDecorator<,>))]
+                [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                public sealed class UnitOfWorkPipelineAttribute : Attribute { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+                public sealed class DoThing : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+
+                public sealed record ReadThingQuery(int Id) : IQuery;
+                public sealed class ReadThing : IHandler<ReadThingQuery, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(ReadThingQuery request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+
+                public sealed record SomethingHappened(int Id) : IIntegrationEvent;
+                public sealed class OnSomething : IHandler<SomethingHappened, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(SomethingHappened request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+        var doThing = GetGeneratedSource(result, "Sample_App_DoThing.g.cs");
+        var readThing = GetGeneratedSource(result, "Sample_App_ReadThing.g.cs");
+
+        // The predicate is called once (cached) per closed handler type, keyed by the request type...
+        doThing.Should().Contain("private static readonly bool __pipelineApplies0");
+        doThing.Should().Contain(".AppliesTo(typeof(global::Sample.App.DoThingCommand))");
+        readThing.Should().Contain(".AppliesTo(typeof(global::Sample.App.ReadThingQuery))");
+        // ...and the decorator is wrapped in a runtime conditional in every in-scope handler (attachment is decided at run time).
+        doThing.Should().Contain("if (__pipelineApplies0)");
+        readThing.Should().Contain("if (__pipelineApplies0)");
+        doThing.Should().Contain("new global::Sample.App.TxDecorator<");
+    }
+
+    [Fact]
+    public void GenerateRegistration_NonPublicAppliesTo_ReportsDiagnostic() {
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.Abstractions.Pipeline;
+
+            [assembly: UseElarion]
+            [assembly: Sample.App.BadPipeline]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed class BadDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                    : IHandler<TRequest, TResponse> {
+                    // Not public: the generated registration cannot call it -> ELPIPE001.
+                    private static bool AppliesTo(Type request) => true;
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                [DecoratorList(typeof(BadDecorator<,>))]
+                [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                public sealed class BadPipelineAttribute : Attribute { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+                public sealed class DoThing : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var syntaxTree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview),
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "AppliesToDiagnostic",
+            [syntaxTree],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(new HandlerRegistrationGenerator());
+        var result = driver.RunGenerators(compilation, TestContext.Current.CancellationToken).GetRunResult();
+
+        result.Diagnostics.Any(d => d.Id == "ELPIPE001" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
+    [Fact]
     public void GenerateRegistration_IHandlerOfT_RegistersResultUnitInterfaceWithTracing() {
         // The IHandler<T> sugar inherits IHandler<T, Result<Unit>> via a default interface method,
         // so the generator discovers and registers it as the two-arg interface with no special-casing.

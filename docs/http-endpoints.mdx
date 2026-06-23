@@ -16,14 +16,14 @@ transport-neutral — the same handler can carry both `[HttpEndpoint]` and `[Rpc
 
 ## Marking a handler
 
-Add `[HttpEndpoint]` to a handler that follows the conventional shape. The verb is **inferred** from
-the nested request type — `Query` maps to `GET`, `Command` maps to `POST` — and the route is explicit:
+Add `[HttpEndpoint]` to a handler. The verb is **inferred from the request's CQRS marker** —
+`IQuery` maps to `GET`, `ICommand` maps to `POST` — and the route is explicit:
 
 ```csharp
-[HttpEndpoint("clients/{id}")]                 // GET (inferred from the nested Query)
+[HttpEndpoint("clients/{id}")]                 // GET (inferred from IQuery)
 public sealed class GetClient(IAppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
-    public sealed record Query {
+    public sealed record Query : IQuery {
         public required Guid Id { get; init; }
     }
     public sealed record Response(Guid Id, string Name);
@@ -31,19 +31,22 @@ public sealed class GetClient(IAppDbContext db)
     public ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) { /* ... */ }
 }
 
-[HttpEndpoint("clients")]                       // POST (inferred from the nested Command)
+[HttpEndpoint("clients")]                       // POST (inferred from ICommand)
 public sealed class CreateClient : IHandler<CreateClient.Command, Result<CreateClient.Response>> { /* ... */ }
 ```
 
-Override the verb when inference isn't what you want:
+Verb precedence is: an explicit verb wins; otherwise the request's `ICommand`/`IQuery` marker decides;
+otherwise the generator reports `ELHTTP004` (a request that is neither marked nor given an explicit
+verb cannot be mapped). Naming or nesting the request `Command`/`Query` has **no** effect on the verb.
 
 ```csharp
-[HttpEndpoint(HttpVerb.Delete, "clients/{id}")]
+[HttpEndpoint(HttpVerb.Delete, "clients/{id}")]   // explicit verb; request needs no marker
 public sealed class DeleteClient : IHandler<DeleteClient.Command, Result<DeleteClient.Response>> { /* ... */ }
 ```
 
-The generator expects the same shape as JSON-RPC: a nested `Command` or `Query`, a nested `Response`,
-and an `IHandler<TRequest, Result<TResponse>>` implementation. A `Response` with no properties returns
+The generator reads the request and response from the `IHandler<TRequest, Result<TResponse>>`
+interface (the success type is unwrapped from `Result<T>`); the types may be nested or top-level. A
+`Response` with no properties returns
 `204 No Content`; otherwise success returns `200 OK` with the response body.
 
 ## Hosting

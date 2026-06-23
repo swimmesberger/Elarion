@@ -24,7 +24,7 @@ public sealed class ElarionManifestGeneratorTests {
             [HttpEndpoint("manifest")]
             [RpcMethod("manifest.get")]
             public sealed class GetManifest : IHandler<GetManifest.Query, Result<GetManifest.Response>> {
-                public sealed record Query { public required System.Guid Id { get; init; } }
+                public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
                 public sealed record Response(string Name);
                 public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
                     ValueTask.FromResult<Result<Response>>(new Response("manifest"));
@@ -85,6 +85,113 @@ public sealed class ElarionManifestGeneratorTests {
 
         diagnostics.Should().Contain(diagnostic =>
             diagnostic.Id == "ELHTTP001" && diagnostic.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public void Manifest_TopLevelRequestResponse_NotNested_IsDiscovered() {
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            namespace Sample.Manifest;
+
+            public sealed record GetThingQuery(int Id) : IQuery;
+            public sealed record GetThingResponse(string Name);
+
+            [RpcMethod("things.get")]
+            [HttpEndpoint("things/{id}")]
+            public sealed class GetThing : IHandler<GetThingQuery, Result<GetThingResponse>> {
+                public ValueTask<Result<GetThingResponse>> HandleAsync(GetThingQuery request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<GetThingResponse>>(new GetThingResponse("x"));
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        diagnostics.Any(diagnostic => diagnostic.Id is "ELHTTP001" or "ELHTTP004" or "ELRPC002").Should().BeFalse();
+        generated.Should().Contain("things.get")
+            .And.Contain("Sample.Manifest.GetThingQuery")
+            .And.Contain("Sample.Manifest.GetThingResponse");
+    }
+
+    [Fact]
+    public void Manifest_HttpEndpoint_RequestWithoutMarkerOrVerb_WarnsCannotInferVerb() {
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            namespace Sample.Manifest;
+
+            public sealed record PlainRequest(int Id);
+            public sealed record PlainResponse(string Name);
+
+            [HttpEndpoint("plain")]
+            public sealed class Plain : IHandler<PlainRequest, Result<PlainResponse>> {
+                public ValueTask<Result<PlainResponse>> HandleAsync(PlainRequest request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<PlainResponse>>(new PlainResponse("x"));
+            }
+            """;
+
+        RunGenerator(source, out var diagnostics);
+
+        diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "ELHTTP004" && diagnostic.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public void Manifest_HttpEndpoint_ExplicitVerb_NeedsNoMarker() {
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            namespace Sample.Manifest;
+
+            public sealed record PlainRequest(int Id);
+            public sealed record PlainResponse(string Name);
+
+            [HttpEndpoint(HttpVerb.Put, "plain")]
+            public sealed class Plain : IHandler<PlainRequest, Result<PlainResponse>> {
+                public ValueTask<Result<PlainResponse>> HandleAsync(PlainRequest request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<PlainResponse>>(new PlainResponse("x"));
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Any(diagnostic => diagnostic.Id == "ELHTTP004").Should().BeFalse();
+        generated.Should().Contain("Put");
+    }
+
+    [Fact]
+    public void Manifest_RpcMethod_NonResultResponse_WarnsMissingShape() {
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            namespace Sample.Manifest;
+
+            public sealed record AskQuery(int Id) : IQuery;
+
+            [RpcMethod("ask.now")]
+            public sealed class Ask : IHandler<AskQuery, AskQuery> {
+                public ValueTask<AskQuery> HandleAsync(AskQuery request, CancellationToken ct) =>
+                    ValueTask.FromResult(request);
+            }
+            """;
+
+        RunGenerator(source, out var diagnostics);
+
+        diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "ELRPC002" && diagnostic.Severity == DiagnosticSeverity.Warning);
     }
 
     private static string RunGenerator(string source, out IReadOnlyList<Diagnostic> diagnostics) {

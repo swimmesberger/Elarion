@@ -44,6 +44,7 @@ public sealed partial class HandlerRegistrationGenerator {
 
         sb.AppendLine($"public static class {handler.HandlerName}Registration");
         sb.AppendLine("{");
+        AppendAppliesToFields(sb, handler);
         AppendRegistrationMethod(sb, handler);
 
         if (handler.Cacheable is not null)
@@ -55,6 +56,19 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("}");
 
         return sb.ToString();
+    }
+
+    private static void AppendAppliesToFields(StringBuilder sb, HandlerInfo handler) {
+        // A decorator with a `public static bool AppliesTo(Type)` predicate is attached conditionally. The
+        // predicate is called once here (per closed handler type, at type init) and cached; the factory below
+        // reads the cached bool. The call site is a direct static invocation + typeof, so it stays AOT/trim-safe.
+        for (var i = 0; i < handler.Decorators.Length; i++) {
+            if (!handler.Decorators[i].HasAppliesTo)
+                continue;
+
+            sb.AppendLine($"    private static readonly bool __pipelineApplies{i} =");
+            sb.AppendLine($"        {handler.Decorators[i].DecoratorFqn}.AppliesTo(typeof({handler.RequestFqn}));");
+        }
     }
 
     private static void AppendRegistrationMethod(StringBuilder sb, HandlerInfo handler) {
@@ -109,7 +123,14 @@ public sealed partial class HandlerRegistrationGenerator {
         for (var i = decorators.Length - 1; i >= 0; i--) {
             var dec = decorators[i];
             // Note 58: Decorators are emitted in reverse so the first configured decorator becomes the outermost wrapper.
-            sb.Append($"                handler = new {dec.DecoratorFqn}(handler");
+            var indent = "                ";
+            if (dec.HasAppliesTo) {
+                // Attach only when the decorator's AppliesTo predicate matched this request type (cached above).
+                sb.AppendLine($"{indent}if (__pipelineApplies{i})");
+                indent += "    ";
+            }
+
+            sb.Append($"{indent}handler = new {dec.DecoratorFqn}(handler");
             foreach (var dep in dec.ExtraDependencyFqns) {
                 sb.Append($", sp.GetRequiredService<{dep}>()");
             }

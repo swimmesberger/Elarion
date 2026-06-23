@@ -25,6 +25,16 @@ internal static class RpcMethodEmission
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor MissingHandlerShape = new(
+        id: "ELRPC002",
+        title: "RPC handler has no resolvable request/response shape",
+        messageFormat:
+        "Handler '{0}' is annotated with [RpcMethod] but does not implement IHandler<TRequest, TResponse> with a "
+        + "Result<T> response; no RPC method will be generated",
+        category: "Elarion.JsonRpc",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public static readonly DiagnosticDescriptor McpCustomizationIgnored = new(
         id: "ELMCP003",
         title: "MCP customization is ignored",
@@ -74,21 +84,13 @@ internal static class RpcMethodEmission
 
         var (onJsonRpc, onMcp) = ReadTransports(attr);
 
-        INamedTypeSymbol? requestType = null;
-        INamedTypeSymbol? responseType = null;
-
-        foreach (var member in type.GetTypeMembers())
+        ct.ThrowIfCancellationRequested();
+        if (!HandlerShape.TryResolve(type, out var requestType, out var responseInner, out _))
         {
-            ct.ThrowIfCancellationRequested();
-
-            if (member.Name is "Command" or "Query")
-                requestType = member;
-            else if (member.Name == "Response")
-                responseType = member;
-        }
-
-        if (requestType is null || responseType is null)
+            report?.Invoke(Diagnostic.Create(
+                MissingHandlerShape, type.Locations.FirstOrDefault() ?? Location.None, type.ToDisplayString()));
             return false;
+        }
 
         var (toolName, hasMcpMethod) = ReadMcpMethod(type, mcpMethodType);
         if (hasMcpMethod && !onMcp)
@@ -107,7 +109,7 @@ internal static class RpcMethodEmission
             methodName,
             type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
             requestType.ToDisplayString(fmt),
-            responseType.ToDisplayString(fmt),
+            responseInner.ToDisplayString(fmt),
             toolName,
             onJsonRpc,
             onMcp,
