@@ -688,7 +688,7 @@ function SiteFooter() {
       <div className="mx-auto flex w-full max-w-7xl flex-col items-center justify-between gap-3 px-6 py-6 text-xs text-fd-muted-foreground sm:flex-row">
         <span className="flex items-center gap-1.5">
           <Sparkles className="size-3.5 text-aqua" />
-          Elarion is open source under the MIT License.
+          Elarion is open source under the Apache 2.0 License.
         </span>
         <span className="font-mono">© {new Date().getFullYear()} Simon Wimmesberger</span>
       </div>
