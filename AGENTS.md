@@ -357,6 +357,46 @@ When changing the TypeScript generator, also generate from a representative
 `rpc-schema.json` and type-check the emitted `rpc-types.ts`, `rpc-schemas.ts`, and
 `rpc-client.ts` under `moduleResolution: NodeNext`.
 
+## Documentation website
+
+The marketing landing page and rendered documentation live in `website/` — a
+Next.js + [Fumadocs](https://fumadocs.dev) app statically exported to GitHub
+Pages. The MDX/JSON content is **not** duplicated there: `website/source.config.ts`
+points Fumadocs at the repository's top-level `docs/` folder, which stays the
+single source of truth. `next.config.mjs` sets `turbopack.root`/`outputFileTracingRoot`
+to the repo root so the bundler can resolve `../docs`.
+
+Static assets follow the same rule: `docs/public/` is the single home for doc and
+brand assets (it lives with the content and is also used by the root `README.md`).
+`website/scripts/sync-public-assets.mjs` (run by the `predev`/`prebuild`/`postinstall`
+hooks) mirrors `docs/public/` into `website/public/` and derives the favicon
+(`website/app/icon.svg`) from the canonical brand symbol. Those generated outputs are
+gitignored — only `website/public/CNAME` (the custom domain) is committed. Put new
+images in `docs/public/`, never in `website/public/`.
+
+```bash
+cd website
+npm install
+npm run dev          # http://localhost:3000
+npm run build        # static export to website/out
+npm start            # preview the export locally
+```
+
+The site is served at the custom domain `elarion.wimmesberger.dev` (pinned by
+`website/public/CNAME`, copied into the export), so it builds with **no base
+path**. For a GitHub Pages *project* URL instead
+(`https://swimmesberger.github.io/Elarion/`), remove the CNAME and build with
+`PAGES_BASE_PATH="/Elarion"`. Pushes to `main` that touch `website/**` or
+`docs/**` trigger `.github/workflows/deploy-docs.yml`, which builds the static
+export and publishes it to Pages (enable once via **Settings → Pages → Source →
+GitHub Actions**).
+
+When adding a doc page, drop the `.mdx` under `docs/` and list it in the relevant
+`meta.json`. If a page or any sidebar uses Fumadocs MDX components beyond
+`Card`/`Cards`/`Callout`/`Step`/`Steps`, register them in `website/components/mdx.tsx`;
+new `icon:` frontmatter values must be valid Lucide icon names (resolved in
+`website/lib/source.ts`).
+
 ## Publishing
 
 Publishing uses GitHub Actions trusted publishing/OIDC:
