@@ -4,7 +4,7 @@ description: ICurrentUser gives handlers transport-neutral access to the authent
 ---
 
 Handlers often need to know who is calling — for authorization, auditing, or
-[user-scoped caching](/docs/concepts/caching). Elarion exposes this through a transport-neutral
+[user-scoped caching](/docs/capabilities/caching). Elarion exposes this through a transport-neutral
 `ICurrentUser` abstraction so application code never depends on `HttpContext` or
 `IHttpContextAccessor`.
 
@@ -77,7 +77,7 @@ builder.Services.AddElarionCurrentUser(options => {
 
 ## Relationship to caching
 
-[`CurrentUser`-scoped caching](/docs/concepts/caching) depends on this abstraction: the cache uses
+[`CurrentUser`-scoped caching](/docs/capabilities/caching) depends on this abstraction: the cache uses
 `ICurrentUser.UserId` (hashed) to isolate entries per user. If you use `CurrentUser` scope, make sure
 `AddElarionCurrentUser()` and `UseElarionCurrentUser()` are wired and the principal carries a user id
 claim.

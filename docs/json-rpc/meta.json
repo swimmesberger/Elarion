@@ -1,4 +1,0 @@
-{
-  "title": "JSON-RPC",
-  "pages": ["index", "hosting", "mcp", "serialization", "schema-generation", "typescript-client"]
-}

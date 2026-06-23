@@ -46,7 +46,7 @@ Read by `AddInMemoryScheduler(IConfiguration)`:
 | `Scheduler:MaxRetainedCompletedJobs` | implementation default | How many terminal job states are kept in memory. |
 | `Scheduler:MaxMisfireCatchUpRuns` | implementation default | Upper bound on catch-up runs for the `CatchUp` misfire policy. |
 
-See [Scheduling](/docs/scheduling).
+See [Scheduling](/docs/capabilities/scheduling).
 
 ## Scheduled job placeholders
 
@@ -58,7 +58,7 @@ Spring-style configuration placeholders, re-resolved per occurrence:
 | `${Jobs:Interval}` | Resolve the key; throw during resolution if missing. |
 | `${Jobs:Interval:-15m}` | Resolve the key; fall back to `15m` if missing or blank. |
 
-See [Schedules](/docs/scheduling/schedules).
+See [Schedules](/docs/capabilities/scheduling/schedules).
 
 ## JSON-RPC schema generation (MSBuild)
 
@@ -75,7 +75,7 @@ Properties read by `Elarion.AspNetCore.SchemaGeneration` during build:
 | `ElarionJsonRpcSchemaApplicationArguments` | empty | Args passed to the app entry point. |
 | `ElarionJsonRpcSchemaGenerationOptions` | empty | Extra tool arguments. |
 
-See [Schema generation](/docs/json-rpc/schema-generation).
+See [Schema generation](/docs/capabilities/transports/schema-generation).
 
 ## Current user (options, not config)
 
@@ -88,4 +88,4 @@ See [Schema generation](/docs/json-rpc/schema-generation).
 | `RoleClaimType` | `ClaimTypes.Role` |
 | `DefaultRolesWhenAuthenticated` | empty |
 
-See [Current user](/docs/concepts/current-user).
+See [Current user](/docs/capabilities/current-user).

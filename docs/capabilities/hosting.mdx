@@ -69,18 +69,18 @@ app.MapJsonRpc();
 app.Run();
 ```
 
-See [Serialization](/docs/json-rpc/serialization) for `CreateSerializerOptions`.
+See [Serialization](/docs/capabilities/serialization) for `CreateSerializerOptions`.
 
 `AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods)` is the **config-aware** overload: it
 resolves `IConfiguration` when the dispatcher singleton is built and registers only the enabled modules'
 JSON-RPC-surfaced `[RpcMethod]` handlers. `MapAllEndpoints` does the same gating for module `MapEndpoints`
 and generated `[HttpEndpoint]` routes. To expose the same handlers over MCP (an independent, equally gated
 transport), pair `ModuleBootstrapper.GetMcpMetadata(builder.Configuration)` with
-`ModuleBootstrapper.RegisterMcpMethods` via `AddElarionMcp` — see [MCP server](/docs/json-rpc/mcp).
+`ModuleBootstrapper.RegisterMcpMethods` via `AddElarionMcp` — see [MCP server](/docs/capabilities/transports/mcp).
 
 <Callout type="info">
   The dispatcher is **frozen** after registration. Freezing produces an immutable, thread-safe map
-  and lets the [build-time schema exporter](/docs/json-rpc/schema-generation) read a complete,
+  and lets the [build-time schema exporter](/docs/capabilities/transports/schema-generation) read a complete,
   deterministic method set. A missing, unfrozen, or empty dispatcher is treated as an error rather
   than producing a stale schema.
 

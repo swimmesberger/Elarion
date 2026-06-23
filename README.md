@@ -116,10 +116,10 @@ JSON-RPC endpoint end to end.
 
 Full guides live in [`docs/`](docs/index.mdx) and are structured for a documentation site:
 
-- **[Introduction](docs/index.mdx)** · **[Installation](docs/getting-started/installation.mdx)** · **[Quickstart](docs/getting-started/quickstart.mdx)**
-- **Core concepts** — [handlers](docs/concepts/handlers.mdx), [results & errors](docs/concepts/results-and-errors.mdx), [modules](docs/concepts/modules.mdx), [services](docs/concepts/services.mdx), [validators](docs/concepts/validators.mdx), [pipelines](docs/concepts/decorator-pipelines.mdx), [caching](docs/concepts/caching.mdx), [current user](docs/concepts/current-user.mdx)
-- **Features** — [source generation](docs/source-generation.mdx), [JSON-RPC](docs/json-rpc/index.mdx), [HTTP endpoints](docs/http-endpoints.mdx), [MCP server](docs/json-rpc/mcp.mdx), [events & messaging](docs/events.mdx), [blob storage](docs/blob-storage.mdx), [scheduling](docs/scheduling/index.mdx), [resilience](docs/resilience.mdx), [EF Core](docs/entity-framework.mdx), [telemetry](docs/telemetry.mdx)
-- **Reference** — [packages](docs/reference/packages.mdx), [configuration](docs/reference/configuration.mdx), [vs. ASP.NET Core](docs/reference/comparison.mdx), [troubleshooting](docs/reference/troubleshooting.mdx)
+- **[Introduction](docs/index.mdx)** · **[Why Elarion](docs/why-elarion.mdx)** · **[Installation](docs/getting-started/installation.mdx)** · **[Quickstart](docs/getting-started/quickstart.mdx)**
+- **Concepts** — [source generation](docs/concepts/source-generation.mdx), [handlers](docs/concepts/handlers.mdx), [results & errors](docs/concepts/results-and-errors.mdx), [modules](docs/concepts/modules.mdx), [services](docs/concepts/services.mdx), [validators](docs/concepts/validators.mdx), [pipelines](docs/concepts/decorator-pipelines.mdx), [cross-module communication](docs/concepts/cross-module-communication.mdx)
+- **Capabilities** — [hosting](docs/capabilities/hosting.mdx), [HTTP endpoints](docs/capabilities/transports/http-endpoints.mdx), [JSON-RPC](docs/capabilities/transports/json-rpc.mdx), [MCP server](docs/capabilities/transports/mcp.mdx), [scheduling](docs/capabilities/scheduling/index.mdx), [resilience](docs/capabilities/resilience.mdx), [events & messaging](docs/capabilities/events/index.mdx), [EF Core](docs/capabilities/entity-framework.mdx), [caching](docs/capabilities/caching.mdx), [current user](docs/capabilities/current-user.mdx), [blob storage](docs/capabilities/blob-storage.mdx), [telemetry](docs/capabilities/telemetry.mdx)
+- **Reference** — [packages](docs/reference/packages.mdx), [configuration](docs/reference/configuration.mdx), [troubleshooting](docs/reference/troubleshooting.mdx)
 
 ## Requirements
 

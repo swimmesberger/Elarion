@@ -54,7 +54,7 @@ The generators discover and wire handlers from their shape and location:
 - For transports (JSON-RPC, HTTP, MCP) the handler returns `Result<TResponse>`; the request and
   response types are read from the `IHandler<,>` interface itself, so they may be declared anywhere —
   nesting them (as `Command`/`Query`/`Response`) is an organizational convention, **not** a
-  requirement. See [JSON-RPC usage](/docs/json-rpc).
+  requirement. See [JSON-RPC usage](/docs/capabilities/transports/json-rpc).
 
 The handler registration generator emits an `Add{HandlerName}()` method and aggregates them into the
 module's `Add{Module}Handlers()` method. You never register a handler by hand.
@@ -81,7 +81,7 @@ remains a useful readability convention, but a request without the marker is tre
 
 Handlers query and persist through the generated `IAppDbContext` interface, injected like any other
 dependency. Elarion does **not** prescribe a repository layer — the
-[EF Core source generator](/docs/entity-framework) exists precisely so the application context
+[EF Core source generator](/docs/capabilities/entity-framework) exists precisely so the application context
 interface *is* your data-access abstraction:
 
 ```csharp
@@ -99,7 +99,7 @@ await db.SaveChangesAsync(ct);
 The interface keeps handlers in the application layer — they query without referencing the
 infrastructure project that owns the concrete `DbContext`. For compiled queries or other advanced
 scenarios that need the concrete type, call `db.AsDbContext()`. See
-[Entity Framework Core](/docs/entity-framework) for how the interface and its `DbSet`s are generated.
+[Entity Framework Core](/docs/capabilities/entity-framework) for how the interface and its `DbSet`s are generated.
 
 <Callout type="info">
   Wrapping each table in a hand-written `IClientRepository` adds a layer that the generated

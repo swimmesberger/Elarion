@@ -3,24 +3,11 @@
   "root": true,
   "pages": [
     "index",
-    "philosophy",
-    "---Getting Started---",
+    "why-elarion",
     "getting-started",
-    "---Tutorial---",
     "tutorial",
-    "---Core Concepts---",
     "concepts",
-    "---Features---",
-    "source-generation",
-    "json-rpc",
-    "http-endpoints",
-    "scheduling",
-    "resilience",
-    "events",
-    "entity-framework",
-    "blob-storage",
-    "telemetry",
-    "---Reference---",
+    "capabilities",
     "reference"
   ]
 }

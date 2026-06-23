@@ -1,0 +1,198 @@
+---
+title: Conventions & layout
+description: The naming and namespace conventions the source generators depend on, and the project dependency rules.
+---
+
+Elarion discovers application code by **namespace containment** and **type conventions** — there is no
+central registration list. Get the layout right and the generators emit DI registration and transport
+maps for you, gated per module. This page consolidates every convention the generators rely on and the
+project dependency rules.
+
+<Callout type="info">
+  When a type is in the wrong namespace or breaks a convention, the result is a **build-time diagnostic**
+  or a **missing generated method** — never a silent runtime failure. See
+  [Diagnostics](/docs/reference/diagnostics) for every id, and
+  [Troubleshooting](/docs/reference/troubleshooting) for the common cases.
+</Callout>
+
+## Solution layout
+
+A conventional Elarion solution separates intent (the application) from platform wiring (the host):
+
+```text title="MyApp.sln"
+src/
+├─ MyApp.Domain/            # entities, value objects — no framework dependency
+├─ MyApp.Application/       # modules, handlers, services, validators  ← Elarion + generators
+├─ MyApp.Infrastructure/    # concrete database/blob/mail/PDF implementations
+└─ MyApp.Api/               # ASP.NET Core host  ← Elarion.AspNetCore (+ .JsonRpc / .Mcp)
+```
+
+A module is a namespace plus an `[AppModule]` marker; everything under that namespace belongs to the
+module. A common per-module layout:
+
+```text title="MyApp.Application/Modules/Clients/"
+ClientsModule.cs            # [AppModule("Clients")] + optional ConfigureServices / JSON resolver
+ClientsJsonContext.cs       # [JsonSerializable(...)] per request/response type
+Handlers/
+├─ GetClient.cs             # [RpcMethod] IHandler<GetClientQuery, Result<ClientResponse>>
+└─ CreateClient/
+   ├─ CreateClient.cs       # handler
+   └─ CreateClientValidator.cs
+Services/
+└─ ClientNumberGenerator.cs # [Service] implementation
+```
+
+## Naming & namespace conventions
+
+These rules are load-bearing for the generators in `Elarion.Generators`.
+
+| Convention | What the generator does | Source |
+| --- | --- | --- |
+| A type lives **under a module namespace** | Decides which `[AppModule]` owns it via longest-prefix containment, and therefore which gated registration runs. | `ModuleScanner` |
+| Handlers implement `IHandler<TRequest, TResponse>` | The request type and the `Result<T>`-unwrapped success type are read straight from the interface. | `HandlerShape` |
+| Services are annotated with `[Service]` | Registered with contracts inferred from implemented interfaces and the `Scope` lifetime. | `ServiceAttribute` |
+| Validators inherit `AbstractValidator<T>` | Registered as `IValidator<T>` (scoped) into the owning module. | `AbstractValidator<T>` |
+| `IHostedService`/`BackgroundService` use `ServiceScope.Singleton` | A scoped/transient hosted service is rejected with `ELSG001`. | `[Service]` |
+
+### Module namespace containment (longest prefix)
+
+Every generator that groups registrations by module assigns each type to the `[AppModule]` whose
+namespace is the **longest prefix** of the type's namespace. Containment requires either an exact match
+or a `.`-delimited prefix (so `MyApp.Billing` does **not** swallow `MyApp.BillingArchive`); a module at
+the global namespace matches everything.
+
+```text
+MyApp.Application.Modules.Billing            ← [AppModule("Billing")]
+MyApp.Application.Modules.Billing.Invoices   → owned by Billing (prefix match)
+MyApp.Application.Modules.Reporting          → not owned by Billing
+```
+
+A `[RpcMethod]`/`[HttpEndpoint]` handler whose namespace falls under **no** module is not dropped — it is
+mapped ungated and a warning is raised (`ELRPC001` for RPC/MCP, `ELHTTP003` for HTTP). Module-scoped
+runtime registrations that require an owner (scheduled jobs, event consumers) are instead left
+unregistered with `ELSG010` / `ELEVT003`.
+
+### Handler request/response shape
+
+The transport generators resolve a handler's request and response **from its `IHandler<TRequest, TResponse>`
+interface** — argument 0 is the request, argument 1 is the response, and the success type is unwrapped from
+`Result<T>`. Request and response types may be **nested or top-level**; nesting and naming carry no semantic
+weight. (The older convention of scanning for nested `Command`/`Query`/`Response` members no longer applies.)
+
+```csharp title="A handler with top-level request/response types"
+public sealed record GetClientQuery(Guid Id) : IQuery;
+public sealed record ClientResponse(Guid Id, string Name);
+
+[RpcMethod("clients.get")]
+public sealed class GetClient : IHandler<GetClientQuery, Result<ClientResponse>> {
+    public ValueTask<Result<ClientResponse>> HandleAsync(GetClientQuery request, CancellationToken ct) =>
+        /* ... */;
+}
+```
+
+A handler annotated with `[RpcMethod]`/`[HttpEndpoint]` that does not implement `IHandler<,>` with a
+`Result<T>` response generates no endpoint and reports `ELRPC002` / `ELHTTP001`. For HTTP, when no explicit
+verb is given, the verb is inferred from the request's CQRS marker (`ICommand` → POST, `IQuery` → GET);
+neither marker present without an explicit verb reports `ELHTTP004`.
+
+### `[Service]` contract & lifetime resolution
+
+`[Service]` registers a class for DI. Contracts and lifetime resolve as follows:
+
+| Aspect | Rule |
+| --- | --- |
+| Explicit contracts | `[Service(typeof(IFoo), typeof(IBar))]` registers exactly those types; each must be assignable from the implementation or `ELSG002` is reported. |
+| Inferred contracts | With no explicit types, the **directly implemented interfaces** are the contracts (base-class interfaces are not treated as explicit). |
+| No interfaces | With no direct interfaces, the implementation registers **as itself**. |
+| Multiple contracts | The first contract is the concrete registration; the rest forward to it (one shared instance per scope). |
+| Lifetime | `Scope` selects the lifetime — `ServiceScope.Scoped` (default), `Singleton`, or `Transient`. |
+| Hosted services | An `IHostedService`/`BackgroundService` is also registered as `IHostedService` (singleton) and **must** use `Singleton` scope (`ELSG001`). |
+| Generic implementations | Open-generic `[Service]` classes are unsupported (`ELSG003`). |
+
+```csharp title="Inferred contract, scoped lifetime"
+[Service]
+public sealed class ClientNumberGenerator : IClientNumberGenerator { /* registered as IClientNumberGenerator */ }
+
+[Service(typeof(IClock), Scope = ServiceScope.Singleton)]
+public sealed class SystemClock : IClock { /* explicit contract, singleton */ }
+```
+
+### Validator grouping
+
+A class inheriting `FluentValidation.AbstractValidator<T>` is registered as `IValidator<T>` with a **scoped**
+lifetime into its owning module (by namespace containment). Abstract validators are skipped. No attribute is
+required — placement and the base class are the whole convention.
+
+## Auto-wiring: `ConfigureDefaultServices`
+
+Under `[GenerateModuleBootstrapper]`, a module's discovered **handlers, services, validators, scheduled
+jobs, and event consumers** are registered automatically — you do **not** hand-write `Add{Module}…()` calls.
+
+- `ModuleDefaultServicesGenerator` emits, per `[AppModule]`, a sibling `static partial class
+  {ModuleType}ElarionModuleServices` with `ConfigureDefaultServices(IServiceCollection)` that calls one
+  `static partial void` hook per category (`AddHandlers`, `AddServices`, `AddValidators`, `AddScheduledJobs`,
+  `AddEventConsumers`, `AddModuleApi`).
+- Each category generator contributes a filler partial implementing its hook; unimplemented hooks elide to
+  no-ops, so a module pays nothing for categories it does not use.
+- The generated host bootstrapper calls `{Module}.ConfigureDefaultServices(services)` gated by
+  `IsModuleEnabled` (which reads `Modules:{Name}:Enabled`, default `true`), **before** the module's optional
+  hand-written `ConfigureServices`.
+
+`ConfigureServices` is therefore reserved for **additional, non-generated** registrations (options binding,
+third-party libraries, manual decorators) — not for re-declaring the module's own handlers/services/validators.
+
+```csharp title="A module needs no manual Add{Module}… calls"
+[AppModule("Clients")]
+public static partial class ClientsModule {
+    // Optional: only for extra, non-generated wiring.
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) =>
+        services.Configure<ClientOptions>(configuration.GetSection("Clients"));
+
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => ClientsJsonContext.Default;
+}
+```
+
+The convention-based module hooks (`ConfigureServices`, `MapEndpoints`, `GetJsonTypeInfoResolver`,
+`ConfigureEndpointGroup`) and the core-vs-feature distinction are covered in
+[Modules](/docs/concepts/modules); the registration mechanics in
+[Source generation](/docs/concepts/source-generation).
+
+## Project dependency rules
+
+The boundary that matters: **the application declares intent; the host wires platform capabilities.**
+
+| Code | Belongs in |
+| --- | --- |
+| Generic handler / result / module / pipeline / RPC primitives | The framework packages (`Elarion`, `Elarion.Abstractions`) |
+| Feature-module composition and business handlers | Application project |
+| Concrete database / blob / mail / PDF / external-service implementations | Infrastructure, registered by the host as a platform capability |
+| Middleware, authentication, telemetry exporters, app lifetime | API host |
+| Application-specific domain types | Domain / application projects |
+
+The **application never references the host or infrastructure**. Application modules may depend only on
+abstractions — DI, configuration, `IEndpointRouteBuilder`, and `System.Text.Json` metadata. They must **not**
+depend on the API host, `WebApplicationBuilder`, concrete infrastructure classes, or deployment-specific
+packages. A module must never call `builder.Build()`, `app.UseAuthentication()`, `app.MapJsonRpc()`, or
+configure concrete providers — those belong to the host.
+
+<Callout type="info">
+  Cross-module references follow the same discipline: depend on another module's published
+  `[ModuleContract]`, never its internal `[Service]`, handler, or `[DbEntity]` types. The
+  `ModuleBoundaryAnalyzer` (`ELMOD002`) flags violations. See
+  [Cross-module communication](/docs/concepts/cross-module-communication).
+</Callout>
+
+<Cards>
+  <Card title="Modules" href="/docs/concepts/modules">
+    Module hooks, core vs. feature modules, and feature-flag gating.
+  </Card>
+  <Card title="Source generation" href="/docs/concepts/source-generation">
+    How the generators discover types and emit registration code.
+  </Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">
+    Every `EL*` diagnostic id, message, and fix.
+  </Card>
+  <Card title="Project structure" href="/docs/getting-started/project-structure">
+    Walkthrough of laying out a new solution.
+  </Card>
+</Cards>

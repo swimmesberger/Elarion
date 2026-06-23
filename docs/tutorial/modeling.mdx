@@ -69,7 +69,7 @@ public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Cancelled }
 Handlers never see the concrete `DbContext`. They depend on a generated `IAppDbContext` interface —
 this *is* the data-access abstraction, so there is [no repository layer](/docs/concepts/handlers#accessing-data).
 Annotate the interface with `[GenerateDbSets]` and the
-[EF Core generator](/docs/entity-framework) emits a `DbSet<T>` for every `[DbEntity]`.
+[EF Core generator](/docs/capabilities/entity-framework) emits a `DbSet<T>` for every `[DbEntity]`.
 
 ```csharp title="src/Billing.Application/IAppDbContext.cs"
 using Elarion.EntityFrameworkCore;
@@ -170,24 +170,22 @@ public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> 
 ### Define the modules
 
 A module is a static partial class marked with `[AppModule]` at the root of a namespace. Everything
-under that namespace belongs to the module, and the generators emit `Add{Module}Handlers()`,
-`Add{Module}Services()`, and `Add{Module}Validators()` for it to call.
+under that namespace belongs to the module, and the generators register its handlers, services, and
+validators for you — the host bootstrapper calls a generated `ConfigureDefaultServices`, gated by the
+module's feature flag, so there are no `Add{Module}…()` calls to write. A module declares only its JSON
+resolver and any extra, non-generated wiring in `ConfigureServices`. See
+[Conventions](/docs/reference/conventions).
 
 **Core** is a foundation module — `Kind = AppModuleKind.Core` keeps it always enabled and initialized
 before feature modules. It owns shared services such as the audit trail you will add next.
 
 ```csharp title="src/Billing.Application/Modules/Core/CoreModule.cs"
 using Elarion.Abstractions.Modules;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Billing.Application.Modules.Core;
 
 [AppModule("Core", Kind = AppModuleKind.Core)]
 public static partial class CoreModule {
-    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
-        services.AddCoreServices();   // generated
-    }
 }
 ```
 
@@ -197,19 +195,11 @@ Each publishes its handlers, services, validators, and JSON metadata.
 ```csharp title="src/Billing.Application/Modules/Clients/ClientsModule.cs"
 using System.Text.Json.Serialization.Metadata;
 using Elarion.Abstractions.Modules;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Billing.Application.Modules.Clients;
 
 [AppModule("Clients")]
 public static partial class ClientsModule {
-    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
-        services.AddClientsHandlers();
-        services.AddClientsServices();
-        services.AddClientsValidators();
-    }
-
     public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => ClientsJsonContext.Default;
 }
 ```
@@ -217,25 +207,17 @@ public static partial class ClientsModule {
 ```csharp title="src/Billing.Application/Modules/Invoicing/InvoicingModule.cs"
 using System.Text.Json.Serialization.Metadata;
 using Elarion.Abstractions.Modules;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Billing.Application.Modules.Invoicing;
 
 [AppModule("Invoicing")]
 public static partial class InvoicingModule {
-    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
-        services.AddInvoicingHandlers();
-        services.AddInvoicingServices();
-        services.AddInvoicingValidators();
-    }
-
     public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => InvoicingJsonContext.Default;
 }
 ```
 
 The `ClientsJsonContext` and `InvoicingJsonContext` referenced above are created in the next step, as
-you add handlers — each module contributes its own [source-generated JSON metadata](/docs/json-rpc/serialization).
+you add handlers — each module contributes its own [source-generated JSON metadata](/docs/capabilities/serialization).
 
 <Callout type="info">
   Because Invoicing is a feature module, an operator can switch it off entirely with

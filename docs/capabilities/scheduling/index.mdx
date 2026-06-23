@@ -10,7 +10,7 @@ and cross-process catch-up are **not** required.
 The scheduler uses source-generated descriptors and invocation delegates — there is no runtime
 assembly scanning, `Type` activation, or reflection-based method invocation. Every run executes
 through an async DI scope, receives a cancellation token, is tracked during shutdown, and emits
-[scheduler telemetry](/docs/telemetry).
+[scheduler telemetry](/docs/capabilities/telemetry).
 
 ## Implementation-neutral by design
 
@@ -86,12 +86,12 @@ public sealed class RecurringBillingJob(
 - The scheduler is **in-memory only**. Queued runtime jobs and due recurring state are lost when the
   process stops.
 - Fixed-rate and cron schedules **skip missed in-process slots** instead of replaying a burst (tunable
-  with [misfire policy](/docs/scheduling/overlap-and-misfire)).
+  with [misfire policy](/docs/capabilities/scheduling/overlap-and-misfire)).
 - There is **no global polling loop**. The runtime waits until the nearest due item and wakes early
   when an earlier item is enqueued.
 - `TimeProvider` is used throughout, so tests can drive millisecond schedules deterministically with a
   fake clock. Production precision is bounded by OS timer resolution and host load.
-- Scheduling, enqueue, cancel, and execution all emit [telemetry](/docs/telemetry).
+- Scheduling, enqueue, cancel, and execution all emit [telemetry](/docs/capabilities/telemetry).
 
 <Callout type="warn">
   If you need durable queues, distributed coordination, or retry history that survives restarts, use
@@ -101,8 +101,8 @@ public sealed class RecurringBillingJob(
 ## In this section
 
 <Cards>
-  <Card title="Schedules" href="/docs/scheduling/schedules">FixedRate, FixedDelay, Cron, initial delay, and config placeholders.</Card>
-  <Card title="Overlap & misfire" href="/docs/scheduling/overlap-and-misfire">What happens when runs collide or fall behind.</Card>
-  <Card title="Runtime jobs" href="/docs/scheduling/runtime-jobs">Typed one-off jobs scheduled at runtime with a payload.</Card>
-  <Card title="Inspection" href="/docs/scheduling/inspection">Snapshots, next-due times, and cancellation.</Card>
+  <Card title="Schedules" href="/docs/capabilities/scheduling/schedules">FixedRate, FixedDelay, Cron, initial delay, and config placeholders.</Card>
+  <Card title="Overlap & misfire" href="/docs/capabilities/scheduling/overlap-and-misfire">What happens when runs collide or fall behind.</Card>
+  <Card title="Runtime jobs" href="/docs/capabilities/scheduling/runtime-jobs">Typed one-off jobs scheduled at runtime with a payload.</Card>
+  <Card title="Inspection" href="/docs/capabilities/scheduling/inspection">Snapshots, next-due times, and cancellation.</Card>
 </Cards>

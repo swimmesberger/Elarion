@@ -143,7 +143,7 @@ using Elarion.Abstractions;
 ### Add the audit trail (Core module + current user)
 
 Command handlers should record *who* did *what*. The audit trail is a `[Service]` in the Core module
-that injects [`ICurrentUser`](/docs/concepts/current-user) — a transport-neutral view of the caller, so
+that injects [`ICurrentUser`](/docs/capabilities/current-user) — a transport-neutral view of the caller, so
 application code never touches `HttpContext`.
 
 ```csharp title="src/Billing.Application/Modules/Core/Services/AuditTrail.cs"
@@ -167,7 +167,8 @@ public sealed class AuditTrail(ICurrentUser user, TimeProvider clock, ILogger<Au
 ```
 
 `[Service(typeof(IAuditTrail))]` registers the implementation against the interface; the generator
-aggregates it into `AddCoreServices()`, which `CoreModule.ConfigureServices` already calls.
+picks it up into the Core module's generated `ConfigureDefaultServices`, which the host bootstrapper
+calls automatically — there is no registration call to write.
 
 </Step>
 
@@ -205,7 +206,7 @@ public sealed class ClientNumberGenerator(IAppDbContext db) : IClientNumberGener
 `CreateClient` is a state change, so its request is a nested `Command`. It runs through the default
 pipeline (logging → validation → transaction), scopes the row to the current user, invalidates the
 clients cache on success, and is exposed over JSON-RPC. The `[Description]` attributes flow straight
-through to the [MCP tool](/docs/json-rpc/mcp) surface.
+through to the [MCP tool](/docs/capabilities/transports/mcp) surface.
 
 ```csharp title="src/Billing.Application/Modules/Clients/Handlers/CreateClient.cs"
 using System.ComponentModel;
@@ -373,7 +374,7 @@ public sealed class ListClients(IAppDbContext db, ICurrentUser user)
 
 ### Register the JSON metadata
 
-Each module contributes [source-generated JSON metadata](/docs/json-rpc/serialization) for its
+Each module contributes [source-generated JSON metadata](/docs/capabilities/serialization) for its
 request/response types. Add an entry per type the module exposes.
 
 ```csharp title="src/Billing.Application/Modules/Clients/ClientsJsonContext.cs"
