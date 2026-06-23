@@ -18,45 +18,36 @@ public sealed partial class HandlerRegistrationGenerator {
         string RequestFqn,
         string ResponseFqn,
         string Namespace,
-        ImmutableArray<DecoratorInfo> Decorators,
+        EquatableArray<DecoratorInfo> Decorators,
         string? ResiliencePolicyName,
         CacheableInfo? Cacheable,
         CacheInvalidationInfo? CacheInvalidation,
-        ImmutableArray<HandlerDiagnosticInfo> Diagnostics
+        EquatableArray<DiagnosticInfo> Diagnostics
     );
 
     private sealed record DecoratorInfo(
         string DecoratorFqn,
-        ImmutableArray<string> ExtraDependencyFqns,
+        EquatableArray<string> ExtraDependencyFqns,
         bool HasAppliesTo
     );
 
     private sealed record CacheableInfo(
-        ImmutableArray<string> Tags,
+        EquatableArray<string> Tags,
         int DurationSeconds,
         int ScopeValue,
-        ImmutableArray<CacheKeyPropertyInfo> KeyProperties,
+        EquatableArray<CacheKeyPropertyInfo> KeyProperties,
         string? ResultValueFqn
     );
 
     private sealed record CacheInvalidationInfo(
-        ImmutableArray<string> Tags,
+        EquatableArray<string> Tags,
         int ScopeValue
     );
 
     private sealed record CacheKeyPropertyInfo(string Name);
 
-    /// <summary>A diagnostic discovered while building a handler's registration (cache, pipeline, …).</summary>
-    private sealed record HandlerDiagnosticInfo(
-        DiagnosticDescriptor Descriptor,
-        Location? Location,
-        object?[] MessageArgs
-    );
-
-    private sealed record ModuleInfo(string Name, string Namespace, string TypeName);
-
     private static readonly DiagnosticDescriptor CacheableAndInvalidatingDescriptor = new(
-        "WIMCACHE001",
+        "ELCACHE001",
         "Handler cannot be both cacheable and cache-invalidating",
         "Handler '{0}' cannot use both CacheableAttribute and CacheInvalidateAttribute",
         "Elarion.Abstractions.Caching",
@@ -64,7 +55,7 @@ public sealed partial class HandlerRegistrationGenerator {
         isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor EmptyCacheTagsDescriptor = new(
-        "WIMCACHE002",
+        "ELCACHE002",
         "Handler cache tags are required",
         "Handler '{0}' must define at least one non-empty cache tag",
         "Elarion.Abstractions.Caching",
@@ -72,7 +63,7 @@ public sealed partial class HandlerRegistrationGenerator {
         isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor InvalidCacheTagDescriptor = new(
-        "WIMCACHE003",
+        "ELCACHE003",
         "Handler cache tag is invalid",
         "Handler '{0}' contains invalid cache tag '{1}'",
         "Elarion.Abstractions.Caching",
@@ -80,7 +71,7 @@ public sealed partial class HandlerRegistrationGenerator {
         isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor InvalidCacheDurationDescriptor = new(
-        "WIMCACHE004",
+        "ELCACHE004",
         "Handler cache duration is invalid",
         "Handler '{0}' must define a positive cache duration",
         "Elarion.Abstractions.Caching",

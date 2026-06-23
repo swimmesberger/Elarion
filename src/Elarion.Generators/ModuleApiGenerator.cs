@@ -63,37 +63,88 @@ public sealed class ModuleApiGenerator : IIncrementalGenerator
         string RequestFqn,
         string ResponseFqn,
         bool Exclude,
-        ImmutableArray<string> Scopes);
+        EquatableArray<string> Scopes);
 
     private sealed record FacadeEntry(
         string Namespace,
         string Name,
         string Accessibility,
-        ImmutableArray<string> Scopes,
-        Location Location);
+        EquatableArray<string> Scopes,
+        LocationInfo Location);
+
+    /// <summary>A discovered facade: either a model or the diagnostics (ELAPI001/002) that rejected it.</summary>
+    private sealed record FacadeResult(FacadeEntry? Facade, EquatableArray<DiagnosticInfo> Diagnostics);
 
     private sealed record MemberEntry(string MethodName, string RequestFqn, string ResponseFqn);
+
+    private static class TrackingNames
+    {
+        public const string Facades = "Facades";
+        public const string Handlers = "Handlers";
+        public const string Combined = "ModuleApiCombined";
+    }
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        context.RegisterSourceOutput(context.CompilationProvider, static (spc, compilation) => Execute(spc, compilation));
+        // Facades are attributed interfaces; handlers are detected structurally (IHandler<,>) and are not
+        // attributed, so they need a separate predicate-filtered syntax provider. There is no assembly
+        // trigger — the generator runs whenever a [GenerateModuleApi] facade exists.
+        var facades = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                GenerateModuleApiAttributeMetadataName,
+                static (node, _) => node is InterfaceDeclarationSyntax,
+                static (ctx, ct) => CreateFacadeResult(ctx, ct))
+            .Where(static result => result is not null)
+            .Select(static (result, _) => result!)
+            .Collect()
+            .WithTrackingName(TrackingNames.Facades);
+
+        var handlers = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
+                static (ctx, ct) => CreateHandler(ctx, ct))
+            .Where(static handler => handler is not null)
+            .Select(static (handler, _) => handler!)
+            .Collect()
+            .WithTrackingName(TrackingNames.Handlers);
+
+        var modules = ModuleProviders.CollectModules(context);
+
+        var combined = facades.Combine(handlers).Combine(modules).WithTrackingName(TrackingNames.Combined);
+
+        context.RegisterSourceOutput(combined, static (spc, source) =>
+        {
+            var ((facadeResults, handlerList), modules) = source;
+            Execute(spc, facadeResults, handlerList, modules);
+        });
     }
 
-    private static void Execute(SourceProductionContext spc, Compilation compilation)
+    private static void Execute(
+        SourceProductionContext spc,
+        ImmutableArray<FacadeResult> facadeResults,
+        ImmutableArray<HandlerEntry> handlerList,
+        EquatableArray<ModuleScanner.Module> modules)
     {
-        var generateAttr = compilation.GetTypeByMetadataName(GenerateModuleApiAttributeMetadataName);
-        if (generateAttr is null)
-            return;
+        foreach (var result in facadeResults)
+        {
+            foreach (var diagnostic in result.Diagnostics)
+                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
+        }
 
-        var moduleApiAttr = compilation.GetTypeByMetadataName(ModuleApiAttributeMetadataName);
+        var facades = new List<FacadeEntry>();
+        foreach (var result in facadeResults)
+        {
+            if (result.Facade is not null)
+                facades.Add(result.Facade);
+        }
 
-        var facades = CollectFacades(compilation, generateAttr, spc);
         if (facades.Count == 0)
             return;
 
-        var modules = ModuleScanner.Collect(compilation, spc.CancellationToken);
-        var handlers = CollectHandlers(compilation, moduleApiAttr, spc.CancellationToken);
+        // A partial handler class declared across files yields one transform result per declaration; the
+        // entries are identical (value records), so Distinct collapses them to a single handler.
+        var handlers = handlerList.Distinct().ToList();
 
         // Facades grouped by owning module, so each module's registration method covers all its facades.
         var registrationsByModule = new Dictionary<ModuleScanner.Module, List<(string InterfaceFqn, string ForwarderFqn)>>();
@@ -103,7 +154,7 @@ public sealed class ModuleApiGenerator : IIncrementalGenerator
             var module = ModuleScanner.FindBest(facade.Namespace, modules);
             if (module is null)
             {
-                spc.ReportDiagnostic(Diagnostic.Create(FacadeNotInModule, facade.Location, facade.Name));
+                spc.ReportDiagnostic(Diagnostic.Create(FacadeNotInModule, facade.Location.ToLocation(), facade.Name));
                 continue;
             }
 
@@ -168,7 +219,7 @@ public sealed class ModuleApiGenerator : IIncrementalGenerator
 
             // No scopes on the facade = the module's default facade (every non-excluded handler).
             // Scoped facade = handlers whose own scope tags intersect the facade's scopes.
-            if (!facade.Scopes.IsDefaultOrEmpty &&
+            if (!facade.Scopes.IsEmpty &&
                 !facade.Scopes.Any(scope => handler.Scopes.Contains(scope, StringComparer.Ordinal)))
             {
                 continue;
@@ -176,7 +227,7 @@ public sealed class ModuleApiGenerator : IIncrementalGenerator
 
             if (!usedNames.Add(handler.Name))
             {
-                spc.ReportDiagnostic(Diagnostic.Create(DuplicateMethod, facade.Location, facade.Name, handler.Name));
+                spc.ReportDiagnostic(Diagnostic.Create(DuplicateMethod, facade.Location.ToLocation(), facade.Name, handler.Name));
                 continue;
             }
 
@@ -186,116 +237,75 @@ public sealed class ModuleApiGenerator : IIncrementalGenerator
         return members;
     }
 
-    private static List<FacadeEntry> CollectFacades(
-        Compilation compilation,
-        INamedTypeSymbol generateAttr,
-        SourceProductionContext spc)
+    private static FacadeResult? CreateFacadeResult(GeneratorAttributeSyntaxContext ctx, CancellationToken ct)
     {
-        var facades = new List<FacadeEntry>();
-        var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+        if (ctx.TargetSymbol is not INamedTypeSymbol symbol || ctx.Attributes.Length == 0)
+            return null;
 
-        foreach (var syntaxTree in compilation.SyntaxTrees)
-        {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            foreach (var interfaceDecl in syntaxTree.GetRoot(spc.CancellationToken)
-                         .DescendantNodes().OfType<InterfaceDeclarationSyntax>())
-            {
-                if (semanticModel.GetDeclaredSymbol(interfaceDecl, spc.CancellationToken) is not INamedTypeSymbol symbol ||
-                    !seen.Add(symbol))
-                {
-                    continue;
-                }
+        var attribute = ctx.Attributes[0];
+        var location = LocationInfo.From(symbol);
 
-                var attribute = symbol.GetAttributes()
-                    .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, generateAttr));
-                if (attribute is null)
-                    continue;
+        if (symbol.ContainingType is not null)
+            return new FacadeResult(null, ImmutableArray.Create(DiagnosticInfo.Create(FacadeNested, location, symbol.Name)));
 
-                var location = symbol.Locations.FirstOrDefault() ?? Location.None;
+        var isPartial = symbol.DeclaringSyntaxReferences.Any(reference =>
+            reference.GetSyntax(ct) is TypeDeclarationSyntax declaration &&
+            declaration.Modifiers.Any(SyntaxKind.PartialKeyword));
+        if (!isPartial)
+            return new FacadeResult(null, ImmutableArray.Create(DiagnosticInfo.Create(FacadeNotPartial, location, symbol.Name)));
 
-                if (symbol.ContainingType is not null)
-                {
-                    spc.ReportDiagnostic(Diagnostic.Create(FacadeNested, location, symbol.Name));
-                    continue;
-                }
+        var ns = symbol.ContainingNamespace is { IsGlobalNamespace: false } containing
+            ? containing.ToDisplayString()
+            : string.Empty;
+        var accessibility = symbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
 
-                var isPartial = symbol.DeclaringSyntaxReferences.Any(reference =>
-                    reference.GetSyntax(spc.CancellationToken) is TypeDeclarationSyntax declaration &&
-                    declaration.Modifiers.Any(SyntaxKind.PartialKeyword));
-                if (!isPartial)
-                {
-                    spc.ReportDiagnostic(Diagnostic.Create(FacadeNotPartial, location, symbol.Name));
-                    continue;
-                }
-
-                var ns = symbol.ContainingNamespace is { IsGlobalNamespace: false } containing
-                    ? containing.ToDisplayString()
-                    : string.Empty;
-                var accessibility = symbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
-
-                facades.Add(new FacadeEntry(ns, symbol.Name, accessibility, GetScopes(attribute), location));
-            }
-        }
-
-        return facades;
+        var facade = new FacadeEntry(ns, symbol.Name, accessibility, GetScopes(attribute), location);
+        return new FacadeResult(facade, EquatableArray<DiagnosticInfo>.Empty);
     }
 
-    private static List<HandlerEntry> CollectHandlers(
-        Compilation compilation,
-        INamedTypeSymbol? moduleApiAttr,
-        CancellationToken ct)
+    private static HandlerEntry? CreateHandler(GeneratorSyntaxContext ctx, CancellationToken ct)
     {
-        var handlers = new List<HandlerEntry>();
-        var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-        var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
-
-        foreach (var syntaxTree in compilation.SyntaxTrees)
+        if (ctx.Node is not ClassDeclarationSyntax classDecl ||
+            ctx.SemanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol symbol ||
+            symbol.IsAbstract)
         {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            foreach (var classDecl in syntaxTree.GetRoot(ct).DescendantNodes().OfType<ClassDeclarationSyntax>())
+            return null;
+        }
+
+        var handlerInterface = symbol.AllInterfaces.FirstOrDefault(iface =>
+            iface.OriginalDefinition.ToDisplayString() == HandlerInterfaceDisplay);
+        if (handlerInterface is null)
+            return null;
+
+        if (symbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
+            return null;
+
+        var exclude = false;
+        var scopes = ImmutableArray<string>.Empty;
+        var moduleApiAttr = ctx.SemanticModel.Compilation.GetTypeByMetadataName(ModuleApiAttributeMetadataName);
+        if (moduleApiAttr is not null)
+        {
+            var apiAttr = symbol.GetAttributes()
+                .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, moduleApiAttr));
+            if (apiAttr is not null)
             {
-                if (semanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol symbol || !seen.Add(symbol))
-                    continue;
-
-                if (symbol.IsAbstract)
-                    continue;
-
-                var handlerInterface = symbol.AllInterfaces.FirstOrDefault(iface =>
-                    iface.OriginalDefinition.ToDisplayString() == HandlerInterfaceDisplay);
-                if (handlerInterface is null)
-                    continue;
-
-                if (symbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
-                    continue;
-
-                var exclude = false;
-                var scopes = ImmutableArray<string>.Empty;
-                if (moduleApiAttr is not null)
+                scopes = GetScopes(apiAttr);
+                foreach (var named in apiAttr.NamedArguments)
                 {
-                    var apiAttr = symbol.GetAttributes()
-                        .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, moduleApiAttr));
-                    if (apiAttr is not null)
-                    {
-                        scopes = GetScopes(apiAttr);
-                        foreach (var named in apiAttr.NamedArguments)
-                        {
-                            if (named.Key == "Exclude" && named.Value.Value is bool value)
-                                exclude = value;
-                        }
-                    }
+                    if (named.Key == "Exclude" && named.Value.Value is bool value)
+                        exclude = value;
                 }
-
-                handlers.Add(new HandlerEntry(
-                    symbol.ContainingNamespace?.ToDisplayString() ?? string.Empty,
-                    symbol.Name,
-                    handlerInterface.TypeArguments[0].ToDisplayString(fmt),
-                    handlerInterface.TypeArguments[1].ToDisplayString(fmt),
-                    exclude,
-                    scopes));
             }
         }
 
-        return handlers;
+        var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
+        return new HandlerEntry(
+            symbol.ContainingNamespace?.ToDisplayString() ?? string.Empty,
+            symbol.Name,
+            handlerInterface.TypeArguments[0].ToDisplayString(fmt),
+            handlerInterface.TypeArguments[1].ToDisplayString(fmt),
+            exclude,
+            scopes);
     }
 
     private static ImmutableArray<string> GetScopes(AttributeData attribute)

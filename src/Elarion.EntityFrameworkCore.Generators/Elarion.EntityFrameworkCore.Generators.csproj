@@ -20,6 +20,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Shared files compiled into both generator assemblies (no cross-assembly reference needed). -->
+    <Compile Include="..\Elarion.Generators\EquatableArray.cs" Link="EquatableArray.cs" />
+    <Compile Include="..\Elarion.Generators\AssemblyMetadataReader.cs" Link="AssemblyMetadataReader.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
     <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
   </ItemGroup>

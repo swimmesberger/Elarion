@@ -11,25 +11,39 @@ namespace Elarion.Generators;
 public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator {
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context) {
-        var handlerDeclarations = context.SyntaxProvider
+        // A handler's generated pipeline depends on cross-file state: the effective [DecoratorList] can come
+        // from the handler, its [AppModule], or the assembly. So resolution must be re-derived whenever the
+        // compilation changes (correctness) — hence the Combine(CompilationProvider). Incrementality comes from
+        // two places instead: the module [DecoratorList] map is built ONCE per pass (not rescanned per handler,
+        // the old O(handlers x all-trees) cost), and the result is a value-equatable array so an edit that does
+        // not change any handler model does not re-emit.
+        var handlerProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
-                transform: static (ctx, _) => (ClassDeclarationSyntax)ctx.Node);
-
-        var handlerProvider = handlerDeclarations
+                transform: static (ctx, _) => (ClassDeclarationSyntax)ctx.Node)
+            .Collect()
             .Combine(context.CompilationProvider)
-            .Select(static (source, ct) => GetHandlerInfo(source.Left, source.Right, ct))
-            .Where(static handler => handler is not null)
-            .Select(static (handler, _) => handler!);
+            .Select(static (source, ct) => ResolveHandlers(source.Left, source.Right, ct))
+            .WithTrackingName("Handlers");
 
-        context.RegisterSourceOutput(handlerProvider, EmitHandlerRegistration);
+        context.RegisterSourceOutput(handlerProvider, static (spc, handlers) => {
+            foreach (var handler in handlers)
+                EmitHandlerRegistration(spc, handler);
+        });
 
         var moduleAggregationProvider = handlerProvider
-            .Collect()
-            .Combine(context.CompilationProvider);
+            .Combine(ModuleProviders.CollectModules(context))
+            .Combine(ModuleProviders.HasTrigger(context, TriggerAttributeMetadataName))
+            .WithTrackingName("HandlerModuleAggregation");
 
         context.RegisterSourceOutput(
             moduleAggregationProvider,
-            static (spc, source) => EmitModuleAggregations(spc, source.Left, source.Right));
+            static (spc, source) => {
+                var ((handlers, modules), hasTrigger) = source;
+                if (!hasTrigger)
+                    return;
+
+                EmitModuleAggregations(spc, handlers, modules);
+            });
     }
 }

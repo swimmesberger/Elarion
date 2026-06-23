@@ -80,7 +80,7 @@ public sealed class ResiliencePolicyRegistrationGeneratorTests {
         var result = Generate(source);
 
         result.Diagnostics
-            .Where(diagnostic => diagnostic.Id == "WFRE002")
+            .Where(diagnostic => diagnostic.Id == "ELRES002")
             .Should()
             .HaveCount(2);
     }
@@ -98,9 +98,26 @@ public sealed class ResiliencePolicyRegistrationGeneratorTests {
         var result = Generate(source);
 
         result.Diagnostics
-            .Where(diagnostic => diagnostic.Id == "WFRE001")
+            .Where(diagnostic => diagnostic.Id == "ELRES001")
             .Should()
             .ContainSingle();
+    }
+
+    [Fact]
+    public void GenerateResiliencePolicies_IrrelevantEdit_ReusesPipeline() {
+        var source = CreateSource(
+            """
+            namespace Sample.Policies {
+                [Elarion.Abstractions.Resilience.ResiliencePolicy("invoice-email", Timeout = "30s")]
+                public static partial class InvoiceEmailPolicy;
+            }
+            """);
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new ResiliencePolicyRegistrationGenerator(),
+            source,
+            "ResiliencePolicies",
+            "ResiliencePoliciesCombined");
     }
 
     private static GeneratorDriverRunResult Generate(string source) {

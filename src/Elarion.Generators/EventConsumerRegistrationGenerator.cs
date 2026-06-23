@@ -129,31 +129,101 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         string? ResponseTypeFqn,
         int Order,
         ReturnShape Return,
-        ImmutableArray<ParameterKind> Parameters,
+        EquatableArray<ParameterKind> Parameters,
         string HintName,
         bool IsHandler);
 
+    /// <summary>A discovered consumer: either a registration model or the diagnostics that rejected it.</summary>
+    private sealed record ConsumerResult(EventConsumerInfo? Consumer, EquatableArray<DiagnosticInfo> Diagnostics);
+
+    private static class TrackingNames {
+        public const string Consumers = "EventConsumers";
+        public const string Combined = "EventConsumersCombined";
+    }
+
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context) {
-        context.RegisterSourceOutput(context.CompilationProvider, static (spc, compilation) => {
-            if (!FrameworkFeatureTriggers.HasAssemblyTrigger(compilation, TriggerAttributeMetadataName)) {
+        // [ConsumeEvent] applies to methods (on [Service] classes) and to types (the IHandler form); a single
+        // attribute-index pass discovers both, and the transform branches on the target symbol kind.
+        var results = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ConsumeEventAttributeMetadataName,
+                static (node, _) => node is MethodDeclarationSyntax or ClassDeclarationSyntax,
+                static (ctx, ct) => CreateConsumerResult(ctx, ct))
+            .Where(static result => result is not null)
+            .Select(static (result, _) => result!)
+            .Collect()
+            .WithTrackingName(TrackingNames.Consumers);
+
+        var modules = ModuleProviders.CollectModules(context);
+        var trigger = ModuleProviders.HasTrigger(context, TriggerAttributeMetadataName);
+
+        var combined = results.Combine(modules).Combine(trigger).WithTrackingName(TrackingNames.Combined);
+
+        context.RegisterSourceOutput(combined, static (spc, source) => {
+            var ((results, modules), hasTrigger) = source;
+            if (!hasTrigger) {
                 return;
             }
 
-            var symbols = ResolveSymbols(compilation);
-            if (symbols is null) {
-                return;
+            foreach (var result in results) {
+                foreach (var diagnostic in result.Diagnostics) {
+                    spc.ReportDiagnostic(diagnostic.ToDiagnostic());
+                }
             }
 
-            var consumers = CollectConsumers(compilation, symbols, spc);
+            var consumers = new List<EventConsumerInfo>();
+            foreach (var result in results) {
+                if (result.Consumer is not null) {
+                    consumers.Add(result.Consumer);
+                }
+            }
+
+            consumers.Sort(static (left, right) =>
+                string.Compare(left.HintName, right.HintName, StringComparison.Ordinal));
+
             ReportDuplicateResponders(consumers, spc);
             if (consumers.Count == 0) {
                 return;
             }
 
             // Consumers are registered per module via ConfigureDefaultServices; there is no assembly-wide method.
-            EmitPerModule(spc, ModuleScanner.Collect(compilation, spc.CancellationToken), consumers);
+            EmitPerModule(spc, modules, consumers);
         });
+    }
+
+    private static ConsumerResult? CreateConsumerResult(GeneratorAttributeSyntaxContext ctx, CancellationToken ct) {
+        if (ctx.Attributes.Length == 0) {
+            return null;
+        }
+
+        var symbols = ResolveSymbols(ctx.SemanticModel.Compilation);
+        if (symbols is null) {
+            return null;
+        }
+
+        var consumeAttribute = ctx.Attributes[0];
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        if (ctx.TargetSymbol is IMethodSymbol method) {
+            var location = (ctx.TargetNode as MethodDeclarationSyntax)?.Identifier.GetLocation();
+            var containingType = method.ContainingType;
+            if (containingType is null || !HasAttribute(containingType, symbols.ServiceAttribute, out _)) {
+                diagnostics.Add(DiagnosticInfo.Create(ConsumerNotOnService, location, method.Name));
+                return new ConsumerResult(null, diagnostics.ToImmutable());
+            }
+
+            var consumer = TryCreateConsumer(method, containingType, consumeAttribute, symbols, location, diagnostics);
+            return new ConsumerResult(consumer, diagnostics.ToImmutable());
+        }
+
+        if (ctx.TargetSymbol is INamedTypeSymbol type) {
+            var location = (ctx.TargetNode as ClassDeclarationSyntax)?.Identifier.GetLocation();
+            var consumer = TryCreateHandlerConsumer(type, consumeAttribute, symbols, location, diagnostics);
+            return new ConsumerResult(consumer, diagnostics.ToImmutable());
+        }
+
+        return null;
     }
 
     private static void EmitPerModule(
@@ -277,94 +347,35 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             valueTaskGeneric);
     }
 
-    private static List<EventConsumerInfo> CollectConsumers(
-        Compilation compilation,
-        KnownSymbols symbols,
-        SourceProductionContext spc) {
-        var consumers = new List<EventConsumerInfo>();
-        var seenMethods = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-
-        var seenTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-        foreach (var syntaxTree in compilation.SyntaxTrees) {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot(spc.CancellationToken);
-
-            foreach (var methodDeclaration in root.DescendantNodes().OfType<MethodDeclarationSyntax>()) {
-                if (semanticModel.GetDeclaredSymbol(methodDeclaration, spc.CancellationToken) is not IMethodSymbol method ||
-                    !seenMethods.Add(method)) {
-                    continue;
-                }
-
-                if (!HasAttribute(method, symbols.ConsumeEventAttribute, out var consumeAttribute)) {
-                    continue;
-                }
-
-                var location = methodDeclaration.Identifier.GetLocation();
-                var containingType = method.ContainingType;
-                if (containingType is null || !HasAttribute(containingType, symbols.ServiceAttribute, out _)) {
-                    spc.ReportDiagnostic(Diagnostic.Create(ConsumerNotOnService, location, method.Name));
-                    continue;
-                }
-
-                var consumer = TryCreateConsumer(method, containingType, consumeAttribute!, symbols, location, spc);
-                if (consumer is not null) {
-                    consumers.Add(consumer);
-                }
-            }
-
-            // Handler form: a class-level [ConsumeEvent] on an IHandler whose request is the event.
-            foreach (var classDeclaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>()) {
-                if (semanticModel.GetDeclaredSymbol(classDeclaration, spc.CancellationToken) is not INamedTypeSymbol type ||
-                    !seenTypes.Add(type)) {
-                    continue;
-                }
-
-                if (!HasAttribute(type, symbols.ConsumeEventAttribute, out var consumeAttribute)) {
-                    continue;
-                }
-
-                var location = classDeclaration.Identifier.GetLocation();
-                var consumer = TryCreateHandlerConsumer(type, consumeAttribute!, symbols, location, spc);
-                if (consumer is not null) {
-                    consumers.Add(consumer);
-                }
-            }
-        }
-
-        consumers.Sort(static (left, right) =>
-            string.Compare(left.HintName, right.HintName, StringComparison.Ordinal));
-        return consumers;
-    }
-
     private static EventConsumerInfo? TryCreateConsumer(
         IMethodSymbol method,
         INamedTypeSymbol containingType,
         AttributeData consumeAttribute,
         KnownSymbols symbols,
-        Location location,
-        SourceProductionContext spc) {
+        Location? location,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         if (method.IsStatic ||
             method.IsGenericMethod ||
             !IsAccessible(method.DeclaredAccessibility) ||
             IsGenericOrNestedInGenericType(containingType)) {
-            spc.ReportDiagnostic(Diagnostic.Create(InvalidConsumerSignature, location, method.Name));
+            diagnostics.Add(DiagnosticInfo.Create(InvalidConsumerSignature, location, method.Name));
             return null;
         }
 
         if (!TryResolveParameters(method, symbols, out var parameters, out var eventType, out var plane)) {
-            spc.ReportDiagnostic(Diagnostic.Create(InvalidConsumerSignature, location, method.Name));
+            diagnostics.Add(DiagnosticInfo.Create(InvalidConsumerSignature, location, method.Name));
             return null;
         }
 
         if (!TryResolveReturn(method.ReturnType, symbols, out var returnShape, out var responseType)) {
-            spc.ReportDiagnostic(Diagnostic.Create(InvalidConsumerSignature, location, method.Name));
+            diagnostics.Add(DiagnosticInfo.Create(InvalidConsumerSignature, location, method.Name));
             return null;
         }
 
         var isResponder = responseType is not null;
         if (isResponder && plane != "Domain") {
             // Only domain requests can have responders; integration events are fan-out only.
-            spc.ReportDiagnostic(Diagnostic.Create(InvalidConsumerSignature, location, method.Name));
+            diagnostics.Add(DiagnosticInfo.Create(InvalidConsumerSignature, location, method.Name));
             return null;
         }
 
@@ -395,10 +406,10 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         INamedTypeSymbol type,
         AttributeData consumeAttribute,
         KnownSymbols symbols,
-        Location location,
-        SourceProductionContext spc) {
+        Location? location,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         if (type.IsAbstract || IsGenericOrNestedInGenericType(type)) {
-            spc.ReportDiagnostic(Diagnostic.Create(InvalidHandlerConsumer, location, type.Name));
+            diagnostics.Add(DiagnosticInfo.Create(InvalidHandlerConsumer, location, type.Name));
             return null;
         }
 
@@ -442,7 +453,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         }
 
         if (match is null || ambiguous) {
-            spc.ReportDiagnostic(Diagnostic.Create(InvalidHandlerConsumer, location, type.Name));
+            diagnostics.Add(DiagnosticInfo.Create(InvalidHandlerConsumer, location, type.Name));
             return null;
         }
 
@@ -452,7 +463,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var isResponder = !SymbolEqualityComparer.Default.Equals(responseValueType, symbols.Unit);
         if (isResponder && plane != "Domain") {
             // Integration events are fan-out only; there is no RequestAsync to answer.
-            spc.ReportDiagnostic(Diagnostic.Create(InvalidHandlerConsumer, location, type.Name));
+            diagnostics.Add(DiagnosticInfo.Create(InvalidHandlerConsumer, location, type.Name));
             return null;
         }
 

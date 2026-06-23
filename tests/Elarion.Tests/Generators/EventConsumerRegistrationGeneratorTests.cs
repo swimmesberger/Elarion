@@ -552,6 +552,31 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             .Should().BeTrue();
     }
 
+    [Fact]
+    public void GenerateEventConsumers_IrrelevantEdit_ReusesPipeline() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record InvoiceCreating(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class InvoiceProjections {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent(Order = 3)]
+                    public System.Threading.Tasks.ValueTask OnCreating(
+                        InvoiceCreating e,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new EventConsumerRegistrationGenerator(),
+            source,
+            "EventConsumers",
+            "EventConsumersCombined");
+    }
+
     private static string CreateSource(
         string testSource,
         string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateEventConsumers]",

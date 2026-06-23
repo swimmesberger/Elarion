@@ -114,10 +114,10 @@ only the success `Value` is cached (`TryGetResultValueFqn`).
 The generator reports misuse at build time (`HandlerRegistrationGenerator.Cache.cs`
 `ValidateCacheMetadata`, tracked in `AnalyzerReleases.Unshipped.md`):
 
-- `WIMCACHE001` — a handler is both `[Cacheable]` and `[CacheInvalidate]`.
-- `WIMCACHE002` — required cache tags are missing.
-- `WIMCACHE003` — an invalid tag (empty/whitespace, or the reserved `*`).
-- `WIMCACHE004` — a non-positive `DurationSeconds`.
+- `ELCACHE001` — a handler is both `[Cacheable]` and `[CacheInvalidate]`.
+- `ELCACHE002` — required cache tags are missing.
+- `ELCACHE003` — an invalid tag (empty/whitespace, or the reserved `*`).
+- `ELCACHE004` — a non-positive `DurationSeconds`.
 
 ## Consequences
 
@@ -137,7 +137,7 @@ The generator reports misuse at build time (`HandlerRegistrationGenerator.Cache.
 
 - Cache behavior is fixed at compile time; changing tags, duration, scope, or key properties is a
   recompile, not a runtime toggle (consistent with the framework's generate-don't-reflect stance).
-- A handler cannot be both cacheable and cache-invalidating (`WIMCACHE001`); the read/write split is
+- A handler cannot be both cacheable and cache-invalidating (`ELCACHE001`); the read/write split is
   intentional.
 - Read/write coupling is **by tag**: an invalidation only evicts reads that share its tags and scope, so
   a mismatch silently fails to evict. This is the cost of decoupling readers from writers.

@@ -70,27 +70,27 @@ public sealed partial class HandlerRegistrationGenerator {
         return new CacheInvalidationInfo(tags, scopeValue);
     }
 
-    private static ImmutableArray<HandlerDiagnosticInfo> ValidateCacheMetadata(
+    private static ImmutableArray<DiagnosticInfo> ValidateCacheMetadata(
         INamedTypeSymbol classSymbol,
         CacheableInfo? cacheable,
         CacheInvalidationInfo? cacheInvalidation) {
-        var builder = ImmutableArray.CreateBuilder<HandlerDiagnosticInfo>();
+        var builder = ImmutableArray.CreateBuilder<DiagnosticInfo>();
         var location = classSymbol.Locations.FirstOrDefault();
 
         if (cacheable is not null && cacheInvalidation is not null) {
-            builder.Add(new HandlerDiagnosticInfo(
+            builder.Add(DiagnosticInfo.Create(
                 CacheableAndInvalidatingDescriptor,
                 location,
-                [classSymbol.Name]));
+                classSymbol.Name));
         }
 
         if (cacheable is not null) {
             ValidateTags(classSymbol, cacheable.Tags, location, builder);
             if (cacheable.DurationSeconds <= 0) {
-                builder.Add(new HandlerDiagnosticInfo(
+                builder.Add(DiagnosticInfo.Create(
                     InvalidCacheDurationDescriptor,
                     location,
-                    [classSymbol.Name]));
+                    classSymbol.Name));
             }
         }
 
@@ -104,21 +104,21 @@ public sealed partial class HandlerRegistrationGenerator {
         INamedTypeSymbol classSymbol,
         ImmutableArray<string> tags,
         Location? location,
-        ImmutableArray<HandlerDiagnosticInfo>.Builder builder) {
+        ImmutableArray<DiagnosticInfo>.Builder builder) {
         if (tags.IsDefaultOrEmpty) {
-            builder.Add(new HandlerDiagnosticInfo(
+            builder.Add(DiagnosticInfo.Create(
                 EmptyCacheTagsDescriptor,
                 location,
-                [classSymbol.Name]));
+                classSymbol.Name));
             return;
         }
 
         foreach (var tag in tags) {
             if (string.IsNullOrWhiteSpace(tag) || tag == "*") {
-                builder.Add(new HandlerDiagnosticInfo(
+                builder.Add(DiagnosticInfo.Create(
                     InvalidCacheTagDescriptor,
                     location,
-                    [classSymbol.Name, tag]));
+                    classSymbol.Name, tag));
             }
         }
     }

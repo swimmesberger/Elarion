@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using Elarion.Generators;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -599,18 +600,18 @@ public sealed class KeysetGenerator : IIncrementalGenerator
         string ClassNamespace,
         string ClassGlobalFqn,
         string EntityGlobalFqn,
-        ImmutableArray<ColumnModel> Columns,
-        ImmutableArray<DiagnosticModel> Diagnostics);
+        EquatableArray<ColumnModel> Columns,
+        EquatableArray<DiagnosticModel> Diagnostics);
 
     private sealed record DiagnosticModel(
         DiagnosticDescriptor Descriptor,
         LocationModel Location,
-        ImmutableArray<string> Args)
+        EquatableArray<string> Args)
     {
         public DiagnosticSeverity Severity => Descriptor.DefaultSeverity;
 
         public static DiagnosticModel Create(DiagnosticDescriptor descriptor, LocationModel location, params string[] args)
-            => new(descriptor, location, [.. args]);
+            => new(descriptor, location, args.ToImmutableArray());
 
         public Diagnostic ToDiagnostic()
             => Diagnostic.Create(Descriptor, Location.ToLocation(), [.. Args]);
