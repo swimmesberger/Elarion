@@ -9,6 +9,18 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Handlers as event consumers (preferred form).** A class-level `[ConsumeEvent]` on an
+  `IHandler<TEvent, Result<T>>` (or the new `IHandler<TEvent>` sugar) whose request *is* the event
+  makes a handler a first-class event consumer, dispatched through its full decorator pipeline
+  (tracing, resilience, validation, cache-invalidation) — the `[Service]`-method form remains a
+  lightweight alternative. The role is inferred from the response type: `Result<Unit>` (the
+  `IHandler<TEvent>` sugar) is a fan-out subscriber whose failed `Result` surfaces as an
+  `EventConsumerFailedException`; a domain handler returning `Result<T>` (`T ≠ Unit`) is the single
+  `RequestAsync` responder. Integration handlers are fan-out only (`ELEVT005`).
+- `Elarion.Abstractions`: a `Unit` no-value type, a non-generic `Result`, and the `IHandler<T>`
+  convenience interface (sugar for `IHandler<T, Result<Unit>>` via a default interface method that
+  bridges the non-generic `Result`), so no-content handlers stay ergonomic without touching the
+  decorator pipeline or handler generator.
 - `Elarion.Messaging.InMemory`: the simple, best-effort **in-memory integration-event
   (Plane B) bus**, commit-gated by the EF Core DbContext transaction (`AddInMemoryIntegrationEventBus`;
   `AddInMemoryEventBus` also wires the `Elarion` domain tier). Events are buffered per scope and

@@ -36,6 +36,12 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
     private const string ResultMetadataName =
         "Elarion.Abstractions.Result`1";
 
+    private const string HandlerMetadataName =
+        "Elarion.Abstractions.IHandler`2";
+
+    private const string UnitMetadataName =
+        "Elarion.Abstractions.Unit";
+
     private const string CancellationTokenMetadataName =
         "System.Threading.CancellationToken";
 
@@ -76,12 +82,24 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor InvalidHandlerConsumer = new(
+        id: "ELEVT005",
+        title: "Invalid handler-form event consumer",
+        messageFormat:
+        "Class '{0}' is annotated with [ConsumeEvent] but must implement exactly one "
+        + "IHandler<TEvent, Result<TResponse>> (or IHandler<TEvent>) whose request type implements "
+        + "IDomainEvent or IIntegrationEvent; an integration-event handler must return Result<Unit> "
+        + "(or use IHandler<TEvent>) because integration events are fan-out only",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     private static readonly DiagnosticDescriptor ConsumerNotInModule = new(
         id: "ELEVT003",
         title: "Event consumer is not in any module",
         messageFormat:
         "Event consumer '{0}' is annotated with [ConsumeEvent] but its namespace is not under any [AppModule]; "
-        + "it will not be registered. Move the consumer under a module's namespace so it is wired by that module",
+        + "it will not be registered. Move the consumer under a module's namespace so it is wired by that module.",
         category: "Elarion.Generators",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
@@ -112,7 +130,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         int Order,
         ReturnShape Return,
         ImmutableArray<ParameterKind> Parameters,
-        string HintName);
+        string HintName,
+        bool IsHandler);
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context) {
@@ -200,6 +219,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         INamedTypeSymbol EventContext,
         INamedTypeSymbol EventContextGeneric,
         INamedTypeSymbol Result,
+        INamedTypeSymbol Handler,
+        INamedTypeSymbol Unit,
         INamedTypeSymbol CancellationToken,
         INamedTypeSymbol Task,
         INamedTypeSymbol TaskGeneric,
@@ -214,6 +235,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var eventContext = compilation.GetTypeByMetadataName(EventContextMetadataName);
         var eventContextGeneric = compilation.GetTypeByMetadataName(EventContextGenericMetadataName);
         var result = compilation.GetTypeByMetadataName(ResultMetadataName);
+        var handler = compilation.GetTypeByMetadataName(HandlerMetadataName);
+        var unit = compilation.GetTypeByMetadataName(UnitMetadataName);
         var cancellationToken = compilation.GetTypeByMetadataName(CancellationTokenMetadataName);
         var task = compilation.GetTypeByMetadataName(TaskMetadataName);
         var taskGeneric = compilation.GetTypeByMetadataName(TaskGenericMetadataName);
@@ -227,6 +250,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             eventContext is null ||
             eventContextGeneric is null ||
             result is null ||
+            handler is null ||
+            unit is null ||
             cancellationToken is null ||
             task is null ||
             taskGeneric is null ||
@@ -243,6 +268,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             eventContext,
             eventContextGeneric,
             result,
+            handler,
+            unit,
             cancellationToken,
             task,
             taskGeneric,
@@ -257,6 +284,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var consumers = new List<EventConsumerInfo>();
         var seenMethods = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 
+        var seenTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
         foreach (var syntaxTree in compilation.SyntaxTrees) {
             var semanticModel = compilation.GetSemanticModel(syntaxTree);
             var root = syntaxTree.GetRoot(spc.CancellationToken);
@@ -279,6 +307,24 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
                 }
 
                 var consumer = TryCreateConsumer(method, containingType, consumeAttribute!, symbols, location, spc);
+                if (consumer is not null) {
+                    consumers.Add(consumer);
+                }
+            }
+
+            // Handler form: a class-level [ConsumeEvent] on an IHandler whose request is the event.
+            foreach (var classDeclaration in root.DescendantNodes().OfType<ClassDeclarationSyntax>()) {
+                if (semanticModel.GetDeclaredSymbol(classDeclaration, spc.CancellationToken) is not INamedTypeSymbol type ||
+                    !seenTypes.Add(type)) {
+                    continue;
+                }
+
+                if (!HasAttribute(type, symbols.ConsumeEventAttribute, out var consumeAttribute)) {
+                    continue;
+                }
+
+                var location = classDeclaration.Identifier.GetLocation();
+                var consumer = TryCreateHandlerConsumer(type, consumeAttribute!, symbols, location, spc);
                 if (consumer is not null) {
                     consumers.Add(consumer);
                 }
@@ -341,7 +387,99 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             order,
             returnShape,
             parameters,
-            hintName);
+            hintName,
+            IsHandler: false);
+    }
+
+    private static EventConsumerInfo? TryCreateHandlerConsumer(
+        INamedTypeSymbol type,
+        AttributeData consumeAttribute,
+        KnownSymbols symbols,
+        Location location,
+        SourceProductionContext spc) {
+        if (type.IsAbstract || IsGenericOrNestedInGenericType(type)) {
+            spc.ReportDiagnostic(Diagnostic.Create(InvalidHandlerConsumer, location, type.Name));
+            return null;
+        }
+
+        // Find the single IHandler<TEvent, Result<T>> whose request type is an event. Keying off
+        // the two-arg interface covers both the explicit form and the IHandler<TEvent> sugar (which
+        // inherits IHandler<TEvent, Result<Unit>>).
+        INamedTypeSymbol? match = null;
+        ITypeSymbol? eventType = null;
+        ITypeSymbol? responseValueType = null;
+        string plane = string.Empty;
+        var ambiguous = false;
+
+        foreach (var iface in type.AllInterfaces) {
+            if (!SymbolEqualityComparer.Default.Equals(iface.OriginalDefinition, symbols.Handler)) {
+                continue;
+            }
+
+            var request = iface.TypeArguments[0];
+            var isDomain = Implements(request, symbols.DomainEvent);
+            var isIntegration = Implements(request, symbols.IntegrationEvent);
+            if (isDomain == isIntegration) {
+                // Not an event request, or a type that is both planes: skip (ambiguous if both).
+                continue;
+            }
+
+            var response = iface.TypeArguments[1];
+            if (response is not INamedTypeSymbol named ||
+                !SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, symbols.Result)) {
+                continue;
+            }
+
+            if (match is not null) {
+                ambiguous = true;
+                break;
+            }
+
+            match = iface;
+            eventType = request;
+            responseValueType = named.TypeArguments[0];
+            plane = isDomain ? "Domain" : "Integration";
+        }
+
+        if (match is null || ambiguous) {
+            spc.ReportDiagnostic(Diagnostic.Create(InvalidHandlerConsumer, location, type.Name));
+            return null;
+        }
+
+        // The role is inferred from the response type, symmetric with the method form:
+        // Result<Unit> is the "no content" analog of void (fan-out subscriber); Result<T> with a
+        // real T is the single responder for IDomainEventBus.RequestAsync.
+        var isResponder = !SymbolEqualityComparer.Default.Equals(responseValueType, symbols.Unit);
+        if (isResponder && plane != "Domain") {
+            // Integration events are fan-out only; there is no RequestAsync to answer.
+            spc.ReportDiagnostic(Diagnostic.Create(InvalidHandlerConsumer, location, type.Name));
+            return null;
+        }
+
+        var order = GetIntNamedArgument(consumeAttribute, "Order", 0);
+        var handlerFqn = match.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var eventFqn = eventType!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var responseFqn = isResponder
+            ? responseValueType!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            : null;
+        var typeNamespace = type.ContainingNamespace is { IsGlobalNamespace: false } containing
+            ? containing.ToDisplayString()
+            : string.Empty;
+        var hintName = $"{GetHintName(type)}__HandleAsync__{GetHintName(eventType!)}";
+
+        return new EventConsumerInfo(
+            // The descriptor resolves the IHandler<,> interface so DI yields the decorated chain.
+            handlerFqn,
+            typeNamespace,
+            "HandleAsync",
+            eventFqn,
+            plane,
+            responseFqn,
+            order,
+            ReturnShape.SubscriberValueTask,
+            ImmutableArray<ParameterKind>.Empty,
+            hintName,
+            IsHandler: true);
     }
 
     private static bool TryResolveParameters(
@@ -497,7 +635,12 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("    {");
 
-        foreach (var serviceFqn in consumers.Select(consumer => consumer.ServiceTypeFqn).Distinct(StringComparer.Ordinal)) {
+        // Handler-form consumers resolve the IHandler<,> interface, which the handler generator
+        // already registers (with its decorator chain); only service-method consumers self-register.
+        foreach (var serviceFqn in consumers
+                     .Where(consumer => !consumer.IsHandler)
+                     .Select(consumer => consumer.ServiceTypeFqn)
+                     .Distinct(StringComparer.Ordinal)) {
             sb.AppendLine($"        services.TryAddScoped<{serviceFqn}>();");
         }
 
@@ -520,7 +663,17 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"            Plane = global::Elarion.Abstractions.Messaging.EventPlane.{consumer.Plane},");
         sb.AppendLine($"            ServiceType = typeof({consumer.ServiceTypeFqn}),");
 
-        if (consumer.ResponseTypeFqn is null) {
+        if (consumer.IsHandler) {
+            if (consumer.ResponseTypeFqn is null) {
+                sb.AppendLine($"            Order = {consumer.Order},");
+                AppendHandlerSubscriberInvoke(sb, consumer);
+            }
+            else {
+                sb.AppendLine($"            ResponseType = typeof({consumer.ResponseTypeFqn}),");
+                AppendHandlerResponderInvoke(sb, consumer);
+            }
+        }
+        else if (consumer.ResponseTypeFqn is null) {
             sb.AppendLine($"            Order = {consumer.Order},");
             AppendSubscriberInvoke(sb, consumer);
         }
@@ -552,6 +705,32 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
                 break;
         }
 
+        sb.AppendLine("            }");
+    }
+
+    private static void AppendHandlerSubscriberInvoke(StringBuilder sb, EventConsumerInfo consumer) {
+        // ServiceTypeFqn is the IHandler<TEvent, Result<T>> interface, so DI yields the decorated
+        // handler. A handler subscriber has no return channel, so a failed Result is surfaced as an
+        // EventConsumerFailedException for the publishing plane to handle.
+        sb.AppendLine("            InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
+        sb.AppendLine("            {");
+        sb.AppendLine($"                var handler = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+        sb.AppendLine($"                var result = await handler.HandleAsync(({consumer.EventTypeFqn})@event, ct).ConfigureAwait(false);");
+        sb.AppendLine("                if (!result.IsSuccess)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+    }
+
+    private static void AppendHandlerResponderInvoke(StringBuilder sb, EventConsumerInfo consumer) {
+        // ServiceTypeFqn is the IHandler<TEvent, Result<T>> interface, so DI yields the decorated
+        // handler. The typed Result<T> flows back to the RequestAsync caller as-is — successes and
+        // failures alike, so there is no failure-to-exception conversion here.
+        sb.AppendLine("            InvokeRequestAsync = static async (serviceProvider, request, context, ct) =>");
+        sb.AppendLine("            {");
+        sb.AppendLine($"                var handler = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+        sb.AppendLine($"                return (object)await handler.HandleAsync(({consumer.EventTypeFqn})request, ct).ConfigureAwait(false);");
         sb.AppendLine("            }");
     }
 

@@ -161,6 +161,31 @@ public sealed class HandlerRegistrationGeneratorTests {
         generated.Should().NotContain("ValidationDecorator");
     }
 
+    [Fact]
+    public void GenerateRegistration_IHandlerOfT_RegistersResultUnitInterfaceWithTracing() {
+        // The IHandler<T> sugar inherits IHandler<T, Result<Unit>> via a default interface method,
+        // so the generator discovers and registers it as the two-arg interface with no special-casing.
+        var source = """
+            namespace Sample.Modules.Sales.Handlers {
+                public sealed record Ping(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                public sealed class PingHandler : Elarion.Abstractions.IHandler<Ping> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                        Ping request,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+        var generated = GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_PingHandler.g.cs");
+
+        generated.Should().Contain(
+            "global::Elarion.Abstractions.IHandler<global::Sample.Modules.Sales.Handlers.Ping, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Unit>>");
+        generated.Should().Contain("global::Elarion.Abstractions.Diagnostics.TracingDecorator<");
+    }
+
     private static string GenerateHandlerRegistrationSource(string source) {
         var result = GenerateHandlerRegistrationRunResult(source);
         return GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_CreateOrder.g.cs");
