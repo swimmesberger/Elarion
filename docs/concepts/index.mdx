@@ -56,7 +56,7 @@ platform capabilities**.
 
 ## The trade-off
 
-You accept conventions. Handler names, nested `Command`/`Query` and `Response` types, module
+You accept conventions. Handler names, the `IHandler<,>` request/response shape, module
 namespace containment, and pipeline attributes matter because generators use them. In exchange you
 get less host boilerplate, inherent modularity, fewer runtime scans, and a clear separation between
 application policy and host mechanics. The full comparison with idiomatic ASP.NET Core is in

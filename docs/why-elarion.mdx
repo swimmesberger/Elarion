@@ -117,8 +117,8 @@ exactly where explicitness is the point.
 
 ## The trade-off
 
-The cost of all this is that **you accept conventions**: handler names, nested `Command`/`Query` and
-`Response` types, namespace containment, and pipeline attributes matter because the generators use
+The cost of all this is that **you accept conventions**: handler names, the `IHandler<,>`
+request/response shape, namespace containment, and pipeline attributes matter because the generators use
 them. In exchange you get less host boilerplate, inherent modularity, fewer runtime scans and faster,
 more predictable startup, and a clear line between application policy and host mechanics.
 
