@@ -220,7 +220,7 @@ var serializerOptions = new JsonSerializerOptions {
 
 builder.Services.AddSingleton(serializerOptions);
 // Gated dispatcher: only enabled modules' [RpcMethod] handlers are registered.
-builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
 
 var app = builder.Build();
 
@@ -234,8 +234,8 @@ using (var scope = app.Services.CreateScope()) {
     db.SaveChanges();
 }
 
-app.MapElarion(app.Configuration);
-app.MapJsonRpc();
+app.MapElarionEndpoints(app.Configuration);
+app.MapElarionJsonRpc();
 
 app.Run();
 ```

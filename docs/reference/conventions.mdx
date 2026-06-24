@@ -172,7 +172,7 @@ The boundary that matters: **the application declares intent; the host wires pla
 The **application never references the host or infrastructure**. Application modules may depend only on
 abstractions — DI, configuration, `IEndpointRouteBuilder`, and `System.Text.Json` metadata. They must **not**
 depend on the API host, `WebApplicationBuilder`, concrete infrastructure classes, or deployment-specific
-packages. A module must never call `builder.Build()`, `app.UseAuthentication()`, `app.MapJsonRpc()`, or
+packages. A module must never call `builder.Build()`, `app.UseAuthentication()`, `app.MapElarionJsonRpc()`, or
 configure concrete providers — those belong to the host.
 
 <Callout type="info">

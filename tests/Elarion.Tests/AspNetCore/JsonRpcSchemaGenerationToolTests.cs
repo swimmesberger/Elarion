@@ -122,7 +122,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
 
             var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
             var builder = WebApplication.CreateSlimBuilder(args);
-            builder.Services.AddJsonRpc(o => o.SerializerOptions = options);
+            builder.Services.AddElarionJsonRpc(o => o.SerializerOptions = options);
 
             var dispatcher = new JsonRpcDispatcher(options)
                 .Map<PingRequest, PingResponse>(
@@ -138,7 +138,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
                 throw new InvalidOperationException("Code after Build should not run during schema generation.");
             }
 
-            app.MapJsonRpc();
+            app.MapElarionJsonRpc();
             await app.RunAsync();
 
             public sealed record PingRequest(string Message);

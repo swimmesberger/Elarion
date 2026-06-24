@@ -19,7 +19,7 @@ namespace Elarion.AspNetCore.Mcp;
 /// <see cref="McpDispatcher"/> (a separate <see cref="JsonRpcDispatcher"/> instance) built from the methods whose
 /// <c>[RpcMethod(Transports = ...)]</c> includes <c>Mcp</c>. This lets a handler be MCP-only (dispatchable here but
 /// absent from <c>/rpc</c> and the JSON-RPC schema) or JSON-RPC-only, while a handler on both surfaces is
-/// registered in both dispatchers. <c>MapJsonRpc</c> is never required.
+/// registered in both dispatchers. <c>MapElarionJsonRpc</c> is never required.
 /// </remarks>
 public static class ElarionMcpServiceExtensions {
     /// <summary>

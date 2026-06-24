@@ -9,7 +9,7 @@ namespace Elarion.Tests.Generators;
 /// <summary>
 /// Tests the module-aware, feature-flag-gated transport mapping emitted by <see cref="AppModuleDiscoveryGenerator"/>:
 /// per-module <c>Map{Module}Http</c> / <c>Add{Module}JsonRpc</c> / <c>Add{Module}Mcp</c> / <c>Get{Module}McpMetadata</c>
-/// methods, gated aggregates (<c>MapElarion</c> / <c>RegisterRpcMethods</c> / <c>RegisterMcpMethods</c> /
+/// methods, gated aggregates (<c>MapElarionEndpoints</c> / <c>RegisterRpcMethods</c> / <c>RegisterMcpMethods</c> /
 /// <c>GetMcpMetadata</c>), per-handler transport surface selection, and core modules always mapped. Handlers and
 /// modules live in referenced images and are consumed from generated Elarion manifest metadata.
 /// </summary>

@@ -175,7 +175,7 @@ public static partial class ChatModule {
 
 Use real endpoint conventions, filters, typed results, and route handler source generation — Elarion
 does not introduce a reduced endpoint facade. Keep host lifecycle concerns out of modules: a module
-should never call `builder.Build()`, `app.UseAuthentication()`, `app.MapJsonRpc()`, or configure
+should never call `builder.Build()`, `app.UseAuthentication()`, `app.MapElarionJsonRpc()`, or configure
 concrete infrastructure providers. Those belong to the host.
 
 ### Owning the route group

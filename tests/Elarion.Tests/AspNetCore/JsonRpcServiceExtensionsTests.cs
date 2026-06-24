@@ -27,7 +27,7 @@ public sealed class JsonRpcServiceExtensionsTests {
     public void AddJsonRpc_WithRegisterAll_RegistersDispatcherAndSerializerOptions() {
         var services = new ServiceCollection();
 
-        services.AddJsonRpc(Options, d => d.MapHandler<PingCommand, PingResponse>("ping"));
+        services.AddElarionJsonRpc(Options, d => d.MapHandler<PingCommand, PingResponse>("ping"));
 
         using var provider = services.BuildServiceProvider();
 
@@ -46,7 +46,7 @@ public sealed class JsonRpcServiceExtensionsTests {
 
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(configuration);
-        services.AddJsonRpc(Options, (dispatcher, config) => {
+        services.AddElarionJsonRpc(Options, (dispatcher, config) => {
             if (config.GetValue("Modules:Shipping:Enabled", true))
                 dispatcher.MapHandler<PingCommand, PingResponse>("shipments.create");
             return dispatcher;

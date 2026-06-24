@@ -195,7 +195,7 @@ public sealed class JsonRpcTelemetryTests {
     private static ServiceProvider CreateProvider(JsonRpcDispatcher dispatcher, JsonSerializerOptions jsonOptions) {
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.ClearProviders());
-        services.AddJsonRpc(options => options.SerializerOptions = jsonOptions);
+        services.AddElarionJsonRpc(options => options.SerializerOptions = jsonOptions);
         services.AddSingleton(dispatcher);
         return services.BuildServiceProvider();
     }

@@ -24,7 +24,7 @@ namespace Billing.Api.Hosting;
 public static partial class ModuleBootstrapper;
 ```
 
-`ModuleBootstrapper` gains `AddElarion`, `MapElarion`, `RegisterRpcMethods` (JSON-RPC),
+`ModuleBootstrapper` gains `AddElarion`, `MapElarionEndpoints`, `RegisterRpcMethods` (JSON-RPC),
 `RegisterMcpMethods` and `GetMcpMetadata` (MCP), and `GetAllJsonTypeInfoResolvers`. Every transport is
 **feature-flag-gated per module**, so a disabled module disappears from all of them at once.
 
@@ -123,7 +123,7 @@ builder.Services.AddElarion(builder.Configuration);
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
 
 // MCP: an independent, equally gated transport with its own dispatcher.
 builder.Services.AddElarionMcp(
@@ -176,8 +176,8 @@ app.UseAuthentication();
 app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
-app.MapElarion(app.Configuration);
-app.MapJsonRpc().RequireAuthorization();        // POST /rpc
+app.MapElarionEndpoints(app.Configuration);
+app.MapElarionJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
 app.Run();
@@ -197,7 +197,7 @@ static JsonSerializerOptions CreateSerializerOptions(IConfiguration configuratio
 <Callout type="info">
   The **same** `serializerOptions` instance flows into the JSON-RPC dispatcher, the MCP server, and schema
   export — so the generated TypeScript types match exactly what the server serializes. MCP owns its own
-  dispatcher, so you could expose it without ever calling `MapJsonRpc()`.
+  dispatcher, so you could expose it without ever calling `MapElarionJsonRpc()`.
 </Callout>
 
 Add the scheduler section to configuration so the in-memory runtime is enabled:
