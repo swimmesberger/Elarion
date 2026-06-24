@@ -1,5 +1,5 @@
 {
   "title": "Tutorial",
   "icon": "GraduationCap",
-  "pages": ["index", "modeling", "features", "background-work", "hosting", "frontend"]
+  "pages": ["modeling", "features", "background-work", "hosting", "frontend"]
 }
