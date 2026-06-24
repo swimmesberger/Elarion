@@ -48,11 +48,13 @@ export const metadata: Metadata = {
     siteName: appName,
     title: `${appName} — ${appTagline}`,
     description: appDescription,
+    images: [{ url: '/brand/elarion-social-card.png', width: 1280, height: 640, alt: `${appName} — ${appTagline}` }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `${appName} — ${appTagline}`,
     description: appDescription,
+    images: ['/brand/elarion-social-card.png'],
   },
 };
 
