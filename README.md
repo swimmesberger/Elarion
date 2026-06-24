@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/public/brand/elarion-banner-transparent-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/public/brand/elarion-banner-transparent-light.svg">
-  <img src="docs/public/brand/elarion-banner-transparent-light.svg" width="640" alt="Elarion — Application framework for .NET">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/swimmesberger/Elarion/main/docs/public/brand/elarion-banner-transparent-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/swimmesberger/Elarion/main/docs/public/brand/elarion-banner-transparent-light.svg">
+  <img src="https://raw.githubusercontent.com/swimmesberger/Elarion/main/docs/public/brand/elarion-banner-transparent-light.svg" width="640" alt="Elarion — Application framework for .NET">
 </picture>
 
 **Module-based handler pipelines, compile-time registration, JSON-RPC hosting, MCP tools for AI agents, and scheduled jobs.**
@@ -16,7 +16,7 @@ Declare intent next to your code; let source generators do the wiring. No runtim
 [![NuGet](https://img.shields.io/nuget/v/Elarion.svg?logo=nuget&label=NuGet)](https://www.nuget.org/packages/Elarion)
 [![npm](https://img.shields.io/npm/v/%40swimmesberger%2Felarion-jsonrpc-client-generator.svg?logo=npm&label=npm)](https://www.npmjs.com/package/@swimmesberger/elarion-jsonrpc-client-generator)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/swimmesberger/Elarion/blob/main/LICENSE)
 
 </div>
 
@@ -89,37 +89,37 @@ registration list.**
 [assembly: UseElarion]
 ```
 
-The [Quickstart](docs/getting-started/quickstart.mdx) builds a module, a handler, and a working
+The [Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/) builds a module, a handler, and a working
 JSON-RPC endpoint end to end.
 
 ## Packages
 
 | Package | Purpose |
 | --- | --- |
-| [`Elarion.Abstractions`](src/Elarion.Abstractions) | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
-| [`Elarion`](src/Elarion) | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user access. |
-| [`Elarion.Blobs`](src/Elarion.Blobs) | Provider-neutral blob storage contracts and DTOs. |
-| [`Elarion.Blobs.PostgreSql`](src/Elarion.Blobs.PostgreSql) | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O. |
-| [`Elarion.Messaging.InMemory`](src/Elarion.Messaging.InMemory) | In-memory integration-event bus (best-effort, commit-gated by the EF Core transaction). |
-| [`Elarion.Messaging.Outbox`](src/Elarion.Messaging.Outbox) | EF Core transactional outbox: a durable, at-least-once integration-event bus with a polling delivery worker. |
-| [`Elarion.Paging`](src/Elarion.Paging) | Keyset (cursor) and offset pagination primitives, opaque cursor codec, and `IQueryable` paging extensions. |
-| [`Elarion.Generators`](src/Elarion.Generators) | Roslyn generators for handlers, services, validators, modules, RPC maps, HTTP endpoint maps, resilience policies, scheduled jobs, and event consumers. |
-| [`Elarion.JsonRpc`](src/Elarion.JsonRpc) | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
-| [`Elarion.AspNetCore`](src/Elarion.AspNetCore) | ASP.NET Core JSON-RPC endpoint mapping, `[HttpEndpoint]` minimal-API mapping, batch execution, and current-user middleware. |
-| [`Elarion.AspNetCore.Mcp`](src/Elarion.AspNetCore.Mcp) | Exposes your JSON-RPC handlers as a Model Context Protocol (MCP) server for AI agents, over Streamable HTTP. |
-| [`Elarion.AspNetCore.SchemaGeneration`](src/Elarion.AspNetCore.SchemaGeneration) | MSBuild package that exports `rpc-schema.json` during `dotnet build`. |
-| [`Elarion.EntityFrameworkCore`](src/Elarion.EntityFrameworkCore) | Marker attributes for generated `DbSet`s and entity inclusion. |
-| [`Elarion.EntityFrameworkCore.Generators`](src/Elarion.EntityFrameworkCore.Generators) | Roslyn generator for `DbSet` properties and entity configuration. |
-| [`@swimmesberger/elarion-jsonrpc-client-generator`](src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, Zod schemas, and a fetch client. |
+| [`Elarion.Abstractions`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Abstractions) | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
+| [`Elarion`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion) | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user access. |
+| [`Elarion.Blobs`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Blobs) | Provider-neutral blob storage contracts and DTOs. |
+| [`Elarion.Blobs.PostgreSql`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Blobs.PostgreSql) | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O. |
+| [`Elarion.Messaging.InMemory`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Messaging.InMemory) | In-memory integration-event bus (best-effort, commit-gated by the EF Core transaction). |
+| [`Elarion.Messaging.Outbox`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Messaging.Outbox) | EF Core transactional outbox: a durable, at-least-once integration-event bus with a polling delivery worker. |
+| [`Elarion.Paging`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Paging) | Keyset (cursor) and offset pagination primitives, opaque cursor codec, and `IQueryable` paging extensions. |
+| [`Elarion.Generators`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Generators) | Roslyn generators for handlers, services, validators, modules, RPC maps, HTTP endpoint maps, resilience policies, scheduled jobs, and event consumers. |
+| [`Elarion.JsonRpc`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.JsonRpc) | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
+| [`Elarion.AspNetCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore) | ASP.NET Core JSON-RPC endpoint mapping, `[HttpEndpoint]` minimal-API mapping, batch execution, and current-user middleware. |
+| [`Elarion.AspNetCore.Mcp`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.Mcp) | Exposes your JSON-RPC handlers as a Model Context Protocol (MCP) server for AI agents, over Streamable HTTP. |
+| [`Elarion.AspNetCore.SchemaGeneration`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.SchemaGeneration) | MSBuild package that exports `rpc-schema.json` during `dotnet build`. |
+| [`Elarion.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore) | Marker attributes for generated `DbSet`s and entity inclusion. |
+| [`Elarion.EntityFrameworkCore.Generators`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore.Generators) | Roslyn generator for `DbSet` properties and entity configuration. |
+| [`@swimmesberger/elarion-jsonrpc-client-generator`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, Zod schemas, and a fetch client. |
 
 ## Documentation
 
-Full guides live in [`docs/`](docs/index.mdx) and are structured for a documentation site:
+Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/docs/) and in [`docs/`](https://github.com/swimmesberger/Elarion/tree/main/docs):
 
-- **[Introduction](docs/index.mdx)** · **[Why Elarion](docs/why-elarion.mdx)** · **[Installation](docs/getting-started/installation.mdx)** · **[Quickstart](docs/getting-started/quickstart.mdx)**
-- **Concepts** — [source generation](docs/concepts/source-generation.mdx), [handlers](docs/concepts/handlers.mdx), [results & errors](docs/concepts/results-and-errors.mdx), [modules](docs/concepts/modules.mdx), [services](docs/concepts/services.mdx), [validators](docs/concepts/validators.mdx), [pipelines](docs/concepts/decorator-pipelines.mdx), [cross-module communication](docs/concepts/cross-module-communication.mdx)
-- **Capabilities** — [hosting](docs/capabilities/hosting.mdx), [HTTP endpoints](docs/capabilities/transports/http-endpoints.mdx), [JSON-RPC](docs/capabilities/transports/json-rpc.mdx), [MCP server](docs/capabilities/transports/mcp.mdx), [scheduling](docs/capabilities/scheduling/index.mdx), [resilience](docs/capabilities/resilience.mdx), [events & messaging](docs/capabilities/events/index.mdx), [EF Core](docs/capabilities/entity-framework.mdx), [caching](docs/capabilities/caching.mdx), [current user](docs/capabilities/current-user.mdx), [blob storage](docs/capabilities/blob-storage.mdx), [telemetry](docs/capabilities/telemetry.mdx)
-- **Reference** — [packages](docs/reference/packages.mdx), [configuration](docs/reference/configuration.mdx), [troubleshooting](docs/reference/troubleshooting.mdx)
+- **[Introduction](https://elarion.wimmesberger.dev/docs/)** · **[Why Elarion](https://elarion.wimmesberger.dev/docs/why-elarion/)** · **[Installation](https://elarion.wimmesberger.dev/docs/getting-started/installation/)** · **[Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/)**
+- **Concepts** — [source generation](https://elarion.wimmesberger.dev/docs/concepts/source-generation/), [handlers](https://elarion.wimmesberger.dev/docs/concepts/handlers/), [results & errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors/), [modules](https://elarion.wimmesberger.dev/docs/concepts/modules/), [services](https://elarion.wimmesberger.dev/docs/concepts/services/), [validators](https://elarion.wimmesberger.dev/docs/concepts/validators/), [pipelines](https://elarion.wimmesberger.dev/docs/concepts/decorator-pipelines/), [cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication/)
+- **Capabilities** — [hosting](https://elarion.wimmesberger.dev/docs/capabilities/hosting/), [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints/), [JSON-RPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/json-rpc/), [MCP server](https://elarion.wimmesberger.dev/docs/capabilities/transports/mcp/), [scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling/), [resilience](https://elarion.wimmesberger.dev/docs/capabilities/resilience/), [events & messaging](https://elarion.wimmesberger.dev/docs/capabilities/events/), [EF Core](https://elarion.wimmesberger.dev/docs/capabilities/entity-framework/), [caching](https://elarion.wimmesberger.dev/docs/capabilities/caching/), [current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user/), [blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage/), [telemetry](https://elarion.wimmesberger.dev/docs/capabilities/telemetry/)
+- **Reference** — [packages](https://elarion.wimmesberger.dev/docs/reference/packages/), [configuration](https://elarion.wimmesberger.dev/docs/reference/configuration/), [troubleshooting](https://elarion.wimmesberger.dev/docs/reference/troubleshooting/)
 
 ## Requirements
 
@@ -129,14 +129,14 @@ Full guides live in [`docs/`](docs/index.mdx) and are structured for a documenta
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development
+Issues and pull requests are welcome. See [CONTRIBUTING.md](https://github.com/swimmesberger/Elarion/blob/main/CONTRIBUTING.md) for the development
 workflow, validation commands, architecture boundaries, and the publishing process. By participating
-you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+you agree to the [Code of Conduct](https://github.com/swimmesberger/Elarion/blob/main/CODE_OF_CONDUCT.md).
 
 ## Security
 
-Please report vulnerabilities privately — see the [security policy](SECURITY.md).
+Please report vulnerabilities privately — see the [security policy](https://github.com/swimmesberger/Elarion/blob/main/SECURITY.md).
 
 ## License
 
-Elarion is licensed under the [Apache License 2.0](LICENSE).
+Elarion is licensed under the [Apache License 2.0](https://github.com/swimmesberger/Elarion/blob/main/LICENSE).
