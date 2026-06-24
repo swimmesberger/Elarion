@@ -1,0 +1,119 @@
+name: Release
+
+# Promotes the current VersionPrefix (the "next" version that main has been previewing)
+# to a stable release: syncs the doc version literals, rolls the changelog, tags the commit,
+# bumps VersionPrefix to the next dev cycle, and creates a GitHub Release. The published
+# release fires the existing `release: published` job in publish.yml, which builds and pushes
+# the stable NuGet + npm packages from the tag.
+#
+# Pushing to the protected main branch and creating a release that triggers publish.yml both
+# require a non-GITHUB_TOKEN identity (the default token cannot bypass branch protection, and
+# events it creates do not start other workflows). Configure a GitHub App on the branch
+# protection / ruleset bypass list and expose it as the RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY
+# secrets. See RELEASING.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version to release, e.g. 0.1.1. Leave empty to use VersionPrefix from Directory.Build.props.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag and release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Generate release app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout main
+        uses: actions/checkout@v6.0.3
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24
+
+      - name: Resolve versions
+        id: resolve
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="${INPUT_VERSION#v}"
+          else
+            VERSION=$(sed -nE 's:.*<VersionPrefix>([^<]+)</VersionPrefix>.*:\1:p' Directory.Build.props | head -n 1)
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release version '$VERSION' must be a stable MAJOR.MINOR.PATCH (no prerelease suffix)."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists."
+            exit 1
+          fi
+
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "date=$(date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
+          git config user.email "${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+
+      - name: Prepare release commit
+        run: node scripts/release.mjs prepare "${{ steps.resolve.outputs.version }}" "${{ steps.resolve.outputs.date }}"
+
+      - name: Commit and tag release
+        run: |
+          git add -A
+          git commit -m "release: v${{ steps.resolve.outputs.version }} [skip ci]"
+          git tag -a "v${{ steps.resolve.outputs.version }}" -m "Elarion v${{ steps.resolve.outputs.version }}"
+
+      - name: Open next dev cycle
+        run: |
+          node scripts/release.mjs bump-prefix "${{ steps.resolve.outputs.next }}"
+          git add -A
+          git commit -m "chore: set VersionPrefix to ${{ steps.resolve.outputs.next }} for next dev cycle [skip ci]"
+
+      - name: Push commits and tag
+        run: |
+          git push origin HEAD:main
+          git push origin "refs/tags/v${{ steps.resolve.outputs.version }}"
+
+      - name: Extract release notes
+        run: node scripts/release.mjs notes "${{ steps.resolve.outputs.version }}" > "$RUNNER_TEMP/notes.md"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh release create "v${{ steps.resolve.outputs.version }}" \
+            --title "v${{ steps.resolve.outputs.version }}" \
+            --notes-file "$RUNNER_TEMP/notes.md"
