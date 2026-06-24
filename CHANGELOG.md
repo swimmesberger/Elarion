@@ -8,6 +8,12 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.0] - 2026-06-19
+
+First stable release.
+
 ### Added
 - **Handlers as event consumers (preferred form).** A class-level `[ConsumeEvent]` on an
   `IHandler<TEvent, Result<T>>` (or the new `IHandler<TEvent>` sugar) whose request *is* the event
@@ -95,5 +101,6 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/main...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.0
 [0.1.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.1.0
