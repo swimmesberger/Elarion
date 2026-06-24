@@ -24,7 +24,7 @@ namespace Billing.Api.Hosting;
 public static partial class ModuleBootstrapper;
 ```
 
-`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods` (JSON-RPC),
+`ModuleBootstrapper` gains `AddElarion`, `MapElarion`, `RegisterRpcMethods` (JSON-RPC),
 `RegisterMcpMethods` and `GetMcpMetadata` (MCP), and `GetAllJsonTypeInfoResolvers`. Every transport is
 **feature-flag-gated per module**, so a disabled module disappears from all of them at once.
 
@@ -94,8 +94,8 @@ builder.Services.AddElarionOutbox<BillingDbContext>();
 // Infrastructure capability: the concrete email sender behind the module's port.
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
-// Scheduler runtime. Job descriptors and event consumers are composed per module by
-// ModuleBootstrapper.ConfigureAllServices below — there is no explicit Add…ScheduledJobs call.
+// Scheduler runtime. Job descriptors and event consumers are composed per module by the
+// services.AddElarion(...) call below — there is no explicit Add…ScheduledJobs call.
 builder.Services.AddInMemoryScheduler(builder.Configuration);
 
 // Resilience: generated policy metadata + the Microsoft/Polly-backed runtime.
@@ -118,7 +118,7 @@ builder.Services.AddAuthorization();
 
 // Compose every module's services — handlers, services, validators, scheduled jobs, and event
 // consumers — each gated by Modules:{Name}:Enabled.
-ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
+builder.Services.AddElarion(builder.Configuration);
 
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
@@ -127,7 +127,7 @@ builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMet
 
 // MCP: an independent, equally gated transport with its own dispatcher.
 builder.Services.AddElarionMcp(
-    ModuleBootstrapper.GetMcpMetadata(builder.Configuration),
+    builder.Configuration.GetMcpMetadata(),
     serializerOptions,
     ModuleBootstrapper.RegisterMcpMethods,
     o => o.ServerName = "Billing");
@@ -170,14 +170,14 @@ app.UseAuthentication();
 app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
-ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);
+app.MapElarion(app.Configuration);
 app.MapJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
 app.Run();
 
 static JsonSerializerOptions CreateSerializerOptions(IConfiguration configuration) {
-    var moduleResolvers = ModuleBootstrapper.GetAllJsonTypeInfoResolvers(configuration);
+    var moduleResolvers = configuration.GetAllJsonTypeInfoResolvers();
     return new JsonSerializerOptions {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,

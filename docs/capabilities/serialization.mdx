@@ -35,7 +35,7 @@ The host combines the JSON-RPC envelope metadata, host metadata, every module re
 fallback resolver:
 
 ```csharp
-var moduleResolvers = ModuleBootstrapper.GetAllJsonTypeInfoResolvers(configuration);
+var moduleResolvers = configuration.GetAllJsonTypeInfoResolvers();
 
 var resolvers = new IJsonTypeInfoResolver[2 + moduleResolvers.Length + 1];
 resolvers[0] = JsonRpcJsonContext.Default;

@@ -208,9 +208,9 @@ var builder = WebApplication.CreateSlimBuilder(args);
 builder.Services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase("quickstart"));
 builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
-ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
+builder.Services.AddElarion(builder.Configuration);
 
-var resolvers = ModuleBootstrapper.GetAllJsonTypeInfoResolvers(builder.Configuration);
+var resolvers = builder.Configuration.GetAllJsonTypeInfoResolvers();
 var serializerOptions = new JsonSerializerOptions {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     PropertyNameCaseInsensitive = true,
@@ -234,7 +234,7 @@ using (var scope = app.Services.CreateScope()) {
     db.SaveChanges();
 }
 
-ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);
+app.MapElarion(app.Configuration);
 app.MapJsonRpc();
 
 app.Run();

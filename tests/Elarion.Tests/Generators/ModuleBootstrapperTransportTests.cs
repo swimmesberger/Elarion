@@ -9,7 +9,7 @@ namespace Elarion.Tests.Generators;
 /// <summary>
 /// Tests the module-aware, feature-flag-gated transport mapping emitted by <see cref="AppModuleDiscoveryGenerator"/>:
 /// per-module <c>Map{Module}Http</c> / <c>Add{Module}JsonRpc</c> / <c>Add{Module}Mcp</c> / <c>Get{Module}McpMetadata</c>
-/// methods, gated aggregates (<c>MapAllEndpoints</c> / <c>RegisterRpcMethods</c> / <c>RegisterMcpMethods</c> /
+/// methods, gated aggregates (<c>MapElarion</c> / <c>RegisterRpcMethods</c> / <c>RegisterMcpMethods</c> /
 /// <c>GetMcpMetadata</c>), per-handler transport surface selection, and core modules always mapped. Handlers and
 /// modules live in referenced images and are consumed from generated Elarion manifest metadata.
 /// </summary>
@@ -110,6 +110,11 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain(
             "global::Elarion.JsonRpc.Mcp.RpcMcpMethodMetadata[] GetBillingMcpMetadata()");
 
+        // The per-module transport methods are extension methods on their receiver, so they read fluently at the
+        // call site (e.g. app.MapGroup("/billing").MapBillingHttp(), dispatcher.AddBillingJsonRpc()).
+        generated.Should().Contain("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)");
+        generated.Should().Contain("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher)");
+
         // The per-module HTTP method maps that module's [HttpEndpoint] handler; the verb comes from the
         // request's CQRS marker (IQuery -> GET, ICommand -> POST).
         generated.Should().Contain("app.MapGet(\"invoices/{id}\",");
@@ -151,6 +156,10 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain(
             "global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         generated.Should().Contain("return dispatcher;");
+
+        // The dispatcher aggregates are extension methods on the dispatcher
+        // (dispatcher.RegisterRpcMethods(configuration) / dispatcher.RegisterMcpMethods(configuration)).
+        generated.Should().Contain("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher,");
 
         // The MCP aggregates compose the per-module MCP registration and metadata.
         generated.Should().Contain("AddBillingMcp(dispatcher);");

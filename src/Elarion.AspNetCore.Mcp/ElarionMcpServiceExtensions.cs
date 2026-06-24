@@ -28,7 +28,7 @@ public static class ElarionMcpServiceExtensions {
     /// <paramref name="registerMcp"/> (e.g. <c>ModuleBootstrapper.RegisterMcpMethods</c>).
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="metadata">The generated MCP metadata table (e.g. <c>ModuleBootstrapper.GetMcpMetadata(configuration)</c>).</param>
+    /// <param name="metadata">The generated MCP metadata table (e.g. <c>configuration.GetMcpMetadata()</c>).</param>
     /// <param name="serializerOptions">
     /// The same serializer options the dispatcher uses; used here to build tool input schemas and by the MCP
     /// dispatcher for params/result handling.
@@ -61,10 +61,10 @@ public static class ElarionMcpServiceExtensions {
     /// Registers an MCP server using a <paramref name="registerMcp"/> delegate that also receives the application
     /// <see cref="IConfiguration"/> — the setup for a module-based host, where
     /// <c>ModuleBootstrapper.RegisterMcpMethods</c> maps only the MCP-exposed methods of enabled modules. Pair it
-    /// with <c>ModuleBootstrapper.GetMcpMetadata(configuration)</c> for the gated tool table.
+    /// with <c>configuration.GetMcpMetadata()</c> for the gated tool table.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="metadata">The (already gated) MCP metadata table, e.g. <c>ModuleBootstrapper.GetMcpMetadata(builder.Configuration)</c>.</param>
+    /// <param name="metadata">The (already gated) MCP metadata table, e.g. <c>builder.Configuration.GetMcpMetadata()</c>.</param>
     /// <param name="serializerOptions">The serializer options used for tool input schemas and the MCP dispatcher.</param>
     /// <param name="registerMcp">The registration delegate (e.g. <c>ModuleBootstrapper.RegisterMcpMethods</c>).</param>
     /// <param name="configure">Configures the server identity and behavior. <see cref="ElarionMcpOptions.ServerName"/> is required.</param>
