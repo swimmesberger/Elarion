@@ -42,6 +42,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"public static class {handler.HandlerName}Registration");
         sb.AppendLine("{");
         AppendAppliesToFields(sb, handler);
+        AppendHandlerMetadataField(sb, handler);
         AppendRegistrationMethod(sb, handler);
 
         if (handler.Cacheable is not null)
@@ -66,6 +67,30 @@ public sealed partial class HandlerRegistrationGenerator {
             sb.AppendLine($"    private static readonly bool __pipelineApplies{i} =");
             sb.AppendLine($"        {handler.Decorators[i].DecoratorFqn}.AppliesTo(typeof({handler.RequestFqn}));");
         }
+    }
+
+    private static void AppendHandlerMetadataField(StringBuilder sb, HandlerInfo handler) {
+        // Only emit the metadata singleton when a pipeline decorator actually asks for it. It captures the
+        // concrete handler type so an attribute-reading decorator sees the true handler regardless of its
+        // position in the chain (the inner.GetType() approach only works when innermost — a fail-open footgun).
+        var wantsMetadata = false;
+        foreach (var dec in handler.Decorators) {
+            foreach (var dep in dec.ExtraDependencies) {
+                if (dep.IsHandlerMetadata) {
+                    wantsMetadata = true;
+                    break;
+                }
+            }
+
+            if (wantsMetadata)
+                break;
+        }
+
+        if (!wantsMetadata)
+            return;
+
+        sb.AppendLine("    private static readonly global::Elarion.Abstractions.Pipeline.HandlerMetadata __handlerMetadata =");
+        sb.AppendLine($"        new(typeof({handler.HandlerFqn}));");
     }
 
     private static void AppendRegistrationMethod(StringBuilder sb, HandlerInfo handler) {
@@ -128,8 +153,10 @@ public sealed partial class HandlerRegistrationGenerator {
             }
 
             sb.Append($"{indent}handler = new {dec.DecoratorFqn}(handler");
-            foreach (var dep in dec.ExtraDependencyFqns) {
-                sb.Append($", sp.GetRequiredService<{dep}>()");
+            foreach (var dep in dec.ExtraDependencies) {
+                sb.Append(dep.IsHandlerMetadata
+                    ? ", __handlerMetadata"
+                    : $", sp.GetRequiredService<{dep.Fqn}>()");
             }
             sb.AppendLine(");");
         }

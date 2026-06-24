@@ -22,13 +22,14 @@ project that owns the concrete `DbContext`.
 
 ## Setup
 
-Reference the marker package and the generator analyzer in the project that owns your entities and
-context abstraction:
+Reference the `Elarion.EntityFrameworkCore` package — it bundles the EF Core source generator — in
+**every** project that declares `[DbEntity]` entities or a `[GenerateDbSets]` context abstraction. If
+your entities live in a separate domain project, that project needs this reference too, so its
+generator emits the per-assembly entity manifest the context project reads:
 
 ```xml
 <ItemGroup>
   <PackageReference Include="Elarion.EntityFrameworkCore" Version="0.1.0" />
-  <PackageReference Include="Elarion.EntityFrameworkCore.Generators" Version="0.1.0" PrivateAssets="all" />
 </ItemGroup>
 ```
 

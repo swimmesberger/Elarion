@@ -12,6 +12,11 @@
     <IncludeSymbols>false</IncludeSymbols>
     <DevelopmentDependency>true</DevelopmentDependency>
     <NoPackageAnalysis>true</NoPackageAnalysis>
+    <!-- This generator no longer ships as its own NuGet package; its analyzer DLL is bundled into the
+         Elarion runtime package (a single home — bundling into more than one package an app might
+         reference would run the generator twice). Application and host projects reference Elarion
+         directly, so the marker reference alone wires the generator. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,11 +28,5 @@
     <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
     <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
   </ItemGroup>
-
-  <Target Name="PackAnalyzer" BeforeTargets="_GetPackageFiles">
-    <ItemGroup>
-      <None Include="$(TargetPath)" Pack="true" PackagePath="analyzers/dotnet/cs/" Visible="false" />
-    </ItemGroup>
-  </Target>
 
 </Project>

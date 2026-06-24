@@ -154,10 +154,10 @@ public sealed partial class HandlerRegistrationGenerator {
         return builder.ToImmutable();
     }
 
-    private static ImmutableArray<string> GetDecoratorExtraDependencies(
+    private static ImmutableArray<DecoratorDependency> GetDecoratorExtraDependencies(
         INamedTypeSymbol closedType,
         SymbolDisplayFormat fmt) {
-        var extraDeps = ImmutableArray.CreateBuilder<string>();
+        var extraDeps = ImmutableArray.CreateBuilder<DecoratorDependency>();
         var constructors = closedType.Constructors;
         if (constructors.Length == 0)
             return extraDeps.ToImmutable();
@@ -168,7 +168,10 @@ public sealed partial class HandlerRegistrationGenerator {
                 continue;
             }
 
-            extraDeps.Add(param.Type.ToDisplayString(fmt));
+            // A HandlerMetadata parameter is supplied by the generator (with the concrete handler type),
+            // not resolved from DI — this is what makes attribute-driven decorators position-independent.
+            var isHandlerMetadata = param.Type.ToDisplayString() == HandlerMetadataTypeName;
+            extraDeps.Add(new DecoratorDependency(param.Type.ToDisplayString(fmt), isHandlerMetadata));
         }
 
         return extraDeps.ToImmutable();
@@ -192,15 +195,44 @@ public sealed partial class HandlerRegistrationGenerator {
             return false;
 
         foreach (var constraint in parameter.ConstraintTypes) {
-            // A constraint that references another type parameter (e.g. `where TRequest : IFoo<TResponse>`) can't be
-            // reliably substituted here; stay permissive so a valid decorator is never dropped.
-            if (ReferencesTypeParameter(constraint))
+            // Substitute the *self* parameter with the concrete argument so a self-referential constraint
+            // like `where TResponse : IResultFailureFactory<TResponse>` is honored (it scopes a decorator to
+            // Result-returning handlers). A constraint that references a *different* type parameter (e.g.
+            // `where TRequest : IFoo<TResponse>`) can't be resolved here, so stay permissive and never drop it.
+            var resolved = ResolveConstraint(constraint, parameter, argument);
+            if (resolved is null)
                 continue;
-            if (!SatisfiesType(argument, constraint))
+            if (!SatisfiesType(argument, resolved))
                 return false;
         }
 
         return true;
+    }
+
+    // Replaces occurrences of the constrained type parameter (self) with the concrete argument inside the
+    // constraint type. Returns null when the constraint references a *different* type parameter, which cannot
+    // be resolved in this single-parameter check.
+    private static ITypeSymbol? ResolveConstraint(
+        ITypeSymbol constraint,
+        ITypeParameterSymbol self,
+        ITypeSymbol argument) {
+        if (constraint is ITypeParameterSymbol) {
+            return SymbolEqualityComparer.Default.Equals(constraint, self) ? argument : null;
+        }
+
+        if (constraint is INamedTypeSymbol { IsGenericType: true } named) {
+            var resolvedArgs = new ITypeSymbol[named.TypeArguments.Length];
+            for (var i = 0; i < named.TypeArguments.Length; i++) {
+                var resolvedArg = ResolveConstraint(named.TypeArguments[i], self, argument);
+                if (resolvedArg is null)
+                    return null;
+                resolvedArgs[i] = resolvedArg;
+            }
+
+            return named.OriginalDefinition.Construct(resolvedArgs);
+        }
+
+        return constraint;
     }
 
     private static bool SatisfiesType(ITypeSymbol argument, ITypeSymbol constraint) {
@@ -218,20 +250,6 @@ public sealed partial class HandlerRegistrationGenerator {
         for (ITypeSymbol? current = argument; current is not null; current = current.BaseType) {
             if (SymbolEqualityComparer.Default.Equals(current, constraint))
                 return true;
-        }
-
-        return false;
-    }
-
-    private static bool ReferencesTypeParameter(ITypeSymbol type) {
-        if (type is ITypeParameterSymbol)
-            return true;
-
-        if (type is INamedTypeSymbol named) {
-            foreach (var argument in named.TypeArguments) {
-                if (ReferencesTypeParameter(argument))
-                    return true;
-            }
         }
 
         return false;

@@ -33,7 +33,8 @@ that you add to a [pipeline](/docs/concepts/decorator-pipelines). The decorator 
 public sealed class ValidationDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
     IEnumerable<IValidator<TRequest>> validators
-) : IHandler<TRequest, TResponse> {
+) : IHandler<TRequest, TResponse>
+    where TResponse : IResultFailureFactory<TResponse> {
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         var failures = new List<string>();
         foreach (var validator in validators) {
@@ -45,7 +46,7 @@ public sealed class ValidationDecorator<TRequest, TResponse>(
             return await inner.HandleAsync(request, ct);
         }
 
-        return ResultFactory.Failure<TResponse>(
+        return TResponse.Failure(
             AppError.Validation(string.Join("; ", failures), failures));
     }
 }
@@ -53,7 +54,11 @@ public sealed class ValidationDecorator<TRequest, TResponse>(
 
 This keeps validation declarative (rules next to the command) and composable (one decorator applies
 it across every handler in a pipeline). The structured `AppError.Validation(message, errors)`
-overload carries the individual messages for the transport to surface.
+overload carries the individual messages for the transport to surface. The
+`where TResponse : IResultFailureFactory<TResponse>` constraint lets the decorator build the failure
+result via the static `TResponse.Failure(error)` — no reflection — and also scopes it at compile time
+to `Result`-returning handlers (see
+[decorator pipelines](/docs/concepts/decorator-pipelines#turning-an-apperror-into-tresponse)).
 
 ## Conventions
 

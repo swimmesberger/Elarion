@@ -10,17 +10,17 @@ inspected like any other source.
 
 ## Turning generators on
 
-An application project references the runtime package and the generators as an analyzer:
+An application project references the runtime package — the source generator ships inside it:
 
 ```xml
 <ItemGroup>
   <PackageReference Include="Elarion" Version="0.1.0" />
-  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
 </ItemGroup>
 ```
 
 (When building inside this repository, reference the generator project with
-`OutputItemType="Analyzer" ReferenceOutputAssembly="false"` instead.)
+`OutputItemType="Analyzer" ReferenceOutputAssembly="false"` instead — a `ProjectReference` to the
+runtime project does not pull in the bundled analyzer.)
 
 Then add the full framework opt-in once in the assembly:
 

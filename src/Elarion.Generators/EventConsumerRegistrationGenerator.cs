@@ -40,7 +40,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         "Elarion.Abstractions.IHandler`2";
 
     private const string UnitMetadataName =
-        "Elarion.Abstractions.Unit";
+        "Elarion.Abstractions.Results.Unit";
 
     private const string CancellationTokenMetadataName =
         "System.Threading.CancellationToken";

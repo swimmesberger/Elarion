@@ -145,6 +145,14 @@ the predicate is plain, runnable C#, it can be unit-tested directly
 - A read-only handler that nonetheless establishes a unit of work (e.g. a read-only integration consumer
   matching `IIntegrationEvent`) opens a transaction it doesn't use — harmless.
 - The predicate must be `public` and total; a throwing predicate surfaces as a type-initialization error.
+- A decorator that needs the *handler's own* type or attributes must **not** read them from
+  `inner.GetType()`: because decorators wrap innermost-first, `inner` is the concrete handler only when
+  the decorator is innermost, so an attribute-driven check (e.g. authorization) silently **fails open**
+  at any other position. Decorators declare a `HandlerMetadata` constructor parameter instead — the
+  generator supplies the concrete handler type position-independently. The seam offers a correct path
+  but does not forbid the `inner.GetType()` anti-pattern from compiling (a reliable analyzer for it was
+  judged too fragile / false-positive-prone), so it is documented in
+  [decorator pipelines](../concepts/decorator-pipelines.mdx#reading-the-handlers-attributes-do-not-use-innergettype).
 
 ## Implementation
 

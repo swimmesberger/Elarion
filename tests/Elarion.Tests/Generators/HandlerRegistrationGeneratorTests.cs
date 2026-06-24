@@ -217,6 +217,143 @@ public sealed class HandlerRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateRegistration_DecoratorWithHandlerMetadata_InjectsConcreteHandlerTypeRegardlessOfPosition() {
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.Abstractions.Pipeline;
+
+            [assembly: UseElarion]
+            [assembly: Sample.App.AuthPipeline]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                // Reads the handler's attributes through HandlerMetadata, so it sees the concrete handler at
+                // ANY position. Here it is the OUTERMOST decorator — the inner.GetType() approach would fail
+                // open from this position because `inner` is the next decorator, not the handler.
+                public sealed class AuthorizationDecorator<TRequest, TResponse>(
+                    IHandler<TRequest, TResponse> inner,
+                    HandlerMetadata metadata)
+                    : IHandler<TRequest, TResponse> {
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                public sealed class PlainDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                    : IHandler<TRequest, TResponse> {
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                // Authorization is first => outermost; a plain decorator is nested below it.
+                [DecoratorList(typeof(AuthorizationDecorator<,>), typeof(PlainDecorator<,>))]
+                [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                public sealed class AuthPipelineAttribute : Attribute { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+                public sealed class DoThing : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+        var generated = GetGeneratedSource(result, "Sample_App_DoThing.g.cs");
+
+        // The generator supplies a metadata singleton built from the CONCRETE handler type...
+        generated.Should().Contain(
+            "private static readonly global::Elarion.Abstractions.Pipeline.HandlerMetadata __handlerMetadata =");
+        generated.Should().Contain("new(typeof(global::Sample.App.DoThing));");
+        // ...and passes it to the (outermost) decorator instead of resolving it from DI.
+        generated.Should().Contain("global::Sample.App.AuthorizationDecorator<");
+        generated.Should().Contain("(handler, __handlerMetadata)");
+        generated.Should().NotContain("GetRequiredService<global::Elarion.Abstractions.Pipeline.HandlerMetadata>");
+
+        // The emitted registration is valid C#: compile the source plus this handler's generated tree and
+        // assert no errors — this proves the HandlerMetadata type, field, and constructor usage are correct.
+        // (Only this tree is compiled; the cross-generator module-services partial skeleton is emitted by
+        // ModuleDefaultServicesGenerator, which does not run in this isolated single-generator test.)
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var full = CSharpCompilation.Create(
+            "HandlerMetadataCompile",
+            [
+                CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(generated, parseOptions, cancellationToken: TestContext.Current.CancellationToken)
+            ],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        full.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GenerateRegistration_ResponseConstrainedDecorator_AttachesOnlyToResultReturningHandlers() {
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.Abstractions.Pipeline;
+
+            [assembly: UseElarion]
+            [assembly: Sample.App.FailurePipeline]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                // The self-referential `where TResponse : IResultFailureFactory<TResponse>` constraint scopes the
+                // decorator to Result-returning handlers and lets it build a failure via static TResponse.Failure.
+                public sealed class FailureMappingDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                    : IHandler<TRequest, TResponse>
+                    where TResponse : IResultFailureFactory<TResponse> {
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                [DecoratorList(typeof(FailureMappingDecorator<,>))]
+                [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                public sealed class FailurePipelineAttribute : Attribute { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+                public sealed class DoThing : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+
+                // Returns a bare (non-Result) response, so the constraint must elide the decorator.
+                public sealed record PlainQuery(int Id) : IQuery;
+                public sealed record PlainResponse(string Name);
+                public sealed class Plain : IHandler<PlainQuery, PlainResponse> {
+                    public ValueTask<PlainResponse> HandleAsync(PlainQuery request, CancellationToken ct) =>
+                        ValueTask.FromResult(new PlainResponse("x"));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+        var doThing = GetGeneratedSource(result, "Sample_App_DoThing.g.cs");
+        var plain = GetGeneratedSource(result, "Sample_App_Plain.g.cs");
+
+        // Attaches to the Result-returning handler (Result<T> implements IResultFailureFactory<Result<T>>)...
+        doThing.Should().Contain("global::Sample.App.FailureMappingDecorator<");
+        // ...and is filtered out of the handler whose response does not implement the interface.
+        plain.Should().NotContain("FailureMappingDecorator");
+    }
+
+    [Fact]
     public void GenerateRegistration_AppliesToPredicate_EmitsCachedRuntimeConditional() {
         const string source =
             """
@@ -358,7 +495,7 @@ public sealed class HandlerRegistrationGeneratorTests {
         var generated = GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_PingHandler.g.cs");
 
         generated.Should().Contain(
-            "global::Elarion.Abstractions.IHandler<global::Sample.Modules.Sales.Handlers.Ping, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Unit>>");
+            "global::Elarion.Abstractions.IHandler<global::Sample.Modules.Sales.Handlers.Ping, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>");
         generated.Should().Contain("global::Elarion.Abstractions.Diagnostics.TracingDecorator<");
     }
 

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Billing sample — domain entities (separate assembly).</Description>
+  </PropertyGroup>
+
+  <!-- The entity assembly references the EF Core marker package and runs its generator so it emits the
+       per-assembly [DbEntity] manifest the Application's IAppDbContext reads cross-assembly. Consuming
+       Elarion from NuGet, the bundled marker package carries the generator; building from source we
+       reference the generator project directly as an analyzer. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore\Elarion.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore.Generators\Elarion.EntityFrameworkCore.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

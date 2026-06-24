@@ -41,6 +41,8 @@ The default implementation reads claims from the authenticated principal into a 
 Register it during service configuration and add the middleware after authentication:
 
 ```csharp
+using Elarion.AspNetCore.Identity;   // AddElarionCurrentUser / UseElarionCurrentUser
+
 builder.Services.AddElarionCurrentUser();
 
 var app = builder.Build();

@@ -8,7 +8,44 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **`samples/Billing` — a compiled, current-pattern end-to-end sample.** A multi-assembly app (separate
+  `Billing.Domain` entity project + `Billing.Application` module/handlers + `Billing.Api` JSON-RPC host,
+  on the in-memory EF provider) that builds as part of the solution. It is the canonical up-to-date
+  reference for module wiring and exercises the cross-assembly `[DbEntity]` discovery fix.
+- **`HandlerMetadata` decorator seam (`Elarion.Abstractions.Pipeline`).** A decorator can declare a
+  `HandlerMetadata` constructor parameter; the source generator supplies it with the **concrete handler
+  type**, so attribute-driven decorators (e.g. authorization reading a `[RequirePermission]`-style
+  attribute) read the handler's attributes correctly **regardless of their position** in the chain.
+  This replaces the position-dependent `inner.GetType().GetCustomAttribute(...)` pattern, which fails
+  **open** when the decorator is not innermost. See
+  [decorator pipelines](docs/concepts/decorator-pipelines.mdx).
+
+### Changed
+- **Decorator generic-constraint filtering now honors self-referential constraints.** A decorator
+  constrained `where TResponse : IResultFailureFactory<TResponse>` (the canonical no-reflection way to
+  build a failure result, e.g. in a validation decorator) is now attached only to `Result`-returning
+  handlers and cleanly elided from handlers whose response doesn't implement the interface — previously
+  the self-reference was treated permissively, which could emit a constraint-violating registration.
+- **`Unit` moved to the `Elarion.Abstractions.Results` namespace (breaking — source).** The framework's
+  no-value `Unit` type was in the root `Elarion.Abstractions` namespace that every handler imports for
+  `IHandler`/`Result`/`AppError`, so a consuming app with its own `Unit` domain type hit `CS0104`
+  ambiguity. `Unit` now lives in `Elarion.Abstractions.Results`; code that names it directly (e.g.
+  returning `Result<Unit>`) adds `using Elarion.Abstractions.Results;`. The `IHandler<T>` no-content
+  sugar and `Result.Success()` are unaffected, so most handlers need no change.
+- **Source generators now ship inside their runtime packages (breaking — packaging).** The
+  standalone `Elarion.Generators` and `Elarion.EntityFrameworkCore.Generators` analyzer packages are
+  no longer published. The Elarion generator's analyzer is bundled into the **`Elarion`** package and
+  the EF Core generator's analyzer into the **`Elarion.EntityFrameworkCore`** package, so referencing
+  the runtime/marker package is now sufficient — no separate analyzer `PackageReference` and no
+  `PrivateAssets="all"` wiring. Because NuGet analyzer assets are not transitive, each analyzer lives
+  in exactly one package: application libraries and hosts that need the Elarion generator reference
+  `Elarion` directly, and any assembly declaring `[DbEntity]`/`[GenerateDbSets]` types references
+  `Elarion.EntityFrameworkCore` directly. This fixes the silent failure where a separate entity
+  assembly referencing only the EF Core marker package emitted no manifest and produced zero `DbSet`s.
+  To upgrade: remove the `Elarion.Generators` / `Elarion.EntityFrameworkCore.Generators`
+  `PackageReference`s; add a direct `Elarion` reference to host projects that previously relied on the
+  standalone generator package.
 
 ## [0.2.0] - 2026-06-19
 

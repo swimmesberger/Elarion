@@ -18,36 +18,34 @@ client generation. You only install the pieces you use.
 | Package | Install in | Purpose |
 | --- | --- | --- |
 | `Elarion.Abstractions` | Application | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
-| `Elarion` | Application / host | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user abstraction. |
+| `Elarion` | Application / host | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user abstraction. **Bundles the Elarion source generator** (handlers, services, validators, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers). |
 | `Elarion.Blobs` | Application | Provider-neutral blob storage contracts and DTOs. |
 | `Elarion.Blobs.PostgreSql` | Infrastructure / host | PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O. |
-| `Elarion.Generators` | Application (analyzer) | Roslyn generators for handlers, services, validators, modules, RPC maps, resilience policies, and scheduled jobs. |
 | `Elarion.JsonRpc` | Host | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
 | `Elarion.AspNetCore` | Host | ASP.NET Core JSON-RPC endpoint mapping, batch execution, and current-user middleware. |
 | `Elarion.AspNetCore.SchemaGeneration` | Host (build tooling) | MSBuild target that exports `rpc-schema.json` during `dotnet build`. |
-| `Elarion.EntityFrameworkCore` | Application | Marker attributes for generated `DbSet`s and entity inclusion. |
-| `Elarion.EntityFrameworkCore.Generators` | Application (analyzer) | Roslyn generator for `DbSet` properties and entity configuration. |
+| `Elarion.EntityFrameworkCore` | Application | Marker attributes for generated `DbSet`s and entity inclusion. **Bundles the EF Core source generator** (`DbSet` properties, entity configuration, keyset pagination). |
 | `@swimmesberger/elarion-jsonrpc-client-generator` | Frontend (npm) | Generates TypeScript method contracts, Zod schemas, and a fetch client from a schema export. |
 
 <Callout type="info">
-  `Elarion.Abstractions` is referenced transitively by `Elarion`, so a typical application only
-  needs to install `Elarion` and `Elarion.Generators`.
+  The source generators ship **inside** their runtime packages — the Elarion generator in `Elarion`
+  and the EF Core generator in `Elarion.EntityFrameworkCore`. There are no separate analyzer packages
+  to install. Because NuGet analyzer assets are not transitive, every assembly that needs a generator
+  must reference its package **directly**: `Elarion` for handlers/modules/transports, and
+  `Elarion.EntityFrameworkCore` for any assembly declaring `[DbEntity]`/`[GenerateDbSets]` types
+  (including a separate domain/entity project).
 </Callout>
 
 ## Application project
 
 An application (class library) holds your modules, handlers, services, and validators. Add the
-runtime package and the generators as an analyzer:
+runtime package — the source generator ships inside it:
 
 ```xml
 <ItemGroup>
   <PackageReference Include="Elarion" Version="0.1.0" />
-  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
 </ItemGroup>
 ```
-
-`Elarion.Generators` is a development-only analyzer package, so `PrivateAssets="all"` keeps it out
-of your published output and downstream references.
 
 Then enable the framework generators once, anywhere in the assembly (commonly in a `Usings.cs` or
 `AssemblyInfo.cs`):
@@ -64,14 +62,16 @@ scheduled jobs. If you want only a subset, use the narrower triggers instead —
 
 ## Host project
 
-The ASP.NET Core host references your application, the JSON-RPC packages, and the generators (for
-the RPC map and module bootstrapper it emits in the host assembly):
+The ASP.NET Core host references your application and the JSON-RPC packages. It also needs the
+Elarion generator (for the RPC map and module bootstrapper it emits in the host assembly), which
+lives in the `Elarion` package — and since analyzer assets are not transitive, the host references
+`Elarion` **directly** (it already depends on it transitively via `Elarion.AspNetCore`):
 
 ```xml
 <ItemGroup>
+  <PackageReference Include="Elarion" Version="0.1.0" />
   <PackageReference Include="Elarion.JsonRpc" Version="0.1.0" />
   <PackageReference Include="Elarion.AspNetCore" Version="0.1.0" />
-  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
   <ProjectReference Include="..\MyApp.Application\MyApp.Application.csproj" />
 </ItemGroup>
 ```

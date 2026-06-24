@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Results;
 using Xunit;
 
 namespace Elarion.Tests.Abstractions;
