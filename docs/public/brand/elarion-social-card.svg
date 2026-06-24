@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1533"/>
+      <stop offset="55%" stop-color="#07142E"/>
+      <stop offset="100%" stop-color="#040C1E"/>
+    </linearGradient>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6E45F6"/>
+      <stop offset="52%" stop-color="#2E68FF"/>
+      <stop offset="100%" stop-color="#2FD6E8"/>
+    </linearGradient>
+    <linearGradient id="gh" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6E45F6"/>
+      <stop offset="65%" stop-color="#2E68FF"/>
+      <stop offset="100%" stop-color="#2FD6E8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="32%" r="62%">
+      <stop offset="0%" stop-color="#2E68FF" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#2E68FF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <!-- logo block (mark + wordmark + tagline), centered horizontally, upper-middle -->
+  <g transform="translate(196 132) scale(0.78)">
+    <g transform="translate(0 0) scale(1.05)">
+      <circle cx="34" cy="52" r="14" fill="url(#g)"/>
+      <circle cx="34" cy="110" r="14" fill="url(#g)" opacity="0.92"/>
+      <circle cx="34" cy="168" r="14" fill="url(#g)" opacity="0.84"/>
+      <rect x="64" y="38" width="126" height="28" rx="14" fill="url(#gh)"/>
+      <rect x="64" y="96" width="92" height="28" rx="14" fill="url(#gh)"/>
+      <rect x="64" y="154" width="152" height="28" rx="14" fill="url(#gh)"/>
+      <rect x="64" y="77" width="56" height="14" rx="7" fill="url(#gh)" opacity="0.36"/>
+      <rect x="64" y="135" width="78" height="14" rx="7" fill="url(#gh)" opacity="0.36"/>
+    </g>
+    <line x1="292" y1="0" x2="292" y2="220" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="4"/>
+    <text x="372" y="150" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="150" font-weight="750" fill="#FFFFFF" letter-spacing="-5">Elarion</text>
+    <text x="378" y="222" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" fill="#DCE5F4" letter-spacing="6">APPLICATION FRAMEWORK FOR .NET</text>
+  </g>
+
+  <!-- feature line -->
+  <text x="640" y="446" text-anchor="middle" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="30" font-weight="600" fill="#9DB0CF" letter-spacing="0.5">Compile-time handlers&#160;&#160;·&#160;&#160;JSON-RPC&#160;&#160;·&#160;&#160;HTTP&#160;&#160;·&#160;&#160;MCP for AI agents</text>
+
+  <!-- accent underline -->
+  <rect x="540" y="486" width="200" height="5" rx="2.5" fill="url(#gh)"/>
+
+  <!-- url -->
+  <text x="640" y="572" text-anchor="middle" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="28" font-weight="600" fill="#5D7099" letter-spacing="2">elarion.wimmesberger.dev</text>
+</svg>

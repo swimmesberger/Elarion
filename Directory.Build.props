@@ -4,16 +4,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <VersionPrefix>0.1.2</VersionPrefix>
+    <VersionPrefix>0.2.1</VersionPrefix>
     <Authors>Simon Wimmesberger</Authors>
     <Company>swimmesberger</Company>
     <Copyright>Copyright (c) Simon Wimmesberger</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/swimmesberger/Elarion</PackageProjectUrl>
+    <PackageProjectUrl>https://elarion.wimmesberger.dev</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/swimmesberger/Elarion.git</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>elarion;json-rpc;source-generator;dotnet;clean-architecture</PackageTags>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>elarion;json-rpc;mcp;source-generator;roslyn;dotnet;aspnetcore;clean-architecture;cqrs;ai-agents</PackageTags>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
@@ -31,6 +32,7 @@
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" Link="README.md" />
+    <None Include="$(MSBuildThisFileDirectory)docs/public/brand/elarion-nuget-icon.png" Pack="true" PackagePath="icon.png" Visible="false" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
   </ItemGroup>
 </Project>

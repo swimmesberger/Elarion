@@ -79,8 +79,8 @@ registration list.**
 ```xml
 <!-- Application library -->
 <ItemGroup>
-  <PackageReference Include="Elarion" Version="0.1.0" />
-  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
+  <PackageReference Include="Elarion" Version="0.2.0" />
+  <PackageReference Include="Elarion.Generators" Version="0.2.0" PrivateAssets="all" />
 </ItemGroup>
 ```
 
