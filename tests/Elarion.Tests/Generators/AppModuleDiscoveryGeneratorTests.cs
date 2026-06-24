@@ -79,6 +79,16 @@ public sealed class AppModuleDiscoveryGeneratorTests {
         generated.Should().Contain("public static void ConfigureAllServices(");
         generated.Should().Contain("public static bool IsModuleEnabled(");
         generated.Should().NotContain("public static partial void ConfigureAllServices(");
+
+        // The aggregate entry points are emitted as extension methods on their receiver (idiomatic host wiring:
+        // services.ConfigureAllServices(configuration), endpoints.MapAllEndpoints(configuration),
+        // configuration.IsModuleEnabled(name)).
+        generated.Should().Contain(
+            "        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services,");
+        generated.Should().Contain(
+            "        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints,");
+        generated.Should().Contain(
+            "        this global::Microsoft.Extensions.Configuration.IConfiguration configuration,");
         generated.Should().Contain("global::Sample.Modules.Core.CoreModule.ConfigureServices(services, configuration);");
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"AiAgent\"))");
         generated.Should().Contain("global::Sample.Modules.AiAgent.AiAgentModule.MapEndpoints(endpoints);");

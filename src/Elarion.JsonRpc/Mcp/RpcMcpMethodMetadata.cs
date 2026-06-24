@@ -41,7 +41,7 @@ public readonly record struct RpcMcpParameterDescriptor(string PropertyName, str
 
 /// <summary>
 /// Reflection-free lookup over the generated <see cref="RpcMcpMethodMetadata"/> table. The implementation is
-/// produced by generated code (<c>ModuleBootstrapper.GetMcpMetadata(configuration)</c>).
+/// produced by generated code (<c>configuration.GetMcpMetadata()</c>).
 /// </summary>
 public interface IRpcMcpMetadataSource {
     /// <summary>All method metadata, ordered by method name.</summary>

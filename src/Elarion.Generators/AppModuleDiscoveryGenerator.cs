@@ -18,8 +18,8 @@ namespace Elarion.Generators;
 /// <c>GetMcpMetadata</c>). A handler chooses its dispatcher-based surfaces via
 /// <c>[RpcMethod(..., Transports = RpcTransports.JsonRpc | RpcTransports.Mcp)]</c> (both by default), so a method can
 /// be JSON-RPC-only, MCP-only, or both. This makes a disabled module disappear across every transport surface, and
-/// the per-module methods double as the customization hook (e.g.
-/// <c>ModuleBootstrapper.MapBillingHttp(app.MapGroup("/billing").RequireAuthorization(policy))</c>).
+/// the per-module methods are emitted as extension methods, so they double as the customization hook (e.g.
+/// <c>app.MapGroup("/billing").RequireAuthorization(policy).MapBillingHttp()</c>).
 /// Transport-specific emission/discovery is shared with the flat generators via
 /// <see cref="HttpEndpointEmission"/>, <see cref="RpcMethodEmission"/>, and <see cref="McpMetadataEmission"/>.
 /// </para>
@@ -583,7 +583,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         // --- ConfigureAllServices ---
         sb.AppendLine("    /// <summary>Calls ConfigureServices on all enabled modules.</summary>");
         sb.AppendLine("    public static void ConfigureAllServices(");
-        sb.AppendLine("        global::Microsoft.Extensions.DependencyInjection.IServiceCollection services,");
+        sb.AppendLine("        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
         foreach (var entry in entries)
@@ -610,7 +610,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         // --- MapAllEndpoints (module MapEndpoints + generated [HttpEndpoint] mapping, both gated) ---
         sb.AppendLine("    /// <summary>Calls MapEndpoints and maps generated [HttpEndpoint] handlers on all enabled modules.</summary>");
         sb.AppendLine("    public static void MapAllEndpoints(");
-        sb.AppendLine("        global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints,");
+        sb.AppendLine("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
         foreach (var entry in entries)
@@ -627,7 +627,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         {
             sb.AppendLine("    /// <summary>Registers JSON-RPC-exposed [RpcMethod] handlers for all enabled modules on the dispatcher.</summary>");
             sb.AppendLine("    public static global::Elarion.JsonRpc.JsonRpcDispatcher RegisterRpcMethods(");
-            sb.AppendLine("        global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher,");
+            sb.AppendLine("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher,");
             sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
             sb.AppendLine("    {");
             foreach (var entry in entries)
@@ -649,7 +649,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         {
             sb.AppendLine("    /// <summary>Registers MCP-exposed [RpcMethod] handlers for all enabled modules on the MCP dispatcher.</summary>");
             sb.AppendLine("    public static global::Elarion.JsonRpc.JsonRpcDispatcher RegisterMcpMethods(");
-            sb.AppendLine("        global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher,");
+            sb.AppendLine("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher,");
             sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
             sb.AppendLine("    {");
             foreach (var entry in entries)
@@ -667,7 +667,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
             sb.AppendLine("    /// <summary>Collects MCP tool metadata for all enabled modules.</summary>");
             sb.AppendLine($"    public static {McpMetadataEmission.Ns}.IRpcMcpMetadataSource GetMcpMetadata(");
-            sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
+            sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
             sb.AppendLine("    {");
             sb.AppendLine(
                 $"        var methods = new global::System.Collections.Generic.List<{McpMetadataEmission.Ns}.RpcMcpMethodMetadata>();");
@@ -689,7 +689,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    /// <summary>Collects JSON type info resolvers from all enabled modules.</summary>");
         sb.AppendLine(
             "    public static global::System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver[] GetAllJsonTypeInfoResolvers(");
-        sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
+        sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
         sb.AppendLine(
             "        var resolvers = new global::System.Collections.Generic.List<global::System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>();");
@@ -711,7 +711,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         // --- IsModuleEnabled ---
         sb.AppendLine("    /// <summary>Returns whether a module is enabled by generated module metadata and configuration.</summary>");
         sb.AppendLine("    public static bool IsModuleEnabled(");
-        sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration,");
+        sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration,");
         sb.AppendLine("        string moduleName)");
         sb.AppendLine("    {");
         sb.AppendLine("        return moduleName switch");
@@ -784,7 +784,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine($"    /// <summary>Maps the [HttpEndpoint] handlers in the '{moduleName}' module onto <paramref name=\"app\"/>.</summary>");
         sb.AppendLine($"    public static global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder {HttpMethodName(moduleName)}(");
-        sb.AppendLine("        global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)");
+        sb.AppendLine("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)");
         sb.AppendLine("    {");
         foreach (var endpoint in endpoints)
             HttpEndpointEmission.AppendRegistration(sb, endpoint, "        ", "app");
@@ -809,7 +809,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine($"    /// <summary>Registers the JSON-RPC-exposed [RpcMethod] handlers in the '{moduleName}' module on <paramref name=\"dispatcher\"/>.</summary>");
         sb.AppendLine($"    public static global::Elarion.JsonRpc.JsonRpcDispatcher {JsonRpcMethodName(moduleName)}(");
-        sb.AppendLine("        global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher)");
+        sb.AppendLine("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher)");
         sb.AppendLine("    {");
         foreach (var method in methods)
         {
@@ -845,7 +845,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine($"    /// <summary>Registers the MCP-exposed [RpcMethod] handlers in the '{moduleName}' module on the MCP <paramref name=\"dispatcher\"/>.</summary>");
         sb.AppendLine($"    public static global::Elarion.JsonRpc.JsonRpcDispatcher {McpMethodName(moduleName)}(");
-        sb.AppendLine("        global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher)");
+        sb.AppendLine("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher)");
         sb.AppendLine("    {");
         foreach (var method in methods)
         {

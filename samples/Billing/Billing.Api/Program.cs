@@ -20,10 +20,10 @@ builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<AppDbContext>(
 
 // Compose every module's services — handlers, services, validators — each gated by Modules:{Name}:Enabled.
 // There are no hand-written Add{Module}…() calls.
-ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
+builder.Services.ConfigureAllServices(builder.Configuration);
 
 // One serializer for runtime dispatch and schema export, built from each module's JSON resolver.
-var resolvers = ModuleBootstrapper.GetAllJsonTypeInfoResolvers(builder.Configuration);
+var resolvers = builder.Configuration.GetAllJsonTypeInfoResolvers();
 var serializerOptions = new JsonSerializerOptions {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     PropertyNameCaseInsensitive = true,
@@ -47,7 +47,7 @@ using (var scope = app.Services.CreateScope()) {
     db.SaveChanges();
 }
 
-ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);
+app.MapAllEndpoints(app.Configuration);
 app.MapJsonRpc();
 
 app.Run();

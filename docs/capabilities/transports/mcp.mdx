@@ -38,9 +38,9 @@ builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMet
 
 // The MCP server: a dedicated dispatcher built from the MCP-surfaced methods, with one tool per handler.
 builder.Services.AddElarionMcp(
-    ModuleBootstrapper.GetMcpMetadata(builder.Configuration), // reflection-free, gated tool table
+    builder.Configuration.GetMcpMetadata(), // reflection-free, gated tool table
     serializerOptions,
-    ModuleBootstrapper.RegisterMcpMethods,                    // builds the dedicated, gated MCP dispatcher
+    ModuleBootstrapper.RegisterMcpMethods,  // builds the dedicated, gated MCP dispatcher
     o => o.ServerName = "MyApp");
 
 var app = builder.Build();
@@ -123,7 +123,7 @@ public sealed class CreateClient : IHandler<...> { ... }
 
 ```csharp
 builder.Services.AddElarionMcp(
-    ModuleBootstrapper.GetMcpMetadata(builder.Configuration),
+    builder.Configuration.GetMcpMetadata(),
     serializerOptions,
     ModuleBootstrapper.RegisterMcpMethods,
     o => {

@@ -63,7 +63,7 @@ public static partial class ModuleBootstrapper;
 builder.Services.AddProblemDetails();   // RFC 7807 responses
 var app = builder.Build();
 
-ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);   // module routes, gated per module
+app.MapAllEndpoints(app.Configuration);   // module routes, gated per module
 ```
 
 The generated registration is a strongly-typed minimal-API lambda per handler (no open generics, no

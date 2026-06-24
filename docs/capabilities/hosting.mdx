@@ -32,11 +32,14 @@ namespace MyApp.Api.Hosting;
 public static partial class ModuleBootstrapper;
 ```
 
-`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints(endpoints, configuration)`,
-`RegisterRpcMethods(dispatcher, configuration)`, `RegisterMcpMethods(dispatcher, configuration)`,
-`GetMcpMetadata(configuration)`, `GetAllJsonTypeInfoResolvers`, `IsModuleEnabled`, and `GetAllModuleNames`,
-plus per-module transport methods (`Map{Module}Http`, `Add{Module}JsonRpc`, `Add{Module}Mcp`,
-`Get{Module}McpMetadata`) for every module that owns `[HttpEndpoint]` / `[RpcMethod]` handlers.
+`ModuleBootstrapper` gains **extension methods on their natural receivers** so the host wires modules
+fluently: `services.ConfigureAllServices(configuration)`, `endpoints.MapAllEndpoints(configuration)`,
+`dispatcher.RegisterRpcMethods(configuration)`, `dispatcher.RegisterMcpMethods(configuration)`,
+`configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and
+`configuration.IsModuleEnabled(name)` — plus the parameterless `ModuleBootstrapper.GetAllModuleNames()`
+and per-module transport extension methods (`Map{Module}Http`, `Add{Module}JsonRpc`, `Add{Module}Mcp`)
+and the parameterless `Get{Module}McpMetadata` for every module that owns `[HttpEndpoint]` / `[RpcMethod]`
+handlers.
 
 All transports are **module-scoped and feature-flag-gated** through the bootstrapper: a module disabled
 with `Modules:{Name}:Enabled = false` has its services, validators, `MapEndpoints`, `[HttpEndpoint]` routes,
@@ -55,7 +58,7 @@ builder.Services.AddMyAppApplicationScheduledJobs();
 builder.Services.AddMyAppApplicationResiliencePolicies();
 builder.Services.AddInMemoryScheduler(builder.Configuration);
 builder.AddMyAppPlatformCapabilities();
-ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
+builder.Services.ConfigureAllServices(builder.Configuration);
 
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
@@ -65,7 +68,7 @@ builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMet
 
 var app = builder.Build();
 
-ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);
+app.MapAllEndpoints(app.Configuration);
 app.MapJsonRpc();
 
 app.Run();
@@ -77,7 +80,7 @@ See [Serialization](/docs/capabilities/serialization) for `CreateSerializerOptio
 resolves `IConfiguration` when the dispatcher singleton is built and registers only the enabled modules'
 JSON-RPC-surfaced `[RpcMethod]` handlers. `MapAllEndpoints` does the same gating for module `MapEndpoints`
 and generated `[HttpEndpoint]` routes. To expose the same handlers over MCP (an independent, equally gated
-transport), pair `ModuleBootstrapper.GetMcpMetadata(builder.Configuration)` with
+transport), pair `builder.Configuration.GetMcpMetadata()` with
 `ModuleBootstrapper.RegisterMcpMethods` via `AddElarionMcp` — see [MCP server](/docs/capabilities/transports/mcp).
 
 <Callout type="info">

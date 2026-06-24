@@ -106,7 +106,7 @@ common dependencies such as Zod when they materially improve safety.
 Plain HTTP/REST is a parallel first-class optional transport that maps the same handlers:
 
 1. Application handlers declare `[HttpEndpoint("route")]` or `[HttpEndpoint(HttpVerb.X, "route")]`. The request/response are read from the handler's `IHandler<TRequest, Result<TResponse>>` interface (success type unwrapped from `Result<T>`), so they may be nested or top-level — nesting/naming carry no semantic weight. Verb precedence: an explicit verb wins; else the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); else `ELHTTP004`. A handler with no resolvable shape reports `ELHTTP001`.
-2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits per-module `Map{Module}Http(IEndpointRouteBuilder)` bodies of strongly-typed minimal-API registrations (one `MapGet`/`MapPost`/... per handler), aggregated and feature-gated by `MapAllEndpoints`.
+2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits per-module `Map{Module}Http(this IEndpointRouteBuilder)` extension-method bodies of strongly-typed minimal-API registrations (one `MapGet`/`MapPost`/... per handler), aggregated and feature-gated by the `endpoints.MapAllEndpoints(configuration)` extension method.
 3. Each emitted lambda binds the request (`[AsParameters]` for GET/DELETE and opt-in custom-bound requests; JSON body for default POST/PUT/PATCH) and translates `Result<T>` via `ElarionHttpResults` — `200`/`204` on success, RFC 7807 ProblemDetails on failure with the status from `HttpAppErrorMapper`.
 
 Keep the generator emitting concrete-typed lambdas (no open generics, no reflection
@@ -124,7 +124,7 @@ HTTP mapping is **module-scoped and feature-flag-gated** — see
 MCP is a parallel first-class optional transport, a peer of JSON-RPC and HTTP, served by `Elarion.AspNetCore.Mcp`:
 
 1. A handler opts into MCP via its `[RpcMethod(Transports = ...)]` flag (default `All` includes MCP). `[McpMethod(ToolName = ...)]` customizes only the tool name — it carries no enable/disable flag (use `Transports` for that).
-2. `AppModuleDiscoveryGenerator` emits the gated `RegisterMcpMethods(dispatcher, configuration)` (the MCP-surfaced registrations) and `GetMcpMetadata(configuration)` (the reflection-free tool table), alongside the JSON-RPC `RegisterRpcMethods`.
+2. `AppModuleDiscoveryGenerator` emits the gated `dispatcher.RegisterMcpMethods(configuration)` (the MCP-surfaced registrations) and `configuration.GetMcpMetadata()` (the reflection-free tool table) extension methods, alongside the JSON-RPC `dispatcher.RegisterRpcMethods(configuration)`.
 3. MCP owns a **dedicated dispatcher**: `McpDispatcher` (in `Elarion.JsonRpc`) wraps a separate `JsonRpcDispatcher` instance built only from MCP-surfaced methods. An MCP-only handler is therefore genuinely absent from `/rpc` and the exported JSON-RPC schema; a JSON-RPC-only handler is never dispatchable as a tool; a "both" handler is registered in both dispatchers.
 4. Hosts call `AddElarionMcp(metadata, serializerOptions, registerMcp, configure)` and `MapElarionMcp()`; `MapJsonRpc()` is never required. When a host opts into `[GenerateModuleBootstrapper]`, MCP registration is **module-scoped and feature-flag-gated** — see [Module-aware transport gating](#module-aware-transport-gating).
 
@@ -136,8 +136,8 @@ All three transports become **module-scoped and feature-flag-gated** when a host
 `[GenerateModuleBootstrapper]`. `AppModuleDiscoveryGenerator` associates each `[RpcMethod]`/`[HttpEndpoint]`
 handler with a module by longest-prefix namespace match and emits, on the host bootstrapper partial:
 
-- per-module `Map{Module}Http(IEndpointRouteBuilder)`, `Add{Module}JsonRpc(JsonRpcDispatcher)`, `Add{Module}Mcp(JsonRpcDispatcher)`, and `Get{Module}McpMetadata()`;
-- aggregate `MapAllEndpoints(endpoints, configuration)` (module `MapEndpoints` + `[HttpEndpoint]`), `RegisterRpcMethods(dispatcher, configuration)`, `RegisterMcpMethods(dispatcher, configuration)`, and `GetMcpMetadata(configuration)`.
+- per-module **extension methods** `Map{Module}Http(this IEndpointRouteBuilder)`, `Add{Module}JsonRpc(this JsonRpcDispatcher)`, `Add{Module}Mcp(this JsonRpcDispatcher)`, and the parameterless `Get{Module}McpMetadata()`;
+- aggregate **extension methods** `services.ConfigureAllServices(configuration)`, `endpoints.MapAllEndpoints(configuration)` (module `MapEndpoints` + `[HttpEndpoint]`), `dispatcher.RegisterRpcMethods(configuration)`, `dispatcher.RegisterMcpMethods(configuration)`, `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and `configuration.IsModuleEnabled(name)`.
 
 Per-module JSON-RPC/MCP methods are additionally filtered by each handler's `Transports` flag, so the JSON-RPC
 dispatcher gets only JSON-RPC-surfaced handlers and the MCP dispatcher only MCP-surfaced ones. Core modules map
@@ -159,13 +159,14 @@ per-module URL prefixes by default — each `[HttpEndpoint]` carries its full ro
 flat URL space; a conventions-only group (`MapGroup("")`) adds policy without a prefix, while `MapGroup("/x")`
 opts the whole module into a prefix. The generator never reads `[Authorize]`/`[AllowAnonymous]` from handlers.
 
-Per-endpoint authorization/conventions are the host's job, via the per-module method on a configured group
-(e.g. `MapBillingHttp(app.MapGroup("/billing").RequireAuthorization(policy))`) plus the module
+Per-endpoint authorization/conventions are the host's job, via the per-module extension method on a configured group
+(e.g. `app.MapGroup("/billing").RequireAuthorization(policy).MapBillingHttp()`) plus the module
 `MapEndpoints` escape hatch — the generator never reads `[Authorize]`/`[AllowAnonymous]`. RPC/MCP gating needs
 `IConfiguration` at dispatcher-compose time, so `AddElarionJsonRpcDispatcher` (transport-neutral, via
 `IServiceProvider`) and `AddJsonRpc`/`AddElarionMcp` (ASP.NET, via `IConfiguration`) expose config-aware
 registration overloads, used as `AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods)` and
-`AddElarionMcp(ModuleBootstrapper.GetMcpMetadata(config), serializerOptions, ModuleBootstrapper.RegisterMcpMethods, configure)`.
+`AddElarionMcp(config.GetMcpMetadata(), serializerOptions, ModuleBootstrapper.RegisterMcpMethods, configure)`
+(the `Register*Methods` registration delegates are still passed as method groups).
 
 ## Event / messaging model
 

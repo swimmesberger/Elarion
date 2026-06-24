@@ -4,7 +4,7 @@ namespace Elarion.JsonRpc.Mcp;
 
 /// <summary>
 /// Frozen-dictionary-backed <see cref="IRpcMcpMetadataSource"/>. Instantiated by generated code
-/// (<c>ModuleBootstrapper.GetMcpMetadata(configuration)</c>) with the compile-time metadata table.
+/// (<c>configuration.GetMcpMetadata()</c>) with the compile-time metadata table.
 /// </summary>
 public sealed class RpcMcpMetadataSource : IRpcMcpMetadataSource {
     private readonly FrozenDictionary<string, RpcMcpMethodMetadata> _byMethodName;
