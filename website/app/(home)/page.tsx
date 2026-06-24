@@ -136,7 +136,7 @@ function HandlerSnippet() {
       <span className="t">IAppDbContext</span> db<span className="p">)</span>
       {'\n  '}
       <span className="p">:</span> <span className="t">IHandler</span>
-      <span className="p">&lt;</span>GetClient.<span className="t">Query</span>
+      <span className="p">&lt;</span><span className="t">Query</span>
       <span className="p">,</span> <span className="t">Result</span>
       <span className="p">&lt;</span>
       <span className="t">Response</span>
@@ -200,7 +200,7 @@ function HandlerSnippet() {
 /* ---------------------------------------------------------- Trust strip */
 
 const trustItems = [
-  '.NET 9 · C# 14',
+  '.NET 10 · C# 14',
   'AOT & trim-safe',
   'Zero runtime reflection',
   'OpenTelemetry built in',
