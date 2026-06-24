@@ -25,7 +25,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5.3.0
@@ -70,7 +70,7 @@ jobs:
         working-directory: src/elarion-jsonrpc-client-generator
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Setup Node
         uses: actions/setup-node@v6.4.0
