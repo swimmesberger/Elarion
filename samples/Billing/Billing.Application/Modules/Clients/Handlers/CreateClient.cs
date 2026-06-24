@@ -1,28 +1,48 @@
-using Billing.Domain;
+using System.ComponentModel;
+using Billing.Application.Domain;
+using Billing.Application.Modules.Clients.Services;
+using Billing.Application.Modules.Core.Services;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+using Elarion.Abstractions.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Application.Modules.Clients.Handlers;
 
-/// <summary>Creates a client. Exposed over JSON-RPC as <c>clients.create</c>; injects the generated
-/// <see cref="IAppDbContext"/> and returns a <see cref="Result{T}"/>.</summary>
+/// <summary>Creates a client. Runs the default pipeline (logging → validation → transaction), scopes the
+/// row to the current user, invalidates the clients cache on success, and is exposed over JSON-RPC and
+/// as an MCP tool. The <c>[Description]</c> attributes flow through to the MCP tool surface.</summary>
 [RpcMethod("clients.create")]
-public sealed class CreateClient(IAppDbContext db, TimeProvider clock)
-    : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
+[CacheInvalidate("clients")]
+[Description("Creates a new client for the current account.")]
+public sealed class CreateClient(
+    IAppDbContext db,
+    ICurrentUser user,
+    IClientNumberGenerator numbers,
+    IAuditTrail audit,
+    TimeProvider clock
+) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
     public sealed record Command : ICommand {
+        [Description("The client's display name.")]
         public required string Name { get; init; }
+
+        [Description("The client's billing email address.")]
         public required string Email { get; init; }
     }
 
-    public sealed record Response(Guid Id);
+    public sealed record Response(Guid Id, string Number);
 
     public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
-        var exists = await db.Clients.AnyAsync(c => c.Email == command.Email, ct);
-        if (exists)
+        var exists = await db.Clients
+            .AnyAsync(c => c.OwnerId == user.UserId && c.Email == command.Email, ct);
+        if (exists) {
             return AppError.Conflict($"A client with email {command.Email} already exists.");
+        }
 
         var client = new Client {
             Id = Guid.NewGuid(),
+            OwnerId = user.UserId,
+            Number = await numbers.NextAsync(user.UserId, ct),
             Name = command.Name,
             Email = command.Email,
             CreatedAt = clock.GetUtcNow(),
@@ -30,7 +50,8 @@ public sealed class CreateClient(IAppDbContext db, TimeProvider clock)
 
         db.Clients.Add(client);
         await db.SaveChangesAsync(ct);
+        audit.Record("client.created", client.Id.ToString());
 
-        return new Response(client.Id);
+        return new Response(client.Id, client.Number);
     }
 }

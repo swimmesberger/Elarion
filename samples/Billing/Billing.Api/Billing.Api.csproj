@@ -1,20 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Description>Billing sample — ASP.NET Core JSON-RPC host.</Description>
+    <Description>Billing sample — ASP.NET Core host: JSON-RPC, MCP, scheduler/resilience/cache runtimes, telemetry.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.JsonRpc\Elarion.JsonRpc.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore.Mcp\Elarion.AspNetCore.Mcp.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Messaging.Outbox\Elarion.Messaging.Outbox.csproj" />
     <ProjectReference Include="..\Billing.Application\Billing.Application.csproj" />
-    <ProjectReference Include="..\Billing.Domain\Billing.Domain.csproj" />
+    <ProjectReference Include="..\Billing.Infrastructure\Billing.Infrastructure.csproj" />
   </ItemGroup>
 
-  <!-- The host runs the Elarion generator to emit the module bootstrapper (RPC map, ConfigureAllServices).
-       Consuming Elarion from NuGet the generator ships inside the Elarion package; building from source we
-       reference the generator project as an analyzer. -->
+  <!-- The host runs the Elarion generator to emit the module bootstrapper (RPC/HTTP/MCP maps,
+       ConfigureAllServices). Building from source we reference the generator project as an analyzer. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
                      OutputItemType="Analyzer"
@@ -22,7 +23,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.Extensions.Resilience" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Billing sample — platform capabilities: the PostgreSQL BillingDbContext, the EF Core outbox, and the SMTP email sender.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Billing.Application\Billing.Application.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore\Elarion.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Messaging.Outbox\Elarion.Messaging.Outbox.csproj" />
+  </ItemGroup>
+
+  <!-- The EF Core generator must run here because the concrete BillingDbContext lives here: it emits the
+       class-side DbSet properties and the ConfigureEntities call, reading the entity + configuration
+       manifest from the referenced Billing.Application assembly cross-assembly. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore.Generators\Elarion.EntityFrameworkCore.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

@@ -84,7 +84,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 // Database: the concrete context is infrastructure; handlers see only IAppDbContext.
 builder.Services.AddDbContext<BillingDbContext>(o =>
-    o.UseNpgsql(builder.Configuration.GetConnectionString("Billing")));
+    o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
 builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 
@@ -166,6 +166,12 @@ endpoints so handlers can read it.
 ```csharp title="src/Billing.Api/Program.cs (continued)"
 var app = builder.Build();
 
+// Apply pending migrations on startup, against the Aspire-provisioned database.
+using (var scope = app.Services.CreateScope()) {
+    var db = scope.ServiceProvider.GetRequiredService<BillingDbContext>();
+    await db.Database.MigrateAsync();
+}
+
 app.UseAuthentication();
 app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
@@ -234,11 +240,14 @@ schema. Code after `builder.Build()` does not run during generation, so there is
 
 ### Run it
 
+Run the **Aspire app host** — it starts PostgreSQL, applies migrations, and launches the API, then opens
+the Aspire dashboard with traces and metrics:
+
 ```bash
-dotnet run --project src/Billing.Api
+dotnet run --project src/Billing.AppHost
 ```
 
-With a valid bearer token, create a client over JSON-RPC:
+With a valid bearer token, create a client over JSON-RPC (use the API URL the dashboard shows):
 
 ```bash
 curl -s http://localhost:5000/rpc \
@@ -255,6 +264,13 @@ curl -s http://localhost:5000/rpc \
 A success returns `{ "id": "…", "number": "C-000001" }`; a duplicate email returns the JSON-RPC error
 your host mapped from `AppError.Conflict`. The MCP server is live at `/mcp` for any MCP client, exposing
 `clients.create`, `invoices.create`, and the rest as tools.
+
+<Callout type="info">
+  For local runs without a real issuer, stamp a development principal before `UseElarionCurrentUser()`
+  (Development only) so `ICurrentUser` resolves and `RequireAuthorization()` passes — exactly what the
+  runnable [`samples/Billing`](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing) app
+  does. In production the JWT bearer registration above takes over.
+</Callout>
 
 </Step>
 

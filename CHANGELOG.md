@@ -9,10 +9,23 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
-- **`samples/Billing` — a compiled, current-pattern end-to-end sample.** A multi-assembly app (separate
-  `Billing.Domain` entity project + `Billing.Application` module/handlers + `Billing.Api` JSON-RPC host,
-  on the in-memory EF provider) that builds as part of the solution. It is the canonical up-to-date
-  reference for module wiring and exercises the cross-assembly `[DbEntity]` discovery fix.
+- **`samples/Billing` — a compiled, full-stack, current-pattern sample.** The runnable counterpart of
+  the [tutorial](docs/tutorial), rebuilt to the recommended solution structure and full feature set:
+  a `Billing.Application` (shared-kernel `Domain` entities under no `[AppModule]`, plus `Core`/`Clients`/
+  `Invoicing` modules owning their handlers, validators, services, scheduled jobs, integration events,
+  resilience policy, **and** each entity's `IEntityTypeConfiguration<T>`), a `Billing.Infrastructure`
+  (PostgreSQL `BillingDbContext` with the EF Core outbox, migrations, and SMTP sender), a `Billing.Api`
+  host (JSON-RPC + MCP + scheduler/resilience/cache + OpenTelemetry), a `Billing.AppHost` (**.NET Aspire**
+  provisioning PostgreSQL and running the API), and a **Vite + React + Tailwind v4 + shadcn/ui + TanStack
+  Query** `web` frontend that calls the API through the **generated** JSON-RPC client. It demonstrates the
+  full chain — one C# handler becoming a JSON-RPC method, an exported `rpc-schema.json`, a generated typed
+  client, and a React call — and builds as part of the solution.
+- **Solution-structure guidance ([`docs/concepts/solution-structure`](docs/concepts/solution-structure.mdx)).**
+  Documents the recommended layout for consuming apps: keep `[DbEntity]` entities in a shared-kernel
+  namespace (under no `[AppModule]`, so cross-aggregate references never trip the `ELMOD002` boundary
+  analyzer), let each module own its `IEntityTypeConfiguration<T>` beside its handlers, keep
+  infrastructure to platform capabilities, and graduate to a separate assembly only when multiple hosts
+  share the code. The tutorial and the Billing sample follow it.
 - **`HandlerMetadata` decorator seam (`Elarion.Abstractions.Pipeline`).** A decorator can declare a
   `HandlerMetadata` constructor parameter; the source generator supplies it with the **concrete handler
   type**, so attribute-driven decorators (e.g. authorization reading a `[RequirePermission]`-style
@@ -46,6 +59,16 @@ minor releases may include breaking changes.
   To upgrade: remove the `Elarion.Generators` / `Elarion.EntityFrameworkCore.Generators`
   `PackageReference`s; add a direct `Elarion` reference to host projects that previously relied on the
   standalone generator package.
+
+### Fixed
+- **Generated TypeScript JSON-RPC client now type-checks under `erasableSyntaxOnly`.** The client emitted
+  by `@swimmesberger/elarion-jsonrpc-client-generator` declared its error classes (`RpcError`,
+  `RpcTransportError`) with TypeScript **constructor parameter properties**, which are rejected when a
+  consumer sets `"erasableSyntaxOnly": true` — now the default in `npm create vite@latest -- --template
+  react-ts` (TypeScript 6 emits `TS1294`). The classes now declare their fields and assign them in the
+  constructor body, so a freshly scaffolded Vite/React app type-checks the generated client without
+  editing its `tsconfig`. The public API (constructor signatures, `.code`/`.data`/`.status` members) is
+  unchanged.
 
 ## [0.2.0] - 2026-06-19
 

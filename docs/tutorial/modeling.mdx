@@ -17,10 +17,10 @@ you define the data model and the module boundaries; the handlers come in
 Entities opt into generation with `[DbEntity]`. Both carry an `OwnerId` — the id of the signed-in
 account that owns the row — which is what later lets reads and caches be scoped per user.
 
-```csharp title="src/Billing.Application/Data/Client.cs"
+```csharp title="src/Billing.Application/Domain/Client.cs"
 using Elarion.EntityFrameworkCore;
 
-namespace Billing.Application.Data;
+namespace Billing.Application.Domain;
 
 [DbEntity]
 public sealed class Client {
@@ -33,10 +33,10 @@ public sealed class Client {
 }
 ```
 
-```csharp title="src/Billing.Application/Data/Invoice.cs"
+```csharp title="src/Billing.Application/Domain/Invoice.cs"
 using Elarion.EntityFrameworkCore;
 
-namespace Billing.Application.Data;
+namespace Billing.Application.Domain;
 
 [DbEntity]
 public sealed class Invoice {
@@ -93,14 +93,18 @@ interface.
 
 ### Add entity configuration
 
-Keep schema rules close to the entities with `IEntityTypeConfiguration<T>`. The generator discovers
-these and emits direct `Configure(...)` calls — no `ApplyConfigurationsFromAssembly` reflection.
+Each module owns the schema for the entities it works with. Put the `IEntityTypeConfiguration<T>` in
+the module, beside its handlers — it references only the shared-kernel entity, so it never crosses a
+module boundary (and ELMOD002 only inspects constructor/field/property surface, never the `Configure`
+body). The generator discovers these wherever they live and emits direct `Configure(...)` calls — no
+`ApplyConfigurationsFromAssembly` reflection.
 
-```csharp title="src/Billing.Application/Data/ClientConfiguration.cs"
+```csharp title="src/Billing.Application/Modules/Clients/ClientConfiguration.cs"
+using Billing.Application.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Billing.Application.Data;
+namespace Billing.Application.Modules.Clients;
 
 public sealed class ClientConfiguration : IEntityTypeConfiguration<Client> {
     public void Configure(EntityTypeBuilder<Client> builder) {
@@ -112,11 +116,12 @@ public sealed class ClientConfiguration : IEntityTypeConfiguration<Client> {
 }
 ```
 
-```csharp title="src/Billing.Application/Data/InvoiceConfiguration.cs"
+```csharp title="src/Billing.Application/Modules/Invoicing/InvoiceConfiguration.cs"
+using Billing.Application.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Billing.Application.Data;
+namespace Billing.Application.Modules.Invoicing;
 
 public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
     public void Configure(EntityTypeBuilder<Invoice> builder) {
@@ -245,7 +250,7 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateSlimBuilder(args);
 
 builder.Services.AddDbContext<BillingDbContext>(o =>
-    o.UseNpgsql(builder.Configuration.GetConnectionString("Billing")));
+    o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
 builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 
@@ -260,10 +265,13 @@ transaction decorator (added next) can begin transactions without knowing the co
 dotnet ef migrations add Initial \
   --project src/Billing.Infrastructure \
   --startup-project src/Billing.Api
-dotnet ef database update \
-  --project src/Billing.Infrastructure \
-  --startup-project src/Billing.Api
 ```
+
+You do not run `dotnet ef database update` by hand: the host applies pending migrations on startup
+(`await db.Database.MigrateAsync()` in [Host the API](/docs/tutorial/hosting)), against the database the
+Aspire app host provisions. To scaffold migrations without launching the host, add a
+[design-time factory](https://learn.microsoft.com/ef/core/cli/dbcontext-creation#from-a-design-time-factory)
+that supplies `UseNpgsql(...)` — the runnable sample includes one.
 
 </Step>
 

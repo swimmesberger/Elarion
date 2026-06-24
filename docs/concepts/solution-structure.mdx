@@ -1,0 +1,117 @@
+---
+title: Solution structure
+description: Where entities, modules, and schema configuration belong relative to the module-boundary rule — keep entities in a shared-kernel namespace, let each module own its handlers and schema, and graduate to separate assemblies only when they earn their keep.
+---
+
+[Project structure](/docs/getting-started/project-structure) covers the mechanical layout the
+generators rely on. This page is the **decision behind that layout**: given that Elarion's
+module-boundary analyzer ([`ELMOD002`](/docs/concepts/cross-module-communication)) treats everything
+inside an `[AppModule]` as module-internal, where do shared things like entities go?
+
+## The rule that drives everything
+
+The boundary analyzer treats every type declared inside a module as **module-internal** — reachable
+from another module only through a [`[ModuleContract]`](/docs/concepts/cross-module-communication)
+interface. Declaring `DependsOn` does **not** grant access to another module's internals; it only
+orders initialization.
+
+Concretely, a `[Service]`, a handler, or a `[DbEntity]` entity declared *inside* module A cannot be
+referenced from module B. Types declared under **no** `[AppModule]` (the shared kernel) are never
+flagged, so every module may depend on them freely.
+
+That single rule decides where entities go.
+
+## Entities are shared kernel, not module-internal
+
+**Do not put entities inside a module.** Domain entities cross-reference each other through foreign-key
+navigation properties, and handlers routinely query across aggregates — so entities cannot be
+module-internal, and a `[ModuleContract]` interface cannot model an EF relationship. If `Invoice` lived
+in a `Billing` module and `Client` in a `Clients` module, an `Invoice.Client` navigation property would
+trip `ELMOD002`.
+
+Keep entities and their enums in a **shared-kernel namespace under no `[AppModule]`** — for example
+`MyApp.Application.Domain` — that every module may depend on and that depends on no module.
+
+```text
+src/
+  MyApp.Application/
+    Domain/                  ← shared kernel: entities + enums (NOT in any [AppModule])
+      Client.cs              [DbEntity]
+      Invoice.cs             [DbEntity]   ← FK navigation across aggregates is fine here
+      InvoiceStatus.cs       (enum)
+    Modules/
+      Clients/               ← vertical slice: handlers, validators,
+        ClientsModule.cs       [AppModule("Clients")]
+        ClientConfiguration.cs IEntityTypeConfiguration<Client>   ← the module owns its schema
+        Handlers/ …
+      Billing/
+        BillingModule.cs       [AppModule("Billing")]
+        InvoiceConfiguration.cs
+        Handlers/ …
+  MyApp.Infrastructure/      ← platform only: DbContext, interceptors, migrations, naming conventions
+  MyApp.Api/                 ← host: [GenerateModuleBootstrapper], middleware, transport wiring
+```
+
+## Modules contribute schema; the host loads it
+
+Place each `IEntityTypeConfiguration<T>` **in the module that owns the entity's behavior**, beside its
+handlers. The EF Core generator discovers `IEntityTypeConfiguration<T>` implementations wherever they
+live and emits direct `Configure(...)` calls into a generated `ConfigureEntities(ModelBuilder)` on the
+context — so colocation is a **convention for discoverability, not a generator requirement**.
+
+A module-owned configuration is safe across the boundary for two independent reasons:
+
+1. It references only the shared-kernel entity (`Client`), never another module's internals.
+2. `ELMOD002` inspects only the **dependency surface** — constructor parameters, fields, and
+   properties — never a method body like `Configure`.
+
+The `[DbEntity]` manifest pairs these module-owned configs with the shared entities, and the generated
+`ConfigureEntities` lives in the **context's** assembly (which carries no module analyzer). Infrastructure
+instantiates nothing per-entity — it just calls `ConfigureEntities(modelBuilder)` from `OnModelCreating`.
+
+<Callout type="info">
+  This keeps **Infrastructure as platform capabilities, not domain configuration**. The DbContext,
+  interceptors, naming conventions, and migrations are platform concerns; *what shape a `Client` table
+  has* is a module concern and lives with the module.
+</Callout>
+
+## A separate `Domain` project is usually unnecessary
+
+For **one bounded context / one `DbContext`**, a shared-kernel *namespace* inside the application project
+is enough. A separate assembly only earns its keep when **multiple host projects share the code**. Until
+then, `MyApp.Application.Domain` (a namespace, not an assembly) avoids a project boundary you would only
+have to wire and reference.
+
+<Callout type="warn">
+  Whatever assembly declares `[DbEntity]` types must reference **`Elarion.EntityFrameworkCore`** (whose
+  bundled generator emits that assembly's entity manifest), not merely depend on a project that does.
+  NuGet analyzer assets are not transitive. If you *do* split entities into their own project, that
+  project needs the reference directly — otherwise no manifest is emitted, the context resolves zero
+  entities, and no `DbSet`s are generated, with no error. See
+  [Entity Framework Core → Setup](/docs/capabilities/entity-framework).
+</Callout>
+
+## When to graduate to a module-owned schema
+
+The shared-kernel default is right until an aggregate cluster becomes a **genuinely separate bounded
+context with its own `DbContext` and schema**. At that point it can move into a self-contained module
+*assembly* that owns its entities, configurations, and migrations — and *that* is the point at which
+module-internal entities become correct, because nothing outside the context references them. The
+cross-assembly `[DbEntity]` manifest is the mechanism that makes this split work without reflection.
+
+| Signal | Layout |
+| --- | --- |
+| One bounded context, one `DbContext` | Shared-kernel **namespace** in the application project; module-owned configs |
+| Code shared by multiple host projects | Promote the shared kernel to its own **assembly** (reference `Elarion.EntityFrameworkCore` there) |
+| An aggregate becomes its own bounded context with its own `DbContext`/schema | Self-contained module **assembly** owning its entities, configs, and migrations |
+
+## See also
+
+- [Project structure](/docs/getting-started/project-structure) — the mechanical layout and the
+  conventions the generators rely on.
+- [Cross-module communication](/docs/concepts/cross-module-communication) — `[ModuleContract]` and the
+  `ELMOD002` analyzer in full.
+- [Entity Framework Core](/docs/capabilities/entity-framework) — `[DbEntity]`, `[GenerateDbSets]`, and
+  configuration discovery.
+- The runnable [`samples/Billing`](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing)
+  app follows this exact layout.

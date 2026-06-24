@@ -26,9 +26,10 @@
   </Folder>
   <Folder Name="/samples/">
     <File Path="samples/Directory.Build.props" />
-    <Project Path="samples/Billing/Billing.Domain/Billing.Domain.csproj" />
     <Project Path="samples/Billing/Billing.Application/Billing.Application.csproj" />
+    <Project Path="samples/Billing/Billing.Infrastructure/Billing.Infrastructure.csproj" />
     <Project Path="samples/Billing/Billing.Api/Billing.Api.csproj" />
+    <Project Path="samples/Billing/Billing.AppHost/Billing.AppHost.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Elarion.Tests/Elarion.Tests.csproj" />
