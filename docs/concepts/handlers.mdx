@@ -7,6 +7,39 @@ A handler is the primary application use-case unit. It receives a request object
 response, usually a [`Result<T>`](/docs/concepts/results-and-errors). Handlers contain business
 orchestration — not transport, serialization, or HTTP concerns.
 
+## What is a use case?
+
+A **use case** is a single thing your application can *do*, named from the user's point of view:
+"get a client", "create an order", "cancel a subscription". It is one complete unit of behavior — it
+takes some input, does the work (reads or changes data, applies the rules), and produces a result.
+That is the whole idea.
+
+It is deliberately a smaller thing than a "service", a "controller", or a "screen". A use case is
+**not** an HTTP endpoint, a database table, or a class bundling loosely related methods — it is
+exactly one action. If you can phrase it as a short verb-plus-noun — *get client*, *list invoices*,
+*approve request* — it is most likely a single use case.
+
+<Callout type="info">
+  If you have read about *Clean Architecture*, *Hexagonal/Ports-and-Adapters*, or *vertical slice*
+  designs, a use case is the same thing those call an **interactor**, an **application-service
+  method**, or a **slice**. You need none of that background to use Elarion — the plain definition
+  above is all that matters here.
+</Callout>
+
+### How a use case materializes in Elarion
+
+In Elarion, one use case is **one handler class**. The three parts of the definition map directly
+onto the class:
+
+- the **input** is the handler's request type (the nested `Query` or `Command`),
+- the **work** is the body of `HandleAsync`,
+- the **output** is the `Result<T>` it returns.
+
+Because the handler is a plain class — not tied to HTTP, JSON-RPC, MCP, or any specific database
+framework — the *same* use case can be exposed over several [transports](/docs/capabilities/transports)
+or called straight from a test, unchanged. The `GetClient` handler below is the entire "get a client"
+use case: input (`Query`), work (the EF Core query), output (`Result<Response>`).
+
 ```csharp
 using Elarion.Abstractions;
 using Microsoft.EntityFrameworkCore;
