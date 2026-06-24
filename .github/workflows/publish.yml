@@ -30,7 +30,7 @@ jobs:
       NUGET_USER: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Resolve version
         id: version
@@ -131,7 +131,7 @@ jobs:
         working-directory: src/elarion-jsonrpc-client-generator
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Resolve version
         id: version
