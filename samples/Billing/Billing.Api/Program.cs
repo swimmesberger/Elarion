@@ -20,7 +20,7 @@ builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<AppDbContext>(
 
 // Compose every module's services — handlers, services, validators — each gated by Modules:{Name}:Enabled.
 // There are no hand-written Add{Module}…() calls.
-builder.Services.ConfigureAllServices(builder.Configuration);
+builder.Services.AddElarion(builder.Configuration);
 
 // One serializer for runtime dispatch and schema export, built from each module's JSON resolver.
 var resolvers = builder.Configuration.GetAllJsonTypeInfoResolvers();
@@ -47,7 +47,7 @@ using (var scope = app.Services.CreateScope()) {
     db.SaveChanges();
 }
 
-app.MapAllEndpoints(app.Configuration);
+app.MapElarion(app.Configuration);
 app.MapJsonRpc();
 
 app.Run();

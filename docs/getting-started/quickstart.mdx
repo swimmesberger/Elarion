@@ -208,7 +208,7 @@ var builder = WebApplication.CreateSlimBuilder(args);
 builder.Services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase("quickstart"));
 builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
-builder.Services.ConfigureAllServices(builder.Configuration);
+builder.Services.AddElarion(builder.Configuration);
 
 var resolvers = builder.Configuration.GetAllJsonTypeInfoResolvers();
 var serializerOptions = new JsonSerializerOptions {
@@ -234,7 +234,7 @@ using (var scope = app.Services.CreateScope()) {
     db.SaveChanges();
 }
 
-app.MapAllEndpoints(app.Configuration);
+app.MapElarion(app.Configuration);
 app.MapJsonRpc();
 
 app.Run();

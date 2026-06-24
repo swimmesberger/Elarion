@@ -33,7 +33,7 @@ public static partial class ModuleBootstrapper;
 ```
 
 `ModuleBootstrapper` gains **extension methods on their natural receivers** so the host wires modules
-fluently: `services.ConfigureAllServices(configuration)`, `endpoints.MapAllEndpoints(configuration)`,
+fluently: `services.AddElarion(configuration)`, `endpoints.MapElarion(configuration)`,
 `dispatcher.RegisterRpcMethods(configuration)`, `dispatcher.RegisterMcpMethods(configuration)`,
 `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and
 `configuration.IsModuleEnabled(name)` — plus the parameterless `ModuleBootstrapper.GetAllModuleNames()`
@@ -58,7 +58,7 @@ builder.Services.AddMyAppApplicationScheduledJobs();
 builder.Services.AddMyAppApplicationResiliencePolicies();
 builder.Services.AddInMemoryScheduler(builder.Configuration);
 builder.AddMyAppPlatformCapabilities();
-builder.Services.ConfigureAllServices(builder.Configuration);
+builder.Services.AddElarion(builder.Configuration);
 
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
@@ -68,7 +68,7 @@ builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMet
 
 var app = builder.Build();
 
-app.MapAllEndpoints(app.Configuration);
+app.MapElarion(app.Configuration);
 app.MapJsonRpc();
 
 app.Run();
@@ -78,7 +78,7 @@ See [Serialization](/docs/capabilities/serialization) for `CreateSerializerOptio
 
 `AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods)` is the **config-aware** overload: it
 resolves `IConfiguration` when the dispatcher singleton is built and registers only the enabled modules'
-JSON-RPC-surfaced `[RpcMethod]` handlers. `MapAllEndpoints` does the same gating for module `MapEndpoints`
+JSON-RPC-surfaced `[RpcMethod]` handlers. `MapElarion` does the same gating for module `MapEndpoints`
 and generated `[HttpEndpoint]` routes. To expose the same handlers over MCP (an independent, equally gated
 transport), pair `builder.Configuration.GetMcpMetadata()` with
 `ModuleBootstrapper.RegisterMcpMethods` via `AddElarionMcp` — see [MCP server](/docs/capabilities/transports/mcp).

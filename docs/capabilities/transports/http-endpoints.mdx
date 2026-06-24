@@ -52,7 +52,7 @@ interface (the success type is unwrapped from `Result<T>`); the types may be nes
 
 `[HttpEndpoint]` handlers are mapped through the generated module bootstrapper, so they are
 **feature-flag-gated** like everything else a module owns ([modules are the single hosting path](/docs/capabilities/hosting)).
-`MapAllEndpoints` calls each enabled module's `MapEndpoints` hook and its generated `Map{Module}Http`
+`MapElarion` calls each enabled module's `MapEndpoints` hook and its generated `Map{Module}Http`
 method; a module disabled with `Modules:{Name}:Enabled = false` drops its routes:
 
 ```csharp
@@ -63,7 +63,7 @@ public static partial class ModuleBootstrapper;
 builder.Services.AddProblemDetails();   // RFC 7807 responses
 var app = builder.Build();
 
-app.MapAllEndpoints(app.Configuration);   // module routes, gated per module
+app.MapElarion(app.Configuration);   // module routes, gated per module
 ```
 
 The generated registration is a strongly-typed minimal-API lambda per handler (no open generics, no
@@ -73,7 +73,7 @@ Delegate Generator. Each endpoint is also annotated with `.Produces<TResponse>(.
 
 ### Per-module authorization and route conventions
 
-`MapAllEndpoints` maps every enabled module's routes onto the same route builder, leaving authentication
+`MapElarion` maps every enabled module's routes onto the same route builder, leaving authentication
 and authorization to the host's middleware and global policies. There are no per-module URL prefixes by
 default — each `[HttpEndpoint("...")]` carries its own complete route template, so modules share a flat
 URL space and any module can declare a route under any path (the generator only guards against duplicate
@@ -81,7 +81,7 @@ URL space and any module can declare a route under any path (the generator only 
 
 When a module needs its own authorization policy or route conventions, that is a **module concern**: the
 module declares an optional `ConfigureEndpointGroup` hook that returns the builder its generated routes
-(and its `MapEndpoints` hook) are mapped onto. The host keeps calling `MapAllEndpoints` once; the module
+(and its `MapEndpoints` hook) are mapped onto. The host keeps calling `MapElarion` once; the module
 owns its group:
 
 ```csharp

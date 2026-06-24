@@ -14,7 +14,7 @@ namespace Elarion.Generators;
 /// It additionally groups <c>[HttpEndpoint]</c> and <c>[RpcMethod]</c> handlers by their owning module
 /// (longest-prefix namespace match) and emits per-module, per-transport methods — <c>Map{Module}Http</c>,
 /// <c>Add{Module}JsonRpc</c>, <c>Add{Module}Mcp</c>, and <c>Get{Module}McpMetadata</c> — plus gated aggregate
-/// entry points (<c>MapAllEndpoints</c>, <c>RegisterRpcMethods</c>, <c>RegisterMcpMethods</c>,
+/// entry points (<c>MapElarion</c>, <c>RegisterRpcMethods</c>, <c>RegisterMcpMethods</c>,
 /// <c>GetMcpMetadata</c>). A handler chooses its dispatcher-based surfaces via
 /// <c>[RpcMethod(..., Transports = RpcTransports.JsonRpc | RpcTransports.Mcp)]</c> (both by default), so a method can
 /// be JSON-RPC-only, MCP-only, or both. This makes a disabled module disappear across every transport surface, and
@@ -580,9 +580,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine($"public static partial class {target.ClassName}");
         sb.AppendLine("{");
 
-        // --- ConfigureAllServices ---
-        sb.AppendLine("    /// <summary>Calls ConfigureServices on all enabled modules.</summary>");
-        sb.AppendLine("    public static void ConfigureAllServices(");
+        // --- AddElarion ---
+        sb.AppendLine("    /// <summary>Registers default services and calls ConfigureServices on all enabled modules.</summary>");
+        sb.AppendLine("    public static void AddElarion(");
         sb.AppendLine("        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
@@ -607,9 +607,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // --- MapAllEndpoints (module MapEndpoints + generated [HttpEndpoint] mapping, both gated) ---
+        // --- MapElarion (module MapEndpoints + generated [HttpEndpoint] mapping, both gated) ---
         sb.AppendLine("    /// <summary>Calls MapEndpoints and maps generated [HttpEndpoint] handlers on all enabled modules.</summary>");
-        sb.AppendLine("    public static void MapAllEndpoints(");
+        sb.AppendLine("    public static void MapElarion(");
         sb.AppendLine("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");

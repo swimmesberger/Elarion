@@ -106,7 +106,7 @@ common dependencies such as Zod when they materially improve safety.
 Plain HTTP/REST is a parallel first-class optional transport that maps the same handlers:
 
 1. Application handlers declare `[HttpEndpoint("route")]` or `[HttpEndpoint(HttpVerb.X, "route")]`. The request/response are read from the handler's `IHandler<TRequest, Result<TResponse>>` interface (success type unwrapped from `Result<T>`), so they may be nested or top-level — nesting/naming carry no semantic weight. Verb precedence: an explicit verb wins; else the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); else `ELHTTP004`. A handler with no resolvable shape reports `ELHTTP001`.
-2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits per-module `Map{Module}Http(this IEndpointRouteBuilder)` extension-method bodies of strongly-typed minimal-API registrations (one `MapGet`/`MapPost`/... per handler), aggregated and feature-gated by the `endpoints.MapAllEndpoints(configuration)` extension method.
+2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits per-module `Map{Module}Http(this IEndpointRouteBuilder)` extension-method bodies of strongly-typed minimal-API registrations (one `MapGet`/`MapPost`/... per handler), aggregated and feature-gated by the `endpoints.MapElarion(configuration)` extension method.
 3. Each emitted lambda binds the request (`[AsParameters]` for GET/DELETE and opt-in custom-bound requests; JSON body for default POST/PUT/PATCH) and translates `Result<T>` via `ElarionHttpResults` — `200`/`204` on success, RFC 7807 ProblemDetails on failure with the status from `HttpAppErrorMapper`.
 
 Keep the generator emitting concrete-typed lambdas (no open generics, no reflection
@@ -137,7 +137,7 @@ All three transports become **module-scoped and feature-flag-gated** when a host
 handler with a module by longest-prefix namespace match and emits, on the host bootstrapper partial:
 
 - per-module **extension methods** `Map{Module}Http(this IEndpointRouteBuilder)`, `Add{Module}JsonRpc(this JsonRpcDispatcher)`, `Add{Module}Mcp(this JsonRpcDispatcher)`, and the parameterless `Get{Module}McpMetadata()`;
-- aggregate **extension methods** `services.ConfigureAllServices(configuration)`, `endpoints.MapAllEndpoints(configuration)` (module `MapEndpoints` + `[HttpEndpoint]`), `dispatcher.RegisterRpcMethods(configuration)`, `dispatcher.RegisterMcpMethods(configuration)`, `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and `configuration.IsModuleEnabled(name)`.
+- aggregate **extension methods** `services.AddElarion(configuration)`, `endpoints.MapElarion(configuration)` (module `MapEndpoints` + `[HttpEndpoint]`), `dispatcher.RegisterRpcMethods(configuration)`, `dispatcher.RegisterMcpMethods(configuration)`, `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and `configuration.IsModuleEnabled(name)`.
 
 Per-module JSON-RPC/MCP methods are additionally filtered by each handler's `Transports` flag, so the JSON-RPC
 dispatcher gets only JSON-RPC-surfaced handlers and the MCP dispatcher only MCP-surfaced ones. Core modules map
@@ -153,7 +153,7 @@ complete contract unless a module is explicitly disabled for the schema build.
 
 A module owns the route group / authorization policy / conventions for its generated `[HttpEndpoint]` routes via
 an optional static `ConfigureEndpointGroup(IEndpointRouteBuilder) → IEndpointRouteBuilder` hook on the
-`[AppModule]` type (detected structurally like `MapEndpoints`). `MapAllEndpoints` maps that module's `MapEndpoints`
+`[AppModule]` type (detected structurally like `MapEndpoints`). `MapElarion` maps that module's `MapEndpoints`
 hook and generated routes onto the builder it returns; absent the hook, they map onto the root. There are no
 per-module URL prefixes by default — each `[HttpEndpoint]` carries its full route template and modules share a
 flat URL space; a conventions-only group (`MapGroup("")`) adds policy without a prefix, while `MapGroup("/x")`
@@ -266,7 +266,7 @@ module author wiring them by hand. The mechanism is a cross-generator partial-me
   per-module `Add{Module}…`). Unimplemented hooks elide to no-ops, so a module that uses only some
   categories costs nothing for the rest. All generators ship in `Elarion.Generators` and so always run
   together; isolated generator unit tests must run `ModuleDefaultServicesGenerator` alongside.
-- `ConfigureAllServices` in the bootstrapper calls `{Module}.ConfigureDefaultServices(services)` gated
+- `AddElarion` in the bootstrapper calls `{Module}.ConfigureDefaultServices(services)` gated
   by `IsModuleEnabled`, **before** the module's optional hand-written `ConfigureServices` (now reserved
   for non-generated registrations). For a referenced module whose assembly predates the skeleton
   generator, the host omits the call (it probes for the public sibling via `GetTypeByMetadataName`);

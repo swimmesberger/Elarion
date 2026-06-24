@@ -78,7 +78,7 @@ skeleton is emitted unconditionally for every module, so the host call always co
 ### How the host invokes it
 
 When the host opts into `[GenerateModuleBootstrapper]`, the generated bootstrapper's
-`ConfigureAllServices` calls each module's `ConfigureDefaultServices(services)` — gated by the
+`AddElarion` calls each module's `ConfigureDefaultServices(services)` — gated by the
 module's feature flag — and then, only if the module declares one, its hand-written
 `ConfigureServices(services, configuration)`. The generated defaults always run **before** your custom
 registrations. See [Hosting](/docs/capabilities/hosting) for the host-side wiring.

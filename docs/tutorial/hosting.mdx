@@ -24,7 +24,7 @@ namespace Billing.Api.Hosting;
 public static partial class ModuleBootstrapper;
 ```
 
-`ModuleBootstrapper` gains `ConfigureAllServices`, `MapAllEndpoints`, `RegisterRpcMethods` (JSON-RPC),
+`ModuleBootstrapper` gains `AddElarion`, `MapElarion`, `RegisterRpcMethods` (JSON-RPC),
 `RegisterMcpMethods` and `GetMcpMetadata` (MCP), and `GetAllJsonTypeInfoResolvers`. Every transport is
 **feature-flag-gated per module**, so a disabled module disappears from all of them at once.
 
@@ -95,7 +95,7 @@ builder.Services.AddElarionOutbox<BillingDbContext>();
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
 // Scheduler runtime. Job descriptors and event consumers are composed per module by the
-// services.ConfigureAllServices(...) call below — there is no explicit Add…ScheduledJobs call.
+// services.AddElarion(...) call below — there is no explicit Add…ScheduledJobs call.
 builder.Services.AddInMemoryScheduler(builder.Configuration);
 
 // Resilience: generated policy metadata + the Microsoft/Polly-backed runtime.
@@ -118,7 +118,7 @@ builder.Services.AddAuthorization();
 
 // Compose every module's services — handlers, services, validators, scheduled jobs, and event
 // consumers — each gated by Modules:{Name}:Enabled.
-builder.Services.ConfigureAllServices(builder.Configuration);
+builder.Services.AddElarion(builder.Configuration);
 
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
@@ -170,7 +170,7 @@ app.UseAuthentication();
 app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
-app.MapAllEndpoints(app.Configuration);
+app.MapElarion(app.Configuration);
 app.MapJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
