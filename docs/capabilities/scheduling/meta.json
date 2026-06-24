@@ -1,4 +1,4 @@
 {
   "title": "Scheduling",
-  "pages": ["index", "schedules", "overlap-and-misfire", "runtime-jobs", "inspection"]
+  "pages": ["schedules", "overlap-and-misfire", "runtime-jobs", "inspection"]
 }
