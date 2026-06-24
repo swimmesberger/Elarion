@@ -21,6 +21,15 @@ MyApp.sln
 The boundary that matters: **the application project declares intent; the host wires platform
 capabilities.** See [Dependency rules](#dependency-rules) below for where each kind of code belongs.
 
+<Callout type="info">
+  `MyApp.Domain` above is shown as a separate project, but for a **single bounded context** a
+  shared-kernel *namespace* inside `MyApp.Application` (e.g. `MyApp.Application.Domain`) is usually
+  enough — a separate assembly only earns its keep when multiple host projects share the code. Either
+  way, entities belong to the **shared kernel, not inside a module**. [Solution
+  structure](/docs/concepts/solution-structure) explains why and when to graduate to a separate
+  assembly.
+</Callout>
+
 <Callout type="warn">
   The source generators ship **inside** their runtime packages, and NuGet analyzer assets are not
   transitive — so every assembly that declares generator-driven types must reference the package

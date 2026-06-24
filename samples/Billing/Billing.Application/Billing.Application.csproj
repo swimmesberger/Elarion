@@ -1,17 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Billing sample — modules, handlers, validators, and the generated data-access context.</Description>
+    <Description>Billing sample — shared-kernel entities, modules, handlers, and the generated data-access context.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore\Elarion.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="..\Billing.Domain\Billing.Domain.csproj" />
   </ItemGroup>
 
   <!-- Building from source, the generators are referenced as analyzers (consuming Elarion from NuGet
-       they ship bundled in the Elarion / Elarion.EntityFrameworkCore packages). -->
+       they ship bundled in the Elarion / Elarion.EntityFrameworkCore packages). The EF Core generator
+       must be present here because this assembly now declares the [DbEntity] types (shared kernel under
+       Billing.Application.Domain) — the marker package alone would emit no entity manifest or DbSets. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
                      OutputItemType="Analyzer"
@@ -23,6 +24,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="FluentValidation" />
   </ItemGroup>
 
 </Project>

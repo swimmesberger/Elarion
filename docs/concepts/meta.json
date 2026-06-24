@@ -9,6 +9,7 @@
     "services",
     "validators",
     "decorator-pipelines",
-    "cross-module-communication"
+    "cross-module-communication",
+    "solution-structure"
   ]
 }

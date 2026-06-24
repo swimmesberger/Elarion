@@ -102,7 +102,7 @@ no-op-if-not-`Draft` guard makes it **idempotent**, which matters because deferr
 attempt after a transient failure.
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Jobs/SendInvoiceEmailJob.cs"
-using Billing.Application.Data;
+using Billing.Application.Domain;
 using Billing.Application.Modules.Invoicing.Services;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;
@@ -180,7 +180,7 @@ an `IIntegrationEvent`, which `TransactionDecorator`'s `AppliesTo` predicate
 a transaction: a consumer that *writes* commits atomically, while this read-only one simply doesn't use it:
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Events/InvoiceNotifications.cs"
-using Billing.Application.Data;
+using Billing.Application.Domain;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
 using Microsoft.EntityFrameworkCore;
@@ -234,7 +234,7 @@ the stable `JobId` so the frontend can poll it.
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/CreateInvoice.cs"
 using System.ComponentModel;
-using Billing.Application.Data;
+using Billing.Application.Domain;
 using Billing.Application.Modules.Core.Services;
 using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
@@ -385,7 +385,7 @@ The invoices table reads through a cached query, invalidated by the `invoices` t
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/ListInvoices.cs"
 using System.Collections.Generic;
-using Billing.Application.Data;
+using Billing.Application.Domain;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -427,7 +427,7 @@ occurrence owns its retries — and a config placeholder for the schedule so ope
 without a redeploy.
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Jobs/OverdueReminderJob.cs"
-using Billing.Application.Data;
+using Billing.Application.Domain;
 using Elarion.Abstractions.Resilience;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;

@@ -65,10 +65,16 @@ billing/
 ├─ Billing.sln
 ├─ src/
 │  ├─ Billing.Application/      # modules, handlers, services, validators, jobs, policies  ← Elarion + generators
-│  ├─ Billing.Infrastructure/   # BillingDbContext (PostgreSQL), SMTP email sender
-│  └─ Billing.Api/              # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore (+ MCP)
+│  │  └─ Domain/                # shared-kernel [DbEntity] entities + enums (under no [AppModule])
+│  ├─ Billing.Infrastructure/   # BillingDbContext (PostgreSQL), EF outbox, SMTP email sender
+│  ├─ Billing.Api/              # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore (+ MCP)
+│  └─ Billing.AppHost/          # .NET Aspire orchestration  → provisions PostgreSQL, runs the API
 └─ web/                         # Vite + React + TanStack Query frontend
 ```
+
+Entities live in a shared-kernel **namespace** (`Billing.Application.Domain`), not a separate project,
+and each module owns its own `IEntityTypeConfiguration<T>` — see
+[Solution structure](/docs/concepts/solution-structure) for why.
 
 <Callout type="info">
   The dependency direction is `Api → Infrastructure → Application`. The application project never
@@ -80,7 +86,7 @@ billing/
 
 - **.NET 10 SDK** or later (see [Installation](/docs/getting-started/installation)).
 - **Node.js 20+** and **npm** for the frontend and client generator.
-- **Docker** (or a local PostgreSQL) for the database.
+- **Docker** or **Podman** — the .NET Aspire app host provisions PostgreSQL in a container.
 - The EF Core CLI for migrations: `dotnet tool install --global dotnet-ef`.
 
 ## Scaffold the solution
@@ -95,11 +101,12 @@ billing/
 mkdir billing && cd billing
 dotnet new sln -n Billing
 
-dotnet new classlib -n Billing.Application   -o src/Billing.Application
-dotnet new classlib -n Billing.Infrastructure -o src/Billing.Infrastructure
-dotnet new web      -n Billing.Api            -o src/Billing.Api
+dotnet new classlib    -n Billing.Application    -o src/Billing.Application
+dotnet new classlib    -n Billing.Infrastructure -o src/Billing.Infrastructure
+dotnet new web         -n Billing.Api            -o src/Billing.Api
+dotnet new aspire-apphost -n Billing.AppHost     -o src/Billing.AppHost
 
-dotnet sln add src/Billing.Application src/Billing.Infrastructure src/Billing.Api
+dotnet sln add src/Billing.Application src/Billing.Infrastructure src/Billing.Api src/Billing.AppHost
 ```
 
 </Step>
@@ -113,6 +120,7 @@ The onion points inward — infrastructure and the host depend on the applicatio
 ```bash
 dotnet add src/Billing.Infrastructure reference src/Billing.Application
 dotnet add src/Billing.Api            reference src/Billing.Infrastructure src/Billing.Application
+dotnet add src/Billing.AppHost        reference src/Billing.Api
 ```
 
 </Step>
@@ -191,22 +199,37 @@ jobs, and resilience policies across the assembly.
 
 <Step>
 
-### Start PostgreSQL
+### Provision PostgreSQL with .NET Aspire
+
+Rather than starting a database by hand, let the Aspire app host provision PostgreSQL and inject its
+connection string into the API. Add the PostgreSQL hosting integration and orchestrate the resources:
 
 ```bash
-docker run --name billing-db -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=billing -p 5432:5432 -d postgres:17
+dotnet add src/Billing.AppHost package Aspire.Hosting.PostgreSQL
 ```
 
-Add the connection string to the host configuration:
+```csharp title="src/Billing.AppHost/AppHost.cs"
+var builder = DistributedApplication.CreateBuilder(args);
 
-```json title="src/Billing.Api/appsettings.Development.json"
-{
-  "ConnectionStrings": {
-    "Billing": "Host=localhost;Database=billing;Username=postgres;Password=postgres"
-  }
-}
+var postgres = builder.AddPostgres("postgres").WithDataVolume();
+var billingDb = postgres.AddDatabase("billing");
+
+builder.AddProject<Projects.Billing_Api>("api")
+    .WithReference(billingDb)   // injects ConnectionStrings__billing into the API
+    .WaitFor(billingDb);
+
+builder.Build().Run();
 ```
+
+Running the app host (in [Host the API](/docs/tutorial/hosting)) starts the database container and the
+API together — no manual connection string, and the API reads it via
+`builder.Configuration.GetConnectionString("billing")`. The host applies EF migrations on startup, so a
+fresh database is ready on first run.
+
+<Callout type="info">
+  Aspire needs a container runtime (Docker or Podman). The Aspire dashboard it opens also collects the
+  OpenTelemetry traces and metrics the host emits — no separate collector to run locally.
+</Callout>
 
 </Step>
 

@@ -8,6 +8,14 @@ Zod-validated client and calls handlers as if they were local async functions â€
 cancellation. We use **Vite**, **Tailwind v4**, **shadcn/ui**, and **TanStack Query**, all current and
 deliberately pragmatic.
 
+<Callout type="info">
+  To run the whole chain with one command, add the web app to the Aspire app host with
+  `builder.AddViteApp("web", "../web").WithReference(api).WithEnvironment("VITE_API_URL", api.GetEndpoint("http"))`
+  (package `Aspire.Hosting.JavaScript`). Then `dotnet run` on the app host starts PostgreSQL, the API,
+  and the Vite dev server together, with the API URL injected as `VITE_API_URL`. The runnable
+  [`samples/Billing`](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing) wires it this way.
+</Callout>
+
 <Steps>
 
 <Step>
