@@ -75,7 +75,7 @@ builder.Services.AddElarion(builder.Configuration);
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
 
 // MCP: an independent, equally gated transport with its own dispatcher.
 builder.Services.AddElarionMcp(
@@ -130,8 +130,8 @@ if (app.Environment.IsDevelopment()) {
 app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
-app.MapElarion(app.Configuration);
-app.MapJsonRpc().RequireAuthorization();        // POST /rpc
+app.MapElarionEndpoints(app.Configuration);
+app.MapElarionJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
 app.Run();

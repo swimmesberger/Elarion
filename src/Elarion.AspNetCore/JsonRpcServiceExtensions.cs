@@ -31,10 +31,10 @@ public static class JsonRpcServiceExtensions {
     /// JsonRpcSchemaExporter.Generate(dispatcher, serializerOptions);
     ///
     /// // runtime
-    /// builder.Services.AddJsonRpc(o =&gt; o.SerializerOptions = serializerOptions);
+    /// builder.Services.AddElarionJsonRpc(o =&gt; o.SerializerOptions = serializerOptions);
     /// </code>
     /// </example>
-    public static IServiceCollection AddJsonRpc(
+    public static IServiceCollection AddElarionJsonRpc(
         this IServiceCollection services,
         Action<JsonRpcOptions>? configure = null
     ) {
@@ -60,12 +60,12 @@ public static class JsonRpcServiceExtensions {
     /// <returns>The service collection for chaining.</returns>
     /// <example>
     /// <code>
-    /// builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+    /// builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
     /// var app = builder.Build();
-    /// app.MapJsonRpc();
+    /// app.MapElarionJsonRpc();
     /// </code>
     /// </example>
-    public static IServiceCollection AddJsonRpc(
+    public static IServiceCollection AddElarionJsonRpc(
         this IServiceCollection services,
         JsonSerializerOptions serializerOptions,
         Func<JsonRpcDispatcher, JsonRpcDispatcher> registerAll,
@@ -76,7 +76,7 @@ public static class JsonRpcServiceExtensions {
 
         services.AddElarionJsonRpcDispatcher(serializerOptions, registerAll);
 
-        return services.AddJsonRpc(options => {
+        return services.AddElarionJsonRpc(options => {
             options.SerializerOptions = serializerOptions;
             configure?.Invoke(options);
         });
@@ -94,10 +94,10 @@ public static class JsonRpcServiceExtensions {
     /// <returns>The service collection for chaining.</returns>
     /// <example>
     /// <code>
-    /// builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+    /// builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
     /// </code>
     /// </example>
-    public static IServiceCollection AddJsonRpc(
+    public static IServiceCollection AddElarionJsonRpc(
         this IServiceCollection services,
         JsonSerializerOptions serializerOptions,
         Func<JsonRpcDispatcher, IConfiguration, JsonRpcDispatcher> register,
@@ -110,7 +110,7 @@ public static class JsonRpcServiceExtensions {
             serializerOptions,
             (dispatcher, sp) => register(dispatcher, sp.GetRequiredService<IConfiguration>()));
 
-        return services.AddJsonRpc(options => {
+        return services.AddElarionJsonRpc(options => {
             options.SerializerOptions = serializerOptions;
             configure?.Invoke(options);
         });
@@ -124,10 +124,10 @@ public static class JsonRpcServiceExtensions {
     /// <example>
     /// <code>
     /// var app = builder.Build();
-    /// app.MapJsonRpc();
+    /// app.MapElarionJsonRpc();
     /// </code>
     /// </example>
-    public static IEndpointConventionBuilder MapJsonRpc(this IEndpointRouteBuilder app) {
+    public static IEndpointConventionBuilder MapElarionJsonRpc(this IEndpointRouteBuilder app) {
         var options = app.ServiceProvider.GetRequiredService<IOptions<JsonRpcOptions>>().Value;
         return app.MapPost(options.EndpointPath, JsonRpcEndpoint.HandleRpc);
     }

@@ -81,7 +81,7 @@ public sealed class AppModuleDiscoveryGeneratorTests {
         generated.Should().NotContain("public static partial void AddElarion(");
 
         // The aggregate entry points are emitted as extension methods on their receiver (idiomatic host wiring:
-        // services.AddElarion(configuration), endpoints.MapElarion(configuration),
+        // services.AddElarion(configuration), endpoints.MapElarionEndpoints(configuration),
         // configuration.IsModuleEnabled(name)).
         generated.Should().Contain(
             "        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services,");

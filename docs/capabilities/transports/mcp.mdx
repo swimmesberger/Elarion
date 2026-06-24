@@ -34,7 +34,7 @@ var serializerOptions = CreateSerializerOptions(builder.Configuration);
 
 // The public JSON-RPC endpoint (optional, independent of MCP): registers the /rpc dispatcher with the
 // JSON-RPC-surfaced methods of enabled modules.
-builder.Services.AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
 
 // The MCP server: a dedicated dispatcher built from the MCP-surfaced methods, with one tool per handler.
 builder.Services.AddElarionMcp(
@@ -45,7 +45,7 @@ builder.Services.AddElarionMcp(
 
 var app = builder.Build();
 
-app.MapElarionMcp();   // mounts /mcp — calling MapJsonRpc() is optional and independent
+app.MapElarionMcp();   // mounts /mcp — calling MapElarionJsonRpc() is optional and independent
 app.Run();
 ```
 
@@ -57,7 +57,7 @@ scanning at runtime.
 
 <Callout type="info">
   MCP is self-contained: `AddElarionMcp` builds its **own** `McpDispatcher` and never touches the unkeyed
-  `/rpc` `JsonRpcDispatcher`. `MapElarionMcp()` does not require `MapJsonRpc()` — you can expose MCP without
+  `/rpc` `JsonRpcDispatcher`. `MapElarionMcp()` does not require `MapElarionJsonRpc()` — you can expose MCP without
   exposing (or even registering) the public JSON-RPC endpoint at all.
 </Callout>
 
