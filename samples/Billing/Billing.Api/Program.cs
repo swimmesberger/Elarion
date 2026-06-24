@@ -40,7 +40,7 @@ builder.Services.AddElarionOutbox<BillingDbContext>();
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
 // Scheduler runtime. Job descriptors and event consumers are composed per module by
-// ModuleBootstrapper.ConfigureAllServices below — there is no explicit Add…ScheduledJobs call.
+// AddElarion below — there is no explicit Add…ScheduledJobs call.
 builder.Services.AddInMemoryScheduler(builder.Configuration);
 
 // Resilience: generated policy metadata + the Microsoft/Polly-backed runtime.
@@ -70,7 +70,7 @@ builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
 
 // Compose every module's services — handlers, services, validators, scheduled jobs, and event
 // consumers — each gated by Modules:{Name}:Enabled.
-ModuleBootstrapper.ConfigureAllServices(builder.Services, builder.Configuration);
+builder.Services.AddElarion(builder.Configuration);
 
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
@@ -130,14 +130,14 @@ if (app.Environment.IsDevelopment()) {
 app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
-ModuleBootstrapper.MapAllEndpoints(app, app.Configuration);
+app.MapElarion(app.Configuration);
 app.MapJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
 app.Run();
 
 static JsonSerializerOptions CreateSerializerOptions(IConfiguration configuration) {
-    var moduleResolvers = ModuleBootstrapper.GetAllJsonTypeInfoResolvers(configuration);
+    var moduleResolvers = configuration.GetAllJsonTypeInfoResolvers();
     return new JsonSerializerOptions {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
