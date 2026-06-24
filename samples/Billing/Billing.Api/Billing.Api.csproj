@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>Billing sample — ASP.NET Core JSON-RPC host.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.JsonRpc\Elarion.JsonRpc.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
+    <ProjectReference Include="..\Billing.Application\Billing.Application.csproj" />
+    <ProjectReference Include="..\Billing.Domain\Billing.Domain.csproj" />
+  </ItemGroup>
+
+  <!-- The host runs the Elarion generator to emit the module bootstrapper (RPC map, ConfigureAllServices).
+       Consuming Elarion from NuGet the generator ships inside the Elarion package; building from source we
+       reference the generator project as an analyzer. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+  </ItemGroup>
+
+</Project>

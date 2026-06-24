@@ -4,4 +4,29 @@
     <Description>Entity Framework Core source-generation markers for Elarion applications.</Description>
   </PropertyGroup>
 
+  <!-- Bundle the EF Core source generator's analyzer into this marker package. NuGet analyzer assets
+       are not transitive, so shipping the generator inside the package that an entity assembly already
+       references (the [DbEntity] marker package) makes the marker reference self-sufficient: any
+       assembly that declares [DbEntity]/[GenerateDbSets] types emits its manifest without a separate
+       analyzer package. ReferenceOutputAssembly=false keeps the generator off the runtime surface;
+       PrivateAssets=all keeps it from becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.EntityFrameworkCore.Generators\Elarion.EntityFrameworkCore.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="_BundleEntityFrameworkCoreGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.EntityFrameworkCore.Generators\Elarion.EntityFrameworkCore.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_EntityFrameworkCoreGeneratorAnalyzer" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_EntityFrameworkCoreGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
 </Project>

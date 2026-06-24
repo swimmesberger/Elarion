@@ -77,10 +77,9 @@ registration list.**
 ## Install
 
 ```xml
-<!-- Application library -->
+<!-- Application library — the source generator ships inside the Elarion package -->
 <ItemGroup>
   <PackageReference Include="Elarion" Version="0.2.0" />
-  <PackageReference Include="Elarion.Generators" Version="0.2.0" PrivateAssets="all" />
 </ItemGroup>
 ```
 
@@ -97,19 +96,17 @@ JSON-RPC endpoint end to end.
 | Package | Purpose |
 | --- | --- |
 | [`Elarion.Abstractions`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Abstractions) | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
-| [`Elarion`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion) | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user access. |
+| [`Elarion`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion) | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user access. Bundles the Elarion source generator (handlers, services, validators, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers). |
 | [`Elarion.Blobs`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Blobs) | Provider-neutral blob storage contracts and DTOs. |
 | [`Elarion.Blobs.PostgreSql`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Blobs.PostgreSql) | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O. |
 | [`Elarion.Messaging.InMemory`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Messaging.InMemory) | In-memory integration-event bus (best-effort, commit-gated by the EF Core transaction). |
 | [`Elarion.Messaging.Outbox`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Messaging.Outbox) | EF Core transactional outbox: a durable, at-least-once integration-event bus with a polling delivery worker. |
 | [`Elarion.Paging`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Paging) | Keyset (cursor) and offset pagination primitives, opaque cursor codec, and `IQueryable` paging extensions. |
-| [`Elarion.Generators`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Generators) | Roslyn generators for handlers, services, validators, modules, RPC maps, HTTP endpoint maps, resilience policies, scheduled jobs, and event consumers. |
 | [`Elarion.JsonRpc`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.JsonRpc) | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
 | [`Elarion.AspNetCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore) | ASP.NET Core JSON-RPC endpoint mapping, `[HttpEndpoint]` minimal-API mapping, batch execution, and current-user middleware. |
 | [`Elarion.AspNetCore.Mcp`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.Mcp) | Exposes your JSON-RPC handlers as a Model Context Protocol (MCP) server for AI agents, over Streamable HTTP. |
 | [`Elarion.AspNetCore.SchemaGeneration`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.SchemaGeneration) | MSBuild package that exports `rpc-schema.json` during `dotnet build`. |
-| [`Elarion.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore) | Marker attributes for generated `DbSet`s and entity inclusion. |
-| [`Elarion.EntityFrameworkCore.Generators`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore.Generators) | Roslyn generator for `DbSet` properties and entity configuration. |
+| [`Elarion.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore) | Marker attributes for generated `DbSet`s and entity inclusion. Bundles the EF Core source generator (`DbSet` properties, entity configuration, keyset pagination). |
 | [`@swimmesberger/elarion-jsonrpc-client-generator`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, Zod schemas, and a fetch client. |
 
 ## Documentation

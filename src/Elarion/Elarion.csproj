@@ -22,4 +22,30 @@
     <InternalsVisibleTo Include="Elarion.Messaging.InMemory" />
   </ItemGroup>
 
+  <!-- Bundle the Elarion source generator's analyzer into this runtime package. NuGet analyzer assets
+       are not transitive, so the generator must live in a package each code-generating assembly
+       references directly. Elarion is that single home: application libraries reference it for the
+       runtime, and hosts reference it directly too (they already depend on it transitively via
+       Elarion.AspNetCore). Keeping the generator in exactly one package avoids it running twice.
+       ReferenceOutputAssembly=false keeps it off the runtime surface; PrivateAssets=all keeps it from
+       becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Generators\Elarion.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="_BundleElarionGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.Generators\Elarion.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionGeneratorAnalyzer" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_ElarionGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
 </Project>

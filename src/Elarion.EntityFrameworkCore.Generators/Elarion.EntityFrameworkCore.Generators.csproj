@@ -12,6 +12,10 @@
     <IncludeSymbols>false</IncludeSymbols>
     <DevelopmentDependency>true</DevelopmentDependency>
     <NoPackageAnalysis>true</NoPackageAnalysis>
+    <!-- This generator no longer ships as its own NuGet package; its analyzer DLL is bundled into
+         the Elarion.EntityFrameworkCore marker package, so referencing the marker package alone is
+         enough for any assembly that declares [DbEntity]/[GenerateDbSets] types. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,11 +33,5 @@
     <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
     <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
   </ItemGroup>
-
-  <Target Name="PackAnalyzer" BeforeTargets="_GetPackageFiles">
-    <ItemGroup>
-      <None Include="$(TargetPath)" Pack="true" PackagePath="analyzers/dotnet/cs/" Visible="false" />
-    </ItemGroup>
-  </Target>
 
 </Project>

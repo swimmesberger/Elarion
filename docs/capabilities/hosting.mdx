@@ -10,9 +10,11 @@ transport; modules own application logic.
 
 ```xml
 <ItemGroup>
+  <!-- Elarion bundles the source generator; reference it directly so the generator runs in the host
+       (analyzer assets are not transitive). -->
+  <PackageReference Include="Elarion" Version="0.1.0" />
   <PackageReference Include="Elarion.JsonRpc" Version="0.1.0" />
   <PackageReference Include="Elarion.AspNetCore" Version="0.1.0" />
-  <PackageReference Include="Elarion.Generators" Version="0.1.0" PrivateAssets="all" />
   <ProjectReference Include="..\MyApp.Application\MyApp.Application.csproj" />
 </ItemGroup>
 ```

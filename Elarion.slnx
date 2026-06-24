@@ -24,6 +24,12 @@
     <Project Path="src/Elarion/Elarion.csproj" />
     <Project Path="src/elarion-jsonrpc-client-generator/elarion-jsonrpc-client-generator.csproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <File Path="samples/Directory.Build.props" />
+    <Project Path="samples/Billing/Billing.Domain/Billing.Domain.csproj" />
+    <Project Path="samples/Billing/Billing.Application/Billing.Application.csproj" />
+    <Project Path="samples/Billing/Billing.Api/Billing.Api.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Elarion.Tests/Elarion.Tests.csproj" />
   </Folder>

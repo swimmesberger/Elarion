@@ -11,6 +11,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string CacheableAttributeMetadataName = "Elarion.Abstractions.Caching.CacheableAttribute";
     private const string CacheInvalidateAttributeMetadataName = "Elarion.Abstractions.Caching.CacheInvalidateAttribute";
     private const string ResilientAttributeMetadataName = "Elarion.Abstractions.Resilience.ResilientAttribute";
+    private const string HandlerMetadataTypeName = "Elarion.Abstractions.Pipeline.HandlerMetadata";
 
     private sealed record HandlerInfo(
         string HandlerFqn,
@@ -27,8 +28,16 @@ public sealed partial class HandlerRegistrationGenerator {
 
     private sealed record DecoratorInfo(
         string DecoratorFqn,
-        EquatableArray<string> ExtraDependencyFqns,
+        EquatableArray<DecoratorDependency> ExtraDependencies,
         bool HasAppliesTo
+    );
+
+    // A constructor dependency of a pipeline decorator (besides the inner handler). A regular service is
+    // resolved from DI; HandlerMetadata is supplied by the generator with the concrete handler type, so
+    // attribute-driven decorators see the true handler regardless of their position in the chain.
+    private sealed record DecoratorDependency(
+        string Fqn,
+        bool IsHandlerMetadata
     );
 
     private sealed record CacheableInfo(

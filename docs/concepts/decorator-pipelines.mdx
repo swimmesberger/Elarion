@@ -140,26 +140,32 @@ still an `IIntegrationEvent`, so it opens a transaction it never uses — harmle
 ### Turning an `AppError` into `TResponse`
 
 Generic decorators (like validation) sometimes need to construct a failure `TResponse` from an
-`AppError`. Keep that helper local to your application — it is intentionally **not** part of the
-framework API yet:
+`AppError`. Both `Result<T>` and the non-generic `Result` implement
+`IResultFailureFactory<TSelf>`, which exposes a `static abstract TSelf Failure(AppError)`. Constrain
+the decorator's `TResponse` to that interface and call `TResponse.Failure(error)` directly — **no
+reflection**:
 
 ```csharp
-internal static class ResultFactory {
-    public static TResponse Failure<TResponse>(AppError error) {
-        var responseType = typeof(TResponse);
-        if (responseType.IsGenericType &&
-            responseType.GetGenericTypeDefinition() == typeof(Result<>)) {
-            var failureMethod = responseType.GetMethod(
-                nameof(Result<object>.Failure),
-                BindingFlags.Static | BindingFlags.Public)!;
-            return (TResponse)failureMethod.Invoke(null, [error])!;
-        }
+public sealed class ValidationDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner,
+    IValidator<TRequest> validator
+) : IHandler<TRequest, TResponse>
+    where TResponse : IResultFailureFactory<TResponse> {
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        var result = await validator.ValidateAsync(request, ct);
+        if (!result.IsValid)
+            return TResponse.Failure(AppError.Validation(result.ToString()));
 
-        throw new InvalidOperationException(
-            $"Cannot map AppError to {responseType.Name}. Handler must return Result<T>.");
+        return await inner.HandleAsync(request, ct);
     }
 }
 ```
+
+The `where TResponse : IResultFailureFactory<TResponse>` constraint does double duty: it makes the
+static `Failure` call type-safe **and** scopes the decorator at compile time to `Result`-returning
+handlers — the generator [skips it](#filtering-by-request-kind) for any handler whose response does not
+satisfy the constraint, so you never hit a runtime "this handler doesn't return `Result<T>`" failure.
+Prefer this over a reflection-based helper.
 
 ## Order matters
 
@@ -167,6 +173,53 @@ Decorators run in the order listed in `[DecoratorList]`, outermost first. A pipe
 `[Transaction, DbConstraint, Validation]` validates innermost (closest to the handler) and wraps the
 transaction outermost — so validation failures never open a transaction. Choose the order
 deliberately; the generated code makes it explicit and inspectable.
+
+## Reading the handler's attributes (do not use `inner.GetType()`)
+
+A common need is a decorator that reads an attribute off the handler — for example an
+`[RequirePermission(...)]` for an authorization decorator. It is tempting to reach for
+`inner.GetType().GetCustomAttribute<RequirePermissionAttribute>()`, but **this is a fail-open
+footgun**. Because decorators wrap innermost-first, `inner` is the *concrete handler* only when the
+decorator is the **innermost** wrapper (last in `[DecoratorList]`). At any other position — including
+the intuitive outermost "check authorization first" spot — `inner` is the *next decorator*, the
+attribute is invisible, and an authorization check **silently passes**.
+
+<Callout type="warn">
+  Never read the handler's attributes from `inner.GetType()`. It only sees the handler when the
+  decorator happens to be innermost; positioned anywhere else it reads a decorator wrapper instead, so
+  an attribute-driven check fails **open**. The failure is silent — there is no compiler error.
+</Callout>
+
+Instead, declare a `HandlerMetadata` constructor parameter. The generator supplies it with the
+**concrete handler type**, so the decorator reads the handler's attributes correctly **regardless of
+its position** in the chain. (The generated factory passes the inner handler first, then any DI
+dependencies and the `HandlerMetadata` singleton in declaration order.)
+
+```csharp
+using Elarion.Abstractions;
+using Elarion.Abstractions.Pipeline;
+
+// Position-independent: works whether this decorator is outermost, innermost, or anywhere between.
+public sealed class AuthorizationDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner,
+    HandlerMetadata metadata,
+    ICurrentUser user
+) : IHandler<TRequest, TResponse> {
+    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        var required = metadata.GetAttribute<RequirePermissionAttribute>();
+        if (required is not null && !user.HasPermission(required.Permission))
+            throw new UnauthorizedAccessException(required.Permission);
+        return inner.HandleAsync(request, ct);
+    }
+}
+```
+
+`metadata.HandlerType` is the true handler type; `GetAttribute<T>()`/`GetAttributes<T>()` read its
+attributes. Attribute reads still use reflection, but on a single known `Type`, which is AOT/trim-safe
+as long as the attribute type is preserved. The `HandlerMetadata` singleton is generated once per
+handler (no per-request allocation). The seam offers a correct path but does not *prevent* the unsafe
+`inner.GetType()` pattern from compiling — prefer `HandlerMetadata` whenever a decorator depends on the
+handler's own type or attributes.
 
 ## Filtering by request kind
 

@@ -58,8 +58,8 @@ public readonly struct Result : IResultLike, IResultFailureFactory<Result> {
 
 ## `Unit`
 
-`Elarion.Abstractions.Unit` — a `readonly struct` with exactly one value, used as the "no value"
-payload for `Result<Unit>`. All `Unit` values are equal.
+`Elarion.Abstractions.Results.Unit` — a `readonly struct` with exactly one value, used as the "no
+value" payload for `Result<Unit>`. All `Unit` values are equal.
 
 ```csharp title="Unit"
 public readonly struct Unit : IEquatable<Unit> {
@@ -67,6 +67,19 @@ public readonly struct Unit : IEquatable<Unit> {
     // == always true, != always false, ToString() => "()"
 }
 ```
+
+<Callout type="info">
+  `Unit` lives in the dedicated `Elarion.Abstractions.Results` namespace — **not** the root
+  `Elarion.Abstractions` namespace that handlers import for `IHandler`/`Result`/`AppError`. `Unit` is
+  a common domain noun (units of measure, org units, rental units), so keeping it out of the
+  always-imported namespace avoids `CS0104` ambiguity with a domain `Unit` type. You rarely name
+  `Unit` directly — prefer the `IHandler<T>` sugar and `Result.Success()`. When you do, add
+  `using Elarion.Abstractions.Results;`, and if a domain `Unit` is also in scope, alias one of them:
+
+  ```csharp
+  using ResultUnit = Elarion.Abstractions.Results.Unit; // or: using DomainUnit = MyApp.Domain.Unit;
+  ```
+</Callout>
 
 ## `IResultLike`
 

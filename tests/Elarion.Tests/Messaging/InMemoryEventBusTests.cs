@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
+using Elarion.Abstractions.Results;
 using Elarion.Messaging.InMemory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

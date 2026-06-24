@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Billing sample — modules, handlers, validators, and the generated data-access context.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore\Elarion.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\Billing.Domain\Billing.Domain.csproj" />
+  </ItemGroup>
+
+  <!-- Building from source, the generators are referenced as analyzers (consuming Elarion from NuGet
+       they ship bundled in the Elarion / Elarion.EntityFrameworkCore packages). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore.Generators\Elarion.EntityFrameworkCore.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+  </ItemGroup>
+
+</Project>

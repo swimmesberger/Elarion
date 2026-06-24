@@ -121,62 +121,52 @@ dotnet add src/Billing.Api            reference src/Billing.Infrastructure src/B
 
 ### Add the Elarion packages
 
-The **application** project holds your modules and needs the runtime plus the generators. It also
-uses EF Core for data access and FluentValidation for input rules.
+The source generators ship **inside** their runtime packages — the Elarion generator in `Elarion`,
+the EF Core generator in `Elarion.EntityFrameworkCore` — so there are no separate analyzer packages to
+install or mark `PrivateAssets="all"`. Because NuGet analyzer assets are not transitive, each project
+that needs a generator references its package directly.
+
+The **application** project holds your modules, entities, and the `[GenerateDbSets]` context
+abstraction. It uses EF Core for data access and FluentValidation for input rules:
 
 ```bash
 cd src/Billing.Application
 dotnet add package Elarion
-dotnet add package Elarion.Generators
 dotnet add package Elarion.EntityFrameworkCore
-dotnet add package Elarion.EntityFrameworkCore.Generators
 dotnet add package Microsoft.EntityFrameworkCore
 dotnet add package FluentValidation
 cd ../..
 ```
 
-Mark the two generator packages as analyzer-only so they stay out of published output. Edit
-`src/Billing.Application/Billing.Application.csproj`:
-
-```xml title="src/Billing.Application/Billing.Application.csproj"
-<ItemGroup>
-  <PackageReference Include="Elarion.Generators" PrivateAssets="all" />
-  <PackageReference Include="Elarion.EntityFrameworkCore.Generators" PrivateAssets="all" />
-</ItemGroup>
-```
-
-The **infrastructure** project owns the concrete `DbContext` and the PostgreSQL provider, plus the EF
-Core integration-event outbox:
+The **infrastructure** project owns the concrete `BillingDbContext` and the PostgreSQL provider, plus
+the EF Core integration-event outbox. Because the generated class-side `DbSet`s and entity
+configuration are emitted where the concrete context lives, infrastructure references
+`Elarion.EntityFrameworkCore` too (its generator reads the application's entity manifest
+cross-assembly):
 
 ```bash
 cd src/Billing.Infrastructure
+dotnet add package Elarion.EntityFrameworkCore
 dotnet add package Microsoft.EntityFrameworkCore
 dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
 dotnet add package Elarion.Messaging.Outbox
 cd ../..
 ```
 
-The **host** project references the JSON-RPC transport, the ASP.NET Core integration, the MCP server,
-and the generators (it emits the RPC map and module bootstrapper). It also registers the scheduler,
-the Microsoft resilience runtime, and EF Core design-time tooling.
+The **host** project references the JSON-RPC transport, the ASP.NET Core integration, and the MCP
+server. It also references `Elarion` directly so the bundled generator runs in the host (it emits the
+RPC map and module bootstrapper), and registers the scheduler, the Microsoft resilience runtime, and
+EF Core design-time tooling.
 
 ```bash
 cd src/Billing.Api
+dotnet add package Elarion
 dotnet add package Elarion.JsonRpc
 dotnet add package Elarion.AspNetCore
 dotnet add package Elarion.AspNetCore.Mcp
-dotnet add package Elarion.Generators
 dotnet add package Microsoft.Extensions.Resilience
 dotnet add package Microsoft.EntityFrameworkCore.Design
 cd ../..
-```
-
-Mark `Elarion.Generators` as analyzer-only in the host too:
-
-```xml title="src/Billing.Api/Billing.Api.csproj"
-<ItemGroup>
-  <PackageReference Include="Elarion.Generators" PrivateAssets="all" />
-</ItemGroup>
 ```
 
 </Step>

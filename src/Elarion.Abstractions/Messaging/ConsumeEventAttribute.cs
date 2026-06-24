@@ -1,3 +1,5 @@
+using Elarion.Abstractions.Results;
+
 namespace Elarion.Abstractions.Messaging;
 
 /// <summary>

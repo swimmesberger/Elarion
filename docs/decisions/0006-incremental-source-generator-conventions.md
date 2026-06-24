@@ -4,7 +4,8 @@
 - Date: 2026-06-23
 - Related: [Source generation](../source-generation.mdx) (user-facing reference),
   [ADR-0003](0003-decorator-attachment-predicates.md) (a generator emits the predicate plumbing),
-  the `Elarion.Generators` and `Elarion.EntityFrameworkCore.Generators` packages.
+  the `Elarion.Generators` and `Elarion.EntityFrameworkCore.Generators` generator projects (their
+  analyzer DLLs ship bundled inside the `Elarion` and `Elarion.EntityFrameworkCore` runtime packages).
 
 ## Context
 

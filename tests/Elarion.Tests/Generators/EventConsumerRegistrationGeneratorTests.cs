@@ -413,10 +413,10 @@ public sealed class EventConsumerRegistrationGeneratorTests {
         generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Domain");
         generated.Should().Contain("Order = 2");
         generated.Should().Contain(
-            "ServiceType = typeof(global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Unit>>)");
+            "ServiceType = typeof(global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>)");
         generated.Should().Contain("InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
         generated.Should().Contain(
-            "var handler = serviceProvider.GetRequiredService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Unit>>>();");
+            "var handler = serviceProvider.GetRequiredService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>();");
         generated.Should().Contain(
             "var result = await handler.HandleAsync((global::Sample.Events.InvoiceCreated)@event, ct).ConfigureAwait(false);");
         generated.Should().Contain(
