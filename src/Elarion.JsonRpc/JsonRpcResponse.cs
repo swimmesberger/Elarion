@@ -1,15 +1,31 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Represents a JSON-RPC 2.0 response envelope.
 /// Always returned with HTTP 200 — errors are conveyed in the body per spec.
 /// </summary>
+[JsonConverter(typeof(JsonRpcResponseConverter))]
 public sealed class JsonRpcResponse {
+    private readonly string? _id;
+    private readonly JsonRpcIdKind _idKind;
+    private readonly string? _idRaw;
+
     /// <summary>JSON-RPC protocol version, always "2.0".</summary>
     public string Jsonrpc { get; init; } = "2.0";
 
     /// <summary>The request id echoed back. Null for parse errors.</summary>
-    public string? Id { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? Id {
+        get => _id;
+        init {
+            _id = value;
+            _idKind = value is null ? JsonRpcIdKind.Null : JsonRpcIdKind.String;
+            _idRaw = value;
+        }
+    }
 
     /// <summary>The handler result. Present only on success.</summary>
     public object? Result { get; init; }
@@ -21,13 +37,37 @@ public sealed class JsonRpcResponse {
     public static JsonRpcResponse Success(string? id, object? result) =>
         new() { Id = id, Result = result };
 
+    internal static JsonRpcResponse Success(JsonRpcRequest request, object? result) =>
+        new() {
+            Id = request.Id,
+            IdKind = request.IdKind,
+            IdRaw = request.IdRaw,
+            Result = result
+        };
+
     /// <summary>Creates an error response from an <see cref="RpcError"/>.</summary>
     public static JsonRpcResponse FromError(string? id, RpcError error) =>
         new() { Id = id, Error = new RpcErrorResponse { Code = error.Code, Message = error.Message, Data = error.Data } };
 
+    internal static JsonRpcResponse FromError(JsonRpcRequest request, RpcError error) =>
+        new() {
+            Id = request.Id,
+            IdKind = request.IdKind,
+            IdRaw = request.IdRaw,
+            Error = new RpcErrorResponse { Code = error.Code, Message = error.Message, Data = error.Data }
+        };
+
     /// <summary>Creates a "method not found" error response (JSON-RPC -32601).</summary>
     public static JsonRpcResponse MethodNotFound(string? id) =>
         new() { Id = id, Error = new RpcErrorResponse { Code = -32601, Message = "Method not found" } };
+
+    internal static JsonRpcResponse MethodNotFound(JsonRpcRequest request) =>
+        new() {
+            Id = request.Id,
+            IdKind = request.IdKind,
+            IdRaw = request.IdRaw,
+            Error = new RpcErrorResponse { Code = -32601, Message = "Method not found" }
+        };
 
     /// <summary>Creates a "parse error" response (JSON-RPC -32700, no id available).</summary>
     public static JsonRpcResponse ParseError() =>
@@ -36,6 +76,24 @@ public sealed class JsonRpcResponse {
     /// <summary>Creates an "invalid request" error response (JSON-RPC -32600).</summary>
     public static JsonRpcResponse InvalidRequest(string? id) =>
         new() { Id = id, Error = new RpcErrorResponse { Code = -32600, Message = "Invalid request" } };
+
+    internal static JsonRpcResponse InvalidRequest(JsonRpcRequest request) =>
+        new() {
+            Id = request.Id,
+            IdKind = request.IdKind,
+            IdRaw = request.IdRaw,
+            Error = new RpcErrorResponse { Code = -32600, Message = "Invalid request" }
+        };
+
+    internal JsonRpcIdKind IdKind {
+        get => _idKind;
+        init => _idKind = value;
+    }
+
+    internal string? IdRaw {
+        get => _idRaw;
+        init => _idRaw = value;
+    }
 }
 
 /// <summary>
@@ -48,4 +106,31 @@ public sealed record RpcErrorResponse {
     public required string Message { get; init; }
     /// <summary>Optional structured data providing additional context.</summary>
     public object? Data { get; init; }
+}
+
+internal sealed class JsonRpcResponseConverter : JsonConverter<JsonRpcResponse> {
+    public override JsonRpcResponse Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        throw new NotSupportedException("JSON-RPC responses are serialized by the server, not deserialized.");
+
+    public override void Write(Utf8JsonWriter writer, JsonRpcResponse value, JsonSerializerOptions options) {
+        writer.WriteStartObject();
+        writer.WriteString("jsonrpc", value.Jsonrpc);
+
+        writer.WritePropertyName("id");
+        JsonRpcIdWriter.Write(writer, value.IdKind, value.Id, value.IdRaw);
+
+        if (value.Error is not null) {
+            writer.WritePropertyName("error");
+            JsonSerializer.Serialize(writer, value.Error, options);
+        } else {
+            writer.WritePropertyName("result");
+            if (value.Result is null) {
+                writer.WriteNullValue();
+            } else {
+                JsonSerializer.Serialize(writer, value.Result, value.Result.GetType(), options);
+            }
+        }
+
+        writer.WriteEndObject();
+    }
 }

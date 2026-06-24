@@ -3,14 +3,14 @@ using System.Text.Json.Serialization;
 
 namespace Elarion.JsonRpc;
 
-internal enum JsonRpcIdKind {
+public enum JsonRpcIdKind {
     Missing,
     Null,
     String,
     Number
 }
 
-internal readonly record struct JsonRpcIdInfo(JsonRpcIdKind Kind, string? Value, string? Raw) {
+public readonly record struct JsonRpcIdInfo(JsonRpcIdKind Kind, string? Value, string? Raw) {
     public bool HasId => Kind != JsonRpcIdKind.Missing;
 
     public static JsonRpcIdInfo Missing { get; } = new(JsonRpcIdKind.Missing, null, null);
