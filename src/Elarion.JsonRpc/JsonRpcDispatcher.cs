@@ -104,25 +104,25 @@ public sealed class JsonRpcDispatcher {
         if (request.IsInvalidEnvelope) {
             using var invalidEnvelopeActivity = StartRequestActivity(request, "_invalid");
             RecordError(invalidEnvelopeActivity, "_invalid", "-32600", "Invalid request", "invalid-envelope", startTimestamp);
-            return JsonRpcResponse.InvalidRequest(request.Id);
+            return JsonRpcResponse.InvalidRequest(request);
         }
 
         if (string.IsNullOrWhiteSpace(request.Method)) {
             using var missingMethodActivity = StartRequestActivity(request, "_invalid");
             RecordError(missingMethodActivity, "_invalid", "-32600", "Invalid request", "missing-method", startTimestamp);
-            return JsonRpcResponse.InvalidRequest(request.Id);
+            return JsonRpcResponse.InvalidRequest(request);
         }
 
         if (request.Jsonrpc != "2.0") {
             using var invalidProtocolActivity = StartRequestActivity(request, "_invalid");
             RecordError(invalidProtocolActivity, "_invalid", "-32600", "Invalid request", "invalid-protocol", startTimestamp);
-            return JsonRpcResponse.InvalidRequest(request.Id);
+            return JsonRpcResponse.InvalidRequest(request);
         }
 
         if (!Methods.TryGetValue(request.Method, out var entry)) {
             using var unregisteredMethodActivity = StartRequestActivity(request, "_unregistered");
             RecordError(unregisteredMethodActivity, "_unregistered", "-32601", "Method not found", "method-not-found", startTimestamp);
-            return JsonRpcResponse.MethodNotFound(request.Id);
+            return JsonRpcResponse.MethodNotFound(request);
         }
 
         var method = entry.MethodName;
@@ -136,7 +136,7 @@ public sealed class JsonRpcDispatcher {
             if (result.IsSuccess) {
                 _logger?.LogDebug("JSON-RPC {Method} succeeded", request.Method);
                 RecordSuccess(activity, method, startTimestamp);
-                return JsonRpcResponse.Success(request.Id, result.Value);
+                return JsonRpcResponse.Success(request, result.Value);
             }
 
             var errorCode = result.Error.Code.ToString();
@@ -144,11 +144,11 @@ public sealed class JsonRpcDispatcher {
                 "JSON-RPC {Method} returned application error {Code}: {Message}",
                 request.Method, result.Error.Code, result.Error.Message);
             RecordError(activity, method, errorCode, result.Error.Message, "application-error", startTimestamp);
-            return JsonRpcResponse.FromError(request.Id, result.Error);
+            return JsonRpcResponse.FromError(request, result.Error);
         } catch (JsonException ex) {
             _logger?.LogWarning(ex, "JSON-RPC {Method} — invalid params (deserialization failed)", request.Method);
             RecordError(activity, method, "-32602", "Invalid params", "invalid-params", startTimestamp);
-            return JsonRpcResponse.FromError(request.Id, RpcError.InvalidParams("Invalid params: could not deserialize"));
+            return JsonRpcResponse.FromError(request, RpcError.InvalidParams("Invalid params: could not deserialize"));
         } catch (Exception ex) {
             _logger?.LogError(ex, "Unhandled exception dispatching JSON-RPC method {Method}", request.Method);
             activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
@@ -165,9 +165,9 @@ public sealed class JsonRpcDispatcher {
             JsonRpcTelemetry.RecordRequest(method, "-32603", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
 #if DEBUG
             // In DEBUG builds, include the actual exception message for easier debugging
-            return JsonRpcResponse.FromError(request.Id, RpcError.InternalError($"Internal error: {ex.Message}"));
+            return JsonRpcResponse.FromError(request, RpcError.InternalError($"Internal error: {ex.Message}"));
 #else
-            return JsonRpcResponse.FromError(request.Id, RpcError.InternalError("Internal error"));
+            return JsonRpcResponse.FromError(request, RpcError.InternalError("Internal error"));
 #endif
         }
     }
