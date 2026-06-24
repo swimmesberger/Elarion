@@ -438,11 +438,21 @@ new `icon:` frontmatter values must be valid Lucide icon names (resolved in
 
 ## Publishing
 
-Publishing uses GitHub Actions trusted publishing/OIDC:
+Publishing uses GitHub Actions trusted publishing/OIDC. `<VersionPrefix>` in
+`Directory.Build.props` is the single source of truth for the *next* version; see
+[RELEASING.md](RELEASING.md) for the full flow.
 
 - NuGet publishing uses `NuGet/login` and the `NUGET_USER` repository variable or secret.
 - npm publishing uses trusted publishers for `@swimmesberger/elarion-jsonrpc-client-generator`.
-- Pushes to `main` publish preview packages using `VersionPrefix` plus the workflow run identity.
-- Published GitHub releases or manual dispatches can publish explicit stable or prerelease SemVer versions.
+- Pushes to `main` publish preview packages as `{VersionPrefix}-preview.{run}.{attempt}`.
+- The **Release** workflow (`release.yml`) promotes the current `VersionPrefix` to a stable release:
+  it syncs the doc `Version="…"` literals and rolls the changelog (`scripts/release.mjs`), tags
+  `v<version>`, auto-bumps `VersionPrefix` to the next patch, and creates a GitHub Release — which
+  fires the `release: published` job in `publish.yml` to publish the stable packages. It runs as a
+  GitHub App (`RELEASE_APP_ID`/`RELEASE_APP_PRIVATE_KEY`) so it can bypass branch protection and
+  trigger the publish.
+- Published GitHub releases or manual dispatches can also publish explicit stable or prerelease SemVer versions.
 
-Keep workflow changes tokenless unless a registry explicitly requires otherwise.
+Keep workflow changes tokenless unless a registry explicitly requires otherwise (the release
+identity App is the deliberate exception — branch-protection bypass and downstream triggering both
+require a non-`GITHUB_TOKEN` actor).
