@@ -44,11 +44,16 @@ minor releases may include breaking changes.
   bare `IEntityTypeConfiguration<T>` is ignored — the previous "schema-only configuration applied without a
   DbSet" path is gone). A single `[EntityConfiguration]` class may implement `IEntityTypeConfiguration<T>`
   more than once, contributing one `DbSet` and one `Configure(...)` call per entity. Scopes move from
-  `[DbEntity(scopes)]` to `[EntityConfiguration(scopes)]` with unchanged semantics; `[GenerateDbSets]` is
-  unchanged. A new `ELEFC001` warning reports an `[EntityConfiguration]` that implements no
-  `IEntityTypeConfiguration<T>`. To upgrade: delete `[DbEntity]` from entities and add `[EntityConfiguration]`
-  to each entity's configuration class (writing one where an entity had none). See
-  [Entity Framework Core](docs/capabilities/entity-framework.mdx).
+  `[DbEntity(scopes)]` to `[EntityConfiguration(scopes)]` with unchanged semantics. The generated
+  `IAppDbContext` **interface is removed**: the database is application logic accessed directly (no
+  repository *and* no context interface), so `[GenerateDbSets]` now goes on the **concrete partial
+  `DbContext`** — the generator emits the `DbSet<T>` properties and `ConfigureEntities` onto the context
+  itself — and handlers inject the concrete `DbContext`, not an interface. A new `ELEFC001` warning reports
+  an `[EntityConfiguration]` that implements no `IEntityTypeConfiguration<T>`. To upgrade: delete
+  `[DbEntity]` from entities and add `[EntityConfiguration]` to each entity's configuration class (writing
+  one where an entity had none); move `[GenerateDbSets]` from the `IAppDbContext` interface onto the
+  concrete `DbContext`, delete the interface, and change handler/service dependencies from `IAppDbContext`
+  to the concrete context. See [Entity Framework Core](docs/capabilities/entity-framework.mdx).
 - **Decorator generic-constraint filtering now honors self-referential constraints.** A decorator
   constrained `where TResponse : IResultFailureFactory<TResponse>` (the canonical no-reflection way to
   build a failure result, e.g. in a validation decorator) is now attached only to `Result`-returning

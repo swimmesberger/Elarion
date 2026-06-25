@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Billing.Application.Domain;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -11,7 +12,7 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 /// <c>invoices</c> tag whenever <see cref="CreateInvoice"/> succeeds.</summary>
 [Cacheable("invoices", DurationSeconds = 30)]
 [RpcMethod("invoices.list")]
-public sealed class ListInvoices(IAppDbContext db, ICurrentUser user)
+public sealed class ListInvoices(BillingDbContext db, ICurrentUser user)
     : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
     public sealed record Query : IQuery;
     public sealed record Item(

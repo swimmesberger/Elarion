@@ -9,7 +9,7 @@ namespace Elarion.Tests.Generators;
 public sealed class DbContextGeneratorTests
 {
     [Fact]
-    public void GenerateDbSets_UnscopedInterface_GeneratesInterfaceAndImplementingContextMembers()
+    public void GenerateDbSets_UnscopedContext_GeneratesDbSetsAndConfigureEntitiesOnTheClass()
     {
         var source =
             CreateSource(
@@ -25,15 +25,9 @@ public sealed class DbContextGeneratorTests
                     }
                 }
 
-                namespace Sample.Application {
-                    [Elarion.EntityFrameworkCore.GenerateDbSets]
-                    public partial interface IAppDbContext {
-                    }
-                }
-
                 namespace Sample.Infrastructure {
-                    public sealed partial class AppDbContext
-                        : Microsoft.EntityFrameworkCore.DbContext, Sample.Application.IAppDbContext {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets]
+                    public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
                     }
 
                     [Elarion.EntityFrameworkCore.EntityConfiguration]
@@ -62,8 +56,8 @@ public sealed class DbContextGeneratorTests
 
         var result = Generate(source);
         var dbContextSource = GetGeneratedSource(result, "AppDbContext.DbSets.g.cs");
-        var dbContextInterfaceSource = GetGeneratedSource(result, "IAppDbContext.DbSets.g.cs");
 
+        dbContextSource.Should().Contain("partial class AppDbContext {");
         dbContextSource.Should().Contain("public DbSet<Company> Companies => Set<Company>();");
         dbContextSource.Should().Contain("public DbSet<Invoice> Invoices => Set<Invoice>();");
         dbContextSource.Should().Contain("var __config0 = new global::Sample.Infrastructure.CompanyConfiguration();");
@@ -71,9 +65,11 @@ public sealed class DbContextGeneratorTests
         dbContextSource.Should().Contain("var __config1 = new global::Sample.Infrastructure.InvoiceConfiguration();");
         dbContextSource.Should().Contain("modelBuilder.ApplyConfiguration<global::Sample.Domain.Invoice>(__config1);");
         dbContextSource.Should().NotContain("SchemaOnlyRow");
-        dbContextInterfaceSource.Should().Contain("DbSet<Company> Companies { get; }");
-        dbContextInterfaceSource.Should().Contain("DbSet<Invoice> Invoices { get; }");
-        dbContextInterfaceSource.Should().NotContain("SchemaOnlyRow");
+        // No interface is generated — the DbSets are a concern of the implementation only.
+        result.GeneratedTrees
+            .Select(tree => Path.GetFileName(tree.FilePath))
+            .Should()
+            .NotContain(name => name.StartsWith("I", StringComparison.Ordinal) && name.EndsWith(".DbSets.g.cs", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -90,15 +86,9 @@ public sealed class DbContextGeneratorTests
                     }
                 }
 
-                namespace Sample.Application {
-                    [Elarion.EntityFrameworkCore.GenerateDbSets]
-                    public partial interface IAppDbContext {
-                    }
-                }
-
                 namespace Sample.Infrastructure {
-                    public sealed partial class AppDbContext
-                        : Microsoft.EntityFrameworkCore.DbContext, Sample.Application.IAppDbContext {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets]
+                    public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
                     }
 
                     [Elarion.EntityFrameworkCore.EntityConfiguration]
@@ -127,7 +117,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_ScopedInterface_FiltersConfigurationsAndEntities()
+    public void GenerateDbSets_ScopedContext_FiltersConfigurationsAndEntities()
     {
         var source =
             CreateSource(
@@ -153,15 +143,9 @@ public sealed class DbContextGeneratorTests
                     }
                 }
 
-                namespace Sample.Application {
-                    [Elarion.EntityFrameworkCore.GenerateDbSets(Sample.Persistence.PersistenceScopes.Main)]
-                    public partial interface IMainDbContext {
-                    }
-                }
-
                 namespace Sample.Infrastructure {
-                    public sealed partial class MainDbContext
-                        : Microsoft.EntityFrameworkCore.DbContext, Sample.Application.IMainDbContext {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets(Sample.Persistence.PersistenceScopes.Main)]
+                    public sealed partial class MainDbContext : Microsoft.EntityFrameworkCore.DbContext {
                     }
 
                     [Elarion.EntityFrameworkCore.EntityConfiguration(Sample.Persistence.PersistenceScopes.Main)]
@@ -198,7 +182,6 @@ public sealed class DbContextGeneratorTests
 
         var result = Generate(source);
         var dbContextSource = GetGeneratedSource(result, "MainDbContext.DbSets.g.cs");
-        var dbContextInterfaceSource = GetGeneratedSource(result, "IMainDbContext.DbSets.g.cs");
 
         dbContextSource.Should().Contain("public DbSet<Invoice> Invoices => Set<Invoice>();");
         dbContextSource.Should().Contain("public DbSet<User> Users => Set<User>();");
@@ -208,10 +191,6 @@ public sealed class DbContextGeneratorTests
         dbContextSource.Should().Contain("UserConfiguration");
         dbContextSource.Should().NotContain("ChatSessionConfiguration");
         dbContextSource.Should().NotContain("LegacyGlobalEntityConfiguration");
-        dbContextInterfaceSource.Should().Contain("DbSet<Invoice> Invoices { get; }");
-        dbContextInterfaceSource.Should().Contain("DbSet<User> Users { get; }");
-        dbContextInterfaceSource.Should().NotContain("ChatSessions");
-        dbContextInterfaceSource.Should().NotContain("LegacyGlobalEntities");
     }
 
     [Fact]
@@ -220,15 +199,9 @@ public sealed class DbContextGeneratorTests
         var source =
             CreateSource(
                 """
-                namespace Sample.Application {
-                    [Elarion.EntityFrameworkCore.GenerateDbSets]
-                    public partial interface IAppDbContext {
-                    }
-                }
-
                 namespace Sample.Infrastructure {
-                    public sealed partial class AppDbContext
-                        : Microsoft.EntityFrameworkCore.DbContext, Sample.Application.IAppDbContext {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets]
+                    public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
                     }
 
                     [Elarion.EntityFrameworkCore.EntityConfiguration]
@@ -249,7 +222,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_DbContextWithoutGeneratedInterface_DoesNotGenerateContextMembers()
+    public void GenerateDbSets_ContextWithoutAttribute_DoesNotGenerate()
     {
         var source =
             CreateSource(
@@ -260,6 +233,7 @@ public sealed class DbContextGeneratorTests
                 }
 
                 namespace Sample.Infrastructure {
+                    // No [GenerateDbSets]: this context is not a target, so nothing is generated for it.
                     public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
                     }
 
@@ -274,7 +248,7 @@ public sealed class DbContextGeneratorTests
 
         var result = Generate(source);
 
-        // The DbContext implements no [GenerateDbSets] interface, so no DbSet/context members are generated.
+        // The context is not marked [GenerateDbSets], so no DbSet/context members are generated.
         // (The configuration is still advertised via the assembly manifest for cross-assembly discovery.)
         result.GeneratedTrees
             .Select(tree => Path.GetFileName(tree.FilePath))
@@ -295,13 +269,11 @@ public sealed class DbContextGeneratorTests
                 }
             }
 
-            namespace Sample.Application {
-                [Elarion.EntityFrameworkCore.GenerateDbSets]
-                public partial interface IAppDbContext {
-                }
-            }
-
             namespace Sample.Infrastructure {
+                [Elarion.EntityFrameworkCore.GenerateDbSets]
+                public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
+                }
+
                 [Elarion.EntityFrameworkCore.EntityConfiguration]
                 public sealed class CompanyConfiguration
                     : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.Company> {
@@ -338,7 +310,7 @@ public sealed class DbContextGeneratorTests
         const string sourceA =
             """
             namespace Elarion.EntityFrameworkCore {
-                [System.AttributeUsage(System.AttributeTargets.Interface, AllowMultiple = false, Inherited = false)]
+                [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
                 public sealed class GenerateDbSetsAttribute : System.Attribute {
                     public GenerateDbSetsAttribute(params string[] scopes) { }
                 }
@@ -378,18 +350,13 @@ public sealed class DbContextGeneratorTests
             string.Join("\n", emitResult.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)));
         var referenceA = MetadataReference.CreateFromImage(image.ToArray());
 
-        // Assembly B has no configurations of its own; it must discover Invoice solely from A's manifest.
+        // Assembly B has no configurations of its own; its [GenerateDbSets] context must discover Invoice
+        // solely from A's manifest.
         const string sourceB =
             """
-            namespace Sample.Application {
-                [Elarion.EntityFrameworkCore.GenerateDbSets]
-                public partial interface IAppDbContext {
-                }
-            }
-
             namespace Sample.Infrastructure {
-                public sealed partial class AppDbContext
-                    : Microsoft.EntityFrameworkCore.DbContext, Sample.Application.IAppDbContext {
+                [Elarion.EntityFrameworkCore.GenerateDbSets]
+                public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
                 }
             }
             """;
@@ -411,7 +378,7 @@ public sealed class DbContextGeneratorTests
     private static string CreateSource(string testSource) =>
         $$"""
         namespace Elarion.EntityFrameworkCore {
-            [System.AttributeUsage(System.AttributeTargets.Interface, AllowMultiple = false, Inherited = false)]
+            [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
             public sealed class GenerateDbSetsAttribute : System.Attribute {
                 public GenerateDbSetsAttribute(params string[] scopes) {
                 }

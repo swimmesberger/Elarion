@@ -1,4 +1,5 @@
 using Billing.Application.Domain;
+using Billing.Application.Persistence;
 using Elarion.Abstractions.Resilience;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +11,7 @@ namespace Billing.Application.Modules.Invoicing.Jobs;
 /// resilience (<c>[Resilient]</c>) — short, idempotent work where one occurrence owns its retries —
 /// and config placeholders so operators can retune the schedule without a redeploy.</summary>
 public sealed class OverdueReminderJob(
-    IAppDbContext db,
+    BillingDbContext db,
     TimeProvider clock,
     ILogger<OverdueReminderJob> logger
 ) {

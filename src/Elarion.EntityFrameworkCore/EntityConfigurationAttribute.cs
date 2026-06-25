@@ -6,7 +6,7 @@ namespace Elarion.EntityFrameworkCore;
 /// <c>[EntityConfiguration]</c> class to drive both halves of model wiring:
 /// <list type="bullet">
 ///   <item><description>a <c>DbSet&lt;T&gt;</c> property for each <c>IEntityTypeConfiguration&lt;T&gt;</c>
-///     the class implements (on the <c>[GenerateDbSets]</c> interface and the implementing context), and</description></item>
+///     the class implements (on the <c>[GenerateDbSets]</c> context class), and</description></item>
 ///   <item><description>a direct <c>Configure(...)</c> call applying the configuration from the generated
 ///     <c>ConfigureEntities(ModelBuilder)</c> method (no reflection scanning).</description></item>
 /// </list>

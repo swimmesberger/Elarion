@@ -27,11 +27,11 @@ var builder = WebApplication.CreateSlimBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
 
 // Database: the context lives in the application's persistence layer (the database is application logic);
-// handlers see only IAppDbContext. Provider *registration* is the host's job — the connection string is
-// injected by the Aspire AppHost (resource name "billing").
+// handlers inject the concrete BillingDbContext directly — there is no IAppDbContext abstraction. Provider
+// *registration* is the host's job — the connection string is injected by the Aspire AppHost ("billing").
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
-builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+// The transaction decorator depends on the base DbContext, so expose BillingDbContext under it too.
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.

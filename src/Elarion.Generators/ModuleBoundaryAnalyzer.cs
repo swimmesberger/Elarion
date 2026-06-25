@@ -20,7 +20,7 @@ namespace Elarion.Generators;
 /// </para>
 /// <para>
 /// Modules are <em>feature</em> separation, not <em>data</em> separation: every module reaches the whole
-/// database through the shared <c>IAppDbContext</c> by design. Entities are therefore shared data — they
+/// database through the shared <c>DbContext</c> by design. Entities are therefore shared data — they
 /// live in the shared kernel, reference each other across aggregate boundaries, and are <strong>never</strong>
 /// flagged, even though their <c>[EntityConfiguration]</c> (module-owned <em>code</em>) is. Real data
 /// isolation is a separate <c>DbContext</c>, not this analyzer.
@@ -46,7 +46,7 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         "A module should collaborate with another module through a published [ModuleContract], not by " +
         "injecting or depending on the other module's internal code — a [Service], a handler, or an " +
         "[EntityConfiguration]. Shared-kernel entities are deliberately not flagged: every module reaches " +
-        "the whole database through IAppDbContext by design.");
+        "the whole database through the shared DbContext by design.");
 
     private static readonly ImmutableArray<DiagnosticDescriptor> SupportedDiagnosticsArray =
         ImmutableArray.Create(CrossModuleInternalReference);
@@ -75,7 +75,7 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
             var handlerInterface = start.Compilation.GetTypeByMetadataName(HandlerInterfaceMetadataName);
 
             // The [EntityConfiguration] class is module-internal code; the entity it configures is shared data
-            // (it lives in the shared kernel and every module reaches it through IAppDbContext by design), so
+            // (it lives in the shared kernel and every module reaches it through the shared DbContext by design), so
             // only the configuration class is flagged — never the entity.
             var state = new BoundaryState(
                 modules, serviceAttr, contractAttr, entityConfigAttr, handlerInterface);

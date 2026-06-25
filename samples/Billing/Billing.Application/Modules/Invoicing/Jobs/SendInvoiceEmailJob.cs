@@ -1,5 +1,6 @@
 using Billing.Application.Domain;
 using Billing.Application.Modules.Invoicing.Services;
+using Billing.Application.Persistence;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,7 +15,7 @@ public sealed record SendInvoiceEmailPayload {
 /// because deferred retry may run a fresh attempt after a transient failure.</summary>
 [ScheduledJob("invoicing.sendInvoiceEmail")]
 public sealed class SendInvoiceEmailJob(
-    IAppDbContext db,
+    BillingDbContext db,
     IInvoiceEmailSender email,
     TimeProvider clock
 ) : IScheduledJob<SendInvoiceEmailPayload> {

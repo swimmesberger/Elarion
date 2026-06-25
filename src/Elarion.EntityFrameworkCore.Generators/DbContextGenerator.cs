@@ -9,9 +9,11 @@ using Microsoft.CodeAnalysis.Text;
 namespace Elarion.EntityFrameworkCore.Generators;
 
 /// <summary>
-/// Source generator that produces DbSet properties and entity-configuration application for interfaces
-/// marked with <c>[GenerateDbSets]</c> and the DbContext classes implementing them. The entity set is
-/// driven entirely by <c>[EntityConfiguration]</c> classes — each implemented
+/// Source generator that fills a partial <c>DbContext</c> class marked with <c>[GenerateDbSets]</c> with
+/// <c>DbSet&lt;T&gt;</c> properties and a <c>ConfigureEntities(ModelBuilder)</c> method. The DbSets are a
+/// concern of the <em>implementation</em> (the concrete context), not of an interface — the database is
+/// application logic that handlers use directly, so there is no generated context abstraction. The entity
+/// set is driven entirely by <c>[EntityConfiguration]</c> classes — each implemented
 /// <c>IEntityTypeConfiguration&lt;T&gt;</c> contributes a <c>DbSet&lt;T&gt;</c> and a direct
 /// <c>Configure(...)</c> call. There is no separate entity marker: a configured entity is a discovered
 /// entity.
@@ -34,20 +36,13 @@ public sealed class DbContextGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var interfaceTargets = context.SyntaxProvider
+        // The target is the partial DbContext class carrying [GenerateDbSets]; the DbSets are emitted onto
+        // the implementation, not an interface.
+        var classTargets = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 GenerateDbSetsAttributeName,
-                static (node, _) => node is InterfaceDeclarationSyntax,
-                static (ctx, _) => GetGeneratedInterfaceTarget(ctx));
-
-        var inferredClassTargets = context.SyntaxProvider
-            .CreateSyntaxProvider(
-                // Narrow to plausible DbContext-derived partials syntactically before paying for the
-                // semantic transform; GetInferredClassTarget still does the authoritative confirmation.
-                static (node, _) => node is ClassDeclarationSyntax c
-                    && c.Modifiers.Any(SyntaxKind.PartialKeyword)
-                    && c.BaseList is not null,
-                static (ctx, _) => GetInferredClassTarget(ctx))
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => GetClassTarget(ctx))
             .Where(static target => target is not null);
 
         // In-compilation configurations are discovered through the syntax provider (incremental: only the
@@ -94,24 +89,11 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             .WithTrackingName("Configurations");
 
         context.RegisterSourceOutput(
-            interfaceTargets.Collect().Combine(configurations),
+            classTargets.Collect().Combine(configurations),
             static (spc, pair) =>
             {
                 var (targets, configs) = pair;
                 foreach (var target in DistinctTargets(targets))
-                {
-                    var active = SelectActiveConfigs(configs, target);
-                    var entities = DeriveEntities(active);
-                    GenerateDbContextInterface(spc, target, entities);
-                }
-            });
-
-        context.RegisterSourceOutput(
-            inferredClassTargets.Collect().Combine(configurations),
-            static (spc, pair) =>
-            {
-                var (targets, configs) = pair;
-                foreach (var target in DistinctNullableTargets(targets))
                 {
                     var active = SelectActiveConfigs(configs, target);
                     var entities = DeriveEntities(active);
@@ -120,48 +102,21 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             });
     }
 
-    private static TargetInfo GetGeneratedInterfaceTarget(GeneratorAttributeSyntaxContext ctx)
+    private static TargetInfo? GetClassTarget(GeneratorAttributeSyntaxContext ctx)
     {
-        var symbol = (INamedTypeSymbol)ctx.TargetSymbol;
-        var scopes = GetScopes(ctx.Attributes);
+        if (ctx.TargetSymbol is not INamedTypeSymbol classSymbol || classSymbol.IsAbstract)
+        {
+            return null;
+        }
 
-        return new TargetInfo(
-            symbol.Name,
-            symbol.ContainingNamespace.ToDisplayString(),
-            symbol.ToDisplayString(),
-            scopes);
-    }
-
-    private static TargetInfo? GetInferredClassTarget(GeneratorSyntaxContext ctx)
-    {
-        if (ctx.Node is not ClassDeclarationSyntax classDeclaration ||
+        if (ctx.TargetNode is not ClassDeclarationSyntax classDeclaration ||
             !classDeclaration.Modifiers.Any(SyntaxKind.PartialKeyword))
         {
             return null;
         }
 
-        if (ctx.SemanticModel.GetDeclaredSymbol(classDeclaration) is not INamedTypeSymbol classSymbol ||
-            classSymbol.IsAbstract)
-        {
-            return null;
-        }
-
-        var compilation = ctx.SemanticModel.Compilation;
-        var dbContext = compilation.GetTypeByMetadataName(DbContextName);
-        var generateDbSetsAttribute = compilation.GetTypeByMetadataName(GenerateDbSetsAttributeName);
-        if (dbContext is null ||
-            generateDbSetsAttribute is null ||
-            !InheritsFrom(classSymbol, dbContext))
-        {
-            return null;
-        }
-
-        var generatedInterfaces = classSymbol.AllInterfaces
-            .Select(interfaceSymbol => TryGetAttribute(interfaceSymbol, generateDbSetsAttribute))
-            .Where(attribute => attribute is not null)
-            .ToImmutableArray();
-
-        if (generatedInterfaces.IsEmpty)
+        var dbContext = ctx.SemanticModel.Compilation.GetTypeByMetadataName(DbContextName);
+        if (dbContext is null || !InheritsFrom(classSymbol, dbContext))
         {
             return null;
         }
@@ -170,7 +125,7 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             classSymbol.Name,
             classSymbol.ContainingNamespace.ToDisplayString(),
             classSymbol.ToDisplayString(),
-            CombineInterfaceScopes(generatedInterfaces));
+            GetScopes(ctx.Attributes));
     }
 
     private static ConfigResult CreateConfig(GeneratorAttributeSyntaxContext ctx, CancellationToken ct)
@@ -377,13 +332,6 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         return false;
     }
 
-    private static AttributeData? TryGetAttribute(ISymbol symbol, INamedTypeSymbol attributeType)
-    {
-        return symbol
-            .GetAttributes()
-            .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, attributeType));
-    }
-
     private static ImmutableArray<string> GetScopes(ImmutableArray<AttributeData> attributes)
     {
         if (attributes.IsEmpty)
@@ -423,28 +371,6 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         }
     }
 
-    private static ImmutableArray<string> CombineInterfaceScopes(ImmutableArray<AttributeData?> attributes)
-    {
-        var scopes = ImmutableArray.CreateBuilder<string>();
-        foreach (var attribute in attributes)
-        {
-            if (attribute is null)
-            {
-                continue;
-            }
-
-            var interfaceScopes = GetScopes(attribute);
-            if (interfaceScopes.IsEmpty)
-            {
-                return ImmutableArray<string>.Empty;
-            }
-
-            scopes.AddRange(interfaceScopes);
-        }
-
-        return NormalizeScopes(scopes);
-    }
-
     private static ImmutableArray<string> NormalizeScopes(IEnumerable<string> scopes)
     {
         var normalized = ImmutableArray.CreateBuilder<string>();
@@ -461,19 +387,7 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         return normalized.ToImmutable();
     }
 
-    private static IEnumerable<TargetInfo> DistinctTargets(ImmutableArray<TargetInfo> targets)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var target in targets)
-        {
-            if (seen.Add(target.FullName))
-            {
-                yield return target;
-            }
-        }
-    }
-
-    private static IEnumerable<TargetInfo> DistinctNullableTargets(ImmutableArray<TargetInfo?> targets)
+    private static IEnumerable<TargetInfo> DistinctTargets(ImmutableArray<TargetInfo?> targets)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var target in targets)
@@ -549,51 +463,6 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         }
 
         sb.AppendLine("    }");
-        sb.AppendLine("}");
-
-        context.AddSource(
-            string.Format("{0}.DbSets.g.cs", target.Name),
-            SourceText.From(sb.ToString(), Encoding.UTF8));
-    }
-
-    private static void GenerateDbContextInterface(
-        SourceProductionContext context,
-        TargetInfo target,
-        ImmutableArray<EntityInfo> entities)
-    {
-        if (entities.IsEmpty)
-        {
-            return;
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine("// <auto-generated/>");
-        sb.AppendLine("#nullable enable");
-        sb.AppendLine();
-
-        var namespaces = entities
-            .Select(e => e.Namespace)
-            .Where(ns => !string.IsNullOrEmpty(ns) && ns != target.Namespace)
-            .Distinct()
-            .OrderBy(ns => ns, StringComparer.Ordinal);
-
-        sb.AppendLine("using Microsoft.EntityFrameworkCore;");
-        foreach (var ns in namespaces)
-        {
-            sb.AppendLine(string.Format("using {0};", ns));
-        }
-
-        sb.AppendLine();
-        sb.AppendLine(string.Format("namespace {0};", target.Namespace));
-        sb.AppendLine();
-        sb.AppendLine(string.Format("partial interface {0} {{", target.Name));
-
-        foreach (var entity in entities)
-        {
-            var pluralName = Pluralize(entity.Name);
-            sb.AppendLine(string.Format("    DbSet<{0}> {1} {{ get; }}", entity.Name, pluralName));
-        }
-
         sb.AppendLine("}");
 
         context.AddSource(
