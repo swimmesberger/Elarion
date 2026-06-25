@@ -1,6 +1,6 @@
 ---
 title: Solution structure
-description: Where entities, modules, and schema configuration belong relative to the module-boundary rule — keep entities in a shared-kernel namespace, let each module own its handlers and schema, and graduate to separate assemblies only when they earn their keep.
+description: Where entities, modules, and schema configuration belong relative to the module-boundary rule — keep entities in a shared-kernel namespace, treat configuration as platform (not feature-owned), and graduate to bounded contexts only when they earn their keep.
 ---
 
 [Project structure](/docs/getting-started/project-structure) covers the mechanical layout the
@@ -22,6 +22,15 @@ deliberately part of that shared kernel** — they are shared data, not module-i
 
 That distinction — code is module-internal, data is shared — decides where entities go.
 
+Said as a model: **a feature is a *plugin* over a *platform* data model.** The platform is the shared
+substrate — the entities, their configuration, and the framework. A feature composes it into behavior
+and may touch *any* entity, but it never depends on another feature except through a
+[`[ModuleContract]`](/docs/concepts/cross-module-communication). The dependency arrow points
+**feature → platform**, never the reverse and never feature → feature. Touching many *entities* is
+using the platform; depending on another *feature* is the thing to avoid.
+[ADR-0007](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0007-data-is-platform-module-as-plugin.md)
+records this model and what it implies for where configuration belongs.
+
 ## Entities are shared kernel, not module-internal
 
 **Do not put entities inside a module.** Domain entities cross-reference each other through foreign-key
@@ -30,9 +39,10 @@ them, and a `[ModuleContract]` interface cannot model an EF relationship. Module
 separation, not *data* separation: every module reaches the whole database through the shared
 `IAppDbContext` by design (real data isolation would be a separate `DbContext`). The boundary analyzer
 reflects this — it flags a module's internal *code* (`[Service]`, handler, `[EntityConfiguration]`) but
-**never an entity** — so an `Invoice.Client` navigation across aggregates is always fine. Keeping entities
-in one shared-kernel namespace is therefore a design convention that gives shared data an obvious home,
-not an analyzer workaround.
+**never an entity** — so a cross-aggregate reference is never flagged. (Reference other aggregates by id
+rather than by navigation property; see [the delete-the-module test](#the-delete-the-module-test) for why.)
+Keeping entities in one shared-kernel namespace is therefore a design convention that gives shared data an
+obvious home, not an analyzer workaround.
 
 Keep entities and their enums in a **shared-kernel namespace under no `[AppModule]`** — for example
 `MyApp.Application.Domain` — that every module may depend on and that depends on no module.
@@ -42,45 +52,54 @@ src/
   MyApp.Application/
     Domain/                  ← shared kernel: entities + enums (NOT in any [AppModule])
       Client.cs              (plain entity — no marker)
-      Invoice.cs             (plain entity)   ← FK navigation across aggregates is fine here
+      Invoice.cs             (plain entity; references Client by id, not a navigation)
       InvoiceStatus.cs       (enum)
+    Persistence/             ← platform: entity configuration = the schema *definition* (under no [AppModule])
+      ClientConfiguration.cs   [EntityConfiguration] : IEntityTypeConfiguration<Client>
+      InvoiceConfiguration.cs  [EntityConfiguration] : IEntityTypeConfiguration<Invoice>
     Modules/
-      Clients/               ← vertical slice: handlers, validators,
+      Clients/               ← vertical slice: handlers, validators, services — behavior only
         ClientsModule.cs       [AppModule("Clients")]
-        ClientConfiguration.cs [EntityConfiguration] : IEntityTypeConfiguration<Client>   ← the module owns its schema
         Handlers/ …
-      Billing/
-        BillingModule.cs       [AppModule("Billing")]
-        InvoiceConfiguration.cs
+      Invoicing/
+        InvoicingModule.cs     [AppModule("Invoicing")]
         Handlers/ …
-  MyApp.Infrastructure/      ← platform only: DbContext, interceptors, migrations, naming conventions
+  MyApp.Infrastructure/      ← platform: concrete DbContext, provider, migrations (schema *provisioning*)
   MyApp.Api/                 ← host: [GenerateModuleBootstrapper], middleware, transport wiring
 ```
 
-## Modules contribute schema; the host loads it
+## Where configuration lives
 
-Place each `[EntityConfiguration]` (an `IEntityTypeConfiguration<T>` implementation) **in the module that
-owns the entity's behavior**, beside its handlers. The EF Core generator discovers `[EntityConfiguration]`
-classes wherever they live — the attribute is the single source of truth, driving both the generated
-`DbSet<T>` and the configuration application — and emits direct `ApplyConfiguration<T>` calls into a
-generated `ConfigureEntities(ModelBuilder)` on the context, so colocation is a **convention for
-discoverability, not a generator requirement**.
+The EF Core generator discovers `[EntityConfiguration]` classes **wherever they live** — the attribute is
+the single source of truth, driving both the generated `DbSet<T>` and the configuration application, and it
+emits direct `ApplyConfiguration<T>` calls into a generated `ConfigureEntities(ModelBuilder)` on the
+context. Placement is therefore a **convention, not a generator requirement**.
 
-A module-owned configuration is safe across the boundary for two independent reasons:
+Because a configuration describes the one shared model every feature draws on, it is *platform*, not
+feature behavior. The recommended home is a shared `Persistence` layer — a sibling of `Domain`, under no
+`[AppModule]` — kept as a flat folder while there is a single `DbContext` (one folder per `DbContext` once
+you use scopes). The `samples/Billing` app currently co-locates each `[EntityConfiguration]` with its
+module — a simpler form the generator also accepts; the recommended layout is the shared `Persistence`
+layer. See
+[ADR-0007](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0007-data-is-platform-module-as-plugin.md)
+for the platform/plugin rationale and why configuration is not feature-owned.
+
+Wherever it sits, a configuration is safe across the module boundary for two independent reasons:
 
 1. It references only the shared-kernel entity (`Client`), never another module's internals.
 2. `ELMOD002` inspects only the **dependency surface** — constructor parameters, fields, and
    properties — never a method body like `Configure`.
 
-The per-assembly configuration manifest pairs these module-owned `[EntityConfiguration]` configs with the
+The per-assembly configuration manifest pairs the discovered `[EntityConfiguration]` configs with the
 shared entities across assemblies, and the generated `ConfigureEntities` lives in the **context's** assembly
 (which carries no module analyzer). Infrastructure instantiates nothing per-entity — it just calls
 `ConfigureEntities(modelBuilder)` from `OnModelCreating`.
 
 <Callout type="info">
-  This keeps **Infrastructure as platform capabilities, not domain configuration**. The DbContext,
-  interceptors, naming conventions, and migrations are platform concerns; *what shape a `Client` table
-  has* is a module concern and lives with the module.
+  Both layers are *platform*, at different tiers. `Persistence` holds the schema **definition** — the
+  `[EntityConfiguration]` classes, i.e. *what shape a `Client` table has* — while `Infrastructure` holds
+  the schema **provisioning**: the concrete `DbContext`, provider, connection, interceptors, and
+  migrations. Neither is module-owned — configuration is platform, not a feature concern.
 </Callout>
 
 ## A separate `Domain` project is usually unnecessary
@@ -100,19 +119,39 @@ have to wire and reference.
   [Entity Framework Core → Setup](/docs/capabilities/entity-framework).
 </Callout>
 
-## When to graduate to a module-owned schema
+## The delete-the-module test
+
+A module is meant to be a plugin: **delete its folder and every other module still compiles, untouched.**
+That holds because cross-module *code* goes through `[ModuleContract]`s (`ELMOD002` keeps it honest) and
+`[EntityConfiguration]` is discovered structurally, never referenced by name — so removing a feature
+removes its behavior cleanly. Two disciplines keep the test green:
+
+- **Reference other aggregates by ID, not by navigation property.** `Invoice.ClientId` (a `Guid`) leaves
+  the model untangled, so removing the `Clients` feature does not ripple into `Invoicing`. A cross-module
+  navigation creates an EF relationship that couples the two.
+- **Treat new data as platform.** A feature that adds an entity, index, or column *extends the platform*;
+  that data lives in the shared data layer and does **not** vanish when the feature folder is deleted — its
+  removal is a deliberate migration step, because data is durable and shared. (How a plugin should own new
+  typed data while staying cleanly removable is an open question —
+  [ADR-0008](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0008-bounded-contexts-and-the-graduation-path.md).)
+
+## Graduating to a bounded context
 
 The shared-kernel default is right until an aggregate cluster becomes a **genuinely separate bounded
-context with its own `DbContext` and schema**. At that point it can move into a self-contained module
-*assembly* that owns its entities, configurations, and migrations — and *that* is the point at which
-module-internal entities become correct, because nothing outside the context references them. The
-cross-assembly configuration manifest is the mechanism that makes this split work without reflection.
+context with its own `DbContext` and schema** — real *data* separation, not just feature separation. At
+that point its entities become context-private (correctly, since nothing outside the context references
+them). The graduation is incremental, not a rewrite:
 
-| Signal | Layout |
+| Stage | Layout |
 | --- | --- |
-| One bounded context, one `DbContext` | Shared-kernel **namespace** in the application project; module-owned configs |
-| Code shared by multiple host projects | Promote the shared kernel to its own **assembly** (reference `Elarion.EntityFrameworkCore` there) |
-| An aggregate becomes its own bounded context with its own `DbContext`/schema | Self-contained module **assembly** owning its entities, configs, and migrations |
+| One bounded context, one `DbContext` | Shared-kernel **namespace** + a shared `Persistence` layer in the application project |
+| Partition into separate `DbContext`s without splitting assemblies | **Scopes** — `[GenerateDbSets("ctx")]` / `[EntityConfiguration("ctx")]`, one `Persistence` folder per scope |
+| An aggregate becomes its own bounded context | A self-contained **`Context.Application` / `.Infrastructure` / `.Contract`** assembly group owning its entities, configs, and migrations |
+
+The by-ID reference discipline above is what keeps each promotion cheap. See
+[ADR-0008](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0008-bounded-contexts-and-the-graduation-path.md)
+for the full bounded-context model — two boundaries / two enforcers, cross-context collaboration via
+`[ModuleContract]` + the outbox, and the staged graduation path.
 
 ## See also
 
@@ -122,5 +161,9 @@ cross-assembly configuration manifest is the mechanism that makes this split wor
   `ELMOD002` analyzer in full.
 - [Entity Framework Core](/docs/capabilities/entity-framework) — `[EntityConfiguration]`, `[GenerateDbSets]`, and
   configuration discovery.
+- [ADR-0007: Data is platform — modules as plugins](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0007-data-is-platform-module-as-plugin.md)
+  — the rationale for this layout: the platform/plugin model and where configuration belongs.
+- [ADR-0008: Bounded contexts and the graduation path](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0008-bounded-contexts-and-the-graduation-path.md)
+  — real data separation and how a system grows into it.
 - The runnable [`samples/Billing`](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing)
-  app follows this exact layout.
+  app follows this layout for entities and modules (configuration currently co-located — see ADR-0007).
