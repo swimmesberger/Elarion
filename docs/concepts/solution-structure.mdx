@@ -33,6 +33,55 @@ using the data layer; depending on another *feature* is the thing to avoid.
 [Why Elarion](/docs/why-elarion) develops this model — including what "platform" means (the host)
 versus the data layer — and what it implies for where the database and configuration belong.
 
+## Active modules vs. passive building blocks
+
+Everything in an Elarion application is one of two kinds, and this — **not** "core-ness" — is the axis that
+decides where it lives:
+
+- **A module is *active*.** It is a self-registering unit of *behavior*: the generators discover its
+  handlers, services, validators, scheduled jobs, and event consumers and wire them as a gated unit, and it
+  can expose transports (JSON-RPC / HTTP / MCP). It contributes DI registrations.
+- **A shared building block is *passive*.** It is referenced or *composed by* modules and the host; it
+  never self-registers behavior. Entities, value objects, `[EntityConfiguration]`, the `DbContext`, and
+  intent-only ports are all passive.
+
+The test is one question: **does it contribute behavior the framework should discover and wire as a gated
+unit?** Yes → a module. No (it is referenced, applied to something, or wired by the host) → a shared
+building block.
+
+They are not two flavors of "core," and they cannot be merged: entities **must** live *outside* modules
+precisely *because* modules are boundaries. `ELMOD002` makes everything in a module module-internal, and
+shared data must not be boundaried (modules are *feature* separation, not *data* separation) — so it lives
+outside every module. The shared kernel exists **because** modules are boundaries; they are opposites.
+
+### Where does it go?
+
+| If it is… | …it lives in | Example |
+| --- | --- | --- |
+| Pure data or a value — no behavior, no DI | the **shared kernel** (`Domain`) | a `Money` value type, the `Client` entity, an enum |
+| How the database is shaped or accessed | the **persistence** layer (`Persistence`) | `[EntityConfiguration]`, the `DbContext`, migrations |
+| An intent-only **mechanism** — you care only *what*, the impl is swappable, no domain data you query | a **port** (in the application) + adapter (`Infrastructure`), wired by the host | `IEmailSender`, `IBlobStore` |
+| **Behavior** — logic, a DI participant, perhaps endpoints | a **module** | a feature; the audit capability |
+| …used by one area and switchable | a **feature module** | `Invoicing` |
+| …a foundation every module assumes is present, always on | the **Core module** | recording an audit event |
+
+A single capability often **spans** these — and that is the model working, not a smell. The audit trail is
+the worked example: the `AuditEntry` record is shared-kernel data, its `[EntityConfiguration]` is in
+`Persistence`, and the recording capability (a `[ModuleContract]` plus its implementation) is in the Core
+module.
+
+### Port or module? (the email-vs-audit line)
+
+Both a platform-capability **port** and a module **capability** are shared and injected, so they are easy to
+confuse. The split is the same *intent-vs-specifics* line that decides the data layer:
+
+- **A port** wraps a domain-blind **mechanism** you only invoke ("send this email") and could swap
+  (SMTP ↔ SES) without changing your application's meaning. It is *platform* — provided by the host, never
+  aware of your domain.
+- **A module capability** is domain-aware **behavior** — it has business meaning, owns or queries domain
+  data, and may expose endpoints. Recording an audit event and reading its history is domain behavior, so
+  audit is a module capability (published cross-module as a `[ModuleContract]`), not a port.
+
 ## Entities are shared kernel, not module-internal
 
 **Do not put entities inside a module.** Domain entities cross-reference each other through foreign-key
