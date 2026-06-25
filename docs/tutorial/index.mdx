@@ -64,8 +64,9 @@ concerns.
 billing/
 ├─ Billing.sln
 ├─ src/
-│  ├─ Billing.Application/      # modules, handlers, services, validators, jobs, policies  ← Elarion + generators
-│  │  └─ Domain/                # shared-kernel entities + enums (each with an [EntityConfiguration], under no [AppModule])
+│  ├─ Billing.Application/      # modules (behavior), handlers, services, validators, jobs, policies  ← Elarion + generators
+│  │  ├─ Domain/                # shared-kernel entities + enums (plain classes, under no [AppModule])
+│  │  └─ Persistence/           # [EntityConfiguration] schema definitions (platform, under no [AppModule])
 │  ├─ Billing.Infrastructure/   # BillingDbContext (PostgreSQL), EF outbox, SMTP email sender
 │  ├─ Billing.Api/              # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore (+ MCP)
 │  └─ Billing.AppHost/          # .NET Aspire orchestration  → provisions PostgreSQL, runs the API
@@ -73,8 +74,8 @@ billing/
 ```
 
 Entities live in a shared-kernel **namespace** (`Billing.Application.Domain`), not a separate project,
-and each module owns its own `IEntityTypeConfiguration<T>` — see
-[Solution structure](/docs/concepts/solution-structure) for why.
+and their `[EntityConfiguration]` schema lives in a shared `Persistence` layer (configuration is platform,
+not feature-owned) — see [Solution structure](/docs/concepts/solution-structure) for why.
 
 <Callout type="info">
   The dependency direction is `Api → Infrastructure → Application`. The application project never

@@ -2,7 +2,7 @@ namespace Billing.Application.Domain;
 
 /// <summary>An invoice issued to a <see cref="Client"/>. Money is stored as integer minor units
 /// (<c>AmountCents</c>) to avoid floating-point rounding. The entity carries no marker — its
-/// <c>[EntityConfiguration]</c> (<see cref="Modules.Invoicing.InvoiceConfiguration"/>) drives its
+/// <c>[EntityConfiguration]</c> (<see cref="Persistence.InvoiceConfiguration"/>) drives its
 /// <c>DbSet</c> and schema.</summary>
 public sealed class Invoice {
     public Guid Id { get; set; }
