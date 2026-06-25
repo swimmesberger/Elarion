@@ -43,6 +43,27 @@ in-memory or SQLite provider — provider-specific SQL must run on the real engi
 usual "abstract the database for testability" argument. The database is application *logic*, so the
 framework couples to it on purpose.
 
+The general rule behind this — the line between **application logic** and **infrastructure** — is *not*
+data-vs-code; it is whether the application depends on a dependency's **specifics** or only on its
+**intent**:
+
+- **Intent-only → infrastructure (a port + adapter).** The app states *what* it wants — "send this
+  email", "store these bytes", "publish this event" — and the mechanism is interchangeable. A narrow,
+  stable interface captures the intent without leaking specifics; swapping the adapter changes nothing
+  about the app's meaning. `IEmailSender`, `IBlobStore`, `IIntegrationEventBus`, caching, and
+  `ICurrentUser` are all this.
+- **Specifics-are-the-logic → application.** A unique constraint *is* a business invariant; an index
+  exists for a specific feature's query; the queries (LINQ, raw SQL, provider functions) encode business
+  rules. The app reasons about these particulars directly and cannot swap the engine without rewriting
+  logic. The relational model is therefore application logic, not a hidden detail.
+
+This is the latent rule the rest of the framework already follows, and the same technology splits by
+*relationship*: Postgres-as-a-blob-store is a port (`IBlobStore` — you only ever say "store/return
+bytes"), while Postgres-as-the-domain-model is logic (you write business queries against it). It follows
+that the persistence layer — entity configuration, the `DbContext`, and migrations — is **application
+logic and lives in the application**, while `Infrastructure` is the home for intent-only mechanism
+adapters (the SMTP `IEmailSender`, an external API client, etc.).
+
 Conflating the two (treating an entity, or its configuration, as "owned" by the feature that happens
 to use it) is what produced the original confusion. This ADR records the model we settled on.
 
@@ -110,15 +131,21 @@ to use it) is what produced the original confusion. This ADR records the model w
   new typed data while keeping the "rip it out cleanly" property is an open question, deferred to
   ADR-0008.
 
-- **Platform spans two tiers.** Schema *definition* — the `[EntityConfiguration]` classes — is
-  platform-*inner* (the `Persistence` layer the generated `IAppDbContext` derives from). Schema
-  *provisioning* — provider, connection, migrations, the concrete `DbContext` — is platform-*outer*
-  (`Infrastructure`). Both are platform; "platform" is **not** a synonym for the `Infrastructure` project.
+- **The persistence layer is application logic — it is not `Infrastructure`.** Because the app depends on
+  the database's specifics (constraints, indexes, queries), the whole persistence concern —
+  `[EntityConfiguration]`, the concrete `DbContext`, and migrations — lives in the application as one
+  `Persistence` layer. The only genuinely outer (host/composition) piece is provider *registration*: the
+  connection string and `UseNpgsql(...)`. `Infrastructure` is reserved for intent-only mechanism adapters
+  (the SMTP `IEmailSender`, external API clients). This keeps a schema change a single-layer edit — config
+  and migration together — and, since config and `DbContext` share an assembly, removes the need for the
+  cross-assembly configuration manifest.
 
 - **Placement is a convention, not enforced.** The generator discovers `[EntityConfiguration]`
   anywhere, so points 3–5 are conventions this ADR establishes; the enforced parts are the generator
-  behavior and `ELMOD002`. Implementation status: the recommended `Persistence` layout is the target;
-  the `samples/Billing` app currently co-locates configs in modules and is to be migrated to match.
+  behavior and `ELMOD002`. Implementation status: `samples/Billing` already keeps configuration in a
+  `Billing.Application.Persistence` namespace; folding the concrete `DbContext` and migrations into that
+  same persistence layer (today they sit in `Billing.Infrastructure`) is the remaining step to make the
+  sample match this ADR.
 
 ## Alternatives considered
 
