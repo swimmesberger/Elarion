@@ -22,17 +22,7 @@ namespace Elarion.EntityFrameworkCore.Generators;
 public sealed class DbContextGenerator : IIncrementalGenerator
 {
     private const string GenerateDbSetsAttributeName = "Elarion.EntityFrameworkCore.GenerateDbSetsAttribute";
-    private const string EntityConfigurationAttributeName = "Elarion.EntityFrameworkCore.EntityConfigurationAttribute";
     private const string DbContextName = "Microsoft.EntityFrameworkCore.DbContext";
-    private const string EntityTypeConfigurationName = "Microsoft.EntityFrameworkCore.IEntityTypeConfiguration`1";
-
-    private static readonly DiagnosticDescriptor NoConfiguration = new(
-        id: "ELEFC001",
-        title: "EntityConfiguration must implement IEntityTypeConfiguration<T>",
-        messageFormat: "Type '{0}' is annotated with [EntityConfiguration] but implements no IEntityTypeConfiguration<T>; no DbSet or configuration will be generated",
-        category: "Elarion.EntityFrameworkCore",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -51,9 +41,9 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         // not force a re-emit.
         var configResults = context.SyntaxProvider
             .ForAttributeWithMetadataName(
-                EntityConfigurationAttributeName,
+                EntityConfigurationDiscovery.AttributeName,
                 static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, ct) => CreateConfig(ctx, ct));
+                static (ctx, ct) => EntityConfigurationDiscovery.CreateConfig(ctx, ct));
 
         // Diagnostics are data: the transform stays pure and the misuse warning is reported here.
         context.RegisterSourceOutput(configResults, static (spc, result) =>
@@ -77,12 +67,10 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             .Collect()
             .WithTrackingName("ReferencedConfigs");
 
-        // Advertise this assembly's configurations (and their entities/scopes) so a DbContext in another
-        // assembly can read them.
-        context.RegisterSourceOutput(
-            inCompilationConfigs,
-            static (spc, configs) => EmitManifest(spc, configs));
-
+        // This assembly's configurations are advertised to other assemblies by the dedicated
+        // EntityConfigurationManifestGenerator. This generator emits only DbSet members onto the partial
+        // context — it does not mutate the compilation's assembly attributes — so its output refreshes
+        // reliably in IDE source-generator hosts.
         var configurations = inCompilationConfigs
             .Combine(referencedConfigs)
             .Select(static (source, _) => Merge(source.Left, source.Right))
@@ -125,69 +113,7 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             classSymbol.Name,
             classSymbol.ContainingNamespace.ToDisplayString(),
             classSymbol.ToDisplayString(),
-            GetScopes(ctx.Attributes));
-    }
-
-    private static ConfigResult CreateConfig(GeneratorAttributeSyntaxContext ctx, CancellationToken ct)
-    {
-        if (ctx.TargetSymbol is not INamedTypeSymbol type || type.IsAbstract)
-        {
-            return default;
-        }
-
-        var configInterface = ctx.SemanticModel.Compilation.GetTypeByMetadataName(EntityTypeConfigurationName);
-        if (configInterface is null)
-        {
-            return default;
-        }
-
-        var entities = GetConfiguredEntities(type, configInterface);
-        if (entities.IsEmpty)
-        {
-            // [EntityConfiguration] on a class that configures nothing yields no DbSet/configuration.
-            return new ConfigResult(
-                null,
-                DiagnosticInfo.Create(NoConfiguration, LocationInfo.From(type), type.Name));
-        }
-
-        return new ConfigResult(
-            new ConfigInfo(
-                type.ToDisplayString(),
-                type.ContainingNamespace.ToDisplayString(),
-                entities,
-                GetScopes(ctx.Attributes)),
-            null);
-    }
-
-    private static ImmutableArray<ConfiguredEntityInfo> GetConfiguredEntities(
-        INamedTypeSymbol type,
-        INamedTypeSymbol configInterface)
-    {
-        var builder = ImmutableArray.CreateBuilder<ConfiguredEntityInfo>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var iface in type.AllInterfaces)
-        {
-            if (!iface.OriginalDefinition.Equals(configInterface, SymbolEqualityComparer.Default) ||
-                iface.TypeArguments.Length != 1 ||
-                iface.TypeArguments[0] is not INamedTypeSymbol entity)
-            {
-                continue;
-            }
-
-            var fullName = entity.ToDisplayString();
-            if (seen.Add(fullName))
-            {
-                builder.Add(new ConfiguredEntityInfo(
-                    entity.Name,
-                    fullName,
-                    entity.ContainingNamespace.ToDisplayString()));
-            }
-        }
-
-        // Order independently of AllInterfaces iteration so the emitted output is byte-identical.
-        builder.Sort(static (a, b) => string.Compare(a.FullName, b.FullName, StringComparison.Ordinal));
-        return builder.ToImmutable();
+            EntityConfigurationDiscovery.GetScopes(ctx.Attributes));
     }
 
     private static ReferencedData ReadManifest(MetadataReference reference, CancellationToken ct)
@@ -211,47 +137,6 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         }
 
         return new ReferencedData(configs.ToImmutable());
-    }
-
-    private static void EmitManifest(SourceProductionContext spc, ImmutableArray<ConfigInfo> configs)
-    {
-        if (configs.IsEmpty)
-        {
-            return;
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine("// <auto-generated/>");
-        sb.AppendLine("// Source: Elarion.EntityFrameworkCore.Generators.DbContextGenerator (entity configuration manifest)");
-        sb.AppendLine("// Do not edit this file manually.");
-        sb.AppendLine("#nullable enable");
-        sb.AppendLine();
-
-        foreach (var config in configs.OrderBy(static c => c.FullName, StringComparer.Ordinal))
-        {
-            var entities = config.Entities.AsImmutableArray
-                .Select(static e => (e.Name, e.FullName, e.Namespace))
-                .ToList();
-            AppendAssemblyMetadata(
-                sb,
-                EntityConfigurationManifest.ConfigKey,
-                EntityConfigurationManifest.EncodeConfig(
-                    config.FullName,
-                    config.Namespace,
-                    config.Scopes.AsImmutableArray,
-                    entities));
-        }
-
-        spc.AddSource("ElarionEntityConfigurationManifest.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
-    }
-
-    private static void AppendAssemblyMetadata(StringBuilder sb, string key, string value)
-    {
-        sb.Append("[assembly: global::System.Reflection.AssemblyMetadataAttribute(");
-        sb.Append(SymbolDisplay.FormatLiteral(key, quote: true));
-        sb.Append(", ");
-        sb.Append(SymbolDisplay.FormatLiteral(value, quote: true));
-        sb.AppendLine(")]");
     }
 
     private static EquatableArray<ConfigInfo> Merge(
@@ -330,61 +215,6 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         }
 
         return false;
-    }
-
-    private static ImmutableArray<string> GetScopes(ImmutableArray<AttributeData> attributes)
-    {
-        if (attributes.IsEmpty)
-        {
-            return ImmutableArray<string>.Empty;
-        }
-
-        return GetScopes(attributes[0]);
-    }
-
-    private static ImmutableArray<string> GetScopes(AttributeData attribute)
-    {
-        var scopes = ImmutableArray.CreateBuilder<string>();
-        foreach (var argument in attribute.ConstructorArguments)
-        {
-            if (argument.Kind == TypedConstantKind.Array)
-            {
-                foreach (var value in argument.Values)
-                {
-                    AddScope(value, scopes);
-                }
-            }
-            else
-            {
-                AddScope(argument, scopes);
-            }
-        }
-
-        return NormalizeScopes(scopes);
-    }
-
-    private static void AddScope(TypedConstant value, ImmutableArray<string>.Builder scopes)
-    {
-        if (value.Value is string scope && scope.Length > 0)
-        {
-            scopes.Add(scope);
-        }
-    }
-
-    private static ImmutableArray<string> NormalizeScopes(IEnumerable<string> scopes)
-    {
-        var normalized = ImmutableArray.CreateBuilder<string>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var scope in scopes)
-        {
-            if (seen.Add(scope))
-            {
-                normalized.Add(scope);
-            }
-        }
-
-        normalized.Sort(StringComparer.Ordinal);
-        return normalized.ToImmutable();
     }
 
     private static IEnumerable<TargetInfo> DistinctTargets(ImmutableArray<TargetInfo?> targets)
@@ -517,23 +347,10 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         string FullName,
         EquatableArray<string> Scopes);
 
-    private readonly record struct ConfiguredEntityInfo(
-        string Name,
-        string FullName,
-        string Namespace);
-
     private readonly record struct EntityInfo(
         string Name,
         string FullName,
         string Namespace);
-
-    private readonly record struct ConfigInfo(
-        string FullName,
-        string Namespace,
-        EquatableArray<ConfiguredEntityInfo> Entities,
-        EquatableArray<string> Scopes);
-
-    private readonly record struct ConfigResult(ConfigInfo? Config, DiagnosticInfo? Diagnostic);
 
     private readonly record struct ReferencedData(EquatableArray<ConfigInfo> Configs);
 }
