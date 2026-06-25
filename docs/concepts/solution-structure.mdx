@@ -15,7 +15,8 @@ from another module only through a [`[ModuleContract]`](/docs/concepts/cross-mod
 interface. Declaring `DependsOn` does **not** grant access to another module's internals; it only
 orders initialization.
 
-Concretely, a `[Service]`, a handler, or a `[DbEntity]` entity declared *inside* module A cannot be
+Concretely, a `[Service]`, a handler, an `[EntityConfiguration]`, or a configured entity (the entity
+behind an `[EntityConfiguration]`, since entities carry no marker) declared *inside* module A cannot be
 referenced from module B. Types declared under **no** `[AppModule]` (the shared kernel) are never
 flagged, so every module may depend on them freely.
 
@@ -36,13 +37,13 @@ Keep entities and their enums in a **shared-kernel namespace under no `[AppModul
 src/
   MyApp.Application/
     Domain/                  ← shared kernel: entities + enums (NOT in any [AppModule])
-      Client.cs              [DbEntity]
-      Invoice.cs             [DbEntity]   ← FK navigation across aggregates is fine here
+      Client.cs              (plain entity — no marker)
+      Invoice.cs             (plain entity)   ← FK navigation across aggregates is fine here
       InvoiceStatus.cs       (enum)
     Modules/
       Clients/               ← vertical slice: handlers, validators,
         ClientsModule.cs       [AppModule("Clients")]
-        ClientConfiguration.cs IEntityTypeConfiguration<Client>   ← the module owns its schema
+        ClientConfiguration.cs [EntityConfiguration] : IEntityTypeConfiguration<Client>   ← the module owns its schema
         Handlers/ …
       Billing/
         BillingModule.cs       [AppModule("Billing")]
@@ -54,10 +55,12 @@ src/
 
 ## Modules contribute schema; the host loads it
 
-Place each `IEntityTypeConfiguration<T>` **in the module that owns the entity's behavior**, beside its
-handlers. The EF Core generator discovers `IEntityTypeConfiguration<T>` implementations wherever they
-live and emits direct `Configure(...)` calls into a generated `ConfigureEntities(ModelBuilder)` on the
-context — so colocation is a **convention for discoverability, not a generator requirement**.
+Place each `[EntityConfiguration]` (an `IEntityTypeConfiguration<T>` implementation) **in the module that
+owns the entity's behavior**, beside its handlers. The EF Core generator discovers `[EntityConfiguration]`
+classes wherever they live — the attribute is the single source of truth, driving both the generated
+`DbSet<T>` and the configuration application — and emits direct `ApplyConfiguration<T>` calls into a
+generated `ConfigureEntities(ModelBuilder)` on the context, so colocation is a **convention for
+discoverability, not a generator requirement**.
 
 A module-owned configuration is safe across the boundary for two independent reasons:
 
@@ -65,9 +68,10 @@ A module-owned configuration is safe across the boundary for two independent rea
 2. `ELMOD002` inspects only the **dependency surface** — constructor parameters, fields, and
    properties — never a method body like `Configure`.
 
-The `[DbEntity]` manifest pairs these module-owned configs with the shared entities, and the generated
-`ConfigureEntities` lives in the **context's** assembly (which carries no module analyzer). Infrastructure
-instantiates nothing per-entity — it just calls `ConfigureEntities(modelBuilder)` from `OnModelCreating`.
+The per-assembly configuration manifest pairs these module-owned `[EntityConfiguration]` configs with the
+shared entities across assemblies, and the generated `ConfigureEntities` lives in the **context's** assembly
+(which carries no module analyzer). Infrastructure instantiates nothing per-entity — it just calls
+`ConfigureEntities(modelBuilder)` from `OnModelCreating`.
 
 <Callout type="info">
   This keeps **Infrastructure as platform capabilities, not domain configuration**. The DbContext,
@@ -83,11 +87,12 @@ then, `MyApp.Application.Domain` (a namespace, not an assembly) avoids a project
 have to wire and reference.
 
 <Callout type="warn">
-  Whatever assembly declares `[DbEntity]` types must reference **`Elarion.EntityFrameworkCore`** (whose
-  bundled generator emits that assembly's entity manifest), not merely depend on a project that does.
-  NuGet analyzer assets are not transitive. If you *do* split entities into their own project, that
-  project needs the reference directly — otherwise no manifest is emitted, the context resolves zero
-  entities, and no `DbSet`s are generated, with no error. See
+  Whatever assembly declares `[EntityConfiguration]`/`[GenerateDbSets]` types must reference
+  **`Elarion.EntityFrameworkCore`** (whose bundled generator emits that assembly's configuration manifest),
+  not merely depend on a project that does. NuGet analyzer assets are not transitive. If you *do* split
+  entities and their configurations into their own project, that project needs the reference directly —
+  otherwise no manifest is emitted, the context resolves zero configurations, and no `DbSet`s are generated,
+  with no error. See
   [Entity Framework Core → Setup](/docs/capabilities/entity-framework).
 </Callout>
 
@@ -97,7 +102,7 @@ The shared-kernel default is right until an aggregate cluster becomes a **genuin
 context with its own `DbContext` and schema**. At that point it can move into a self-contained module
 *assembly* that owns its entities, configurations, and migrations — and *that* is the point at which
 module-internal entities become correct, because nothing outside the context references them. The
-cross-assembly `[DbEntity]` manifest is the mechanism that makes this split work without reflection.
+cross-assembly configuration manifest is the mechanism that makes this split work without reflection.
 
 | Signal | Layout |
 | --- | --- |
@@ -111,7 +116,7 @@ cross-assembly `[DbEntity]` manifest is the mechanism that makes this split work
   conventions the generators rely on.
 - [Cross-module communication](/docs/concepts/cross-module-communication) — `[ModuleContract]` and the
   `ELMOD002` analyzer in full.
-- [Entity Framework Core](/docs/capabilities/entity-framework) — `[DbEntity]`, `[GenerateDbSets]`, and
+- [Entity Framework Core](/docs/capabilities/entity-framework) — `[EntityConfiguration]`, `[GenerateDbSets]`, and
   configuration discovery.
 - The runnable [`samples/Billing`](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing)
   app follows this exact layout.

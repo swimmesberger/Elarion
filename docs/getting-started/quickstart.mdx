@@ -60,18 +60,33 @@ hook is reserved for additional, non-generated wiring (options binding, third-pa
 ### Define the data model
 
 Handlers access data through a generated `IAppDbContext` interface — there is no repository layer.
-Mark an entity with `[DbEntity]`, declare the context interface with `[GenerateDbSets]`, and let the
-[EF Core generator](/docs/capabilities/entity-framework) emit the `DbSet`s.
+Write an `IEntityTypeConfiguration<T>` for the entity and mark it with `[EntityConfiguration]`, declare
+the context interface with `[GenerateDbSets]`, and let the
+[EF Core generator](/docs/capabilities/entity-framework) emit the `DbSet`s. The entity itself is a plain
+class — `[EntityConfiguration]` on its configuration is the single source of truth that drives both the
+generated `DbSet<Client>` and the `Configure(...)` application.
 
 ```csharp title="MyApp.Application/Data/Client.cs"
-using Elarion.EntityFrameworkCore;
-
 namespace MyApp.Application.Data;
 
-[DbEntity]
 public sealed class Client {
     public Guid Id { get; set; }
     public required string Name { get; set; }
+}
+```
+
+```csharp title="MyApp.Application/Data/ClientConfiguration.cs"
+using Elarion.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace MyApp.Application.Data;
+
+[EntityConfiguration]
+public sealed class ClientConfiguration : IEntityTypeConfiguration<Client> {
+    public void Configure(EntityTypeBuilder<Client> builder) {
+        builder.HasKey(c => c.Id);
+    }
 }
 ```
 
@@ -104,7 +119,8 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-This step needs `Elarion.EntityFrameworkCore` (which bundles the EF Core source generator) and an EF
+This step needs `Elarion.EntityFrameworkCore` (which bundles the EF Core source generator) in any
+assembly that declares `[EntityConfiguration]`/`[GenerateDbSets]` types, and an EF
 Core provider — the quickstart uses `Microsoft.EntityFrameworkCore.InMemory`. In a real application
 the concrete `AppDbContext` lives in an infrastructure project; for the quickstart we keep it in the
 application project.

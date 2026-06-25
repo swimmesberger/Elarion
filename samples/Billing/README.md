@@ -11,7 +11,7 @@ real PostgreSQL database.
 
 | Project | Role |
 | --- | --- |
-| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (`[DbEntity]` `Client`/`Invoice` + enums, under no `[AppModule]`); the `Core`, `Clients`, and `Invoicing` modules with their handlers, validators, services, jobs, events, resilience policy, **and** each entity's `IEntityTypeConfiguration<T>`; the decorator pipeline; and the `[GenerateDbSets] IAppDbContext`. |
+| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice` entities + enums, under no `[AppModule]`); the `Core`, `Clients`, and `Invoicing` modules with their handlers, validators, services, jobs, events, resilience policy, **and** each entity's `[EntityConfiguration]` `IEntityTypeConfiguration<T>` (which drives both the entity's `DbSet` and its schema); the decorator pipeline; and the `[GenerateDbSets] IAppDbContext`. |
 | `Billing.Infrastructure` | Platform capabilities only: the PostgreSQL `BillingDbContext` (with the EF Core outbox), the design-time migration factory, EF migrations, and the SMTP email sender. |
 | `Billing.Api` | The ASP.NET Core host: `[GenerateModuleBootstrapper]`, JSON-RPC + MCP transports, the scheduler/resilience/cache runtimes, current-user, and OpenTelemetry. |
 | `Billing.AppHost` | The .NET Aspire app host: provisions PostgreSQL, runs the API and the web frontend, and wires them together. |
@@ -25,7 +25,8 @@ for when each would graduate to its own assembly.
 ## What it demonstrates
 
 - **Recommended structure** — shared-kernel entities reachable by every module without tripping
-  ELMOD002, with each module owning its own `IEntityTypeConfiguration<T>` beside its handlers.
+  ELMOD002, with each module owning its own `[EntityConfiguration]` `IEntityTypeConfiguration<T>` beside
+  its handlers (the configuration drives the entity's `DbSet` and schema — there is no separate entity marker).
 - **Vertical-slice modules** — `Core` (always-on, `ICurrentUser` audit trail), `Clients`, and `Invoicing`,
   each auto-registered and feature-gated; no hand-written `Add{Module}…()` calls.
 - **The full cross-cutting machinery** — a one-line decorator pipeline (logging → validation →

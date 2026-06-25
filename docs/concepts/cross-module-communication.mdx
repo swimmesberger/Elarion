@@ -41,7 +41,8 @@ internal sealed class OrderPricer(ICustomerLookup customers) {
 }
 ```
 
-Injecting Module A's internal `[Service]`, a handler, or a `[DbEntity]` from Module B instead of a
+Injecting Module A's internal `[Service]`, a handler, an `[EntityConfiguration]`, or a configured entity
+(the entity behind an `[EntityConfiguration]`, since entities carry no marker) from Module B instead of a
 `[ModuleContract]` is reported by the boundary analyzer (`ELMOD002`, a warning). The analyzer inspects
 the dependency surface (constructor parameters, fields, properties); framework and shared-kernel types
 (anything under no `[AppModule]`) are never flagged.
@@ -81,7 +82,7 @@ whole module, so the forwarder never builds a handler's pipeline until you invok
 
 ## Choosing which handlers appear
 
-Membership is **opt-out** and uses the same scope vocabulary as `[DbEntity]`/`[GenerateDbSets]`:
+Membership is **opt-out** and uses the same scope vocabulary as `[EntityConfiguration]`/`[GenerateDbSets]`:
 
 - A default `[GenerateModuleApi]` facade includes **every handler** in the owning module.
 - `[ModuleApi(Exclude = true)]` on a handler removes it from every facade.

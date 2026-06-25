@@ -165,9 +165,9 @@ must be tested.
   the assembly's data as `[assembly: AssemblyMetadata(key, value)]` and read referenced assemblies'
   metadata via `context.MetadataReferencesProvider` (`ElarionManifestReader` reads it straight from PE
   metadata with no symbols, so it is cached **per reference** — a source edit re-reads nothing). Used
-  by `[AppModule]`/`[HttpEndpoint]`/`[RpcMethod]` (`ElarionManifest`) and by `[DbEntity]`
-  (`DbEntityManifest` — a `DbContext` reads referenced entities from their manifest instead of walking
-  the referenced symbol tree). The convention's cost: a referenced project must run the generator to
+  by `[AppModule]`/`[HttpEndpoint]`/`[RpcMethod]` (`ElarionManifest`) and by `[EntityConfiguration]`
+  (`EntityConfigurationManifest` — a `DbContext` reads referenced configurations from their manifest
+  instead of walking the referenced symbol tree). The convention's cost: a referenced project must run the generator to
   emit its manifest (the same requirement that already applies to referenced modules).
 
 ## Consequences
@@ -199,9 +199,9 @@ must be tested.
     file's `[DecoratorList]` changes — a silent cross-edit bug). It keeps `Combine(CompilationProvider)`
     for correctness, but builds the module-`[DecoratorList]` map **once per pass** (not per handler) and
     returns a value-equatable array, so irrelevant edits don't re-emit.
-  - `DbContextGenerator` — in-compilation `[DbEntity]`/configs use the syntax providers (incremental);
-    referenced entities use the **manifest** (`DbEntityManifest`, cached per reference) instead of a
-    symbol scan. The earlier "scans referenced assemblies every edit" cost is gone.
+  - `DbContextGenerator` — in-compilation `[EntityConfiguration]` classes use the syntax provider
+    (incremental); referenced configurations use the **manifest** (`EntityConfigurationManifest`, cached
+    per reference) instead of a symbol scan. The earlier "scans referenced assemblies every edit" cost is gone.
 - The byte-identical-output contract makes conversions deliberate: you change *where* the model is
   computed, never the `StringBuilder`/hint-name/sort code, and you re-run the generator's tests after
   each step.

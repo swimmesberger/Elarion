@@ -177,7 +177,8 @@ configure concrete providers — those belong to the host.
 
 <Callout type="info">
   Cross-module references follow the same discipline: depend on another module's published
-  `[ModuleContract]`, never its internal `[Service]`, handler, or `[DbEntity]` types. The
+  `[ModuleContract]`, never its internal `[Service]`, handler, `[EntityConfiguration]`, or configured-entity
+  types (the entity behind an `[EntityConfiguration]`, since entities carry no marker). The
   `ModuleBoundaryAnalyzer` (`ELMOD002`) flags violations. See
   [Cross-module communication](/docs/concepts/cross-module-communication).
 </Callout>

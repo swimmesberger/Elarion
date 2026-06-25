@@ -65,7 +65,7 @@ billing/
 ├─ Billing.sln
 ├─ src/
 │  ├─ Billing.Application/      # modules, handlers, services, validators, jobs, policies  ← Elarion + generators
-│  │  └─ Domain/                # shared-kernel [DbEntity] entities + enums (under no [AppModule])
+│  │  └─ Domain/                # shared-kernel entities + enums (each with an [EntityConfiguration], under no [AppModule])
 │  ├─ Billing.Infrastructure/   # BillingDbContext (PostgreSQL), EF outbox, SMTP email sender
 │  ├─ Billing.Api/              # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore (+ MCP)
 │  └─ Billing.AppHost/          # .NET Aspire orchestration  → provisions PostgreSQL, runs the API
@@ -149,7 +149,7 @@ cd ../..
 The **infrastructure** project owns the concrete `BillingDbContext` and the PostgreSQL provider, plus
 the EF Core integration-event outbox. Because the generated class-side `DbSet`s and entity
 configuration are emitted where the concrete context lives, infrastructure references
-`Elarion.EntityFrameworkCore` too (its generator reads the application's entity manifest
+`Elarion.EntityFrameworkCore` too (its generator reads the application's configuration manifest
 cross-assembly):
 
 ```bash

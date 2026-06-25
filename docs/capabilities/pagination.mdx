@@ -50,10 +50,8 @@ translates to SQL like hand-written `OrderBy`/`Where`) plus a static `Definition
 opaque cursor codec that carries the key values (no extra round-trip to reload a reference row):
 
 ```csharp
-using Elarion.EntityFrameworkCore;   // [DbEntity]
 using Elarion.Paging;                 // [Keyset<T>]
 
-[DbEntity]
 public sealed class Client {
     public Guid Id { get; init; }
     public DateTime CreatedAt { get; init; }

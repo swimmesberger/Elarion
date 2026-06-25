@@ -17,7 +17,7 @@ namespace Elarion.Abstractions.Modules;
 ///     on the matching scoped facades.</description></item>
 /// </list>
 /// <para>
-/// The scope vocabulary mirrors <c>[DbEntity]</c>/<c>[GenerateDbSets]</c>: a handler's scope tags are
+/// The scope vocabulary mirrors <c>[EntityConfiguration]</c>/<c>[GenerateDbSets]</c>: a handler's scope tags are
 /// additive (it stays in the default facade), and a scoped facade selects the handlers whose tags
 /// intersect its own. A handler with no attribute is in the default facade only.
 /// </para>

@@ -99,6 +99,93 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
+    public async Task InjectingForeignConfiguredEntity_IsReported()
+    {
+        // Entities carry no marker — a configured entity is the entity behind an [EntityConfiguration].
+        // Referencing another module's configured entity must still trip ELMOD002.
+        const string source =
+            """
+            namespace Elarion.EntityFrameworkCore {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class EntityConfigurationAttribute : System.Attribute {
+                    public EntityConfigurationAttribute(params string[] scopes) { }
+                }
+            }
+
+            namespace App.Billing {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+
+                public sealed class Invoice { }
+
+                [Elarion.EntityFrameworkCore.EntityConfiguration]
+                public sealed class InvoiceConfiguration
+                    : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Invoice> {
+                    public void Configure(
+                        Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Invoice> builder) { }
+                }
+            }
+
+            namespace App.Orders {
+                [Elarion.Abstractions.Modules.AppModule("Orders")]
+                public static class OrdersModule { }
+
+                [Elarion.Abstractions.Service]
+                public sealed class OrdersService {
+                    public OrdersService(App.Billing.Invoice invoice) { }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        diagnostics.Should().ContainSingle(d => d.Id == "ELMOD002");
+    }
+
+    [Fact]
+    public async Task InjectingForeignEntityConfiguration_IsReported()
+    {
+        // The configuration class itself is module-internal infrastructure.
+        const string source =
+            """
+            namespace Elarion.EntityFrameworkCore {
+                [System.AttributeUsage(System.AttributeTargets.Class)]
+                public sealed class EntityConfigurationAttribute : System.Attribute {
+                    public EntityConfigurationAttribute(params string[] scopes) { }
+                }
+            }
+
+            namespace App.Billing {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+
+                public sealed class Invoice { }
+
+                [Elarion.EntityFrameworkCore.EntityConfiguration]
+                public sealed class InvoiceConfiguration
+                    : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Invoice> {
+                    public void Configure(
+                        Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Invoice> builder) { }
+                }
+            }
+
+            namespace App.Orders {
+                [Elarion.Abstractions.Modules.AppModule("Orders")]
+                public static class OrdersModule { }
+
+                [Elarion.Abstractions.Service]
+                public sealed class OrdersService {
+                    public OrdersService(App.Billing.InvoiceConfiguration configuration) { }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        diagnostics.Should().Contain(d => d.Id == "ELMOD002");
+    }
+
+    [Fact]
     public async Task ReferencingForeignPlainType_IsNotGated()
     {
         const string source =

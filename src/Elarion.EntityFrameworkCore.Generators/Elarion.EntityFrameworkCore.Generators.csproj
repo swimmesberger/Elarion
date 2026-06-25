@@ -14,7 +14,7 @@
     <NoPackageAnalysis>true</NoPackageAnalysis>
     <!-- This generator no longer ships as its own NuGet package; its analyzer DLL is bundled into
          the Elarion.EntityFrameworkCore marker package, so referencing the marker package alone is
-         enough for any assembly that declares [DbEntity]/[GenerateDbSets] types. -->
+         enough for any assembly that declares [EntityConfiguration]/[GenerateDbSets] types. -->
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -27,6 +27,7 @@
     <!-- Shared files compiled into both generator assemblies (no cross-assembly reference needed). -->
     <Compile Include="..\Elarion.Generators\EquatableArray.cs" Link="EquatableArray.cs" />
     <Compile Include="..\Elarion.Generators\AssemblyMetadataReader.cs" Link="AssemblyMetadataReader.cs" />
+    <Compile Include="..\Elarion.Generators\SourceModels.cs" Link="SourceModels.cs" />
   </ItemGroup>
 
   <ItemGroup>

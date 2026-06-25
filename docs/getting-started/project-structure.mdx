@@ -11,7 +11,7 @@ layout right is what lets the generators emit registration code without a centra
 ```text
 MyApp.sln
 ├─ src/
-│  ├─ MyApp.Domain/            # entities, value objects  ← Elarion.EntityFrameworkCore (if it declares [DbEntity] types)
+│  ├─ MyApp.Domain/            # entities (plain classes) + their [EntityConfiguration]s  ← Elarion.EntityFrameworkCore (if it declares [EntityConfiguration] types)
 │  ├─ MyApp.Application/       # modules, handlers, services, validators  ← Elarion
 │  ├─ MyApp.Infrastructure/    # EF Core context, mail, blob storage, external services
 │  └─ MyApp.Api/               # ASP.NET Core host  ← Elarion, Elarion.JsonRpc, Elarion.AspNetCore
@@ -33,10 +33,11 @@ capabilities.** See [Dependency rules](#dependency-rules) below for where each k
 <Callout type="warn">
   The source generators ship **inside** their runtime packages, and NuGet analyzer assets are not
   transitive — so every assembly that declares generator-driven types must reference the package
-  directly. In particular, a separate domain/entity project that declares `[DbEntity]` types must
-  reference **`Elarion.EntityFrameworkCore`**: its generator emits that assembly's entity manifest,
-  which the `[GenerateDbSets]` context project reads cross-assembly. Without it, the context resolves
-  zero entities and generates no `DbSet`s.
+  directly. In particular, a separate domain/entity project that declares `[EntityConfiguration]`
+  types must reference **`Elarion.EntityFrameworkCore`**: its generator emits that assembly's
+  configuration manifest, which the `[GenerateDbSets]` context project reads cross-assembly. Entities
+  themselves stay plain classes — the `[EntityConfiguration]` on the `IEntityTypeConfiguration<T>`
+  is the marked type. Without it, the context resolves zero configurations and generates no `DbSet`s.
 </Callout>
 
 ## Module layout

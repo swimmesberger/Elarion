@@ -37,7 +37,7 @@ rather than a runtime failure. This table maps the common symptoms to fixes.
 | --- | --- | --- |
 | Transaction decorator cannot resolve `DbContext` | The host registered only the concrete context. | Register `DbContext` to resolve to the app context: `services.AddScoped<DbContext>(sp => sp.GetRequiredService<AppDbContext>())`. |
 | `System.Text.Json` cannot serialize a DTO under AOT | The type is missing from a module JSON context. | Add `[JsonSerializable(typeof(…))]` to the relevant module context. |
-| `DbSet<T>` is missing for an entity | The entity lacks `[DbEntity]`, or its scope does not intersect the `[GenerateDbSets("scope")]` interface. | Add `[DbEntity]` with a matching scope. |
+| `DbSet<T>` is missing for an entity | The entity has no `[EntityConfiguration]` (no `IEntityTypeConfiguration<T>` marked with `[EntityConfiguration]`), or its config's scope does not intersect the `[GenerateDbSets("scope")]` interface. | Add an `[EntityConfiguration]` for the entity with a matching scope. |
 
 Still stuck? Open an issue at
 [github.com/swimmesberger/Elarion/issues](https://github.com/swimmesberger/Elarion/issues) with a

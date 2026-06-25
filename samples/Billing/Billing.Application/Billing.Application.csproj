@@ -11,8 +11,9 @@
 
   <!-- Building from source, the generators are referenced as analyzers (consuming Elarion from NuGet
        they ship bundled in the Elarion / Elarion.EntityFrameworkCore packages). The EF Core generator
-       must be present here because this assembly now declares the [DbEntity] types (shared kernel under
-       Billing.Application.Domain) — the marker package alone would emit no entity manifest or DbSets. -->
+       must be present here because this assembly declares the [EntityConfiguration] types (the module
+       configs that drive the shared-kernel entities under Billing.Application.Domain) — the marker package
+       alone would emit no configuration manifest or DbSets. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
                      OutputItemType="Analyzer"
