@@ -5,7 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using Billing.Api.Hosting;
 using Billing.Application;
 using Billing.Application.Modules.Invoicing.Services;
-using Billing.Infrastructure.Data;
+using Billing.Application.Persistence;
 using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Scheduling;
@@ -26,8 +26,9 @@ var builder = WebApplication.CreateSlimBuilder(args);
 // Clock — used by handlers, jobs, and the current-user snapshot.
 builder.Services.AddSingleton(TimeProvider.System);
 
-// Database: the concrete context is infrastructure; handlers see only IAppDbContext. The connection
-// string is injected by the Aspire AppHost (resource name "billing").
+// Database: the context lives in the application's persistence layer (the database is application logic);
+// handlers see only IAppDbContext. Provider *registration* is the host's job — the connection string is
+// injected by the Aspire AppHost (resource name "billing").
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
 builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());

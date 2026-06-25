@@ -11,16 +11,16 @@ real PostgreSQL database.
 
 | Project | Role |
 | --- | --- |
-| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer (each entity's `[EntityConfiguration]` `IEntityTypeConfiguration<T>`, which drives both its `DbSet` and its schema — configuration is platform, not feature-owned); the `Core`, `Clients`, and `Invoicing` modules with their handlers, validators, services, jobs, events, and resilience policy; the decorator pipeline; and the `[GenerateDbSets] IAppDbContext`. |
-| `Billing.Infrastructure` | Platform capabilities only: the PostgreSQL `BillingDbContext` (with the EF Core outbox), the design-time migration factory, EF migrations, and the SMTP email sender. |
+| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox), the design-time factory, and the EF migrations; the `Core`, `Clients`, and `Invoicing` modules with their handlers, validators, services, jobs, events, and resilience policy; the decorator pipeline; and the `[GenerateDbSets] IAppDbContext`. |
+| `Billing.Infrastructure` | Intent-only mechanism adapters only: the SMTP email sender behind the module's port. The database is **not** here — it is application logic and lives in `Billing.Application.Persistence`. |
 | `Billing.Api` | The ASP.NET Core host: `[GenerateModuleBootstrapper]`, JSON-RPC + MCP transports, the scheduler/resilience/cache runtimes, current-user, and OpenTelemetry. |
 | `Billing.AppHost` | The .NET Aspire app host: provisions PostgreSQL, runs the API and the web frontend, and wires them together. |
 | `web` | A Vite + React 19 + Tailwind v4 + shadcn/ui + TanStack Query frontend that calls the API through the **generated** JSON-RPC client (`rpc-schema.json` → `src/generated/`). |
 
-Entities live in a shared-kernel **namespace** and their `[EntityConfiguration]` schema in a shared
-`Persistence` namespace (both under no `[AppModule]`), not separate projects; `Infrastructure` holds only
-platform code (no per-entity knowledge — the generated `ConfigureEntities` applies the discovered
-configurations). See [Solution structure](../../docs/concepts/solution-structure) for the reasoning and
+Entities live in a shared-kernel **namespace** and the whole persistence layer (configuration, the
+`BillingDbContext`, and migrations) in a shared `Persistence` namespace (both under no `[AppModule]`), not
+separate projects; `Infrastructure` holds only the intent-only SMTP adapter. See
+[Solution structure](../../docs/concepts/solution-structure) for the reasoning and
 for when each would graduate to its own assembly.
 
 ## What it demonstrates

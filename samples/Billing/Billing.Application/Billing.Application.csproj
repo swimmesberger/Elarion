@@ -1,19 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Billing sample — shared-kernel entities, modules, handlers, and the generated data-access context.</Description>
+    <Description>Billing sample — shared-kernel entities, modules, handlers, and the persistence layer (configuration, the concrete DbContext, and migrations). The database is application logic, so it lives here, not in Infrastructure.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore\Elarion.EntityFrameworkCore.csproj" />
+    <!-- The persistence layer (DbContext, migrations, outbox table config) lives in the application,
+         because the database is application logic, not an infrastructure detail. -->
+    <ProjectReference Include="..\..\..\src\Elarion.Messaging.Outbox\Elarion.Messaging.Outbox.csproj" />
   </ItemGroup>
 
   <!-- Building from source, the generators are referenced as analyzers (consuming Elarion from NuGet
        they ship bundled in the Elarion / Elarion.EntityFrameworkCore packages). The EF Core generator
-       must be present here because this assembly declares the [EntityConfiguration] types (the module
-       configs that drive the shared-kernel entities under Billing.Application.Domain) — the marker package
-       alone would emit no configuration manifest or DbSets. -->
+       runs here because this assembly now holds the whole persistence layer — the [EntityConfiguration]
+       types AND the concrete BillingDbContext — so it emits both the interface and class-side DbSets and
+       ConfigureEntities in one place (no cross-assembly manifest needed). -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
                      OutputItemType="Analyzer"
@@ -25,6 +28,13 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <!-- The concrete DbContext + migrations live here, so the provider and design-time tooling do too.
+         Provider *registration* (UseNpgsql + connection string) stays in the host. -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="FluentValidation" />
   </ItemGroup>
 
