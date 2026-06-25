@@ -39,15 +39,28 @@ internal sealed class OrderPricer(ICustomerLookup customers) {
 }
 ```
 
-Injecting Module A's internal **code** — a `[Service]`, a handler, or an `[EntityConfiguration]` — from
-Module B instead of a `[ModuleContract]` is reported by the boundary analyzer (`ELMOD002`, a warning). The
-analyzer inspects the dependency surface (constructor parameters, fields, properties); framework and
-shared-kernel types (anything under no `[AppModule]`) are never flagged. **Entities are shared data, not
-module-internal**: modules are feature separation, not data separation — every module reaches the whole
-database through the shared `DbContext` by design — so referencing a shared-kernel entity is never flagged. Its
-`[EntityConfiguration]` is part of the shared data layer too and lives in the `Persistence` layer (under no
-`[AppModule]`); the analyzer flags an `[EntityConfiguration]` only in the discouraged case where one is
+The boundary analyzer (`ELMOD002`, a warning) is purely **location-based**: everything under an
+`[AppModule]` is module-internal, and everything outside every module is shareable. So injecting another
+module's internal type — an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]` placed inside it —
+is flagged, while a `[ModuleContract]` is allowed. It inspects only the dependency surface (constructor
+parameters, fields, properties). Resolve a flag one of three ways:
+
+- **A `[ModuleContract]`** — for a genuine cross-module *domain* call. Use it sparingly and deliberately;
+  it is a published surface, not a default reach.
+- **A platform-capability port** — an intent-only abstraction (sending email, recording an audit event)
+  that lives *outside* the modules with its adapter in infrastructure (the port/adapter pattern). Shared
+  by location, not by contract.
+- **The shared kernel** — data and value types (entities, `Money`) live outside every module and are
+  freely referenceable. A shared-kernel entity is shareable because of *where it lives*, not because
+  entities are special: place an entity inside a module and it becomes module-owned and flagged.
+
+The recommended layout keeps each entity's `[EntityConfiguration]` in the shared `Persistence` layer (under
+no `[AppModule]`), so it is shareable too; an `[EntityConfiguration]` is flagged only when deliberately
 placed *inside* a module.
+
+Foundation (`Core`) modules are **no exception** — the analyzer reads only the module name, never its
+`Kind`, so a core module exports through a `[ModuleContract]` (or a platform port outside the modules) just
+like any other. Making "what a module exports to the outside world" explicit is the point, core included.
 
 ## Implementing a contract with the typed module API
 

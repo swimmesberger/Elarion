@@ -284,16 +284,22 @@ the analyzer; mapping between a contract's DTOs and a module's handler DTOs is t
 
 - **`[ModuleContract]`** marks an interface (or class) as a module's published cross-module surface.
   The owning module keeps the implementation `internal` and registers it (commonly a thin `[Service]`
-  adapter that maps to, and forwards to, the module's handlers); other modules inject the contract.
-- **`ModuleBoundaryAnalyzer` (`ELMOD002`, warning)** reports when a type in one module depends on
-  another module's **internal code** — a `[Service]`, a handler, or an `[EntityConfiguration]` — instead
-  of a `[ModuleContract]`. It inspects only the dependency surface (constructor parameters, fields,
-  properties) to stay precise; types under no `[AppModule]` (framework/shared kernel) are never flagged.
-  Modules are *feature* separation, not *data* separation: every module reaches the whole database through
-  the shared `DbContext` by design, so **entities are shared data and are never flagged** even though
-  their `[EntityConfiguration]` is (real data isolation is a separate `DbContext`).
-  This is the repo's first `DiagnosticAnalyzer`; new analyzer diagnostics must be tracked in
-  `AnalyzerReleases.Unshipped.md` (RS2008).
+  adapter that maps to, and forwards to, the module's handlers); other modules inject the contract. This
+  applies to **every** module, including `Kind = Core` foundation modules — there is no core exemption
+  (the analyzer reads only the module name, never `Kind`), so a module's cross-module surface is always
+  explicit: a `[ModuleContract]`, or a platform-capability port that lives outside the modules.
+- **`ModuleBoundaryAnalyzer` (`ELMOD002`, warning)** is purely **location-based**: everything under an
+  `[AppModule]` is module-internal and may not be referenced from another module except through a published
+  `[ModuleContract]`; everything **outside** every module is shareable. It reports a cross-module dependency
+  on another module's internal type — an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]`
+  placed inside the module — and inspects only the dependency surface (constructor parameters, fields,
+  properties) to stay precise. Resolve a flag one of three ways: a `[ModuleContract]` for a genuine,
+  sparingly-used cross-module *domain* call; a platform-capability **port** outside the modules with its
+  adapter in infrastructure (the port/adapter pattern, like `IEmailSender`); or move shared data/value
+  types to the **shared kernel** (under no module). A shared-kernel entity is shareable because it lives
+  *outside* a module — not because entities are special; placing an entity inside a module makes it
+  module-owned (how a mini bounded context earns data ownership — see ADR-0008). This is the repo's first
+  `DiagnosticAnalyzer`; new analyzer diagnostics must be tracked in `AnalyzerReleases.Unshipped.md` (RS2008).
 - **`[GenerateModuleApi]` (optional ergonomic layer)** generates a typed in-process API over a module's
   own handlers so intra-module code (notably a contract implementation) can call handlers by name. It is
   **not a transport** — it dispatches typed-direct to the decorated `IHandler<,>` (full pipeline), crosses

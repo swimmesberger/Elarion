@@ -15,10 +15,12 @@ from another module only through a [`[ModuleContract]`](/docs/concepts/cross-mod
 interface. Declaring `DependsOn` does **not** grant access to another module's internals; it only
 orders initialization.
 
-Concretely, a module's internal **code** — a `[Service]`, a handler, or an `[EntityConfiguration]` —
-declared *inside* module A cannot be referenced from module B. Types declared under **no** `[AppModule]`
-(the shared kernel) are never flagged, so every module may depend on them freely. **Entities are
-deliberately part of that shared kernel** — they are shared data, not module-internal code.
+Concretely, the rule is **location-based**: any type declared *inside* module A — an entity, DTO,
+`[Service]`, handler, or `[EntityConfiguration]` — cannot be referenced from module B except through a
+`[ModuleContract]`. Types declared under **no** `[AppModule]` (the shared kernel and platform ports) are
+shareable, so every module may depend on them freely. **Entities live in that shared kernel** — that is what
+makes them shareable; an entity placed inside a module would become module-owned and flagged like any other
+internal type.
 
 That distinction — code is module-internal, data is shared — decides where entities go.
 
@@ -38,11 +40,11 @@ navigation properties, and handlers routinely query across aggregates — so a s
 them, and a `[ModuleContract]` interface cannot model an EF relationship. Modules are *feature*
 separation, not *data* separation: every module reaches the whole database through the shared
 concrete `DbContext` by design (real data isolation would be a separate `DbContext`). The boundary analyzer
-reflects this — it flags a module's internal *code* (`[Service]`, handler, `[EntityConfiguration]`) but
-**never an entity** — so a cross-aggregate reference is never flagged. (Reference other aggregates by id
-rather than by navigation property; see [the delete-the-module test](#the-delete-the-module-test) for why.)
-Keeping entities in one shared-kernel namespace is therefore a design convention that gives shared data an
-obvious home, not an analyzer workaround.
+is purely **location-based** — it flags any type placed *inside* a module, so keeping entities in the
+shared kernel (under no `[AppModule]`) is what keeps a cross-aggregate reference unflagged. (Reference other
+aggregates by id rather than by navigation property; see [the delete-the-module test](#the-delete-the-module-test)
+for why.) Keeping entities in one shared-kernel namespace gives shared data an obvious home; placing an entity
+inside a module instead deliberately makes it module-owned — the first step toward a bounded context.
 
 Keep entities and their enums in a **shared-kernel namespace under no `[AppModule]`** — for example
 `MyApp.Application.Domain` — that every module may depend on and that depends on no module.

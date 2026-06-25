@@ -60,16 +60,21 @@ surface." It documents intent and is the anchor the boundary analyzer keys off.
 
 ### 2. The boundary analyzer — `ELMOD002` (owned)
 
-A `DiagnosticAnalyzer` (the repo's first) that reports when a type in one module depends on
-another module's **internal code** — a `[Service]`, a handler, or an `[EntityConfiguration]` —
-rather than a `[ModuleContract]`. To stay precise and low-noise it inspects each type's **dependency
-surface** (constructor parameters, fields, properties) — where foreign internals leak in via
-DI — not every reference. Framework and shared-kernel types are exempt automatically: a type
-whose namespace is under no `[AppModule]` has no owning module and is never flagged. **Entities are
-deliberately not flagged**: modules are feature separation, not data separation — every module reaches
-the whole database through the shared `DbContext` by design (real data isolation would be a separate
-`DbContext`), so a shared-kernel entity is shared data, not module-internal code, even though its
-module-owned `[EntityConfiguration]` is. Severity is `Warning` (configurable by the host).
+A `DiagnosticAnalyzer` (the repo's first) with a purely **location-based** rule: everything under an
+`[AppModule]` is module-internal and may not be referenced from another module except through a published
+`[ModuleContract]`; everything **outside** every module is shareable. So it reports a cross-module
+dependency on a type *inside* another module — an entity, DTO, `[Service]`, handler, or
+`[EntityConfiguration]` — and allows a `[ModuleContract]`. To stay precise and low-noise it inspects each
+type's **dependency surface** (constructor parameters, fields, properties) — where foreign internals leak
+in via DI — not every reference. Framework and shared-kernel types are exempt automatically: a type whose
+namespace is under no `[AppModule]` has no owning module. A shared-kernel entity is therefore exempt
+because of *where it lives* (outside every module), **not** because entities are special — placing an
+entity inside a module makes it module-owned and flagged, which is how a module earns data ownership on the
+way to a bounded context (see [ADR-0008](0008-bounded-contexts-and-the-graduation-path.md)). The rule
+reads only the module name, so foundation (`Core`) modules get no exemption either. A flagged reference is
+resolved one of three ways — a `[ModuleContract]` (a genuine, sparingly-used cross-module *domain* call), a
+platform-capability port outside the modules (the port/adapter pattern), or moving shared data to the
+shared kernel. Severity is `Warning` (configurable by the host).
 
 ### 3. The typed in-process API — `[GenerateModuleApi]` (optional ergonomic layer)
 

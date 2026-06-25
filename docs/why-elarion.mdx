@@ -83,6 +83,12 @@ the moment you need raw SQL. So the database *is* your data access: handlers use
 The framework wires the *connection* (`UseNpgsql` and the connection string are the host's job); what
 lives in the database is application logic and yours.
 
+This line is **intent-vs-specifics, not database-vs-no-database** — so infrastructure may still own its own
+persisted state and stay infrastructure. A scheduler's tables, or Elarion's EF Core outbox table, are
+*mechanism state*: your domain code reaches them only through a port (`IJobScheduler`, `IIntegrationEventBus`)
+and never queries them as domain. Your **domain model** is application logic; a mechanism's private
+bookkeeping is infrastructure, even when it shares the same database.
+
 → [Entity Framework Core](/docs/capabilities/entity-framework) · [Handlers → Accessing data](/docs/concepts/handlers#accessing-data)
 
 ## JSON-RPC for internal APIs

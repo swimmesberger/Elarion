@@ -140,24 +140,33 @@ using Elarion.Abstractions;
 
 <Step>
 
-### Add the audit trail (Core module + current user)
+### Add the audit trail (a platform-capability port)
 
-Command handlers should record *who* did *what*. The audit trail is a `[Service]` in the Core module
-that injects [`ICurrentUser`](/docs/capabilities/current-user) — a transport-neutral view of the caller, so
-application code never touches `HttpContext`.
+Command handlers should record *who* did *what*. Audit is **intent-only** — callers just say "record this
+happened," and the app never queries audit records as domain — so it is a platform-capability **port** that
+lives *outside* every module, with its adapter in `Billing.Infrastructure` (exactly like the email sender
+later). Putting the port outside the modules lets any module depend on it without tripping the
+[module boundary analyzer](/docs/concepts/cross-module-communication); a `[ModuleContract]` would be the
+wrong tool here — that is for cross-module *domain* calls, not shared infrastructure.
 
-```csharp title="src/Billing.Application/Modules/Core/Services/AuditTrail.cs"
-using Elarion.Abstractions;
-using Elarion.Abstractions.Identity;
-using Microsoft.Extensions.Logging;
-
-namespace Billing.Application.Modules.Core.Services;
+```csharp title="src/Billing.Application/Abstractions/IAuditTrail.cs"
+namespace Billing.Application.Abstractions;
 
 public interface IAuditTrail {
     void Record(string action, string subjectId);
 }
+```
 
-[Service(typeof(IAuditTrail))]
+The adapter injects [`ICurrentUser`](/docs/capabilities/current-user) — a transport-neutral view of the
+caller, so application code never touches `HttpContext`:
+
+```csharp title="src/Billing.Infrastructure/Audit/AuditTrail.cs"
+using Billing.Application.Abstractions;
+using Elarion.Abstractions.Identity;
+using Microsoft.Extensions.Logging;
+
+namespace Billing.Infrastructure.Audit;
+
 public sealed class AuditTrail(ICurrentUser user, TimeProvider clock, ILogger<AuditTrail> logger)
     : IAuditTrail {
     public void Record(string action, string subjectId) =>
@@ -166,9 +175,14 @@ public sealed class AuditTrail(ICurrentUser user, TimeProvider clock, ILogger<Au
 }
 ```
 
-`[Service(typeof(IAuditTrail))]` registers the implementation against the interface; the generator
-picks it up into the Core module's generated `ConfigureDefaultServices`, which the host bootstrapper
-calls automatically — there is no registration call to write.
+It just logs here, but it could write its own audit table and still be infrastructure — the
+[logic/infra line](/docs/why-elarion) is domain-data vs. mechanism-state, not database vs. no-database (the
+EF Core outbox owns a table the same way). The host registers it like any other intent-only adapter, which
+you do in [Host the API](/docs/tutorial/hosting):
+
+```csharp
+builder.Services.AddScoped<IAuditTrail, AuditTrail>();
+```
 
 </Step>
 

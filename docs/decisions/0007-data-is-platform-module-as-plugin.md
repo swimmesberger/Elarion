@@ -55,6 +55,26 @@ The same technology splits by *relationship*: Postgres-as-a-blob-store is a port
 ever say "store/return bytes"), while Postgres-as-the-domain-model is logic (you write business queries
 against it).
 
+This split is **orthogonal to persistence**: infrastructure may own *its own* durable state and still be
+infrastructure, because the app depends only on the port's intent, never on that state's shape. A scheduler
+(Quartz's `QRTZ_*` tables) and Elarion's own EF Core outbox (`OutboxMessage`, created via `UseElarionOutbox`)
+both persist — often in the very same database — yet stay infrastructure: domain code says "schedule this
+job" / "publish this event" through a port and never queries those tables as domain. So the real test is
+**domain-data vs. mechanism-state**, not database-vs-no-database:
+
+- **Domain data** — the application queries it and depends on its shape; you do not abstract it (the
+  relational model above). Owned by the application (or a bounded context).
+- **Mechanism state** — bookkeeping a mechanism persists for itself, opaque to domain code and reached only
+  through its port. Owned by the infrastructure that defines the port, even when it lives in a table.
+
+Ownership is therefore **per concern, not per database**: one physical database can hold the app's domain
+tables, the outbox's table, and a scheduler's tables, each owned by whoever depends on its specifics. A
+mechanism persists one of two ways — **transaction-coupled** (its table rides in the app's `DbContext` via a
+helper like `UseElarionOutbox`, to commit atomically with domain writes) or a **self-managed store** (its
+own tables/schema/migrations, out-of-band — the Quartz pattern). An audit trail is the worked example: an
+opaque write-only sink (a log, a SIEM, or *its own* audit table) is infrastructure; it becomes application
+data only if the app grows a feature that **queries** that audit history as domain.
+
 ### "Platform" is the host; the data layer is the application
 
 The word **"platform"** is already taken, and an earlier "data is platform" framing wrongly borrowed it.
@@ -130,10 +150,12 @@ that modules build on.** Conflating them (treating the data layer as host/infras
    config placement can cleanly sever — and it is what makes a future context split expensive (see
    ADR-0008). Compose across aggregates by ID + `[ModuleContract]`, not by object graph.
 
-6. **`ELMOD002` flags module-internal *code* — a `[Service]`, a handler, or an
-   `[EntityConfiguration]` — never an entity.** Entities are shared data; flagging a reference to one
-   would contradict "every module reaches the whole database by design." (Entities also carry no
-   marker, so there is nothing to flag.)
+6. **`ELMOD002` is location-based — it flags any cross-module reference to a type *inside* another
+   module, and exempts everything *outside* every module.** A shared-kernel entity is exempt because it
+   lives outside a module (the default here), not because entities are special — so the rule never
+   contradicts "every module reaches the whole shared database by design." Placing an entity inside a
+   module instead makes it module-owned and flagged, which is exactly how a module earns data ownership on
+   the way to a bounded context (see ADR-0008).
 
 ## Consequences
 
@@ -150,13 +172,15 @@ that modules build on.** Conflating them (treating the data layer as host/infras
   new typed data while keeping the "rip it out cleanly" property is an open question, deferred to ADR-0008.
 
 - **The data layer is application logic — it is not `Infrastructure`.** Because the app depends on the
-  database's specifics (constraints, indexes, queries), the whole persistence concern —
+  database's specifics (constraints, indexes, queries), the whole *domain* persistence concern —
   `[EntityConfiguration]`, the concrete `DbContext`, and migrations — lives in the application as one
   `Persistence` layer. The host provides only the **connection**: provider registration
   (`UseNpgsql(...)` + the connection string). `Infrastructure` is reserved for intent-only mechanism
-  adapters (the SMTP `IEmailSender`, external API clients). This keeps a schema change a single-layer edit
-  — config and migration together — and, since config and `DbContext` share an assembly, removes the need
-  for the cross-assembly configuration manifest.
+  adapters (the SMTP `IEmailSender`, external API clients) — *including mechanisms that persist their own
+  opaque state*, such as the EF Core outbox or a Quartz-style scheduler: that table is mechanism-state, not
+  the application's domain model, even when it shares the database. This keeps a *domain* schema change a
+  single-layer edit — config and migration together — and, since config and `DbContext` share an assembly,
+  removes the need for the cross-assembly configuration manifest.
 
 - **Placement is a convention, not enforced.** The generator discovers `[EntityConfiguration]`
   anywhere, so points 3–5 are conventions this ADR establishes; the enforced parts are the generator

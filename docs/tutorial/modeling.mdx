@@ -179,7 +179,9 @@ resolver and any extra, non-generated wiring in `ConfigureServices`. See
 [Conventions](/docs/reference/conventions).
 
 **Core** is a foundation module — `Kind = AppModuleKind.Core` keeps it always enabled and initialized
-before feature modules. It owns shared services such as the audit trail you will add next.
+before feature modules. It is the home for always-on *domain* services other modules build on. (Cross-cutting
+*infrastructure* capabilities — like the audit trail you add next — are not module services; they are
+platform ports that live outside the modules.)
 
 ```csharp title="src/Billing.Application/Modules/Core/CoreModule.cs"
 using Elarion.Abstractions.Modules;

@@ -64,7 +64,7 @@ App-module discovery and the `ModuleBoundaryAnalyzer`. See
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELMOD001 | Warning | Two `[AppModule]` types share the same namespace; generated transport handlers in that namespace are associated with the alphabetically first matching module (ambiguous ownership). | Give each module a distinct namespace so handler-to-module association is unambiguous. |
-| ELMOD002 | Warning | A type in one `[AppModule]` depends (via constructor parameter, field, or property) on another module's internal code — a `[Service]`, a handler, or an `[EntityConfiguration]` — rather than a published `[ModuleContract]`. Types under no module are never flagged; shared-kernel **entities** are deliberately not flagged (every module reaches the whole database through the shared `DbContext` by design). | Depend on the other module's published `[ModuleContract]` interface instead of its internal `[Service]`/handler/`[EntityConfiguration]` code. |
+| ELMOD002 | Warning | Location-based: a type in one `[AppModule]` depends (via constructor parameter, field, or property) on a type **inside** another module — an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]` — that is not a published `[ModuleContract]`. Everything **outside** every module (the shared kernel and platform ports) is shareable; a shared-kernel entity is exempt because of *where it lives*, not because entities are special. | Reach the other module through its `[ModuleContract]` (used sparingly), a platform-capability port outside the modules, or move shared data/value types to the shared kernel. |
 
 ## ELAPI — Module API facades
 
