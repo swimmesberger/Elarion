@@ -11,16 +11,16 @@ real PostgreSQL database.
 
 | Project | Role |
 | --- | --- |
-| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox), the design-time factory, and the EF migrations; the `Billing.Application.Abstractions` namespace holding cross-cutting platform-capability **ports** (e.g. `IAuditTrail`, outside every module so any module may use it); the `Core`, `Clients`, and `Invoicing` modules with their handlers, validators, services, jobs, events, and resilience policy; the decorator pipeline; and the `[GenerateDbSets]`-annotated `BillingDbContext` (handlers inject it directly — no context interface). |
-| `Billing.Infrastructure` | Intent-only mechanism adapters only: the SMTP email sender and the audit-trail sink behind the application's ports. The database is **not** here — it is application logic and lives in `Billing.Application.Persistence`. |
+| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice`/`AuditEntry` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox), the design-time factory, and the EF migrations; the `Core`, `Clients`, and `Invoicing` modules with their handlers, validators, services, jobs, events, and resilience policy — including the Core module's `IAuditTrail` `[ModuleContract]` (a domain capability `Clients`/`Invoicing` record through, backed by the `AuditEntry` entity); the decorator pipeline; and the `[GenerateDbSets]`-annotated `BillingDbContext` (handlers inject it directly — no context interface). |
+| `Billing.Infrastructure` | Intent-only mechanism adapters only: the SMTP email sender behind the module's port. The database is **not** here — it is application logic and lives in `Billing.Application.Persistence`. |
 | `Billing.Api` | The ASP.NET Core host: `[GenerateModuleBootstrapper]`, JSON-RPC + MCP transports, the scheduler/resilience/cache runtimes, current-user, and OpenTelemetry. |
 | `Billing.AppHost` | The .NET Aspire app host: provisions PostgreSQL, runs the API and the web frontend, and wires them together. |
 | `web` | A Vite + React 19 + Tailwind v4 + shadcn/ui + TanStack Query frontend that calls the API through the **generated** JSON-RPC client (`rpc-schema.json` → `src/generated/`). |
 
 Entities live in a shared-kernel **namespace** and the whole persistence layer (configuration, the
 `BillingDbContext`, and migrations) in a shared `Persistence` namespace (both under no `[AppModule]`), not
-separate projects; cross-cutting platform-capability ports live in `Abstractions` (outside every module),
-with their intent-only adapters (the SMTP sender, the audit sink) in `Infrastructure`. See
+separate projects; the Core module publishes its audit capability as an `IAuditTrail` `[ModuleContract]`,
+while `Infrastructure` holds only the intent-only SMTP adapter. See
 [Solution structure](../../docs/concepts/solution-structure) for the reasoning and
 for when each would graduate to its own assembly.
 

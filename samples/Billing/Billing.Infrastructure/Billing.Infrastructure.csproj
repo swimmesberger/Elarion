@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Billing sample — intent-only mechanism adapters (the SMTP email sender and the audit-trail sink behind the application's ports). The database is application logic and lives in Billing.Application, not here.</Description>
+    <Description>Billing sample — intent-only mechanism adapters (the SMTP email sender behind the module's port). The database is application logic and lives in Billing.Application, not here.</Description>
   </PropertyGroup>
 
   <ItemGroup>

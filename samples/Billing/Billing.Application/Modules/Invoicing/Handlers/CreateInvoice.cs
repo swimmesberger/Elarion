@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using Billing.Application.Abstractions;
 using Billing.Application.Domain;
+using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
 using Billing.Application.Persistence;
@@ -71,7 +71,7 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        audit.Record("invoice.created", invoice.Id.ToString());
+        await audit.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }
