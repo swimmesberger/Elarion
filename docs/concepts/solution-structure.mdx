@@ -28,8 +28,8 @@ and may touch *any* entity, but it never depends on another feature except throu
 [`[ModuleContract]`](/docs/concepts/cross-module-communication). The dependency arrow points
 **feature → platform**, never the reverse and never feature → feature. Touching many *entities* is
 using the platform; depending on another *feature* is the thing to avoid.
-[ADR-0007](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0007-data-is-platform-module-as-plugin.md)
-records this model and what it implies for where configuration belongs.
+[Philosophy](/docs/concepts/philosophy) develops this model and what it implies for where the database
+and configuration belong.
 
 ## Entities are shared kernel, not module-internal
 
@@ -54,9 +54,11 @@ src/
       Client.cs              (plain entity — no marker)
       Invoice.cs             (plain entity; references Client by id, not a navigation)
       InvoiceStatus.cs       (enum)
-    Persistence/             ← platform: entity configuration = the schema *definition* (under no [AppModule])
+    Persistence/             ← the database is application logic (under no [AppModule])
       ClientConfiguration.cs   [EntityConfiguration] : IEntityTypeConfiguration<Client>
       InvoiceConfiguration.cs  [EntityConfiguration] : IEntityTypeConfiguration<Invoice>
+      AppDbContext.cs          the concrete DbContext (+ design-time factory)
+      Migrations/ …            EF Core migrations
     Modules/
       Clients/               ← vertical slice: handlers, validators, services — behavior only
         ClientsModule.cs       [AppModule("Clients")]
@@ -64,42 +66,37 @@ src/
       Invoicing/
         InvoicingModule.cs     [AppModule("Invoicing")]
         Handlers/ …
-  MyApp.Infrastructure/      ← platform: concrete DbContext, provider, migrations (schema *provisioning*)
-  MyApp.Api/                 ← host: [GenerateModuleBootstrapper], middleware, transport wiring
+  MyApp.Infrastructure/      ← intent-only mechanism adapters: IEmailSender (SMTP), external clients
+  MyApp.Api/                 ← host: [GenerateModuleBootstrapper], middleware, transport, UseNpgsql + connection
 ```
 
-## Where configuration lives
+## The persistence layer is application logic
 
-The EF Core generator discovers `[EntityConfiguration]` classes **wherever they live** — the attribute is
-the single source of truth, driving both the generated `DbSet<T>` and the configuration application, and it
-emits direct `ApplyConfiguration<T>` calls into a generated `ConfigureEntities(ModelBuilder)` on the
-context. Placement is therefore a **convention, not a generator requirement**.
+The application depends on the database's *specifics* — constraints are invariants, indexes serve specific
+queries, raw SQL and provider functions encode rules — so the database is application logic, not an
+infrastructure detail ([Philosophy](/docs/concepts/philosophy)). The whole persistence concern therefore
+lives in **one `Persistence` layer in the application**: the `[EntityConfiguration]` classes, the concrete
+`DbContext`, and the migrations. The only genuinely host concern is provider *registration* —
+`UseNpgsql(...)` and the connection string.
 
-Because a configuration describes the one shared model every feature draws on, it is *platform*, not
-feature behavior. The recommended home is a shared `Persistence` layer — a sibling of `Domain`, under no
-`[AppModule]` — kept as a flat folder while there is a single `DbContext` (one folder per `DbContext` once
-you use scopes). The `samples/Billing` app currently co-locates each `[EntityConfiguration]` with its
-module — a simpler form the generator also accepts; the recommended layout is the shared `Persistence`
-layer. See
-[ADR-0007](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0007-data-is-platform-module-as-plugin.md)
-for the platform/plugin rationale and why configuration is not feature-owned.
+`[EntityConfiguration]` is the single source of truth for an entity's participation: it drives both the
+generated `DbSet<T>` and the configuration application. The generator emits direct `ApplyConfiguration<T>`
+calls into a generated `ConfigureEntities(ModelBuilder)` on the context — no `ApplyConfigurationsFromAssembly`
+reflection. Because the configurations and the `DbContext` share an assembly, that emission is in-place and
+needs no cross-assembly manifest. Keep the layer flat while there is one `DbContext`; use one folder per
+`DbContext` once you [scope](#graduating-to-a-bounded-context).
 
-Wherever it sits, a configuration is safe across the module boundary for two independent reasons:
+A configuration never crosses the module boundary, for two reasons:
 
 1. It references only the shared-kernel entity (`Client`), never another module's internals.
 2. `ELMOD002` inspects only the **dependency surface** — constructor parameters, fields, and
    properties — never a method body like `Configure`.
 
-The per-assembly configuration manifest pairs the discovered `[EntityConfiguration]` configs with the
-shared entities across assemblies, and the generated `ConfigureEntities` lives in the **context's** assembly
-(which carries no module analyzer). Infrastructure instantiates nothing per-entity — it just calls
-`ConfigureEntities(modelBuilder)` from `OnModelCreating`.
-
 <Callout type="info">
-  Both layers are *platform*, at different tiers. `Persistence` holds the schema **definition** — the
-  `[EntityConfiguration]` classes, i.e. *what shape a `Client` table has* — while `Infrastructure` holds
-  the schema **provisioning**: the concrete `DbContext`, provider, connection, interceptors, and
-  migrations. Neither is module-owned — configuration is platform, not a feature concern.
+  `Infrastructure` is **not** where the database lives. It holds only intent-only mechanism adapters — the
+  SMTP `IEmailSender`, external API clients — the things you depend on by intent ("send an email") and
+  could swap without changing your application's meaning. The database, which you depend on by specifics,
+  is application logic and stays in `Persistence`.
 </Callout>
 
 ## A separate `Domain` project is usually unnecessary
@@ -130,10 +127,9 @@ removes its behavior cleanly. Two disciplines keep the test green:
   the model untangled, so removing the `Clients` feature does not ripple into `Invoicing`. A cross-module
   navigation creates an EF relationship that couples the two.
 - **Treat new data as platform.** A feature that adds an entity, index, or column *extends the platform*;
-  that data lives in the shared data layer and does **not** vanish when the feature folder is deleted — its
-  removal is a deliberate migration step, because data is durable and shared. (How a plugin should own new
-  typed data while staying cleanly removable is an open question —
-  [ADR-0008](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0008-bounded-contexts-and-the-graduation-path.md).)
+  that data lives in the shared persistence layer and does **not** vanish when the feature folder is deleted
+  — its removal is a deliberate migration step, because data is durable and shared. (How a plugin should own
+  new typed data while staying cleanly removable is an open design question.)
 
 ## Graduating to a bounded context
 
@@ -148,22 +144,23 @@ them). The graduation is incremental, not a rewrite:
 | Partition into separate `DbContext`s without splitting assemblies | **Scopes** — `[GenerateDbSets("ctx")]` / `[EntityConfiguration("ctx")]`, one `Persistence` folder per scope |
 | An aggregate becomes its own bounded context | A self-contained **`Context.Application` / `.Infrastructure` / `.Contract`** assembly group owning its entities, configs, and migrations |
 
-The by-ID reference discipline above is what keeps each promotion cheap. See
-[ADR-0008](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0008-bounded-contexts-and-the-graduation-path.md)
-for the full bounded-context model — two boundaries / two enforcers, cross-context collaboration via
-`[ModuleContract]` + the outbox, and the staged graduation path.
+The by-ID reference discipline above is what keeps each promotion cheap. A bounded context collaborates
+with the rest of the system only through a [`[ModuleContract]`](/docs/concepts/cross-module-communication)
+and integration events (the outbox) — exactly as modules already do — so promoting one is mostly moving
+files and splitting the schema, not a rewrite. The boundary it adds is enforced by the compiler (separate
+assemblies) rather than the analyzer, which is the heavier guarantee real data separation deserves.
 
 ## See also
 
+- [Philosophy](/docs/concepts/philosophy) — the principles behind this layout: features as plugins over a
+  platform, and the database as application logic.
 - [Project structure](/docs/getting-started/project-structure) — the mechanical layout and the
   conventions the generators rely on.
 - [Cross-module communication](/docs/concepts/cross-module-communication) — `[ModuleContract]` and the
   `ELMOD002` analyzer in full.
 - [Entity Framework Core](/docs/capabilities/entity-framework) — `[EntityConfiguration]`, `[GenerateDbSets]`, and
   configuration discovery.
-- [ADR-0007: Data is platform — modules as plugins](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0007-data-is-platform-module-as-plugin.md)
-  — the rationale for this layout: the platform/plugin model and where configuration belongs.
-- [ADR-0008: Bounded contexts and the graduation path](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0008-bounded-contexts-and-the-graduation-path.md)
-  — real data separation and how a system grows into it.
 - The runnable [`samples/Billing`](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing)
-  app follows this layout for entities and modules (configuration currently co-located — see ADR-0007).
+  app follows this layout — entities in `Billing.Application.Domain`, the persistence layer (configuration,
+  `BillingDbContext`, and migrations) in `Billing.Application.Persistence`, and the SMTP adapter in
+  `Billing.Infrastructure`.

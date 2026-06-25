@@ -1,0 +1,91 @@
+---
+title: Philosophy
+description: The opinionated principles behind Elarion — features as plugins over a platform, the database as application logic, and shared data with feature (not data) boundaries.
+icon: Compass
+---
+
+Elarion is opinionated. A handful of principles explain most of its design choices — why there is no
+repository layer, why entity configuration lives where it does, and where the line between *your
+application* and *infrastructure* falls.
+
+## Features are plugins over a platform
+
+Think of an application as a **platform** with **features** built on it. The platform is the shared
+substrate — your entities, their schema, and the framework's services. A feature (a module) is a
+**plugin**: it asks "what can I build with what the platform offers?" and composes that capability into
+behavior.
+
+The rule that keeps this honest is the **dependency arrow**:
+
+- **feature → platform** — freely. A feature may use *any* entity and any platform service.
+- **feature → feature** — only through a published [`[ModuleContract]`](/docs/concepts/cross-module-communication).
+- **platform → feature** — **never**. The platform must not know its plugins exist.
+
+Touching many *entities* is just *using the platform*; depending on another *feature* is the thing to
+avoid — that is what contracts are for, and what the module-boundary analyzer enforces. The practical
+test: you should be able to delete a feature's folder and have every other feature still compile,
+untouched.
+
+## The database is part of the application
+
+The sharpest principle, and the one that surprises people: **the database is not a swappable detail you
+hide behind a repository — it is where a large part of your application's logic lives.**
+
+The general rule for *what to abstract* is not "data vs code." It is whether your application depends on a
+dependency's **specifics** or only on its **intent**:
+
+- **Intent-only → infrastructure.** You state *what* you want — "send this email," "store these bytes,"
+  "publish this event" — and the mechanism is interchangeable. A narrow, stable interface captures the
+  intent without leaking specifics; swapping the implementation changes nothing about your application's
+  meaning. This is a **port + adapter**: `IEmailSender`, `IBlobStore`, the integration-event bus, caching,
+  the current-user accessor. You do not care whether email goes via SMTP, Office 365, or SES.
+
+- **Specifics-are-the-logic → application.** A unique constraint *is* a business invariant. An index
+  exists because a specific feature runs a specific query. The queries themselves — LINQ, raw SQL,
+  provider functions — encode business rules. You reason about these particulars directly, and you cannot
+  swap the engine without rewriting them. The relational model is therefore application logic, not a
+  hidden detail.
+
+So Elarion **does not wrap the database in repositories.** The `DbContext` already *is* the
+unit-of-work/repository; handlers work directly with `DbSet<T>`, LINQ, raw SQL, and provider-specific
+functions. Coupling to PostgreSQL is deliberate — the power is worth more than provider-portability, and
+switching engines is rare and far more involved than swapping `UseNpgsql` anyway. It follows that
+persistence is **tested against a real PostgreSQL** (for example with Testcontainers), never an in-memory
+or SQLite provider: raw SQL must run on the real engine to be meaningful, which also removes the usual
+"abstract the database so we can fake it in tests" argument.
+
+<Callout type="info">
+  The same technology can sit on either side of the line — what matters is *your relationship to it*.
+  PostgreSQL **as a blob store** is a port (`IBlobStore` — you only ever say "store/return these bytes").
+  PostgreSQL **as your domain model** is application logic (you write business queries against it). Same
+  engine, opposite treatment.
+</Callout>
+
+This is why entity configuration, the concrete `DbContext`, and migrations live **in the application**
+(its persistence layer), while the project usually called *Infrastructure* holds only the intent-only
+mechanism adapters — the SMTP `IEmailSender`, an external API client, and the like.
+
+## Data is shared; modules are features
+
+Within one `DbContext`, **data is shared**: every module reaches the whole database through the generated
+`IAppDbContext` by design. Modules are **feature** separation, not **data** separation. That is why
+entities live in a shared kernel that every feature may depend on, and why the boundary analyzer flags a
+module's internal *code* (a `[Service]`, a handler, an `[EntityConfiguration]`) but **never** an entity —
+entities are shared data.
+
+Real *data* separation — a separate schema or database — is a **bounded context**, a deliberate, heavier
+step you take when an aggregate cluster has genuinely earned its own isolation. Until then, compose across
+aggregates **by id, not by navigation property**: a `Guid` foreign key keeps the model decoupled, makes
+the "delete a feature" test pass, and keeps a future split cheap.
+
+## Where this leaves the layout
+
+- **Entities** → a shared-kernel namespace (`…​.Domain`), plain classes, depended on by every feature.
+- **The database** (entity configuration, the `DbContext`, migrations) → the application's `Persistence`
+  layer — because the database is application logic.
+- **Mechanism adapters** (the SMTP `IEmailSender`, external clients) → `Infrastructure`.
+- **Provider registration** (`UseNpgsql` + the connection string) → the host, where environment
+  configuration belongs.
+
+See [Solution structure](/docs/concepts/solution-structure) for the concrete project/folder layout and
+the bounded-context graduation path.

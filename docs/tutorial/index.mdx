@@ -66,8 +66,8 @@ billing/
 ├─ src/
 │  ├─ Billing.Application/      # modules (behavior), handlers, services, validators, jobs, policies  ← Elarion + generators
 │  │  ├─ Domain/                # shared-kernel entities + enums (plain classes, under no [AppModule])
-│  │  └─ Persistence/           # [EntityConfiguration] schema definitions (platform, under no [AppModule])
-│  ├─ Billing.Infrastructure/   # BillingDbContext (PostgreSQL), EF outbox, SMTP email sender
+│  │  └─ Persistence/           # the database is app logic: [EntityConfiguration], BillingDbContext, migrations
+│  ├─ Billing.Infrastructure/   # intent-only mechanism adapters: the SMTP email sender
 │  ├─ Billing.Api/              # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore (+ MCP)
 │  └─ Billing.AppHost/          # .NET Aspire orchestration  → provisions PostgreSQL, runs the API
 └─ web/                         # Vite + React + TanStack Query frontend
@@ -147,17 +147,15 @@ dotnet add package FluentValidation
 cd ../..
 ```
 
-The **infrastructure** project owns the concrete `BillingDbContext` and the PostgreSQL provider, plus
-the EF Core integration-event outbox. Because the generated class-side `DbSet`s and entity
-configuration are emitted where the concrete context lives, infrastructure references
-`Elarion.EntityFrameworkCore` too (its generator reads the application's configuration manifest
-cross-assembly):
+The application's **persistence layer** owns the concrete `BillingDbContext`, the PostgreSQL provider, the
+EF Core integration-event outbox, and the migrations — because the database is application logic, not an
+infrastructure detail. The generated class-side `DbSet`s and entity configuration are emitted there beside
+the configurations (so no cross-assembly manifest is involved):
 
 ```bash
-cd src/Billing.Infrastructure
-dotnet add package Elarion.EntityFrameworkCore
-dotnet add package Microsoft.EntityFrameworkCore
+cd src/Billing.Application
 dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add package Microsoft.EntityFrameworkCore.Design
 dotnet add package Elarion.Messaging.Outbox
 cd ../..
 ```

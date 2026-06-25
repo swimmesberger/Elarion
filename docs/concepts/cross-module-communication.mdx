@@ -10,9 +10,7 @@ modules depend on the contract, never on the module's internals.
 
 The framework owns the convention (`[ModuleContract]`) and an analyzer that enforces it. Mapping
 between a contract's DTOs and a module's handler DTOs is the **module's concern** — write it by hand
-or with any mapper. There is no generated forwarder for the contract and no mapper dependency. See
-[ADR-0002](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0002-cross-module-communication.md)
-for the rationale.
+or with any mapper. There is no generated forwarder for the contract and no mapper dependency.
 
 ## The contract
 
@@ -149,10 +147,8 @@ internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
   Either way the **interface stays stable across a later gRPC extraction** — only the implementation's
   mapping changes. A `Result<T>` contract maps elegantly to a protobuf `oneof` response (success *or*
   error, the on-the-wire `Result`); an exception contract maps to the
-  [Google Rich Error Model](https://grpc.io/docs/guides/error/) (`google.rpc.Status`). See
-  [ADR-0005](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0005-cross-module-error-channel.md)
-  for the `.proto` shapes and the `ErrorKind` → `google.rpc.Code` table. **Prefer `Result`; only drop it
-  when a concrete need calls for it.**
+  [Google Rich Error Model](https://grpc.io/docs/guides/error/) (`google.rpc.Status`), with `ErrorKind`
+  mapping onto `google.rpc.Code`. **Prefer `Result`; only drop it when a concrete need calls for it.**
 </Callout>
 
 ## Why not `IDomainEventBus.RequestAsync`?

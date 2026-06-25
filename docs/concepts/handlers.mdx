@@ -129,9 +129,9 @@ db.Clients.Add(new Client { Id = Guid.NewGuid(), Name = command.Name });
 await db.SaveChangesAsync(ct);
 ```
 
-The interface keeps handlers in the application layer — they query without referencing the
-infrastructure project that owns the concrete `DbContext`. For compiled queries or other advanced
-scenarios that need the concrete type, call `db.AsDbContext()`. See
+The interface keeps handlers decoupled from the concrete context — they query `IAppDbContext` without
+referencing the concrete `DbContext` (which lives in the application's persistence layer). For compiled
+queries or other advanced scenarios that need the concrete type, call `db.AsDbContext()`. See
 [Entity Framework Core](/docs/capabilities/entity-framework) for how the interface and its `DbSet`s are generated.
 
 <Callout type="info">

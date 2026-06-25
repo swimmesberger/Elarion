@@ -144,18 +144,18 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
 
 <Step>
 
-### Implement the concrete context in infrastructure
+### Implement the concrete context in the persistence layer
 
-The concrete `BillingDbContext` lives in the infrastructure project and implements `IAppDbContext`.
-The generator emits the matching `DbSet` properties into this partial class and a `ConfigureEntities`
-call that applies every discovered configuration.
+The concrete `BillingDbContext` lives in the application's persistence layer — the database is application
+logic, not an infrastructure detail — beside the configurations and migrations, and implements
+`IAppDbContext`. The generator emits the matching `DbSet` properties into this partial class and a
+`ConfigureEntities` call that applies every discovered configuration.
 
-```csharp title="src/Billing.Infrastructure/Data/BillingDbContext.cs"
-using Billing.Application;
+```csharp title="src/Billing.Application/Persistence/BillingDbContext.cs"
 using Elarion.Messaging.Outbox;
 using Microsoft.EntityFrameworkCore;
 
-namespace Billing.Infrastructure.Data;
+namespace Billing.Application.Persistence;
 
 public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> options)
     : DbContext(options), IAppDbContext {
@@ -250,7 +250,7 @@ The host needs to register `BillingDbContext` before EF tooling can find it. Add
 
 ```csharp title="src/Billing.Api/Program.cs"
 using Billing.Application;
-using Billing.Infrastructure.Data;
+using Billing.Application.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateSlimBuilder(args);

@@ -36,10 +36,10 @@ ADR-0007 surfaced about plugins that introduce new data.
    applied *inside* it (a shared per-context data layer + feature modules over it):
 
    ```
-   MyApp.Api                      ← host: composes contexts, owns transport wiring
+   MyApp.Api                      ← host: composes contexts, transport wiring, provider registration (UseNpgsql)
    MyApp.Context1.Contract        ← in-process surface other contexts depend on (create on demand)
-   MyApp.Context1.Application      ← behavior + Domain + Persistence  (internally: ADR-0007 layout)
-   MyApp.Context1.Infrastructure  ← context-specific platform wiring: its DbContext, provider, migrations
+   MyApp.Context1.Application      ← behavior + Domain + Persistence (config, DbContext, migrations — ADR-0007)
+   MyApp.Context1.Infrastructure  ← context-specific intent-only adapters (its own mail / external clients)
    MyApp.Context2.Contract / .Application / .Infrastructure
    MyApp.SharedKernel             ← minimal cross-context primitives only (value objects — never entities)
    ```

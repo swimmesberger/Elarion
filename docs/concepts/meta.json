@@ -2,6 +2,7 @@
   "title": "Concepts",
   "icon": "Lightbulb",
   "pages": [
+    "philosophy",
     "source-generation",
     "handlers",
     "results-and-errors",

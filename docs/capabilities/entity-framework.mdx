@@ -8,9 +8,9 @@ style for persistence wiring that the rest of Elarion uses — generated `DbSet<
 direct `IEntityTypeConfiguration<T>` calls instead of reflection-based assembly scanning.
 
 Its main purpose is to give you a **generated application-context interface** (`IAppDbContext`) that
-handlers depend on directly. That interface *is* your data-access abstraction: application code in the
-application layer queries `DbSet`s and calls `SaveChangesAsync` without referencing the infrastructure
-project that owns the concrete `DbContext`.
+handlers depend on directly. That interface *is* your data-access abstraction: handlers query `DbSet`s
+and call `SaveChangesAsync` against `IAppDbContext`, never the concrete `DbContext` (which lives in the
+application's persistence layer).
 
 <Callout type="info">
   This is the recommended alternative to a per-entity repository layer. With full LINQ, projections,
@@ -25,13 +25,12 @@ project that owns the concrete `DbContext`.
 Reference the `Elarion.EntityFrameworkCore` package — it bundles the EF Core source generator — in
 **every** project that declares `[EntityConfiguration]` configurations or a `[GenerateDbSets]` context
 abstraction. Configurations describe the one shared model every feature draws on, so they are *platform*,
-not feature-owned: the recommended home is a shared `Persistence` layer (a sibling of your entities, under
-no `[AppModule]`), while entities themselves stay plain classes. (See
-[Solution structure](/docs/concepts/solution-structure) and
-[ADR-0007](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0007-data-is-platform-module-as-plugin.md)
-for the rationale; the generator discovers configurations wherever they live, so placement is a
-convention.) Because the manifest is emitted per assembly, the project that declares the configurations
-and the project that holds the concrete `DbContext` (commonly separate assemblies) each need this
+not feature-owned: they live in a shared `Persistence` layer alongside the concrete `DbContext` (the
+database is application logic — see [Philosophy](/docs/concepts/philosophy) and
+[Solution structure](/docs/concepts/solution-structure)), while entities themselves stay plain classes.
+The generator discovers configurations wherever they live, so placement is a convention. If you *do* split
+configurations and the `DbContext` into separate assemblies, each assembly that declares the configurations
+and the one that holds the `DbContext` need this
 reference: the former so its generator emits the per-assembly configuration manifest, the latter so the
 generator reads that manifest to fill its context with `DbSet`s:
 

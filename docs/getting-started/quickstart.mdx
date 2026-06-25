@@ -122,8 +122,8 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
 This step needs `Elarion.EntityFrameworkCore` (which bundles the EF Core source generator) in any
 assembly that declares `[EntityConfiguration]`/`[GenerateDbSets]` types, and an EF
 Core provider — the quickstart uses `Microsoft.EntityFrameworkCore.InMemory`. In a real application
-the concrete `AppDbContext` lives in an infrastructure project; for the quickstart we keep it in the
-application project.
+the concrete `AppDbContext` lives in the application's persistence layer (the database is application
+logic, not an infrastructure detail); the quickstart keeps everything in one project for brevity.
 
 </Step>
 

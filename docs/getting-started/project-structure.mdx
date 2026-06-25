@@ -12,9 +12,9 @@ layout right is what lets the generators emit registration code without a centra
 MyApp.sln
 ├─ src/
 │  ├─ MyApp.Domain/            # entities (plain classes) + value objects + enums — no marker, no Elarion ref
-│  ├─ MyApp.Application/       # modules (behavior); Persistence ([EntityConfiguration]); [GenerateDbSets]  ← Elarion, Elarion.EntityFrameworkCore
-│  ├─ MyApp.Infrastructure/    # EF Core context, mail, blob storage, external services  ← Elarion.EntityFrameworkCore
-│  └─ MyApp.Api/               # ASP.NET Core host  ← Elarion, Elarion.JsonRpc, Elarion.AspNetCore
+│  ├─ MyApp.Application/       # modules (behavior); Persistence (config + DbContext + migrations); [GenerateDbSets]  ← Elarion, Elarion.EntityFrameworkCore
+│  ├─ MyApp.Infrastructure/    # intent-only mechanism adapters: mail, blob storage, external services
+│  └─ MyApp.Api/               # ASP.NET Core host (UseNpgsql + connection)  ← Elarion, Elarion.JsonRpc, Elarion.AspNetCore
 └─ tests/
 ```
 
@@ -33,14 +33,14 @@ capabilities.** See [Dependency rules](#dependency-rules) below for where each k
 <Callout type="warn">
   The source generators ship **inside** their runtime packages, and NuGet analyzer assets are not
   transitive — so every assembly that declares generator-driven types must reference the package
-  directly. For EF Core that is two assemblies: the **application** project, which declares the
-  `[EntityConfiguration]` configurations (in a shared `Persistence` layer — they are platform, not
-  feature-owned) and the `[GenerateDbSets]` interface and whose generator emits the per-assembly
-  configuration manifest; and the **infrastructure** project, which holds the concrete `DbContext` and
-  whose generator reads that manifest cross-assembly to fill the context with `DbSet`s. Both reference **`Elarion.EntityFrameworkCore`**. Entities themselves stay
-  plain classes with no marker — the `[EntityConfiguration]` on the `IEntityTypeConfiguration<T>` is the
-  marked type — so a pure domain/entity project needs no reference. Without the reference, the context
-  resolves zero configurations and generates no `DbSet`s.
+  directly. For EF Core that is the **application** project: it holds the persistence layer (the
+  `[EntityConfiguration]` configurations, the `[GenerateDbSets]` interface, the concrete `DbContext`, and
+  migrations — the database is application logic, not an infrastructure detail), so its generator emits the
+  `DbSet`s and `ConfigureEntities` in place. Reference **`Elarion.EntityFrameworkCore`** there. Entities
+  themselves stay plain classes with no marker, so a pure domain/entity project needs no reference. (If you
+  split the entities/configurations into a *separate* assembly from the `DbContext`, each needs the
+  reference, and the context reads the configurations from the other assembly's emitted manifest.) Without
+  the reference, the context resolves zero configurations and generates no `DbSet`s.
 </Callout>
 
 ## Module layout

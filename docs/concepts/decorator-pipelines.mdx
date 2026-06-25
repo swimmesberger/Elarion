@@ -265,8 +265,7 @@ predicate is **called, not parsed**, so any C# is allowed — including reflecti
 The generator evaluates it **once per closed handler type** (caching the result in a generated
 `static readonly bool` initialized at type init), never per request, and the emitted code is a direct
 static call plus `typeof`, so it stays NativeAOT- and trim-safe. It composes with `where`: the
-constraint governs what the body may *call*; `AppliesTo` governs *whether to attach*. See
-[ADR-0003](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0003-decorator-attachment-predicates.md).
+constraint governs what the body may *call*; `AppliesTo` governs *whether to attach*.
 
 The method must be `public static`, return `bool`, and take one `System.Type` parameter; a non-`public`
 `AppliesTo` is reported as `ELPIPE001` (a build error). Because it is plain runnable C#, you can
