@@ -66,13 +66,18 @@ ADR-0007 surfaced about plugins that introduce new data.
    1. **One shared context** — `Domain` + `Persistence` + feature modules, one `DbContext` (where most
       apps start, per ADR-0007).
    2. **Scoped contexts in one assembly** — `[GenerateDbSets("ctx")]` / `[EntityConfiguration("ctx")]`
-      partition entities into separate `DbContext`s within one assembly. A soft, cheap precursor that
-      already exists.
-   3. **Separate context assemblies** — the `Context.*` layout above; hard, compiler-enforced.
+      partition entities into separate `DbContext`s within one assembly. This is a **logical /
+      application-layer** boundary only: the contexts share the **same database and schema** by default
+      (Elarion neither requires nor recommends a per-scope schema). A soft, cheap precursor that already
+      exists — it separates the *model in code*, not the data in the database.
+   3. **Separate context assemblies** — the `Context.*` layout above; hard, compiler-enforced. This is
+      where **physical** data separation enters: a bounded context gets its **own schema and/or
+      database** (and its own migration history), which a scope deliberately does not.
 
    The **by-ID reference discipline** of ADR-0007 is what makes 2 → 3 cheap: if aggregates already
-   reference each other by ID, promotion is mostly moving files, adding a `Contract`, and swapping a
-   couple of lookups for contract calls. Cross-aggregate navigations would have to be untangled first.
+   reference each other by ID, promotion is mostly moving files, adding a `Contract`, splitting the
+   schema/database, and swapping a couple of lookups for contract calls. Cross-aggregate navigations
+   would have to be untangled first.
 
 7. **Earn each split.** A context is justified by a *real* data seam — an aggregate cluster with
    few/no shared entities, a distinct change cadence, a different owning team, or a planned extraction

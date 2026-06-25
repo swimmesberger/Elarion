@@ -14,8 +14,15 @@ entity's `DbSet` (the marker now sits on the `IEntityTypeConfiguration<T>`, not 
 forced a question the old model let us dodge: **where does configuration live, and what is a "module"
 relative to the data?**
 
-A single-assembly modular monolith has **one `DbContext`, one schema, shared data**. There are two
-coupling surfaces, and they are *not* the same boundary:
+A single-assembly modular monolith has, by default, **one `DbContext` over one shared schema** — and may
+partition into several via scopes (`[GenerateDbSets("ctx")]` / `[EntityConfiguration("ctx")]`). A scope is
+an **application-layer** partition: a separate `DbContext` that owns a subset of the model in *code*, over
+(by default) the **same database and schema**. It scopes which entities a context sees, not where the data
+physically lives — Elarion neither requires nor recommends a per-scope schema (a scoped `DbContext` *could*
+target one, but that is the user's choice, not the framework's). So a scope is a *logical* boundary; the
+*physical* data separation (its own schema and/or database) is what a **bounded context** adds — see
+[ADR-0008](0008-bounded-contexts-and-the-graduation-path.md). "Shared data" holds **within a context**.
+There are two coupling surfaces, and they are *not* the same boundary:
 
 - **Code** — handlers, services, the schema-mapping classes. Module-private; cross-module use goes
   through a published `[ModuleContract]` (ADR-0002), enforced by `ELMOD002`.
@@ -27,6 +34,14 @@ the unit-of-work/repository, and handlers work directly against `IAppDbContext` 
 SQL, and provider-specific functions — with no wrapping abstraction. So the persistence model, including
 its physical characteristics (indexes, columns, provider features), is *intentionally* an Application-facing
 capability, not a hidden Infrastructure secret. That premise is what determines where configuration belongs.
+
+More broadly, Elarion treats the database — PostgreSQL — as **part of the application**, not a swappable
+detail. The coupling is intentional: raw SQL, provider functions, and one fewer abstraction are worth more
+than provider-portability, and switching engines is rare and far more involved than swapping `UseNpgsql`
+anyway. It follows that persistence is tested against a **real PostgreSQL (Testcontainers)**, never an
+in-memory or SQLite provider — provider-specific SQL must run on the real engine — which also removes the
+usual "abstract the database for testability" argument. The database is application *logic*, so the
+framework couples to it on purpose.
 
 Conflating the two (treating an entity, or its configuration, as "owned" by the feature that happens
 to use it) is what produced the original confusion. This ADR records the model we settled on.
