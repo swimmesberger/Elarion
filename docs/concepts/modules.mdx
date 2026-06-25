@@ -116,7 +116,9 @@ are reported with a diagnostic and mapped ungated so they are never silently dro
 
 ## Core modules
 
-Core modules are required foundation modules. Declare them with `Kind = AppModuleKind.Core`:
+A core module is an ordinary module in every way **except two**: it is always enabled (it ignores
+`Modules:{Name}:Enabled`) and it initializes before feature modules. Declare it with
+`Kind = AppModuleKind.Core`:
 
 ```csharp title="CoreModule.cs"
 [AppModule("Core", Kind = AppModuleKind.Core)]
@@ -124,10 +126,37 @@ public static partial class CoreModule {
 }
 ```
 
-Core modules are always enabled, ignore `Modules:{Name}:Enabled`, and initialize before feature
-modules. A host that conceptually has "no modules" still declares one core `[AppModule]`, since
-`[GenerateModuleBootstrapper]` is the single transport-wiring path and core modules map
-unconditionally.
+A host that conceptually has "no modules" still declares one core `[AppModule]`, since
+`[GenerateModuleBootstrapper]` is the single transport-wiring path and core modules map unconditionally.
+
+### What belongs in a core module
+
+A core module is for a **foundation capability with behavior that other modules assume is present** — an
+always-on domain service such as audit recording or current-user context enrichment. Its only reason to
+exist is that *can't-be-disabled + initializes-first* guarantee; otherwise it is the same kind of thing as a
+feature module. It is **not** "where shared code lives."
+
+<Callout type="warn">
+  A core module is not a junk drawer for everything cross-cutting. Apply the [active-vs-passive
+  test](/docs/concepts/solution-structure#active-modules-vs-passive-building-blocks): cross-cutting **data**
+  belongs in the shared kernel, a cross-cutting **mechanism** belongs in a port, and only cross-cutting
+  **behavior that must always be present** belongs in a core module — kept as small as possible.
+</Callout>
+
+### Core module vs. the platform
+
+Both a core module and the *platform* (the host/runtime) are "always there," so they are easy to conflate.
+The difference is **domain-awareness**:
+
+- The **platform** provides domain-**blind** *mechanisms* — the DI container, the transports, the database
+  *connection*, and the adapters behind intent-only ports (SMTP for `IEmailSender`). It never knows your
+  domain, and the same platform serves any application. It is the ground your application stands on.
+- A **core module** is domain-**aware** application *behavior* you wrote — your application's load-bearing
+  foundation. A core module *consumes* platform capabilities (audit injects `ICurrentUser`); application
+  always builds on the platform, never the reverse.
+
+So a domain-blind mechanism is a *platform capability* (a port); domain-aware always-on behavior is a
+*foundation capability* (a core module) — never call the latter a "platform capability."
 
 ## Ordering with DependsOn
 

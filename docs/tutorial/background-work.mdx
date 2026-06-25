@@ -104,6 +104,7 @@ attempt after a transient failure.
 ```csharp title="src/Billing.Application/Modules/Invoicing/Jobs/SendInvoiceEmailJob.cs"
 using Billing.Application.Domain;
 using Billing.Application.Modules.Invoicing.Services;
+using Billing.Application.Persistence;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;
 
@@ -115,7 +116,7 @@ public sealed record SendInvoiceEmailPayload {
 
 [ScheduledJob("invoicing.sendInvoiceEmail")]
 public sealed class SendInvoiceEmailJob(
-    IAppDbContext db,
+    BillingDbContext db,
     IInvoiceEmailSender email,
     TimeProvider clock
 ) : IScheduledJob<SendInvoiceEmailPayload> {
@@ -181,6 +182,7 @@ a transaction: a consumer that *writes* commits atomically, while this read-only
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Events/InvoiceNotifications.cs"
 using Billing.Application.Domain;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
 using Microsoft.EntityFrameworkCore;
@@ -190,7 +192,7 @@ namespace Billing.Application.Modules.Invoicing.Events;
 
 [ConsumeEvent]
 public sealed class InvoiceNotifications(
-    IAppDbContext db,
+    BillingDbContext db,
     ILogger<InvoiceNotifications> logger
 ) : IHandler<InvoiceCreated> {
     public async ValueTask<Result> HandleAsync(InvoiceCreated e, CancellationToken ct) {
@@ -235,9 +237,10 @@ the stable `JobId` so the frontend can poll it.
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/CreateInvoice.cs"
 using System.ComponentModel;
 using Billing.Application.Domain;
-using Billing.Application.Modules.Core.Services;
+using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -251,7 +254,7 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 [CacheInvalidate("invoices")]
 [Description("Creates a draft invoice and sends it to the client in the background.")]
 public sealed class CreateInvoice(
-    IAppDbContext db,
+    BillingDbContext db,
     ICurrentUser user,
     IJobScheduler scheduler,
     IIntegrationEventBus integrationEvents,
@@ -302,7 +305,7 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        audit.Record("invoice.created", invoice.Id.ToString());
+        await audit.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }
@@ -386,6 +389,7 @@ The invoices table reads through a cached query, invalidated by the `invoices` t
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/ListInvoices.cs"
 using System.Collections.Generic;
 using Billing.Application.Domain;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -395,7 +399,7 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 
 [Cacheable("invoices", DurationSeconds = 30)]
 [RpcMethod("invoices.list")]
-public sealed class ListInvoices(IAppDbContext db, ICurrentUser user)
+public sealed class ListInvoices(BillingDbContext db, ICurrentUser user)
     : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
     public sealed record Query : IQuery;
     public sealed record Item(
@@ -428,6 +432,7 @@ without a redeploy.
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Jobs/OverdueReminderJob.cs"
 using Billing.Application.Domain;
+using Billing.Application.Persistence;
 using Elarion.Abstractions.Resilience;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;
@@ -436,7 +441,7 @@ using Microsoft.Extensions.Logging;
 namespace Billing.Application.Modules.Invoicing.Jobs;
 
 public sealed class OverdueReminderJob(
-    IAppDbContext db,
+    BillingDbContext db,
     TimeProvider clock,
     ILogger<OverdueReminderJob> logger
 ) {

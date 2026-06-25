@@ -32,8 +32,9 @@ client generation. You only install the pieces you use.
   and the EF Core generator in `Elarion.EntityFrameworkCore`. There are no separate analyzer packages
   to install. Because NuGet analyzer assets are not transitive, every assembly that needs a generator
   must reference its package **directly**: `Elarion` for handlers/modules/transports, and
-  `Elarion.EntityFrameworkCore` for any assembly declaring `[DbEntity]`/`[GenerateDbSets]` types
-  (including a separate domain/entity project).
+  `Elarion.EntityFrameworkCore` for any assembly that declares `[EntityConfiguration]`/`[GenerateDbSets]`
+  types or holds the concrete `DbContext` (a pure domain/entity project declares neither — entities are
+  plain classes — so it needs no reference).
 </Callout>
 
 ## Application project

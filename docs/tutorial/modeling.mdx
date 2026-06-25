@@ -1,6 +1,6 @@
 ---
 title: Model the domain
-description: Define the billing entities, the generated IAppDbContext data-access interface, and the Core, Clients, and Invoicing modules.
+description: Define the billing entities, the BillingDbContext data-access context, and the Core, Clients, and Invoicing modules.
 ---
 
 Billing has two entities — `Client` and `Invoice` — and three modules. **Clients** and **Invoicing**
@@ -14,15 +14,14 @@ you define the data model and the module boundaries; the handlers come in
 
 ### Define the entities
 
-Entities opt into generation with `[DbEntity]`. Both carry an `OwnerId` — the id of the signed-in
-account that owns the row — which is what later lets reads and caches be scoped per user.
+Entities are plain classes — generation is driven by an `[EntityConfiguration]` on each entity's
+`IEntityTypeConfiguration<T>` (which you add a couple of steps down), not by a marker on the entity
+itself. Both carry an `OwnerId` — the id of the signed-in account that owns the row — which is what
+later lets reads and caches be scoped per user.
 
 ```csharp title="src/Billing.Application/Domain/Client.cs"
-using Elarion.EntityFrameworkCore;
-
 namespace Billing.Application.Domain;
 
-[DbEntity]
 public sealed class Client {
     public Guid Id { get; set; }
     public required string OwnerId { get; set; }
@@ -34,11 +33,8 @@ public sealed class Client {
 ```
 
 ```csharp title="src/Billing.Application/Domain/Invoice.cs"
-using Elarion.EntityFrameworkCore;
-
 namespace Billing.Application.Domain;
 
-[DbEntity]
 public sealed class Invoice {
     public Guid Id { get; set; }
     public required string OwnerId { get; set; }
@@ -64,28 +60,20 @@ public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Cancelled }
 
 <Step>
 
-### Declare the data-access interface
+### Plan the data access
 
-Handlers never see the concrete `DbContext`. They depend on a generated `IAppDbContext` interface —
-this *is* the data-access abstraction, so there is [no repository layer](/docs/concepts/handlers#accessing-data).
-Annotate the interface with `[GenerateDbSets]` and the
-[EF Core generator](/docs/capabilities/entity-framework) emits a `DbSet<T>` for every `[DbEntity]`.
+Handlers inject the concrete `BillingDbContext` directly — the database *is* application logic, accessed
+on its own terms, so there is [no repository layer](/docs/concepts/handlers#accessing-data) and no
+context interface. You abstract intent-only dependencies (sending email behind an `IEmailSender`); you do
+not abstract the database, because you depend on its specifics — constraints, indexes, raw SQL. The
+context itself, its `[EntityConfiguration]` classes, and the migrations all live in the application's
+shared `Persistence` layer; only provider registration (`UseNpgsql` plus the connection string) is the
+host's job.
 
-```csharp title="src/Billing.Application/IAppDbContext.cs"
-using Elarion.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
-
-namespace Billing.Application;
-
-[GenerateDbSets]
-public partial interface IAppDbContext {
-    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
-    DbContext AsDbContext();
-}
-```
-
-After the next build the generator adds `DbSet<Client> Clients` and `DbSet<Invoice> Invoices` to this
-interface.
+You define `BillingDbContext` a couple of steps down. It carries `[GenerateDbSets]`, and the
+[EF Core generator](/docs/capabilities/entity-framework) emits a `DbSet<T>` for every
+`[EntityConfiguration]` entity straight onto that concrete class — `DbSet<Client> Clients` and
+`DbSet<Invoice> Invoices` after the next build.
 
 </Step>
 
@@ -93,19 +81,26 @@ interface.
 
 ### Add entity configuration
 
-Each module owns the schema for the entities it works with. Put the `IEntityTypeConfiguration<T>` in
-the module, beside its handlers — it references only the shared-kernel entity, so it never crosses a
-module boundary (and ELMOD002 only inspects constructor/field/property surface, never the `Configure`
-body). The generator discovers these wherever they live and emits direct `Configure(...)` calls — no
+Configuration is part of the shared **data layer**, not feature-owned, and the generator discovers it
+wherever it lives. The `[EntityConfiguration]` attribute on each `IEntityTypeConfiguration<T>` is the single source of truth for
+an entity's participation — it drives both the generated `DbSet<T>` and the `Configure(...)` application,
+so a configured entity is a discovered entity (a plain `IEntityTypeConfiguration<T>` with no attribute is
+ignored). Because configuration is part of the shared data layer, it lives in a `Persistence` layer — a sibling of
+`Modules`, under no `[AppModule]` — not inside a feature module; see
+[solution structure](/docs/concepts/solution-structure). It references only the shared-kernel entity, so
+it never crosses a module boundary (ELMOD002 only inspects constructor/field/property surface, never the
+`Configure` body). The generator emits direct `ApplyConfiguration<T>` calls — no
 `ApplyConfigurationsFromAssembly` reflection.
 
-```csharp title="src/Billing.Application/Modules/Clients/ClientConfiguration.cs"
+```csharp title="src/Billing.Application/Persistence/ClientConfiguration.cs"
 using Billing.Application.Domain;
+using Elarion.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Billing.Application.Modules.Clients;
+namespace Billing.Application.Persistence;
 
+[EntityConfiguration]
 public sealed class ClientConfiguration : IEntityTypeConfiguration<Client> {
     public void Configure(EntityTypeBuilder<Client> builder) {
         builder.HasKey(c => c.Id);
@@ -116,13 +111,15 @@ public sealed class ClientConfiguration : IEntityTypeConfiguration<Client> {
 }
 ```
 
-```csharp title="src/Billing.Application/Modules/Invoicing/InvoiceConfiguration.cs"
+```csharp title="src/Billing.Application/Persistence/InvoiceConfiguration.cs"
 using Billing.Application.Domain;
+using Elarion.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Billing.Application.Modules.Invoicing;
+namespace Billing.Application.Persistence;
 
+[EntityConfiguration]
 public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
     public void Configure(EntityTypeBuilder<Invoice> builder) {
         builder.HasKey(i => i.Id);
@@ -138,23 +135,23 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
 
 <Step>
 
-### Implement the concrete context in infrastructure
+### Implement the concrete context in the persistence layer
 
-The concrete `BillingDbContext` lives in the infrastructure project and implements `IAppDbContext`.
-The generator emits the matching `DbSet` properties into this partial class and a `ConfigureEntities`
-call that applies every discovered configuration.
+The concrete `BillingDbContext` lives in the application's persistence layer — the database is application
+logic, not an infrastructure detail — beside the configurations and migrations. Annotate it with
+`[GenerateDbSets]`: the generator emits the matching `DbSet` properties into this partial class and a
+`ConfigureEntities` call that applies every discovered configuration.
 
-```csharp title="src/Billing.Infrastructure/Data/BillingDbContext.cs"
-using Billing.Application;
+```csharp title="src/Billing.Application/Persistence/BillingDbContext.cs"
+using Elarion.EntityFrameworkCore;
 using Elarion.Messaging.Outbox;
 using Microsoft.EntityFrameworkCore;
 
-namespace Billing.Infrastructure.Data;
+namespace Billing.Application.Persistence;
 
+[GenerateDbSets]
 public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> options)
-    : DbContext(options), IAppDbContext {
-    public DbContext AsDbContext() => this;
-
+    : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         base.OnModelCreating(modelBuilder);
         ConfigureEntities(modelBuilder);   // generated
@@ -163,9 +160,9 @@ public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> 
 }
 ```
 
-<Callout type="warn">
-  Do **not** add `[GenerateDbSets]` to the concrete context. Class-side generation is inferred from the
-  interface, so the model has exactly one declaration point.
+<Callout type="info">
+  `[GenerateDbSets]` goes on the concrete context, the single declaration point for the model. The
+  generated `DbSet`s and `ConfigureEntities` are emitted onto this class, so handlers query it directly.
 </Callout>
 
 </Step>
@@ -182,7 +179,9 @@ resolver and any extra, non-generated wiring in `ConfigureServices`. See
 [Conventions](/docs/reference/conventions).
 
 **Core** is a foundation module — `Kind = AppModuleKind.Core` keeps it always enabled and initialized
-before feature modules. It owns shared services such as the audit trail you will add next.
+before feature modules. It owns always-on *domain* capabilities other modules build on — such as the audit
+trail you add next, which Core publishes as a `[ModuleContract]` so `Clients` and `Invoicing` can record
+through it.
 
 ```csharp title="src/Billing.Application/Modules/Core/CoreModule.cs"
 using Elarion.Abstractions.Modules;
@@ -244,22 +243,21 @@ The host needs to register `BillingDbContext` before EF tooling can find it. Add
 
 ```csharp title="src/Billing.Api/Program.cs"
 using Billing.Application;
-using Billing.Infrastructure.Data;
+using Billing.Application.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
-builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 
 var app = builder.Build();
 app.Run();
 ```
 
-`IAppDbContext` is registered as the application-facing abstraction; `DbContext` is also exposed so the
-transaction decorator (added next) can begin transactions without knowing the concrete type.
+Handlers inject `BillingDbContext` directly; `DbContext` is also exposed so the transaction decorator
+(added next) can begin transactions without knowing the concrete type.
 
 ```bash
 dotnet ef migrations add Initial \
@@ -279,7 +277,7 @@ that supplies `UseNpgsql(...)` — the runnable sample includes one.
 
 ## What you have so far
 
-- Two `[DbEntity]` types and a generated `IAppDbContext` that handlers will query directly.
+- Two entities, each with an `[EntityConfiguration]`, and a `BillingDbContext` that handlers will query directly.
 - A `BillingDbContext` whose `DbSet`s and configuration calls are generated, not reflected.
 - Three modules — one core, two feature — each owning its own surface.
 

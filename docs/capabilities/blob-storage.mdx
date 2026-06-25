@@ -133,7 +133,7 @@ builder.Services.AddPostgreSqlBlobStore<AppDbContext>();
 | `blob_contents` | Content bytes keyed by blob id, with cascade delete from `stored_blobs`. |
 
 The blob entities are plain EF Core types configured by `UsePostgreSqlBlobStorage()`; they are
-**not** part of Elarion's `[DbEntity]` / `[GenerateDbSets]` source generation. Because the
+**not** part of Elarion's `[EntityConfiguration]` / `[GenerateDbSets]` source generation. Because the
 configuration runs inside your own `OnModelCreating`, the tables become part of your context's model
 and ride along with your normal migrations — there is no separate "blob migration" to manage.
 

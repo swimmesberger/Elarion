@@ -5,7 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using Billing.Api.Hosting;
 using Billing.Application;
 using Billing.Application.Modules.Invoicing.Services;
-using Billing.Infrastructure.Data;
+using Billing.Application.Persistence;
 using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Scheduling;
@@ -26,17 +26,19 @@ var builder = WebApplication.CreateSlimBuilder(args);
 // Clock — used by handlers, jobs, and the current-user snapshot.
 builder.Services.AddSingleton(TimeProvider.System);
 
-// Database: the concrete context is infrastructure; handlers see only IAppDbContext. The connection
-// string is injected by the Aspire AppHost (resource name "billing").
+// Database: the context lives in the application's persistence layer (the database is application logic);
+// handlers inject the concrete BillingDbContext directly — there is no IAppDbContext abstraction. Provider
+// *registration* is the host's job — the connection string is injected by the Aspire AppHost ("billing").
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
-builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+// The transaction decorator depends on the base DbContext, so expose BillingDbContext under it too.
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
 builder.Services.AddElarionOutbox<BillingDbContext>();
 
-// Infrastructure capability: the concrete email sender behind the module's port.
+// Infrastructure capability: the concrete email sender behind the module's port. (The audit trail is a
+// Core module capability — a [ModuleContract] with a Core-internal [Service] impl — so it self-registers.)
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
 // Scheduler runtime. Job descriptors and event consumers are composed per module by

@@ -217,23 +217,37 @@ See [Resilience](/docs/capabilities/resilience).
 
 ## EF Core
 
-### `[DbEntity]`
+### `[EntityConfiguration]`
 
-- **Package:** `Elarion.EntityFrameworkCore` · **Applies to:** class
-- **Triggers:** marks an entity class for inclusion in the DbContext; the source generator scans for it to auto-generate `DbSet` properties.
+- **Package:** `Elarion.EntityFrameworkCore` · **Applies to:** class (an `IEntityTypeConfiguration<TEntity>` implementation)
+- **Triggers:** marks an `IEntityTypeConfiguration<TEntity>` implementation as the single source of truth for an entity's participation; it drives both the generated `DbSet<TEntity>` and the `Configure(...)` application. The entity itself carries no marker (previously `[DbEntity]`) — a configured entity is a discovered entity. A plain `IEntityTypeConfiguration<T>` with no attribute is ignored (no DbSet, no Configure). A single `[EntityConfiguration]` class may implement `IEntityTypeConfiguration<T>` more than once; each implemented entity gets its own `DbSet` and its own `Configure(...)` call. A class implementing no `IEntityTypeConfiguration<T>` is reported (`ELEFC001`).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `scopes` | `params string[]` (ctor) → `Scopes` (`IReadOnlyList<string>`) | empty | Optional context scopes this entity belongs to. Omit scopes to participate in unscoped/global contexts. |
+| `scopes` | `params string[]` (ctor) → `Scopes` (`IReadOnlyList<string>`) | empty | Optional context scopes this configuration belongs to. Omit scopes to participate in unscoped/global contexts. |
+
+```csharp
+// Entities/Invoice.cs — plain class, no attribute
+public sealed class Invoice { public Guid Id { get; set; } }
+
+// Invoicing/InvoiceConfiguration.cs — the single source of truth
+using Elarion.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+[EntityConfiguration]
+public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
+    public void Configure(EntityTypeBuilder<Invoice> builder) { /* ... */ }
+}
+```
 
 ### `[GenerateDbSets]`
 
-- **Package:** `Elarion.EntityFrameworkCore` · **Applies to:** interface
-- **Triggers:** applied to a partial DbContext interface; generates `DbSet<T>` properties for each `[DbEntity]` class, `DbSet<T>` properties on implementing DbContext classes, and `ConfigureEntities(ModelBuilder)` on implementing DbContext classes.
+- **Package:** `Elarion.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** applied to a partial DbContext class; generates a `DbSet<T>` property for each `[EntityConfiguration]` entity and `ConfigureEntities(ModelBuilder)` directly onto that class (reflection-free, AOT-friendly direct `ApplyConfiguration<T>` calls).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `scopes` | `params string[]` (ctor) → `Scopes` (`IReadOnlyList<string>`) | empty | Optional context scopes generated for this interface. Omit scopes to include every `[DbEntity]`. |
+| `scopes` | `params string[]` (ctor) → `Scopes` (`IReadOnlyList<string>`) | empty | Optional context scopes generated for this class. Omit scopes to include every `[EntityConfiguration]`; a scoped class includes only configurations whose scopes intersect. |
 
 ### `[Keyset<TEntity>]`
 
@@ -252,12 +266,12 @@ See [Entity Framework](/docs/capabilities/entity-framework) and [Pagination](/do
 ### `[ModuleContract]`
 
 - **Package:** `Elarion.Abstractions` (Modules) · **Applies to:** interface | class
-- **Triggers:** marks a module's published cross-module surface — the stable type other modules may depend on. The owning module keeps the implementation `internal`; other modules inject the contract. `ModuleBoundaryAnalyzer` (`ELMOD002`) reports cross-module references to internal `[Service]`/handler/entity types but allows references to a `[ModuleContract]` type. Marker only — no parameters.
+- **Triggers:** marks a module's published cross-module surface — the stable type other modules may depend on. Use it **sparingly and deliberately**: it is for genuine cross-module *domain* calls, not shared infrastructure (use a port outside the modules) or shared data (use the shared kernel). The owning module keeps the implementation `internal`; other modules inject the contract. `ModuleBoundaryAnalyzer` (`ELMOD002`) is location-based — it allows a `[ModuleContract]` but reports any other cross-module reference to a type placed *inside* another module (an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]`). Types outside every module — the shared kernel and platform ports — are never flagged. Marker only — no parameters.
 
 ### `[ModuleApi]`
 
 - **Package:** `Elarion.Abstractions` (Modules) · **Applies to:** class
-- **Triggers:** configures how a handler participates in its module's generated typed in-process API (see `[GenerateModuleApi]`). A configurator, never a gate: every handler is in the default facade automatically (opt-out). Apply only to exclude a handler or to tag it into named scopes (additive). Scope vocabulary mirrors `[DbEntity]`/`[GenerateDbSets]`.
+- **Triggers:** configures how a handler participates in its module's generated typed in-process API (see `[GenerateModuleApi]`). A configurator, never a gate: every handler is in the default facade automatically (opt-out). Apply only to exclude a handler or to tag it into named scopes (additive). Scope vocabulary mirrors `[EntityConfiguration]`/`[GenerateDbSets]`.
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |

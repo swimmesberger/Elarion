@@ -64,7 +64,7 @@ App-module discovery and the `ModuleBoundaryAnalyzer`. See
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELMOD001 | Warning | Two `[AppModule]` types share the same namespace; generated transport handlers in that namespace are associated with the alphabetically first matching module (ambiguous ownership). | Give each module a distinct namespace so handler-to-module association is unambiguous. |
-| ELMOD002 | Warning | A type in one `[AppModule]` depends (via constructor parameter, field, or property) on another module's internal type — a `[Service]`, a handler, or a `[DbEntity]` entity — rather than a published `[ModuleContract]`. Types under no module are never flagged. | Depend on the other module's published `[ModuleContract]` interface instead of its internal service/handler/entity types. |
+| ELMOD002 | Warning | Location-based: a type in one `[AppModule]` depends (via constructor parameter, field, or property) on a type **inside** another module — an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]` — that is not a published `[ModuleContract]`. Everything **outside** every module (the shared kernel and platform ports) is shareable; a shared-kernel entity is exempt because of *where it lives*, not because entities are special. | Reach the other module through its `[ModuleContract]` (used sparingly), a platform-capability port outside the modules, or move shared data/value types to the shared kernel. |
 
 ## ELAPI — Module API facades
 
@@ -77,6 +77,15 @@ Typed in-process module API generation for `[GenerateModuleApi]` / `[ModuleApi]`
 | ELAPI002 | Error | A `[GenerateModuleApi]` interface is nested inside another type instead of being declared at namespace scope. | Move the `[GenerateModuleApi]` interface to namespace (top-level) scope. |
 | ELAPI003 | Warning | A `[GenerateModuleApi]` interface's namespace is not under any `[AppModule]`, so no handlers can be associated and the facade is left empty. | Move the facade interface under a module's namespace so its handlers can be discovered. |
 | ELAPI004 | Error | A `[GenerateModuleApi]` facade maps more than one handler to the same method name (handlers share a type name); the duplicate handler is skipped. | Rename one of the conflicting handler types, or exclude one via `[ModuleApi(Exclude = true)]`, so each facade method name is unique. |
+
+## ELEFC — Entity configuration
+
+EF Core entity configuration discovery for `[EntityConfiguration]`. See
+[Entity Framework Core](/docs/capabilities/entity-framework).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELEFC001 | Warning | An `[EntityConfiguration]` class implements no `IEntityTypeConfiguration<T>`, so no `DbSet` or configuration is generated for it. | Make the class implement at least one `IEntityTypeConfiguration<T>`, or remove the `[EntityConfiguration]` attribute. |
 
 ## ELKEY — Keyset pagination
 

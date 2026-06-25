@@ -1,7 +1,8 @@
 using System.ComponentModel;
 using Billing.Application.Domain;
 using Billing.Application.Modules.Clients.Services;
-using Billing.Application.Modules.Core.Services;
+using Billing.Application.Modules.Core.Contracts;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -16,7 +17,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 [CacheInvalidate("clients")]
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(
-    IAppDbContext db,
+    BillingDbContext db,
     ICurrentUser user,
     IClientNumberGenerator numbers,
     IAuditTrail audit,
@@ -50,7 +51,7 @@ public sealed class CreateClient(
 
         db.Clients.Add(client);
         await db.SaveChangesAsync(ct);
-        audit.Record("client.created", client.Id.ToString());
+        await audit.RecordAsync("client.created", client.Id.ToString(), ct);
 
         return new Response(client.Id, client.Number);
     }

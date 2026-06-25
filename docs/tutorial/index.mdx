@@ -40,7 +40,7 @@ Every Elarion capability shows up exactly where it pulls its weight in a real bi
 | --- | --- | --- |
 | Feature boundaries (`Clients`, `Invoicing`) and a shared foundation | [Modules](/docs/concepts/modules) (feature + core) | [Model the domain](/docs/tutorial/modeling) |
 | Reads and writes as named use cases | [Handlers](/docs/concepts/handlers) + [Results](/docs/concepts/results-and-errors) | [Write the features](/docs/tutorial/features) |
-| Data access without a repository layer | [EF Core `IAppDbContext`](/docs/capabilities/entity-framework) | [Model the domain](/docs/tutorial/modeling) |
+| Data access without a repository layer | [EF Core `BillingDbContext`](/docs/capabilities/entity-framework) | [Model the domain](/docs/tutorial/modeling) |
 | Rejecting bad input | [Validators](/docs/concepts/validators) | [Write the features](/docs/tutorial/features) |
 | Transactions + logging around every command | [Decorator pipelines](/docs/concepts/decorator-pipelines) | [Write the features](/docs/tutorial/features) |
 | "Who is calling?" for scoping and audit | [Current user](/docs/capabilities/current-user) | [Write the features](/docs/tutorial/features) |
@@ -64,17 +64,18 @@ concerns.
 billing/
 ├─ Billing.sln
 ├─ src/
-│  ├─ Billing.Application/      # modules, handlers, services, validators, jobs, policies  ← Elarion + generators
-│  │  └─ Domain/                # shared-kernel [DbEntity] entities + enums (under no [AppModule])
-│  ├─ Billing.Infrastructure/   # BillingDbContext (PostgreSQL), EF outbox, SMTP email sender
+│  ├─ Billing.Application/      # modules (behavior), handlers, services, validators, jobs, policies  ← Elarion + generators
+│  │  ├─ Domain/                # shared-kernel entities + enums (plain classes, under no [AppModule])
+│  │  └─ Persistence/           # the database is app logic: [EntityConfiguration], BillingDbContext, migrations
+│  ├─ Billing.Infrastructure/   # intent-only mechanism adapters: the SMTP email sender
 │  ├─ Billing.Api/              # ASP.NET Core host  ← Elarion.JsonRpc + Elarion.AspNetCore (+ MCP)
 │  └─ Billing.AppHost/          # .NET Aspire orchestration  → provisions PostgreSQL, runs the API
 └─ web/                         # Vite + React + TanStack Query frontend
 ```
 
 Entities live in a shared-kernel **namespace** (`Billing.Application.Domain`), not a separate project,
-and each module owns its own `IEntityTypeConfiguration<T>` — see
-[Solution structure](/docs/concepts/solution-structure) for why.
+and their `[EntityConfiguration]` schema lives in a shared `Persistence` layer (configuration is part of the
+shared data layer, not feature-owned) — see [Solution structure](/docs/concepts/solution-structure) for why.
 
 <Callout type="info">
   The dependency direction is `Api → Infrastructure → Application`. The application project never
@@ -134,8 +135,8 @@ the EF Core generator in `Elarion.EntityFrameworkCore` — so there are no separ
 install or mark `PrivateAssets="all"`. Because NuGet analyzer assets are not transitive, each project
 that needs a generator references its package directly.
 
-The **application** project holds your modules, entities, and the `[GenerateDbSets]` context
-abstraction. It uses EF Core for data access and FluentValidation for input rules:
+The **application** project holds your modules, entities, and the `[GenerateDbSets]` concrete
+`BillingDbContext`. It uses EF Core for data access and FluentValidation for input rules:
 
 ```bash
 cd src/Billing.Application
@@ -146,17 +147,15 @@ dotnet add package FluentValidation
 cd ../..
 ```
 
-The **infrastructure** project owns the concrete `BillingDbContext` and the PostgreSQL provider, plus
-the EF Core integration-event outbox. Because the generated class-side `DbSet`s and entity
-configuration are emitted where the concrete context lives, infrastructure references
-`Elarion.EntityFrameworkCore` too (its generator reads the application's entity manifest
-cross-assembly):
+The application's **persistence layer** owns the concrete `BillingDbContext`, the PostgreSQL provider, the
+EF Core integration-event outbox, and the migrations — because the database is application logic, not an
+infrastructure detail. The generated class-side `DbSet`s and entity configuration are emitted there beside
+the configurations (so no cross-assembly manifest is involved):
 
 ```bash
-cd src/Billing.Infrastructure
-dotnet add package Elarion.EntityFrameworkCore
-dotnet add package Microsoft.EntityFrameworkCore
+cd src/Billing.Application
 dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add package Microsoft.EntityFrameworkCore.Design
 dotnet add package Elarion.Messaging.Outbox
 cd ../..
 ```
@@ -239,6 +238,6 @@ The skeleton is in place. Next, model the domain and define the modules that own
 
 <Cards>
   <Card title="Next: Model the domain" href="/docs/tutorial/modeling">
-    Entities, the generated `IAppDbContext`, and the Core / Clients / Invoicing modules.
+    Entities, the `[GenerateDbSets]` concrete `BillingDbContext`, and the Core / Clients / Invoicing modules.
   </Card>
 </Cards>

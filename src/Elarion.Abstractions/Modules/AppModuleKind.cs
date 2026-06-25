@@ -17,7 +17,12 @@ public enum AppModuleKind {
     /// Required foundation module that is always enabled and initialized before features.
     /// </summary>
     /// <remarks>
-    /// Use this for shared infrastructure or domain foundations that feature modules depend on.
+    /// Use this for an always-on <em>domain foundation</em> — a capability with behavior that other modules
+    /// assume is present (for example audit recording or current-user context enrichment). A core module is
+    /// application code, not infrastructure: a domain-blind mechanism such as sending email or storing blobs
+    /// belongs behind an intent-only port wired by the host, never in a core module. Keep core modules
+    /// minimal — cross-cutting <em>data</em> belongs in the shared kernel and a cross-cutting
+    /// <em>mechanism</em> in a port.
     /// </remarks>
     Core = 1,
 }

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Billing.Application.Domain;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -11,7 +12,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 /// <see cref="CreateClient"/> invalidates, so the list refreshes the moment a client is added.</summary>
 [Cacheable("clients", DurationSeconds = 60)]
 [RpcMethod("clients.list")]
-public sealed class ListClients(IAppDbContext db, ICurrentUser user)
+public sealed class ListClients(BillingDbContext db, ICurrentUser user)
     : IHandler<ListClients.Query, Result<ListClients.Response>> {
     public sealed record Query : IQuery;
     public sealed record Item(Guid Id, string Number, string Name, string Email);

@@ -45,7 +45,7 @@ using Elarion.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
 [RpcMethod("clients.get")]
-public sealed class GetClient(IAppDbContext db)
+public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
     public sealed record Response(Guid Id, string Name);
@@ -112,10 +112,10 @@ remains a useful readability convention, but a request without the marker is tre
 
 ## Accessing data
 
-Handlers query and persist through the generated `IAppDbContext` interface, injected like any other
-dependency. Elarion does **not** prescribe a repository layer — the
-[EF Core source generator](/docs/capabilities/entity-framework) exists precisely so the application context
-interface *is* your data-access abstraction:
+Handlers query and persist through the concrete `AppDbContext`, injected like any other dependency.
+Elarion does **not** prescribe a repository layer — the
+[EF Core source generator](/docs/capabilities/entity-framework) generates the context's `DbSet`s and
+entity configuration so the `DbContext` *is* your data-access surface:
 
 ```csharp
 // Read: query the generated DbSet directly with EF Core async LINQ
@@ -129,16 +129,18 @@ db.Clients.Add(new Client { Id = Guid.NewGuid(), Name = command.Name });
 await db.SaveChangesAsync(ct);
 ```
 
-The interface keeps handlers in the application layer — they query without referencing the
-infrastructure project that owns the concrete `DbContext`. For compiled queries or other advanced
-scenarios that need the concrete type, call `db.AsDbContext()`. See
-[Entity Framework Core](/docs/capabilities/entity-framework) for how the interface and its `DbSet`s are generated.
+The database is application logic, accessed directly — not an abstraction to hide behind. You abstract
+intent-only dependencies (sending email → `IEmailSender`); you do **not** abstract the database, because
+you depend on its specifics: constraints, indexes, raw SQL. So there is no repository *and* no context
+interface — handlers inject the `AppDbContext` itself, which lives in the application's shared persistence
+layer alongside its `[EntityConfiguration]` classes and migrations. See
+[Entity Framework Core](/docs/capabilities/entity-framework) for how the context's `DbSet`s and entity
+configuration are generated.
 
 <Callout type="info">
-  Wrapping each table in a hand-written `IClientRepository` adds a layer that the generated
-  `IAppDbContext` already provides — with full LINQ, projections, and EF Core change tracking. Reach
-  for a dedicated abstraction only when a query genuinely needs to be reused or hidden behind a
-  domain operation.
+  Wrapping each table in a hand-written `IClientRepository` adds a layer that the `AppDbContext`
+  already provides — with full LINQ, projections, and EF Core change tracking. Reach for a dedicated
+  abstraction only when a query genuinely needs to be reused or hidden behind a domain operation.
 </Callout>
 
 ## Keep handlers transport-agnostic

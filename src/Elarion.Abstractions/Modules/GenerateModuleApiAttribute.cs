@@ -14,7 +14,7 @@ namespace Elarion.Abstractions.Modules;
 /// types, the facade is module-internal and must not be injected across module boundaries.
 /// </para>
 /// <para>
-/// Membership mirrors <c>[GenerateDbSets]</c>/<c>[DbEntity]</c>:
+/// Membership mirrors <c>[GenerateDbSets]</c>/<c>[EntityConfiguration]</c>:
 /// </para>
 /// <list type="bullet">
 ///   <item><description>No <see cref="Scopes"/> (default facade): every non-excluded handler in the

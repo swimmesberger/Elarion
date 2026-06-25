@@ -1,4 +1,5 @@
 using Billing.Application.Domain;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -11,7 +12,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 /// one account's cached client is never served to another.</summary>
 [Cacheable("clients", DurationSeconds = 120)]
 [RpcMethod("clients.get")]
-public sealed class GetClient(IAppDbContext db, ICurrentUser user)
+public sealed class GetClient(BillingDbContext db, ICurrentUser user)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id) : IQuery;
     public sealed record Response(Guid Id, string Number, string Name, string Email);

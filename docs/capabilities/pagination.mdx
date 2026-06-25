@@ -50,10 +50,8 @@ translates to SQL like hand-written `OrderBy`/`Where`) plus a static `Definition
 opaque cursor codec that carries the key values (no extra round-trip to reload a reference row):
 
 ```csharp
-using Elarion.EntityFrameworkCore;   // [DbEntity]
 using Elarion.Paging;                 // [Keyset<T>]
 
-[DbEntity]
 public sealed class Client {
     public Guid Id { get; init; }
     public DateTime CreatedAt { get; init; }
@@ -82,7 +80,7 @@ binding (`KeysetPageRequest` is a ready-made implementation for handlers that ne
 ```csharp
 [RpcMethod("clients.list")]
 [HttpEndpoint("clients")]
-public sealed class ListClients(IAppDbContext db, ICurrentUser user)
+public sealed class ListClients(AppDbContext db, ICurrentUser user)
     : IHandler<ListClients.Query, Result<Page<ListClients.Item>>> {
 
     public sealed record Query : IKeysetPageRequest {
@@ -211,7 +209,7 @@ entry. Offset pages fill `Total`; keyset pages fill the cursors instead.
 
 <Cards>
   <Card title="Entity Framework Core" href="/docs/capabilities/entity-framework">
-    Generated `DbSet`s and the interface-first `IAppDbContext` that handlers page against.
+    Generated `DbSet`s on the concrete `DbContext` that handlers page against.
   </Card>
   <Card title="Handlers" href="/docs/concepts/handlers">
     How list handlers accept a paging request and return `Result<Page<T>>`.

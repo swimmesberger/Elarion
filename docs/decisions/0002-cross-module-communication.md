@@ -60,13 +60,21 @@ surface." It documents intent and is the anchor the boundary analyzer keys off.
 
 ### 2. The boundary analyzer — `ELMOD002` (owned)
 
-A `DiagnosticAnalyzer` (the repo's first) that reports when a type in one module depends on
-another module's **internal** type — a `[Service]`, a handler, or a `[DbEntity]` entity — rather
-than a `[ModuleContract]`. To stay precise and low-noise it inspects each type's **dependency
-surface** (constructor parameters, fields, properties) — where foreign internals leak in via
-DI — not every reference. Framework and shared-kernel types are exempt automatically: a type
-whose namespace is under no `[AppModule]` has no owning module and is never flagged. Severity is
-`Warning` (configurable by the host).
+A `DiagnosticAnalyzer` (the repo's first) with a purely **location-based** rule: everything under an
+`[AppModule]` is module-internal and may not be referenced from another module except through a published
+`[ModuleContract]`; everything **outside** every module is shareable. So it reports a cross-module
+dependency on a type *inside* another module — an entity, DTO, `[Service]`, handler, or
+`[EntityConfiguration]` — and allows a `[ModuleContract]`. To stay precise and low-noise it inspects each
+type's **dependency surface** (constructor parameters, fields, properties) — where foreign internals leak
+in via DI — not every reference. Framework and shared-kernel types are exempt automatically: a type whose
+namespace is under no `[AppModule]` has no owning module. A shared-kernel entity is therefore exempt
+because of *where it lives* (outside every module), **not** because entities are special — placing an
+entity inside a module makes it module-owned and flagged, which is how a module earns data ownership on the
+way to a bounded context (see [ADR-0008](0008-bounded-contexts-and-the-graduation-path.md)). The rule
+reads only the module name, so foundation (`Core`) modules get no exemption either. A flagged reference is
+resolved one of three ways — a `[ModuleContract]` (a genuine, sparingly-used cross-module *domain* call), a
+platform-capability port outside the modules (the port/adapter pattern), or moving shared data to the
+shared kernel. Severity is `Warning` (configurable by the host).
 
 ### 3. The typed in-process API — `[GenerateModuleApi]` (optional ergonomic layer)
 
@@ -76,19 +84,19 @@ intra-module code) can call handlers by name instead of resolving verbose generi
 typed-direct to `IHandler<,>` (full pipeline), and is absent from the JSON-RPC/MCP schema.
 Because its methods expose handler DTOs, it is module-internal and must not cross a boundary.
 
-Membership mirrors `[DbEntity]`/`[GenerateDbSets]` exactly — the same scope vocabulary the
+Membership mirrors `[EntityConfiguration]`/`[GenerateDbSets]` exactly — the same scope vocabulary the
 codebase already uses — with one principled inversion of the default:
 
 | Concern | DbContext grouping | Module API |
 |---|---|---|
 | Container declared by the user | `[GenerateDbSets(scopes)]` partial interface | `[GenerateModuleApi(scopes)]` partial interface |
-| Member tagging | `[DbEntity(scopes)]` | `[ModuleApi(scopes)]` |
-| Default membership | **opt-in** (must mark `[DbEntity]`) | **opt-out** (every handler is in) |
+| Member tagging | `[EntityConfiguration(scopes)]` | `[ModuleApi(scopes)]` |
+| Default membership | an entity participates by having an `[EntityConfiguration]` (the EF side opts out of a DbSet only by omitting a configuration) | **opt-out** (every handler is in) |
 
 The default is opt-out because **handler-ness is structural** (the type implements `IHandler<,>`,
 already discovered), so a handler being in its module's facade by default matches its inherent
-in-process callability. "Entity-ness" is not structural, which is why `[DbEntity]` must be an
-explicit gate. The `[ModuleApi]` attribute therefore becomes a pure configurator: apply it only
+in-process callability. Entity-ness is now expressed by an `[EntityConfiguration]` — the
+configuration is the marked, structural anchor that gates participation. The `[ModuleApi]` attribute therefore becomes a pure configurator: apply it only
 to exclude a handler (`Exclude = true`) or to tag it into named scopes. A default
 `[GenerateModuleApi]` facade includes every non-excluded handler in the owning module; a scoped
 facade includes the handlers whose tags intersect its scopes. Scoped facades are the ISP tool:
@@ -203,7 +211,7 @@ the seam stays "own the convention and the analyzer," not "generate adapters."
 - Direct cross-module calls have one sanctioned shape (a published contract), enforced by an
   analyzer rather than convention alone.
 - Reuses existing machinery: `[Service]` registration, the decorated `IHandler<,>`, the
-  `ConfigureDefaultServices` aggregation, and the `[DbEntity]`/`[GenerateDbSets]` scope vocabulary.
+  `ConfigureDefaultServices` aggregation, and the `[EntityConfiguration]`/`[GenerateDbSets]` scope vocabulary.
 - AOT/trim-friendly: typed-direct dispatch, no reflection, no serialization in-process.
 - The contract seam is the clean extraction path to a real service boundary.
 

@@ -1,8 +1,9 @@
 using System.ComponentModel;
 using Billing.Application.Domain;
-using Billing.Application.Modules.Core.Services;
+using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -19,7 +20,7 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 [CacheInvalidate("invoices")]
 [Description("Creates a draft invoice and sends it to the client in the background.")]
 public sealed class CreateInvoice(
-    IAppDbContext db,
+    BillingDbContext db,
     ICurrentUser user,
     IJobScheduler scheduler,
     IIntegrationEventBus integrationEvents,
@@ -70,7 +71,7 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        audit.Record("invoice.created", invoice.Id.ToString());
+        await audit.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }

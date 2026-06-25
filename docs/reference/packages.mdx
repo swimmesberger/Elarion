@@ -19,7 +19,7 @@ infrastructure stay in consuming projects.
 | `Elarion.AspNetCore` | ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport. | ASP.NET Core abstractions plus `Elarion.JsonRpc`. |
 | `Elarion.AspNetCore.Mcp` | Exposes JSON-RPC handlers as a Model Context Protocol (MCP) server for AI agents over Streamable HTTP. | `Elarion.JsonRpc` plus `ModelContextProtocol.AspNetCore`; the only Elarion package that references the MCP SDK. |
 | `Elarion.AspNetCore.SchemaGeneration` | MSBuild package and host-launching tool for exporting JSON-RPC schemas during build. | Private build-time reference from ASP.NET Core hosts. |
-| `Elarion.EntityFrameworkCore` | Marker attributes for EF Core entity and `DbSet` generation. Bundles the EF Core source generator (`DbSet` properties, entity configuration, keyset pagination) as an analyzer. | Marker-only at runtime; consumers provide EF Core. |
+| `Elarion.EntityFrameworkCore` | Marker attributes for EF Core entity configuration and `DbSet` generation (`[EntityConfiguration]` on an `IEntityTypeConfiguration<T>` drives both the `DbSet` and its `Configure` application). Bundles the EF Core source generator (`DbSet` properties, entity configuration, keyset pagination) as an analyzer. | Marker-only at runtime; consumers provide EF Core. |
 
 ## npm package
 
@@ -48,6 +48,6 @@ The package split enforces clean dependencies:
 | Project | References |
 | --- | --- |
 | Application library | `Elarion` (bundles the generator); optionally `Elarion.Blobs`, `Elarion.EntityFrameworkCore` (bundles the EF Core generator). |
-| Domain / entity library (if separate) | `Elarion.EntityFrameworkCore` — required wherever `[DbEntity]`/`[GenerateDbSets]` types are declared, since its generator emits the per-assembly entity manifest. |
+| Domain / entity library (if separate) | None — entities are plain classes with no marker. `[EntityConfiguration]` configurations live with the modules in the application library; the project holding the concrete `DbContext` references `Elarion.EntityFrameworkCore` so its generator reads the per-assembly configuration manifest and fills the context. |
 | ASP.NET Core host | `Elarion` (for the generator), `Elarion.JsonRpc`, `Elarion.AspNetCore`; optionally `Elarion.Blobs.PostgreSql`, `Elarion.AspNetCore.SchemaGeneration` (build tooling), and `Elarion.AspNetCore.Mcp` (MCP server). |
 | Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`. |

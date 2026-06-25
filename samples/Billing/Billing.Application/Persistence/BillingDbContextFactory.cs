@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
-namespace Billing.Infrastructure.Data;
+namespace Billing.Application.Persistence;
 
 /// <summary>Design-time factory so <c>dotnet ef migrations</c> can build the context without launching
 /// the host. The connection string here is only used to pick the provider's SQL dialect when scaffolding

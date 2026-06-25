@@ -71,7 +71,7 @@ using Elarion.Abstractions;
 
 [RpcMethod("clients.create")]
 [Description("Creates a new client record.")]            // → tool description
-public sealed class CreateClient(IAppDbContext db)
+public sealed class CreateClient(AppDbContext db)
     : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
     public sealed record Command {
         [Description("Human-readable client name.")]      // → input-schema property description

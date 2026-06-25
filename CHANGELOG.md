@@ -21,9 +21,9 @@ minor releases may include breaking changes.
   full chain — one C# handler becoming a JSON-RPC method, an exported `rpc-schema.json`, a generated typed
   client, and a React call — and builds as part of the solution.
 - **Solution-structure guidance ([`docs/concepts/solution-structure`](docs/concepts/solution-structure.mdx)).**
-  Documents the recommended layout for consuming apps: keep `[DbEntity]` entities in a shared-kernel
+  Documents the recommended layout for consuming apps: keep entities in a shared-kernel
   namespace (under no `[AppModule]`, so cross-aggregate references never trip the `ELMOD002` boundary
-  analyzer), let each module own its `IEntityTypeConfiguration<T>` beside its handlers, keep
+  analyzer), let each module own its `[EntityConfiguration]` `IEntityTypeConfiguration<T>` beside its handlers, keep
   infrastructure to platform capabilities, and graduate to a separate assembly only when multiple hosts
   share the code. The tutorial and the Billing sample follow it.
 - **`HandlerMetadata` decorator seam (`Elarion.Abstractions.Pipeline`).** A decorator can declare a
@@ -35,6 +35,25 @@ minor releases may include breaking changes.
   [decorator pipelines](docs/concepts/decorator-pipelines.mdx).
 
 ### Changed
+- **EF Core entity participation is now configuration-driven (breaking — source).** The `[DbEntity]`
+  marker is removed. An entity opts into a generated context through `[EntityConfiguration]` placed on its
+  `IEntityTypeConfiguration<T>` implementation — the single source of truth that drives **both** the
+  entity's generated `DbSet<T>` and its `Configure(...)` application (emitted as a reflection-free
+  `modelBuilder.ApplyConfiguration<T>(...)` call). There is no separate entity marker, so a configured
+  entity is a discovered entity, and only a configuration carrying `[EntityConfiguration]` participates (a
+  bare `IEntityTypeConfiguration<T>` is ignored — the previous "schema-only configuration applied without a
+  DbSet" path is gone). A single `[EntityConfiguration]` class may implement `IEntityTypeConfiguration<T>`
+  more than once, contributing one `DbSet` and one `Configure(...)` call per entity. Scopes move from
+  `[DbEntity(scopes)]` to `[EntityConfiguration(scopes)]` with unchanged semantics. The generated
+  `IAppDbContext` **interface is removed**: the database is application logic accessed directly (no
+  repository *and* no context interface), so `[GenerateDbSets]` now goes on the **concrete partial
+  `DbContext`** — the generator emits the `DbSet<T>` properties and `ConfigureEntities` onto the context
+  itself — and handlers inject the concrete `DbContext`, not an interface. A new `ELEFC001` warning reports
+  an `[EntityConfiguration]` that implements no `IEntityTypeConfiguration<T>`. To upgrade: delete
+  `[DbEntity]` from entities and add `[EntityConfiguration]` to each entity's configuration class (writing
+  one where an entity had none); move `[GenerateDbSets]` from the `IAppDbContext` interface onto the
+  concrete `DbContext`, delete the interface, and change handler/service dependencies from `IAppDbContext`
+  to the concrete context. See [Entity Framework Core](docs/capabilities/entity-framework.mdx).
 - **Decorator generic-constraint filtering now honors self-referential constraints.** A decorator
   constrained `where TResponse : IResultFailureFactory<TResponse>` (the canonical no-reflection way to
   build a failure result, e.g. in a validation decorator) is now attached only to `Result`-returning
@@ -53,12 +72,23 @@ minor releases may include breaking changes.
   the runtime/marker package is now sufficient — no separate analyzer `PackageReference` and no
   `PrivateAssets="all"` wiring. Because NuGet analyzer assets are not transitive, each analyzer lives
   in exactly one package: application libraries and hosts that need the Elarion generator reference
-  `Elarion` directly, and any assembly declaring `[DbEntity]`/`[GenerateDbSets]` types references
+  `Elarion` directly, and any assembly declaring `[EntityConfiguration]`/`[GenerateDbSets]` types references
   `Elarion.EntityFrameworkCore` directly. This fixes the silent failure where a separate entity
   assembly referencing only the EF Core marker package emitted no manifest and produced zero `DbSet`s.
   To upgrade: remove the `Elarion.Generators` / `Elarion.EntityFrameworkCore.Generators`
   `PackageReference`s; add a direct `Elarion` reference to host projects that previously relied on the
   standalone generator package.
+- **`ELMOD002` is now a uniform location-based rule (breaking — analyzer).** The boundary analyzer
+  previously flagged only a fixed set of module-internal *kinds* (`[Service]`, handler,
+  `[EntityConfiguration]`) and never entities. It now flags **any** cross-module dependency (constructor
+  parameter, field, or property) on a type declared *inside* another `[AppModule]` — entity, DTO,
+  `[Service]`, handler, or `[EntityConfiguration]` alike — unless that type is a published `[ModuleContract]`.
+  Everything *outside* every module (the shared kernel and platform-capability ports) stays shareable, and
+  foundation (`Core`) modules get no exemption. A module can therefore *own* its data by placing entities in
+  its own namespace (the on-ramp to a bounded context), while shared infrastructure belongs on ports outside
+  the modules. To upgrade: route a flagged cross-module dependency through a `[ModuleContract]`, a
+  platform-capability port outside the modules (the port/adapter pattern), or the shared kernel — see
+  [Cross-module communication](docs/concepts/cross-module-communication.mdx).
 
 ### Fixed
 - **Generated TypeScript JSON-RPC client now type-checks under `erasableSyntaxOnly`.** The client emitted

@@ -1,4 +1,5 @@
 using Billing.Application.Domain;
+using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +12,7 @@ namespace Billing.Application.Modules.Invoicing.Events;
 /// command. Delivery is at-least-once, so keep it idempotent.</summary>
 [ConsumeEvent]
 public sealed class InvoiceNotifications(
-    IAppDbContext db,
+    BillingDbContext db,
     ILogger<InvoiceNotifications> logger
 ) : IHandler<InvoiceCreated> {
     public async ValueTask<Result> HandleAsync(InvoiceCreated e, CancellationToken ct) {

@@ -20,7 +20,7 @@ Add `[HttpEndpoint]` to a handler. The verb is **inferred from the request's CQR
 
 ```csharp
 [HttpEndpoint("clients/{id}")]                 // GET (inferred from IQuery)
-public sealed class GetClient(IAppDbContext db)
+public sealed class GetClient(BillingDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query : IQuery {
         public required Guid Id { get; init; }

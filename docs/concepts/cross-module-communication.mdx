@@ -10,9 +10,7 @@ modules depend on the contract, never on the module's internals.
 
 The framework owns the convention (`[ModuleContract]`) and an analyzer that enforces it. Mapping
 between a contract's DTOs and a module's handler DTOs is the **module's concern** — write it by hand
-or with any mapper. There is no generated forwarder for the contract and no mapper dependency. See
-[ADR-0002](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0002-cross-module-communication.md)
-for the rationale.
+or with any mapper. There is no generated forwarder for the contract and no mapper dependency.
 
 ## The contract
 
@@ -41,10 +39,57 @@ internal sealed class OrderPricer(ICustomerLookup customers) {
 }
 ```
 
-Injecting Module A's internal `[Service]`, a handler, or a `[DbEntity]` from Module B instead of a
-`[ModuleContract]` is reported by the boundary analyzer (`ELMOD002`, a warning). The analyzer inspects
-the dependency surface (constructor parameters, fields, properties); framework and shared-kernel types
-(anything under no `[AppModule]`) are never flagged.
+The boundary analyzer (`ELMOD002`, a warning) is purely **location-based**: everything under an
+`[AppModule]` is module-internal, and everything outside every module is shareable. So injecting another
+module's internal type — an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]` placed inside it —
+is flagged, while a `[ModuleContract]` is allowed. It inspects only the dependency surface (constructor
+parameters, fields, properties). Resolve a flag one of three ways:
+
+- **A `[ModuleContract]`** — for a genuine cross-module *domain* call (e.g. a foundation module publishing
+  an audit-recording capability whose records are queryable domain data). Use it sparingly and
+  deliberately; it is a published surface, not a default reach.
+- **A platform-capability port** — an intent-only abstraction (sending email, storing a blob) that lives
+  *outside* the modules with its adapter in infrastructure (the port/adapter pattern). Shared by location,
+  not by contract. (A write-only audit *sink* would belong here; a *queryable* audit history is domain, so
+  it is the contract above instead.)
+- **The shared kernel** — data and value types (entities, `Money`) live outside every module and are
+  freely referenceable. A shared-kernel entity is shareable because of *where it lives*, not because
+  entities are special: place an entity inside a module and it becomes module-owned and flagged.
+
+The recommended layout keeps each entity's `[EntityConfiguration]` in the shared `Persistence` layer (under
+no `[AppModule]`), so it is shareable too; an `[EntityConfiguration]` is flagged only when deliberately
+placed *inside* a module.
+
+Foundation (`Core`) modules are **no exception** — the analyzer reads only the module name, never its
+`Kind`, so a core module exports through a `[ModuleContract]` (or a platform port outside the modules) just
+like any other. Making "what a module exports to the outside world" explicit is the point, core included.
+
+## Mental model: module-private namespaces
+
+If you know Java or Kotlin, `ELMOD002` is essentially **package-private for C#**. A module owns a namespace
+the way a Java package owns its types, and the analyzer enforces the same visibility split:
+
+| Java / Kotlin | Elarion |
+| --- | --- |
+| a package | a module's namespace (`[AppModule]` + everything under it) |
+| `public` (or a JPMS `exports`) | a `[ModuleContract]` — the exported surface |
+| package-private (the default) | everything else in the module — *module-internal* |
+| the **compiler** enforces it | the **analyzer** (`ELMOD002`) enforces it |
+
+Elarion has to synthesize this because **C#'s `internal` is assembly-scoped, not namespace-scoped** — within
+one assembly the language has no "visible only inside this module." The analyzer fills that gap on top of
+namespaces.
+
+Two deliberate differences from Java's version: it checks only the **dependency surface** (constructor
+parameters, fields, properties) rather than every reference, and **data is a shared carve-out** — entities
+live outside modules on purpose (feature, not data, separation), so it is "module-private for *code*, shared
+kernel for *data*."
+
+It also has a hard upgrade: when a module graduates to its **own assembly** (a
+[bounded context](/docs/concepts/solution-structure#graduating-to-a-bounded-context)), real C# `internal`
+takes over and the boundary becomes **compiler**-enforced. So the progression is exactly *package-private
+(soft, co-located) → a real module boundary (hard, separate assembly)* — the analyzer is the in-assembly
+tier C# lacks, and the assembly split is the upgrade.
 
 ## Implementing a contract with the typed module API
 
@@ -81,7 +126,7 @@ whole module, so the forwarder never builds a handler's pipeline until you invok
 
 ## Choosing which handlers appear
 
-Membership is **opt-out** and uses the same scope vocabulary as `[DbEntity]`/`[GenerateDbSets]`:
+Membership is **opt-out** and uses the same scope vocabulary as `[EntityConfiguration]`/`[GenerateDbSets]`:
 
 - A default `[GenerateModuleApi]` facade includes **every handler** in the owning module.
 - `[ModuleApi(Exclude = true)]` on a handler removes it from every facade.
@@ -144,10 +189,8 @@ internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
   Either way the **interface stays stable across a later gRPC extraction** — only the implementation's
   mapping changes. A `Result<T>` contract maps elegantly to a protobuf `oneof` response (success *or*
   error, the on-the-wire `Result`); an exception contract maps to the
-  [Google Rich Error Model](https://grpc.io/docs/guides/error/) (`google.rpc.Status`). See
-  [ADR-0005](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0005-cross-module-error-channel.md)
-  for the `.proto` shapes and the `ErrorKind` → `google.rpc.Code` table. **Prefer `Result`; only drop it
-  when a concrete need calls for it.**
+  [Google Rich Error Model](https://grpc.io/docs/guides/error/) (`google.rpc.Status`), with `ErrorKind`
+  mapping onto `google.rpc.Code`. **Prefer `Result`; only drop it when a concrete need calls for it.**
 </Callout>
 
 ## Why not `IDomainEventBus.RequestAsync`?

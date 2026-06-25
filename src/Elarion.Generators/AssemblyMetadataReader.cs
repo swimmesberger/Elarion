@@ -8,7 +8,7 @@ namespace Elarion.Generators;
 /// Reads raw <c>[assembly: AssemblyMetadata(key, value)]</c> entries from a
 /// <see cref="MetadataReference"/> without symbol binding, suitable for use in
 /// <c>MetadataReferencesProvider</c> pipelines (cached per reference — a source edit re-reads nothing).
-/// Both <see cref="ElarionManifest"/> and <c>DbEntityManifest</c> delegate their reference reading here.
+/// Both <see cref="ElarionManifest"/> and <c>EntityConfigurationManifest</c> delegate their reference reading here.
 /// </summary>
 internal static class AssemblyMetadataReader
 {

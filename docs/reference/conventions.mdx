@@ -176,9 +176,11 @@ packages. A module must never call `builder.Build()`, `app.UseAuthentication()`,
 configure concrete providers — those belong to the host.
 
 <Callout type="info">
-  Cross-module references follow the same discipline: depend on another module's published
-  `[ModuleContract]`, never its internal `[Service]`, handler, or `[DbEntity]` types. The
-  `ModuleBoundaryAnalyzer` (`ELMOD002`) flags violations. See
+  Cross-module references are **location-based**: depend on another module's published `[ModuleContract]`
+  (used sparingly), a platform-capability **port** outside the modules, or the **shared kernel** — never a
+  type placed *inside* another module (an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]`). A
+  shared-kernel entity is shareable because it lives outside every module, not because entities are special.
+  The `ModuleBoundaryAnalyzer` (`ELMOD002`) flags violations. See
   [Cross-module communication](/docs/concepts/cross-module-communication).
 </Callout>
 
