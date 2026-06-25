@@ -4,8 +4,10 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Billing.Api.Hosting;
 using Billing.Application;
+using Billing.Application.Abstractions;
 using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
+using Billing.Infrastructure.Audit;
 using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Scheduling;
@@ -37,8 +39,10 @@ builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbConte
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
 builder.Services.AddElarionOutbox<BillingDbContext>();
 
-// Infrastructure capability: the concrete email sender behind the module's port.
+// Infrastructure capabilities: concrete adapters behind the application's intent-only ports. The audit
+// trail is a cross-cutting platform capability — a port outside every module — wired here like the email sender.
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
+builder.Services.AddScoped<IAuditTrail, AuditTrail>();
 
 // Scheduler runtime. Job descriptors and event consumers are composed per module by
 // AddElarion below — there is no explicit Add…ScheduledJobs call.

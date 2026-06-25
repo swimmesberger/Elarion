@@ -1,6 +1,6 @@
 using System.ComponentModel;
+using Billing.Application.Abstractions;
 using Billing.Application.Domain;
-using Billing.Application.Modules.Core.Services;
 using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
 using Billing.Application.Persistence;

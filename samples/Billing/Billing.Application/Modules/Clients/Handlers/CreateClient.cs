@@ -1,7 +1,7 @@
 using System.ComponentModel;
+using Billing.Application.Abstractions;
 using Billing.Application.Domain;
 using Billing.Application.Modules.Clients.Services;
-using Billing.Application.Modules.Core.Services;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
