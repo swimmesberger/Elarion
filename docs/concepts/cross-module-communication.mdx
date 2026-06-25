@@ -44,7 +44,7 @@ Module B instead of a `[ModuleContract]` is reported by the boundary analyzer (`
 analyzer inspects the dependency surface (constructor parameters, fields, properties); framework and
 shared-kernel types (anything under no `[AppModule]`) are never flagged. **Entities are shared data, not
 module-internal**: modules are feature separation, not data separation — every module reaches the whole
-database through `IAppDbContext` by design — so referencing a shared-kernel entity is never flagged. Its
+database through the shared `DbContext` by design — so referencing a shared-kernel entity is never flagged. Its
 `[EntityConfiguration]` is part of the shared data layer too and lives in the `Persistence` layer (under no
 `[AppModule]`); the analyzer flags an `[EntityConfiguration]` only in the discouraged case where one is
 placed *inside* a module.

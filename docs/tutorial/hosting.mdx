@@ -83,10 +83,9 @@ var builder = WebApplication.CreateSlimBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
 
 // Database: the context lives in the application's persistence layer (the database is application logic);
-// handlers see only IAppDbContext. Provider registration (UseNpgsql + connection) is the host's job.
+// handlers inject the concrete BillingDbContext. Provider registration (UseNpgsql + connection) is the host's job.
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
-builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.

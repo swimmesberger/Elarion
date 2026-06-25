@@ -28,7 +28,7 @@ may touch *any* entity, but it never depends on another feature except through a
 [`[ModuleContract]`](/docs/concepts/cross-module-communication). The dependency arrow points
 **feature → data layer**, never the reverse and never feature → feature. Touching many *entities* is
 using the data layer; depending on another *feature* is the thing to avoid.
-[Philosophy](/docs/concepts/philosophy) develops this model — including what "platform" means (the host)
+[Why Elarion](/docs/why-elarion) develops this model — including what "platform" means (the host)
 versus the data layer — and what it implies for where the database and configuration belong.
 
 ## Entities are shared kernel, not module-internal
@@ -37,7 +37,7 @@ versus the data layer — and what it implies for where the database and configu
 navigation properties, and handlers routinely query across aggregates — so a single module cannot own
 them, and a `[ModuleContract]` interface cannot model an EF relationship. Modules are *feature*
 separation, not *data* separation: every module reaches the whole database through the shared
-`IAppDbContext` by design (real data isolation would be a separate `DbContext`). The boundary analyzer
+concrete `DbContext` by design (real data isolation would be a separate `DbContext`). The boundary analyzer
 reflects this — it flags a module's internal *code* (`[Service]`, handler, `[EntityConfiguration]`) but
 **never an entity** — so a cross-aggregate reference is never flagged. (Reference other aggregates by id
 rather than by navigation property; see [the delete-the-module test](#the-delete-the-module-test) for why.)
@@ -74,7 +74,7 @@ src/
 
 The application depends on the database's *specifics* — constraints are invariants, indexes serve specific
 queries, raw SQL and provider functions encode rules — so the database is application logic, not an
-infrastructure detail ([Philosophy](/docs/concepts/philosophy)). The whole persistence concern therefore
+infrastructure detail ([Why Elarion](/docs/why-elarion)). The whole persistence concern therefore
 lives in **one `Persistence` layer in the application**: the `[EntityConfiguration]` classes, the concrete
 `DbContext`, and the migrations. The only genuinely host concern is provider *registration* —
 `UseNpgsql(...)` and the connection string.
@@ -152,7 +152,7 @@ assemblies) rather than the analyzer, which is the heavier guarantee real data s
 
 ## See also
 
-- [Philosophy](/docs/concepts/philosophy) — the principles behind this layout: features as plugins over the
+- [Why Elarion](/docs/why-elarion) — the principles behind this layout: features as plugins over the
   shared data layer, and the database as application logic.
 - [Project structure](/docs/getting-started/project-structure) — the mechanical layout and the
   conventions the generators rely on.

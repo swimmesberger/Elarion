@@ -87,7 +87,7 @@ pipeline attributes are most-specific-wins — see [decorator pipelines](/docs/c
 // Domain-event handler: shares the publisher's DbContext and transaction, so it must NOT
 // open a nested transaction. With an AppliesTo predicate it needs no pipeline annotation at all.
 [ConsumeEvent]
-public sealed class RecalculateTotals(IAppDbContext db) : IHandler<InvoiceLineAdded> {
+public sealed class RecalculateTotals(AppDbContext db) : IHandler<InvoiceLineAdded> {
     public async ValueTask<Result> HandleAsync(InvoiceLineAdded e, CancellationToken ct) {
         // Shares the publisher's DbContext; this write commits atomically with the command.
         await db.Invoices

@@ -34,7 +34,7 @@ capabilities.** See [Dependency rules](#dependency-rules) below for where each k
   The source generators ship **inside** their runtime packages, and NuGet analyzer assets are not
   transitive — so every assembly that declares generator-driven types must reference the package
   directly. For EF Core that is the **application** project: it holds the persistence layer (the
-  `[EntityConfiguration]` configurations, the `[GenerateDbSets]` interface, the concrete `DbContext`, and
+  `[EntityConfiguration]` configurations, the `[GenerateDbSets]` concrete `DbContext`, and
   migrations — the database is application logic, not an infrastructure detail), so its generator emits the
   `DbSet`s and `ConfigureEntities` in place. Reference **`Elarion.EntityFrameworkCore`** there. Entities
   themselves stay plain classes with no marker, so a pure domain/entity project needs no reference. (If you

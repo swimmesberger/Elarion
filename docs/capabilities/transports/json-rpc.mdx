@@ -41,7 +41,7 @@ const client = await rpc.clients.get({ id })
 ```csharp
 // Backend — the handler the call above resolves to
 [RpcMethod("clients.get")]
-public sealed class GetClient(IAppDbContext db)
+public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> { /* ... */ }
 ```
 

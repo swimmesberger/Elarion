@@ -22,7 +22,7 @@ using Microsoft.EntityFrameworkCore;
 
 [Cacheable("clients", DurationSeconds = 120)]
 [RpcMethod("clients.get")]
-public sealed class GetClient(IAppDbContext db)
+public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
     public sealed record Response(Guid Id, string Name);
@@ -81,7 +81,7 @@ so the writer does not need to know the concrete keys produced by read handlers:
 ```csharp
 [CacheInvalidate("clients")]
 [RpcMethod("clients.update")]
-public sealed class UpdateClient(IAppDbContext db)
+public sealed class UpdateClient(AppDbContext db)
     : IHandler<UpdateClient.Command, Result<UpdateClient.Response>> {
     public sealed record Command(Guid Id, string Name);
     public sealed record Response(Guid Id);

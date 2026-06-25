@@ -68,15 +68,20 @@ which modules are exposed.
 
 → [Modules](/docs/concepts/modules) · [Project structure](/docs/getting-started/project-structure)
 
-## The context interface is the data abstraction
+## The database is application logic, not an abstraction
 
-Handlers query through a generated `IAppDbContext` interface and its `DbSet`s — there is no
-per-entity repository layer.
+Handlers work **directly** against the concrete `DbContext` — its `DbSet`s, LINQ, raw SQL, and
+provider-specific functions. There is no repository layer, and no context interface in front of it.
 
-**Why:** the generated interface already provides full LINQ, projections, and EF Core change tracking,
-while keeping handlers decoupled from the concrete context (they depend on `IAppDbContext`, never the
-concrete `DbContext`). A hand-written `IClientRepository` per table usually adds indirection without
-value. This is the reason the EF Core package exists.
+**Why:** the rule for *what to hide behind an abstraction* is whether you depend on a dependency's
+**intent** or its **specifics**. Email is intent-only — you say "send this", and SMTP vs SES is
+interchangeable — so it belongs behind a port (`IEmailSender`). The database is the opposite: a unique
+constraint *is* a business rule, an index exists for a specific query, and the SQL you write is
+provider-specific. You depend on its **specifics**, so wrapping it (a repository, or an `IAppDbContext`
+interface) only hides the model you are actually programming against — and forces a leaky escape hatch
+the moment you need raw SQL. So the database *is* your data access: handlers use the concrete `DbContext`.
+The framework wires the *connection* (`UseNpgsql` and the connection string are the host's job); what
+lives in the database is application logic and yours.
 
 → [Entity Framework Core](/docs/capabilities/entity-framework) · [Handlers → Accessing data](/docs/concepts/handlers#accessing-data)
 
@@ -138,7 +143,7 @@ principles above, viewed against idiomatic ASP.NET Core.
 | Discovery | Runtime reflection scanning for validators, handlers, controllers, endpoint modules. | Compile-time source generation for deterministic startup, AOT friendliness, and inspectable code. |
 | Host responsibilities | The host often knows every feature and registers most feature services. | The host owns platform capabilities, middleware, auth, telemetry, database setup, and transports; modules own composition. |
 | Serialization metadata | Global JSON options plus reflection fallback. | Modules contribute `JsonSerializerContext` resolvers following the module boundary. |
-| EF Core model wiring | Hand-written `DbSet<T>` and `ApplyConfigurationsFromAssembly(…)`. | Optional generator with interface-first `[GenerateDbSets]`, explicit `[EntityConfiguration]` (single source of truth for DbSet + schema), optional scopes, and direct `ApplyConfiguration<T>` calls. |
+| EF Core model wiring | Hand-written `DbSet<T>` and `ApplyConfigurationsFromAssembly(…)`. | Optional generator: `[GenerateDbSets]` on the concrete `DbContext`, explicit `[EntityConfiguration]` (single source of truth for DbSet + schema), optional scopes, and direct `ApplyConfiguration<T>` calls. Handlers use the concrete context — no interface. |
 | Background work | Individual `BackgroundService` loops own their timers, overlap, logging, and cancellation. | Source-generated scheduled jobs share one scheduler with typed invocation, explicit overlap, `TimeProvider`, and telemetry. |
 | Error model | Exceptions, `ProblemDetails`, action results, or ad-hoc DTOs. | Handlers return `Result<T>` with transport-agnostic `AppError`; the host maps errors per transport. |
 | Transport | HTTP REST is the default API. | HTTP, JSON-RPC, and MCP are parallel first-class optional transports over the same handlers; JSON-RPC and MCP live outside the core package. |

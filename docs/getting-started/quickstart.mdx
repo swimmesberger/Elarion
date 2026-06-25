@@ -59,9 +59,9 @@ hook is reserved for additional, non-generated wiring (options binding, third-pa
 
 ### Define the data model
 
-Handlers access data through a generated `IAppDbContext` interface — there is no repository layer.
-Write an `IEntityTypeConfiguration<T>` for the entity and mark it with `[EntityConfiguration]`, declare
-the context interface with `[GenerateDbSets]`, and let the
+Handlers access data through the concrete `AppDbContext` directly — there is no repository layer and no
+context interface. Write an `IEntityTypeConfiguration<T>` for the entity and mark it with
+`[EntityConfiguration]`, annotate the concrete partial `AppDbContext` with `[GenerateDbSets]`, and let the
 [EF Core generator](/docs/capabilities/entity-framework) emit the `DbSet`s. The entity itself is a plain
 class — `[EntityConfiguration]` on its configuration is the single source of truth that drives both the
 generated `DbSet<Client>` and the `Configure(...)` application.
@@ -90,28 +90,15 @@ public sealed class ClientConfiguration : IEntityTypeConfiguration<Client> {
 }
 ```
 
-```csharp title="MyApp.Application/Data/IAppDbContext.cs"
+```csharp title="MyApp.Application/Data/AppDbContext.cs"
 using Microsoft.EntityFrameworkCore;
 using Elarion.EntityFrameworkCore;
 
 namespace MyApp.Application;
 
 [GenerateDbSets]
-public partial interface IAppDbContext {
-    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
-    DbContext AsDbContext();
-}
-```
-
-```csharp title="MyApp.Application/Data/AppDbContext.cs"
-using Microsoft.EntityFrameworkCore;
-
-namespace MyApp.Application;
-
 public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
-    : DbContext(options), IAppDbContext {
-    public DbContext AsDbContext() => this;
-
+    : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         base.OnModelCreating(modelBuilder);
         ConfigureEntities(modelBuilder);   // generated
@@ -132,7 +119,7 @@ logic, not an infrastructure detail); the quickstart keeps everything in one pro
 ### Write a handler
 
 Handlers are the unit of work. This one is exposed over JSON-RPC with `[RpcMethod]`, injects
-`IAppDbContext`, and returns a `Result<T>`.
+`AppDbContext`, and returns a `Result<T>`.
 
 ```csharp title="MyApp.Application/Modules/Clients/Handlers/GetClient.cs"
 using Elarion.Abstractions;
@@ -142,7 +129,7 @@ using MyApp.Application;
 namespace MyApp.Application.Modules.Clients.Handlers;
 
 [RpcMethod("clients.get")]
-public sealed class GetClient(IAppDbContext db)
+public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
     public sealed record Response(Guid Id, string Name);
@@ -211,7 +198,7 @@ public static partial class ModuleBootstrapper;
 
 The host composes modules, configures serialization, and publishes the JSON-RPC endpoint. The host
 owns infrastructure (here, the database provider); modules own application logic. The concrete
-`AppDbContext` is registered once and exposed to handlers through `IAppDbContext`.
+`AppDbContext` is registered once and injected into handlers directly.
 
 ```csharp title="MyApp.Api/Program.cs"
 using Microsoft.EntityFrameworkCore;
@@ -222,7 +209,6 @@ using MyApp.Application.Data;
 var builder = WebApplication.CreateSlimBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase("quickstart"));
-builder.Services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
 builder.Services.AddElarion(builder.Configuration);
 

@@ -242,12 +242,12 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
 
 ### `[GenerateDbSets]`
 
-- **Package:** `Elarion.EntityFrameworkCore` · **Applies to:** interface
-- **Triggers:** applied to a partial DbContext interface; generates a `DbSet<T>` property for each `[EntityConfiguration]` entity, the matching `DbSet<T>` properties on implementing DbContext classes, and `ConfigureEntities(ModelBuilder)` on implementing DbContext classes (reflection-free, AOT-friendly direct `ApplyConfiguration<T>` calls). Class-side generation is inferred from the implementing partial `DbContext`; never place `[GenerateDbSets]` on the class.
+- **Package:** `Elarion.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** applied to a partial DbContext class; generates a `DbSet<T>` property for each `[EntityConfiguration]` entity and `ConfigureEntities(ModelBuilder)` directly onto that class (reflection-free, AOT-friendly direct `ApplyConfiguration<T>` calls).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `scopes` | `params string[]` (ctor) → `Scopes` (`IReadOnlyList<string>`) | empty | Optional context scopes generated for this interface. Omit scopes to include every `[EntityConfiguration]`; a scoped interface includes only configurations whose scopes intersect. |
+| `scopes` | `params string[]` (ctor) → `Scopes` (`IReadOnlyList<string>`) | empty | Optional context scopes generated for this class. Omit scopes to include every `[EntityConfiguration]`; a scoped class includes only configurations whose scopes intersect. |
 
 ### `[Keyset<TEntity>]`
 
@@ -266,7 +266,7 @@ See [Entity Framework](/docs/capabilities/entity-framework) and [Pagination](/do
 ### `[ModuleContract]`
 
 - **Package:** `Elarion.Abstractions` (Modules) · **Applies to:** interface | class
-- **Triggers:** marks a module's published cross-module surface — the stable type other modules may depend on. The owning module keeps the implementation `internal`; other modules inject the contract. `ModuleBoundaryAnalyzer` (`ELMOD002`) reports cross-module references to a module's internal **code** — a `[Service]`, a handler, or an `[EntityConfiguration]` — but allows references to a `[ModuleContract]` type. Shared-kernel **entities** are never flagged (they are shared data, reached by every module through `IAppDbContext` by design). Marker only — no parameters.
+- **Triggers:** marks a module's published cross-module surface — the stable type other modules may depend on. The owning module keeps the implementation `internal`; other modules inject the contract. `ModuleBoundaryAnalyzer` (`ELMOD002`) reports cross-module references to a module's internal **code** — a `[Service]`, a handler, or an `[EntityConfiguration]` — but allows references to a `[ModuleContract]` type. Shared-kernel **entities** are never flagged (they are shared data, reached by every module through the `DbContext` by design). Marker only — no parameters.
 
 ### `[ModuleApi]`
 

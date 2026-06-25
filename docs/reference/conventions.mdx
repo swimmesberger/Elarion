@@ -179,7 +179,7 @@ configure concrete providers — those belong to the host.
   Cross-module references follow the same discipline: depend on another module's published
   `[ModuleContract]`, never its internal **code** — a `[Service]`, a handler, or an `[EntityConfiguration]`.
   Shared-kernel **entities** are exempt: they are shared data (every module reaches the whole database
-  through `IAppDbContext` by design), so referencing one is never flagged. The
+  through the shared `DbContext` by design), so referencing one is never flagged. The
   `ModuleBoundaryAnalyzer` (`ELMOD002`) flags violations. See
   [Cross-module communication](/docs/concepts/cross-module-communication).
 </Callout>

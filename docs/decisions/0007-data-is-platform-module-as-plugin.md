@@ -27,13 +27,15 @@ There are two coupling surfaces, and they are *not* the same boundary:
 - **Code** — handlers, services, the schema-mapping classes. Module-private; cross-module use goes
   through a published `[ModuleContract]` (ADR-0002), enforced by `ELMOD002`.
 - **Data** — the entities and the one relational model they form. Reached by every module through the
-  shared `IAppDbContext` **by design**.
+  shared `DbContext` **by design**.
 
-This rests on a deliberate upstream choice: Elarion does **not** use repositories. The `DbContext` *is*
-the unit-of-work/repository, and handlers work directly against `IAppDbContext` — `DbSet<T>`, LINQ, raw
-SQL, and provider-specific functions — with no wrapping abstraction. So the persistence model, including
-its physical characteristics (indexes, columns, provider features), is *intentionally* an Application-facing
-capability, not a hidden Infrastructure secret. That premise is what determines where configuration belongs.
+This rests on a deliberate upstream choice: Elarion does **not** use repositories — and **not even a
+context interface**. The concrete `DbContext` *is* the unit-of-work/repository, and handlers work directly
+against it — `DbSet<T>`, LINQ, raw SQL, and provider-specific functions — with no wrapping abstraction (an
+`IAppDbContext`-style interface would only re-introduce one, and would need a leaky `AsDbContext()` escape
+hatch the moment a handler needs raw SQL). So the persistence model, including its physical characteristics
+(indexes, columns, provider features), is *intentionally* an Application-facing capability, not a hidden
+Infrastructure secret. That premise is what determines where configuration belongs.
 
 The general rule behind this — the line between **application logic** and **infrastructure** — is *not*
 data-vs-code; it is whether the application depends on a dependency's **specifics** or only on its
@@ -87,7 +89,7 @@ that modules build on.** Conflating them (treating the data layer as host/infras
 ## Decision
 
 1. **Modules are *feature* separation, not *data* separation.** In a single-assembly system, assume
-   data is shared. Every module may query the whole database through `IAppDbContext`; that is
+   data is shared. Every module may query the whole database through the shared `DbContext`; that is
    deliberate. Real data isolation is a separate `DbContext` / bounded context — see ADR-0008.
 
 2. **A feature/module is a *plugin* over the application's data layer.** A feature builds on the shared
@@ -175,17 +177,14 @@ that modules build on.** Conflating them (treating the data layer as host/infras
   steward removes that `DbSet` and breaks them. Co-location is only correct for genuinely
   *module-private* data — which is the bounded-context case (ADR-0008), not a feature.
 
-- **Configuration (and the `DbContext`) in `Infrastructure` (split membership from mapping).** This is the
-  orthodox Clean-Architecture placement — persistence mapping as an outer detail — *and it would be the
-  sounder choice if `Application` were persistence-ignorant behind repositories.* It is not: Elarion
-  exposes `DbSet<T>`, LINQ, raw SQL, and provider functions to handlers by design (the
-  `DbContext`-as-repository stance), so the data layer is already application logic — handlers reason about
-  indexes, columns, and provider features directly. Moving it to `Infrastructure` would treat application
-  logic as a host concern, scatter one cohesive vertical-slice concern across the central boundary for
-  **no** isolation gain, and force splitting *membership* (which must stay inner — it feeds the generated
-  `IAppDbContext`, and an inner port cannot derive its surface from an outer artifact without inverting the
-  dependency) from *mapping*, losing the single source of truth. Rejected on those grounds, not because of
-  any generator limitation. (It becomes the sounder layout only under a repository / persistence-ignorant
+- **Configuration (and the `DbContext`) in `Infrastructure`.** This is the orthodox Clean-Architecture
+  placement — persistence as an outer detail — *and it would be the sounder choice if `Application` were
+  persistence-ignorant behind repositories.* It is not: Elarion exposes `DbSet<T>`, LINQ, raw SQL, and
+  provider functions to handlers by design (the `DbContext`-as-repository stance, with no context
+  interface), so the data layer is already application logic — handlers reason about indexes, columns, and
+  provider features directly. Moving it to `Infrastructure` would treat application logic as a host concern
+  and scatter one cohesive vertical-slice concern across the central boundary for **no** isolation gain.
+  Rejected on those grounds. (It becomes the sounder layout only under a repository / persistence-ignorant
   `Application` — which Elarion rejects. The host still owns the *connection*; that is the only piece that
   is genuinely infrastructure.)
 

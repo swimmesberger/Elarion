@@ -40,7 +40,7 @@ Every Elarion capability shows up exactly where it pulls its weight in a real bi
 | --- | --- | --- |
 | Feature boundaries (`Clients`, `Invoicing`) and a shared foundation | [Modules](/docs/concepts/modules) (feature + core) | [Model the domain](/docs/tutorial/modeling) |
 | Reads and writes as named use cases | [Handlers](/docs/concepts/handlers) + [Results](/docs/concepts/results-and-errors) | [Write the features](/docs/tutorial/features) |
-| Data access without a repository layer | [EF Core `IAppDbContext`](/docs/capabilities/entity-framework) | [Model the domain](/docs/tutorial/modeling) |
+| Data access without a repository layer | [EF Core `BillingDbContext`](/docs/capabilities/entity-framework) | [Model the domain](/docs/tutorial/modeling) |
 | Rejecting bad input | [Validators](/docs/concepts/validators) | [Write the features](/docs/tutorial/features) |
 | Transactions + logging around every command | [Decorator pipelines](/docs/concepts/decorator-pipelines) | [Write the features](/docs/tutorial/features) |
 | "Who is calling?" for scoping and audit | [Current user](/docs/capabilities/current-user) | [Write the features](/docs/tutorial/features) |
@@ -135,8 +135,8 @@ the EF Core generator in `Elarion.EntityFrameworkCore` — so there are no separ
 install or mark `PrivateAssets="all"`. Because NuGet analyzer assets are not transitive, each project
 that needs a generator references its package directly.
 
-The **application** project holds your modules, entities, and the `[GenerateDbSets]` context
-abstraction. It uses EF Core for data access and FluentValidation for input rules:
+The **application** project holds your modules, entities, and the `[GenerateDbSets]` concrete
+`BillingDbContext`. It uses EF Core for data access and FluentValidation for input rules:
 
 ```bash
 cd src/Billing.Application
@@ -238,6 +238,6 @@ The skeleton is in place. Next, model the domain and define the modules that own
 
 <Cards>
   <Card title="Next: Model the domain" href="/docs/tutorial/modeling">
-    Entities, the generated `IAppDbContext`, and the Core / Clients / Invoicing modules.
+    Entities, the `[GenerateDbSets]` concrete `BillingDbContext`, and the Core / Clients / Invoicing modules.
   </Card>
 </Cards>

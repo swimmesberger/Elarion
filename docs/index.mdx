@@ -16,7 +16,7 @@ startup.
 
 ```csharp
 [RpcMethod("clients.get")]
-public sealed class GetClient(IAppDbContext db)
+public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
     public sealed record Response(Guid Id, string Name);
