@@ -64,6 +64,33 @@ Foundation (`Core`) modules are **no exception** — the analyzer reads only the
 `Kind`, so a core module exports through a `[ModuleContract]` (or a platform port outside the modules) just
 like any other. Making "what a module exports to the outside world" explicit is the point, core included.
 
+## Mental model: module-private namespaces
+
+If you know Java or Kotlin, `ELMOD002` is essentially **package-private for C#**. A module owns a namespace
+the way a Java package owns its types, and the analyzer enforces the same visibility split:
+
+| Java / Kotlin | Elarion |
+| --- | --- |
+| a package | a module's namespace (`[AppModule]` + everything under it) |
+| `public` (or a JPMS `exports`) | a `[ModuleContract]` — the exported surface |
+| package-private (the default) | everything else in the module — *module-internal* |
+| the **compiler** enforces it | the **analyzer** (`ELMOD002`) enforces it |
+
+Elarion has to synthesize this because **C#'s `internal` is assembly-scoped, not namespace-scoped** — within
+one assembly the language has no "visible only inside this module." The analyzer fills that gap on top of
+namespaces.
+
+Two deliberate differences from Java's version: it checks only the **dependency surface** (constructor
+parameters, fields, properties) rather than every reference, and **data is a shared carve-out** — entities
+live outside modules on purpose (feature, not data, separation), so it is "module-private for *code*, shared
+kernel for *data*."
+
+It also has a hard upgrade: when a module graduates to its **own assembly** (a
+[bounded context](/docs/concepts/solution-structure#graduating-to-a-bounded-context)), real C# `internal`
+takes over and the boundary becomes **compiler**-enforced. So the progression is exactly *package-private
+(soft, co-located) → a real module boundary (hard, separate assembly)* — the analyzer is the in-assembly
+tier C# lacks, and the assembly split is the upgrade.
+
 ## Implementing a contract with the typed module API
 
 A `[ModuleContract]` implementation is a small, hand-written adapter: it forwards to the module's
