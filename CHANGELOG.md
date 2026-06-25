@@ -78,6 +78,17 @@ minor releases may include breaking changes.
   To upgrade: remove the `Elarion.Generators` / `Elarion.EntityFrameworkCore.Generators`
   `PackageReference`s; add a direct `Elarion` reference to host projects that previously relied on the
   standalone generator package.
+- **`ELMOD002` is now a uniform location-based rule (breaking — analyzer).** The boundary analyzer
+  previously flagged only a fixed set of module-internal *kinds* (`[Service]`, handler,
+  `[EntityConfiguration]`) and never entities. It now flags **any** cross-module dependency (constructor
+  parameter, field, or property) on a type declared *inside* another `[AppModule]` — entity, DTO,
+  `[Service]`, handler, or `[EntityConfiguration]` alike — unless that type is a published `[ModuleContract]`.
+  Everything *outside* every module (the shared kernel and platform-capability ports) stays shareable, and
+  foundation (`Core`) modules get no exemption. A module can therefore *own* its data by placing entities in
+  its own namespace (the on-ramp to a bounded context), while shared infrastructure belongs on ports outside
+  the modules. To upgrade: route a flagged cross-module dependency through a `[ModuleContract]`, a
+  platform-capability port outside the modules (the port/adapter pattern), or the shared kernel — see
+  [Cross-module communication](docs/concepts/cross-module-communication.mdx).
 
 ### Fixed
 - **Generated TypeScript JSON-RPC client now type-checks under `erasableSyntaxOnly`.** The client emitted

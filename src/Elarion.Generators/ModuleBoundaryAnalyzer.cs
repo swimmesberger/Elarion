@@ -5,48 +5,48 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Reports when a type in one <c>[AppModule]</c> depends on another module's <em>internal code</em>
-/// (a <c>[Service]</c>, a handler, or an <c>[EntityConfiguration]</c>) instead of a published
-/// <c>[ModuleContract]</c>.
+/// Reports when a type in one <c>[AppModule]</c> depends on a type owned by <em>another</em> module that
+/// is not a published <c>[ModuleContract]</c>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The rule keeps modules honest: cross-module collaboration must go through an intentional, published
-/// surface, not a module's internals. It inspects the <em>dependency surface</em> of each type
-/// (constructor parameters, fields, properties) — the place foreign internals leak in via DI — rather
-/// than every reference, to stay precise and low-noise. Framework and shared-kernel types are exempt
-/// automatically: a type whose namespace is under no <c>[AppModule]</c> has no owning module and is
-/// never flagged.
+/// The rule is purely <em>location</em>-based: everything under an <c>[AppModule]</c> namespace is
+/// module-internal and not shareable across modules; everything <em>outside</em> every module is
+/// shareable. So a cross-module dependency is allowed only when the referenced type either lives under no
+/// module (the shared kernel — entities and value objects — and platform-capability ports such as
+/// <c>IEmailSender</c>) or is marked <c>[ModuleContract]</c> (a module's deliberately published,
+/// used-sparingly cross-module surface). Everything else owned by another module — entities, DTOs,
+/// <c>[Service]</c>s, handlers, <c>[EntityConfiguration]</c>s — is internal and flagged.
 /// </para>
 /// <para>
-/// Modules are <em>feature</em> separation, not <em>data</em> separation: every module reaches the whole
-/// database through the shared <c>DbContext</c> by design. Entities are therefore shared data — they
-/// live in the shared kernel, reference each other across aggregate boundaries, and are <strong>never</strong>
-/// flagged, even though their <c>[EntityConfiguration]</c> (module-owned <em>code</em>) is. Real data
-/// isolation is a separate <c>DbContext</c>, not this analyzer.
+/// It inspects the <em>dependency surface</em> of each type (constructor parameters, fields, properties) —
+/// the place foreign internals leak in via DI — rather than every reference, to stay precise and low-noise.
+/// A shared-kernel entity is shareable because it lives <em>outside</em> a module, not because entities are
+/// special: a module that deliberately owns its data by placing entities in its own namespace makes those
+/// entities module-internal, which is how a mini bounded context earns data ownership (see ADR-0008).
 /// </para>
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
 {
     private const string AppModuleAttributeMetadataName = "Elarion.Abstractions.Modules.AppModuleAttribute";
-    private const string ServiceAttributeMetadataName = "Elarion.Abstractions.ServiceAttribute";
     private const string ModuleContractAttributeMetadataName = "Elarion.Abstractions.Modules.ModuleContractAttribute";
-    private const string EntityConfigurationAttributeMetadataName = "Elarion.EntityFrameworkCore.EntityConfigurationAttribute";
-    private const string HandlerInterfaceMetadataName = "Elarion.Abstractions.IHandler`2";
 
     private static readonly DiagnosticDescriptor CrossModuleInternalReference = new(
         "ELMOD002",
         "Cross-module reference to a module-internal type",
-        "Type '{0}' is internal to module '{1}'; reference it from module '{2}' through a [ModuleContract] interface instead of depending on the module's internals",
+        "Type '{0}' belongs to module '{1}'; module '{2}' must not depend on another module's internals — reach it through a [ModuleContract], or move the shared type out of the module",
         "Elarion.Modules",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description:
-        "A module should collaborate with another module through a published [ModuleContract], not by " +
-        "injecting or depending on the other module's internal code — a [Service], a handler, or an " +
-        "[EntityConfiguration]. Shared-kernel entities are deliberately not flagged: every module reaches " +
-        "the whole database through the shared DbContext by design.");
+        "Everything under an [AppModule] is module-internal and not shareable across modules except a " +
+        "published [ModuleContract]; everything outside every module is shareable. Resolve a cross-module " +
+        "dependency by (a) using a [ModuleContract] for a genuine, sparingly-used cross-module domain call, " +
+        "(b) depending on a platform-capability port that lives outside the modules (the port/adapter " +
+        "pattern, like IEmailSender), or (c) moving shared data and value types to the shared kernel " +
+        "(under no module). The analyzer inspects only the dependency surface — constructor parameters, " +
+        "fields, and properties.");
 
     private static readonly ImmutableArray<DiagnosticDescriptor> SupportedDiagnosticsArray =
         ImmutableArray.Create(CrossModuleInternalReference);
@@ -69,16 +69,9 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
             if (modules.Count < 2)
                 return; // A single module (or none) has no cross-module boundary to enforce.
 
-            var serviceAttr = start.Compilation.GetTypeByMetadataName(ServiceAttributeMetadataName);
             var contractAttr = start.Compilation.GetTypeByMetadataName(ModuleContractAttributeMetadataName);
-            var entityConfigAttr = start.Compilation.GetTypeByMetadataName(EntityConfigurationAttributeMetadataName);
-            var handlerInterface = start.Compilation.GetTypeByMetadataName(HandlerInterfaceMetadataName);
 
-            // The [EntityConfiguration] class is module-internal code; the entity it configures is shared data
-            // (it lives in the shared kernel and every module reaches it through the shared DbContext by design), so
-            // only the configuration class is flagged — never the entity.
-            var state = new BoundaryState(
-                modules, serviceAttr, contractAttr, entityConfigAttr, handlerInterface);
+            var state = new BoundaryState(modules, contractAttr);
             start.RegisterSymbolAction(symbolContext => AnalyzeType(symbolContext, state), SymbolKind.NamedType);
         });
     }
@@ -131,9 +124,8 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
             if (HasAttribute(named, state.ContractAttribute))
                 continue; // A published contract is the allowed cross-module surface.
 
-            if (!IsModuleInternal(named, state))
-                continue; // Plain DTOs and shared types are not gated.
-
+            // Everything else owned by another module — entities, DTOs, [Service]s, handlers,
+            // [EntityConfiguration]s — is module-internal. Shared types must live outside every module.
             var location = locations.FirstOrDefault() ?? Location.None;
             context.ReportDiagnostic(Diagnostic.Create(
                 CrossModuleInternalReference,
@@ -156,24 +148,6 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
                     yield return nested;
             }
         }
-    }
-
-    private static bool IsModuleInternal(INamedTypeSymbol type, BoundaryState state)
-    {
-        if (HasAttribute(type, state.ServiceAttribute) ||
-            HasAttribute(type, state.EntityConfigurationAttribute))
-            return true;
-
-        if (state.HandlerInterface is null)
-            return false;
-
-        foreach (var iface in type.AllInterfaces)
-        {
-            if (SymbolEqualityComparer.Default.Equals(iface.OriginalDefinition, state.HandlerInterface))
-                return true;
-        }
-
-        return false;
     }
 
     private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol? attribute)
@@ -253,8 +227,5 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
 
     private sealed record BoundaryState(
         IReadOnlyList<ModuleInfo> Modules,
-        INamedTypeSymbol? ServiceAttribute,
-        INamedTypeSymbol? ContractAttribute,
-        INamedTypeSymbol? EntityConfigurationAttribute,
-        INamedTypeSymbol? HandlerInterface);
+        INamedTypeSymbol? ContractAttribute);
 }
