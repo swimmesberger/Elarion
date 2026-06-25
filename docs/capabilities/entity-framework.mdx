@@ -24,9 +24,12 @@ project that owns the concrete `DbContext`.
 
 Reference the `Elarion.EntityFrameworkCore` package — it bundles the EF Core source generator — in
 **every** project that declares `[EntityConfiguration]` configurations or a `[GenerateDbSets]` context
-abstraction. If your configurations live in a separate domain project, that project needs this
-reference too, so its generator emits the per-assembly configuration manifest the context project
-reads:
+abstraction. Configurations are a persistence concern, so they live with your modules in the
+application layer (beside the handlers), **not** in the domain — entities themselves stay plain
+classes. Because the manifest is emitted per assembly, the project that declares the configurations
+and the project that holds the concrete `DbContext` (commonly separate assemblies) each need this
+reference: the former so its generator emits the per-assembly configuration manifest, the latter so
+the generator reads that manifest to fill its context with `DbSet`s:
 
 ```xml
 <ItemGroup>

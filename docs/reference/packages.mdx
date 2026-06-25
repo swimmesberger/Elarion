@@ -48,6 +48,6 @@ The package split enforces clean dependencies:
 | Project | References |
 | --- | --- |
 | Application library | `Elarion` (bundles the generator); optionally `Elarion.Blobs`, `Elarion.EntityFrameworkCore` (bundles the EF Core generator). |
-| Domain / entity library (if separate) | `Elarion.EntityFrameworkCore` — required wherever `[EntityConfiguration]`/`[GenerateDbSets]` types are declared, since its generator emits the per-assembly configuration manifest. |
+| Domain / entity library (if separate) | None — entities are plain classes with no marker. `[EntityConfiguration]` configurations live with the modules in the application library; the project holding the concrete `DbContext` references `Elarion.EntityFrameworkCore` so its generator reads the per-assembly configuration manifest and fills the context. |
 | ASP.NET Core host | `Elarion` (for the generator), `Elarion.JsonRpc`, `Elarion.AspNetCore`; optionally `Elarion.Blobs.PostgreSql`, `Elarion.AspNetCore.SchemaGeneration` (build tooling), and `Elarion.AspNetCore.Mcp` (MCP server). |
 | Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`. |
