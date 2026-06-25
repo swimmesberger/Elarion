@@ -156,6 +156,14 @@ inspectable and AOT-friendly. The trade-off is explicit participation: each enti
 `[EntityConfiguration]`, and scoped contexts require matching scopes.
 
 <Callout type="info">
+  In-assembly configurations are discovered through the syntax provider, so `dotnet build` and the CLI
+  always reflect the current source. If a **newly added** same-assembly `[EntityConfiguration]` does not
+  produce its `DbSet` in Rider/ReSharper until you restart, that is the IDE's source-generator host
+  refreshing lazily, not the generator — build the project or **Invalidate Caches / Restart** to refresh
+  it. See [Troubleshooting](/docs/reference/troubleshooting).
+</Callout>
+
+<Callout type="info">
   Blob entities are **not** part of `[EntityConfiguration]` / `[GenerateDbSets]`. A provider such as
   `Elarion.Blobs.PostgreSql` configures its tables directly in your `OnModelCreating` (via
   `UsePostgreSqlBlobStorage()`), so they join your context's model without opting into entity

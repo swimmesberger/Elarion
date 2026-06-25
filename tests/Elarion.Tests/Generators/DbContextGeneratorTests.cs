@@ -305,8 +305,9 @@ public sealed class DbContextGeneratorTests
 
         // Assembly A defines the Elarion markers + a [EntityConfiguration] for Invoice, configuring against
         // the real EF Core types (so it does not re-export a stub Microsoft.EntityFrameworkCore.DbContext that
-        // would collide with the real one when B resolves its DbContext base type). Running the generator
-        // emits A's configuration manifest; A is then emitted to an image and referenced by B.
+        // would collide with the real one when B resolves its DbContext base type). Running the generators
+        // emits A's configuration manifest (the dedicated EntityConfigurationManifestGenerator owns that
+        // emission now); A is then emitted to an image and referenced by B.
         const string sourceA =
             """
             namespace Elarion.EntityFrameworkCore {
@@ -340,7 +341,8 @@ public sealed class DbContextGeneratorTests
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        GeneratorDriver driverA = CSharpGeneratorDriver.Create(new DbContextGenerator())
+        GeneratorDriver driverA = CSharpGeneratorDriver
+            .Create(new DbContextGenerator(), new EntityConfigurationManifestGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driverA = driverA.RunGeneratorsAndUpdateCompilation(compilationA, out var outputA, out _, ct);
 
@@ -373,6 +375,120 @@ public sealed class DbContextGeneratorTests
         generated.Should().Contain("DbSet<Invoice> Invoices");
         generated.Should().Contain("new global::Sample.Domain.InvoiceConfiguration()");
         generated.Should().Contain("modelBuilder.ApplyConfiguration<global::Sample.Domain.Invoice>(");
+    }
+
+    [Fact]
+    public void GenerateDbSets_NewSameAssemblyConfigurationAdded_RegeneratesDbSets()
+    {
+        // Reproduces the IDE scenario the user hit: a new [EntityConfiguration] is added in the same
+        // assembly as the [GenerateDbSets] context (a new file), with no rebuild. The pure-Roslyn pipeline
+        // must surface the new DbSet on the next incremental run — bounding any remaining "needs a restart"
+        // behavior to the IDE source-generator host rather than this generator.
+        var ct = TestContext.Current.CancellationToken;
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var initialSource =
+            CreateSource(
+                """
+                namespace Sample.Domain {
+                    public sealed class Company {
+                    }
+                }
+
+                namespace Sample.Infrastructure {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets]
+                    public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class CompanyConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.Company> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.Company> builder) {
+                        }
+                    }
+                }
+                """);
+
+        var compilation = CSharpCompilation.Create(
+            "DbContextGeneratorTests",
+            [CSharpSyntaxTree.ParseText(initialSource, parseOptions, cancellationToken: ct)],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new DbContextGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions,
+            additionalTexts: null,
+            optionsProvider: null,
+            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
+
+        driver = driver.RunGenerators(compilation, ct);
+
+        // Add a brand-new same-assembly [EntityConfiguration] as a separate syntax tree.
+        var addedTree = CSharpSyntaxTree.ParseText(
+            """
+            namespace Sample.Domain {
+                public sealed class Invoice {
+                }
+            }
+
+            namespace Sample.Infrastructure {
+                [Elarion.EntityFrameworkCore.EntityConfiguration]
+                public sealed class InvoiceConfiguration
+                    : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.Invoice> {
+                    public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.Invoice> builder) {
+                    }
+                }
+            }
+            """,
+            parseOptions,
+            cancellationToken: ct);
+
+        driver = driver.RunGenerators(compilation.AddSyntaxTrees(addedTree), ct);
+        var result = driver.GetRunResult();
+
+        var dbContextSource = result.Results
+            .SelectMany(runResult => runResult.GeneratedSources)
+            .Single(source => string.Equals(source.HintName, "AppDbContext.DbSets.g.cs", StringComparison.Ordinal))
+            .SourceText
+            .ToString();
+        dbContextSource.Should().Contain("DbSet<Company> Companies");
+        dbContextSource.Should().Contain("DbSet<Invoice> Invoices");
+
+        // The regeneration was driven purely by the syntax path: the reference set did not change, so the
+        // MetadataReferencesProvider-backed step stays cached. This isolates same-assembly discovery from the
+        // cross-assembly manifest read.
+        result.Results.Single().TrackedSteps["ReferencedConfigs"]
+            .SelectMany(step => step.Outputs)
+            .Select(output => output.Reason)
+            .Should()
+            .OnlyContain(reason =>
+                reason == IncrementalStepRunReason.Unchanged || reason == IncrementalStepRunReason.Cached);
+    }
+
+    [Fact]
+    public void EntityConfigurationManifest_IrrelevantEdit_ReusesCollectedData()
+    {
+        var source = CreateSource(
+            """
+            namespace Sample.Domain {
+                public sealed class Company {
+                }
+            }
+
+            namespace Sample.Infrastructure {
+                [Elarion.EntityFrameworkCore.EntityConfiguration]
+                public sealed class CompanyConfiguration
+                    : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.Company> {
+                    public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.Company> builder) {
+                    }
+                }
+            }
+            """);
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new EntityConfigurationManifestGenerator(),
+            source,
+            "ManifestConfigs");
     }
 
     private static string CreateSource(string testSource) =>
