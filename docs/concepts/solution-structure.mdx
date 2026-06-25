@@ -15,20 +15,24 @@ from another module only through a [`[ModuleContract]`](/docs/concepts/cross-mod
 interface. Declaring `DependsOn` does **not** grant access to another module's internals; it only
 orders initialization.
 
-Concretely, a `[Service]`, a handler, an `[EntityConfiguration]`, or a configured entity (the entity
-behind an `[EntityConfiguration]`, since entities carry no marker) declared *inside* module A cannot be
-referenced from module B. Types declared under **no** `[AppModule]` (the shared kernel) are never
-flagged, so every module may depend on them freely.
+Concretely, a module's internal **code** — a `[Service]`, a handler, or an `[EntityConfiguration]` —
+declared *inside* module A cannot be referenced from module B. Types declared under **no** `[AppModule]`
+(the shared kernel) are never flagged, so every module may depend on them freely. **Entities are
+deliberately part of that shared kernel** — they are shared data, not module-internal code.
 
-That single rule decides where entities go.
+That distinction — code is module-internal, data is shared — decides where entities go.
 
 ## Entities are shared kernel, not module-internal
 
 **Do not put entities inside a module.** Domain entities cross-reference each other through foreign-key
-navigation properties, and handlers routinely query across aggregates — so entities cannot be
-module-internal, and a `[ModuleContract]` interface cannot model an EF relationship. If `Invoice` lived
-in a `Billing` module and `Client` in a `Clients` module, an `Invoice.Client` navigation property would
-trip `ELMOD002`.
+navigation properties, and handlers routinely query across aggregates — so a single module cannot own
+them, and a `[ModuleContract]` interface cannot model an EF relationship. Modules are *feature*
+separation, not *data* separation: every module reaches the whole database through the shared
+`IAppDbContext` by design (real data isolation would be a separate `DbContext`). The boundary analyzer
+reflects this — it flags a module's internal *code* (`[Service]`, handler, `[EntityConfiguration]`) but
+**never an entity** — so an `Invoice.Client` navigation across aggregates is always fine. Keeping entities
+in one shared-kernel namespace is therefore a design convention that gives shared data an obvious home,
+not an analyzer workaround.
 
 Keep entities and their enums in a **shared-kernel namespace under no `[AppModule]`** — for example
 `MyApp.Application.Domain` — that every module may depend on and that depends on no module.

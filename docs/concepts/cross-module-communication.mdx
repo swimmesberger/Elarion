@@ -41,11 +41,13 @@ internal sealed class OrderPricer(ICustomerLookup customers) {
 }
 ```
 
-Injecting Module A's internal `[Service]`, a handler, an `[EntityConfiguration]`, or a configured entity
-(the entity behind an `[EntityConfiguration]`, since entities carry no marker) from Module B instead of a
-`[ModuleContract]` is reported by the boundary analyzer (`ELMOD002`, a warning). The analyzer inspects
-the dependency surface (constructor parameters, fields, properties); framework and shared-kernel types
-(anything under no `[AppModule]`) are never flagged.
+Injecting Module A's internal **code** — a `[Service]`, a handler, or an `[EntityConfiguration]` — from
+Module B instead of a `[ModuleContract]` is reported by the boundary analyzer (`ELMOD002`, a warning). The
+analyzer inspects the dependency surface (constructor parameters, fields, properties); framework and
+shared-kernel types (anything under no `[AppModule]`) are never flagged. **Entities are shared data, not
+module-internal**: modules are feature separation, not data separation — every module reaches the whole
+database through `IAppDbContext` by design — so referencing a shared-kernel entity is never flagged, even
+when another module owns its `[EntityConfiguration]`.
 
 ## Implementing a contract with the typed module API
 

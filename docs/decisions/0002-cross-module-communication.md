@@ -61,13 +61,15 @@ surface." It documents intent and is the anchor the boundary analyzer keys off.
 ### 2. The boundary analyzer — `ELMOD002` (owned)
 
 A `DiagnosticAnalyzer` (the repo's first) that reports when a type in one module depends on
-another module's **internal** type — a `[Service]`, a handler, an `[EntityConfiguration]`, or a
-configured entity (the entity behind an `[EntityConfiguration]`, since entities carry no marker) —
+another module's **internal code** — a `[Service]`, a handler, or an `[EntityConfiguration]` —
 rather than a `[ModuleContract]`. To stay precise and low-noise it inspects each type's **dependency
 surface** (constructor parameters, fields, properties) — where foreign internals leak in via
 DI — not every reference. Framework and shared-kernel types are exempt automatically: a type
-whose namespace is under no `[AppModule]` has no owning module and is never flagged. Severity is
-`Warning` (configurable by the host).
+whose namespace is under no `[AppModule]` has no owning module and is never flagged. **Entities are
+deliberately not flagged**: modules are feature separation, not data separation — every module reaches
+the whole database through the shared `IAppDbContext` by design (real data isolation would be a separate
+`DbContext`), so a shared-kernel entity is shared data, not module-internal code, even though its
+module-owned `[EntityConfiguration]` is. Severity is `Warning` (configurable by the host).
 
 ### 3. The typed in-process API — `[GenerateModuleApi]` (optional ergonomic layer)
 

@@ -266,7 +266,7 @@ See [Entity Framework](/docs/capabilities/entity-framework) and [Pagination](/do
 ### `[ModuleContract]`
 
 - **Package:** `Elarion.Abstractions` (Modules) · **Applies to:** interface | class
-- **Triggers:** marks a module's published cross-module surface — the stable type other modules may depend on. The owning module keeps the implementation `internal`; other modules inject the contract. `ModuleBoundaryAnalyzer` (`ELMOD002`) reports cross-module references to module-internal types — a `[Service]`, a handler, an `[EntityConfiguration]`, or a configured entity (the entity behind an `[EntityConfiguration]`, since entities carry no marker) — but allows references to a `[ModuleContract]` type. Marker only — no parameters.
+- **Triggers:** marks a module's published cross-module surface — the stable type other modules may depend on. The owning module keeps the implementation `internal`; other modules inject the contract. `ModuleBoundaryAnalyzer` (`ELMOD002`) reports cross-module references to a module's internal **code** — a `[Service]`, a handler, or an `[EntityConfiguration]` — but allows references to a `[ModuleContract]` type. Shared-kernel **entities** are never flagged (they are shared data, reached by every module through `IAppDbContext` by design). Marker only — no parameters.
 
 ### `[ModuleApi]`
 

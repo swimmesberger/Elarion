@@ -5,9 +5,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Reports when a type in one <c>[AppModule]</c> depends on another module's <em>internal</em> type
-/// (a <c>[Service]</c>, a handler, an <c>[EntityConfiguration]</c>, or a configured entity — the entity
-/// behind an <c>[EntityConfiguration]</c>, since entities carry no marker) instead of a published
+/// Reports when a type in one <c>[AppModule]</c> depends on another module's <em>internal code</em>
+/// (a <c>[Service]</c>, a handler, or an <c>[EntityConfiguration]</c>) instead of a published
 /// <c>[ModuleContract]</c>.
 /// </summary>
 /// <remarks>
@@ -19,6 +18,13 @@ namespace Elarion.Generators;
 /// automatically: a type whose namespace is under no <c>[AppModule]</c> has no owning module and is
 /// never flagged.
 /// </para>
+/// <para>
+/// Modules are <em>feature</em> separation, not <em>data</em> separation: every module reaches the whole
+/// database through the shared <c>IAppDbContext</c> by design. Entities are therefore shared data — they
+/// live in the shared kernel, reference each other across aggregate boundaries, and are <strong>never</strong>
+/// flagged, even though their <c>[EntityConfiguration]</c> (module-owned <em>code</em>) is. Real data
+/// isolation is a separate <c>DbContext</c>, not this analyzer.
+/// </para>
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
@@ -27,7 +33,6 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
     private const string ServiceAttributeMetadataName = "Elarion.Abstractions.ServiceAttribute";
     private const string ModuleContractAttributeMetadataName = "Elarion.Abstractions.Modules.ModuleContractAttribute";
     private const string EntityConfigurationAttributeMetadataName = "Elarion.EntityFrameworkCore.EntityConfigurationAttribute";
-    private const string EntityTypeConfigurationMetadataName = "Microsoft.EntityFrameworkCore.IEntityTypeConfiguration`1";
     private const string HandlerInterfaceMetadataName = "Elarion.Abstractions.IHandler`2";
 
     private static readonly DiagnosticDescriptor CrossModuleInternalReference = new(
@@ -39,8 +44,9 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         isEnabledByDefault: true,
         description:
         "A module should collaborate with another module through a published [ModuleContract], not by " +
-        "injecting or depending on the other module's internal [Service], handler, [EntityConfiguration], " +
-        "or configured entity types.");
+        "injecting or depending on the other module's internal code — a [Service], a handler, or an " +
+        "[EntityConfiguration]. Shared-kernel entities are deliberately not flagged: every module reaches " +
+        "the whole database through IAppDbContext by design.");
 
     private static readonly ImmutableArray<DiagnosticDescriptor> SupportedDiagnosticsArray =
         ImmutableArray.Create(CrossModuleInternalReference);
@@ -66,18 +72,13 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
             var serviceAttr = start.Compilation.GetTypeByMetadataName(ServiceAttributeMetadataName);
             var contractAttr = start.Compilation.GetTypeByMetadataName(ModuleContractAttributeMetadataName);
             var entityConfigAttr = start.Compilation.GetTypeByMetadataName(EntityConfigurationAttributeMetadataName);
-            var configInterface = start.Compilation.GetTypeByMetadataName(EntityTypeConfigurationMetadataName);
             var handlerInterface = start.Compilation.GetTypeByMetadataName(HandlerInterfaceMetadataName);
 
-            // Entities carry no marker attribute anymore — a configured entity is the entity type behind an
-            // [EntityConfiguration] class. Collect them once so a cross-module reference to one is still
-            // flagged. Same-compilation collection is sufficient: a module in a separate assembly is not in
-            // this compilation's module set and is never matched anyway.
-            var configuredEntities = CollectConfiguredEntities(
-                start.Compilation, entityConfigAttr, configInterface, start.CancellationToken);
-
+            // The [EntityConfiguration] class is module-internal code; the entity it configures is shared data
+            // (it lives in the shared kernel and every module reaches it through IAppDbContext by design), so
+            // only the configuration class is flagged — never the entity.
             var state = new BoundaryState(
-                modules, serviceAttr, contractAttr, entityConfigAttr, configuredEntities, handlerInterface);
+                modules, serviceAttr, contractAttr, entityConfigAttr, handlerInterface);
             start.RegisterSymbolAction(symbolContext => AnalyzeType(symbolContext, state), SymbolKind.NamedType);
         });
     }
@@ -160,8 +161,7 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
     private static bool IsModuleInternal(INamedTypeSymbol type, BoundaryState state)
     {
         if (HasAttribute(type, state.ServiceAttribute) ||
-            HasAttribute(type, state.EntityConfigurationAttribute) ||
-            state.ConfiguredEntities.Contains(type))
+            HasAttribute(type, state.EntityConfigurationAttribute))
             return true;
 
         if (state.HandlerInterface is null)
@@ -195,60 +195,6 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         var modules = new List<ModuleInfo>();
         Walk(compilation.Assembly.GlobalNamespace, appModule, modules, ct);
         return modules;
-    }
-
-    private static HashSet<INamedTypeSymbol> CollectConfiguredEntities(
-        Compilation compilation,
-        INamedTypeSymbol? entityConfigAttr,
-        INamedTypeSymbol? configInterface,
-        CancellationToken ct)
-    {
-        var entities = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-        if (entityConfigAttr is null || configInterface is null)
-            return entities;
-
-        WalkConfigs(compilation.Assembly.GlobalNamespace, entityConfigAttr, configInterface, entities, ct);
-        return entities;
-    }
-
-    private static void WalkConfigs(
-        INamespaceSymbol namespaceSymbol,
-        INamedTypeSymbol entityConfigAttr,
-        INamedTypeSymbol configInterface,
-        HashSet<INamedTypeSymbol> entities,
-        CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-
-        foreach (var type in namespaceSymbol.GetTypeMembers())
-            InspectConfig(type, entityConfigAttr, configInterface, entities, ct);
-
-        foreach (var nested in namespaceSymbol.GetNamespaceMembers())
-            WalkConfigs(nested, entityConfigAttr, configInterface, entities, ct);
-    }
-
-    private static void InspectConfig(
-        INamedTypeSymbol type,
-        INamedTypeSymbol entityConfigAttr,
-        INamedTypeSymbol configInterface,
-        HashSet<INamedTypeSymbol> entities,
-        CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-
-        if (HasAttribute(type, entityConfigAttr))
-        {
-            foreach (var iface in type.AllInterfaces)
-            {
-                if (SymbolEqualityComparer.Default.Equals(iface.OriginalDefinition, configInterface) &&
-                    iface.TypeArguments.Length == 1 &&
-                    iface.TypeArguments[0] is INamedTypeSymbol entity)
-                    entities.Add(entity);
-            }
-        }
-
-        foreach (var nested in type.GetTypeMembers())
-            InspectConfig(nested, entityConfigAttr, configInterface, entities, ct);
     }
 
     private static void Walk(INamespaceSymbol namespaceSymbol, INamedTypeSymbol appModule, List<ModuleInfo> modules, CancellationToken ct)
@@ -310,6 +256,5 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         INamedTypeSymbol? ServiceAttribute,
         INamedTypeSymbol? ContractAttribute,
         INamedTypeSymbol? EntityConfigurationAttribute,
-        HashSet<INamedTypeSymbol> ConfiguredEntities,
         INamedTypeSymbol? HandlerInterface);
 }

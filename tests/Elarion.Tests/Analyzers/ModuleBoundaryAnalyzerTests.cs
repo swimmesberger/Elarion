@@ -99,10 +99,12 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task InjectingForeignConfiguredEntity_IsReported()
+    public async Task ReferencingForeignConfiguredEntity_IsNotGated()
     {
-        // Entities carry no marker — a configured entity is the entity behind an [EntityConfiguration].
-        // Referencing another module's configured entity must still trip ELMOD002.
+        // Entities are shared data, not module-internal: every module reaches the whole database through
+        // IAppDbContext by design. Configuring an entity in one module does NOT make the entity private to
+        // that module, so referencing it from another module must not trip ELMOD002 (only the configuration
+        // *class* is module-internal — see InjectingForeignEntityConfiguration_IsReported).
         const string source =
             """
             namespace Elarion.EntityFrameworkCore {
@@ -139,7 +141,7 @@ public sealed class ModuleBoundaryAnalyzerTests
 
         var diagnostics = await AnalyzeAsync(source);
 
-        diagnostics.Should().ContainSingle(d => d.Id == "ELMOD002");
+        diagnostics.Should().NotContain(d => d.Id == "ELMOD002");
     }
 
     [Fact]

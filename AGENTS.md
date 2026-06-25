@@ -286,11 +286,12 @@ the analyzer; mapping between a contract's DTOs and a module's handler DTOs is t
   The owning module keeps the implementation `internal` and registers it (commonly a thin `[Service]`
   adapter that maps to, and forwards to, the module's handlers); other modules inject the contract.
 - **`ModuleBoundaryAnalyzer` (`ELMOD002`, warning)** reports when a type in one module depends on
-  another module's **internal** type — a `[Service]`, a handler, an `[EntityConfiguration]`, or a
-  configured entity (the entity behind an `[EntityConfiguration]`, since entities carry no marker) —
-  instead of a `[ModuleContract]`. It inspects only the dependency surface (constructor parameters,
-  fields, properties) to stay precise; types under no `[AppModule]` (framework/shared kernel) are never
-  flagged.
+  another module's **internal code** — a `[Service]`, a handler, or an `[EntityConfiguration]` — instead
+  of a `[ModuleContract]`. It inspects only the dependency surface (constructor parameters, fields,
+  properties) to stay precise; types under no `[AppModule]` (framework/shared kernel) are never flagged.
+  Modules are *feature* separation, not *data* separation: every module reaches the whole database through
+  the shared `IAppDbContext` by design, so **entities are shared data and are never flagged** even though
+  their module-owned `[EntityConfiguration]` is (real data isolation is a separate `DbContext`).
   This is the repo's first `DiagnosticAnalyzer`; new analyzer diagnostics must be tracked in
   `AnalyzerReleases.Unshipped.md` (RS2008).
 - **`[GenerateModuleApi]` (optional ergonomic layer)** generates a typed in-process API over a module's
