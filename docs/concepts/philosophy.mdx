@@ -1,6 +1,6 @@
 ---
 title: Philosophy
-description: The opinionated principles behind Elarion — features as plugins over a platform, the database as application logic, and shared data with feature (not data) boundaries.
+description: The opinionated principles behind Elarion — features as plugins over a shared data layer, the database as application logic (not platform), and shared data with feature (not data) boundaries.
 icon: Compass
 ---
 
@@ -8,20 +8,29 @@ Elarion is opinionated. A handful of principles explain most of its design choic
 repository layer, why entity configuration lives where it does, and where the line between *your
 application* and *infrastructure* falls.
 
-## Features are plugins over a platform
+## Features are plugins over the data layer
 
-Think of an application as a **platform** with **features** built on it. The platform is the shared
-substrate — your entities, their schema, and the framework's services. A feature (a module) is a
-**plugin**: it asks "what can I build with what the platform offers?" and composes that capability into
-behavior.
+A feature (a module) is a **plugin**. It builds on two things: the application's shared **data layer**
+(your entities and their schema — application logic you own) and the **platform capabilities** the host
+provides through service ports (the database connection, transports, email, …). It asks "what can I build
+with what these offer?" and composes them into behavior.
 
-The rule that keeps this honest is the **dependency arrow**:
+<Callout type="info">
+  **A word on "platform."** In Elarion, *platform* (or *platform capabilities*) means what the **host**
+  provides at runtime — the database connection, transports, and the concrete implementations behind
+  service ports like `IEmailSender`. The platform is agnostic to your domain. The **data layer** is *not*
+  platform: it is application logic you own (see [below](#the-database-is-part-of-the-application)). A
+  feature *consumes* the data layer; from the host's point of view that data layer is an application
+  concern, not something the host provides.
+</Callout>
 
-- **feature → platform** — freely. A feature may use *any* entity and any platform service.
+The rule that keeps the feature boundary honest is the **dependency arrow**:
+
+- **feature → data layer** — freely. A feature may use *any* entity.
 - **feature → feature** — only through a published [`[ModuleContract]`](/docs/concepts/cross-module-communication).
-- **platform → feature** — **never**. The platform must not know its plugins exist.
+- **data layer → feature** — **never**. The shared data layer must not know its plugins exist.
 
-Touching many *entities* is just *using the platform*; depending on another *feature* is the thing to
+Touching many *entities* is just *using the data layer*; depending on another *feature* is the thing to
 avoid — that is what contracts are for, and what the module-boundary analyzer enforces. The practical
 test: you should be able to delete a feature's folder and have every other feature still compile,
 untouched.

@@ -27,5 +27,5 @@ designs that are not yet implemented.
 - [ADR-0004: Handler result caching](0004-handler-result-caching.md)
 - [ADR-0005: Cross-module error channel (`Result` vs exceptions) and gRPC mapping](0005-cross-module-error-channel.md)
 - [ADR-0006: Incremental source generator conventions](0006-incremental-source-generator-conventions.md)
-- [ADR-0007: Data is platform — modules as plugins, and where entity configuration lives](0007-data-is-platform-module-as-plugin.md)
+- [ADR-0007: The data layer is application logic — modules as plugins over it](0007-data-is-platform-module-as-plugin.md)
 - [ADR-0008: Bounded contexts and the graduation path](0008-bounded-contexts-and-the-graduation-path.md)

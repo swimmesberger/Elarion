@@ -74,8 +74,8 @@ billing/
 ```
 
 Entities live in a shared-kernel **namespace** (`Billing.Application.Domain`), not a separate project,
-and their `[EntityConfiguration]` schema lives in a shared `Persistence` layer (configuration is platform,
-not feature-owned) — see [Solution structure](/docs/concepts/solution-structure) for why.
+and their `[EntityConfiguration]` schema lives in a shared `Persistence` layer (configuration is part of the
+shared data layer, not feature-owned) — see [Solution structure](/docs/concepts/solution-structure) for why.
 
 <Callout type="info">
   The dependency direction is `Api → Infrastructure → Application`. The application project never

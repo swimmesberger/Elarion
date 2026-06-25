@@ -27,8 +27,8 @@ for when each would graduate to its own assembly.
 
 - **Recommended structure** — shared-kernel entities reachable by every module without tripping
   ELMOD002, with their `[EntityConfiguration]` schema in a shared `Persistence` layer (configuration is
-  platform, not feature-owned — the config drives the entity's `DbSet` and schema, and there is no
-  separate entity marker).
+  part of the shared data layer, not feature-owned — the config drives the entity's `DbSet` and schema,
+  and there is no separate entity marker).
 - **Vertical-slice modules** — `Core` (always-on, `ICurrentUser` audit trail), `Clients`, and `Invoicing`,
   each auto-registered and feature-gated; no hand-written `Add{Module}…()` calls.
 - **The full cross-cutting machinery** — a one-line decorator pipeline (logging → validation →

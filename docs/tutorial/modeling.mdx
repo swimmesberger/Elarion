@@ -90,11 +90,11 @@ interface.
 
 ### Add entity configuration
 
-Configuration is *platform*, not feature-owned, and the generator discovers it wherever it lives. The
-`[EntityConfiguration]` attribute on each `IEntityTypeConfiguration<T>` is the single source of truth for
+Configuration is part of the shared **data layer**, not feature-owned, and the generator discovers it
+wherever it lives. The `[EntityConfiguration]` attribute on each `IEntityTypeConfiguration<T>` is the single source of truth for
 an entity's participation — it drives both the generated `DbSet<T>` and the `Configure(...)` application,
 so a configured entity is a discovered entity (a plain `IEntityTypeConfiguration<T>` with no attribute is
-ignored). Because configuration is platform, it lives in a shared `Persistence` layer — a sibling of
+ignored). Because configuration is part of the shared data layer, it lives in a `Persistence` layer — a sibling of
 `Modules`, under no `[AppModule]` — not inside a feature module; see
 [solution structure](/docs/concepts/solution-structure). It references only the shared-kernel entity, so
 it never crosses a module boundary (ELMOD002 only inspects constructor/field/property surface, never the

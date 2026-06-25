@@ -1,4 +1,4 @@
-# ADR-0007: Data is platform — modules as plugins, and where entity configuration lives
+# ADR-0007: The data layer is application logic — modules as plugins over it
 
 - Status: Accepted
 - Date: 2026-06-25
@@ -35,14 +35,6 @@ SQL, and provider-specific functions — with no wrapping abstraction. So the pe
 its physical characteristics (indexes, columns, provider features), is *intentionally* an Application-facing
 capability, not a hidden Infrastructure secret. That premise is what determines where configuration belongs.
 
-More broadly, Elarion treats the database — PostgreSQL — as **part of the application**, not a swappable
-detail. The coupling is intentional: raw SQL, provider functions, and one fewer abstraction are worth more
-than provider-portability, and switching engines is rare and far more involved than swapping `UseNpgsql`
-anyway. It follows that persistence is tested against a **real PostgreSQL (Testcontainers)**, never an
-in-memory or SQLite provider — provider-specific SQL must run on the real engine — which also removes the
-usual "abstract the database for testability" argument. The database is application *logic*, so the
-framework couples to it on purpose.
-
 The general rule behind this — the line between **application logic** and **infrastructure** — is *not*
 data-vs-code; it is whether the application depends on a dependency's **specifics** or only on its
 **intent**:
@@ -57,15 +49,40 @@ data-vs-code; it is whether the application depends on a dependency's **specific
   rules. The app reasons about these particulars directly and cannot swap the engine without rewriting
   logic. The relational model is therefore application logic, not a hidden detail.
 
-This is the latent rule the rest of the framework already follows, and the same technology splits by
-*relationship*: Postgres-as-a-blob-store is a port (`IBlobStore` — you only ever say "store/return
-bytes"), while Postgres-as-the-domain-model is logic (you write business queries against it). It follows
-that the persistence layer — entity configuration, the `DbContext`, and migrations — is **application
-logic and lives in the application**, while `Infrastructure` is the home for intent-only mechanism
-adapters (the SMTP `IEmailSender`, an external API client, etc.).
+The same technology splits by *relationship*: Postgres-as-a-blob-store is a port (`IBlobStore` — you only
+ever say "store/return bytes"), while Postgres-as-the-domain-model is logic (you write business queries
+against it).
 
-Conflating the two (treating an entity, or its configuration, as "owned" by the feature that happens
-to use it) is what produced the original confusion. This ADR records the model we settled on.
+### "Platform" is the host; the data layer is the application
+
+The word **"platform"** is already taken, and an earlier "data is platform" framing wrongly borrowed it.
+Across Elarion, **platform** (or *platform capabilities*) means what the **host / infrastructure** provides
+at runtime — and nothing else:
+
+- **The host / platform.** Provides capabilities *at runtime*: the DI container, the transports
+  (HTTP/JSON-RPC/MCP), the *connection* to a database (which PostgreSQL instance, the connection string,
+  `UseNpgsql`), and the *implementations* of intent-only ports (SMTP for `IEmailSender`, …). The platform
+  is **agnostic to the domain**: the application assumes a stable PostgreSQL connection, but the host
+  neither knows nor cares which database it is or what tables live in it.
+
+The **data layer** is a *different thing, and it is not platform.* It is what *lives in* the database —
+entities, configuration, the `DbContext`, migrations — plus the PostgreSQL-specific queries written
+against them. This is **application logic**: the application owns its schema and its dialect. The host
+supplies the *connection*; the application supplies the *content*.
+
+The two get confused because the data layer is **viewpoint-relative**: from a **feature module's** vantage
+it is the shared substrate it is *given* to build on; from the **host's** vantage it is an *application
+concern*, not part of the runtime it provides. So the data layer is application logic that a feature builds
+on — which is why "data is platform" was wrong (it lent the host's word to an application concern). "The
+database is part of the application" therefore means its **content and dialect** (application logic,
+coupled to PostgreSQL on purpose), **not** the **connection to a specific instance** (host platform).
+Hence persistence is tested against a **real PostgreSQL (Testcontainers)**, never an in-memory or SQLite
+provider — provider-specific SQL must run on the real engine — which also removes the usual "abstract the
+database for testability" argument.
+
+So throughout this ADR: **platform = host capabilities; the *data layer* = the application's shared data
+that modules build on.** Conflating them (treating the data layer as host/infrastructure, or an entity as
+"owned" by the feature that happens to use it) is what produced the original confusion.
 
 ## Decision
 
@@ -73,28 +90,28 @@ to use it) is what produced the original confusion. This ADR records the model w
    data is shared. Every module may query the whole database through `IAppDbContext`; that is
    deliberate. Real data isolation is a separate `DbContext` / bounded context — see ADR-0008.
 
-2. **Mental model: a feature/module is a *plugin* over a *platform data model*.** The platform is the
-   shared substrate — `Domain` (entities) + `Persistence` (configuration) + the framework. A feature
-   asks "what can I build with what the platform offers?" and composes platform capability (including
-   touching as many entities as it needs) into behavior. The governing rule is the **dependency
-   arrow**:
+2. **A feature/module is a *plugin* over the application's data layer.** A feature builds on the shared
+   **data layer** — `Domain` (entities) + `Persistence` (configuration + the `DbContext`), which is
+   application logic — and consumes **host platform capabilities** through service ports. It asks "what can
+   I build with what this offers?" and composes it (touching as many entities as it needs) into behavior.
+   The governing rule is the **dependency arrow**:
 
    ```
-   feature ──▶ platform        (freely — use any entity)
-   feature ──▶ feature         (only via a [ModuleContract])
-   platform ──▶ feature        (NEVER)
+   feature ──▶ shared data layer    (freely — use any entity)
+   feature ──▶ feature              (only via a [ModuleContract])
+   shared data layer ──▶ feature    (NEVER — the data layer must not know its plugins)
    ```
 
-   Touching many *entities* is using the platform; depending on another *feature* is the thing to
-   avoid. A "configured entity is a discovered entity," but no feature *owns* an entity — the entity
-   serves the platform, available to all features.
+   Touching many *entities* is using the data layer; depending on another *feature* is the thing to
+   avoid. A "configured entity is a discovered entity," but no feature *owns* an entity — entities are
+   shared data the whole application draws on.
 
-3. **Entity configuration is platform, not feature-owned.** `[EntityConfiguration]` classes live in a
-   shared **`Persistence`** layer (a sibling of `Domain`), **not** inside a feature module. The
-   decisive reason is the arrow: putting a config in a feature folder *inverts* it — a piece of the
-   platform data model would live inside a plugin, so removing the plugin would break the platform.
-   (Secondary: under one `DbContext` the configs are one coupled model — shared conventions,
-   cross-entity relationships, an index budget — so "which feature owns this config" is malformed.)
+3. **Entity configuration belongs to the application's data layer, not a feature.** `[EntityConfiguration]`
+   classes live in a shared **`Persistence`** layer (a sibling of `Domain`), **not** inside a feature
+   module. The decisive reason is the arrow: putting a config in a feature folder *inverts* it — a piece
+   of the shared data layer would live inside a plugin, so removing the plugin would break the data layer.
+   (Secondary: under one `DbContext` the configs are one coupled model — shared conventions, cross-entity
+   relationships, an index budget — so "which feature owns this config" is malformed.)
 
 4. **Directory structure mirrors *enforced* boundaries — don't signal a boundary you don't enforce.**
    One folder per `DbContext`:
@@ -119,33 +136,32 @@ to use it) is what produced the original confusion. This ADR records the model w
 ## Consequences
 
 - **The delete-the-module test holds for behavior.** Deleting a *pure-behavior* feature folder
-  (handlers/jobs/endpoints over existing platform data) leaves every other feature compiling and the
+  (handlers/jobs/endpoints over the existing data layer) leaves every other feature compiling and the
   data model untouched — the plugin promise. `[EntityConfiguration]` is discovered structurally
   (never referenced by name), so removing a config never breaks another module's *code*.
 
-- **Data has a platform footprint, on purpose.** A feature that introduces *new* data (an entity,
-  index, or column) extends the platform; that data lives in `Persistence` and does **not** vanish
-  when the feature folder is deleted — its removal is a deliberate platform/migration step, because
-  data is durable and shared. Putting such config in `Persistence` (not the feature folder) makes the
-  footprint explicit and prevents an accidental, silent `DbSet`/table drop. *How* a plugin should own
-  new typed data while keeping the "rip it out cleanly" property is an open question, deferred to
-  ADR-0008.
+- **New data has a footprint on the data layer, on purpose.** A feature that introduces *new* data (an
+  entity, index, or column) extends the shared data layer; that data lives in `Persistence` and does
+  **not** vanish when the feature folder is deleted — its removal is a deliberate schema/migration step,
+  because data is durable and shared. Putting such config in `Persistence` (not the feature folder) makes
+  the footprint explicit and prevents an accidental, silent `DbSet`/table drop. *How* a plugin should own
+  new typed data while keeping the "rip it out cleanly" property is an open question, deferred to ADR-0008.
 
-- **The persistence layer is application logic — it is not `Infrastructure`.** Because the app depends on
-  the database's specifics (constraints, indexes, queries), the whole persistence concern —
+- **The data layer is application logic — it is not `Infrastructure`.** Because the app depends on the
+  database's specifics (constraints, indexes, queries), the whole persistence concern —
   `[EntityConfiguration]`, the concrete `DbContext`, and migrations — lives in the application as one
-  `Persistence` layer. The only genuinely outer (host/composition) piece is provider *registration*: the
-  connection string and `UseNpgsql(...)`. `Infrastructure` is reserved for intent-only mechanism adapters
-  (the SMTP `IEmailSender`, external API clients). This keeps a schema change a single-layer edit — config
-  and migration together — and, since config and `DbContext` share an assembly, removes the need for the
-  cross-assembly configuration manifest.
+  `Persistence` layer. The host provides only the **connection**: provider registration
+  (`UseNpgsql(...)` + the connection string). `Infrastructure` is reserved for intent-only mechanism
+  adapters (the SMTP `IEmailSender`, external API clients). This keeps a schema change a single-layer edit
+  — config and migration together — and, since config and `DbContext` share an assembly, removes the need
+  for the cross-assembly configuration manifest.
 
 - **Placement is a convention, not enforced.** The generator discovers `[EntityConfiguration]`
   anywhere, so points 3–5 are conventions this ADR establishes; the enforced parts are the generator
-  behavior and `ELMOD002`. Implementation status: `samples/Billing` already keeps configuration in a
-  `Billing.Application.Persistence` namespace; folding the concrete `DbContext` and migrations into that
-  same persistence layer (today they sit in `Billing.Infrastructure`) is the remaining step to make the
-  sample match this ADR.
+  behavior and `ELMOD002`. Implementation status: `samples/Billing` follows this ADR — entities in
+  `Billing.Application.Domain`, the persistence layer (configuration, `BillingDbContext`, and migrations)
+  in `Billing.Application.Persistence`, the SMTP adapter in `Billing.Infrastructure`, and provider
+  registration in the `Billing.Api` host.
 
 ## Alternatives considered
 
@@ -159,18 +175,20 @@ to use it) is what produced the original confusion. This ADR records the model w
   steward removes that `DbSet` and breaks them. Co-location is only correct for genuinely
   *module-private* data — which is the bounded-context case (ADR-0008), not a feature.
 
-- **Configuration in `Infrastructure` (split membership from mapping).** This is the orthodox
-  Clean-Architecture placement — persistence mapping as an outer detail — *and it would be the sounder
-  choice if `Application` were persistence-ignorant behind repositories.* It is not: Elarion exposes
-  `DbSet<T>`, LINQ, raw SQL, and provider functions to handlers by design (the `DbContext`-as-repository
-  stance), so the physical model is already Application-facing — handlers reason about indexes, columns,
-  and provider features directly. Moving mapping to `Infrastructure` would therefore scatter one cohesive
-  vertical-slice concern across the central boundary for **no** isolation gain, and would force splitting
-  *membership* (which must stay inner — it feeds the generated `IAppDbContext`, and an inner port cannot
-  derive its surface from an outer artifact without inverting the dependency) from *mapping*, losing the
-  single source of truth. Rejected on those grounds, not because of any generator limitation. (It becomes
-  the sounder layout only under a repository / persistence-ignorant `Application` — which Elarion rejects.)
+- **Configuration (and the `DbContext`) in `Infrastructure` (split membership from mapping).** This is the
+  orthodox Clean-Architecture placement — persistence mapping as an outer detail — *and it would be the
+  sounder choice if `Application` were persistence-ignorant behind repositories.* It is not: Elarion
+  exposes `DbSet<T>`, LINQ, raw SQL, and provider functions to handlers by design (the
+  `DbContext`-as-repository stance), so the data layer is already application logic — handlers reason about
+  indexes, columns, and provider features directly. Moving it to `Infrastructure` would treat application
+  logic as a host concern, scatter one cohesive vertical-slice concern across the central boundary for
+  **no** isolation gain, and force splitting *membership* (which must stay inner — it feeds the generated
+  `IAppDbContext`, and an inner port cannot derive its surface from an outer artifact without inverting the
+  dependency) from *mapping*, losing the single source of truth. Rejected on those grounds, not because of
+  any generator limitation. (It becomes the sounder layout only under a repository / persistence-ignorant
+  `Application` — which Elarion rejects. The host still owns the *connection*; that is the only piece that
+  is genuinely infrastructure.)
 
 - **Full centralization for governance.** A strong DBA / data-governance gate (schema reviewed as a
   single artifact, regulated change control) is the condition under which one reviewed schema surface
-  outweighs the plugin model. Absent that, the platform/plugin split wins.
+  outweighs the data-layer-as-application model. Absent that, this model wins.

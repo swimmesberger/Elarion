@@ -1,6 +1,6 @@
 ---
 title: Solution structure
-description: Where entities, modules, and schema configuration belong relative to the module-boundary rule — keep entities in a shared-kernel namespace, treat configuration as platform (not feature-owned), and graduate to bounded contexts only when they earn their keep.
+description: Where entities, modules, and schema configuration belong relative to the module-boundary rule — keep entities in a shared-kernel namespace, treat configuration as part of the shared data layer (not feature-owned), and graduate to bounded contexts only when they earn their keep.
 ---
 
 [Project structure](/docs/getting-started/project-structure) covers the mechanical layout the
@@ -22,14 +22,14 @@ deliberately part of that shared kernel** — they are shared data, not module-i
 
 That distinction — code is module-internal, data is shared — decides where entities go.
 
-Said as a model: **a feature is a *plugin* over a *platform* data model.** The platform is the shared
-substrate — the entities, their configuration, and the framework. A feature composes it into behavior
-and may touch *any* entity, but it never depends on another feature except through a
+Said as a model: **a feature is a *plugin* over the application's shared data layer.** A feature composes
+the data layer (the entities + their configuration) and the host's platform capabilities into behavior; it
+may touch *any* entity, but it never depends on another feature except through a
 [`[ModuleContract]`](/docs/concepts/cross-module-communication). The dependency arrow points
-**feature → platform**, never the reverse and never feature → feature. Touching many *entities* is
-using the platform; depending on another *feature* is the thing to avoid.
-[Philosophy](/docs/concepts/philosophy) develops this model and what it implies for where the database
-and configuration belong.
+**feature → data layer**, never the reverse and never feature → feature. Touching many *entities* is
+using the data layer; depending on another *feature* is the thing to avoid.
+[Philosophy](/docs/concepts/philosophy) develops this model — including what "platform" means (the host)
+versus the data layer — and what it implies for where the database and configuration belong.
 
 ## Entities are shared kernel, not module-internal
 
@@ -126,7 +126,7 @@ removes its behavior cleanly. Two disciplines keep the test green:
 - **Reference other aggregates by ID, not by navigation property.** `Invoice.ClientId` (a `Guid`) leaves
   the model untangled, so removing the `Clients` feature does not ripple into `Invoicing`. A cross-module
   navigation creates an EF relationship that couples the two.
-- **Treat new data as platform.** A feature that adds an entity, index, or column *extends the platform*;
+- **Treat new data as shared.** A feature that adds an entity, index, or column *extends the shared data layer*;
   that data lives in the shared persistence layer and does **not** vanish when the feature folder is deleted
   — its removal is a deliberate migration step, because data is durable and shared. (How a plugin should own
   new typed data while staying cleanly removable is an open design question.)
@@ -152,8 +152,8 @@ assemblies) rather than the analyzer, which is the heavier guarantee real data s
 
 ## See also
 
-- [Philosophy](/docs/concepts/philosophy) — the principles behind this layout: features as plugins over a
-  platform, and the database as application logic.
+- [Philosophy](/docs/concepts/philosophy) — the principles behind this layout: features as plugins over the
+  shared data layer, and the database as application logic.
 - [Project structure](/docs/getting-started/project-structure) — the mechanical layout and the
   conventions the generators rely on.
 - [Cross-module communication](/docs/concepts/cross-module-communication) — `[ModuleContract]` and the

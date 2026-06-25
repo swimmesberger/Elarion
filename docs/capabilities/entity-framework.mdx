@@ -24,9 +24,9 @@ application's persistence layer).
 
 Reference the `Elarion.EntityFrameworkCore` package — it bundles the EF Core source generator — in
 **every** project that declares `[EntityConfiguration]` configurations or a `[GenerateDbSets]` context
-abstraction. Configurations describe the one shared model every feature draws on, so they are *platform*,
-not feature-owned: they live in a shared `Persistence` layer alongside the concrete `DbContext` (the
-database is application logic — see [Philosophy](/docs/concepts/philosophy) and
+abstraction. Configurations describe the one shared model every feature draws on, so they are part of the
+shared **data layer**, not feature-owned: they live in a shared `Persistence` layer alongside the concrete
+`DbContext` (the database is application logic — see [Philosophy](/docs/concepts/philosophy) and
 [Solution structure](/docs/concepts/solution-structure)), while entities themselves stay plain classes.
 The generator discovers configurations wherever they live, so placement is a convention. If you *do* split
 configurations and the `DbContext` into separate assemblies, each assembly that declares the configurations

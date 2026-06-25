@@ -4,14 +4,14 @@
 - Date: 2026-06-25
 - Related: [ADR-0001](0001-event-transaction-phase.md) (event planes / outbox),
   [ADR-0002](0002-cross-module-communication.md) (`[ModuleContract]`),
-  [ADR-0007](0007-data-is-platform-module-as-plugin.md) (data is platform),
+  [ADR-0007](0007-data-is-platform-module-as-plugin.md) (the data layer is application logic),
   [solution structure](../concepts/solution-structure.mdx).
 
 ## Context
 
-ADR-0007 establishes that within one assembly **data is shared platform** and **modules are feature
-plugins**. That gives *feature* separation but explicitly **not** *data* separation — every module
-reaches the whole database through one `DbContext`. Eventually an aggregate cluster earns genuine
+ADR-0007 establishes that within one assembly the **data layer is shared application logic** that
+**modules plug into as features**. That gives *feature* separation but explicitly **not** *data*
+separation — every module reaches the whole database through one `DbContext`. Eventually an aggregate cluster earns genuine
 isolation: its own schema, its own `DbContext`, no shared entities with the rest. That is a **bounded
 context**, and it needs a different, stronger boundary than a feature module.
 
@@ -87,15 +87,15 @@ ADR-0007 surfaced about plugins that introduce new data.
 
 ## Open question — how a plugin owns new data
 
-ADR-0007 notes that a feature introducing new data *extends the platform*, so that data does not
+ADR-0007 notes that a feature introducing new data *extends the shared data layer*, so that data does not
 "rip out cleanly" with the feature folder. How a module/plugin should own **new typed data** while
 preserving the removability promise is unresolved. Candidate directions, to be decided:
 
 1. **Typed schema extension inside modules** — a module declares its own typed entities/schema and
    contributes migrations. Hard to maintain: there is a single migration point, migration ordering
    and shared-model ownership get complicated, and removability is not automatic.
-2. **An untyped `jsonb` "module data" table in the platform** — module-specific data goes in a generic
-   store keyed by module, and the platform decommissions it via a cleanup hook when the module is
+2. **An untyped `jsonb` "module data" table in the shared data layer** — module-specific data goes in a
+   generic store keyed by module, and a framework cleanup hook decommissions it when the module is
    removed. Trades schema typing for clean, automatic removability.
 3. **Require a bounded context when new typed data is needed** — introducing new typed data is the
    trigger to graduate to a context, which owns its own schema/migrations and is removable as a unit.
