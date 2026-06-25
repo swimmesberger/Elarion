@@ -237,7 +237,7 @@ the stable `JobId` so the frontend can poll it.
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/CreateInvoice.cs"
 using System.ComponentModel;
 using Billing.Application.Domain;
-using Billing.Application.Modules.Core.Services;
+using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
 using Billing.Application.Persistence;
@@ -305,7 +305,7 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        audit.Record("invoice.created", invoice.Id.ToString());
+        await audit.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }

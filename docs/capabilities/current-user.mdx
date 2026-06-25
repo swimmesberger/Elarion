@@ -29,9 +29,9 @@ Inject it like any other service:
 
 ```csharp
 [Service]
-public sealed class AuditTrail(ICurrentUser user) {
-    public AuditEntry Record(string action) =>
-        new(action, user.UserId, DateTimeOffset.UtcNow);
+public sealed class OwnershipStamp(ICurrentUser user) {
+    // Stamp the signed-in account onto a new row, so reads can be scoped per user.
+    public string CurrentOwnerId => user.UserId;
 }
 ```
 

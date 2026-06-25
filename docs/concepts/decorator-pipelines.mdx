@@ -238,7 +238,8 @@ public sealed class AuditDecorator<TRequest, TResponse>(
     where TRequest : ICommand {
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         var response = await inner.HandleAsync(request, ct);
-        if (response is IResultLike { IsSuccess: true }) audit.Record(typeof(TRequest).Name);
+        if (response is IResultLike { IsSuccess: true })
+            await audit.RecordAsync(typeof(TRequest).Name, request.GetType().Name, ct);
         return response;
     }
 }
