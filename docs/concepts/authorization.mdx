@@ -1,0 +1,177 @@
+---
+title: Authorization
+description: Declarative, transport-neutral handler authorization — claims, roles, permissions, and named policies — independent of the authentication provider.
+---
+
+Authorization in Elarion is **declarative and transport-neutral**. You annotate a handler with what it
+requires; a generated decorator enforces it before the handler runs, under every transport (JSON-RPC,
+MCP, HTTP) identically. It depends only on the claims of the current user — never on the authentication
+provider or an `HttpContext` — so ASP.NET Core Identity, Entra ID, or any OIDC/JWT setup all work with
+the same attributes.
+
+## Authentication vs authorization
+
+- **Authentication** — *who you are.* The host's ASP.NET middleware validates a cookie, JWT, or OIDC
+  token and produces a `ClaimsPrincipal`. This is the host's job; Elarion does not issue credentials.
+- **Authorization** — *what you may do.* Elarion's job, per handler.
+
+The request flow:
+
+```
+authentication middleware  →  ICurrentUser snapshot  →  handler pipeline
+                                                          └─ AuthorizationDecorator → IAuthorizer → handler
+```
+
+`UseElarionCurrentUser()` snapshots the authenticated principal's claims into the scoped
+[`ICurrentUser`](/docs/concepts/handlers); the generated authorization decorator reads the handler's
+requirements and asks an `IAuthorizer` to evaluate them against that snapshot.
+
+## Declaring requirements
+
+Annotate the handler class:
+
+```csharp
+[RpcMethod("tenants.create")]
+[RequirePermission("tenants.write")]
+public sealed class CreateTenant(AppDbContext db)
+    : IHandler<CreateTenant.Command, Result<CreateTenant.Response>> { /* ... */ }
+```
+
+| Attribute | Requires |
+|---|---|
+| `[RequireClaim(type, values…)]` | A claim of `type`. With values, at least one must match (**OR**); with none, the claim must merely be present. The general form. |
+| `[RequirePermission("x")]` | Sugar for `[RequireClaim(PermissionClaimType, "x")]` over the configured permission claim type (default `"permission"`). The common case. |
+| `[RequireRole("Admin")]` | Role membership (`ICurrentUser.IsInRole`). |
+| `[RequirePolicy("AtLeast21")]` | A named [`IAuthorizationPolicy`](#named-policies) — custom logic over the user and the request. |
+| `[AllowAnonymous]` | Nothing — the handler is public (see [secure-by-default](#secure-by-default)). |
+
+### Combining requirements
+
+- **Different attribute kinds combine with AND.** `[RequirePolicy("AtLeast21")]` + `[RequireRole("Admin")]`
+  requires both.
+- **Multiple of the same kind combine with AND.** Two `[RequirePermission]` requires both permissions.
+- **OR lives inside a single `[RequireClaim]`'s value list.** `[RequireClaim("scope", "read", "write")]`
+  passes if the user has either.
+- **`[AllowAnonymous]` wins** over any `Require*`.
+
+## Authenticated, forbidden, unauthorized
+
+A denied request short-circuits the pipeline with an `AppError` — the handler never runs, and neither
+does caching, validation, or a transaction:
+
+- An **unauthenticated** caller → `AppError.Unauthorized` → HTTP **401** / JSON-RPC `-32005`.
+- An **authenticated but not permitted** caller → `AppError.Forbidden` → HTTP **403** / JSON-RPC `-32003`.
+
+This mirrors ASP.NET's 401-vs-403 split, mapped centrally — see [Results & errors](/docs/concepts/results-and-errors).
+
+## Opt-in by default
+
+By default the authorization decorator is attached **only to handlers that carry a `Require*` or
+`[RequirePolicy]` attribute** — apps that don't use authorization pay nothing. Attachment is decided at
+compile time by the generator inspecting the handler, so an unguarded handler is genuinely unwrapped.
+
+### Secure-by-default
+
+To flip to deny-by-default, declare `[ElarionAuthorizationDefaults]` at assembly or `[AppModule]` scope
+(resolved most-specific-wins, like [`[DefaultPipeline]`](/docs/concepts/decorator-pipelines)):
+
+```csharp
+[assembly: ElarionAuthorizationDefaults] // RequireAuthenticated = true
+```
+
+Now **every** in-scope handler requires an authenticated principal unless it carries `[AllowAnonymous]`.
+A handler with explicit `Require*` attributes keeps those; an unannotated one just requires authentication.
+
+## The authorizer seam
+
+`IAuthorizer` is the single decision point. The default `ClaimsAuthorizer` (registered by
+`AddElarionAuthorization()`) evaluates every requirement against `ICurrentUser` and the registered
+policies — no `HttpContext`, no ASP.NET dependency:
+
+```csharp
+public interface IAuthorizer {
+    // null => authorized; AppError.Unauthorized/Forbidden otherwise.
+    ValueTask<AppError?> AuthorizeAsync(AuthorizationRequirements requirements, object? resource, CancellationToken ct);
+}
+```
+
+The `resource` is the **handler request** — a typed domain object, which is what named policies authorize
+against (no digging route values out of an `HttpContext`).
+
+### Named policies
+
+A named policy is a transport-neutral `IAuthorizationPolicy` resolved from DI by name:
+
+```csharp
+public sealed class AtLeast21Policy(TimeProvider clock) : IAuthorizationPolicy {
+    public string Name => "AtLeast21";
+    public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+        var birthDate = context.User.GetClaimValues("birthdate").FirstOrDefault();
+        // compute age against clock.GetUtcNow() ...
+        return ValueTask.FromResult(/* age >= 21 */);
+    }
+}
+```
+
+Register it (or an inline delegate) and reference it with `[RequirePolicy("AtLeast21")]`:
+
+```csharp
+services.AddElarionAuthorization();
+services.AddElarionAuthorizationPolicy<AtLeast21Policy>();
+// or: services.AddElarionAuthorizationPolicy("AtLeast21", (ctx, ct) => ...);
+```
+
+> **Reusing ASP.NET policies.** If you already have ASP.NET `AddAuthorization` policies, the optional
+> `AddAspNetAuthorizationPolicyBridge("Name")` (in `Elarion.AspNetCore`) exposes one as an
+> `IAuthorizationPolicy`. Caveat: Elarion passes the *request* as the resource, so a policy whose handler
+> casts `context.Resource` to `HttpContext` only works under HTTP. The native `IAuthorizationPolicy` is
+> the recommended path.
+
+## Provider neutrality
+
+Authorization depends only on `ICurrentUser`, so the same `[Require*]` handlers work under any
+authentication provider. Two setups, identical handlers:
+
+### ASP.NET Core Identity
+
+The optional `Elarion.AspNetCore.Identity` package wires Identity onto a **plain** `DbContext` (no
+`IdentityDbContext` inheritance) and maps the current user to the Identity claim types:
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionIdentity<ApplicationUser, ApplicationRole, Guid>(SnakeCase = true)]
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+
+// Program.cs
+builder.Services.AddElarionIdentity<ApplicationUser, ApplicationRole, Guid, AppDbContext>();
+builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
+// cookie policy, AddAuthorization policies, UseAuthentication/UseElarionCurrentUser stay host-owned
+```
+
+The generator emits the Identity `DbSet`s (`db.Users`, `db.Roles`, …) and the snake_case model, so the
+context never inherits `IdentityDbContext` — see the [Identity capability](/docs/capabilities/identity).
+
+### Entra ID (no ASP.NET Identity)
+
+Swap the authentication provider; the authorization is unchanged — and no Identity package:
+
+```csharp
+builder.Services.AddAuthentication().AddMicrosoftIdentityWebApi(builder.Configuration); // or .AddJwtBearer
+builder.Services.AddElarionCurrentUser(o => {
+    o.UserIdClaimType = "oid";    // Entra object id
+    o.RoleClaimType   = "roles";  // Entra app roles
+});
+builder.Services.AddElarionAuthorization();
+```
+
+The very same `[RequireRole("Admin")]` / `[RequirePolicy("AtLeast21")]` handlers are now enforced against
+Entra's token claims — and would behave identically over JSON-RPC or MCP. That independence is the point:
+authentication is a host concern, authorization is a handler concern, and they meet only at `ICurrentUser`.
+
+## See also
+
+- [Decorator pipelines](/docs/concepts/decorator-pipelines) — where the authorization decorator sits.
+- [Results & errors](/docs/concepts/results-and-errors) — how `Unauthorized`/`Forbidden` map per transport.
+- [Why Elarion → Composition over inheritance](/docs/why-elarion#composition-over-inheritance).

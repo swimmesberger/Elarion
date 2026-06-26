@@ -25,6 +25,7 @@ public static class AppErrorMapper {
         ErrorKind.Conflict => -32002,
         ErrorKind.Forbidden => -32003,
         ErrorKind.BusinessRule => -32004,
+        ErrorKind.Unauthorized => -32005,
         ErrorKind.Internal => -32603,      // Internal error
         _ => -32603,
     };

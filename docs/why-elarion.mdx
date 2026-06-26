@@ -68,6 +68,28 @@ which modules are exposed.
 
 → [Modules](/docs/concepts/modules) · [Project structure](/docs/getting-started/project-structure)
 
+## Composition over inheritance
+
+You compose framework capabilities onto your own types; you do not inherit framework base classes.
+
+**Why:** inheritance forces your type into the framework's hierarchy, and only one base class can win.
+Composition keeps your type yours and lets capabilities stack. It is a through-line, not a slogan:
+
+- Your `DbContext` is a plain `DbContext`. Entities are composed in through `[EntityConfiguration]` and
+  `[GenerateDbSets]` — with no repository or `IAppDbContext` in front of it — not by deriving a base context.
+- ASP.NET Core Identity is composed in with `[GenerateElarionIdentity<…>]`: the generator emits the Identity
+  `DbSet`s and model configuration onto your context **instead of inheriting `IdentityDbContext`**.
+- Cross-cutting behavior wraps a handler through the [decorator pipeline](/docs/concepts/decorator-pipelines),
+  not a handler base class.
+- Modules are composed by namespace + `[AppModule]`, not a module base type.
+
+The common shape is the one the framework uses everywhere: a marker attribute states intent, a generator emits
+the wiring onto *your* partial type, and nothing forces a base class. That is also what makes
+[authorization](/docs/concepts/authorization) provider-neutral — handlers depend on the `ICurrentUser` claims
+abstraction, so the authentication provider composes underneath without the handler inheriting anything.
+
+→ [Authorization](/docs/concepts/authorization) · [Entity Framework Core](/docs/capabilities/entity-framework)
+
 ## The database is application logic, not an abstraction
 
 Handlers work **directly** against the concrete `DbContext` — its `DbSet`s, LINQ, raw SQL, and

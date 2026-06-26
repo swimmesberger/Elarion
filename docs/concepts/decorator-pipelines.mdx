@@ -108,8 +108,9 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
     DbContext db
 ) : IHandler<TRequest, TResponse> {
     // Attach only where a new unit of work is needed. The generator calls this once per handler type.
-    public static bool AppliesTo(Type request) =>
-        request.IsAssignableTo(typeof(ICommand)) || request.IsAssignableTo(typeof(IIntegrationEvent));
+    public static bool AppliesTo(HandlerMetadata handler) =>
+        handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
+        handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent));
 
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -258,27 +259,38 @@ A decorator may declare a static predicate that the generator **calls once at pi
 decide attachment per handler:
 
 ```csharp
-public static bool AppliesTo(System.Type request);
+public static bool AppliesTo(HandlerMetadata handler);
 ```
 
-When present, the decorator is attached only to handlers whose request type makes it return `true`. The
-predicate is **called, not parsed**, so any C# is allowed — including reflection over the request type.
-The generator evaluates it **once per closed handler type** (caching the result in a generated
-`static readonly bool` initialized at type init), never per request, and the emitted code is a direct
-static call plus `typeof`, so it stays NativeAOT- and trim-safe. It composes with `where`: the
-constraint governs what the body may *call*; `AppliesTo` governs *whether to attach*.
+When present, the decorator is attached only to handlers for which it returns `true`. The predicate is
+**called, not parsed**, so any C# is allowed — including reflection. The generator evaluates it **once per
+closed handler type** (caching the result in a generated `static readonly bool` initialized at type init),
+never per request, so it stays NativeAOT- and trim-safe. It composes with `where`: the constraint governs
+what the body may *call*; `AppliesTo` governs *whether to attach*.
 
-The method must be `public static`, return `bool`, and take one `System.Type` parameter; a non-`public`
-`AppliesTo` is reported as `ELPIPE001` (a build error). Because it is plain runnable C#, you can
-unit-test it directly: `TransactionDecorator<,>.AppliesTo(typeof(CreateOrder.Command))`.
-
-Because the predicate is called rather than interpreted, it can check anything reflection exposes — for
-example a custom `[Transactional]` attribute on the request type:
+The predicate receives [`HandlerMetadata`](/docs/concepts/handlers) — the concrete `HandlerType`,
+`RequestType`, `ResponseType`, and `GetAttribute<T>()`/`GetAttributes<T>()` — so it can attach based on the
+request type, the response type, **or the handler's own attributes**. That is the same handler-attribute-driven
+attachment the framework's built-in decorators use; there is no privileged generator capability a custom
+decorator can't replicate. Attach on the request kind:
 
 ```csharp
-public static bool AppliesTo(Type request) =>
-    request.IsDefined(typeof(TransactionalAttribute), inherit: true);
+public static bool AppliesTo(HandlerMetadata handler) =>
+    handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
+    handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent));
 ```
+
+…or on a custom handler attribute:
+
+```csharp
+public static bool AppliesTo(HandlerMetadata handler) =>
+    handler.GetAttribute<AuditableAttribute>() is not null;
+```
+
+There is a single supported signature on purpose. It must be `public static bool AppliesTo(HandlerMetadata)`;
+a non-`public` one is `ELPIPE001`, and a differently-shaped `AppliesTo` (e.g. the older
+`AppliesTo(System.Type)`) is `ELPIPE002` rather than silently ignored. Because it is plain runnable C#, you can
+unit-test it directly: `TransactionDecorator<,>.AppliesTo(new HandlerMetadata(typeof(CreateOrder), typeof(CreateOrder.Command), typeof(Result<CreateOrder.Response>)))`.
 
 <Callout type="info">
   `AppliesTo` works for decorators shipped in **referenced packages** too — a `public static` method is

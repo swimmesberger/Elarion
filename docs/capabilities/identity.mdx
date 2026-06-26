@@ -1,0 +1,74 @@
+---
+title: ASP.NET Core Identity
+description: Optional ASP.NET Core Identity integration that composes onto a plain DbContext — no IdentityDbContext inheritance, snake_case-ready.
+---
+
+`Elarion.AspNetCore.Identity` is an **optional** package that wires ASP.NET Core Identity for an Elarion
+host. It is one authentication provider among many — [authorization](/docs/concepts/authorization) itself
+does not depend on it. Its distinguishing trait is **composition over inheritance**: your application
+`DbContext` stays a plain `DbContext` and *composes* the Identity model, rather than deriving from
+`IdentityDbContext`.
+
+## Wiring
+
+```csharp
+// Program.cs
+builder.Services.AddElarionIdentity<ApplicationUser, ApplicationRole, Guid, AppDbContext>();
+builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
+```
+
+`AddElarionIdentity<TUser, TRole, TKey, TDbContext>`:
+
+- registers `AddIdentity<TUser, TRole>()` + `AddEntityFrameworkStores<TDbContext>()` (+ default token providers),
+- maps [`ICurrentUser`](/docs/capabilities/current-user) to the Identity claim types (`NameIdentifier`/`Email`/`Role`, overridable), and
+- registers the transport-neutral authorizer via `AddElarionAuthorization`, so handler `[Require*]` attributes are enforced.
+
+Cookie/authentication policy (`ConfigureApplicationCookie`, login endpoints, `UseAuthentication`,
+`UseElarionCurrentUser`) stays the host's job — the package wires Identity and authorization, not your sign-in UX.
+
+## The context composes Identity
+
+`AddEntityFrameworkStores` only needs the Identity entities mapped — it does **not** require
+`IdentityDbContext`. Annotate a plain `[GenerateDbSets]` context:
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionIdentity<ApplicationUser, ApplicationRole, Guid>(SnakeCase = true)]
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+
+public sealed class ApplicationUser : IdentityUser<Guid>;
+public sealed class ApplicationRole : IdentityRole<Guid>;
+```
+
+The bundled generator emits the seven Identity `DbSet`s (`db.Users`, `db.Roles`, `db.UserClaims`, …) and
+applies the full Identity model configuration — keys, composite keys, unique normalized indexes,
+relationships, max-lengths — through the EF generator's neutral `OnEntitiesConfigured` seam. So the single
+`ConfigureEntities(modelBuilder)` call configures **both** your domain entities (from `[EntityConfiguration]`)
+and Identity, with no `<TUser, TRole, TKey>` repeated at the call site and no `IdentityDbContext` in the
+hierarchy. (Requires `[GenerateDbSets]` on the same context, else `ELIDN001`.)
+
+## snake_case
+
+`SnakeCase = true` (the default) makes the generated Identity model use snake_case **table, column, and
+index** names directly — `users`, `roles`, `user_claims`, `normalized_user_name`,
+`ix_users_normalized_user_name`, … — instead of the ASP.NET `AspNet*` PascalCase defaults. It is
+self-contained: no `EFCore.NamingConventions` dependency, and the names match what that convention would
+produce, so an app already using it for domain tables sees a consistent schema. Set `SnakeCase = false` to
+keep the Identity defaults. The underlying primitive, `modelBuilder.ApplyElarionIdentity<TUser, TRole, TKey>(snakeCase)`,
+is public for advanced hosts that prefer to call it directly.
+
+## What stays in your app
+
+The package is deliberately minimal. Your roles/permissions catalog, seeding, sign-in/registration
+endpoints, and user-management surface stay app-owned — they are domain decisions, not framework mechanics.
+Permissions are typically issued as a `permission` claim (the default
+[`AuthorizationOptions.PermissionClaimType`](/docs/concepts/authorization)) on roles, and enforced on
+handlers with `[RequirePermission]`.
+
+## See also
+
+- [Authorization](/docs/concepts/authorization) — the attributes and the provider-neutral decision path.
+- [Current user](/docs/capabilities/current-user) — the `ICurrentUser` abstraction Identity populates.
+- [Why Elarion → Composition over inheritance](/docs/why-elarion#composition-over-inheritance).

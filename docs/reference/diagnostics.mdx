@@ -123,7 +123,8 @@ Decorator attachment in handler registration. See [Decorator pipelines](/docs/co
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELPIPE001 | Error | A decorator declares an `AppliesTo` attachment-predicate method that is not public, so the generated registration cannot call it to decide attachment. | Declare the predicate as `public static bool AppliesTo(System.Type request)`. |
+| ELPIPE001 | Error | A decorator declares an `AppliesTo` attachment-predicate method that is not public, so the generated registration cannot call it to decide attachment. | Declare the predicate as `public static bool AppliesTo(HandlerMetadata handler)`. |
+| ELPIPE002 | Error | A decorator declares an `AppliesTo` method with an unsupported signature (e.g. the older `AppliesTo(System.Type request)`). | Use the one supported form, `public static bool AppliesTo(HandlerMetadata handler)`; for request-based checks use `handler.RequestType`. |
 
 ## WFRE — Resilience policies
 

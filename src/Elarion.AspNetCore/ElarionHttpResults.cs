@@ -40,11 +40,12 @@ public static class ElarionHttpResults {
 
     /// <summary>
     /// Adds the ProblemDetails response metadata (for OpenAPI) covering every status code an Elarion handler
-    /// failure can produce: 400 validation, 403, 404, 409, 422, and 500.
+    /// failure can produce: 400 validation, 401, 403, 404, 409, 422, and 500.
     /// </summary>
     public static RouteHandlerBuilder ProducesElarionErrors(this RouteHandlerBuilder builder) =>
         builder
             .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)

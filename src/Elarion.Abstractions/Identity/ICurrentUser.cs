@@ -18,5 +18,21 @@ public interface ICurrentUser {
 
     /// <summary>Returns whether the current principal has the specified role.</summary>
     bool IsInRole(string role);
+
+    /// <summary>
+    /// Returns whether the current principal has a claim of <paramref name="type"/> with the given
+    /// <paramref name="value"/>.
+    /// </summary>
+    /// <remarks>
+    /// A default interface method so existing implementers keep compiling; the default <b>fails closed</b>
+    /// (returns <see langword="false"/>) so a stale implementer denies rather than silently authorizes.
+    /// Real implementers (e.g. the ASP.NET <c>CurrentUserSnapshot</c>) override it to answer from the
+    /// principal's claims.
+    /// </remarks>
+    bool HasClaim(string type, string value) => false;
+
+    /// <summary>Returns all values of claims of the given <paramref name="type"/> held by the current principal.</summary>
+    /// <remarks>A default interface method that fails closed (returns an empty sequence); see <see cref="HasClaim"/>.</remarks>
+    IEnumerable<string> GetClaimValues(string type) => [];
 }
 

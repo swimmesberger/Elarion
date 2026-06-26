@@ -12,6 +12,7 @@ public sealed class HttpAppErrorMapperTests {
     [InlineData(ErrorKind.NotFound, 404)]
     [InlineData(ErrorKind.Conflict, 409)]
     [InlineData(ErrorKind.Forbidden, 403)]
+    [InlineData(ErrorKind.Unauthorized, 401)]
     [InlineData(ErrorKind.BusinessRule, 422)]
     [InlineData(ErrorKind.Internal, 500)]
     public void MapToStatusCode_MapsEachKind(ErrorKind kind, int expected) =>

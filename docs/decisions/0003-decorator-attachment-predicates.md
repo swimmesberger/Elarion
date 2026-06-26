@@ -37,18 +37,22 @@ framework.
 A decorator may declare an optional predicate:
 
 ```csharp
-public static bool AppliesTo(System.Type request);
+public static bool AppliesTo(HandlerMetadata handler);
 ```
 
 When present, the generated factory **calls it once at pipeline-build time** (cached) and attaches the
-decorator only when it returns `true` for the handler's request type. It **composes with `where`**: the
-constraint governs what the decorator body may call (type-safety); `AppliesTo` governs whether to
-attach.
+decorator only when it returns `true` for that handler. It **composes with `where`**: the constraint governs
+what the decorator body may call (type-safety); `AppliesTo` governs whether to attach.
+
+The predicate receives [`HandlerMetadata`](../concepts/handlers.mdx) — the concrete handler type, its
+request/response types, and `GetAttribute<T>()` — so it can attach on the request kind, the response type,
+**or the handler's own attributes**:
 
 ```csharp
 public sealed class TransactionDecorator<TRequest, TResponse>(/* ... */) : IHandler<TRequest, TResponse> {
-    public static bool AppliesTo(Type request) =>
-        request.IsAssignableTo(typeof(ICommand)) || request.IsAssignableTo(typeof(IIntegrationEvent));
+    public static bool AppliesTo(HandlerMetadata handler) =>
+        handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
+        handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent));
 
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -59,6 +63,22 @@ public sealed class TransactionDecorator<TRequest, TResponse>(/* ... */) : IHand
 
 The transaction decorator stays trivial; domain-event handlers get no decorator at all (they ride the
 publisher's ambient transaction), and queries get none either.
+
+### One signature, on `HandlerMetadata`
+
+There is exactly one predicate signature, on `HandlerMetadata` rather than `System.Type`. This is a deliberate
+symmetry decision: the framework's own built-in decorators (caching, resilience, authorization) attach based on
+a **handler** attribute (`[Cacheable]`, `[Resilient]`, `[RequirePermission]`), which a request-type-only
+predicate cannot express. Giving custom decorators the handler-typed predicate means there is **no privileged
+generator capability users cannot replicate** — the value the framework optimizes for. `HandlerMetadata` carries
+`RequestType`, so request-kind checks (the common case) are unchanged in spirit (`handler.RequestType`), and the
+generator passes the same cached metadata singleton it injects into decorator constructors.
+
+We chose a single form over keeping a `Type`-based overload for backward compatibility: one signature is simpler
+to teach and removes "which overload?" ambiguity. `DecoratorPredicate.Detect` recognizes only
+`AppliesTo(HandlerMetadata)`; a non-`public` one is `ELPIPE001`, and a differently-shaped `AppliesTo` (e.g. the
+older `AppliesTo(System.Type)`) is `ELPIPE002` — reported, never silently ignored (which would attach the
+decorator unconditionally).
 
 ### Evaluated at run time, not symbolically
 
@@ -156,9 +176,10 @@ the predicate is plain, runnable C#, it can be unit-tested directly
 
 ## Implementation
 
-- `DecoratorPredicate.Detect` (`Elarion.Generators`) finds a `public static bool AppliesTo(System.Type)`
-  on a decorator (reporting `ELPIPE001` if present but non-public).
-- `HandlerRegistrationGenerator` flags such decorators (`DecoratorInfo.HasAppliesTo`), emits the cached
-  field, and wraps the decorator's construction in `if (__pipelineApplies{i})`.
+- `DecoratorPredicate.Detect` (`Elarion.Generators`) finds a `public static bool AppliesTo(HandlerMetadata)`
+  on a decorator (reporting `ELPIPE001` if non-public, or `ELPIPE002` for a differently-shaped `AppliesTo`).
+- `HandlerRegistrationGenerator` flags such decorators (`DecoratorInfo.HasAppliesTo`), emits the cached field
+  — calling the predicate with the `__handlerMetadata` singleton — and wraps the decorator's construction in
+  `if (__pipelineApplies{i})`.
 - Documented in [decorator pipelines](../concepts/decorator-pipelines.mdx); the tutorial's transaction
   decorator uses `AppliesTo`.

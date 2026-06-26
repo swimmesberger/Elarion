@@ -9,6 +9,7 @@
     "services",
     "validators",
     "decorator-pipelines",
+    "authorization",
     "cross-module-communication",
     "solution-structure"
   ]

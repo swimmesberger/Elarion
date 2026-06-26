@@ -13,6 +13,7 @@ public sealed class CurrentUserSnapshot(IOptions<AspNetCoreCurrentUserOptions> o
     private string? _userId;
     private string? _email;
     private IReadOnlyList<string> _roles = [];
+    private ILookup<string, string> _claims = Enumerable.Empty<string>().ToLookup(static value => value);
 
     private AspNetCoreCurrentUserOptions Options => options.Value;
 
@@ -57,10 +58,27 @@ public sealed class CurrentUserSnapshot(IOptions<AspNetCoreCurrentUserOptions> o
     public bool IsInRole(string role) =>
         Roles.Contains(role, StringComparer.Ordinal);
 
+    /// <inheritdoc />
+    public bool HasClaim(string type, string value) {
+        EnsureInitialized();
+
+        return _claims[type].Contains(value, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public IEnumerable<string> GetClaimValues(string type) {
+        EnsureInitialized();
+
+        return _claims[type];
+    }
+
     internal void Initialize(ClaimsPrincipal principal) {
         _isAuthenticated = principal.Identity?.IsAuthenticated == true;
         _userId = principal.FindFirstValue(Options.UserIdClaimType);
         _email = principal.FindFirstValue(Options.EmailClaimType);
+        // ToLookup is eager: it copies the claim type/value strings (immutable) into the lookup now, holding no
+        // reference to the principal or its Claim objects — a true snapshot, like the user id/email/roles above.
+        _claims = principal.Claims.ToLookup(claim => claim.Type, claim => claim.Value, StringComparer.Ordinal);
 
         var claimRoles = principal.FindAll(Options.RoleClaimType)
             .Select(claim => claim.Value)

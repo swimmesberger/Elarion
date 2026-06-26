@@ -9,6 +9,25 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Authorization building blocks (`Elarion.Abstractions.Authorization` + `Elarion` core).** Declarative,
+  transport-neutral handler authorization: the `[RequireClaim]`, `[RequirePermission]` (sugar over the
+  configured permission claim), `[RequireRole]`, `[RequirePolicy]`, and `[AllowAnonymous]` attributes; an
+  async `IAuthorizer` seam with the default `ClaimsAuthorizer` (over `ICurrentUser`, **no ASP.NET dependency**);
+  a transport-neutral named-policy seam (`IAuthorizationPolicy`, registered via `AddElarionAuthorizationPolicy`);
+  and an `AuthorizationDecorator` the source generator **auto-attaches** as the outermost functional gate when
+  a handler carries a `Require*` attribute. An assembly-/`[AppModule]`-scoped `[ElarionAuthorizationDefaults]`
+  flips to secure-by-default (deny unless `[AllowAnonymous]`). `AppError.Unauthorized` (HTTP 401) joins
+  `Forbidden` (403), and `ICurrentUser` gains claim access (`HasClaim`/`GetClaimValues`). The same `[Require*]`
+  handlers are enforced identically under JSON-RPC, MCP, and HTTP, regardless of the authentication provider.
+  See [`docs/concepts/authorization`](docs/concepts/authorization.mdx) and
+  [ADR-0009](docs/decisions/0009-authorization-building-blocks.md).
+- **`Elarion.AspNetCore.Identity` — optional ASP.NET Core Identity integration.** `AddElarionIdentity<TUser, TRole, TKey, TDbContext>`
+  wires Identity + EF stores against a **plain** `DbContext` (no `IdentityDbContext` inheritance). A bundled
+  generator, triggered by `[GenerateElarionIdentity<TUser, TRole, TKey>(SnakeCase = true)]` on a `[GenerateDbSets]`
+  context, emits the Identity `DbSet`s and a self-contained snake_case-ready model (via the EF generator's new
+  neutral `OnEntitiesConfigured` seam) — so the context composes Identity instead of inheriting it. The same
+  authorization works with Entra ID / any OIDC-JWT by configuring `AddElarionCurrentUser` claim mapping, no
+  Identity package required. See [`docs/capabilities/identity`](docs/capabilities/identity.mdx).
 - **`samples/Billing` — a compiled, full-stack, current-pattern sample.** The runnable counterpart of
   the [tutorial](docs/tutorial), rebuilt to the recommended solution structure and full feature set:
   a `Billing.Application` (shared-kernel `Domain` entities under no `[AppModule]`, plus `Core`/`Clients`/

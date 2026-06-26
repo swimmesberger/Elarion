@@ -271,7 +271,9 @@ public sealed class HandlerRegistrationGeneratorTests {
         // The generator supplies a metadata singleton built from the CONCRETE handler type...
         generated.Should().Contain(
             "private static readonly global::Elarion.Abstractions.Pipeline.HandlerMetadata __handlerMetadata =");
-        generated.Should().Contain("new(typeof(global::Sample.App.DoThing));");
+        generated.Should().Contain(
+            "new(typeof(global::Sample.App.DoThing), typeof(global::Sample.App.DoThingCommand), "
+            + "typeof(global::Elarion.Abstractions.Result<global::Sample.App.DoThingResponse>));");
         // ...and passes it to the (outermost) decorator instead of resolving it from DI.
         generated.Should().Contain("global::Sample.App.AuthorizationDecorator<");
         generated.Should().Contain("(handler, __handlerMetadata)");
@@ -375,8 +377,9 @@ public sealed class HandlerRegistrationGeneratorTests {
                 // Attaches to commands and integration-event handlers, but not queries — a union no `where` can state.
                 public sealed class TxDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
                     : IHandler<TRequest, TResponse> {
-                    public static bool AppliesTo(Type request) =>
-                        request.IsAssignableTo(typeof(ICommand)) || request.IsAssignableTo(typeof(IIntegrationEvent));
+                    public static bool AppliesTo(HandlerMetadata handler) =>
+                        handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
+                        handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent));
                     public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
                         inner.HandleAsync(request, ct);
                 }
@@ -410,10 +413,13 @@ public sealed class HandlerRegistrationGeneratorTests {
         var doThing = GetGeneratedSource(result, "Sample_App_DoThing.g.cs");
         var readThing = GetGeneratedSource(result, "Sample_App_ReadThing.g.cs");
 
-        // The predicate is called once (cached) per closed handler type, keyed by the request type...
+        // The predicate is called once (cached) per closed handler type with that handler's metadata (which carries
+        // the request type), so each handler's predicate sees its own request type...
         doThing.Should().Contain("private static readonly bool __pipelineApplies0");
-        doThing.Should().Contain(".AppliesTo(typeof(global::Sample.App.DoThingCommand))");
-        readThing.Should().Contain(".AppliesTo(typeof(global::Sample.App.ReadThingQuery))");
+        doThing.Should().Contain(".AppliesTo(__handlerMetadata)");
+        readThing.Should().Contain(".AppliesTo(__handlerMetadata)");
+        doThing.Should().Contain("new(typeof(global::Sample.App.DoThing), typeof(global::Sample.App.DoThingCommand),");
+        readThing.Should().Contain("new(typeof(global::Sample.App.ReadThing), typeof(global::Sample.App.ReadThingQuery),");
         // ...and the decorator is wrapped in a runtime conditional in every in-scope handler (attachment is decided at run time).
         doThing.Should().Contain("if (__pipelineApplies0)");
         readThing.Should().Contain("if (__pipelineApplies0)");
@@ -441,7 +447,7 @@ public sealed class HandlerRegistrationGeneratorTests {
                 public sealed class BadDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
                     : IHandler<TRequest, TResponse> {
                     // Not public: the generated registration cannot call it -> ELPIPE001.
-                    private static bool AppliesTo(Type request) => true;
+                    private static bool AppliesTo(HandlerMetadata handler) => true;
                     public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
                         inner.HandleAsync(request, ct);
                 }
@@ -471,6 +477,62 @@ public sealed class HandlerRegistrationGeneratorTests {
         var result = driver.RunGenerators(compilation, TestContext.Current.CancellationToken).GetRunResult();
 
         result.Diagnostics.Any(d => d.Id == "ELPIPE001" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateRegistration_LegacyAppliesToTypeSignature_ReportsDiagnostic() {
+        // The older `AppliesTo(System.Type request)` form is no longer supported — there is one predicate
+        // signature. It must fail loudly (ELPIPE002) rather than be silently ignored (which would attach the
+        // decorator unconditionally).
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.Abstractions.Pipeline;
+
+            [assembly: UseElarion]
+            [assembly: Sample.App.LegacyPipeline]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed class LegacyDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                    : IHandler<TRequest, TResponse> {
+                    public static bool AppliesTo(Type request) => true;
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                [DecoratorList(typeof(LegacyDecorator<,>))]
+                [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                public sealed class LegacyPipelineAttribute : Attribute { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+                public sealed class DoThing : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var syntaxTree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview),
+            cancellationToken: TestContext.Current.CancellationToken);
+        var compilation = CSharpCompilation.Create(
+            "LegacyAppliesToDiagnostic",
+            [syntaxTree],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(new HandlerRegistrationGenerator());
+        var result = driver.RunGenerators(compilation, TestContext.Current.CancellationToken).GetRunResult();
+
+        result.Diagnostics.Any(d => d.Id == "ELPIPE002" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
@@ -510,6 +572,78 @@ public sealed class HandlerRegistrationGeneratorTests {
             new HandlerRegistrationGenerator(),
             source,
             "Handlers");
+    }
+
+    [Fact]
+    public void GenerateRegistration_AppliesToHandlerMetadata_AttachesBasedOnHandlerAttributes() {
+        // A *custom* decorator attaches based on the HANDLER's attributes via AppliesTo(HandlerMetadata) — the
+        // same capability the framework's built-in decorators use, with no privileged generator magic.
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.Abstractions.Pipeline;
+
+            [assembly: UseElarion]
+            [assembly: Sample.App.AuditPipeline]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                [AttributeUsage(AttributeTargets.Class)]
+                public sealed class AuditableAttribute : Attribute { }
+
+                public sealed class AuditDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                    : IHandler<TRequest, TResponse> {
+                    public static bool AppliesTo(HandlerMetadata handler) =>
+                        handler.GetAttribute<AuditableAttribute>() is not null;
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                [DecoratorList(typeof(AuditDecorator<,>))]
+                [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                public sealed class AuditPipelineAttribute : Attribute { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+
+                [Auditable]
+                public sealed class AuditedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+        var generated = GetGeneratedSource(result, "Sample_App_AuditedHandler.g.cs");
+
+        // The predicate is invoked with the handler metadata (not typeof(request)), cached as a runtime conditional.
+        generated.Should().Contain("global::Sample.App.AuditDecorator<global::Sample.App.DoThingCommand, global::Elarion.Abstractions.Result<global::Sample.App.DoThingResponse>>.AppliesTo(__handlerMetadata)");
+        generated.Should().Contain("if (__pipelineApplies0)");
+        generated.Should().Contain("new global::Sample.App.AuditDecorator<");
+        // The metadata field is declared before the AppliesTo field that reads it (static initializer order).
+        generated.IndexOf("HandlerMetadata __handlerMetadata", StringComparison.Ordinal)
+            .Should().BeLessThan(generated.IndexOf("__pipelineApplies0", StringComparison.Ordinal));
+
+        // The emitted registration is valid C#: AppliesTo(HandlerMetadata) and the metadata field resolve.
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var full = CSharpCompilation.Create(
+            "AppliesToMetadataCompile",
+            [
+                CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(generated, parseOptions, cancellationToken: TestContext.Current.CancellationToken)
+            ],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        full.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
     }
 
     private static string GenerateHandlerRegistrationSource(string source) {

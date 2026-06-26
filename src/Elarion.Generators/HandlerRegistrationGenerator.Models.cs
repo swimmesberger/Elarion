@@ -12,6 +12,13 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string CacheInvalidateAttributeMetadataName = "Elarion.Abstractions.Caching.CacheInvalidateAttribute";
     private const string ResilientAttributeMetadataName = "Elarion.Abstractions.Resilience.ResilientAttribute";
     private const string HandlerMetadataTypeName = "Elarion.Abstractions.Pipeline.HandlerMetadata";
+    private const string RequireClaimAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireClaimAttribute";
+    private const string RequirePermissionAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
+    private const string RequireRoleAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireRoleAttribute";
+    private const string RequirePolicyAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePolicyAttribute";
+    private const string AllowAnonymousAttributeMetadataName = "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
+    private const string AuthorizationDefaultsAttributeMetadataName = "Elarion.Abstractions.Authorization.ElarionAuthorizationDefaultsAttribute";
+    private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
 
     private sealed record HandlerInfo(
         string HandlerFqn,
@@ -23,6 +30,8 @@ public sealed partial class HandlerRegistrationGenerator {
         string? ResiliencePolicyName,
         CacheableInfo? Cacheable,
         CacheInvalidationInfo? CacheInvalidation,
+        bool HasAuthorization,
+        bool RequireAuthenticatedByDefault,
         EquatableArray<DiagnosticInfo> Diagnostics
     );
 
@@ -84,6 +93,16 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler cache duration is invalid",
         "Handler '{0}' must define a positive cache duration",
         "Elarion.Abstractions.Caching",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor AuthorizationResponseNotFailureCapable = new(
+        "ELAUTH001",
+        "Authorized handler response cannot represent failure",
+        "Handler '{0}' declares an authorization requirement but its response type '{1}' does not implement "
+        + "IResultFailureFactory<T>, so the authorization check cannot short-circuit and would be silently "
+        + "skipped; return Result<T> or Result",
+        "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 }

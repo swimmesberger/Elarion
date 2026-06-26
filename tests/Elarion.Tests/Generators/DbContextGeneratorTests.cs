@@ -194,7 +194,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_EntityConfigurationWithoutInterface_ReportsDiagnosticAndGeneratesNothing()
+    public void GenerateDbSets_EntityConfigurationWithoutInterface_ReportsDiagnosticAndGeneratesNoEntities()
     {
         var source =
             CreateSource(
@@ -215,10 +215,46 @@ public sealed class DbContextGeneratorTests
         result.Diagnostics
             .Should()
             .Contain(diagnostic => diagnostic.Id == "ELEFC001" && diagnostic.Severity == DiagnosticSeverity.Warning);
-        result.GeneratedTrees
-            .Select(tree => Path.GetFileName(tree.FilePath))
-            .Should()
-            .NotContain(name => name.EndsWith(".DbSets.g.cs", StringComparison.Ordinal));
+
+        // The context still gets ConfigureEntities + the neutral seam (the host calls ConfigureEntities), but no
+        // DbSet/ApplyConfiguration for the invalid configuration.
+        var dbContextSource = GetGeneratedSource(result, "AppDbContext.DbSets.g.cs");
+        dbContextSource.Should().Contain("private void ConfigureEntities(ModelBuilder modelBuilder)");
+        dbContextSource.Should().Contain("partial void OnEntitiesConfigured(ModelBuilder modelBuilder);");
+        dbContextSource.Should().NotContain("NotAConfiguration");
+    }
+
+    [Fact]
+    public void GenerateDbSets_AlwaysEmitsNeutralOnEntitiesConfiguredSeam()
+    {
+        var source =
+            CreateSource(
+                """
+                namespace Sample.Domain {
+                    public sealed class Company {
+                    }
+                }
+
+                namespace Sample.Infrastructure {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets]
+                    public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class CompanyConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.Company> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.Company> builder) {
+                        }
+                    }
+                }
+                """);
+
+        var dbContextSource = GetGeneratedSource(Generate(source), "AppDbContext.DbSets.g.cs");
+
+        dbContextSource.Should().Contain("partial void OnEntitiesConfigured(ModelBuilder modelBuilder);");
+        // The seam is invoked at the end of ConfigureEntities, after the ApplyConfiguration calls.
+        dbContextSource.IndexOf("ApplyConfiguration", StringComparison.Ordinal)
+            .Should().BeLessThan(dbContextSource.IndexOf("OnEntitiesConfigured(modelBuilder);", StringComparison.Ordinal));
     }
 
     [Fact]

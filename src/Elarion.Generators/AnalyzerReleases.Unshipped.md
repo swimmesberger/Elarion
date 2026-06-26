@@ -3,6 +3,7 @@
 Rule ID | Category | Severity | Notes
 --------|----------|----------|------
 ELPIPE001 | Elarion.Generators | Error | Decorator AppliesTo predicate must be public
+ELPIPE002 | Elarion.Generators | Error | Decorator AppliesTo predicate has an unsupported signature
 ELSG001 | Elarion.Generators | Error | Hosted service scope must be singleton
 ELSG002 | Elarion.Generators | Error | Invalid explicit service contract
 ELSG003 | Elarion.Generators | Error | Generic services are not supported
@@ -37,3 +38,4 @@ ELCACHE001 | Elarion.Abstractions.Caching | Error | Handler cannot be both cache
 ELCACHE002 | Elarion.Abstractions.Caching | Error | Handler cache tags are required
 ELCACHE003 | Elarion.Abstractions.Caching | Error | Handler cache tag is invalid
 ELCACHE004 | Elarion.Abstractions.Caching | Error | Handler cache duration is invalid
+ELAUTH001 | Elarion.Abstractions.Authorization | Error | Authorized handler response cannot represent failure
