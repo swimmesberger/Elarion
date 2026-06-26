@@ -10,7 +10,7 @@ namespace Elarion.Tests.Authorization;
 public sealed class ClaimsAuthorizerTests {
     private static ClaimsAuthorizer Create(
         FakeCurrentUser user,
-        IEnumerable<IAuthorizationPolicy>? policies = null,
+        IEnumerable<NamedAuthorizationPolicy>? policies = null,
         AuthorizationOptions? options = null) =>
         new(user, policies ?? [], options ?? new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
 
@@ -58,7 +58,7 @@ public sealed class ClaimsAuthorizerTests {
     [Fact]
     public async Task RegisteredPolicyEvaluated() {
         var user = new FakeCurrentUser { IsAuthenticated = true, Claims = [("age", "25")] };
-        var authorizer = Create(user, policies: [new AtLeast21Policy()]);
+        var authorizer = Create(user, policies: [new NamedAuthorizationPolicy("AtLeast21", new AtLeast21Policy())]);
 
         var error = await authorizer.AuthorizeAsync(
             Requirements(policies: ["AtLeast21"]), new GuardedCommand(1), TestContext.Current.CancellationToken);

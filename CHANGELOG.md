@@ -13,7 +13,8 @@ minor releases may include breaking changes.
   transport-neutral handler authorization: the `[RequireClaim]`, `[RequirePermission]` (sugar over the
   configured permission claim), `[RequireRole]`, `[RequirePolicy]`, and `[AllowAnonymous]` attributes; an
   async `IAuthorizer` seam with the default `ClaimsAuthorizer` (over `ICurrentUser`, **no ASP.NET dependency**);
-  a transport-neutral named-policy seam (`IAuthorizationPolicy`, registered via `AddElarionAuthorizationPolicy`);
+  a transport-neutral named-policy seam (`IAuthorizationPolicy`) where `[AuthorizationPolicy("name")]`
+  auto-registers a policy per module like `[Service]` (or register manually via `AddElarionAuthorizationPolicy`);
   and an `AuthorizationDecorator` the source generator **auto-attaches** as the outermost functional gate when
   a handler carries a `Require*` attribute. An assembly-/`[AppModule]`-scoped `[ElarionAuthorizationDefaults]`
   flips to secure-by-default (deny unless `[AllowAnonymous]`). `AppError.Unauthorized` (HTTP 401) joins
@@ -54,6 +55,13 @@ minor releases may include breaking changes.
   [decorator pipelines](docs/concepts/decorator-pipelines.mdx).
 
 ### Changed
+- **The decorator attachment predicate takes `HandlerMetadata` (breaking — source).** A decorator's optional
+  `AppliesTo` predicate is now `public static bool AppliesTo(HandlerMetadata handler)` (use `handler.RequestType`
+  for request-based checks), giving custom decorators the same handler-attribute-driven attachment the framework's
+  built-in decorators use. `HandlerMetadata` carries `HandlerType`/`RequestType`/`ResponseType`. The older
+  `AppliesTo(System.Type request)` is reported as `ELPIPE002` rather than silently ignored.
+- **`IAuthorizationPolicy` no longer carries `Name`.** A policy's name lives on `[AuthorizationPolicy("name")]`
+  or the registration call (one source of truth, and the compile-time metadata a future analyzer uses).
 - **EF Core entity participation is now configuration-driven (breaking — source).** The `[DbEntity]`
   marker is removed. An entity opts into a generated context through `[EntityConfiguration]` placed on its
   `IEntityTypeConfiguration<T>` implementation — the single source of truth that drives **both** the

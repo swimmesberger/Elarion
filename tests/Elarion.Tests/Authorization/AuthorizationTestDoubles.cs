@@ -32,10 +32,9 @@ internal sealed class StubInnerHandler<TRequest, TResponse>(TResponse response) 
 }
 
 /// <summary>A named policy that asserts the request flows through as the resource and checks an "age" claim.</summary>
+[AuthorizationPolicy("AtLeast21")]
 internal sealed class AtLeast21Policy : IAuthorizationPolicy {
     public object? LastResource { get; private set; }
-
-    public string Name => "AtLeast21";
 
     public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
         LastResource = context.Resource;

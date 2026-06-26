@@ -4,13 +4,16 @@ namespace Elarion.Abstractions.Authorization;
 
 /// <summary>
 /// A named, transport-neutral authorization policy referenced by <see cref="RequirePolicyAttribute"/>.
-/// Resolved from DI by <see cref="Name"/> and evaluated against the current principal and the handler
-/// request — the in-process analog of an ASP.NET Core policy, without the HTTP coupling.
+/// Evaluated against the current principal and the handler request — the in-process analog of an ASP.NET
+/// Core policy, without the HTTP coupling. The policy <b>name</b> lives on
+/// <see cref="AuthorizationPolicyAttribute"/> (for an auto-registered policy) or on the
+/// <c>AddElarionAuthorizationPolicy</c> registration call — never on the implementation itself, so it is the
+/// single source of truth.
 /// </summary>
 /// <example>
 /// <code>
+/// [AuthorizationPolicy("AtLeast21")]
 /// public sealed class AtLeast21Policy(TimeProvider clock) : IAuthorizationPolicy {
-///     public string Name => "AtLeast21";
 ///     public ValueTask&lt;bool&gt; EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
 ///         var birthDate = context.User.GetClaimValues("birthdate").FirstOrDefault();
 ///         // ... compute age against clock.GetUtcNow() ...
@@ -20,9 +23,6 @@ namespace Elarion.Abstractions.Authorization;
 /// </code>
 /// </example>
 public interface IAuthorizationPolicy {
-    /// <summary>The policy name, matched against <see cref="RequirePolicyAttribute.Policy"/>.</summary>
-    string Name { get; }
-
     /// <summary>Returns whether the policy is satisfied for the given context.</summary>
     ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct);
 }

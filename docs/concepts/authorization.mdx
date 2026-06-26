@@ -100,11 +100,13 @@ against (no digging route values out of an `HttpContext`).
 
 ### Named policies
 
-A named policy is a transport-neutral `IAuthorizationPolicy` resolved from DI by name:
+A named policy is a transport-neutral `IAuthorizationPolicy`. Mark it with `[AuthorizationPolicy("name")]` and
+it is **auto-registered per module** (like `[Service]`) — no manual wiring, and the name is the compile-time
+metadata `[RequirePolicy("name")]` references:
 
 ```csharp
+[AuthorizationPolicy("AtLeast21")]
 public sealed class AtLeast21Policy(TimeProvider clock) : IAuthorizationPolicy {
-    public string Name => "AtLeast21";
     public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
         var birthDate = context.User.GetClaimValues("birthdate").FirstOrDefault();
         // compute age against clock.GetUtcNow() ...
@@ -113,19 +115,16 @@ public sealed class AtLeast21Policy(TimeProvider clock) : IAuthorizationPolicy {
 }
 ```
 
-Register it (or an inline delegate) and reference it with `[RequirePolicy("AtLeast21")]`:
+The name lives on the attribute (or the registration call), never on the implementation — one source of truth.
+A policy under an `[AppModule]` namespace is registered by that module's `ConfigureDefaultServices`; the generator
+reports `ELPOL001` if `[AuthorizationPolicy]` is on a type that isn't an `IAuthorizationPolicy`, and `ELPOL002` if a
+policy isn't under any module. For policies you'd rather wire by hand (or inline), register manually:
 
 ```csharp
 services.AddElarionAuthorization();
-services.AddElarionAuthorizationPolicy<AtLeast21Policy>();
-// or: services.AddElarionAuthorizationPolicy("AtLeast21", (ctx, ct) => ...);
+services.AddElarionAuthorizationPolicy<AtLeast21Policy>();            // reads the [AuthorizationPolicy] name
+services.AddElarionAuthorizationPolicy("AtLeast21", (ctx, ct) => ...); // inline delegate
 ```
-
-> **Reusing ASP.NET policies.** If you already have ASP.NET `AddAuthorization` policies, the optional
-> `AddAspNetAuthorizationPolicyBridge("Name")` (in `Elarion.AspNetCore`) exposes one as an
-> `IAuthorizationPolicy`. Caveat: Elarion passes the *request* as the resource, so a policy whose handler
-> casts `context.Resource` to `HttpContext` only works under HTTP. The native `IAuthorizationPolicy` is
-> the recommended path.
 
 ## Provider neutrality
 

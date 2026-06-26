@@ -21,13 +21,13 @@ public sealed class AuthorizationPolicyRegistrationTests {
     }
 
     [Fact]
-    public void AddElarionAuthorizationPolicyOfTResolvesByName() {
+    public void AddElarionAuthorizationPolicyOfTReadsNameFromAttribute() {
         var services = new ServiceCollection();
         services.AddElarionAuthorizationPolicy<AtLeast21Policy>();
 
         using var provider = services.BuildServiceProvider();
 
-        var policies = provider.GetServices<IAuthorizationPolicy>().ToArray();
+        var policies = provider.GetServices<NamedAuthorizationPolicy>().ToArray();
         policies.Should().ContainSingle(policy => policy.Name == "AtLeast21");
     }
 
@@ -39,9 +39,9 @@ public sealed class AuthorizationPolicyRegistrationTests {
             (context, _) => ValueTask.FromResult(context.Resource is GuardedCommand { Id: var id } && id % 2 == 0));
 
         using var provider = services.BuildServiceProvider();
-        var policy = provider.GetServices<IAuthorizationPolicy>().Single(candidate => candidate.Name == "EvenId");
+        var named = provider.GetServices<NamedAuthorizationPolicy>().Single(candidate => candidate.Name == "EvenId");
 
-        var even = await policy.EvaluateAsync(
+        var even = await named.Policy.EvaluateAsync(
             new AuthorizationContext(new FakeCurrentUser(), new GuardedCommand(2)), TestContext.Current.CancellationToken);
         even.Should().BeTrue();
     }

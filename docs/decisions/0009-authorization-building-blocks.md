@@ -30,9 +30,16 @@ should named "policies" reuse ASP.NET Core's policy engine?
    - **Why not bridge to ASP.NET's `IAuthorizationService`?** Its engine is lightweight, but it is an
      `AspNetCore`-named dependency in the core authorization path, and real-world policy handlers routinely
      cast `AuthorizationHandlerContext.Resource` to `HttpContext` — which silently breaks under non-HTTP
-     transports. An Elarion-native policy authorizes against the typed request instead. An **optional,
-     caveated** adapter (`AddAspNetAuthorizationPolicyBridge`) in `Elarion.AspNetCore` lets teams reuse
-     existing ASP.NET policies when they want to.
+     transports. An Elarion-native policy authorizes against the typed request instead. (An ASP.NET-policy
+     adapter was prototyped and **dropped**: it leaked the HTTP-resource assumption into a transport-neutral
+     surface and is rarely needed; re-expressing a policy as an `IAuthorizationPolicy` is trivial.)
+   - **Named policies are declared, not hand-wired.** An `IAuthorizationPolicy` marked
+     `[AuthorizationPolicy("name")]` is **auto-registered per module** by a dedicated generator (a 7th
+     `ConfigureDefaultServices` category alongside handlers/services/validators/jobs/consumers/module-api),
+     mirroring `[Service]`. The name lives on the attribute (the single compile-time source), so a future
+     analyzer can validate `[RequirePolicy("name")]` references against the declared set. `ELPOL001` flags
+     `[AuthorizationPolicy]` on a non-policy; `ELPOL002` flags a policy outside any module. Manual
+     `AddElarionAuthorizationPolicy` (typed or delegate) remains for inline/host registration.
 
 2. **`AppError` gains `Unauthorized` (401)** alongside `Forbidden` (403): an unauthenticated caller fails
    with `Unauthorized`, an authenticated-but-denied caller with `Forbidden`, matching ASP.NET semantics and
@@ -66,9 +73,15 @@ should named "policies" reuse ASP.NET Core's policy engine?
 - `ICurrentUser` gains claim access (`HasClaim`/`GetClaimValues`) as fail-closed default interface methods, so
   existing implementers keep compiling and a stale fake denies rather than fails open.
 - Named policies are resolved by string at runtime; a typo'd policy name fails closed (forbidden + a warning),
-  not at compile time. A future analyzer could check policy names against registrations.
+  not at compile time. Because `[AuthorizationPolicy("name")]` puts the name in compile-time metadata, a future
+  analyzer can cross-check `[RequirePolicy("name")]` references against the declared policies and flag typos —
+  the attribute exists in part to enable that.
 - The EF generator now emits `ConfigureEntities` + the neutral seam for every `[GenerateDbSets]` context, even
   one with no `[EntityConfiguration]` entities (e.g. an Identity-only context), so the host's `ConfigureEntities`
   call always resolves.
-- Replicating EF's Identity model configuration (rather than inheriting it) is a maintenance cost, bounded by
-  pinning the Identity version and a model test that locks the keys, indexes, and names.
+- **Replicating EF's Identity model configuration is the accepted "bitter pill."** The rejected alternatives are
+  worse: inheriting `IdentityDbContext` (the coupling this design removes), or reflectively invoking
+  `IdentityDbContext<…>.OnModelCreating` on a throwaway instance to harvest its config (AOT/trim-hostile hidden
+  runtime discovery that depends on EF internals like instance `StoreOptions`). Replication is ~80 lines of
+  MIT-licensed, extremely stable config, pinned to the Identity version and locked by a model test; the only
+  realistic drift is a new Identity column, which the app's column convention still snake_cases.

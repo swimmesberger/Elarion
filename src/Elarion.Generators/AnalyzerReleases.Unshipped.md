@@ -39,3 +39,5 @@ ELCACHE002 | Elarion.Abstractions.Caching | Error | Handler cache tags are requi
 ELCACHE003 | Elarion.Abstractions.Caching | Error | Handler cache tag is invalid
 ELCACHE004 | Elarion.Abstractions.Caching | Error | Handler cache duration is invalid
 ELAUTH001 | Elarion.Abstractions.Authorization | Error | Authorized handler response cannot represent failure
+ELPOL001 | Elarion.Abstractions.Authorization | Error | [AuthorizationPolicy] must be on an IAuthorizationPolicy
+ELPOL002 | Elarion.Abstractions.Authorization | Warning | Authorization policy is not in any module

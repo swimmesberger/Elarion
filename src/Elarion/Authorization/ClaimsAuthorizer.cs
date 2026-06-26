@@ -14,7 +14,7 @@ namespace Elarion.Authorization;
 /// </summary>
 public sealed class ClaimsAuthorizer(
     ICurrentUser user,
-    IEnumerable<IAuthorizationPolicy> policies,
+    IEnumerable<NamedAuthorizationPolicy> policies,
     AuthorizationOptions options,
     ILogger<ClaimsAuthorizer> logger
 ) : IAuthorizer {
@@ -65,21 +65,21 @@ public sealed class ClaimsAuthorizer(
         return null;
     }
 
+    private IAuthorizationPolicy? FindPolicy(string name) {
+        foreach (var named in policies) {
+            if (string.Equals(named.Name, name, StringComparison.Ordinal)) {
+                return named.Policy;
+            }
+        }
+
+        return null;
+    }
+
     private bool SatisfiesClaim(RequireClaimAttribute claim) {
         var values = user.GetClaimValues(claim.ClaimType);
         return claim.AllowedValues.Count == 0
             ? values.Any()
             : values.Any(value => claim.AllowedValues.Contains(value, StringComparer.Ordinal));
-    }
-
-    private IAuthorizationPolicy? FindPolicy(string name) {
-        foreach (var policy in policies) {
-            if (string.Equals(policy.Name, name, StringComparison.Ordinal)) {
-                return policy;
-            }
-        }
-
-        return null;
     }
 
     private AppError Forbidden(string requirement) =>

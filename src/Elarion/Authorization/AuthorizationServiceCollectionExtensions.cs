@@ -1,3 +1,4 @@
+using System.Reflection;
 using Elarion.Abstractions.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -27,13 +28,32 @@ public static class AuthorizationServiceCollectionExtensions {
         return services;
     }
 
-    /// <summary>Registers a named <see cref="IAuthorizationPolicy"/> resolved from DI (may inject services).</summary>
+    /// <summary>
+    /// Registers a named <see cref="IAuthorizationPolicy"/> (resolved from DI, so it may inject services),
+    /// bound to <paramref name="name"/>. Usually emitted by the generator from <c>[AuthorizationPolicy("name")]</c>.
+    /// </summary>
+    public static IServiceCollection AddElarionAuthorizationPolicy<TPolicy>(this IServiceCollection services, string name)
+        where TPolicy : class, IAuthorizationPolicy {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        services.TryAddScoped<TPolicy>();
+        services.AddScoped(sp => new NamedAuthorizationPolicy(name, sp.GetRequiredService<TPolicy>()));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a named <see cref="IAuthorizationPolicy"/> whose name is read from its
+    /// <see cref="AuthorizationPolicyAttribute"/>. Convenience for manual registration of an attributed policy.
+    /// </summary>
     public static IServiceCollection AddElarionAuthorizationPolicy<TPolicy>(this IServiceCollection services)
         where TPolicy : class, IAuthorizationPolicy {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddScoped<IAuthorizationPolicy, TPolicy>();
-        return services;
+        var attribute = typeof(TPolicy).GetCustomAttribute<AuthorizationPolicyAttribute>(inherit: false)
+            ?? throw new InvalidOperationException(
+                $"'{typeof(TPolicy)}' has no [AuthorizationPolicy] attribute; pass the policy name explicitly.");
+        return services.AddElarionAuthorizationPolicy<TPolicy>(attribute.Name);
     }
 
     /// <summary>Registers a named authorization policy from an inline delegate, for simple checks.</summary>
@@ -45,7 +65,7 @@ public static class AuthorizationServiceCollectionExtensions {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(evaluate);
 
-        services.AddSingleton<IAuthorizationPolicy>(new DelegateAuthorizationPolicy(name, evaluate));
+        services.AddScoped(_ => new NamedAuthorizationPolicy(name, new DelegateAuthorizationPolicy(evaluate)));
         return services;
     }
 }

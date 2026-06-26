@@ -14,7 +14,7 @@ public sealed class AuthorizationDecoratorTests {
         Type handlerType,
         ICurrentUser user,
         bool requireAuthenticatedByDefault = false,
-        IEnumerable<IAuthorizationPolicy>? policies = null,
+        IEnumerable<NamedAuthorizationPolicy>? policies = null,
         AuthorizationOptions? options = null) {
         var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
         var authorizer = new ClaimsAuthorizer(
@@ -94,7 +94,8 @@ public sealed class AuthorizationDecoratorTests {
             IsAuthenticated = true, Roles = ["Admin"], Claims = [("age", "30")],
         };
         var policy = new AtLeast21Policy();
-        var decorator = Decorate(typeof(PolicyAndRoleHandler), authorized, policies: [policy]);
+        var decorator = Decorate(
+            typeof(PolicyAndRoleHandler), authorized, policies: [new NamedAuthorizationPolicy("AtLeast21", policy)]);
 
         var allowed = await decorator.HandleAsync(new GuardedCommand(7), TestContext.Current.CancellationToken);
 
@@ -104,7 +105,9 @@ public sealed class AuthorizationDecoratorTests {
 
         // Missing the role => forbidden even though the policy passes.
         var missingRole = new FakeCurrentUser { IsAuthenticated = true, Claims = [("age", "30")] };
-        var deniedDecorator = Decorate(typeof(PolicyAndRoleHandler), missingRole, policies: [new AtLeast21Policy()]);
+        var deniedDecorator = Decorate(
+            typeof(PolicyAndRoleHandler), missingRole,
+            policies: [new NamedAuthorizationPolicy("AtLeast21", new AtLeast21Policy())]);
         var denied = await deniedDecorator.HandleAsync(new GuardedCommand(7), TestContext.Current.CancellationToken);
         denied.Error.Kind.Should().Be(ErrorKind.Forbidden);
     }
