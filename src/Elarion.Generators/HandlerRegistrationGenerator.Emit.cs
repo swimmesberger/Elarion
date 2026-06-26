@@ -41,8 +41,10 @@ public sealed partial class HandlerRegistrationGenerator {
 
         sb.AppendLine($"public static class {handler.HandlerName}Registration");
         sb.AppendLine("{");
-        AppendAppliesToFields(sb, handler);
+        // The metadata field is emitted before the AppliesTo fields so an `AppliesTo(HandlerMetadata)` field
+        // initializer (which references __handlerMetadata) sees it initialized — static initializers run in order.
         AppendHandlerMetadataField(sb, handler);
+        AppendAppliesToFields(sb, handler);
         AppendRegistrationMethod(sb, handler);
 
         if (handler.Cacheable is not null)
@@ -57,24 +59,33 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     private static void AppendAppliesToFields(StringBuilder sb, HandlerInfo handler) {
-        // A decorator with a `public static bool AppliesTo(Type)` predicate is attached conditionally. The
-        // predicate is called once here (per closed handler type, at type init) and cached; the factory below
-        // reads the cached bool. The call site is a direct static invocation + typeof, so it stays AOT/trim-safe.
+        // A decorator with a `public static bool AppliesTo(HandlerMetadata)` predicate is attached conditionally.
+        // The predicate is called once here (per closed handler type, at type init) and cached; the factory below
+        // reads the cached bool. The call site is a direct static invocation, so it stays AOT/trim-safe.
         for (var i = 0; i < handler.Decorators.Length; i++) {
-            if (!handler.Decorators[i].HasAppliesTo)
+            var decorator = handler.Decorators[i];
+            if (!decorator.HasAppliesTo)
                 continue;
 
+            // The single predicate form is `AppliesTo(HandlerMetadata)`; pass the cached metadata singleton.
             sb.AppendLine($"    private static readonly bool __pipelineApplies{i} =");
-            sb.AppendLine($"        {handler.Decorators[i].DecoratorFqn}.AppliesTo(typeof({handler.RequestFqn}));");
+            sb.AppendLine($"        {decorator.DecoratorFqn}.AppliesTo(__handlerMetadata);");
         }
     }
 
     private static void AppendHandlerMetadataField(StringBuilder sb, HandlerInfo handler) {
-        // Only emit the metadata singleton when a pipeline decorator actually asks for it. It captures the
-        // concrete handler type so an attribute-reading decorator sees the true handler regardless of its
-        // position in the chain (the inner.GetType() approach only works when innermost — a fail-open footgun).
-        var wantsMetadata = false;
+        // Only emit the metadata singleton when a pipeline decorator actually asks for it (or the auto-attached
+        // authorization decorator needs it). It captures the concrete handler type so an attribute-reading
+        // decorator sees the true handler regardless of its position in the chain (the inner.GetType() approach
+        // only works when innermost — a fail-open footgun).
+        var wantsMetadata = handler.HasAuthorization;
         foreach (var dec in handler.Decorators) {
+            // An `AppliesTo(HandlerMetadata)` predicate or a constructor HandlerMetadata dependency both need it.
+            if (dec.HasAppliesTo) {
+                wantsMetadata = true;
+                break;
+            }
+
             foreach (var dep in dec.ExtraDependencies) {
                 if (dep.IsHandlerMetadata) {
                     wantsMetadata = true;
@@ -90,7 +101,7 @@ public sealed partial class HandlerRegistrationGenerator {
             return;
 
         sb.AppendLine("    private static readonly global::Elarion.Abstractions.Pipeline.HandlerMetadata __handlerMetadata =");
-        sb.AppendLine($"        new(typeof({handler.HandlerFqn}));");
+        sb.AppendLine($"        new(typeof({handler.HandlerFqn}), typeof({handler.RequestFqn}), typeof({handler.ResponseFqn}));");
     }
 
     private static void AppendRegistrationMethod(StringBuilder sb, HandlerInfo handler) {
@@ -122,6 +133,9 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendPipelineDecorators(sb, handler.Decorators);
         AppendResilienceDecorator(sb, handler);
         AppendCacheInvalidationDecorator(sb, handler);
+        // Authorization is the outermost functional gate (just inside tracing): a denied request never touches
+        // caching, the pipeline (validation/transaction), or the handler, yet the denial is still traced.
+        AppendAuthorizationDecorator(sb, handler);
         // Note: tracing is emitted last so the handler span is the outermost decorator and parents
         // any cache/resilience/pipeline child spans.
         AppendTracingDecorator(sb, handler);
@@ -147,7 +161,7 @@ public sealed partial class HandlerRegistrationGenerator {
             // Note 58: Decorators are emitted in reverse so the first configured decorator becomes the outermost wrapper.
             var indent = "                ";
             if (dec.HasAppliesTo) {
-                // Attach only when the decorator's AppliesTo predicate matched this request type (cached above).
+                // Attach only when the decorator's AppliesTo(HandlerMetadata) predicate returned true (cached above).
                 sb.AppendLine($"{indent}if (__pipelineApplies{i})");
                 indent += "    ";
             }
@@ -170,6 +184,21 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Resilience.IResiliencePipelineRunner>(),");
         sb.AppendLine($"                    new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference {{ Name = {FormatStringLiteral(handler.ResiliencePolicyName)} }});");
+    }
+
+    private static void AppendAuthorizationDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (!handler.HasAuthorization)
+            return;
+
+        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Authorization.AuthorizationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine("                    __handlerMetadata,");
+        if (handler.RequireAuthenticatedByDefault) {
+            sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>(),");
+            sb.AppendLine("                    requireAuthenticatedByDefault: true);");
+        } else {
+            sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>());");
+        }
     }
 
     private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {

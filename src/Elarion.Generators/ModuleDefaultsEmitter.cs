@@ -29,6 +29,7 @@ internal static class ModuleDefaultsEmitter
     public const string AddValidatorsMethod = "AddValidators";
     public const string AddScheduledJobsMethod = "AddScheduledJobs";
     public const string AddEventConsumersMethod = "AddEventConsumers";
+    public const string AddAuthorizationPoliciesMethod = "AddAuthorizationPolicies";
     public const string AddModuleApiMethod = "AddModuleApi";
 
     public const string ServiceCollectionFqn =
@@ -42,6 +43,7 @@ internal static class ModuleDefaultsEmitter
         AddValidatorsMethod,
         AddScheduledJobsMethod,
         AddEventConsumersMethod,
+        AddAuthorizationPoliciesMethod,
         AddModuleApiMethod
     ];
 

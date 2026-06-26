@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
+using Elarion.Abstractions.Pipeline;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -42,10 +43,11 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
     DbContext db
 ) : IHandler<TRequest, TResponse> {
-    // Attach only where a new unit of work is needed — commands and integration-event handlers. The
-    // generator evaluates this at compile time, so queries and domain-event handlers never get it.
-    public static bool AppliesTo(Type request) =>
-        request.IsAssignableTo(typeof(ICommand)) || request.IsAssignableTo(typeof(IIntegrationEvent));
+    // Attach only where a new unit of work is needed — commands and integration-event handlers. The generator
+    // evaluates this once per handler at pipeline-build time, so queries and domain-event handlers never get it.
+    public static bool AppliesTo(HandlerMetadata handler) =>
+        handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
+        handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent));
 
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);

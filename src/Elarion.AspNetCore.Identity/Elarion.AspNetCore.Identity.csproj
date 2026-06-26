@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Optional ASP.NET Core Identity integration for Elarion: AddElarionIdentity wiring, a snake_case Identity model that composes onto a plain DbContext via [GenerateElarionIdentity], and the transport-neutral authorizer.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <!-- Bundle the Identity source generator's analyzer into this package. NuGet analyzer assets are not
+       transitive, so the generator lives in the package each annotated assembly references directly.
+       ReferenceOutputAssembly=false keeps it off the runtime surface; PrivateAssets=all keeps it from
+       becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.AspNetCore.Identity.Generators\Elarion.AspNetCore.Identity.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="_BundleElarionIdentityGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.AspNetCore.Identity.Generators\Elarion.AspNetCore.Identity.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionIdentityGeneratorAnalyzer" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_ElarionIdentityGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>

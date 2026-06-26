@@ -32,5 +32,8 @@
     <ProjectReference Include="../../src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.Generators/Elarion.Generators.csproj" />
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj" />
+    <ProjectReference Include="../../src/Elarion.AspNetCore.Identity.Generators/Elarion.AspNetCore.Identity.Generators.csproj" />
   </ItemGroup>
 </Project>

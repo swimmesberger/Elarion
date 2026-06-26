@@ -3,26 +3,21 @@ using System.Reflection;
 namespace Elarion.Abstractions.Pipeline;
 
 /// <summary>
-/// Compile-time metadata about the concrete handler at the bottom of a decorator pipeline, supplied
-/// by the source generator to any decorator that declares a <see cref="HandlerMetadata"/> constructor
-/// parameter.
+/// Compile-time facts about the concrete handler at the bottom of a decorator pipeline — its type, request
+/// type, response type, and (through them) its attributes — supplied by the source generator.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Decorators wrap innermost-first, so a decorator that tries to read the handler's attributes via
-/// <c>inner.GetType()</c> only sees the concrete handler when it happens to be the innermost wrapper —
-/// at any other position it sees the next decorator instead. For an authorization-style decorator that
-/// reads a <c>[RequirePermission]</c>-style attribute off the handler, that is a <b>fail-open</b>
-/// footgun: positioned outermost (the intuitive "check first" spot) the attribute is invisible and the
-/// check silently passes.
+/// It is used in two places, and both let a decorator key off the <b>handler's own attributes</b> without the
+/// fail-open footgun of reading <c>inner.GetType()</c> (which only sees the concrete handler when the decorator
+/// happens to be innermost — at any other position it sees the next decorator):
 /// </para>
-/// <para>
-/// <see cref="HandlerType"/> is the <b>true</b> concrete handler type regardless of the decorator's
-/// position in the chain, so attribute-driven cross-cutting concerns become position-independent.
-/// Declare a constructor parameter of this type and the generator injects it (the inner handler comes
-/// first, then any DI dependencies and this metadata in declaration order):
-/// </para>
-/// <example>
+/// <list type="number">
+/// <item>
+/// <description>
+/// <b>Constructor injection.</b> A decorator that declares a <see cref="HandlerMetadata"/> constructor parameter
+/// receives it (the inner handler comes first, then any DI dependencies and this metadata in declaration order),
+/// so an authorization-style decorator can read a <c>[RequirePermission]</c>-style attribute at run time:
 /// <code>
 /// public sealed class AuthorizationDecorator&lt;TRequest, TResponse&gt;(
 ///     IHandler&lt;TRequest, TResponse&gt; inner,
@@ -37,21 +32,46 @@ namespace Elarion.Abstractions.Pipeline;
 ///     }
 /// }
 /// </code>
-/// </example>
+/// </description>
+/// </item>
+/// <item>
+/// <description>
+/// <b>An <c>AppliesTo</c> attachment predicate.</b> A decorator may declare
+/// <c>public static bool AppliesTo(HandlerMetadata handler)</c> so it attaches <b>based on the handler</b> — its
+/// attributes, request type (<see cref="RequestType"/>), or response type — which is the same capability the
+/// framework's built-in decorators use, available to any custom decorator:
+/// <code>
+/// public static bool AppliesTo(HandlerMetadata handler) =>
+///     handler.GetAttribute&lt;AuditableAttribute&gt;() is not null;
+/// </code>
+/// The generator calls it once per closed handler type at pipeline-build time and caches the result.
+/// </description>
+/// </item>
+/// </list>
 /// <para>
-/// Reading attributes still uses reflection, but on a single known <see cref="System.Type"/>, which is
-/// AOT/trim-safe as long as the attribute type itself is preserved.
+/// Reading attributes uses reflection, but on a single known <see cref="System.Type"/>, which is AOT/trim-safe as
+/// long as the attribute type itself is preserved.
 /// </para>
 /// </remarks>
 public sealed class HandlerMetadata {
-    /// <summary>Creates metadata for the given concrete handler type.</summary>
+    /// <summary>Creates metadata for the given concrete handler.</summary>
     /// <param name="handlerType">The concrete handler type at the bottom of the pipeline.</param>
-    public HandlerMetadata(Type handlerType) {
+    /// <param name="requestType">The handler's request type (<c>TRequest</c>).</param>
+    /// <param name="responseType">The handler's response type (<c>TResponse</c>, typically a <c>Result&lt;T&gt;</c>).</param>
+    public HandlerMetadata(Type handlerType, Type requestType, Type responseType) {
         HandlerType = handlerType ?? throw new ArgumentNullException(nameof(handlerType));
+        RequestType = requestType ?? throw new ArgumentNullException(nameof(requestType));
+        ResponseType = responseType ?? throw new ArgumentNullException(nameof(responseType));
     }
 
     /// <summary>The concrete handler type, independent of the decorator's position in the chain.</summary>
     public Type HandlerType { get; }
+
+    /// <summary>The handler's request type (the <c>TRequest</c> of its <c>IHandler&lt;TRequest, TResponse&gt;</c>).</summary>
+    public Type RequestType { get; }
+
+    /// <summary>The handler's response type (the <c>TResponse</c>; typically a <c>Result&lt;T&gt;</c>).</summary>
+    public Type ResponseType { get; }
 
     /// <summary>
     /// Returns the single attribute of type <typeparamref name="TAttribute"/> declared on the handler,

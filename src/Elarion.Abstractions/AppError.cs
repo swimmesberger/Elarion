@@ -17,6 +17,8 @@ public enum ErrorKind {
     BusinessRule,
     /// <summary>An unexpected internal error occurred.</summary>
     Internal,
+    /// <summary>The caller is not authenticated (no/invalid credentials). Maps to HTTP 401.</summary>
+    Unauthorized,
 }
 
 /// <summary>
@@ -57,9 +59,13 @@ public sealed record AppError {
     public static AppError Conflict(string message) =>
         new() { Kind = ErrorKind.Conflict, Message = message };
 
-    /// <summary>Creates a forbidden/authorization error.</summary>
+    /// <summary>Creates a forbidden/authorization error (authenticated but not permitted).</summary>
     public static AppError Forbidden(string message) =>
         new() { Kind = ErrorKind.Forbidden, Message = message };
+
+    /// <summary>Creates an unauthorized/authentication error (no or invalid credentials).</summary>
+    public static AppError Unauthorized(string message) =>
+        new() { Kind = ErrorKind.Unauthorized, Message = message };
 
     /// <summary>Creates a business rule violation error with optional details.</summary>
     public static AppError BusinessRule(string message, object? data = null) =>

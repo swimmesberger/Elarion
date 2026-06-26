@@ -20,7 +20,7 @@ This page builds Clients in full. The Invoicing module follows the same patterns
 Elarion ships no concrete decorators — they depend on *your* logging, *your* `DbContext`, *your*
 conventions. Define them in the application and expose a pipeline with `[DecoratorList]`. A decorator
 can declare *where it attaches* — by a generic constraint (`where TRequest : ICommand`) or a
-`static bool AppliesTo(Type request)` predicate the generator evaluates at compile time — so **one**
+`static bool AppliesTo(HandlerMetadata handler)` predicate the generator evaluates per handler — so **one**
 pipeline serves commands, queries, and event handlers alike.
 
 ```csharp title="src/Billing.Application/Decorators/Decorators.cs"
@@ -69,9 +69,10 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
     DbContext db
 ) : IHandler<TRequest, TResponse> {
     // Attach only where a new unit of work is needed — commands and integration-event handlers. The
-    // generator evaluates this at compile time, so queries and domain-event handlers never get it.
-    public static bool AppliesTo(Type request) =>
-        request.IsAssignableTo(typeof(ICommand)) || request.IsAssignableTo(typeof(IIntegrationEvent));
+    // generator calls this once per handler type, so queries and domain-event handlers never get it.
+    public static bool AppliesTo(HandlerMetadata handler) =>
+        handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
+        handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent));
 
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);

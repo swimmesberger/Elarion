@@ -16,6 +16,7 @@ public static class HttpAppErrorMapper {
         ErrorKind.NotFound => StatusCodes.Status404NotFound,
         ErrorKind.Conflict => StatusCodes.Status409Conflict,
         ErrorKind.Forbidden => StatusCodes.Status403Forbidden,
+        ErrorKind.Unauthorized => StatusCodes.Status401Unauthorized,
         ErrorKind.BusinessRule => StatusCodes.Status422UnprocessableEntity,
         ErrorKind.Internal => StatusCodes.Status500InternalServerError,
         _ => StatusCodes.Status500InternalServerError,

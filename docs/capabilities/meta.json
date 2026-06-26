@@ -5,6 +5,7 @@
     "hosting",
     "serialization",
     "current-user",
+    "identity",
     "caching",
     "transports",
     "scheduling",

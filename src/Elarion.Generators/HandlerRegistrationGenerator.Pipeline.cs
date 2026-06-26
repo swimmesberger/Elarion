@@ -99,7 +99,17 @@ public sealed partial class HandlerRegistrationGenerator {
         "ELPIPE001",
         "Decorator AppliesTo predicate must be public",
         "Decorator '{0}' declares an 'AppliesTo' predicate that is not public; make it a "
-        + "'public static bool AppliesTo(System.Type request)' so the generated registration can call it",
+        + "'public static bool AppliesTo(HandlerMetadata handler)' so the generated registration can call it",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor UnsupportedAppliesToSignature = new(
+        "ELPIPE002",
+        "Decorator AppliesTo predicate has an unsupported signature",
+        "Decorator '{0}' declares an 'AppliesTo' method with an unsupported signature; the only attachment "
+        + "predicate is 'public static bool AppliesTo(Elarion.Abstractions.Pipeline.HandlerMetadata handler)' "
+        + "(use handler.RequestType for request-based checks)",
         "Elarion.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -132,13 +142,20 @@ public sealed partial class HandlerRegistrationGenerator {
             if (!SatisfiesConstraints(definition, requestType, responseType))
                 continue;
 
-            // A decorator may narrow attachment with a `public static bool AppliesTo(Type request)` predicate,
-            // called once at pipeline-build time (see ADR-0003). It expresses unions/negations a `where` cannot,
-            // and may use any logic — including reflection over the request type's attributes.
+            // A decorator may narrow attachment with a `public static bool AppliesTo(HandlerMetadata handler)`
+            // predicate, called once at pipeline-build time (see ADR-0003). It expresses unions/negations a
+            // `where` cannot, may use any logic (including reflection over the handler's attributes), and is the
+            // same capability the framework's built-in decorators use.
             var predicate = DecoratorPredicate.Detect(definition, compilation, out var predicateLocation);
             if (predicate == DecoratorPredicate.Result.NotPublic) {
                 diagnostics.Add(DiagnosticInfo.Create(
                     NonPublicAppliesToPredicate, predicateLocation, definition.Name));
+                continue;
+            }
+
+            if (predicate == DecoratorPredicate.Result.UnsupportedSignature) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    UnsupportedAppliesToSignature, predicateLocation, definition.Name));
                 continue;
             }
 
