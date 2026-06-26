@@ -508,8 +508,10 @@ public sealed class InMemorySchedulerTests
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => probe.StartedCount >= 1);
 
-        time.Advance(Interval);
-        await WaitUntilAsync(() => probe.StartedCount >= 2);
+        // Advance in steps until the overlapping run dispatches. A single Advance can land
+        // before the scheduler registers its next-occurrence wait timer on the fake clock,
+        // which loses the tick and stalls the run; AdvanceUntilAsync re-advances until it fires.
+        await AdvanceUntilAsync(time, Interval, () => probe.StartedCount >= 2);
 
         probe.MaxActiveCount.Should().BeGreaterThan(1);
 
@@ -533,8 +535,10 @@ public sealed class InMemorySchedulerTests
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => probe.StartedCount >= 1);
 
-        time.Advance(Interval);
-        await WaitUntilAsync(() => probe.StartedCount >= 2);
+        // Same fake-clock race as RecurringJob_AllowConcurrent_StartsOverlappingRuns: a single
+        // Advance can be lost if it beats the scheduler's wait-timer registration. The cap then
+        // holds StartedCount/MaxActiveCount at 2 regardless of how far the clock is advanced.
+        await AdvanceUntilAsync(time, Interval, () => probe.StartedCount >= 2);
         time.Advance(Interval);
         await Task.Delay(100, cts.Token);
 
