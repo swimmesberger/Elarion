@@ -82,7 +82,10 @@ public static class JsonRpcEndpoint {
             return;
         }
 
-        await using var scope = ctx.RequestServices.CreateDispatchScope(CreateDispatchContext(ctx));
+        // inheritFrom: the request scope — initializers copy its already-built scoped state (current user, …)
+        // into the call scope instead of rebuilding it.
+        await using var scope = ctx.RequestServices.CreateDispatchScope(
+            CreateDispatchContext(ctx), inheritFrom: ctx.RequestServices);
         var response = await dispatcher.DispatchAsync(
             request, scope.ServiceProvider, ctx.RequestAborted);
 

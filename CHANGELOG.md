@@ -22,6 +22,11 @@ minor releases may include breaking changes.
   `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(...)` helper carry request-boundary
   state into the JSON-RPC/MCP per-call child scope. Current-user seeding is one registered consumer
   (`AddElarionCurrentUser`); hosts register their own (tenant, correlation, …) via `TryAddEnumerable`.
+- **Scope inheritance via copy (`IScopeCopyable<T>` + `AddDispatchScopeInherited<T>()`).** When a request
+  scope exists (JSON-RPC, HTTP batch), the rail copies an already-built request-scoped instance into each
+  per-call scope instead of rebuilding it. Current-user uses this to inherit the middleware's snapshot —
+  the materialized claims are reused, no re-parsing — falling back to building from the captured principal
+  only for MCP (no request scope) or when the middleware did not run.
 
 ### Changed
 - **Breaking (custom batch strategies):** `IBatchExecutionStrategy.ExecuteAsync` gains a

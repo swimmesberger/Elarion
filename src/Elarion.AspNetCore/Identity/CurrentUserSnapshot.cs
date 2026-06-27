@@ -1,13 +1,15 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Options;
 using Elarion.Abstractions.Identity;
+using Elarion.JsonRpc;
 
 namespace Elarion.AspNetCore.Identity;
 
 /// <summary>
 /// Scoped copy of the authenticated ASP.NET principal exposed through the framework identity abstraction.
 /// </summary>
-public sealed class CurrentUserSnapshot(IOptions<AspNetCoreCurrentUserOptions> options) : ICurrentUser {
+public sealed class CurrentUserSnapshot(IOptions<AspNetCoreCurrentUserOptions> options)
+    : ICurrentUser, IScopeCopyable<CurrentUserSnapshot> {
     private bool _initialized;
     private bool _isAuthenticated;
     private string? _userId;
@@ -16,6 +18,9 @@ public sealed class CurrentUserSnapshot(IOptions<AspNetCoreCurrentUserOptions> o
     private ILookup<string, string> _claims = Enumerable.Empty<string>().ToLookup(static value => value);
 
     private AspNetCoreCurrentUserOptions Options => options.Value;
+
+    /// <summary>Whether this snapshot has been initialized from a principal.</summary>
+    internal bool IsInitialized => _initialized;
 
     /// <inheritdoc />
     public string UserId {
@@ -70,6 +75,22 @@ public sealed class CurrentUserSnapshot(IOptions<AspNetCoreCurrentUserOptions> o
         EnsureInitialized();
 
         return _claims[type];
+    }
+
+    /// <summary>
+    /// Copies an already-built snapshot's state into this instance — reusing the materialized claims lookup
+    /// and roles by reference (both are immutable after <see cref="Initialize"/>), so no claims are re-parsed.
+    /// Used to inherit the request-scope snapshot into the dispatcher's per-call child scopes.
+    /// </summary>
+    public void CopyFrom(CurrentUserSnapshot source) {
+        ArgumentNullException.ThrowIfNull(source);
+
+        _isAuthenticated = source._isAuthenticated;
+        _userId = source._userId;
+        _email = source._email;
+        _roles = source._roles;
+        _claims = source._claims;
+        _initialized = source._initialized;
     }
 
     internal void Initialize(ClaimsPrincipal principal) {

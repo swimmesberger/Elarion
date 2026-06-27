@@ -87,6 +87,40 @@ public sealed class DispatchScopeTests {
         doc.RootElement.GetProperty("seen").GetString().Should().Be("from-context");
     }
 
+    [Fact]
+    public void AddDispatchScopeInherited_CopiesOriginatingInstanceIntoChildScope_WithoutRebuilding() {
+        var services = new ServiceCollection()
+            .AddScoped<CopyableProbe>()
+            .AddDispatchScopeInherited<CopyableProbe>()
+            .BuildServiceProvider();
+        // Originating "request" scope with a built instance.
+        using var request = services.CreateScope();
+        var origin = request.ServiceProvider.GetRequiredService<CopyableProbe>();
+        origin.Value = "built-once";
+
+        using var call = request.ServiceProvider.CreateDispatchScope(inheritFrom: request.ServiceProvider);
+
+        var copied = call.ServiceProvider.GetRequiredService<CopyableProbe>();
+        copied.Value.Should().Be("built-once");
+        copied.CopyCount.Should().Be(1);
+        origin.CopyCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void AddDispatchScopeInherited_NoInheritFrom_IsNoOp() {
+        var services = new ServiceCollection()
+            .AddScoped<CopyableProbe>()
+            .AddDispatchScopeInherited<CopyableProbe>()
+            .BuildServiceProvider();
+
+        // No originating scope (e.g. MCP) — nothing to copy.
+        using var call = services.CreateDispatchScope();
+
+        var probe = call.ServiceProvider.GetRequiredService<CopyableProbe>();
+        probe.Value.Should().BeNull();
+        probe.CopyCount.Should().Be(0);
+    }
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
@@ -95,8 +129,18 @@ public sealed class DispatchScopeTests {
         public string? Value { get; set; }
     }
 
+    private sealed class CopyableProbe : IScopeCopyable<CopyableProbe> {
+        public string? Value { get; set; }
+        public int CopyCount { get; private set; }
+
+        public void CopyFrom(CopyableProbe source) {
+            Value = source.Value;
+            CopyCount++;
+        }
+    }
+
     private sealed class SeedProbeInitializer : IDispatchScopeInitializer {
-        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
+        public void Initialize(IServiceProvider callScope, IServiceProvider? inheritFrom, DispatchScopeContext context) {
             if (context.TryGet<string>(out var value)) {
                 callScope.GetRequiredService<ProbeState>().Value = value;
             }
