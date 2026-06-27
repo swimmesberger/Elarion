@@ -33,6 +33,26 @@ minor releases may include breaking changes.
 - **`IAppErrorTranslator<TError>` (`Elarion.Abstractions`).** A seam for mapping `AppError` to a transport's
   wire error type. The JSON-RPC bridge resolves `IAppErrorTranslator<RpcError>` (defaulting to the
   `AppErrorMapper` codes), so a host can override JSON-RPC error codes by registering its own.
+- **Runtime-changeable, database-backed settings (`Elarion.Settings` + `Elarion.Settings.EntityFrameworkCore` + `Elarion.Settings.Configuration`).**
+  Key/value settings with **swappable abstractions on both sides**. The sink side is `ISettingsStore` plus the
+  listen seam `ISettingsChangeSource`/`ISettingsChangePublisher`, keyed by an extensible `(Kind, Owner)`
+  `SettingsScope` (`Global` and `User(ownerId)` ship) and hierarchical, virtual `:`-separated keys, with
+  optimistic-concurrency `SettingWriteResult`. The shipped in-process backend (single-instance notify) and an
+  EF Core backend (`EfCoreSettingsStore<TDbContext>`, change-tracker-free immediate writes, `UseElarionSettings`)
+  both implement it. The consuming side is the AOT-clean scoped `ISettingsManager` (typed access via source-gen
+  `JsonTypeInfo<T>`, per-user scope resolved from `ICurrentUser`, failing closed when unauthenticated), plus an
+  `IConfiguration`/`IOptionsMonitor` adapter (`AddElarionSettingsConfiguration`) with `IChangeToken` reload.
+  See [`docs/concepts/settings`](docs/concepts/settings.mdx) and [ADR-0011](docs/decisions/0011-runtime-settings-subsystem.md).
+- **Reusable variable substitution (`Elarion.Abstractions.Substitution`).** Spring-style `${key:-default}`
+  placeholders resolved from a pluggable `IVariableSource` (and change-observable `IObservableVariableSource`):
+  `VariableSubstitution` supports both whole-value and embedded substitution, `ConfigurationVariableSource`
+  bridges to `IConfiguration` (and its reload token), and `AddElarionVariableSubstitution` registers a default
+  source. A general building block, not tied to any one subsystem. See
+  [`docs/concepts/variable-substitution`](docs/concepts/variable-substitution.mdx).
+- **Scheduler live reschedule on variable change.** The in-memory scheduler resolves `${...}` schedule
+  variables through `IVariableSource`; when the source is observable, a watched-variable change **reschedules
+  affected recurring jobs immediately** (signature-based change detection; supersede + re-enqueue; mid-run
+  fixed-delay chains reschedule themselves), beyond per-occurrence next-fire pickup.
 
 ### Changed
 - **The event bus is now pub/sub-only; request/reply is unified under typed dispatch (breaking).** See
@@ -85,6 +105,15 @@ minor releases may include breaking changes.
 - **Breaking (custom batch strategies):** `IBatchExecutionStrategy.ExecuteAsync` takes a
   `DispatchScopeContext context`; strategies create each per-item scope via
   `CreateDispatchScope(context)` so scoped state (current user, …) is seeded per item.
+- The in-memory scheduler now resolves `${...}` schedule variables through the general `IVariableSource` seam
+  (config-backed by default via `AddElarionVariableSubstitution`) instead of taking `IConfiguration` directly,
+  so the variable source is swappable. `ScheduledJobSchedule.Resolve(IConfiguration)` is unchanged and gains a
+  `Resolve(IVariableSource)` overload.
+
+### Removed
+- **Breaking:** `ConfigPlaceholder` (`Elarion.Abstractions.Scheduling`) is removed in favor of the general
+  `VariableSubstitution`. The common surface — `ScheduledJobSchedule.Resolve(IConfiguration)` — is unchanged;
+  only direct callers of the low-level helper need to switch (same `${key:-default}` semantics).
 
 ### Documentation
 - Tutorial `features.mdx` now shows the no-reflection `IResultFailureFactory<TResponse>` /
