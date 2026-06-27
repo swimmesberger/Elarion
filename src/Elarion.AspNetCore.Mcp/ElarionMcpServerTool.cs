@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Elarion.JsonRpc;
@@ -51,8 +52,15 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
             ? JsonSerializer.SerializeToDocument(arguments, jsonOptions)
             : null;
 
+        // Capture the authenticated principal (populated by the Streamable-HTTP transport) so the per-call
+        // scope's ICurrentUser resolves — RpcToolInvoker scopes from the app root, not the request scope.
+        var context = new DispatchScopeContext();
+        if (request.User is { } user) {
+            context.Set<ClaimsPrincipal>(user);
+        }
+
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, _methodName, argumentsDocument?.RootElement, services, cancellationToken);
+            dispatcher, _methodName, argumentsDocument?.RootElement, services, context, cancellationToken);
 
         return ToCallToolResult(result, jsonOptions);
     }

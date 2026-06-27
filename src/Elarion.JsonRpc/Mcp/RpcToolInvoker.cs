@@ -29,19 +29,23 @@ public static class RpcToolInvoker {
     /// <summary>
     /// Dispatches <paramref name="methodName"/> with the given arguments. A fresh
     /// <see cref="IServiceScope"/> is created from <paramref name="rootServices"/> per call so scoped
-    /// services (e.g. a pooled EF Core <c>DbContext</c>) are managed correctly — mirroring the JSON-RPC endpoint.
+    /// services (e.g. a pooled EF Core <c>DbContext</c>) are managed correctly — mirroring the JSON-RPC
+    /// endpoint — and every registered <see cref="IDispatchScopeInitializer"/> seeds that scope from
+    /// <paramref name="context"/>.
     /// </summary>
     /// <param name="dispatcher">The frozen dispatcher to route through.</param>
     /// <param name="methodName">The JSON-RPC method name to invoke.</param>
     /// <param name="arguments">The method arguments as a JSON object, or <see langword="null"/> for none.</param>
     /// <param name="rootServices">The application root service provider; a per-call scope is created from it.</param>
+    /// <param name="context">The values captured at the call boundary (e.g. the authenticated principal), or <see langword="null"/>.</param>
     /// <param name="ct">A cancellation token flowed into the handler.</param>
     public static async Task<RpcToolResult> InvokeAsync(
         JsonRpcDispatcher dispatcher,
         string methodName,
         JsonElement? arguments,
         IServiceProvider rootServices,
-        CancellationToken ct) {
+        DispatchScopeContext? context = null,
+        CancellationToken ct = default) {
         var request = new JsonRpcRequest {
             Jsonrpc = "2.0",
             Method = methodName,
@@ -49,7 +53,7 @@ public static class RpcToolInvoker {
             Id = null,
         };
 
-        await using var scope = rootServices.CreateAsyncScope();
+        await using var scope = rootServices.CreateDispatchScope(context);
         var response = await dispatcher.DispatchAsync(request, scope.ServiceProvider, ct);
 
         if (response.Error is { } error) {

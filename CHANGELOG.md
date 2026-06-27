@@ -8,6 +8,30 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **`ICurrentUser` now resolves inside JSON-RPC and MCP handlers (and so does authorization).** The
+  dispatchers run each call in a fresh DI child scope, which does not inherit the request scope's scoped
+  `CurrentUserSnapshot`, so a handler injecting `ICurrentUser` — or the `AuthorizationDecorator`, which
+  reads it — threw `"Current user has not been initialized"`. Each transport now captures the authenticated
+  principal at its boundary (`ctx.User` for JSON-RPC, `RequestContext.User` for MCP) and seeds the per-call
+  scope through a new generic rail — no `IHttpContextAccessor`, no `AsyncLocal`. Plain HTTP endpoints were
+  unaffected. See [`docs/capabilities/current-user`](docs/capabilities/current-user.mdx).
+
+### Added
+- **Generic per-call dispatch-scope seeding (`Elarion.JsonRpc`).** `IDispatchScopeInitializer` +
+  `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(...)` helper carry request-boundary
+  state into the JSON-RPC/MCP per-call child scope. Current-user seeding is one registered consumer
+  (`AddElarionCurrentUser`); hosts register their own (tenant, correlation, …) via `TryAddEnumerable`.
+
+### Changed
+- **Breaking (custom batch strategies):** `IBatchExecutionStrategy.ExecuteAsync` gains a
+  `DispatchScopeContext context` parameter, and strategies must create each per-item scope with
+  `CreateDispatchScope(context)` so scoped state is seeded per item.
+
+### Documentation
+- Tutorial `features.mdx` now shows the no-reflection `IResultFailureFactory<TResponse>` /
+  `TResponse.Failure(...)` pattern for validation decorators instead of a reflection-based helper.
+
 ## [0.2.2] - 2026-06-27
 
 ### Added

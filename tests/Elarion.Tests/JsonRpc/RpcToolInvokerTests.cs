@@ -44,7 +44,7 @@ public sealed class RpcToolInvokerTests {
 
         // Pass the root provider; the invoker creates its own per-call scope to resolve the scoped handler.
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, "echo", Args(new { name = "World" }), services, TestContext.Current.CancellationToken);
+            dispatcher, "echo", Args(new { name = "World" }), services, ct: TestContext.Current.CancellationToken);
 
         result.IsError.Should().BeFalse();
         using var doc = JsonDocument.Parse(result.Text);
@@ -56,7 +56,7 @@ public sealed class RpcToolInvokerTests {
         var (dispatcher, services) = Build();
 
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, "echo", Args(new { name = "missing" }), services, TestContext.Current.CancellationToken);
+            dispatcher, "echo", Args(new { name = "missing" }), services, ct: TestContext.Current.CancellationToken);
 
         result.IsError.Should().BeTrue();
         result.Text.Should().Be("client not found");
@@ -68,7 +68,7 @@ public sealed class RpcToolInvokerTests {
         var (dispatcher, services) = Build();
 
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, "does.not.exist", null, services, TestContext.Current.CancellationToken);
+            dispatcher, "does.not.exist", null, services, ct: TestContext.Current.CancellationToken);
 
         result.IsError.Should().BeTrue();
         result.ErrorCode.Should().Be(-32601);

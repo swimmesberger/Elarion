@@ -22,6 +22,8 @@ public interface ICurrentUser {
     IReadOnlyList<string> Roles { get; }
     bool IsAuthenticated { get; }
     bool IsInRole(string role);
+    bool HasClaim(string type, string value);
+    IEnumerable<string> GetClaimValues(string type);
 }
 ```
 
@@ -55,6 +57,36 @@ app.UseAuthorization();
 `UseElarionCurrentUser()` copies claim values into a scoped `CurrentUserSnapshot` once per request.
 Application handlers then read the snapshot, so they never touch `HttpContext` and stay testable —
 in a unit test you simply register a fake `ICurrentUser`.
+
+## Works across every transport
+
+`ICurrentUser` resolves identically under plain HTTP endpoints, JSON-RPC (single and batch), and MCP —
+no extra wiring. This matters because the JSON-RPC and MCP dispatchers run each call in a **fresh DI
+child scope** for isolation, and a child scope does not inherit the request scope's scoped instances. So
+the snapshot the request middleware initialized is not the one a JSON-RPC/MCP handler would otherwise
+resolve.
+
+Elarion bridges that gap explicitly (no `IHttpContextAccessor`, no `AsyncLocal`): each transport captures
+the authenticated principal at its boundary into a `DispatchScopeContext`, and `AddElarionCurrentUser()`
+registers an `IDispatchScopeInitializer` that seeds the per-call snapshot from it. Authorization rides the
+same path, since the authorizer reads `ICurrentUser`.
+
+`IDispatchScopeInitializer` is the public extension point for this. To carry any other per-call scoped
+state (tenant, correlation id, …) into JSON-RPC/MCP handler scopes, register your own:
+
+```csharp
+internal sealed class TenantScopeInitializer : IDispatchScopeInitializer {
+    public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
+        if (context.TryGet<ClaimsPrincipal>(out var user) && user is not null) {
+            callScope.GetRequiredService<TenantContext>().TenantId =
+                user.FindFirstValue("tenant");
+        }
+    }
+}
+
+// services.TryAddEnumerable(
+//     ServiceDescriptor.Singleton<IDispatchScopeInitializer, TenantScopeInitializer>());
+```
 
 ## Mapping claims
 

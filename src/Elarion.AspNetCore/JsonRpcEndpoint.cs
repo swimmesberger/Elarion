@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Claims;
 using System.Text.Json;
 using Elarion.JsonRpc;
 using Microsoft.AspNetCore.Http;
@@ -81,7 +82,7 @@ public static class JsonRpcEndpoint {
             return;
         }
 
-        await using var scope = ctx.RequestServices.CreateAsyncScope();
+        await using var scope = ctx.RequestServices.CreateDispatchScope(CreateDispatchContext(ctx));
         var response = await dispatcher.DispatchAsync(
             request, scope.ServiceProvider, ctx.RequestAborted);
 
@@ -180,6 +181,7 @@ public static class JsonRpcEndpoint {
             requests,
             dispatcher,
             ctx.RequestServices,
+            CreateDispatchContext(ctx),
             ctx.RequestAborted);
 
         if (responses.Count == 0) {
@@ -189,6 +191,15 @@ public static class JsonRpcEndpoint {
 
         ctx.Response.ContentType = "application/json";
         await JsonSerializer.SerializeAsync(ctx.Response.Body, responses, jsonOptions, ctx.RequestAborted);
+    }
+
+    // Captures the request-boundary state (the authenticated principal) so registered
+    // IDispatchScopeInitializer instances can seed it into each per-call child scope — child scopes do not
+    // inherit the request scope's scoped services, so ICurrentUser/authorization would otherwise be unset.
+    private static DispatchScopeContext CreateDispatchContext(HttpContext ctx) {
+        var context = new DispatchScopeContext();
+        context.Set<ClaimsPrincipal>(ctx.User);
+        return context;
     }
 
     private static void RecordEndpointInvalidRequest(string method, string phase) {
