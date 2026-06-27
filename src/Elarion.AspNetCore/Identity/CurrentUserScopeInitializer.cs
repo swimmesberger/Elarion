@@ -12,10 +12,11 @@ namespace Elarion.AspNetCore.Identity;
 /// <remarks>
 /// <para>
 /// Hybrid by necessity: when an originating request scope exists (JSON-RPC, HTTP batch) it <em>copies</em> the
-/// already-built request-scope snapshot — reusing the materialized claims, no re-parsing. MCP dispatches from
-/// the application root with no request scope, so there it builds the snapshot from the principal captured in
-/// the <see cref="DispatchScopeContext"/>. (The principal is also the fallback if the request-scope snapshot
-/// was never initialized, e.g. a host that omitted the middleware.)
+/// already-built request-scope snapshot — reusing the materialized claims, no re-parsing. MCP's per-call scope
+/// is rooted at the session / application-root provider, not the HTTP request scope, so the middleware snapshot
+/// is unreachable; there it builds the snapshot from the per-message principal captured in the
+/// <see cref="DispatchScopeContext"/> (<c>RequestContext.User</c>). The principal is also the fallback if the
+/// request-scope snapshot was never initialized, e.g. a host that omitted the middleware.
 /// </para>
 /// <para>Registered by <c>AddElarionCurrentUser</c>. Stateless, so it is a singleton operating on the passed scopes.</para>
 /// </remarks>
