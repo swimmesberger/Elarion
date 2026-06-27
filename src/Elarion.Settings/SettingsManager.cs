@@ -1,0 +1,92 @@
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
+using Elarion.Abstractions.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Primitives;
+
+namespace Elarion.Settings;
+
+/// <summary>
+/// Default <see cref="ISettingsManager"/> over an <see cref="ISettingsStore"/> and an
+/// <see cref="ISettingsChangeSource"/>. Registered scoped so it observes the current request's
+/// <c>ICurrentUser</c>; the user is resolved lazily through <see cref="IServiceProvider"/> (mirroring
+/// <c>HybridHandlerCache</c>) so global-only usage does not require an <c>ICurrentUser</c> registration.
+/// </summary>
+public sealed class SettingsManager(
+    ISettingsStore store,
+    ISettingsChangeSource changeSource,
+    IServiceProvider services) : ISettingsManager {
+    /// <inheritdoc />
+    public async ValueTask<T> GetAsync<T>(
+        JsonTypeInfo<T> typeInfo,
+        string key,
+        T fallback,
+        SettingsScope? scope = null,
+        CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        var raw = await store.GetAsync(ResolveScope(scope), key, cancellationToken).ConfigureAwait(false);
+        if (raw is null) {
+            return fallback;
+        }
+
+        var value = JsonSerializer.Deserialize(raw, typeInfo);
+        return value is null ? fallback : value;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<SettingWriteResult> SetAsync<T>(
+        JsonTypeInfo<T> typeInfo,
+        string key,
+        T value,
+        SettingsScope? scope = null,
+        int? expectedVersion = null,
+        CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        var raw = JsonSerializer.Serialize(value, typeInfo);
+        return store.SetAsync(ResolveScope(scope), key, raw, expectedVersion, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<string?> GetStringAsync(
+        string key,
+        SettingsScope? scope = null,
+        CancellationToken cancellationToken = default) =>
+        store.GetAsync(ResolveScope(scope), key, cancellationToken);
+
+    /// <inheritdoc />
+    public ValueTask<SettingWriteResult> SetStringAsync(
+        string key,
+        string? value,
+        SettingsScope? scope = null,
+        int? expectedVersion = null,
+        CancellationToken cancellationToken = default) =>
+        store.SetAsync(ResolveScope(scope), key, value, expectedVersion, cancellationToken);
+
+    /// <inheritdoc />
+    public ValueTask<bool> RemoveAsync(
+        string key,
+        SettingsScope? scope = null,
+        int? expectedVersion = null,
+        CancellationToken cancellationToken = default) =>
+        store.RemoveAsync(ResolveScope(scope), key, expectedVersion, cancellationToken);
+
+    /// <inheritdoc />
+    public IChangeToken Watch(string? keyPrefix = null, SettingsScope? scope = null) =>
+        changeSource.Watch(ResolveScope(scope), keyPrefix);
+
+    private SettingsScope ResolveScope(SettingsScope? scope) {
+        var resolved = scope ?? SettingsScope.Global;
+        if (!resolved.IsCurrentUserPlaceholder) {
+            return resolved;
+        }
+
+        // Resolve the ambient user lazily and fail closed when unauthenticated (for example outside HTTP).
+        var currentUser = services.GetRequiredService<ICurrentUser>();
+        if (!currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(currentUser.UserId)) {
+            throw new InvalidOperationException(
+                "User-scoped settings require an authenticated current user with a user id.");
+        }
+
+        return SettingsScope.User(currentUser.UserId);
+    }
+}

@@ -1,0 +1,151 @@
+---
+title: Settings
+description: Runtime-changeable, key/value settings with a swappable store, in-process change watching, and an AOT-clean typed accessor — global and per-user.
+---
+
+Elarion's settings subsystem gives applications **runtime-changeable configuration**: key/value data,
+hierarchical like `IConfiguration` (but the hierarchy is *virtual*, like environment variables), that can
+change while the app runs and be **watched** for changes in-process. It is split into two swappable sides
+so each can evolve independently — see [ADR-0010](../decisions/0010-runtime-settings-subsystem.md).
+
+<Callout type="info">
+  Two backends ship: an **in-process** store (the zero-dependency default) and an **EF Core database**
+  store (`Elarion.Settings.EntityFrameworkCore`). Both notify **only within the current process**.
+  Consume settings natively (below), or as `IConfiguration`/`IOptionsMonitor<T>` via the
+  `Elarion.Settings.Configuration` adapter. Cross-instance change sources (Postgres `LISTEN/NOTIFY`, Redis)
+  are planned providers over the same contracts.
+</Callout>
+
+## Two sides
+
+- **The sink side** — where settings live and how changes are announced. `ISettingsStore` reads and
+  writes values; `ISettingsChangeSource` hands out change tokens you can watch. Both are interfaces, so
+  the backing store is swappable: the in-process default ships today; database and other backends
+  implement the same contracts.
+- **The consuming side** — how your code reads settings. The native `ISettingsManager` is an AOT-clean
+  typed accessor. (Adapters to `IConfiguration` and `IOptionsMonitor<T>` are planned, so existing code
+  that already speaks those abstractions can consume settings without change.)
+
+## Scopes
+
+A setting belongs to a `SettingsScope`. Two scopes ship:
+
+- `SettingsScope.Global` — system-wide, shared by everyone.
+- `SettingsScope.User(userId)` — bound to a specific user. `SettingsScope.CurrentUser` is a placeholder
+  the accessor resolves against the ambient `ICurrentUser` at call time.
+
+A scope is an open `(Kind, Owner)` value rather than a closed enum, so additional scopes (for example
+`tenant` or `environment`) can be added later without changing the contracts or the store schema.
+
+User-scoped reads **fail closed**: outside an authenticated context (a background job, say, where there is
+no current user) requesting `CurrentUser` throws rather than silently reading global data — the same
+posture as current-user handler caching.
+
+## Keys
+
+Keys are flat strings with a `:` separator, exactly like `IConfiguration` (`"app:smtp:host"`). The
+hierarchy is virtual — the store treats keys as opaque; only prefix watching and (future) adapters
+interpret the tree. Watch a prefix to observe a whole subtree.
+
+## Using the typed accessor
+
+`ISettingsManager` is registered scoped by `AddElarionSettings()`. Typed access binds through a
+source-generated `JsonTypeInfo<T>` — no reflection — so it works under trimming/AOT (the repo disables
+reflection-based JSON by default).
+
+```csharp
+// Program.cs
+builder.Services.AddElarionSettings();
+
+// A source-generated context for your settings types.
+[JsonSerializable(typeof(SmtpSettings))]
+internal sealed partial class AppSettingsJsonContext : JsonSerializerContext;
+
+public sealed record SmtpSettings {
+    public required string Host { get; init; }
+    public int Port { get; init; } = 25;
+}
+```
+
+```csharp
+public sealed class SendEmailHandler(ISettingsManager settings) : IHandler<SendEmail, Result<Unit>> {
+    public async ValueTask<Result<Unit>> HandleAsync(SendEmail request, CancellationToken ct) {
+        // Global, typed, with a fallback when unset.
+        var smtp = await settings.GetAsync(
+            AppSettingsJsonContext.Default.SmtpSettings,
+            "app:smtp",
+            fallback: new SmtpSettings { Host = "localhost" },
+            cancellationToken: ct);
+
+        // Per-user, raw string.
+        var signature = await settings.GetStringAsync(
+            "email:signature", SettingsScope.CurrentUser, ct);
+
+        // ... send ...
+        return Result.Success();
+    }
+}
+```
+
+Write with `SetAsync`/`SetStringAsync`. Writes carry optimistic concurrency: pass an `expectedVersion` and
+a mismatch returns `SettingWriteResult.ConcurrencyConflict` rather than throwing.
+
+## Watching for changes
+
+`ISettingsManager.Watch` (and `ISettingsChangeSource.Watch`) return an `IChangeToken` that fires when a
+matching setting changes. Tokens are one-shot — re-watch, or use `ChangeToken.OnChange`, to keep
+observing.
+
+```csharp
+ChangeToken.OnChange(
+    () => settings.Watch("app:smtp"),
+    () => _logger.LogInformation("SMTP settings changed; reloading."));
+```
+
+## Using the EF Core database store
+
+`Elarion.Settings.EntityFrameworkCore` persists settings to a relational database via your `DbContext`:
+
+```csharp
+// In your DbContext's OnModelCreating:
+modelBuilder.UseElarionSettings();   // maps the elarion_settings table
+
+// In Program.cs (replaces the in-process store):
+builder.Services.AddElarionSettingsEntityFrameworkCore<AppDbContext>();
+```
+
+Writes are change-tracker-free and immediate (they never flush the caller's unrelated tracked changes),
+with optimistic concurrency via a `version` column. Generate and apply an EF migration for the
+`elarion_settings` table; the framework ships no migrations. Change notification still uses the in-process
+source (single-instance) until a cross-instance source is added.
+
+## Consuming as IConfiguration / IOptionsMonitor
+
+If you prefer the standard .NET abstractions, `Elarion.Settings.Configuration` surfaces the **global**
+settings as an `IConfiguration` provider with live reload:
+
+```csharp
+// On the host builder (WebApplicationBuilder / HostApplicationBuilder):
+builder.AddElarionSettingsConfiguration();
+```
+
+Now `builder.Configuration["app:title"]` reads from settings, `IOptionsMonitor<T>` reloads when a setting
+changes, and any code already reading `IConfiguration` — including the scheduler's `${...}` variable
+substitution, which re-resolves on every occurrence — picks up runtime changes automatically. Because
+`IConfiguration` is built before the DI container, values appear once the host starts (a background
+refresher loads them and reloads on change). Only the `Global` scope is surfaced; per-user settings are
+not app-wide configuration, so read those through `ISettingsManager`.
+
+## Scheduler integration
+
+Settings flow into the scheduler through [variable substitution](variable-substitution.mdx): a job's
+`${...}` schedule variables resolve from the (config-backed) variable source, and the settings
+`IConfiguration` adapter is observable, so changing a setting **reschedules affected recurring jobs live**
+(not just on their next fire). No scheduler-specific wiring is needed.
+
+## Roadmap
+
+The foundation, the EF Core database store, the `IConfiguration`/`IOptionsMonitor` adapter, and the
+scheduler integration ship today. Built as fast-follows over the same contracts: cross-instance change
+sources (Postgres `LISTEN/NOTIFY`, Redis) so a change on one node propagates to others. See
+[ADR-0010](../decisions/0010-runtime-settings-subsystem.md) for the full design and phasing.

@@ -30,3 +30,4 @@ designs that are not yet implemented.
 - [ADR-0007: The data layer is application logic — modules as plugins over it](0007-data-is-platform-module-as-plugin.md)
 - [ADR-0008: Bounded contexts and the graduation path](0008-bounded-contexts-and-the-graduation-path.md)
 - [ADR-0009: Authorization building blocks](0009-authorization-building-blocks.md)
+- [ADR-0010: Runtime-changeable settings subsystem](0010-runtime-settings-subsystem.md)
