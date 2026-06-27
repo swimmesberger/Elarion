@@ -19,11 +19,13 @@ public sealed class SequentialBatchStrategy : IBatchExecutionStrategy {
         IReadOnlyList<JsonRpcRequest> requests,
         JsonRpcDispatcher dispatcher,
         IServiceProvider rootProvider,
+        DispatchScopeContext context,
         CancellationToken ct) {
         var responses = new List<JsonRpcResponse>(requests.Count);
 
         foreach (var request in requests) {
-            await using var scope = rootProvider.CreateAsyncScope();
+            // rootProvider is the request scope, so each item's scope inherits its already-built scoped state.
+            await using var scope = rootProvider.CreateDispatchScope(context, inheritFrom: rootProvider);
             var response = await dispatcher.DispatchAsync(
                 request, scope.ServiceProvider, ct);
 

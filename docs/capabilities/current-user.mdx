@@ -22,6 +22,8 @@ public interface ICurrentUser {
     IReadOnlyList<string> Roles { get; }
     bool IsAuthenticated { get; }
     bool IsInRole(string role);
+    bool HasClaim(string type, string value);
+    IEnumerable<string> GetClaimValues(string type);
 }
 ```
 
@@ -55,6 +57,55 @@ app.UseAuthorization();
 `UseElarionCurrentUser()` copies claim values into a scoped `CurrentUserSnapshot` once per request.
 Application handlers then read the snapshot, so they never touch `HttpContext` and stay testable —
 in a unit test you simply register a fake `ICurrentUser`.
+
+## Works across every transport
+
+`ICurrentUser` resolves identically under plain HTTP endpoints, JSON-RPC (single and batch), and MCP —
+no extra wiring. This matters because the JSON-RPC and MCP dispatchers run each call in a **fresh DI
+child scope** for isolation, and a child scope does not inherit the request scope's scoped instances. So
+the snapshot the request middleware initialized is not the one a JSON-RPC/MCP handler would otherwise
+resolve.
+
+Elarion bridges that gap explicitly (no `IHttpContextAccessor`, no `AsyncLocal`). When a request scope
+exists (JSON-RPC, HTTP batch) the per-call scope **inherits** the snapshot the middleware already built —
+the materialized claims are copied by reference, so nothing is re-parsed. MCP's per-call scope is rooted at
+the session / application root (not the HTTP request scope — the middleware runs, but its snapshot lives in
+a different scope tree the tool handler can't reach), so there the snapshot is built from the per-message
+principal the transport stamps on each call (`RequestContext.User`), captured at the boundary in a
+`DispatchScopeContext`. Authorization rides the same path, since the authorizer reads `ICurrentUser`.
+
+### Inheriting your own scoped state
+
+The simplest way to carry an existing request-scoped service into JSON-RPC / HTTP-batch handler scopes is
+to make it `IScopeCopyable<T>` and register it with `AddDispatchScopeInherited<T>()` — the rail copies the
+request-scope instance into each call scope (a no-op for MCP, which has no request scope):
+
+```csharp
+public sealed class TenantContext : IScopeCopyable<TenantContext> {
+    public string? TenantId { get; set; }
+    public void CopyFrom(TenantContext source) => TenantId = source.TenantId;
+}
+
+// services.AddScoped<TenantContext>();
+// services.AddDispatchScopeInherited<TenantContext>();
+```
+
+For full control — e.g. seeding from the captured principal so it also works under MCP — implement
+`IDispatchScopeInitializer` directly and register it with `TryAddEnumerable`. `inheritFrom` is the
+originating request scope (or `null` when there is none, e.g. MCP):
+
+```csharp
+internal sealed class TenantScopeInitializer : IDispatchScopeInitializer {
+    public void Initialize(IServiceProvider callScope, IServiceProvider? inheritFrom, DispatchScopeContext context) {
+        if (context.TryGet<ClaimsPrincipal>(out var user) && user is not null) {
+            callScope.GetRequiredService<TenantContext>().TenantId = user.FindFirstValue("tenant");
+        }
+    }
+}
+
+// services.TryAddEnumerable(
+//     ServiceDescriptor.Singleton<IDispatchScopeInitializer, TenantScopeInitializer>());
+```
 
 ## Mapping claims
 

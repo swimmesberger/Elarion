@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Elarion.Abstractions.Identity;
+using Elarion.JsonRpc;
 
 namespace Elarion.AspNetCore.Identity;
 
@@ -22,6 +23,12 @@ public static class CurrentUserServiceCollectionExtensions {
 
         services.TryAddScoped<CurrentUserSnapshot>();
         services.TryAddScoped<ICurrentUser>(sp => sp.GetRequiredService<CurrentUserSnapshot>());
+
+        // Seed the snapshot into the per-call child scopes the JSON-RPC / MCP dispatchers create, where the
+        // request-scope snapshot from CurrentUserMiddleware is not visible. TryAddEnumerable so multiple
+        // IDispatchScopeInitializer instances (e.g. a host's tenant/correlation seeders) compose.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IDispatchScopeInitializer, CurrentUserScopeInitializer>());
 
         return services;
     }
