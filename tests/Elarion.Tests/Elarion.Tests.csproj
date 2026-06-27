@@ -28,6 +28,9 @@
     <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql/Elarion.Blobs.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj" />
+    <ProjectReference Include="../../src/Elarion.Settings/Elarion.Settings.csproj" />
+    <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore/Elarion.Settings.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj" />
     <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />
     <ProjectReference Include="../../src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />

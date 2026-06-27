@@ -1,0 +1,77 @@
+---
+title: Variable substitution
+description: Spring-style ${key:-default} placeholders resolved from a pluggable source — a general building block reused across Elarion subsystems, not tied to any one feature.
+---
+
+Variable substitution is a small, reusable building block: resolve `${key}` placeholders (with optional
+`${key:-default}` fallbacks) from a pluggable source. It is **not tied to any one subsystem** — the
+scheduler uses it for `${...}` variables in cron/interval expressions, and you can use it anywhere you want
+configurable, runtime-changeable string values.
+
+## The pieces
+
+- **`IVariableSource`** — the pluggable backend: `bool TryGetValue(string key, out string? value)`. The
+  shipped adapter is `ConfigurationVariableSource` (over `IConfiguration`); other sources (a dictionary,
+  environment, a custom store) implement the same seam.
+- **`VariableSubstitution`** — the resolver. A missing, empty, or whitespace value is treated as unset so an
+  inline `:-` default can recover.
+
+Both live in `Elarion.Abstractions.Substitution`.
+
+## Two models
+
+**Whole-value** — a string is either a literal or a single placeholder. Useful for optional, settable
+attributes; an unresolved placeholder yields `null`.
+
+```csharp
+IVariableSource source = new ConfigurationVariableSource(configuration);
+
+VariableSubstitution.Resolve("plain", source);            // "plain" (literal)
+VariableSubstitution.Resolve("${Jobs:Interval:-15s}", source); // configured value, else "15s"
+VariableSubstitution.Resolve("${Jobs:Interval}", source); // null when unset (no default)
+VariableSubstitution.ResolveRequired("${Jobs:Interval}", source); // throws when unset
+```
+
+**Embedded** — replace every `${...}` inside a larger template (a connection string, a path, a message):
+
+```csharp
+VariableSubstitution.Substitute("postgres://${db:host}:${db:port:-5432}/app", source);
+// → "postgres://db.local:5432/app"
+```
+
+Embedded substitution throws when a placeholder is unset and has no default; nesting (`${a:${b}}`) is not
+supported.
+
+## Dependency injection
+
+Register a default source so any subsystem can inject one:
+
+```csharp
+builder.Services.AddElarionVariableSubstitution(); // IVariableSource → ConfigurationVariableSource
+```
+
+Because it reads `IConfiguration`, it transparently sees appsettings, environment variables, and — if you
+add the [settings](settings.mdx) `IConfiguration` adapter — database-backed settings, with **runtime
+changes** as those providers reload. Register a different `IVariableSource` first to override the source.
+
+### Observable sources
+
+A source that can signal change implements `IObservableVariableSource` (`IChangeToken Watch()`).
+`ConfigurationVariableSource` is observable — `Watch()` bridges to the configuration reload token, so a
+provider reload (appsettings change, or a settings-backed provider reload) propagates to consumers. A static
+source (a dictionary) simply doesn't implement it.
+
+## How the scheduler uses it
+
+Scheduled jobs resolve `${...}` variables in their schedule (interval, cron, time zone, enabled flag) on
+**every occurrence**, so changing a variable changes the schedule on its next fire. The scheduler injects an
+`IVariableSource` (config-backed by default), so pointing it at a settings-backed `IConfiguration` makes job
+schedules runtime-changeable with no scheduler-specific wiring — the substitution concept is shared, not
+duplicated.
+
+Because the default source is **observable**, the scheduler goes further than next-fire pickup: when a
+watched variable changes it **reschedules affected recurring jobs immediately**, re-resolving each job whose
+variables changed and replacing its queued occurrence (a job with a literal schedule, or one whose variables
+didn't change, is left untouched; a fixed-delay job mid-run reschedules itself on completion). So shortening a
+job's interval, changing its cron, or enabling a `${...}`-disabled job takes effect at once rather than after
+the (possibly long) current interval.

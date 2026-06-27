@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using Elarion.Abstractions.Scheduling;
 using Elarion.Resilience;
+using Elarion.Substitution;
 
 namespace Elarion.Scheduling;
 
@@ -23,6 +24,10 @@ public static class SchedulerServiceCollectionExtensions {
         SchedulerOptions? options = null) {
         options ??= new SchedulerOptions();
         services.AddMicrosoftResilienceRuntime();
+        // The scheduler resolves ${...} schedule variables through IVariableSource; default to the
+        // config-backed source (observable, so reloads drive live reschedule). Register a different
+        // IVariableSource first to override.
+        services.AddElarionVariableSubstitution();
         services.TryAddSingleton(options);
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<InMemoryScheduler>();

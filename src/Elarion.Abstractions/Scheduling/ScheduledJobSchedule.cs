@@ -1,4 +1,5 @@
 using System.Globalization;
+using Elarion.Abstractions.Substitution;
 using Microsoft.Extensions.Configuration;
 
 namespace Elarion.Abstractions.Scheduling;
@@ -109,12 +110,12 @@ public sealed record ScheduledJobSchedule {
     public static ScheduledJobSchedule Cron(string expression, string? timeZone = null) {
         ArgumentException.ThrowIfNullOrWhiteSpace(expression);
         // Note 19: Literal cron expressions are validated eagerly; placeholders are validated later after configuration is resolved.
-        if (!ConfigPlaceholder.IsPlaceholder(expression) && expression != CronDisabled) {
+        if (!VariableSubstitution.IsPlaceholder(expression) && expression != CronDisabled) {
             CronExpression.Parse(expression);
         }
 
         // Note 20: Time zone ids are also validated eagerly unless they are placeholders.
-        if (timeZone is not null && !ConfigPlaceholder.IsPlaceholder(timeZone)) {
+        if (timeZone is not null && !VariableSubstitution.IsPlaceholder(timeZone)) {
             TimeZoneInfo.FindSystemTimeZoneById(timeZone);
         }
 
@@ -134,7 +135,7 @@ public sealed record ScheduledJobSchedule {
     /// </remarks>
     public static ScheduledJobSchedule Once(string initialDelay) {
         ArgumentException.ThrowIfNullOrWhiteSpace(initialDelay);
-        if (!ConfigPlaceholder.IsPlaceholder(initialDelay)) {
+        if (!VariableSubstitution.IsPlaceholder(initialDelay)) {
             ParseDuration(initialDelay);
         }
 
@@ -152,11 +153,23 @@ public sealed record ScheduledJobSchedule {
     /// <exception cref="InvalidOperationException">A placeholder is unresolvable.</exception>
     /// <exception cref="FormatException">A resolved value is not valid.</exception>
     public ResolvedSchedule Resolve(IConfiguration configuration) {
+        ArgumentNullException.ThrowIfNull(configuration);
+        return Resolve(new ConfigurationVariableSource(configuration));
+    }
+
+    /// <summary>
+    /// Resolves placeholders against an arbitrary <see cref="IVariableSource"/> and parses the schedule
+    /// values, so a schedule can draw its variables from configuration, settings, or any other source.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A placeholder is unresolvable.</exception>
+    /// <exception cref="FormatException">A resolved value is not valid.</exception>
+    public ResolvedSchedule Resolve(IVariableSource variables) {
+        ArgumentNullException.ThrowIfNull(variables);
         // Note 21: Resolution is separated from construction so configuration changes can affect future occurrences.
-        var value = ConfigPlaceholder.ResolveRequired(Value, configuration);
+        var value = VariableSubstitution.ResolveRequired(Value, variables);
         var initialDelay = InitialDelay is null
             ? (TimeSpan?)null
-            : ParseDuration(ConfigPlaceholder.ResolveRequired(InitialDelay, configuration));
+            : ParseDuration(VariableSubstitution.ResolveRequired(InitialDelay, variables));
 
         if (Kind == ScheduledJobScheduleKind.Cron) {
             if (value == CronDisabled) {
@@ -167,7 +180,7 @@ public sealed record ScheduledJobSchedule {
                 };
             }
 
-            var timeZoneId = TimeZone is null ? null : ConfigPlaceholder.ResolveRequired(TimeZone, configuration);
+            var timeZoneId = TimeZone is null ? null : VariableSubstitution.ResolveRequired(TimeZone, variables);
             return new ResolvedSchedule {
                 Kind = Kind,
                 Cron = CronExpression.Parse(value),
@@ -251,11 +264,11 @@ public sealed record ScheduledJobSchedule {
         string? initialDelay,
         bool runOnStart) {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        if (!ConfigPlaceholder.IsPlaceholder(value)) {
+        if (!VariableSubstitution.IsPlaceholder(value)) {
             ParsePositiveDuration(value);
         }
 
-        if (initialDelay is not null && !ConfigPlaceholder.IsPlaceholder(initialDelay)) {
+        if (initialDelay is not null && !VariableSubstitution.IsPlaceholder(initialDelay)) {
             ParseDuration(initialDelay);
         }
 
