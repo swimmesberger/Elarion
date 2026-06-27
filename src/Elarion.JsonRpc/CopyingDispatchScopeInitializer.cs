@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-
 namespace Elarion.JsonRpc;
 
 /// <summary>
@@ -18,15 +16,7 @@ namespace Elarion.JsonRpc;
 public sealed class CopyingDispatchScopeInitializer<T> : IDispatchScopeInitializer
     where T : class, IScopeCopyable<T> {
     /// <inheritdoc />
-    public void Initialize(IServiceProvider callScope, IServiceProvider? inheritFrom, DispatchScopeContext context) {
-        // No originating request scope (e.g. MCP) — nothing to copy.
-        if (inheritFrom is null) {
-            return;
-        }
-
-        var source = inheritFrom.GetService<T>();
-        if (source is not null) {
-            callScope.GetRequiredService<T>().CopyFrom(source);
-        }
-    }
+    public void Initialize(IServiceProvider callScope, IServiceProvider? inheritFrom, DispatchScopeContext context) =>
+        // No originating request scope (e.g. MCP) → TryInherit finds nothing and is a no-op.
+        ServiceProviderDispatchScopeExtensions.TryInherit<T>(callScope, inheritFrom);
 }

@@ -44,4 +44,36 @@ public static class ServiceProviderDispatchScopeExtensions {
 
         return scope;
     }
+
+    /// <summary>
+    /// The single copy primitive behind scope inheritance: if <paramref name="inheritFrom"/> holds a
+    /// <typeparamref name="T"/> that <paramref name="accept"/> approves, copies it into the
+    /// <typeparamref name="T"/> resolved from <paramref name="callScope"/> via
+    /// <see cref="IScopeCopyable{T}.CopyFrom"/> and returns <see langword="true"/>. Returns
+    /// <see langword="false"/> when there is nothing to inherit (no originating scope, no instance there, or
+    /// the candidate is rejected) — the caller then seeds the service some other way.
+    /// </summary>
+    /// <remarks>
+    /// Shared by <see cref="CopyingDispatchScopeInitializer{T}"/> and by bespoke hybrid initializers (e.g. the
+    /// current-user one, which inherits the request-scope snapshot via this method and otherwise builds from a
+    /// captured principal), so the copy path has exactly one implementation.
+    /// </remarks>
+    /// <param name="callScope">The per-call scope whose <typeparamref name="T"/> is the copy target.</param>
+    /// <param name="inheritFrom">The originating request scope to copy from, or <see langword="null"/>.</param>
+    /// <param name="accept">Optional predicate to gate the source (e.g. "is initialized"); defaults to accept.</param>
+    /// <typeparam name="T">The inheritable scoped service.</typeparam>
+    public static bool TryInherit<T>(
+        IServiceProvider callScope,
+        IServiceProvider? inheritFrom,
+        Func<T, bool>? accept = null)
+        where T : class, IScopeCopyable<T> {
+        ArgumentNullException.ThrowIfNull(callScope);
+
+        if (inheritFrom?.GetService<T>() is { } source && (accept?.Invoke(source) ?? true)) {
+            callScope.GetRequiredService<T>().CopyFrom(source);
+            return true;
+        }
+
+        return false;
+    }
 }

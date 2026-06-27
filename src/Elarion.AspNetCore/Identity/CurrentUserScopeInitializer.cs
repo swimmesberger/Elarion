@@ -25,23 +25,18 @@ internal sealed class CurrentUserScopeInitializer : IDispatchScopeInitializer {
 
     /// <inheritdoc />
     public void Initialize(IServiceProvider callScope, IServiceProvider? inheritFrom, DispatchScopeContext context) {
-        // GetService (not GetRequired): a host may have replaced ICurrentUser without the snapshot, in which
-        // case there is nothing to seed and dispatch must not fail.
-        var target = callScope.GetService<CurrentUserSnapshot>();
-        if (target is null) {
+        // Inherit the request-scope snapshot when there is an initialized one (JSON-RPC / HTTP batch) — the
+        // shared copy path, reusing the materialized claims with no re-parsing.
+        if (ServiceProviderDispatchScopeExtensions.TryInherit<CurrentUserSnapshot>(
+                callScope, inheritFrom, static snapshot => snapshot.IsInitialized)) {
             return;
         }
 
-        // Prefer copying the request-scope snapshot (JSON-RPC / HTTP batch) — reuses the materialized claims.
-        if (inheritFrom?.GetService<CurrentUserSnapshot>() is { IsInitialized: true } source) {
-            target.CopyFrom(source);
-            return;
-        }
-
-        // No request scope to inherit from (MCP), or it was never initialized — build from the captured principal.
+        // The only current-user-specific part: no request scope to inherit from (MCP), or it was never
+        // initialized — build from the per-message principal captured in the context.
         var principal = context.TryGet<ClaimsPrincipal>(out var captured) && captured is not null
             ? captured
             : Anonymous;
-        target.Initialize(principal);
+        callScope.GetRequiredService<CurrentUserSnapshot>().Initialize(principal);
     }
 }
