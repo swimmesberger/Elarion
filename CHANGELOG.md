@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-27
+
 ### Added
 - **Authorization building blocks (`Elarion.Abstractions.Authorization` + `Elarion` core).** Declarative,
   transport-neutral handler authorization: the `[RequireClaim]`, `[RequirePermission]` (sugar over the
@@ -218,6 +220,7 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.2
 [0.2.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.0
 [0.1.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.1.0

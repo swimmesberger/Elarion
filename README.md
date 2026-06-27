@@ -79,7 +79,7 @@ registration list.**
 ```xml
 <!-- Application library — the source generator ships inside the Elarion package -->
 <ItemGroup>
-  <PackageReference Include="Elarion" Version="0.2.0" />
+  <PackageReference Include="Elarion" Version="0.2.2" />
 </ItemGroup>
 ```
 
