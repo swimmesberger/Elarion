@@ -29,7 +29,7 @@ public sealed class CurrentUserTransportTests {
         await using var provider = BuildProvider();
         using var requestScope = provider.CreateScope();
         var context = CreateContext(requestScope.ServiceProvider, body: "", userId: "user-http");
-        await InitializeRequestSnapshotAsync(requestScope.ServiceProvider, context);
+        await SeedRequestScopeAsync(context);
 
         // A minimal-API [HttpEndpoint] resolves its handler from the request scope (no child scope) — exactly
         // how the generated lambda binds [FromServices] — so it reads the middleware-built snapshot directly.
@@ -129,11 +129,10 @@ public sealed class CurrentUserTransportTests {
         return context;
     }
 
-    // Simulates app.UseElarionCurrentUser(): the middleware builds the snapshot in the request scope, which
-    // each JSON-RPC/HTTP call scope then inherits.
-    private static Task InitializeRequestSnapshotAsync(IServiceProvider requestScope, HttpContext context) =>
-        new CurrentUserMiddleware(_ => Task.CompletedTask)
-            .InvokeAsync(context, requestScope.GetRequiredService<CurrentUserSnapshot>());
+    // Simulates app.UseElarionCurrentUser(): the middleware seeds the current-user snapshot into the request
+    // scope (context.RequestServices), where the HTTP handler resolves it.
+    private static Task SeedRequestScopeAsync(HttpContext context) =>
+        new CurrentUserMiddleware(_ => Task.CompletedTask).InvokeAsync(context);
 
     private static JsonDocument ReadResponse(HttpContext context) {
         context.Response.Body.Position = 0;

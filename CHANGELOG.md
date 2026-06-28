@@ -20,14 +20,30 @@ minor releases may include breaking changes.
 
 ### Added
 - **Per-call dispatch-scope seeding (`Elarion.JsonRpc`).** `IDispatchScopeInitializer` +
-  `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(context)` helper carry request-boundary
-  state into the fresh per-call child scope dispatcher-based transports (JSON-RPC, MCP) create. Current-user
-  is one registered consumer; hosts add their own (tenant, correlation, …) via `TryAddEnumerable`.
+  `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(context)` / `SeedScope(context)` helpers
+  carry request-boundary state into the fresh per-call child scope dispatcher-based transports (JSON-RPC, MCP)
+  create. Current-user is one registered consumer; hosts add their own (tenant, correlation, …) via
+  `TryAddEnumerable`.
+- **Off-HTTP `ICurrentUser` (`Elarion` core).** `AddElarionClaimsCurrentUser` + `ClaimsPrincipalCurrentUser` +
+  `ClaimsCurrentUserOptions` provide the claims-based `ICurrentUser` with **no ASP.NET dependency**, so gRPC,
+  console, or any custom transport gets identity + `[Require*]` authorization by referencing only `Elarion`.
+- **`HandlerInvoker.InvokeAsync<TRequest,TResponse>` (`Elarion` core).** The typed-direct transport entry
+  point: creates a seeded dispatch scope, resolves the decorated handler, invokes it, and disposes the scope —
+  the sibling of the JSON-RPC/MCP name-based dispatch path for transports that know the static handler type.
+- **`IAppErrorTranslator<TError>` (`Elarion.Abstractions`).** A seam for mapping `AppError` to a transport's
+  wire error type. The JSON-RPC bridge resolves `IAppErrorTranslator<RpcError>` (defaulting to the
+  `AppErrorMapper` codes), so a host can override JSON-RPC error codes by registering its own.
 
 ### Changed
-- **`CurrentUserSnapshot` materializes claims lazily** (on first access, cached) instead of eagerly on
+- **`ClaimsPrincipalCurrentUser` materializes claims lazily** (on first access, cached) instead of eagerly on
   `Initialize`, so seeding a fresh snapshot per dispatch call costs nothing until a claim is read and no
   claims are parsed twice — making per-call seeding uniform across transports without copying.
+- **Identity re-layered into core (breaking for direct users of the ASP.NET types).** The claims snapshot,
+  options, and current-user initializer moved from `Elarion.AspNetCore` to `Elarion` core
+  (`ClaimsPrincipalCurrentUser` / `ClaimsCurrentUserOptions`); `CurrentUserSnapshot` and
+  `AspNetCoreCurrentUserOptions` are removed. `AddElarionCurrentUser` (ASP.NET) now delegates to
+  `AddElarionClaimsCurrentUser` and takes `ClaimsCurrentUserOptions`; the middleware seeds the request scope
+  via `SeedScope`. Behavior is unchanged for HTTP hosts.
 - **Breaking (custom batch strategies):** `IBatchExecutionStrategy.ExecuteAsync` takes a
   `DispatchScopeContext context`; strategies create each per-item scope via
   `CreateDispatchScope(context)` so scoped state (current user, …) is seeded per item.
@@ -35,6 +51,8 @@ minor releases may include breaking changes.
 ### Documentation
 - Tutorial `features.mdx` now shows the no-reflection `IResultFailureFactory<TResponse>` /
   `TResponse.Failure(...)` pattern for validation decorators instead of a reflection-based helper.
+- New [`docs/concepts/transports`](docs/concepts/transports.mdx): authoring a new transport (gRPC, console, …)
+  — the seams, the scope rail, off-HTTP `ICurrentUser`, the two invoke paths, and `ErrorKind` mapping.
 
 ## [0.2.2] - 2026-06-27
 

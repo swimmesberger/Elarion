@@ -37,8 +37,14 @@ public static class RpcDispatcherExtensions {
             async (request, serviceProvider, ct) => {
                 var handler = serviceProvider.GetRequiredService<IHandler<TRequest, Result<TResponse>>>();
                 var result = await handler.HandleAsync(request, ct);
-                return result.IsSuccess
-                    ? RpcResult<TResponse>.Success(result.Value)
-                    : RpcResult<TResponse>.Failure(AppErrorMapper.ToRpcError(result.Error));
+                if (result.IsSuccess) {
+                    return RpcResult<TResponse>.Success(result.Value);
+                }
+
+                // Failures go through the registered IAppErrorTranslator<RpcError> (a host can override the
+                // JSON-RPC error codes that way); the default maps via AppErrorMapper.
+                var translator = serviceProvider.GetService<IAppErrorTranslator<RpcError>>()
+                    ?? JsonRpcAppErrorTranslator.Default;
+                return RpcResult<TResponse>.Failure(translator.Translate(result.Error));
             });
 }

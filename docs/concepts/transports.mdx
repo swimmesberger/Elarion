@@ -1,0 +1,143 @@
+---
+title: Writing a transport
+description: How to call into Elarion handlers from a new transport (gRPC, console, anything) with the full pipeline and all scoped services — including ICurrentUser — available.
+---
+
+Elarion ships three transports — HTTP `[HttpEndpoint]`, JSON-RPC, and MCP — but they are all thin: each
+turns an inbound request into a handler invocation over the same transport-neutral seams. This page is for
+authoring a new one (gRPC, a CLI, a message-queue consumer, …).
+
+A transport has four jobs:
+
+1. **Capture identity** — get the caller's `ClaimsPrincipal` (or build one) at the boundary.
+2. **Create a seeded scope** — a per-call DI scope with that identity (and any other per-call state) seeded.
+3. **Invoke the handler** — resolve `IHandler<TRequest, Result<TResponse>>` and call it; the full decorator
+   pipeline (tracing, validation, authorization, resilience, caching) runs because that is what DI resolves.
+4. **Map the result** — translate `Result<T>` / `AppError` to your wire format.
+
+## The seams you build on
+
+| Seam | Package | Role |
+| --- | --- | --- |
+| `IHandler<TRequest, TResponse>`, `Result<T>`, `AppError`/`ErrorKind` | `Elarion.Abstractions` | the handler contract and result/error model |
+| `ICurrentUser`, `IAuthorizer` | `Elarion.Abstractions` | identity + authorization (the decorator is auto-attached) |
+| `DispatchScopeContext`, `IDispatchScopeInitializer`, `IServiceProvider.CreateDispatchScope`/`SeedScope` | `Elarion.JsonRpc` | the per-call scope-seeding rail (transport-neutral) |
+| `HandlerInvoker.InvokeAsync<TRequest,TResponse>` | `Elarion` | typed-direct "seed scope + invoke handler + dispose" |
+| `AddElarionClaimsCurrentUser` / `ClaimsPrincipalCurrentUser` | `Elarion` | claims-based `ICurrentUser`, **no ASP.NET dependency** |
+| `IAppErrorTranslator<TError>` | `Elarion.Abstractions` | map `AppError` to your wire error type |
+
+None of these require ASP.NET. A non-HTTP transport references `Elarion` (+ `Elarion.Abstractions`) only — not
+`Elarion.AspNetCore`.
+
+## The per-call scope rail (don't hand-roll)
+
+Dispatcher-based transports run each call in a **fresh DI child scope** for isolation (e.g. a clean
+`DbContext` per call). A child scope does **not** inherit the parent scope's scoped instances, so scoped
+state like `ICurrentUser` must be seeded into it. Capture boundary state into a `DispatchScopeContext` and
+create the scope with `CreateDispatchScope` — it runs every registered `IDispatchScopeInitializer`:
+
+```csharp
+var context = new DispatchScopeContext();
+context.Set<ClaimsPrincipal>(principal);                 // captured at your boundary
+
+await using var scope = rootProvider.CreateDispatchScope(context);
+// resolve + invoke inside `scope`
+```
+
+`SeedScope(context)` does the same against an **existing** scope (the HTTP middleware uses it to seed the
+request scope, where minimal-API handlers run without a child scope).
+
+## Seeding `ICurrentUser` off HTTP
+
+`ICurrentUser` is transport-neutral. Register the claims-based implementation in core — no ASP.NET — and seed
+it with the principal you captured:
+
+```csharp
+services.AddElarionClaimsCurrentUser(o => o.UserIdClaimType = "sub");  // claim mapping is optional
+services.AddElarionAuthorization();                                    // enables [Require*]
+```
+
+That registers a `CurrentUserScopeInitializer`; once you put a `ClaimsPrincipal` in the `DispatchScopeContext`,
+`ICurrentUser` resolves inside the handler and `[Require*]` authorization is enforced. Authentication itself is
+**your** job: validate the caller and produce the `ClaimsPrincipal` (from a gRPC `ServerCallContext`, a CLI
+flag, a JWT, …). On an ASP.NET host, `AddElarionCurrentUser()` + `UseElarionCurrentUser()` do this for you.
+
+## Invoking the handler
+
+Two equivalent paths; both run the full pipeline:
+
+**Typed-direct** — when you know the static handler type (recommended for gRPC/CLI):
+
+```csharp
+var result = await HandlerInvoker.InvokeAsync<CreateClientCommand, ClientDto>(
+    rootProvider, command, context, ct);
+```
+
+**Name-based** — when you route dynamically by method name (what JSON-RPC and MCP do):
+
+```csharp
+var response = await dispatcher.DispatchAsync(jsonRpcRequest, scope.ServiceProvider, ct);
+```
+
+## Mapping `Result` and `AppError`
+
+A handler returns `Result<T>` — success or an `AppError` whose `ErrorKind` your transport maps to its wire
+error. Implement `IAppErrorTranslator<TError>` for your wire type (the JSON-RPC transport ships and uses
+`IAppErrorTranslator<RpcError>`; register your own to override its codes). Reference mappings:
+`AppErrorMapper` (JSON-RPC codes, `Elarion`) and `HttpAppErrorMapper` (HTTP status, `Elarion.AspNetCore`).
+
+| `ErrorKind` | JSON-RPC | HTTP | gRPC (suggested) | CLI exit (suggested) |
+| --- | --- | --- | --- | --- |
+| `Validation` | -32602 | 400 | `InvalidArgument` | 2 |
+| `NotFound` | -32001 | 404 | `NotFound` | 3 |
+| `Conflict` | -32002 | 409 | `AlreadyExists` | 4 |
+| `Forbidden` | -32003 | 403 | `PermissionDenied` | 5 |
+| `Unauthorized` | -32005 | 401 | `Unauthenticated` | 6 |
+| `BusinessRule` | -32004 | 422 | `FailedPrecondition` | 7 |
+| `Internal` | -32603 | 500 | `Internal` | 70 |
+
+## Authentication vs authorization
+
+- **Authentication is the transport's job**: produce the `ClaimsPrincipal` and seed it. Without it,
+  `ICurrentUser` is anonymous and `[Require*]` handlers fail with `Unauthorized`.
+- **Authorization is automatic**: the generator attaches the `AuthorizationDecorator` to `[Require*]`
+  handlers; it reads `ICurrentUser` and runs per scope. You don't wire it per transport.
+
+## Packaging
+
+A non-HTTP transport references `Elarion` and `Elarion.Abstractions`. Avoid `Elarion.AspNetCore` unless you are
+co-hosted in ASP.NET. (`Elarion.JsonRpc` comes in transitively via `Elarion`; you only touch it directly if you
+use the name-based dispatcher.)
+
+## Worked example: a console transport
+
+A complete transport with no ASP.NET — the smallest proof the seams compose:
+
+```csharp
+using System.Security.Claims;
+using Elarion;                       // HandlerInvoker
+using Elarion.Identity;              // AddElarionClaimsCurrentUser
+using Elarion.JsonRpc;              // DispatchScopeContext
+using Elarion.Authorization;        // AddElarionAuthorization
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddElarion(configuration);          // generated module services (handlers, validators, …)
+services.AddElarionClaimsCurrentUser();      // ICurrentUser, no ASP.NET
+services.AddElarionAuthorization();          // [Require*] enforcement
+await using var provider = services.BuildServiceProvider();
+
+// Authenticate however the CLI does (here: a --user flag) and build the principal.
+var principal = new ClaimsPrincipal(new ClaimsIdentity(
+    [new Claim("sub", userArg)], authenticationType: "cli"));
+
+var context = new DispatchScopeContext();
+context.Set<ClaimsPrincipal>(principal);
+
+var result = await HandlerInvoker.InvokeAsync<CreateClientCommand, ClientDto>(
+    provider, new CreateClientCommand(/* parsed from argv */), context, CancellationToken.None);
+
+return result.IsSuccess
+    ? 0
+    : (int)MapExitCode(result.Error.Kind);   // your ErrorKind -> exit-code mapping
+```
