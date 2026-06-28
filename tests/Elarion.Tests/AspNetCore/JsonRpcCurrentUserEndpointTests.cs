@@ -25,10 +25,12 @@ public sealed class JsonRpcCurrentUserEndpointTests {
     [Fact]
     public async Task HandleRpc_Single_HandlerReadsAuthenticatedCurrentUser() {
         await using var provider = BuildProvider();
+        using var requestScope = provider.CreateScope();
         var context = CreateContext(
-            provider,
+            requestScope.ServiceProvider,
             """{ "jsonrpc": "2.0", "method": "whoami", "params": {}, "id": 1 }""",
             "user-42");
+        await InitializeRequestSnapshotAsync(requestScope.ServiceProvider, context);
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -41,8 +43,9 @@ public sealed class JsonRpcCurrentUserEndpointTests {
     [Fact]
     public async Task HandleRpc_Batch_EachItemReadsAuthenticatedCurrentUser() {
         await using var provider = BuildProvider();
+        using var requestScope = provider.CreateScope();
         var context = CreateContext(
-            provider,
+            requestScope.ServiceProvider,
             """
             [
               { "jsonrpc": "2.0", "method": "whoami", "params": {}, "id": 1 },
@@ -50,6 +53,7 @@ public sealed class JsonRpcCurrentUserEndpointTests {
             ]
             """,
             "user-99");
+        await InitializeRequestSnapshotAsync(requestScope.ServiceProvider, context);
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -59,6 +63,12 @@ public sealed class JsonRpcCurrentUserEndpointTests {
             item.GetProperty("result").GetProperty("userId").GetString().Should().Be("user-99");
         }
     }
+
+    // Simulates app.UseElarionCurrentUser(): the middleware builds the snapshot in the request scope, which
+    // each JSON-RPC call scope then inherits.
+    private static Task InitializeRequestSnapshotAsync(IServiceProvider requestScope, HttpContext context) =>
+        new CurrentUserMiddleware(_ => Task.CompletedTask)
+            .InvokeAsync(context, requestScope.GetRequiredService<CurrentUserSnapshot>());
 
     private static ServiceProvider BuildProvider() {
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web) {

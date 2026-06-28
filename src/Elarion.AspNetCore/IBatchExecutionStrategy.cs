@@ -28,12 +28,9 @@ public interface IBatchExecutionStrategy {
     /// <param name="requests">The parsed batch of JSON-RPC requests.</param>
     /// <param name="dispatcher">The RPC dispatcher to invoke for each request.</param>
     /// <param name="rootProvider">
-    /// The root <see cref="IServiceProvider"/> from which per-request scopes are created.
-    /// </param>
-    /// <param name="context">
-    /// The values captured at the batch boundary (e.g. the authenticated principal). Strategies must create
-    /// each per-request scope with <see cref="ServiceProviderDispatchScopeExtensions.CreateDispatchScope"/>,
-    /// passing this context, so scoped state (current user, …) is seeded into every item's scope.
+    /// The request scope from which each per-request call scope is created and inherits the request's
+    /// already-built scoped state (current user, …) via
+    /// <see cref="ServiceProviderDispatchScopeExtensions.CreateDispatchScope"/>.
     /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
@@ -45,6 +42,5 @@ public interface IBatchExecutionStrategy {
         IReadOnlyList<JsonRpcRequest> requests,
         JsonRpcDispatcher dispatcher,
         IServiceProvider rootProvider,
-        DispatchScopeContext context,
         CancellationToken ct);
 }

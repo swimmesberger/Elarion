@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+
 namespace Elarion.JsonRpc;
 
 /// <summary>
@@ -8,15 +10,18 @@ namespace Elarion.JsonRpc;
 /// <see cref="DispatchScopeServiceCollectionExtensions.AddDispatchScopeInherited{T}"/>.
 /// </summary>
 /// <remarks>
-/// This only applies where a request scope exists to inherit from (JSON-RPC, HTTP batch). For MCP — which
-/// dispatches from the application root with no request scope — there is nothing to copy and this is a no-op;
-/// seed such transports from the <see cref="DispatchScopeContext"/> in a bespoke initializer instead.
+/// This only applies where a request scope exists to inherit from (JSON-RPC, HTTP batch). For MCP — whose
+/// per-call scope is rooted at the session / application root with no request scope — <c>inheritFrom</c> is
+/// <see langword="null"/> and this is a no-op; seed such transports from the
+/// <see cref="DispatchScopeContext"/> in a dedicated initializer instead.
 /// </remarks>
 /// <typeparam name="T">The scoped service to inherit; it must be registered and implement <see cref="IScopeCopyable{T}"/>.</typeparam>
 public sealed class CopyingDispatchScopeInitializer<T> : IDispatchScopeInitializer
     where T : class, IScopeCopyable<T> {
     /// <inheritdoc />
-    public void Initialize(IServiceProvider callScope, IServiceProvider? inheritFrom, DispatchScopeContext context) =>
-        // No originating request scope (e.g. MCP) → TryInherit finds nothing and is a no-op.
-        ServiceProviderDispatchScopeExtensions.TryInherit<T>(callScope, inheritFrom);
+    public void Initialize(IServiceProvider callScope, IServiceProvider? inheritFrom, DispatchScopeContext context) {
+        if (inheritFrom?.GetService<T>() is { } source) {
+            callScope.GetRequiredService<T>().CopyFrom(source);
+        }
+    }
 }
