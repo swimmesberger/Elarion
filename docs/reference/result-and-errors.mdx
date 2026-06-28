@@ -196,9 +196,9 @@ when translating a failed `Result<T>` into an RFC 7807 ProblemDetails response.
 | *(default)* | `500 Internal Server Error` |
 
 <Callout type="info">
-  The JSON-RPC table is the default used by `RpcDispatcherExtensions.MapHandler`. Applications that
-  need different codes register methods via the raw `JsonRpcDispatcher.Map` API and supply their own
-  mapping.
+  The JSON-RPC table is the default applied when an operation is mapped onto the dispatcher (e.g.
+  `dispatcher.Map<TRequest, TResponse>("x")` or `dispatcher.MapDelegate<TRequest, TResponse>("x", fn)`).
+  Applications that need different codes supply their own mapping.
 </Callout>
 
 <Cards>

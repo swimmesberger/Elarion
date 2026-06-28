@@ -8,9 +8,9 @@ namespace Elarion.JsonRpc;
 /// application kinds use the reserved JSON-RPC server range (-32000 to -32099).
 /// </summary>
 /// <remarks>
-/// This is the framework's default mapping, used by <see cref="RpcDispatcherExtensions.MapHandler{TRequest,TResponse}"/>.
-/// Applications needing different codes can register methods via the raw
-/// <see cref="JsonRpcDispatcher.Map{TRequest,TResponse}"/> API and supply their own mapping.
+/// This is the framework's default mapping, used by <see cref="JsonRpcDispatcher"/> via
+/// <see cref="JsonRpcAppErrorTranslator"/>. Applications needing different codes can register their own
+/// <c>IAppErrorTranslator&lt;RpcError&gt;</c> to override it.
 /// </remarks>
 public static class AppErrorMapper {
     /// <summary>Converts an <see cref="AppError"/> to a JSON-RPC <see cref="RpcError"/>.</summary>

@@ -35,6 +35,36 @@ minor releases may include breaking changes.
   `AppErrorMapper` codes), so a host can override JSON-RPC error codes by registering its own.
 
 ### Changed
+- **The event bus is now pub/sub-only; request/reply is unified under typed dispatch (breaking).** See
+  [ADR-0010](docs/decisions/0010-event-bus-is-pub-sub-only.md). `IDomainEventBus.RequestAsync` and the single-
+  **responder** role of `[ConsumeEvent]` are removed — `[ConsumeEvent]` now means exactly one thing, a fan-out
+  subscriber (handler form returns `Result<Unit>`/`IHandler<TEvent>`; method form returns `void`/`Task`/`ValueTask`
+  or the non-generic `Result`/`Task<Result>`/`ValueTask<Result>` for a failure channel), and a `Result<T>` *with a
+  value* is rejected (`ELEVT005` handler-form, `ELEVT002` method-form; the
+  duplicate-responder `ELEVT004` is retired). For an in-process, in-transaction typed request/reply, inject the new
+  **`IHandlerSender`** and call `SendAsync<TRequest, TResponse>(request, ct)` (auto-registered by the generated
+  bootstrapper, or `AddElarionHandlerSender()` manually), or inject `IHandler<TRequest, Result<TResponse>>` directly. To upgrade a former
+  responder: drop `[ConsumeEvent]` and the `IDomainEvent` marker on the request, and replace
+  `bus.RequestAsync<R, T>(r, ct)` with `sender.SendAsync<R, T>(r, ct)`.
+- **Named handler dispatch is now transport-agnostic (breaking — source + generated host wiring).** A handler
+  is mapped onto a single transport-neutral request/reply bus, `HandlerDispatcher`
+  (`Elarion.Abstractions.Dispatch`), which owns no serialization or wire format; **JSON-RPC and MCP are now
+  thin adapters over that one shared bus** (each serving only the operations flagged for its surface) rather
+  than two separate dispatcher instances. `[RpcMethod]` is renamed to **`[Handler]`** and its name is now
+  **optional** — when omitted the operation name is inferred by convention as `{module}.{operation}` (the
+  handler type name minus a `Handler`/`Command`/`Query`/`Request` suffix, camelCased; an explicit name is
+  recommended for stable public/wire contracts). `RpcTransports` is renamed to **`HandlerTransports`**
+  (`JsonRpc`/`Mcp`/`All` unchanged) and `[McpMethod]` to **`[McpHandler]`**. The generated host wiring's two
+  methods `RegisterRpcMethods`/`RegisterMcpMethods` (and the per-module `Add{Module}JsonRpc`/`Add{Module}Mcp`)
+  are replaced by a single **`RegisterHandlers`** (per-module `Add{Module}Handlers`) that both adapters
+  resolve, and the JSON-RPC `MapHandler` bridge is removed in favor of mapping onto the `HandlerDispatcher`
+  (`dispatcher.Map<Req,Resp>("x")` / `dispatcher.MapDelegate<Req,Resp>("x", fn)`). To upgrade: rename the
+  attributes/enum, and change host calls to pass `ModuleBootstrapper.RegisterHandlers` to
+  `AddElarionJsonRpc(serializerOptions, …)` and `AddElarionMcp(metadata, serializerOptions, …, configure)`. Pass
+  the **same** `RegisterHandlers` delegate to both transports — the shared bus is built once (first registration
+  wins). MCP tool calls now dispatch directly through the bus and no longer emit the JSON-RPC transport-level OTel
+  span/metric (handler-level tracing is unchanged); operation names must be unique across the bus, and a collision
+  is reported at compile time (`ELRPC003`) and rejected at registration.
 - **`Elarion` core is now transport-agnostic — it no longer references `Elarion.JsonRpc`.** The
   transport-neutral dispatch-scope rail (`DispatchScopeContext` / `IDispatchScopeInitializer` /
   `CreateDispatchScope` / `SeedScope`) moved to `Elarion.Abstractions` (namespace

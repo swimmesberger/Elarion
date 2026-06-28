@@ -15,7 +15,7 @@ namespace Elarion.Generators;
 public sealed class ElarionManifestGenerator : IIncrementalGenerator
 {
     private const string AppModuleAttributeMetadataName = "Elarion.Abstractions.Modules.AppModuleAttribute";
-    private const string McpMethodAttributeMetadataName = "Elarion.Abstractions.McpMethodAttribute";
+    private const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
 
     private sealed record ManifestItem<T>(T? Model, ImmutableArray<Diagnostic> Diagnostics);
@@ -42,7 +42,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
 
         var rpcMethods = context.SyntaxProvider
             .ForAttributeWithMetadataName(
-                RpcMethodEmission.RpcMethodAttributeMetadataName,
+                RpcMethodEmission.HandlerAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
                 static (ctx, ct) => CreateRpcMethod(ctx, ct))
             .Where(static item => item.Model is not null || item.Diagnostics.Length > 0)
@@ -127,7 +127,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             return new ManifestItem<RpcMethodEmission.Model>(null, diagnostics.ToImmutable());
 
         var compilation = ctx.SemanticModel.Compilation;
-        var mcpMethodType = compilation.GetTypeByMetadataName(McpMethodAttributeMetadataName);
+        var mcpMethodType = compilation.GetTypeByMetadataName(McpHandlerAttributeMetadataName);
         var descriptionType = compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
         foreach (var attr in ctx.Attributes)
         {

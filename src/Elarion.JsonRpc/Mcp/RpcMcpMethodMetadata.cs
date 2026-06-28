@@ -19,7 +19,7 @@ public sealed record RpcMcpMethodMetadata {
     public required Type RequestType { get; init; }
 
     /// <summary>
-    /// Explicit MCP tool-name override from <c>[McpMethod(ToolName = ...)]</c>, or <see langword="null"/> to
+    /// Explicit MCP tool-name override from <c>[McpHandler(ToolName = ...)]</c>, or <see langword="null"/> to
     /// derive the tool name from <see cref="MethodName"/>.
     /// </summary>
     public string? ToolName { get; init; }

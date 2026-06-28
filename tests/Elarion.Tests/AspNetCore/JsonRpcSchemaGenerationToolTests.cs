@@ -117,6 +117,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
 
         var program = """
             using System.Text.Json;
+            using Elarion.Abstractions;
             using Elarion.AspNetCore;
             using Elarion.JsonRpc;
 
@@ -125,9 +126,9 @@ public sealed class JsonRpcSchemaGenerationToolTests {
             builder.Services.AddElarionJsonRpc(o => o.SerializerOptions = options);
 
             var dispatcher = new JsonRpcDispatcher(options)
-                .Map<PingRequest, PingResponse>(
+                .MapDelegate<PingRequest, PingResponse>(
                     "sample.ping",
-                    (request, _, _) => Task.FromResult(RpcResult<PingResponse>.Success(new PingResponse(request.Message))))
+                    (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)))
                 .Freeze();
 
             builder.Services.AddSingleton(dispatcher);

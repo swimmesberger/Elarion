@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
@@ -55,12 +56,12 @@ public static class JsonRpcServiceExtensions {
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="serializerOptions">The serializer options used by the dispatcher and the endpoint.</param>
-    /// <param name="registerAll">The generated registration delegate (e.g. <c>ModuleBootstrapper.RegisterRpcMethods</c>).</param>
+    /// <param name="registerHandlers">The generated registration delegate (e.g. <c>ModuleBootstrapper.RegisterHandlers</c>).</param>
     /// <param name="configure">Optional additional <see cref="JsonRpcOptions"/> configuration (e.g. endpoint path).</param>
     /// <returns>The service collection for chaining.</returns>
     /// <example>
     /// <code>
-    /// builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+    /// builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
     /// var app = builder.Build();
     /// app.MapElarionJsonRpc();
     /// </code>
@@ -68,13 +69,13 @@ public static class JsonRpcServiceExtensions {
     public static IServiceCollection AddElarionJsonRpc(
         this IServiceCollection services,
         JsonSerializerOptions serializerOptions,
-        Func<JsonRpcDispatcher, JsonRpcDispatcher> registerAll,
+        Func<HandlerDispatcher, HandlerDispatcher> registerHandlers,
         Action<JsonRpcOptions>? configure = null
     ) {
         ArgumentNullException.ThrowIfNull(serializerOptions);
-        ArgumentNullException.ThrowIfNull(registerAll);
+        ArgumentNullException.ThrowIfNull(registerHandlers);
 
-        services.AddElarionJsonRpcDispatcher(serializerOptions, registerAll);
+        services.AddElarionJsonRpcDispatcher(serializerOptions, registerHandlers);
 
         return services.AddElarionJsonRpc(options => {
             options.SerializerOptions = serializerOptions;
@@ -85,22 +86,22 @@ public static class JsonRpcServiceExtensions {
     /// <summary>
     /// Adds JSON-RPC 2.0 services and registers the dispatcher from a <paramref name="register"/> delegate that also
     /// receives the application <see cref="IConfiguration"/> — the setup for a module-based host, where
-    /// <c>ModuleBootstrapper.RegisterRpcMethods</c> registers only the methods of enabled modules.
+    /// <c>ModuleBootstrapper.RegisterHandlers</c> registers only the operations of enabled modules.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="serializerOptions">The serializer options used by the dispatcher and the endpoint.</param>
-    /// <param name="register">The registration delegate (e.g. <c>ModuleBootstrapper.RegisterRpcMethods</c>).</param>
+    /// <param name="register">The registration delegate (e.g. <c>ModuleBootstrapper.RegisterHandlers</c>).</param>
     /// <param name="configure">Optional additional <see cref="JsonRpcOptions"/> configuration (e.g. endpoint path).</param>
     /// <returns>The service collection for chaining.</returns>
     /// <example>
     /// <code>
-    /// builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+    /// builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
     /// </code>
     /// </example>
     public static IServiceCollection AddElarionJsonRpc(
         this IServiceCollection services,
         JsonSerializerOptions serializerOptions,
-        Func<JsonRpcDispatcher, IConfiguration, JsonRpcDispatcher> register,
+        Func<HandlerDispatcher, IConfiguration, HandlerDispatcher> register,
         Action<JsonRpcOptions>? configure = null
     ) {
         ArgumentNullException.ThrowIfNull(serializerOptions);

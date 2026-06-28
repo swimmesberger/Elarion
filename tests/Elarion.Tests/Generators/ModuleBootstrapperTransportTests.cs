@@ -8,10 +8,10 @@ namespace Elarion.Tests.Generators;
 
 /// <summary>
 /// Tests the module-aware, feature-flag-gated transport mapping emitted by <see cref="AppModuleDiscoveryGenerator"/>:
-/// per-module <c>Map{Module}Http</c> / <c>Add{Module}JsonRpc</c> / <c>Add{Module}Mcp</c> / <c>Get{Module}McpMetadata</c>
-/// methods, gated aggregates (<c>MapElarionEndpoints</c> / <c>RegisterRpcMethods</c> / <c>RegisterMcpMethods</c> /
-/// <c>GetMcpMetadata</c>), per-handler transport surface selection, and core modules always mapped. Handlers and
-/// modules live in referenced images and are consumed from generated Elarion manifest metadata.
+/// per-module <c>Map{Module}Http</c> / <c>Add{Module}Handlers</c> / <c>Get{Module}McpMetadata</c> methods, gated
+/// aggregates (<c>MapElarionEndpoints</c> / <c>RegisterHandlers</c> / <c>GetMcpMetadata</c>), per-handler transport
+/// flags on the single shared registry, and core modules always mapped. Handlers and modules live in referenced
+/// images and are consumed from generated Elarion manifest metadata.
 /// </summary>
 public sealed class ModuleBootstrapperTransportTests {
     private const string ModulesSource =
@@ -33,7 +33,7 @@ public sealed class ModuleBootstrapperTransportTests {
                     ValueTask.FromResult<Result<Response>>(new Response("INV"));
             }
 
-            [RpcMethod("invoices.get")]
+            [Handler("invoices.get")]
             public sealed class GetInvoiceRpc : IHandler<GetInvoiceRpc.Query, Result<GetInvoiceRpc.Response>> {
                 public sealed record Query { public required System.Guid Id { get; init; } }
                 public sealed record Response(string Number);
@@ -41,7 +41,7 @@ public sealed class ModuleBootstrapperTransportTests {
                     ValueTask.FromResult<Result<Response>>(new Response("INV"));
             }
 
-            [RpcMethod("invoices.archive", Transports = RpcTransports.JsonRpc)]
+            [Handler("invoices.archive", Transports = HandlerTransports.JsonRpc)]
             public sealed class ArchiveInvoiceRpc : IHandler<ArchiveInvoiceRpc.Command, Result<ArchiveInvoiceRpc.Response>> {
                 public sealed record Command { public required System.Guid Id { get; init; } }
                 public sealed record Response(bool Ok);
@@ -49,7 +49,7 @@ public sealed class ModuleBootstrapperTransportTests {
                     ValueTask.FromResult<Result<Response>>(new Response(true));
             }
 
-            [RpcMethod("invoices.summarize", Transports = RpcTransports.Mcp)]
+            [Handler("invoices.summarize", Transports = HandlerTransports.Mcp)]
             public sealed class SummarizeInvoiceRpc : IHandler<SummarizeInvoiceRpc.Query, Result<SummarizeInvoiceRpc.Response>> {
                 public sealed record Query { public required System.Guid Id { get; init; } }
                 public sealed record Response(string Summary);
@@ -70,7 +70,7 @@ public sealed class ModuleBootstrapperTransportTests {
                     ValueTask.FromResult<Result<Response>>(new Response(System.Guid.Empty));
             }
 
-            [RpcMethod("shipments.create")]
+            [Handler("shipments.create")]
             public sealed class CreateShipmentRpc : IHandler<CreateShipmentRpc.Command, Result<CreateShipmentRpc.Response>> {
                 public sealed record Command { public required string Address { get; init; } }
                 public sealed record Response(System.Guid Id);
@@ -94,26 +94,22 @@ public sealed class ModuleBootstrapperTransportTests {
     public void Bootstrapper_EmitsPerModuleTransportMethods() {
         var generated = RunGenerator(out _);
 
-        // HTTP + JSON-RPC + MCP per-module methods follow the uniform Map/Add{Module}{Transport} scheme.
+        // HTTP per-module methods plus one handler-registry method per module (the named bus).
         generated.Should().Contain(
             "public static global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapBillingHttp(");
         generated.Should().Contain(
             "public static global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapShippingHttp(");
         generated.Should().Contain(
-            "public static global::Elarion.JsonRpc.JsonRpcDispatcher AddBillingJsonRpc(");
+            "public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher AddBillingHandlers(");
         generated.Should().Contain(
-            "public static global::Elarion.JsonRpc.JsonRpcDispatcher AddShippingJsonRpc(");
-        generated.Should().Contain(
-            "public static global::Elarion.JsonRpc.JsonRpcDispatcher AddBillingMcp(");
-        generated.Should().Contain(
-            "public static global::Elarion.JsonRpc.JsonRpcDispatcher AddShippingMcp(");
+            "public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher AddShippingHandlers(");
         generated.Should().Contain(
             "global::Elarion.JsonRpc.Mcp.RpcMcpMethodMetadata[] GetBillingMcpMetadata()");
 
-        // The per-module transport methods are extension methods on their receiver, so they read fluently at the
-        // call site (e.g. app.MapGroup("/billing").MapBillingHttp(), dispatcher.AddBillingJsonRpc()).
+        // The per-module methods are extension methods on their receiver, so they read fluently at the
+        // call site (e.g. app.MapGroup("/billing").MapBillingHttp(), dispatcher.AddBillingHandlers()).
         generated.Should().Contain("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)");
-        generated.Should().Contain("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher)");
+        generated.Should().Contain("        this global::Elarion.Abstractions.Dispatch.HandlerDispatcher dispatcher)");
 
         // The per-module HTTP method maps that module's [HttpEndpoint] handler; the verb comes from the
         // request's CQRS marker (IQuery -> GET, ICommand -> POST).
@@ -121,9 +117,9 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain("app.MapPost(\"shipments\",");
         generated.Should().Contain(
             "[global::Microsoft.AspNetCore.Http.AsParameters] global::Sample.Billing.GetInvoice.Query request");
-        // The per-module RPC method registers that module's [RpcMethod] handler.
+        // The per-module handler method maps that module's [Handler] operation onto the registry with its flags.
         generated.Should().Contain(
-            "dispatcher.MapHandler<global::Sample.Billing.GetInvoiceRpc.Query, global::Sample.Billing.GetInvoiceRpc.Response>(\"invoices.get\");");
+            "dispatcher.Map<global::Sample.Billing.GetInvoiceRpc.Query, global::Sample.Billing.GetInvoiceRpc.Response>(\"invoices.get\", global::Elarion.Abstractions.HandlerTransports.All);");
     }
 
     [Fact]
@@ -132,15 +128,13 @@ public sealed class ModuleBootstrapperTransportTests {
 
         // Core module (Billing) is mapped unconditionally on every transport — never wrapped in IsModuleEnabled.
         generated.Should().Contain("        MapBillingHttp(endpoints);");
-        generated.Should().Contain("        AddBillingJsonRpc(dispatcher);");
-        generated.Should().Contain("        AddBillingMcp(dispatcher);");
+        generated.Should().Contain("        AddBillingHandlers(dispatcher);");
         generated.Should().NotContain("if (IsModuleEnabled(configuration, \"Billing\"))");
 
         // Feature module (Shipping) is gated by its feature flag on every transport.
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"Shipping\"))");
         generated.Should().Contain("MapShippingHttp(endpoints);");
-        generated.Should().Contain("AddShippingJsonRpc(dispatcher);");
-        generated.Should().Contain("AddShippingMcp(dispatcher);");
+        generated.Should().Contain("AddShippingHandlers(dispatcher);");
     }
 
     [Fact]
@@ -148,21 +142,19 @@ public sealed class ModuleBootstrapperTransportTests {
         var generated = RunGenerator(out _);
 
         generated.Should().Contain(
-            "public static global::Elarion.JsonRpc.JsonRpcDispatcher RegisterRpcMethods(");
-        generated.Should().Contain(
-            "public static global::Elarion.JsonRpc.JsonRpcDispatcher RegisterMcpMethods(");
+            "public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher RegisterHandlers(");
         generated.Should().Contain(
             "public static global::Elarion.JsonRpc.Mcp.IRpcMcpMetadataSource GetMcpMetadata(");
         generated.Should().Contain(
             "global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         generated.Should().Contain("return dispatcher;");
 
-        // The dispatcher aggregates are extension methods on the dispatcher
-        // (dispatcher.RegisterRpcMethods(configuration) / dispatcher.RegisterMcpMethods(configuration)).
-        generated.Should().Contain("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher,");
+        // The handler aggregate is an extension method on the shared registry
+        // (dispatcher.RegisterHandlers(configuration)).
+        generated.Should().Contain("        this global::Elarion.Abstractions.Dispatch.HandlerDispatcher dispatcher,");
 
-        // The MCP aggregates compose the per-module MCP registration and metadata.
-        generated.Should().Contain("AddBillingMcp(dispatcher);");
+        // The aggregates compose the per-module handler registration and MCP metadata.
+        generated.Should().Contain("AddBillingHandlers(dispatcher);");
         generated.Should().Contain("methods.AddRange(GetBillingMcpMetadata());");
     }
 
@@ -170,18 +162,16 @@ public sealed class ModuleBootstrapperTransportTests {
     public void Bootstrapper_SelectsTransportSurfacesPerHandler() {
         var generated = RunGenerator(out _);
 
-        var jsonRpc = Slice(generated, "JsonRpcDispatcher AddBillingJsonRpc(");
-        var mcp = Slice(generated, "JsonRpcDispatcher AddBillingMcp(");
+        var handlers = Slice(generated, "HandlerDispatcher AddBillingHandlers(");
         var mcpMetadata = Slice(generated, "RpcMcpMethodMetadata[] GetBillingMcpMetadata()");
 
-        // A "both" handler is on both dispatchers; a JSON-RPC-only handler is only on /rpc; an MCP-only handler only on MCP.
-        jsonRpc.Should().Contain("\"invoices.get\"").And.Contain("\"invoices.archive\"");
-        jsonRpc.Should().NotContain("\"invoices.summarize\"");
+        // The single registry method maps every operation with its transport flags: "both" -> All,
+        // a JSON-RPC-only -> JsonRpc, an MCP-only -> Mcp.
+        handlers.Should().Contain("\"invoices.get\", global::Elarion.Abstractions.HandlerTransports.All");
+        handlers.Should().Contain("\"invoices.archive\", global::Elarion.Abstractions.HandlerTransports.JsonRpc");
+        handlers.Should().Contain("\"invoices.summarize\", global::Elarion.Abstractions.HandlerTransports.Mcp");
 
-        mcp.Should().Contain("\"invoices.get\"").And.Contain("\"invoices.summarize\"");
-        mcp.Should().NotContain("\"invoices.archive\"");
-
-        // The MCP tool table mirrors the MCP dispatcher surface.
+        // The MCP tool table mirrors the MCP surface: the "both" and MCP-only operations, never the JSON-RPC-only one.
         mcpMetadata.Should().Contain("MethodName = \"invoices.get\"")
             .And.Contain("MethodName = \"invoices.summarize\"");
         mcpMetadata.Should().NotContain("invoices.archive");
@@ -203,7 +193,7 @@ public sealed class ModuleBootstrapperTransportTests {
                 public static class BillingInvoicingModule { }
 
                 [HttpEndpoint("invoices")]
-                [RpcMethod("invoices.list")]
+                [Handler("invoices.list")]
                 public sealed class ListInvoices : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
                     public sealed record Query : IQuery;
                     public sealed record Response(string Number);
@@ -310,11 +300,10 @@ public sealed class ModuleBootstrapperTransportTests {
         var generated = RunGenerator([manifestReference], out var compilationWithGenerated);
 
         generated.Should().Contain("MapManifestHttp(endpoints);");
-        generated.Should().Contain("AddManifestJsonRpc(dispatcher);");
-        generated.Should().Contain("AddManifestMcp(dispatcher);");
+        generated.Should().Contain("AddManifestHandlers(dispatcher);");
         generated.Should().Contain("app.MapGet(\"manifest\",");
         generated.Should().Contain(
-            "dispatcher.MapHandler<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\");");
+            "dispatcher.Map<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\", global::Elarion.Abstractions.HandlerTransports.All);");
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
@@ -335,6 +324,83 @@ public sealed class ModuleBootstrapperTransportTests {
         var second = RunGenerator(out _);
 
         second.Should().Be(first);
+    }
+
+    [Fact]
+    public void Bootstrapper_WarnsOnDuplicateOperationName() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Dup {
+                [AppModule("Dup", Kind = AppModuleKind.Core)]
+                public static class DupModule { }
+
+                [Handler("dup.op")]
+                public sealed class FirstOp : IHandler<FirstOp.Query, Result<FirstOp.Response>> {
+                    public sealed record Query;
+                    public sealed record Response(string V);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("a"));
+                }
+
+                [Handler("dup.op")]
+                public sealed class SecondOp : IHandler<SecondOp.Query, Result<SecondOp.Response>> {
+                    public sealed record Query;
+                    public sealed record Response(string V);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("b"));
+                }
+            }
+            """;
+
+        var diagnostics = RunGeneratorDiagnostics(modulesSource);
+
+        diagnostics.Should().Contain(d => d.Id == "ELRPC003" && d.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public void Bootstrapper_InfersOperationName_FromModuleAndHandlerName() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Catalog {
+                [AppModule("Catalog", Kind = AppModuleKind.Core)]
+                public static class CatalogModule { }
+
+                [Handler]
+                public sealed class CreateProduct : IHandler<CreateProduct.Command, Result<CreateProduct.Response>> {
+                    public sealed record Command { public required string Name { get; init; } }
+                    public sealed record Response(System.Guid Id);
+                    public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(System.Guid.Empty));
+                }
+
+                [Handler(Transports = HandlerTransports.JsonRpc)]
+                public sealed class GetProductHandler : IHandler<GetProductHandler.Query, Result<GetProductHandler.Response>> {
+                    public sealed record Query { public required System.Guid Id { get; init; } }
+                    public sealed record Response(string Name);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("p"));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        // No explicit name -> {module}.{handler-name minus Handler/Command/Query/Request suffix, camelCased}.
+        generated.Should().Contain("\"catalog.createProduct\", global::Elarion.Abstractions.HandlerTransports.All");
+        generated.Should().Contain("\"catalog.getProduct\", global::Elarion.Abstractions.HandlerTransports.JsonRpc");
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
     }
 
     // Extracts a single emitted method body (from its signature marker to the matching closing brace) so a test can
@@ -426,7 +492,8 @@ public sealed class ModuleBootstrapperTransportTests {
             "1",
             "1",
             null,
-            string.Empty);
+            string.Empty,
+            "0");
 
         return $$"""
             using System.Threading;

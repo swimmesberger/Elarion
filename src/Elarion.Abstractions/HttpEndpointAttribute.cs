@@ -26,7 +26,7 @@ public enum HttpVerb {
 /// the request's CQRS marker: <see cref="ICommand"/> maps to <see cref="HttpVerb.Post"/> and <see cref="IQuery"/>
 /// maps to <see cref="HttpVerb.Get"/>. A request that implements neither marker must be given an explicit verb.
 /// This type lives in <c>Elarion.Abstractions</c> and intentionally carries no ASP.NET Core dependency — it is
-/// pure declarative metadata. A handler may carry both this attribute and <see cref="RpcMethodAttribute"/> to be
+/// pure declarative metadata. A handler may carry both this attribute and <see cref="HandlerAttribute"/> to be
 /// exposed over both transports.
 /// </remarks>
 /// <example>

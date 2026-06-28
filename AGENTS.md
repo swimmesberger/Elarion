@@ -17,14 +17,14 @@ and deployment quirks belong in consuming repositories, not here.
 
 ## Package layout
 
-- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts (`IHandler<TRequest, TResponse>` plus the `IHandler<T>` no-content convenience that inherits `IHandler<T, Result<Unit>>` via a default interface method bridging the non-generic `Result` — so the handler generator and decorators stay unchanged — plus optional CQRS request markers `IRequest`/`ICommand`/`IQuery` that drive HTTP verb inference, decorator generic constraints, and runtime branching), result types (`Result<T>`, the non-generic `Result`, and the `Unit` no-value payload — `Unit` lives in the dedicated `Elarion.Abstractions.Results` namespace, not the root namespace handlers import, so it never collides with a domain `Unit` type), pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, messaging contracts (`IDomainEvent`/`IIntegrationEvent` markers, `IDomainEventBus`/`IIntegrationEventBus`, `IEventContext`, `[ConsumeEvent]`, `EventConsumerFailedException`, `EventSubscriptionDescriptor`), cross-module communication markers (`[ModuleContract]`, `[ModuleApi]`, `[GenerateModuleApi]`), the transport-neutral authorization building blocks (the `[RequireClaim]`/`[RequirePermission]`/`[RequireRole]`/`[RequirePolicy]`/`[AllowAnonymous]` attributes, the assembly/`[AppModule]`-scoped `[ElarionAuthorizationDefaults]` deny-by-default opt-in, the async `IAuthorizer` seam, the `IAuthorizationPolicy` named-policy seam, `AuthorizationOptions`, and the `AuthorizationDecorator`; `AppError.Unauthorized` (401) joins `Forbidden` (403), and `ICurrentUser` exposes claim access via `HasClaim`/`GetClaimValues`), the **per-call dispatch-scope rail** (`DispatchScopeContext`, `IDispatchScopeInitializer`, and the `IServiceProvider.CreateDispatchScope`/`SeedScope` helpers in `Elarion.Abstractions.Dispatch`) that transports use to seed scoped state — e.g. the current user — into each handler call, the `IAppErrorTranslator<TError>` seam for mapping `AppError` to a transport's wire error, and source-generation triggers. See [Authorization model](#authorization-model).
+- `Elarion.Abstractions` — implementation-neutral attributes, handler contracts (`IHandler<TRequest, TResponse>` plus the `IHandler<T>` no-content convenience that inherits `IHandler<T, Result<Unit>>` via a default interface method bridging the non-generic `Result` — so the handler generator and decorators stay unchanged — plus optional CQRS request markers `IRequest`/`ICommand`/`IQuery` that drive HTTP verb inference, decorator generic constraints, and runtime branching), result types (`Result<T>`, the non-generic `Result`, and the `Unit` no-value payload — `Unit` lives in the dedicated `Elarion.Abstractions.Results` namespace, not the root namespace handlers import, so it never collides with a domain `Unit` type), pagination contracts (`Page<T>`, keyset/offset page requests), module metadata, scheduling contracts, messaging contracts (`IDomainEvent`/`IIntegrationEvent` markers, `IDomainEventBus`/`IIntegrationEventBus`, `IEventContext`, `[ConsumeEvent]`, `EventConsumerFailedException`, `EventSubscriptionDescriptor`), cross-module communication markers (`[ModuleContract]`, `[ModuleApi]`, `[GenerateModuleApi]`), the transport-neutral authorization building blocks (the `[RequireClaim]`/`[RequirePermission]`/`[RequireRole]`/`[RequirePolicy]`/`[AllowAnonymous]` attributes, the assembly/`[AppModule]`-scoped `[ElarionAuthorizationDefaults]` deny-by-default opt-in, the async `IAuthorizer` seam, the `IAuthorizationPolicy` named-policy seam, `AuthorizationOptions`, and the `AuthorizationDecorator`; `AppError.Unauthorized` (401) joins `Forbidden` (403), and `ICurrentUser` exposes claim access via `HasClaim`/`GetClaimValues`), the **per-call dispatch-scope rail** (`DispatchScopeContext`, `IDispatchScopeInitializer`, and the `IServiceProvider.CreateDispatchScope`/`SeedScope` helpers in `Elarion.Abstractions.Dispatch`) that transports use to seed scoped state — e.g. the current user — into each handler call, the `IAppErrorTranslator<TError>` seam for mapping `AppError` to a transport's wire error, the **transport-neutral named handler bus** (`HandlerDispatcher`/`HandlerRoute` in `Elarion.Abstractions.Dispatch` — a name→handler registry that every name-routed transport adapts, owning routing + invocation but no serialization) plus the handler-exposure attributes that drive it (`[Handler]` with an optional, convention-inferred operation name, the `HandlerTransports` flag, and `[McpHandler]`), and source-generation triggers. See [Authorization model](#authorization-model).
 - `Elarion` — runtime primitives for handler caches, decorators, modules, resilience policies, current-user access, the default transport-neutral authorizer (`ClaimsAuthorizer` + `AddElarionAuthorization` + the named-policy registry `AddElarionAuthorizationPolicy`), the in-memory scheduler, and the in-memory **domain** event bus (Plane A inline dispatch, `AddInMemoryDomainEventBus`) plus the shared `EventSubscriptionRegistry`/`EventContext`. EF-agnostic: the in-memory integration tier lives in `Elarion.Messaging.InMemory`. The published NuGet package **bundles the `Elarion.Generators` analyzer** (`analyzers/dotnet/cs/`), so referencing `Elarion` directly wires the source generator — there is no standalone generator package. Because NuGet analyzer assets are not transitive, this is the single home for the generator: application libraries and hosts both reference `Elarion` directly. The core is **transport-agnostic** — it depends only on `Elarion.Abstractions` and references no transport package (not even `Elarion.JsonRpc`); the off-HTTP claims-based `ICurrentUser` (`AddElarionClaimsCurrentUser` / `ClaimsPrincipalCurrentUser`) and the typed-direct `HandlerInvoker` live here.
 - `Elarion.Blobs` — implementation-neutral, streaming-first blob storage contracts and DTOs. `IBlobStore` is a minimal core (`SaveAsync(BlobUploadRequest, Stream)`, `OpenReadAsync` returning a disposable `BlobDownload` of metadata + an open content stream, plus metadata/delete/exists), so callers never have to buffer a whole blob and backends implement only the primitives. Ergonomic `byte[]`/file saves and buffered/copy-to reads (`SaveFromFileAsync`, `DownloadContentAsync`, `ReadAllBytesAsync`, `DownloadToAsync`) live as `BlobStoreExtensions` over that core; `BlobUploadRequest.ContentLength` is an optional hint while the recorded `Size` is always the actual bytes written.
 - `Elarion.Blobs.PostgreSql` — PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O. Writes stream a seekable source straight into the `bytea` column without buffering, and stream a non-seekable source without buffering too when the caller supplies a `BlobUploadRequest.ContentLength` hint (the bind requires the length up front; the actual bytes are verified against the hint so the recorded `Size` stays truthful), buffering only when the hint is absent; reads are buffered for now, with a documented `CommandBehavior.SequentialAccess` + `NpgsqlDataReader.GetStream` upgrade path that attaches the reader/connection to the returned `BlobDownload`.
-- `Elarion.JsonRpc` — the JSON-RPC **protocol runtime** (not a wire/host): the dispatcher, envelopes, result/error types, telemetry, and schema export, **plus the Elarion handler bridge** — `MapHandler` (maps `IHandler<,>` onto the dispatcher), `AppErrorMapper`, and the default `IAppErrorTranslator<RpcError>`. References `Elarion.Abstractions` (for the handler/result/error contracts and the dispatch-scope rail) but stays ASP.NET-free — it knows nothing about HTTP/Kestrel and could be driven over any wire. The actual HTTP/Kestrel hosting of JSON-RPC lives in `Elarion.AspNetCore` (`MapJsonRpc`), which depends on this package. The transport-neutral dispatch-scope rail itself lives in `Elarion.Abstractions`, not here.
+- `Elarion.JsonRpc` — the JSON-RPC **protocol adapter** over the shared `HandlerDispatcher` bus (not a wire/host): `JsonRpcDispatcher` wraps a `HandlerDispatcher` and serves only the operations flagged `HandlerTransports.JsonRpc`, owning the JSON-RPC concerns — envelopes, result/error types, telemetry, schema export, JSON param (de)serialization, and `Result`→`RpcError` mapping (`AppErrorMapper`, the default `IAppErrorTranslator<RpcError>`). The MCP adapter (`McpDispatcher`) lives here too, over the same bus filtered to `HandlerTransports.Mcp`. References `Elarion.Abstractions` (for the handler/result/error contracts, the named bus, and the dispatch-scope rail) but stays ASP.NET-free — it knows nothing about HTTP/Kestrel and could be driven over any wire. The actual HTTP/Kestrel hosting of JSON-RPC lives in `Elarion.AspNetCore` (`MapJsonRpc`), which depends on this package. The named bus and the dispatch-scope rail themselves live in `Elarion.Abstractions`, not here.
 - `Elarion.AspNetCore` — ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware (the snapshot exposes `ICurrentUser` claim access), HTTP transport support, and minimal-API endpoint mapping for `[HttpEndpoint]` handlers (`HttpAppErrorMapper` maps `Unauthorized`→401/`Forbidden`→403, `ElarionHttpResults`).
 - `Elarion.AspNetCore.Identity` — optional ASP.NET Core Identity integration. `AddElarionIdentity<TUser, TRole, TKey, TDbContext>` wires `AddIdentity` + EF stores against the application's **plain** `DbContext` (no `IdentityDbContext` inheritance), maps `ICurrentUser` to the Identity claim types, and calls the core `AddElarionAuthorization`. `[GenerateElarionIdentity<TUser, TRole, TKey>(SnakeCase = true)]` (on a `[GenerateDbSets]` context) drives a **bundled generator** (`Elarion.AspNetCore.Identity.Generators`, `IsPackable=false`) that emits the seven Identity `DbSet`s and implements the EF generator's `OnEntitiesConfigured` seam by calling `ModelBuilder.ApplyElarionIdentity<…>` — the self-contained Identity model (keys, composite keys, indexes, snake_case table/column/index names; no `EFCore.NamingConventions` dependency). `ELIDN001` if `[GenerateDbSets]` is missing. Depends on `Microsoft.AspNetCore.Identity.EntityFrameworkCore`, `Elarion.Abstractions`, and `Elarion.AspNetCore`.
-- `Elarion.AspNetCore.Mcp` — Model Context Protocol (MCP) server integration: exposes MCP-surfaced `[RpcMethod]` handlers as tools over Streamable HTTP via a dedicated `McpDispatcher`, independent of the JSON-RPC endpoint (`AddElarionMcp`, `MapElarionMcp`). The only package referencing the `ModelContextProtocol` SDK.
+- `Elarion.AspNetCore.Mcp` — Model Context Protocol (MCP) server integration: exposes MCP-surfaced `[Handler]` operations as tools over Streamable HTTP via the `McpDispatcher` adapter (over the shared `HandlerDispatcher`, filtered to `HandlerTransports.Mcp`), independent of the JSON-RPC endpoint (`AddElarionMcp`, `MapElarionMcp`). The only package referencing the `ModelContextProtocol` SDK.
 - `Elarion.AspNetCore.SchemaGeneration` — MSBuild package and host-launching tool for generating JSON-RPC schemas during build.
 - `Elarion.EntityFrameworkCore` — marker attributes for EF Core DbSet/configuration generation: `[EntityConfiguration]` (placed on an `IEntityTypeConfiguration<T>` implementation; the single source of truth that drives **both** the entity's `DbSet<T>` and its `Configure(...)` application — there is no separate entity marker, and a configuration class may implement `IEntityTypeConfiguration<T>` more than once so one class can contribute several DbSets), `[GenerateDbSets]` (on the concrete partial `DbContext` class — the generator emits the `DbSet<T>` properties and `ConfigureEntities` onto the context itself; there is no context interface, since the database is application logic handlers use directly), plus the assembly-level `[UseElarionEntityFrameworkCore(Provider = EfCoreProvider.Npgsql)]` opt-in (`EfCoreProvider` enum, default `Portable`) that lets EF generators emit provider-optimized variants. Dependency-free at runtime (no EF Core or runtime package references). The published NuGet package **bundles the `Elarion.EntityFrameworkCore.Generators` analyzer** (`analyzers/dotnet/cs/`), so referencing the marker package directly is sufficient for any assembly that declares `[EntityConfiguration]`/`[GenerateDbSets]` types (including a separate entity/configuration assembly, whose generator emits the per-assembly configuration manifest the context assembly reads) — there is no standalone generator package.
 - `Elarion.Paging` — keyset (cursor) and offset pagination primitives: the `[Keyset<TEntity>]` attribute (declared on a dedicated partial class, not the entity, so an entity may have any number of orderings), `IKeysetDefinition<T>` plus generated-keyset support types, an opaque cursor codec, `SortMap`/`SortMapBuilder` (composite multi-column sorts with per-entry tiebreakers and a `SortDirection`), and the `IQueryable` paging extensions that produce the transport-neutral `Page<T>`. Both keyset and offset paging take an explicit definition (`MyKeyset.Definition` / a `SortMap`). Depends on EF Core (`Microsoft.EntityFrameworkCore.Relational`) and `Elarion.Abstractions`.
@@ -41,9 +41,9 @@ and deployment quirks belong in consuming repositories, not here.
 - `Elarion` depends only on `Elarion.Abstractions` and is **transport-agnostic**: it must not reference any protocol or host package (including `Elarion.JsonRpc`), ASP.NET Core, or EF Core. Two distinct layers sit above core: **protocol** packages (`Elarion.JsonRpc` — message format + dispatcher, no wire/host) and **host** packages that bind protocols to a wire (`Elarion.AspNetCore` serves JSON-RPC over `/rpc` plus REST; `Elarion.AspNetCore.Mcp` hosts MCP over Streamable HTTP). Host packages depend on the protocol packages, not vice versa.
 - The event bus stays split across the two packages: `Elarion.Abstractions` owns the transport-neutral messaging contracts and the domain/integration plane split, while `Elarion` owns only the in-memory implementation. An alternative backend (transactional outbox, message broker) replaces the in-memory runtime by implementing `IIntegrationEventBus` — the only broker-portable plane — without touching the abstractions.
 - `Elarion.Blobs` must stay provider-neutral. Provider implementations such as `Elarion.Blobs.PostgreSql` own storage-specific dependencies and schema configuration.
-- `Elarion.JsonRpc` owns the JSON-RPC runtime (dispatch, envelopes, telemetry, schema export) and the Elarion handler bridge (`MapHandler` / `AppErrorMapper` / default `IAppErrorTranslator<RpcError>`). It references `Elarion.Abstractions` but must stay ASP.NET-free. The transport-neutral dispatch-scope rail (`DispatchScopeContext`, `IDispatchScopeInitializer`, `CreateDispatchScope`/`SeedScope`) lives in `Elarion.Abstractions`, not here.
+- `Elarion.JsonRpc` owns the JSON-RPC and MCP **adapters** over the shared named bus: `JsonRpcDispatcher` (envelopes, telemetry, schema export, `Result`→`RpcError` via `AppErrorMapper` / default `IAppErrorTranslator<RpcError>`) and `McpDispatcher`, each serving the bus subset their `HandlerTransports` flag selects. It references `Elarion.Abstractions` but must stay ASP.NET-free. The named bus (`HandlerDispatcher`/`HandlerRoute`) and the dispatch-scope rail (`DispatchScopeContext`, `IDispatchScopeInitializer`, `CreateDispatchScope`/`SeedScope`) both live in `Elarion.Abstractions.Dispatch`, not here.
 - `Elarion.AspNetCore` owns HTTP/JSON-RPC endpoint integration and ASP.NET Core-specific behavior. Keep JSON-RPC runtime contracts, telemetry, and schema export in `Elarion.JsonRpc`.
-- `Elarion.AspNetCore.Mcp` owns MCP transport integration only; the dedicated-dispatcher wrapper (`McpDispatcher`) lives in `Elarion.JsonRpc`, and the `RpcTransports` flag plus `[McpMethod]`/`[RpcMethod]` attributes live in `Elarion.Abstractions`.
+- `Elarion.AspNetCore.Mcp` owns MCP transport integration only; the MCP adapter (`McpDispatcher`) over the shared bus lives in `Elarion.JsonRpc`, and the `HandlerTransports` flag plus `[McpHandler]`/`[Handler]` attributes live in `Elarion.Abstractions`.
 - Authorization must stay transport-neutral and ASP.NET-free: the attributes, `IAuthorizer`, `IAuthorizationPolicy`, and `AuthorizationDecorator` live in `Elarion.Abstractions`, and the default `ClaimsAuthorizer` in `Elarion` core. Do not couple the authorization decision path to `HttpContext` or ASP.NET's policy engine; named policies are Elarion-native `IAuthorizationPolicy` implementations evaluated against `ICurrentUser` + the request.
 - `Elarion.AspNetCore.Identity` owns ASP.NET Core Identity integration only and is **optional**. The base authorization building blocks must not depend on it; authentication providers (Identity, Entra ID, any OIDC/JWT) only populate `ICurrentUser`. The app's `DbContext` composes Identity via `[GenerateElarionIdentity]` rather than inheriting `IdentityDbContext`.
 - EF Core packages own only EF-specific marker APIs, pagination primitives, and source generation. Keep `Elarion.EntityFrameworkCore` dependency-free (markers only); EF Core-dependent runtime such as the pagination execution helpers belongs in `Elarion.Paging`, while provider-neutral pagination contracts (`Page<T>`, keyset/offset requests) stay in `Elarion.Abstractions`.
@@ -94,7 +94,7 @@ the six registration generators), not the old "scan and emit" shape.
 
 JSON-RPC is a first-class optional transport:
 
-1. Application handlers declare `[RpcMethod("module.action")]`. The `Transports` flag (`RpcTransports.JsonRpc`/`Mcp`/`All`, default `All`) selects which dispatcher-based transports expose the handler — JSON-RPC, MCP, or both. Request/response are read from the handler's `IHandler<TRequest, Result<TResponse>>` interface (success type unwrapped from `Result<T>`), so they may be nested or top-level; a handler with no resolvable shape reports `ELRPC002`.
+1. Application handlers declare `[Handler("module.action")]` (the name is optional — when omitted the generator infers `{module}.{operation}` from the handler type name, see [HTTP endpoint model](#http-endpoint-model)/below; specify it explicitly for stable wire contracts). The `Transports` flag (`HandlerTransports.JsonRpc`/`Mcp`/`All`, default `All`) selects which name-routed transports expose the handler — JSON-RPC, MCP, or both. Request/response are read from the handler's `IHandler<TRequest, Result<TResponse>>` interface (success type unwrapped from `Result<T>`), so they may be nested or top-level; a handler with no resolvable shape reports `ELRPC002`.
 2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits the module-scoped, feature-flag-gated dispatcher registration code.
 3. Hosts configure `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
 4. `Elarion.JsonRpc.JsonRpcSchemaExporter` or `Elarion.AspNetCore.SchemaGeneration` exports `rpc-schema.json` from registered methods.
@@ -105,13 +105,25 @@ Generated TypeScript should remain portable across browser and Node.js server
 runtimes. Prefer standard `fetch`, injectable transport, `AbortSignal`, and small
 common dependencies such as Zod when they materially improve safety.
 
+The named `HandlerDispatcher` bus is a **transport seam**, not an in-process call path: it exists so name-keyed
+transports (JSON-RPC, MCP) can route a wire *string* to a handler. **In-process, always call handlers
+typed-directly** — inject `IHandler<TRequest, Result<TResponse>>`, inject `IHandlerSender` and call
+`SendAsync<,>` (the typed mediator send — resolves by type from the ambient scope/transaction; register with
+`AddElarionHandlerSender`), use `HandlerInvoker.InvokeAsync<,>` (custom transports/jobs, fresh scope), or, across
+modules, the typed `[GenerateModuleApi]` facade behind a `[ModuleContract]` — so a rename is a compile error, not
+a runtime surprise. The bus *is* an injectable singleton and `DispatchAsync(name, …)` works, but it takes
+`object`/returns `Result<object>` (no compile-time type, no schema), so use it from application code only when you
+must dispatch by a dynamic/string name and cannot reference the handler's type (the mediator niche); prefer
+`[ModuleContract]` for cross-module decoupling. The event bus is **pub/sub-only** — it has no request/reply (see
+[Event / messaging model](#event--messaging-model)). See [Cross-module communication](#cross-module-communication).
+
 ## HTTP endpoint model
 
 Plain HTTP/REST is a parallel first-class optional transport that maps the same handlers:
 
 1. Application handlers declare `[HttpEndpoint("route")]` or `[HttpEndpoint(HttpVerb.X, "route")]`. The request/response are read from the handler's `IHandler<TRequest, Result<TResponse>>` interface (success type unwrapped from `Result<T>`), so they may be nested or top-level — nesting/naming carry no semantic weight. Verb precedence: an explicit verb wins; else the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); else `ELHTTP004`. A handler with no resolvable shape reports `ELHTTP001`.
 2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits per-module `Map{Module}Http(this IEndpointRouteBuilder)` extension-method bodies of strongly-typed minimal-API registrations (one `MapGet`/`MapPost`/... per handler), aggregated and feature-gated by the `endpoints.MapElarion(configuration)` extension method.
-3. Each emitted lambda binds the request (`[AsParameters]` for GET/DELETE and opt-in custom-bound requests; JSON body for default POST/PUT/PATCH) and translates `Result<T>` via `ElarionHttpResults` — `200`/`204` on success, RFC 7807 ProblemDetails on failure with the status from `HttpAppErrorMapper`.
+3. Each emitted lambda binds the request (`[AsParameters]` for GET/DELETE and opt-in custom-bound requests; JSON body for default POST/PUT/PATCH), **resolves the handler typed-directly** (`[FromServices] IHandler<TRequest, Result<TResponse>>` — HTTP does **not** go through the named bus, since the route already pins the type), and translates `Result<T>` via `ElarionHttpResults` — `200`/`204` on success, RFC 7807 ProblemDetails on failure with the status from `HttpAppErrorMapper`.
 
 Keep the generator emitting concrete-typed lambdas (no open generics, no reflection
 binding) so output stays AOT/RDG friendly. The `[HttpEndpoint]` attribute lives in
@@ -127,12 +139,12 @@ HTTP mapping is **module-scoped and feature-flag-gated** — see
 
 MCP is a parallel first-class optional transport, a peer of JSON-RPC and HTTP, served by `Elarion.AspNetCore.Mcp`:
 
-1. A handler opts into MCP via its `[RpcMethod(Transports = ...)]` flag (default `All` includes MCP). `[McpMethod(ToolName = ...)]` customizes only the tool name — it carries no enable/disable flag (use `Transports` for that).
-2. `AppModuleDiscoveryGenerator` emits the gated `dispatcher.RegisterMcpMethods(configuration)` (the MCP-surfaced registrations) and `configuration.GetMcpMetadata()` (the reflection-free tool table) extension methods, alongside the JSON-RPC `dispatcher.RegisterRpcMethods(configuration)`.
-3. MCP owns a **dedicated dispatcher**: `McpDispatcher` (in `Elarion.JsonRpc`) wraps a separate `JsonRpcDispatcher` instance built only from MCP-surfaced methods. An MCP-only handler is therefore genuinely absent from `/rpc` and the exported JSON-RPC schema; a JSON-RPC-only handler is never dispatchable as a tool; a "both" handler is registered in both dispatchers.
-4. Hosts call `AddElarionMcp(metadata, serializerOptions, registerMcp, configure)` and `MapElarionMcp()`; `MapJsonRpc()` is never required. When a host opts into `[GenerateModuleBootstrapper]`, MCP registration is **module-scoped and feature-flag-gated** — see [Module-aware transport gating](#module-aware-transport-gating).
+1. A handler opts into MCP via its `[Handler(Transports = ...)]` flag (default `All` includes MCP). `[McpHandler(ToolName = ...)]` customizes only the tool name — it carries no enable/disable flag (use `Transports` for that).
+2. `AppModuleDiscoveryGenerator` emits the gated `dispatcher.RegisterHandlers(configuration)` (which builds the single shared `HandlerDispatcher` with every operation's flags) and `configuration.GetMcpMetadata()` (the reflection-free tool table).
+3. MCP is an **adapter over the shared bus**: `McpDispatcher` (in `Elarion.JsonRpc`) wraps the same `HandlerDispatcher` and serves only the operations flagged `HandlerTransports.Mcp`. An MCP-only handler is therefore genuinely absent from `/rpc` and the exported JSON-RPC schema; a JSON-RPC-only handler is never dispatchable as a tool; a "both" handler is reachable from either surface — all from one registry.
+4. Hosts call `AddElarionMcp(metadata, serializerOptions, registerHandlers, configure)` and `MapElarionMcp()`; `MapJsonRpc()` is never required. The same `RegisterHandlers` delegate is passed to both `AddElarionJsonRpc` and `AddElarionMcp`, and the bus is built once (shared). When a host opts into `[GenerateModuleBootstrapper]`, MCP registration is **module-scoped and feature-flag-gated** — see [Module-aware transport gating](#module-aware-transport-gating).
 
-REST stays a separate opt-in via `[HttpEndpoint]` (it needs route/verb/param binding that don't fit a flags enum); JSON-RPC and MCP share the single define-once `[RpcMethod]` identity and differ only by the `Transports` flag.
+REST stays a separate opt-in via `[HttpEndpoint]` (it needs route/verb/param binding that don't fit a flags enum); JSON-RPC and MCP share the single define-once `[Handler]` identity and differ only by the `Transports` flag.
 
 ## Authorization model
 
@@ -166,23 +178,23 @@ runs in the handler pipeline, so the same rules apply under JSON-RPC, MCP, and H
 ## Module-aware transport gating
 
 All three transports become **module-scoped and feature-flag-gated** when a host opts in with
-`[GenerateModuleBootstrapper]`. `AppModuleDiscoveryGenerator` associates each `[RpcMethod]`/`[HttpEndpoint]`
+`[GenerateModuleBootstrapper]`. `AppModuleDiscoveryGenerator` associates each `[Handler]`/`[HttpEndpoint]`
 handler with a module by longest-prefix namespace match and emits, on the host bootstrapper partial:
 
-- per-module **extension methods** `Map{Module}Http(this IEndpointRouteBuilder)`, `Add{Module}JsonRpc(this JsonRpcDispatcher)`, `Add{Module}Mcp(this JsonRpcDispatcher)`, and the parameterless `Get{Module}McpMetadata()`;
-- aggregate **extension methods** `services.AddElarion(configuration)`, `endpoints.MapElarion(configuration)` (module `MapEndpoints` + `[HttpEndpoint]`), `dispatcher.RegisterRpcMethods(configuration)`, `dispatcher.RegisterMcpMethods(configuration)`, `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and `configuration.IsModuleEnabled(name)`.
+- per-module **extension methods** `Map{Module}Http(this IEndpointRouteBuilder)`, `Add{Module}Handlers(this HandlerDispatcher)` (maps the module's `[Handler]` operations with their transport flags), and the parameterless `Get{Module}McpMetadata()`;
+- aggregate **extension methods** `services.AddElarion(configuration)`, `endpoints.MapElarion(configuration)` (module `MapEndpoints` + `[HttpEndpoint]`), `dispatcher.RegisterHandlers(configuration)` (builds the single shared `HandlerDispatcher`), `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and `configuration.IsModuleEnabled(name)`.
 
-Per-module JSON-RPC/MCP methods are additionally filtered by each handler's `Transports` flag, so the JSON-RPC
-dispatcher gets only JSON-RPC-surfaced handlers and the MCP dispatcher only MCP-surfaced ones. Core modules map
+The single registry carries each operation's `Transports` flag, so the JSON-RPC adapter serves only
+JSON-RPC-surfaced operations and the MCP adapter only MCP-surfaced ones. Core modules map
 unconditionally; feature modules are gated by `Modules:{Name}:Enabled` (via `IsModuleEnabled`), so a disabled
 module disappears across services, validators, `MapEndpoints`, `[HttpEndpoint]`, JSON-RPC, and MCP. Handlers
 whose namespace is under no module emit a warning (`ELHTTP003`/`ELRPC001`; MCP reuses `ELRPC001` since it is
-built on `[RpcMethod]`) and are mapped ungated so they are never silently dropped.
+built on `[Handler]`) and are mapped ungated so they are never silently dropped.
 
 `[GenerateModuleBootstrapper]` is the **single transport-wiring path** — there is no flat, ungated map. A host
 that conceptually has "no modules" declares one core `[AppModule]` (core modules map unconditionally). Schema
-export reads the gated `RegisterRpcMethods`; feature modules default to enabled, so the exported schema is the
-complete contract unless a module is explicitly disabled for the schema build.
+export reads the gated `RegisterHandlers` (filtered to the JSON-RPC surface); feature modules default to enabled,
+so the exported schema is the complete contract unless a module is explicitly disabled for the schema build.
 
 A module owns the route group / authorization policy / conventions for its generated `[HttpEndpoint]` routes via
 an optional static `ConfigureEndpointGroup(IEndpointRouteBuilder) → IEndpointRouteBuilder` hook on the
@@ -195,11 +207,11 @@ opts the whole module into a prefix. The generator never reads `[Authorize]`/`[A
 Per-endpoint authorization/conventions are the host's job, via the per-module extension method on a configured group
 (e.g. `app.MapGroup("/billing").RequireAuthorization(policy).MapBillingHttp()`) plus the module
 `MapEndpoints` escape hatch — the generator never reads `[Authorize]`/`[AllowAnonymous]`. RPC/MCP gating needs
-`IConfiguration` at dispatcher-compose time, so `AddElarionJsonRpcDispatcher` (transport-neutral, via
-`IServiceProvider`) and `AddJsonRpc`/`AddElarionMcp` (ASP.NET, via `IConfiguration`) expose config-aware
-registration overloads, used as `AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods)` and
-`AddElarionMcp(config.GetMcpMetadata(), serializerOptions, ModuleBootstrapper.RegisterMcpMethods, configure)`
-(the `Register*Methods` registration delegates are still passed as method groups).
+`IConfiguration` at registry-compose time, so `AddElarionHandlerDispatcher`/`AddElarionJsonRpcDispatcher`
+(transport-neutral, via `IServiceProvider`) and `AddJsonRpc`/`AddElarionMcp` (ASP.NET, via `IConfiguration`)
+expose config-aware registration overloads, used as `AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers)`
+and `AddElarionMcp(config.GetMcpMetadata(), serializerOptions, ModuleBootstrapper.RegisterHandlers, configure)`
+(the same `RegisterHandlers` delegate is passed to both as a method group, so the shared bus is built once).
 
 ## Event / messaging model
 
@@ -213,9 +225,8 @@ for the full rationale.
    **inline within the caller's DI scope**, and therefore within the caller's transaction:
    consumers share the scoped `DbContext`, their writes commit atomically with the command,
    and a consumer failure fails the command. `PublishAsync<TEvent> where TEvent : IDomainEvent`
-   fans out to every consumer in ascending `[ConsumeEvent(Order = …)]`, aggregating failures;
-   `RequestAsync<TRequest, TResponse>` dispatches to a single responder returning
-   `Result<TResponse>`. Never broker-portable.
+   fans out to every consumer in ascending `[ConsumeEvent(Order = …)]`, aggregating failures.
+   Pub/sub only — never broker-portable.
 2. **Plane B — integration events (`IIntegrationEventBus`).** Notifications **recorded within
    the caller's unit of work and delivered after the transaction commits**, on a separate
    scope, retried independently; a consumer failure never fails the command, and a rollback
@@ -235,15 +246,16 @@ the full decorator pipeline, exactly like a command/query handler. The consumer 
 implementing `IHandler<TEvent, Result<T>>` (or the `IHandler<TEvent>` sugar) whose request type
 *is* the event, annotated with a class-level `[ConsumeEvent]`. It is dispatched through its full
 decorator pipeline (tracing, resilience, validation, cache-invalidation) — the generated
-descriptor resolves the `IHandler<,>` interface from DI so the decorated chain runs — and its
-role is inferred from the response type: `Result<Unit>` (or the `IHandler<TEvent>` sugar) is a
-**fan-out subscriber** whose failed `Result` surfaces as an `EventConsumerFailedException` (each
-backend handles it per its plane — domain aggregates and rethrows, failing the command; the
-in-memory integration pump logs and isolates; the outbox retries), while a domain handler
-returning `Result<T>` (`T ≠ Unit`) is the **single `RequestAsync` responder**, returning its
-typed `Result<T>` to the caller without throwing. Integration events are fan-out only, so an
-integration handler returning a non-`Unit` `Result<T>` is rejected (`ELEVT005`). A class-level
-`[ConsumeEvent]` on a non-handler is reported (`ELEVT005`).
+descriptor resolves the `IHandler<,>` interface from DI so the decorated chain runs. Every
+consumer is a **fan-out subscriber**: `Result<Unit>` (or the `IHandler<TEvent>` sugar) whose failed
+`Result` surfaces as an `EventConsumerFailedException` (each backend handles it per its plane —
+domain aggregates and rethrows, failing the command; the in-memory integration pump logs and
+isolates; the outbox retries). The event bus is **pub/sub-only** (see
+[ADR-0010](docs/decisions/0010-event-bus-is-pub-sub-only.md)) — a non-`Unit` `Result<T>` response is
+request/reply, not a notification, and is rejected (`ELEVT005` handler-form, `ELEVT002` method-form);
+for a typed reply, call a handler **by type** with `IHandlerSender`/`IHandler` (see
+[the handler-call guidance](docs/concepts/handlers.mdx#calling-a-handler-from-other-code)). A
+class-level `[ConsumeEvent]` on a non-handler is reported (`ELEVT005`).
 
 Because the domain plane dispatches **inline in the publisher's scope**, a domain-event handler's
 decorator pipeline runs **nested within the command's** (same scope, `DbContext`, and transaction), so
@@ -257,14 +269,15 @@ and the `AppliesTo` predicate are both evaluated at compile time by `HandlerRegi
 
 The **method form** is a lightweight alternative for a small side effect on an existing
 `[Service]`: the consumer is an instance method on a `[Service]` class (no decorator pipeline);
-the marker selects the plane and the return type selects the role (`void`/`Task`/`ValueTask` →
-fan-out subscriber, `Result<TResponse>` → the single responder). Its optional
-`IEventContext`/`IEventContext<TEvent>` and `CancellationToken` parameters are supplied by the
-runtime.
+the message parameter's marker selects the plane. It is a fan-out subscriber, returning
+`void`/`Task`/`ValueTask` (throw to fail) or the **non-generic `Result`**/`Task<Result>`/`ValueTask<Result>`
+(a failed `Result` → `EventConsumerFailedException`, the same failure channel as the handler form) — a
+`Result<T>` with a value is request/reply and is rejected. Its optional `IEventContext`/`IEventContext<TEvent>`
+and `CancellationToken` parameters are supplied by the runtime.
 
 `EventConsumerRegistrationGenerator` (triggered by `[GenerateEventConsumers]` or
 `[UseElarion]`) discovers consumers, validates signatures (diagnostics `ELEVT001`/`ELEVT002`/
-`ELEVT004`), and emits a per-module `Add{Module}EventConsumers(IServiceCollection)` (longest-prefix
+`ELEVT005`), and emits a per-module `Add{Module}EventConsumers(IServiceCollection)` (longest-prefix
 namespace match) that registers each consumer service plus an `EventSubscriptionDescriptor`, wired
 into that module's `ConfigureDefaultServices` — see
 [Module default services](#module-default-services). The in-memory domain tier in `Elarion/Messaging`
@@ -308,8 +321,8 @@ module author wiring them by hand. The mechanism is a cross-generator partial-me
 ## Cross-module communication
 
 Direct, synchronous module-to-module calls (the in-process analog of a gRPC call) go through a
-**published contract**, not through another module's internals or `IDomainEventBus.RequestAsync`
-(Plane A is in-process by nature and not an extraction path). See
+**published contract**, not through another module's internals or a direct typed handler call
+(`IHandlerSender`/`IHandler` couple you to the other module's types and don't survive extraction). See
 [ADR-0002](docs/decisions/0002-cross-module-communication.md). The framework owns the convention and
 the analyzer; mapping between a contract's DTOs and a module's handler DTOs is the **module's concern**
 (hand-written or any mapper) — there is no generated forwarder and no mapper dependency.

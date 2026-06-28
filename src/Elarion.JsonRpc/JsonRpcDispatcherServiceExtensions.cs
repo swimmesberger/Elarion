@@ -1,69 +1,93 @@
 using System.Text.Json;
+using Elarion.Abstractions.Dispatch;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace Elarion.JsonRpc;
 
 /// <summary>
-/// DI registration for the <see cref="JsonRpcDispatcher"/>.
+/// DI registration for the transport-neutral <see cref="HandlerDispatcher"/> (the named bus) and the JSON-RPC
+/// adapter (<see cref="JsonRpcDispatcher"/>) over it.
 /// </summary>
 public static class JsonRpcDispatcherServiceExtensions {
     /// <summary>
-    /// Registers a singleton <see cref="JsonRpcDispatcher"/> built from <paramref name="serializerOptions"/> and
-    /// the generated <paramref name="registerAll"/> map, frozen and ready for dispatch. The dispatcher is created
-    /// lazily on first resolution so its <see cref="ILogger{TCategoryName}"/> is taken from the built container —
-    /// no separate eager instance or logger-attaching copy is needed.
+    /// Registers the shared <see cref="HandlerDispatcher"/> singleton, built once from the generated
+    /// <paramref name="registerHandlers"/> map and frozen. Idempotent (<c>TryAddSingleton</c>), so every transport
+    /// host that needs the bus (JSON-RPC, MCP, …) can call it with the same delegate and the registry is built once.
     /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <param name="serializerOptions">The serializer options the dispatcher uses for params/result handling.</param>
-    /// <param name="registerAll">
-    /// The generated registration delegate (e.g. <c>ModuleBootstrapper.RegisterRpcMethods</c>) that maps the enabled
-    /// modules' handlers onto the dispatcher and returns it for chaining.
-    /// </param>
-    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// <b>First registration wins.</b> Pass the <b>same</b> registration delegate (e.g.
+    /// <c>ModuleBootstrapper.RegisterHandlers</c>) to every transport — <c>AddElarionJsonRpc</c> and
+    /// <c>AddElarionMcp</c> both route through this method, and a divergent second delegate is silently ignored
+    /// because the bus is a single shared singleton.
+    /// </remarks>
+    public static IServiceCollection AddElarionHandlerDispatcher(
+        this IServiceCollection services,
+        Func<HandlerDispatcher, HandlerDispatcher> registerHandlers) {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(registerHandlers);
+
+        services.TryAddSingleton(_ => registerHandlers(new HandlerDispatcher()).Freeze());
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the shared <see cref="HandlerDispatcher"/> singleton using a registration delegate that also
+    /// receives the <see cref="IServiceProvider"/>, so registration can resolve services (e.g. configuration) at
+    /// compose time — for example to gate operations by a per-module feature flag. The transport-neutral
+    /// <c>Elarion.JsonRpc</c> package stays free of a configuration dependency; ASP.NET hosts get an
+    /// <c>IConfiguration</c>-flavored overload from <c>Elarion.AspNetCore</c>.
+    /// </summary>
+    /// <remarks><b>First registration wins</b> — see the other overload; pass the same delegate to every transport.</remarks>
+    public static IServiceCollection AddElarionHandlerDispatcher(
+        this IServiceCollection services,
+        Func<HandlerDispatcher, IServiceProvider, HandlerDispatcher> registerHandlers) {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(registerHandlers);
+
+        services.TryAddSingleton(sp => registerHandlers(new HandlerDispatcher(), sp).Freeze());
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the shared <see cref="HandlerDispatcher"/> and a singleton <see cref="JsonRpcDispatcher"/> adapter
+    /// over it, using <paramref name="serializerOptions"/> for params/result handling.
+    /// </summary>
     /// <example>
     /// <code>
-    /// builder.Services.AddElarionJsonRpcDispatcher(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+    /// builder.Services.AddElarionJsonRpcDispatcher(serializerOptions, ModuleBootstrapper.RegisterHandlers);
     /// </code>
     /// </example>
     public static IServiceCollection AddElarionJsonRpcDispatcher(
         this IServiceCollection services,
         JsonSerializerOptions serializerOptions,
-        Func<JsonRpcDispatcher, JsonRpcDispatcher> registerAll) {
-        ArgumentNullException.ThrowIfNull(services);
+        Func<HandlerDispatcher, HandlerDispatcher> registerHandlers) {
         ArgumentNullException.ThrowIfNull(serializerOptions);
-        ArgumentNullException.ThrowIfNull(registerAll);
 
-        services.AddSingleton(sp =>
-            registerAll(new JsonRpcDispatcher(serializerOptions, sp.GetService<ILogger<JsonRpcDispatcher>>()))
-                .Freeze());
-
+        services.AddElarionHandlerDispatcher(registerHandlers);
+        services.AddElarionJsonRpcAdapter(serializerOptions);
         return services;
     }
 
     /// <summary>
-    /// Registers the dispatcher singleton using a registration delegate that also receives the
-    /// <see cref="IServiceProvider"/>, so registration can resolve services (e.g. configuration) at compose time —
-    /// for example to gate methods by a per-module feature flag. The transport-neutral
-    /// <c>Elarion.JsonRpc</c> package stays free of a configuration dependency; ASP.NET hosts get an
-    /// <c>IConfiguration</c>-flavored overload from <c>Elarion.AspNetCore</c>.
+    /// Registers the shared <see cref="HandlerDispatcher"/> (config-aware) and a singleton
+    /// <see cref="JsonRpcDispatcher"/> adapter over it.
     /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <param name="serializerOptions">The serializer options the dispatcher uses for params/result handling.</param>
-    /// <param name="registerAll">The registration delegate, given the dispatcher and the request <see cref="IServiceProvider"/>.</param>
-    /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddElarionJsonRpcDispatcher(
         this IServiceCollection services,
         JsonSerializerOptions serializerOptions,
-        Func<JsonRpcDispatcher, IServiceProvider, JsonRpcDispatcher> registerAll) {
-        ArgumentNullException.ThrowIfNull(services);
+        Func<HandlerDispatcher, IServiceProvider, HandlerDispatcher> registerHandlers) {
         ArgumentNullException.ThrowIfNull(serializerOptions);
-        ArgumentNullException.ThrowIfNull(registerAll);
 
-        services.AddSingleton(sp =>
-            registerAll(new JsonRpcDispatcher(serializerOptions, sp.GetService<ILogger<JsonRpcDispatcher>>()), sp)
-                .Freeze());
-
+        services.AddElarionHandlerDispatcher(registerHandlers);
+        services.AddElarionJsonRpcAdapter(serializerOptions);
         return services;
     }
+
+    private static void AddElarionJsonRpcAdapter(this IServiceCollection services, JsonSerializerOptions serializerOptions) =>
+        services.TryAddSingleton(sp => new JsonRpcDispatcher(
+            sp.GetRequiredService<HandlerDispatcher>(),
+            serializerOptions,
+            sp.GetService<ILogger<JsonRpcDispatcher>>()));
 }

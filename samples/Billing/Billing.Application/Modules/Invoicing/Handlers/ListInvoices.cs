@@ -11,7 +11,7 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 /// <summary>Lists the current account's invoices through a cached query, invalidated by the
 /// <c>invoices</c> tag whenever <see cref="CreateInvoice"/> succeeds.</summary>
 [Cacheable("invoices", DurationSeconds = 30)]
-[RpcMethod("invoices.list")]
+[Handler("invoices.list")]
 public sealed class ListInvoices(BillingDbContext db, ICurrentUser user)
     : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
     public sealed record Query : IQuery;

@@ -29,7 +29,7 @@ discovered from your code — handlers, validators, services, scheduled jobs, RP
 startup.
 
 ```csharp
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient(IAppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
@@ -50,7 +50,8 @@ public sealed class GetClient(IAppDbContext db)
 
 That one class is a use case, a registered service, a JSON-RPC method, an **MCP tool for AI agents**,
 and (optionally) a schema-exported TypeScript contract — with **no entry added to any `Program.cs`
-registration list.**
+registration list.** The operation name is optional: `[Handler]` alone infers `{module}.{operation}` by
+convention (here `clients.get`), while an explicit name is recommended for stable public/wire contracts.
 
 ## Why Elarion
 
@@ -61,13 +62,18 @@ registration list.**
   under it and the module publishes it automatically.
 - **Transport-neutral results** — handlers return `Result<T>` with a transport-agnostic `AppError`;
   the host maps failures to JSON-RPC, HTTP, or anything else.
-- **End-to-end JSON-RPC** — mark a handler with `[RpcMethod]`, export a schema at build time, and
+- **One bus, many surfaces** — every handler maps onto a single transport-neutral `HandlerDispatcher`
+  (`Elarion.Abstractions.Dispatch`); JSON-RPC and MCP are thin **adapters** over that one bus, each serving
+  only the operations flagged for it. Define a handler once and choose its surfaces with the `Transports`
+  flag.
+- **End-to-end JSON-RPC** — mark a handler with `[Handler]`, export a schema at build time, and
   generate a typed TypeScript + Zod client.
-- **AI-native, no extra code** — expose the same `[RpcMethod]` handlers to AI agents as an
-  [MCP](https://modelcontextprotocol.io) server, an independent transport with its own dispatcher. Tool
-  names, descriptions, and input schemas are generated from your handlers and `[Description]` attributes at
-  compile time — no separate tool layer, no duplicated schemas, no runtime reflection. Choose a handler's
-  transports with `[RpcMethod(Transports = …)]` (JSON-RPC, MCP, or both) and rename a tool with `[McpMethod]`.
+- **AI-native, no extra code** — expose the same `[Handler]` handlers to AI agents as an
+  [MCP](https://modelcontextprotocol.io) server. MCP is an adapter over the shared `HandlerDispatcher`, so a
+  tool is just a handler flagged `HandlerTransports.Mcp`. Tool names, descriptions, and input schemas are
+  generated from your handlers and `[Description]` attributes at compile time — no separate tool layer, no
+  duplicated schemas, no runtime reflection. Choose a handler's transports with
+  `[Handler(Transports = …)]` (JSON-RPC, MCP, or both) and rename a tool with `[McpHandler]`.
 - **In-process scheduling** — source-generated scheduled jobs with explicit overlap, misfire, and
   resilience policies.
 - **Observable by default** — JSON-RPC, scheduling, caching, and resilience emit
@@ -104,7 +110,7 @@ JSON-RPC endpoint end to end.
 | [`Elarion.Paging`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Paging) | Keyset (cursor) and offset pagination primitives, opaque cursor codec, and `IQueryable` paging extensions. |
 | [`Elarion.JsonRpc`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.JsonRpc) | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
 | [`Elarion.AspNetCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore) | ASP.NET Core JSON-RPC endpoint mapping, `[HttpEndpoint]` minimal-API mapping, batch execution, and current-user middleware. |
-| [`Elarion.AspNetCore.Mcp`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.Mcp) | Exposes your JSON-RPC handlers as a Model Context Protocol (MCP) server for AI agents, over Streamable HTTP. |
+| [`Elarion.AspNetCore.Mcp`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.Mcp) | Exposes your handlers as a Model Context Protocol (MCP) server for AI agents, over Streamable HTTP — an MCP adapter over the shared `HandlerDispatcher`. |
 | [`Elarion.AspNetCore.SchemaGeneration`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.SchemaGeneration) | MSBuild package that exports `rpc-schema.json` during `dotnet build`. |
 | [`Elarion.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore) | Marker attributes for generated `DbSet`s and entity inclusion. Bundles the EF Core source generator (`DbSet` properties, entity configuration, keyset pagination). |
 | [`@swimmesberger/elarion-jsonrpc-client-generator`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, Zod schemas, and a fetch client. |

@@ -126,9 +126,9 @@ contract itself — only as the lifecycle forwarder.
 
 A `[Service]` can host a lightweight **event consumer** for a small side effect: an instance method
 annotated with `[ConsumeEvent]`. The marker interface on the event selects the plane
-(`IDomainEvent` → inline; `IIntegrationEvent` → after commit) and the return type selects the role
-(`void`/`Task`/`ValueTask` → fan-out subscriber; `Result<TResponse>` → the single `RequestAsync`
-responder). Optional `IEventContext` and `CancellationToken` parameters are supplied by the runtime:
+(`IDomainEvent` → inline; `IIntegrationEvent` → after commit), and the method is always a **fan-out
+subscriber** returning `void`/`Task`/`ValueTask` — the event bus is pub/sub-only. Optional
+`IEventContext` and `CancellationToken` parameters are supplied by the runtime:
 
 ```csharp title="ClientNotifier.cs"
 [Service]

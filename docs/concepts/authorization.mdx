@@ -31,7 +31,7 @@ requirements and asks an `IAuthorizer` to evaluate them against that snapshot.
 Annotate the handler class:
 
 ```csharp
-[RpcMethod("tenants.create")]
+[Handler("tenants.create")]
 [RequirePermission("tenants.write")]
 public sealed class CreateTenant(AppDbContext db)
     : IHandler<CreateTenant.Command, Result<CreateTenant.Response>> { /* ... */ }

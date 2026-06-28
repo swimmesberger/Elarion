@@ -16,13 +16,14 @@ it, grouped by prefix and sorted by id.
 
 ## ELRPC — JSON-RPC method generation
 
-JSON-RPC method emission for `[RpcMethod]` handlers. See
+JSON-RPC method emission for `[Handler]` handlers. See
 [JSON-RPC](/docs/capabilities/transports/json-rpc).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELRPC001 | Warning | An `[RpcMethod]` handler's namespace is not under any `[AppModule]`; it is registered unconditionally (not gated by a module feature flag). MCP reuses this id since it is built on `[RpcMethod]`. | Move the handler under a module's namespace so its RPC/MCP registration is module-scoped and feature-gated. |
-| ELRPC002 | Warning | An `[RpcMethod]` handler does not implement `IHandler<TRequest, TResponse>` with a `Result<T>` response, so no RPC method can be generated. | Make the handler implement `IHandler<TRequest, Result<TResponse>>` (or the `IHandler<T>` sugar) so the request/response shape is resolvable. |
+| ELRPC001 | Warning | A `[Handler]` handler's namespace is not under any `[AppModule]`; it is registered unconditionally (not gated by a module feature flag). MCP reuses this id since it is built on `[Handler]`. | Move the handler under a module's namespace so its RPC/MCP registration is module-scoped and feature-gated. |
+| ELRPC002 | Warning | A `[Handler]` handler does not implement `IHandler<TRequest, TResponse>` with a `Result<T>` response, so no RPC method can be generated. | Make the handler implement `IHandler<TRequest, Result<TResponse>>` (or the `IHandler<T>` sugar) so the request/response shape is resolvable. |
+| ELRPC003 | Warning | Two handlers resolve to the same operation name on the shared bus (e.g. an inferred name colliding with another inferred or explicit one); one would silently win at runtime. | Give one handler an explicit `[Handler("...")]` name so every operation name is unique across the bus. |
 
 ## ELHTTP — HTTP endpoint generation
 
@@ -38,11 +39,11 @@ Minimal-API endpoint emission for `[HttpEndpoint]` handlers. See
 
 ## ELMCP — MCP customization
 
-MCP tool customization for `[McpMethod]`. See [MCP](/docs/capabilities/transports/mcp).
+MCP tool customization for `[McpHandler]`. See [MCP](/docs/capabilities/transports/mcp).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELMCP003 | Warning | A handler carries `[McpMethod]` (tool-name customization) but its `[RpcMethod]` `Transports` flag does not include `RpcTransports.Mcp`, so the customization has no effect. | Remove `[McpMethod]`, or include `RpcTransports.Mcp` in the handler's `[RpcMethod]` `Transports`. |
+| ELMCP003 | Warning | A handler carries `[McpHandler]` (tool-name customization) but its `[Handler]` `Transports` flag does not include `HandlerTransports.Mcp`, so the customization has no effect. | Remove `[McpHandler]`, or include `HandlerTransports.Mcp` in the handler's `[Handler]` `Transports`. |
 
 ## ELEVT — Event consumers
 
@@ -51,10 +52,9 @@ Event-consumer discovery for `[ConsumeEvent]`. See [Consuming events](/docs/capa
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELEVT001 | Error | A method-form `[ConsumeEvent]` consumer method is declared on a class that is not annotated with `[Service]`. | Declare the consumer method on a `[Service]` class, or use the handler-form consumer instead. |
-| ELEVT002 | Error | A method-form `[ConsumeEvent]` consumer has an unsupported signature. It must be an accessible, non-generic, non-static instance method accepting exactly one `IDomainEvent`/`IIntegrationEvent` parameter (optionally `IEventContext` and/or `CancellationToken`) and returning `void`/`Task`/`ValueTask` (subscriber) or `Result<T>` (domain responder). | Take one event parameter (optionally `IEventContext` and/or `CancellationToken`), return `void`/`Task`/`ValueTask` for a subscriber or `Result<T>` for a domain responder, and make it an accessible, non-generic, non-static instance method. |
+| ELEVT002 | Error | A method-form `[ConsumeEvent]` consumer has an unsupported signature. Event consumers are fan-out subscribers, so it must be an accessible, non-generic, non-static instance method accepting exactly one `IDomainEvent`/`IIntegrationEvent` parameter (optionally `IEventContext` and/or `CancellationToken`) and returning `void`/`Task`/`ValueTask` or the non-generic `Result`/`Task<Result>`/`ValueTask<Result>`. | Return `void`/`Task`/`ValueTask` or the non-generic `Result` (a fan-out subscriber); a `Result<T>` with a value is request/reply — call a handler by type with `IHandlerSender`/`IHandler` instead. |
 | ELEVT003 | Warning | A `[ConsumeEvent]` consumer's namespace is not under any `[AppModule]`, so it will not be registered. | Move the consumer under a module's namespace so it is wired by that module. |
-| ELEVT004 | Error | More than one responder is declared for the same request type (`RequestAsync` requires exactly one responder per request type). | Keep exactly one responder for the request type; remove or convert the duplicates. |
-| ELEVT005 | Error | A class-level `[ConsumeEvent]` is on a type that does not implement exactly one `IHandler<TEvent, Result<TResponse>>` (or `IHandler<TEvent>`) whose request is an `IDomainEvent`/`IIntegrationEvent`; or an integration-event handler returns a non-`Unit` `Result<T>` (integration events are fan-out only); or the marker is on a non-handler. | Implement exactly one `IHandler<TEvent, Result<TResponse>>` (or `IHandler<TEvent>`) whose request is an `IDomainEvent`/`IIntegrationEvent`; for integration events return `Result<Unit>` (or use `IHandler<TEvent>`) since they are fan-out only. |
+| ELEVT005 | Error | A class-level `[ConsumeEvent]` is on a type that does not implement exactly one `IHandler<TEvent>` (or `IHandler<TEvent, Result<Unit>>`) whose request is an `IDomainEvent`/`IIntegrationEvent`; or it returns a non-`Unit` `Result<T>` (event consumers are fan-out subscribers); or the marker is on a non-handler. | Implement exactly one `IHandler<TEvent>` (response `Result<Unit>`) whose request is an `IDomainEvent`/`IIntegrationEvent`; for a typed reply use `IHandlerSender`/`IHandler` instead of the event bus. |
 
 ## ELMOD — Module boundaries
 

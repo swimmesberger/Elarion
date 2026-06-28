@@ -77,13 +77,13 @@ builder.Services.AddElarion(builder.Configuration);
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
 
-// MCP: an independent, equally gated transport with its own dispatcher.
+// MCP: an equally gated transport adapter over the same shared handler registry (the named bus).
 builder.Services.AddElarionMcp(
     ModuleBootstrapper.GetMcpMetadata(builder.Configuration),
     serializerOptions,
-    ModuleBootstrapper.RegisterMcpMethods,
+    ModuleBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
 
 // Telemetry: register the Elarion sources/meters; the Aspire dashboard collects them over OTLP.

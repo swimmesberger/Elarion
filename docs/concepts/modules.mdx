@@ -105,8 +105,8 @@ predicate, so a disabled feature module disappears completely and consistently:
   event consumers, module API) are never registered;
 - its hand-written `ConfigureServices` is never called;
 - its `MapEndpoints` routes and its generated `[HttpEndpoint]` routes are never mapped;
-- its `[RpcMethod]` JSON-RPC methods are never registered;
-- its `[RpcMethod]` MCP tools (and their metadata) are never registered;
+- its `[Handler]` JSON-RPC operations are never registered;
+- its `[Handler]` MCP tools (and their metadata) are never registered;
 - its `GetJsonTypeInfoResolver()` contribution is left out.
 
 This is the canonical statement of the gating contract: a module is enabled or disabled **as one
@@ -178,12 +178,12 @@ public static partial class BillingModule {
 
 ## Endpoints in modules
 
-A module's handlers expose themselves over a transport with `[RpcMethod]`
+A module's handlers expose themselves over a transport with `[Handler]`
 ([JSON-RPC](/docs/capabilities/transports/json-rpc) and [MCP](/docs/capabilities/transports/mcp)) or
-`[HttpEndpoint]` ([HTTP](/docs/capabilities/transports/http-endpoints)). A single `[RpcMethod]` covers
-both dispatcher transports; choose which ones with `[RpcMethod(Transports = ...)]` (default: both
+`[HttpEndpoint]` ([HTTP](/docs/capabilities/transports/http-endpoints)). A single `[Handler]` covers
+both dispatcher transports; choose which ones with `[Handler(Transports = ...)]` (default: both
 JSON-RPC and MCP). The generated bootstrapper associates each handler with a module by namespace and
-maps its route/method/tool only when the module is enabled — the same feature gate that governs the
+maps its operation/tool only when the module is enabled — the same feature gate that governs the
 module's services.
 
 ### Hand-written endpoints

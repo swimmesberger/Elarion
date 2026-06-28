@@ -165,7 +165,7 @@ must be tested.
   the assembly's data as `[assembly: AssemblyMetadata(key, value)]` and read referenced assemblies'
   metadata via `context.MetadataReferencesProvider` (`ElarionManifestReader` reads it straight from PE
   metadata with no symbols, so it is cached **per reference** — a source edit re-reads nothing). Used
-  by `[AppModule]`/`[HttpEndpoint]`/`[RpcMethod]` (`ElarionManifest`) and by `[EntityConfiguration]`
+  by `[AppModule]`/`[HttpEndpoint]`/`[Handler]` (`ElarionManifest`) and by `[EntityConfiguration]`
   (`EntityConfigurationManifest` — a `DbContext` reads referenced configurations from their manifest
   instead of walking the referenced symbol tree). The convention's cost: a referenced project must run the generator to
   emit its manifest (the same requirement that already applies to referenced modules).

@@ -58,35 +58,37 @@ See [Decorator pipelines](/docs/concepts/decorator-pipelines).
 
 ## Transports
 
-### `[RpcMethod]`
+### `[Handler]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
-- **Triggers:** marks a handler as a dispatcher-based RPC method (the handler must implement `IHandler<TRequest, TResponse>`). The method name is declared once and shared by every dispatcher transport; `Transports` selects JSON-RPC, MCP, or both. REST is a separate opt-in via `[HttpEndpoint]`.
+- **Triggers:** marks a handler as a named operation on the transport-neutral request/reply bus (the handler must implement `IHandler<TRequest, TResponse>`). The operation name is declared once and shared by every dispatcher transport; `Transports` selects JSON-RPC, MCP, or both. JSON-RPC and MCP are thin adapters over the one bus, so a handler is "define once, choose surfaces via the `Transports` flag". REST is a separate opt-in via `[HttpEndpoint]`.
+
+The operation name is **optional**: `[Handler]` alone is valid. When omitted, the name is inferred by convention as `{module}.{operation}`, where `operation` is the handler type name minus a `Handler`/`Command`/`Query`/`Request` suffix, camelCased (e.g. module `Clients` + `CreateClient` → `clients.createClient`). Supply an explicit name for stable public/wire contracts.
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `methodName` | `string` (ctor) → `MethodName` | required | The JSON-RPC method name, e.g. `"clients.create"`. |
-| `Transports` | `RpcTransports` (init, `[Flags]`) | `All` (`JsonRpc \| Mcp`) | Which dispatcher transports expose the handler. |
+| `name` | `string?` (ctor) → `Name` | optional | The operation name, e.g. `"clients.create"`. When omitted, inferred by convention as `{module}.{operation}`. |
+| `Transports` | `HandlerTransports` (init, `[Flags]`) | `All` (`JsonRpc \| Mcp`) | Which dispatcher transports expose the handler. |
 
-**`RpcTransports`:** `JsonRpc` (= 1), `Mcp` (= 2), `All` (= `JsonRpc \| Mcp`).
+**`HandlerTransports`:** `JsonRpc` (= 1), `Mcp` (= 2), `All` (= `JsonRpc \| Mcp`).
 
 See [JSON-RPC](/docs/capabilities/transports/json-rpc) and [MCP](/docs/capabilities/transports/mcp).
 
-### `[McpMethod]`
+### `[McpHandler]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
-- **Triggers:** optional MCP tool-name customization for a handler already on the MCP surface (its `[RpcMethod]` `Transports` includes `Mcp`). Purely additive — carries no enable/disable flag. Tool/parameter descriptions come from `System.ComponentModel.DescriptionAttribute`, not this attribute.
+- **Triggers:** optional MCP tool-name customization for a handler already on the MCP surface (its `[Handler]` `Transports` includes `Mcp`). Purely additive — carries no enable/disable flag. Tool/parameter descriptions come from `System.ComponentModel.DescriptionAttribute`, not this attribute.
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `ToolName` | `string?` (init) | `null` | Overrides the MCP tool name; when null/empty the name is derived from the RPC method name via the host's transform (e.g. `"clients.create"` → `"clients_create"`). |
+| `ToolName` | `string?` (init) | `null` | Overrides the MCP tool name; when null/empty the name is derived from the handler's operation name via the host's transform (e.g. `"clients.create"` → `"clients_create"`). |
 
 See [MCP](/docs/capabilities/transports/mcp).
 
 ### `[HttpEndpoint]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
-- **Triggers:** marks a handler as an HTTP/REST endpoint; `AppModuleDiscoveryGenerator` emits the matching minimal-API `MapGet`/`MapPost`/… registration. The handler must implement `IHandler<TRequest, Result<TResponse>>`. With no explicit verb the verb is inferred from the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); a request with neither marker requires an explicit verb (else `ELHTTP004`). Carries no ASP.NET Core dependency; a handler may carry both this and `[RpcMethod]`.
+- **Triggers:** marks a handler as an HTTP/REST endpoint; `AppModuleDiscoveryGenerator` emits the matching minimal-API `MapGet`/`MapPost`/… registration. The handler must implement `IHandler<TRequest, Result<TResponse>>`. With no explicit verb the verb is inferred from the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); a request with neither marker requires an explicit verb (else `ELHTTP004`). Carries no ASP.NET Core dependency; a handler may carry both this and `[Handler]`.
 
 The attribute has two constructors:
 
@@ -148,8 +150,8 @@ See [Scheduling](/docs/capabilities/scheduling), [Schedules](/docs/capabilities/
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** method | class
 - **Triggers:** marks an event consumer, discovered by the event-consumer generator and registered as an `EventSubscriptionDescriptor`.
-  - **Handler form (preferred):** on a class implementing `IHandler<TEvent, Result<T>>` (or `IHandler<TEvent>` sugar) whose request type *is* the event; runs through the full decorator pipeline. Role inferred from the response type: `Result<Unit>` = fan-out subscriber, `Result<T>` with `T != Unit` = single `RequestAsync` responder.
-  - **Method form:** on a method of a `[Service]` class (no pipeline); plane taken from the message type marker (`IDomainEvent`/`IIntegrationEvent`), role from the return type.
+  - **Handler form (preferred):** on a class implementing `IHandler<TEvent>` (sugar over `IHandler<TEvent, Result<Unit>>`) whose request type *is* the event; runs through the full decorator pipeline. Always a fan-out subscriber — the event bus is pub/sub-only. A non-`Unit` `Result<T>` return is rejected (`ELEVT005`).
+  - **Method form:** on a method of a `[Service]` class (no pipeline); plane taken from the message type marker (`IDomainEvent`/`IIntegrationEvent`). Always a fan-out subscriber, returning `void`/`Task`/`ValueTask` or the non-generic `Result`/`Task<Result>`/`ValueTask<Result>` (a failed `Result` → `EventConsumerFailedException`). A `Result<T>` with a value is request/reply and is rejected.
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
