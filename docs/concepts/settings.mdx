@@ -6,7 +6,7 @@ description: Runtime-changeable, key/value settings with a swappable store, in-p
 Elarion's settings subsystem gives applications **runtime-changeable configuration**: key/value data,
 hierarchical like `IConfiguration` (but the hierarchy is *virtual*, like environment variables), that can
 change while the app runs and be **watched** for changes in-process. It is split into two swappable sides
-so each can evolve independently — see [ADR-0010](../decisions/0010-runtime-settings-subsystem.md).
+so each can evolve independently — see [ADR-0011](../decisions/0011-runtime-settings-subsystem.md).
 
 <Callout type="info">
   Two backends ship: an **in-process** store (the zero-dependency default) and an **EF Core database**
@@ -148,4 +148,4 @@ Settings flow into the scheduler through [variable substitution](variable-substi
 The foundation, the EF Core database store, the `IConfiguration`/`IOptionsMonitor` adapter, and the
 scheduler integration ship today. Built as fast-follows over the same contracts: cross-instance change
 sources (Postgres `LISTEN/NOTIFY`, Redis) so a change on one node propagates to others. See
-[ADR-0010](../decisions/0010-runtime-settings-subsystem.md) for the full design and phasing.
+[ADR-0011](../decisions/0011-runtime-settings-subsystem.md) for the full design and phasing.

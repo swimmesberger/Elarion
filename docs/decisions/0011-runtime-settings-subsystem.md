@@ -1,4 +1,4 @@
-# ADR-0010: Runtime-changeable settings subsystem
+# ADR-0011: Runtime-changeable settings subsystem
 
 - Status: Accepted
 - Date: 2026-06-27
