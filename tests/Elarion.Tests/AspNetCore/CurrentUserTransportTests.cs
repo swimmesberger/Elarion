@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Identity;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;

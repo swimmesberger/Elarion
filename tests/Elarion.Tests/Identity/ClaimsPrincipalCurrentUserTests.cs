@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using AwesomeAssertions;
+using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Identity;
 using Elarion.Identity;
-using Elarion.JsonRpc;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 

@@ -5,8 +5,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Transport-agnostic: core depends only on Abstractions. The JSON-RPC transport (Elarion.JsonRpc) is a
+         sibling that references Abstractions too; core does not reference any transport. -->
     <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
-    <ProjectReference Include="..\Elarion.JsonRpc\Elarion.JsonRpc.csproj" />
   </ItemGroup>
 
   <ItemGroup>

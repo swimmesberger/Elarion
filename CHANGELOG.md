@@ -35,6 +35,14 @@ minor releases may include breaking changes.
   `AppErrorMapper` codes), so a host can override JSON-RPC error codes by registering its own.
 
 ### Changed
+- **`Elarion` core is now transport-agnostic — it no longer references `Elarion.JsonRpc`.** The
+  transport-neutral dispatch-scope rail (`DispatchScopeContext` / `IDispatchScopeInitializer` /
+  `CreateDispatchScope` / `SeedScope`) moved to `Elarion.Abstractions` (namespace
+  `Elarion.Abstractions.Dispatch`), and the JSON-RPC handler bridge (`MapHandler` / `AppErrorMapper` /
+  `JsonRpcAppErrorTranslator`) moved from core into `Elarion.JsonRpc` (which now references
+  `Elarion.Abstractions`). JSON-RPC is genuinely package-optional: reference `Elarion.JsonRpc` only when using
+  the dispatcher. **Breaking namespaces (pre-1.0):** the rail types are now under `Elarion.Abstractions.Dispatch`;
+  `MapHandler` / `AppErrorMapper` are now under `Elarion.JsonRpc`.
 - **`ClaimsPrincipalCurrentUser` materializes claims lazily** (on first access, cached) instead of eagerly on
   `Initialize`, so seeding a fresh snapshot per dispatch call costs nothing until a claim is read and no
   claims are parsed twice — making per-call seeding uniform across transports without copying.

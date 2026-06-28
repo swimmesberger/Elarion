@@ -1,5 +1,5 @@
+using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Identity;
-using Elarion.JsonRpc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
