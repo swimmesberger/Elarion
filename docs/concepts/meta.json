@@ -11,6 +11,7 @@
     "decorator-pipelines",
     "authorization",
     "cross-module-communication",
+    "transports",
     "solution-structure"
   ]
 }

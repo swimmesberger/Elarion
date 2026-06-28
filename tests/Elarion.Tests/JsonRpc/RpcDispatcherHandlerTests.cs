@@ -82,6 +82,27 @@ public sealed class RpcDispatcherHandlerTests {
         response.Error!.Code.Should().Be(expectedCode);
     }
 
+    private sealed class FixedCodeErrorTranslator : IAppErrorTranslator<RpcError> {
+        public RpcError Translate(AppError error) => new() { Code = -40404, Message = $"custom: {error.Message}" };
+    }
+
+    [Fact]
+    public async Task MapHandler_RegisteredErrorTranslator_OverridesErrorCode() {
+        var dispatcher = new JsonRpcDispatcher(Options).MapHandler<EchoCommand, EchoResponse>("echo").Freeze();
+        var services = new ServiceCollection()
+            .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
+            .AddSingleton<IAppErrorTranslator<RpcError>, FixedCodeErrorTranslator>()
+            .BuildServiceProvider();
+        await using var scope = services.CreateAsyncScope();
+
+        var response = await dispatcher.DispatchAsync(
+            Request(new { name = "missing" }), scope.ServiceProvider, TestContext.Current.CancellationToken);
+
+        response.Error.Should().NotBeNull();
+        response.Error!.Code.Should().Be(-40404);
+        response.Error.Message.Should().StartWith("custom:");
+    }
+
     [Fact]
     public void AppErrorMapper_PreservesMessageAndData() {
         var data = new { field = "name" };

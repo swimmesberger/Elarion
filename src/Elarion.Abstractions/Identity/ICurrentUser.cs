@@ -26,8 +26,8 @@ public interface ICurrentUser {
     /// <remarks>
     /// A default interface method so existing implementers keep compiling; the default <b>fails closed</b>
     /// (returns <see langword="false"/>) so a stale implementer denies rather than silently authorizes.
-    /// Real implementers (e.g. the ASP.NET <c>CurrentUserSnapshot</c>) override it to answer from the
-    /// principal's claims.
+    /// Real implementers (e.g. the claims-based <c>ClaimsPrincipalCurrentUser</c>) override it to answer from
+    /// the principal's claims.
     /// </remarks>
     bool HasClaim(string type, string value) => false;
 
