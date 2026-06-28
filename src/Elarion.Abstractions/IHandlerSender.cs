@@ -8,10 +8,19 @@ namespace Elarion.Abstractions;
 /// typed replacement for the former <c>IDomainEventBus.RequestAsync</c> (see ADR-0010).
 /// </summary>
 /// <remarks>
-/// Because it resolves from the ambient scope, the call runs in the caller's transaction. For a fresh seeded
-/// scope (a custom transport or background job) use <c>HandlerInvoker</c> instead; for name-routed transport
-/// dispatch use <c>HandlerDispatcher</c>. Prefer injecting the specific <see cref="IHandler{TRequest, TResponse}"/>
+/// <para>
+/// Because it resolves from the ambient scope, the call runs in the caller's transaction — so inject it only into
+/// <b>scoped</b> consumers (a handler or a <c>[Service]</c>). Do not resolve it from the root provider or capture it
+/// in a singleton: that would run the inner handler (and its scoped <c>DbContext</c>) outside any request scope. For
+/// a fresh seeded scope (a custom transport or background job) use <c>HandlerInvoker</c> instead; for name-routed
+/// transport dispatch use <c>HandlerDispatcher</c>.
+/// </para>
+/// <para>
+/// Unlike the removed <c>RequestAsync</c> (whose responder was compile-time validated), the handler is resolved from
+/// DI at runtime: <see cref="SendAsync{TRequest,TResponse}"/> throws if no <see cref="IHandler{TRequest,TResponse}"/>
+/// is registered for the requested types. Prefer injecting the specific <see cref="IHandler{TRequest, TResponse}"/>
 /// directly when you call only one — this is the convenience for code that dispatches several by type.
+/// </para>
 /// </remarks>
 /// <example>
 /// <code>

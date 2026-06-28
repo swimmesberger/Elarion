@@ -36,6 +36,9 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
     private const string ResultMetadataName =
         "Elarion.Abstractions.Result`1";
 
+    private const string ResultNonGenericMetadataName =
+        "Elarion.Abstractions.Result";
+
     private const string HandlerMetadataName =
         "Elarion.Abstractions.IHandler`2";
 
@@ -69,7 +72,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         id: "ELEVT002",
         title: "Invalid event consumer signature",
         messageFormat:
-        "Event consumer method '{0}' must be an accessible, non-generic, non-static instance method that accepts exactly one IDomainEvent or IIntegrationEvent parameter (optionally with IEventContext and/or CancellationToken) and returns void/Task/ValueTask — event consumers are fan-out subscribers, so for request/reply use IHandlerSender/IHandler instead of the event bus",
+        "Event consumer method '{0}' must be an accessible, non-generic, non-static instance method that accepts exactly one IDomainEvent or IIntegrationEvent parameter (optionally with IEventContext and/or CancellationToken) and returns void/Task/ValueTask or Result/Task<Result>/ValueTask<Result> — event consumers are fan-out subscribers, so a Result<T> with a value is request/reply, for which you use IHandlerSender/IHandler instead of the event bus",
         category: "Elarion.Generators",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -106,7 +109,10 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
     private enum ReturnShape {
         SubscriberVoid,
         SubscriberTask,
-        SubscriberValueTask
+        SubscriberValueTask,
+        SubscriberResult,
+        SubscriberResultTask,
+        SubscriberResultValueTask
     }
 
     private sealed record EventConsumerInfo(
@@ -276,6 +282,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         INamedTypeSymbol EventContext,
         INamedTypeSymbol EventContextGeneric,
         INamedTypeSymbol Result,
+        INamedTypeSymbol ResultNonGeneric,
         INamedTypeSymbol Handler,
         INamedTypeSymbol Unit,
         INamedTypeSymbol CancellationToken,
@@ -292,6 +299,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var eventContext = compilation.GetTypeByMetadataName(EventContextMetadataName);
         var eventContextGeneric = compilation.GetTypeByMetadataName(EventContextGenericMetadataName);
         var result = compilation.GetTypeByMetadataName(ResultMetadataName);
+        var resultNonGeneric = compilation.GetTypeByMetadataName(ResultNonGenericMetadataName);
         var handler = compilation.GetTypeByMetadataName(HandlerMetadataName);
         var unit = compilation.GetTypeByMetadataName(UnitMetadataName);
         var cancellationToken = compilation.GetTypeByMetadataName(CancellationTokenMetadataName);
@@ -307,6 +315,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             eventContext is null ||
             eventContextGeneric is null ||
             result is null ||
+            resultNonGeneric is null ||
             handler is null ||
             unit is null ||
             cancellationToken is null ||
@@ -325,6 +334,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             eventContext,
             eventContextGeneric,
             result,
+            resultNonGeneric,
             handler,
             unit,
             cancellationToken,
@@ -531,8 +541,9 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         return true;
     }
 
-    // Event consumers are fan-out subscribers, so only void/Task/ValueTask are valid. A Result<T> return
-    // (request/reply) is rejected here and surfaces as ELEVT002.
+    // Event consumers are fan-out subscribers. A "no value" success/failure is the non-generic Result (the
+    // IHandler<TEvent> shape) — a failed Result surfaces as an EventConsumerFailedException. void/Task/ValueTask
+    // are the fire-and-throw shorthand. A Result<T> with a value is request/reply and is rejected (ELEVT002).
     private static bool TryResolveReturn(
         ITypeSymbol returnType,
         KnownSymbols symbols,
@@ -552,6 +563,22 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         if (SymbolEqualityComparer.Default.Equals(returnType, symbols.ValueTask)) {
             shape = ReturnShape.SubscriberValueTask;
             return true;
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(returnType, symbols.ResultNonGeneric)) {
+            shape = ReturnShape.SubscriberResult;
+            return true;
+        }
+
+        if (returnType is INamedTypeSymbol { IsGenericType: true } named) {
+            var definition = named.OriginalDefinition;
+            var isTask = SymbolEqualityComparer.Default.Equals(definition, symbols.TaskGeneric);
+            var isValueTask = SymbolEqualityComparer.Default.Equals(definition, symbols.ValueTaskGeneric);
+            if ((isTask || isValueTask) &&
+                SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], symbols.ResultNonGeneric)) {
+                shape = isTask ? ReturnShape.SubscriberResultTask : ReturnShape.SubscriberResultValueTask;
+                return true;
+            }
         }
 
         return false;
@@ -623,23 +650,54 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var arguments = BuildArguments(consumer, "@event");
         var invocation = $"service.{consumer.MethodName}({arguments})";
 
-        sb.AppendLine("            InvokeAsync = static (serviceProvider, @event, context, ct) =>");
-        sb.AppendLine("            {");
-        sb.AppendLine($"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
         switch (consumer.Return) {
             case ReturnShape.SubscriberVoid:
-                sb.AppendLine($"                {invocation};");
-                sb.AppendLine("                return global::System.Threading.Tasks.ValueTask.CompletedTask;");
-                break;
             case ReturnShape.SubscriberTask:
-                sb.AppendLine($"                return new global::System.Threading.Tasks.ValueTask({invocation});");
+            case ReturnShape.SubscriberValueTask:
+                sb.AppendLine("            InvokeAsync = static (serviceProvider, @event, context, ct) =>");
+                sb.AppendLine("            {");
+                sb.AppendLine($"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+                switch (consumer.Return) {
+                    case ReturnShape.SubscriberVoid:
+                        sb.AppendLine($"                {invocation};");
+                        sb.AppendLine("                return global::System.Threading.Tasks.ValueTask.CompletedTask;");
+                        break;
+                    case ReturnShape.SubscriberTask:
+                        sb.AppendLine($"                return new global::System.Threading.Tasks.ValueTask({invocation});");
+                        break;
+                    default:
+                        sb.AppendLine($"                return {invocation};");
+                        break;
+                }
+
+                sb.AppendLine("            }");
+                break;
+            case ReturnShape.SubscriberResult:
+                // A synchronous non-generic Result: invoke, surface a failure as EventConsumerFailedException, complete.
+                sb.AppendLine("            InvokeAsync = static (serviceProvider, @event, context, ct) =>");
+                sb.AppendLine("            {");
+                sb.AppendLine($"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+                sb.AppendLine($"                var result = {invocation};");
+                sb.AppendLine("                if (!result.IsSuccess)");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+                sb.AppendLine("                }");
+                sb.AppendLine("                return global::System.Threading.Tasks.ValueTask.CompletedTask;");
+                sb.AppendLine("            }");
                 break;
             default:
-                sb.AppendLine($"                return {invocation};");
+                // Task<Result> / ValueTask<Result>: await, surface a failure as EventConsumerFailedException.
+                sb.AppendLine("            InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
+                sb.AppendLine("            {");
+                sb.AppendLine($"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+                sb.AppendLine($"                var result = await {invocation}.ConfigureAwait(false);");
+                sb.AppendLine("                if (!result.IsSuccess)");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+                sb.AppendLine("                }");
+                sb.AppendLine("            }");
                 break;
         }
-
-        sb.AppendLine("            }");
     }
 
     private static void AppendHandlerSubscriberInvoke(StringBuilder sb, EventConsumerInfo consumer) {

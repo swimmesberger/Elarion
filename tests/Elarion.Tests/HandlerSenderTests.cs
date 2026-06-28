@@ -49,4 +49,45 @@ public sealed class HandlerSenderTests {
         result.IsSuccess.Should().BeFalse();
         result.Error.Kind.Should().Be(ErrorKind.Validation);
     }
+
+    [Fact]
+    public async Task SendAsync_NoHandlerRegistered_Throws() {
+        // Resolution is runtime-checked (unlike the removed RequestAsync responder), so a missing handler throws.
+        using var provider = new ServiceCollection().AddElarionHandlerSender().BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var sender = scope.ServiceProvider.GetRequiredService<IHandlerSender>();
+
+        var act = async () => await sender.SendAsync<Double, int>(new Double(1), TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SendAsync_ResolvesHandlerInCallerScope_SharesScopedServices() {
+        // The whole reason this exists over HandlerInvoker: it runs in the CALLER's scope/transaction. Prove the
+        // handler sees the same scoped instance the caller mutated.
+        using var provider = new ServiceCollection()
+            .AddElarionHandlerSender()
+            .AddScoped<Counter>()
+            .AddScoped<IHandler<Read, Result<int>>, ReadHandler>()
+            .BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Counter>().Value = 7;
+        var sender = scope.ServiceProvider.GetRequiredService<IHandlerSender>();
+
+        var result = await sender.SendAsync<Read, int>(new Read(), TestContext.Current.CancellationToken);
+
+        result.Value.Should().Be(7);
+    }
+
+    private sealed class Counter {
+        public int Value { get; set; }
+    }
+
+    private sealed record Read;
+
+    private sealed class ReadHandler(Counter counter) : IHandler<Read, Result<int>> {
+        public ValueTask<Result<int>> HandleAsync(Read request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<int>>(counter.Value);
+    }
 }

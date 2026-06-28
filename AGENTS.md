@@ -269,9 +269,11 @@ and the `AppliesTo` predicate are both evaluated at compile time by `HandlerRegi
 
 The **method form** is a lightweight alternative for a small side effect on an existing
 `[Service]`: the consumer is an instance method on a `[Service]` class (no decorator pipeline);
-the message parameter's marker selects the plane, and the method returns `void`/`Task`/`ValueTask`
-(a fan-out subscriber). Its optional `IEventContext`/`IEventContext<TEvent>` and `CancellationToken`
-parameters are supplied by the runtime.
+the message parameter's marker selects the plane. It is a fan-out subscriber, returning
+`void`/`Task`/`ValueTask` (throw to fail) or the **non-generic `Result`**/`Task<Result>`/`ValueTask<Result>`
+(a failed `Result` → `EventConsumerFailedException`, the same failure channel as the handler form) — a
+`Result<T>` with a value is request/reply and is rejected. Its optional `IEventContext`/`IEventContext<TEvent>`
+and `CancellationToken` parameters are supplied by the runtime.
 
 `EventConsumerRegistrationGenerator` (triggered by `[GenerateEventConsumers]` or
 `[UseElarion]`) discovers consumers, validates signatures (diagnostics `ELEVT001`/`ELEVT002`/

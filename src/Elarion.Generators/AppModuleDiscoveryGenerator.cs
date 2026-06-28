@@ -643,6 +643,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
+        // The typed in-process mediator send, available wherever handlers are. Idempotent (TryAddScoped).
+        sb.AppendLine("        global::Elarion.HandlerSenderServiceCollectionExtensions.AddElarionHandlerSender(services);");
         foreach (var entry in entries)
         {
             // Generated defaults (handlers, services, validators, scheduled jobs, event consumers) first,

@@ -288,9 +288,9 @@ public sealed class EventConsumerRegistrationGeneratorTests {
     }
 
     [Fact]
-    public void GenerateEventConsumers_MethodForm_ResultReturn_EmitsDiagnostic() {
-        // Event consumers are fan-out subscribers (ADR-0010); a Result<T> return (request/reply) is rejected
-        // on either plane — including domain, which used to be the responder role.
+    public void GenerateEventConsumers_MethodForm_GenericResultReturn_EmitsDiagnostic() {
+        // A Result<T> with a VALUE is request/reply, rejected on either plane — including domain, which used to
+        // be the responder role (ADR-0010). The non-generic Result is fine (see the test below).
         var source = CreateSource(
             """
             namespace Sample.Events {
@@ -309,6 +309,36 @@ public sealed class EventConsumerRegistrationGeneratorTests {
 
         result.Diagnostics.Any(d => d.Id == "ELEVT002" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_MethodForm_NonGenericResult_EmitsFailingSubscriber() {
+        // A method-form consumer may return the non-generic Result (no value, success/failure) — a failed
+        // Result surfaces as EventConsumerFailedException, the same failure channel as the handler form.
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record Shipped(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class ShipmentProjections {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> OnShipped(
+                        Shipped e,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        generated.Should().Contain("InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
+        generated.Should().Contain(
+            "var result = await service.OnShipped((global::Sample.Events.Shipped)@event, ct).ConfigureAwait(false);");
+        generated.Should().Contain(
+            "throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
     }
 
     [Fact]

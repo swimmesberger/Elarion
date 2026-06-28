@@ -106,8 +106,10 @@ public sealed class InvoiceNotifications(ILogger<InvoiceNotifications> logger) {
 }
 ```
 
-Here too the method is a **fan-out subscriber** — it returns `void` / `Task` / `ValueTask` (every matching
-consumer runs). The event bus is pub/sub-only, so a method that returns a `Result<TResponse>` is rejected
+Here too the method is a **fan-out subscriber** — it returns `void` / `Task` / `ValueTask` (throw to fail)
+or the **non-generic `Result`** / `Task<Result>` / `ValueTask<Result>` (a failed `Result` →
+`EventConsumerFailedException`, the same failure channel as the handler form). Every matching consumer runs.
+The event bus is pub/sub-only, so a method that returns a `Result<TResponse>` *with a value* is rejected
 (`ELEVT002`); when you need one typed response, call the target handler directly instead of consuming an
 event (see [calling a handler from other code](/docs/concepts/handlers#calling-a-handler-from-other-code)).
 

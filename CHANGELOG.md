@@ -38,11 +38,12 @@ minor releases may include breaking changes.
 - **The event bus is now pub/sub-only; request/reply is unified under typed dispatch (breaking).** See
   [ADR-0010](docs/decisions/0010-event-bus-is-pub-sub-only.md). `IDomainEventBus.RequestAsync` and the single-
   **responder** role of `[ConsumeEvent]` are removed — `[ConsumeEvent]` now means exactly one thing, a fan-out
-  subscriber (handler form returns `Result<Unit>`/`IHandler<TEvent>`; method form returns `void`/`Task`/`ValueTask`),
-  and a non-`Unit` `Result<T>` consumer is rejected (`ELEVT005` handler-form, `ELEVT002` method-form; the
+  subscriber (handler form returns `Result<Unit>`/`IHandler<TEvent>`; method form returns `void`/`Task`/`ValueTask`
+  or the non-generic `Result`/`Task<Result>`/`ValueTask<Result>` for a failure channel), and a `Result<T>` *with a
+  value* is rejected (`ELEVT005` handler-form, `ELEVT002` method-form; the
   duplicate-responder `ELEVT004` is retired). For an in-process, in-transaction typed request/reply, inject the new
-  **`IHandlerSender`** and call `SendAsync<TRequest, TResponse>(request, ct)` (register with
-  `AddElarionHandlerSender()`), or inject `IHandler<TRequest, Result<TResponse>>` directly. To upgrade a former
+  **`IHandlerSender`** and call `SendAsync<TRequest, TResponse>(request, ct)` (auto-registered by the generated
+  bootstrapper, or `AddElarionHandlerSender()` manually), or inject `IHandler<TRequest, Result<TResponse>>` directly. To upgrade a former
   responder: drop `[ConsumeEvent]` and the `IDomainEvent` marker on the request, and replace
   `bus.RequestAsync<R, T>(r, ct)` with `sender.SendAsync<R, T>(r, ct)`.
 - **Named handler dispatch is now transport-agnostic (breaking — source + generated host wiring).** A handler

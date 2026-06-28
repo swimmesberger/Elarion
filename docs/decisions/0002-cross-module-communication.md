@@ -6,6 +6,11 @@
   [module default services](../../AGENTS.md#module-default-services),
   [decorator pipelines](../concepts/decorator-pipelines.mdx)
 
+> **Note (ADR-0010):** candidate 2 below, `IDomainEventBus.RequestAsync`, has since been **removed** — the event
+> bus is pub/sub-only. The typed in-process equivalent today is `IHandlerSender`/`IHandler`; the conclusion is
+> unchanged (it is still not a cross-module extraction path — a `[ModuleContract]` is). It is kept below as the
+> historical comparison.
+
 ## Context
 
 Elarion positions itself as a modular-monolith alternative to microservices. For

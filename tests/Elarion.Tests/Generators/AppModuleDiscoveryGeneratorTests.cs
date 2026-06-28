@@ -48,6 +48,13 @@ public sealed class AppModuleDiscoveryGeneratorTests {
                 public interface IServiceCollection;
             }
 
+            namespace Elarion {
+                public static class HandlerSenderServiceCollectionExtensions {
+                    public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddElarionHandlerSender(
+                        Microsoft.Extensions.DependencyInjection.IServiceCollection services) => services;
+                }
+            }
+
             namespace Host {
                 [Elarion.AspNetCore.GenerateModuleBootstrapper]
                 public static partial class ModuleBootstrapper;

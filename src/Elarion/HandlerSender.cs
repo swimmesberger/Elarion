@@ -11,8 +11,10 @@ namespace Elarion;
 /// </summary>
 internal sealed class HandlerSender(IServiceProvider serviceProvider) : IHandlerSender {
     public ValueTask<Result<TResponse>> SendAsync<TRequest, TResponse>(TRequest request, CancellationToken ct = default)
-        where TRequest : notnull =>
-        serviceProvider.GetRequiredService<IHandler<TRequest, Result<TResponse>>>().HandleAsync(request, ct);
+        where TRequest : notnull {
+        ArgumentNullException.ThrowIfNull(request);
+        return serviceProvider.GetRequiredService<IHandler<TRequest, Result<TResponse>>>().HandleAsync(request, ct);
+    }
 }
 
 /// <summary>DI registration for the typed in-process <see cref="IHandlerSender"/>.</summary>
