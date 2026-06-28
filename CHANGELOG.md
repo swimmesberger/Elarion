@@ -8,6 +8,34 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **`ICurrentUser` now resolves inside JSON-RPC and MCP handlers (and so does authorization).** The
+  dispatchers run each call in a fresh DI child scope, which does not inherit the request scope's scoped
+  `CurrentUserSnapshot`, so a handler injecting `ICurrentUser` — or the `AuthorizationDecorator`, which
+  reads it — threw `"Current user has not been initialized"`. Now every dispatcher-based transport seeds the
+  per-call snapshot the same way: it captures the authenticated principal at its boundary (`HttpContext.User`
+  for JSON-RPC, `RequestContext.User` for MCP) into a `DispatchScopeContext`, and one initializer applies it —
+  no `IHttpContextAccessor`, no `AsyncLocal`. Plain HTTP endpoints were unaffected. See
+  [`docs/capabilities/current-user`](docs/capabilities/current-user.mdx).
+
+### Added
+- **Per-call dispatch-scope seeding (`Elarion.JsonRpc`).** `IDispatchScopeInitializer` +
+  `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(context)` helper carry request-boundary
+  state into the fresh per-call child scope dispatcher-based transports (JSON-RPC, MCP) create. Current-user
+  is one registered consumer; hosts add their own (tenant, correlation, …) via `TryAddEnumerable`.
+
+### Changed
+- **`CurrentUserSnapshot` materializes claims lazily** (on first access, cached) instead of eagerly on
+  `Initialize`, so seeding a fresh snapshot per dispatch call costs nothing until a claim is read and no
+  claims are parsed twice — making per-call seeding uniform across transports without copying.
+- **Breaking (custom batch strategies):** `IBatchExecutionStrategy.ExecuteAsync` takes a
+  `DispatchScopeContext context`; strategies create each per-item scope via
+  `CreateDispatchScope(context)` so scoped state (current user, …) is seeded per item.
+
+### Documentation
+- Tutorial `features.mdx` now shows the no-reflection `IResultFailureFactory<TResponse>` /
+  `TResponse.Failure(...)` pattern for validation decorators instead of a reflection-based helper.
+
 ## [0.2.2] - 2026-06-27
 
 ### Added
