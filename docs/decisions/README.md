@@ -30,3 +30,5 @@ designs that are not yet implemented.
 - [ADR-0007: The data layer is application logic — modules as plugins over it](0007-data-is-platform-module-as-plugin.md)
 - [ADR-0008: Bounded contexts and the graduation path](0008-bounded-contexts-and-the-graduation-path.md)
 - [ADR-0009: Authorization building blocks](0009-authorization-building-blocks.md)
+- [ADR-0010: The event bus is pub/sub-only; request/reply is unified under dispatch](0010-event-bus-is-pub-sub-only.md)
+- [ADR-0011: Runtime-changeable settings subsystem](0011-runtime-settings-subsystem.md)

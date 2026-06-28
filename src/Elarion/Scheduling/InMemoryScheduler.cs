@@ -1,10 +1,11 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using Elarion.Abstractions.Resilience;
 using Elarion.Abstractions.Scheduling;
+using Elarion.Abstractions.Substitution;
 
 namespace Elarion.Scheduling;
 
@@ -20,7 +21,7 @@ namespace Elarion.Scheduling;
 public sealed class InMemoryScheduler(
     IEnumerable<ScheduledJobDescriptor> descriptors,
     IServiceScopeFactory scopeFactory,
-    IConfiguration configuration,
+    IVariableSource variableSource,
     TimeProvider timeProvider,
     SchedulerOptions options,
     IResiliencePolicyCatalog resiliencePolicies,
@@ -28,6 +29,21 @@ public sealed class InMemoryScheduler(
 ) : BackgroundService, IJobScheduler, IJobSchedulerInspector {
     /// <summary>Upper bound for a single wait so very long schedules stay within timer limits.</summary>
     private static readonly TimeSpan MaxWaitSlice = TimeSpan.FromDays(1);
+
+    // Schedules and the per-occurrence enabled check resolve their ${...} variables through the general
+    // substitution seam, so the (default config-backed) source makes them runtime-changeable.
+    private readonly IVariableSource _variableSource = variableSource;
+
+    // Current queued recurring occurrence per job name, so a live variable change can supersede it.
+    private readonly Dictionary<string, Guid> _recurringRunIds = new(StringComparer.Ordinal);
+
+    // Queued occurrences replaced by a live reschedule; dropped silently (no outcome) at dequeue.
+    private readonly HashSet<Guid> _supersededRuns = [];
+
+    // Last resolved variable signature per recurring job, to detect which jobs a change actually affects.
+    private readonly Dictionary<string, string> _recurringSignatures = new(StringComparer.Ordinal);
+
+    private IDisposable? _variableSubscription;
 
     // ReSharper disable once PossibleMultipleEnumeration
     private readonly IReadOnlyList<ScheduledJobDescriptor> _descriptors = descriptors.ToArray();
@@ -331,6 +347,7 @@ public sealed class InMemoryScheduler(
 
         // Note 32: Startup enqueues only the next occurrence for each recurring job; future occurrences are chained as runs dispatch or complete.
         EnqueueRecurringJobs();
+        SubscribeToVariableChanges();
         logger.LogInformation("In-memory scheduler started with {JobCount} descriptor(s).", _descriptors.Count);
 
         try {
@@ -352,6 +369,7 @@ public sealed class InMemoryScheduler(
         } catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
             logger.LogInformation("In-memory scheduler is shutting down.");
         } finally {
+            _variableSubscription?.Dispose();
             await AwaitInFlightRunsAsync();
             logger.LogInformation("In-memory scheduler stopped.");
         }
@@ -367,35 +385,133 @@ public sealed class InMemoryScheduler(
                 continue;
             }
 
-            var resolved = descriptor.Schedule.Resolve(configuration);
+            var resolved = descriptor.Schedule.Resolve(_variableSource);
+            var signature = ComputeSignature(descriptor);
             lock (_stateLock) {
                 _resolvedSchedules[descriptor.Name] = resolved;
+                _recurringSignatures[descriptor.Name] = signature;
             }
 
             if (resolved.IsDisabled) {
                 continue;
             }
 
-            Enqueue(new ScheduledJobWorkItem(
-                Guid.NewGuid(),
-                Guid.NewGuid(),
-                descriptor,
-                resolved.GetFirstDueTime(now),
-                null,
-                false,
-                1,
-                1,
-                null,
-                ScheduledJobResilienceMode.Inline,
-                null,
-                0,
-                null));
+            Enqueue(BuildRecurringOccurrence(descriptor, resolved.GetFirstDueTime(now)));
         }
+    }
+
+    private static ScheduledJobWorkItem BuildRecurringOccurrence(ScheduledJobDescriptor descriptor, DateTimeOffset dueTimeUtc) =>
+        new(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            descriptor,
+            dueTimeUtc,
+            null,
+            false,
+            1,
+            1,
+            null,
+            ScheduledJobResilienceMode.Inline,
+            null,
+            0,
+            null);
+
+    // Resolves the schedule's variable-bearing inputs to a signature, so a live change can be matched to the
+    // jobs it actually affects (a job whose schedule is all literals never reschedules on an unrelated change).
+    private string ComputeSignature(ScheduledJobDescriptor descriptor) {
+        var schedule = descriptor.Schedule!;
+        return string.Join(
+            "\u001f",
+            VariableSubstitution.Resolve(schedule.Value, _variableSource),
+            schedule.InitialDelay is null ? null : VariableSubstitution.Resolve(schedule.InitialDelay, _variableSource),
+            schedule.TimeZone is null ? null : VariableSubstitution.Resolve(schedule.TimeZone, _variableSource),
+            descriptor.Enabled is null ? null : VariableSubstitution.Resolve(descriptor.Enabled, _variableSource));
+    }
+
+    private void SubscribeToVariableChanges() {
+        // Live reschedule: when a watched variable changes, re-resolve affected recurring jobs immediately
+        // instead of waiting for each one's next natural occurrence. Sources that cannot observe change skip this.
+        if (_variableSource is IObservableVariableSource observable) {
+            _variableSubscription = ChangeToken.OnChange(observable.Watch, ResyncRecurringSchedules);
+        }
+    }
+
+    private void ResyncRecurringSchedules() {
+        try {
+            var now = timeProvider.GetUtcNow();
+            foreach (var descriptor in _descriptors) {
+                if (descriptor.Schedule is not null) {
+                    ResyncDescriptor(descriptor, now);
+                }
+            }
+        } catch (Exception ex) {
+            logger.LogError(ex, "Failed to resync scheduled jobs after a variable change.");
+        }
+    }
+
+    private void ResyncDescriptor(ScheduledJobDescriptor descriptor, DateTimeOffset now) {
+        string signature;
+        try {
+            signature = ComputeSignature(descriptor);
+        } catch (FormatException) {
+            return; // malformed placeholder; leave the existing chain untouched
+        }
+
+        bool supersededQueued;
+        bool jobActive;
+        lock (_stateLock) {
+            if (string.Equals(_recurringSignatures.GetValueOrDefault(descriptor.Name), signature, StringComparison.Ordinal)) {
+                return; // variables affecting this job did not change
+            }
+
+            _recurringSignatures[descriptor.Name] = signature;
+
+            supersededQueued = false;
+            if (_recurringRunIds.TryGetValue(descriptor.Name, out var runId) && _queuedRuns.Remove(runId)) {
+                // Tombstone the queued occurrence; its physical queue entry is dropped lazily at dequeue.
+                _supersededRuns.Add(runId);
+                _recurringRunIds.Remove(descriptor.Name);
+                supersededQueued = true;
+            }
+
+            jobActive = _activeRunsByJob.GetValueOrDefault(descriptor.Name) > 0
+                || DispatchingContainsLocked(descriptor.Name);
+        }
+
+        ResolvedSchedule resolved;
+        try {
+            resolved = ResolveScheduleSafely(descriptor);
+        } catch (Exception ex) {
+            logger.LogError(ex, "Failed to resolve the schedule for {JobName} during live reschedule.", descriptor.Name);
+            return;
+        }
+
+        if (resolved.IsDisabled) {
+            return; // now disabled: superseding the queued occurrence stopped the chain
+        }
+
+        // Skip re-enqueuing only when the job is mid-run with no queued occurrence: a fixed-delay chain
+        // reschedules itself on completion and will pick up the new variables there.
+        if (!supersededQueued && jobActive) {
+            return;
+        }
+
+        Enqueue(BuildRecurringOccurrence(descriptor, resolved.GetFirstDueTime(now)));
+    }
+
+    private bool DispatchingContainsLocked(string jobName) {
+        foreach (var dispatching in _dispatchingRuns.Values) {
+            if (string.Equals(dispatching.Descriptor.Name, jobName, StringComparison.Ordinal)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private ResolvedSchedule ResolveScheduleSafely(ScheduledJobDescriptor descriptor) {
         try {
-            var resolved = descriptor.Schedule!.Resolve(configuration);
+            var resolved = descriptor.Schedule!.Resolve(_variableSource);
             lock (_stateLock) {
                 _resolvedSchedules[descriptor.Name] = resolved;
             }
@@ -424,7 +540,7 @@ public sealed class InMemoryScheduler(
 
         string? resolved;
         try {
-            resolved = ConfigPlaceholder.Resolve(descriptor.Enabled, configuration);
+            resolved = VariableSubstitution.Resolve(descriptor.Enabled, _variableSource);
         } catch (FormatException ex) {
             logger.LogError(ex, "Scheduled job {JobName} has a malformed Enabled placeholder; treating it as disabled.", descriptor.Name);
             return false;
@@ -468,6 +584,10 @@ public sealed class InMemoryScheduler(
             // Note 34: The priority queue gives the scheduler an efficient "next due run" without a fixed polling interval.
             _queue.Enqueue(item, item.DueTimeUtc);
             _queuedRuns[item.RunId] = item;
+            if (!item.IsRuntimeScheduled) {
+                // Track the current queued recurring occurrence so a live variable change can supersede it.
+                _recurringRunIds[item.Descriptor.Name] = item.RunId;
+            }
             if (item.IsRuntimeScheduled && !_jobStates.ContainsKey(item.JobId)) {
                 RecordJobStateLocked(item, ScheduledJobLifecycleStatus.Queued, item.DueTimeUtc, null, null);
             }
@@ -481,6 +601,13 @@ public sealed class InMemoryScheduler(
         lock (_stateLock) {
             while (_queue.Count > 0) {
                 var next = _queue.Peek();
+                if (_supersededRuns.Remove(next.RunId)) {
+                    // A live reschedule replaced this occurrence; drop it silently (no recorded outcome).
+                    _queue.Dequeue();
+                    _queuedRuns.Remove(next.RunId);
+                    continue;
+                }
+
                 if (_cancelledRuns.Remove(next.RunId)) {
                     _queuedRuns.Remove(next.RunId);
                     _queue.Dequeue();
