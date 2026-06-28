@@ -1,27 +1,22 @@
 namespace Elarion.JsonRpc;
 
 /// <summary>
-/// A hook that seeds scoped services in a per-call dispatch scope. Implementations are resolved from the
-/// call scope and run once per dispatch, immediately after the scope is created and before the handler runs.
+/// A hook that seeds scoped services in a per-call dispatch scope from the captured
+/// <see cref="DispatchScopeContext"/>. Implementations are resolved from the call scope and run once per
+/// dispatch, immediately after the scope is created and before the handler runs.
 /// </summary>
 /// <remarks>
 /// This is the extension point for carrying request-boundary state into the fresh DI scope dispatcher-based
-/// transports (JSON-RPC, MCP) use for each call — child scopes do not inherit the parent scope's scoped
-/// instances. An initializer can seed from two sources: the captured <see cref="DispatchScopeContext"/>
-/// values, or <paramref name="inheritFrom"/> — the originating request scope, when one exists — which lets it
-/// <em>copy</em> an already-built instance instead of rebuilding it (see <see cref="CopyingDispatchScopeInitializer{T}"/>).
-/// The framework ships a current-user initializer; hosts register additional ones (tenant, correlation, …)
-/// with <c>TryAddEnumerable</c>, and every registered initializer runs via
+/// transports (JSON-RPC, MCP) create per call — child scopes do not inherit the parent scope's scoped
+/// instances. Each transport captures what it needs (e.g. the authenticated principal) into the
+/// <see cref="DispatchScopeContext"/> at its boundary; initializers read it back out. The framework ships a
+/// current-user initializer; hosts register their own (tenant, correlation, …) with <c>TryAddEnumerable</c>,
+/// and every registered initializer runs via
 /// <see cref="ServiceProviderDispatchScopeExtensions.CreateDispatchScope"/>.
 /// </remarks>
 public interface IDispatchScopeInitializer {
-    /// <summary>Seeds scoped services in <paramref name="callScope"/>.</summary>
+    /// <summary>Seeds scoped services in <paramref name="callScope"/> from <paramref name="context"/>.</summary>
     /// <param name="callScope">The freshly created per-call service provider.</param>
-    /// <param name="inheritFrom">
-    /// The originating request scope to copy already-built scoped instances from, or <see langword="null"/>
-    /// when there is none (e.g. MCP, which dispatches from the application root). Never resolve scoped
-    /// services from the application root; rely on <paramref name="context"/> instead when this is null.
-    /// </param>
     /// <param name="context">The values captured at the dispatch boundary.</param>
-    void Initialize(IServiceProvider callScope, IServiceProvider? inheritFrom, DispatchScopeContext context);
+    void Initialize(IServiceProvider callScope, DispatchScopeContext context);
 }

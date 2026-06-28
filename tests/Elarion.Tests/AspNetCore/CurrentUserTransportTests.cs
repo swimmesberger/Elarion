@@ -44,12 +44,11 @@ public sealed class CurrentUserTransportTests {
     [Fact]
     public async Task JsonRpc_Single_HandlerReadsAuthenticatedCurrentUser() {
         await using var provider = BuildProvider();
-        using var requestScope = provider.CreateScope();
+        // The endpoint captures ctx.User into the dispatch context, so no middleware is required here.
         var context = CreateContext(
-            requestScope.ServiceProvider,
+            provider,
             """{ "jsonrpc": "2.0", "method": "whoami", "params": {}, "id": 1 }""",
             "user-42");
-        await InitializeRequestSnapshotAsync(requestScope.ServiceProvider, context);
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -61,9 +60,8 @@ public sealed class CurrentUserTransportTests {
     [Fact]
     public async Task JsonRpc_Batch_EachItemReadsAuthenticatedCurrentUser() {
         await using var provider = BuildProvider();
-        using var requestScope = provider.CreateScope();
         var context = CreateContext(
-            requestScope.ServiceProvider,
+            provider,
             """
             [
               { "jsonrpc": "2.0", "method": "whoami", "params": {}, "id": 1 },
@@ -71,7 +69,6 @@ public sealed class CurrentUserTransportTests {
             ]
             """,
             "user-99");
-        await InitializeRequestSnapshotAsync(requestScope.ServiceProvider, context);
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -86,9 +83,8 @@ public sealed class CurrentUserTransportTests {
     public async Task Mcp_ToolCall_HandlerReadsAuthenticatedCurrentUser() {
         await using var provider = BuildProvider();
         var dispatcher = provider.GetRequiredService<JsonRpcDispatcher>();
-        // MCP has no request scope; ElarionMcpServerTool captures RequestContext.User into the context. Here we
-        // dispatch from the application root (inheritFrom defaults to null) so the MCP initializer must seed
-        // ICurrentUser from that captured principal.
+        // MCP has no request scope; ElarionMcpServerTool captures RequestContext.User into the context, and the
+        // current-user initializer seeds ICurrentUser from that captured principal — the same path as JSON-RPC.
         var context = new DispatchScopeContext();
         context.Set<ClaimsPrincipal>(Authenticated("user-mcp"));
 

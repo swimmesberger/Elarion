@@ -1,121 +1,77 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Options;
 using Elarion.Abstractions.Identity;
-using Elarion.JsonRpc;
 
 namespace Elarion.AspNetCore.Identity;
 
 /// <summary>
-/// Scoped copy of the authenticated ASP.NET principal exposed through the framework identity abstraction.
+/// Scoped view of the authenticated ASP.NET principal exposed through the framework identity abstraction.
 /// </summary>
-public sealed class CurrentUserSnapshot(IOptions<AspNetCoreCurrentUserOptions> options)
-    : ICurrentUser, IScopeCopyable<CurrentUserSnapshot> {
-    private bool _initialized;
-    private bool _isAuthenticated;
-    private string? _userId;
-    private string? _email;
-    private IReadOnlyList<string> _roles = [];
-    private ILookup<string, string> _claims = Enumerable.Empty<string>().ToLookup(static value => value);
+/// <remarks>
+/// Holds the <see cref="ClaimsPrincipal"/> set by <see cref="Initialize"/> and materializes the claims lookup
+/// and roles <b>lazily</b> on first access (then caches them). Lazy materialization is what makes seeding the
+/// snapshot uniform across transports: building it from the principal per dispatch call costs nothing until a
+/// handler actually reads a claim, and each snapshot parses at most once — so JSON-RPC/MCP can seed a fresh
+/// per-call snapshot without the request-scope one ever being re-parsed.
+/// </remarks>
+public sealed class CurrentUserSnapshot(IOptions<AspNetCoreCurrentUserOptions> options) : ICurrentUser {
+    private ClaimsPrincipal? _principal;
+    private ILookup<string, string>? _claims;
+    private IReadOnlyList<string>? _roles;
 
     private AspNetCoreCurrentUserOptions Options => options.Value;
 
-    /// <summary>Whether this snapshot has been initialized from a principal.</summary>
-    internal bool IsInitialized => _initialized;
+    private ClaimsPrincipal Principal =>
+        _principal ?? throw new InvalidOperationException(
+            "Current user has not been initialized. Call UseElarionCurrentUser() after authentication middleware before accessing ICurrentUser.");
 
     /// <inheritdoc />
-    public string UserId {
-        get {
-            EnsureInitialized();
-
-            return _userId
-                ?? throw new InvalidOperationException($"User id claim '{Options.UserIdClaimType}' is not set.");
-        }
-    }
+    public string UserId =>
+        Principal.FindFirstValue(Options.UserIdClaimType)
+        ?? throw new InvalidOperationException($"User id claim '{Options.UserIdClaimType}' is not set.");
 
     /// <inheritdoc />
-    public string? Email {
-        get {
-            EnsureInitialized();
-
-            return _email;
-        }
-    }
+    public string? Email => Principal.FindFirstValue(Options.EmailClaimType);
 
     /// <inheritdoc />
-    public IReadOnlyList<string> Roles {
-        get {
-            EnsureInitialized();
-
-            return _roles;
-        }
-    }
+    public IReadOnlyList<string> Roles => _roles ??= ResolveRoles();
 
     /// <inheritdoc />
-    public bool IsAuthenticated {
-        get {
-            EnsureInitialized();
-
-            return _isAuthenticated;
-        }
-    }
+    public bool IsAuthenticated => Principal.Identity?.IsAuthenticated == true;
 
     /// <inheritdoc />
     public bool IsInRole(string role) =>
         Roles.Contains(role, StringComparer.Ordinal);
 
     /// <inheritdoc />
-    public bool HasClaim(string type, string value) {
-        EnsureInitialized();
-
-        return _claims[type].Contains(value, StringComparer.Ordinal);
-    }
+    public bool HasClaim(string type, string value) =>
+        Claims[type].Contains(value, StringComparer.Ordinal);
 
     /// <inheritdoc />
-    public IEnumerable<string> GetClaimValues(string type) {
-        EnsureInitialized();
-
-        return _claims[type];
-    }
+    public IEnumerable<string> GetClaimValues(string type) =>
+        Claims[type];
 
     /// <summary>
-    /// Copies an already-built snapshot's state into this instance — reusing the materialized claims lookup
-    /// and roles by reference (both are immutable after <see cref="Initialize"/>), so no claims are re-parsed.
-    /// Used to inherit the request-scope snapshot into the dispatcher's per-call child scopes.
+    /// Sets the principal this snapshot exposes. Claims and roles are materialized lazily on first access, so
+    /// this is cheap and may be called once per dispatch scope. Called by <see cref="CurrentUserMiddleware"/>
+    /// (HTTP request scope) and by the current-user dispatch-scope initializer (JSON-RPC / MCP call scopes).
     /// </summary>
-    public void CopyFrom(CurrentUserSnapshot source) {
-        ArgumentNullException.ThrowIfNull(source);
+    internal void Initialize(ClaimsPrincipal principal) => _principal = principal;
 
-        _isAuthenticated = source._isAuthenticated;
-        _userId = source._userId;
-        _email = source._email;
-        _roles = source._roles;
-        _claims = source._claims;
-        _initialized = source._initialized;
-    }
+    private ILookup<string, string> Claims =>
+        // Materialized once per snapshot, on first claim access; the strings are immutable, so the lookup is a
+        // true snapshot from that point and holds no live reference to the principal's Claim objects.
+        _claims ??= Principal.Claims.ToLookup(claim => claim.Type, claim => claim.Value, StringComparer.Ordinal);
 
-    internal void Initialize(ClaimsPrincipal principal) {
-        _isAuthenticated = principal.Identity?.IsAuthenticated == true;
-        _userId = principal.FindFirstValue(Options.UserIdClaimType);
-        _email = principal.FindFirstValue(Options.EmailClaimType);
-        // ToLookup is eager: it copies the claim type/value strings (immutable) into the lookup now, holding no
-        // reference to the principal or its Claim objects — a true snapshot, like the user id/email/roles above.
-        _claims = principal.Claims.ToLookup(claim => claim.Type, claim => claim.Value, StringComparer.Ordinal);
-
-        var claimRoles = principal.FindAll(Options.RoleClaimType)
+    private IReadOnlyList<string> ResolveRoles() {
+        var claimRoles = Principal.FindAll(Options.RoleClaimType)
             .Select(claim => claim.Value)
             .Where(role => !string.IsNullOrWhiteSpace(role))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        _roles = claimRoles.Length > 0 || !_isAuthenticated
+        return claimRoles.Length > 0 || !IsAuthenticated
             ? claimRoles
             : Options.DefaultRolesWhenAuthenticated.ToArray();
-        _initialized = true;
-    }
-
-    private void EnsureInitialized() {
-        if (!_initialized) {
-            throw new InvalidOperationException("Current user has not been initialized. Call UseElarionCurrentUser() after authentication middleware before accessing ICurrentUser.");
-        }
     }
 }

@@ -12,23 +12,25 @@ minor releases may include breaking changes.
 - **`ICurrentUser` now resolves inside JSON-RPC and MCP handlers (and so does authorization).** The
   dispatchers run each call in a fresh DI child scope, which does not inherit the request scope's scoped
   `CurrentUserSnapshot`, so a handler injecting `ICurrentUser` — or the `AuthorizationDecorator`, which
-  reads it — threw `"Current user has not been initialized"`. Now JSON-RPC and HTTP-batch call scopes
-  **inherit** the request-scope snapshot the middleware already built, and MCP (which has no request scope)
-  seeds from the per-message principal (`RequestContext.User`) — no `IHttpContextAccessor`, no `AsyncLocal`.
-  Plain HTTP endpoints were unaffected. See [`docs/capabilities/current-user`](docs/capabilities/current-user.mdx).
+  reads it — threw `"Current user has not been initialized"`. Now every dispatcher-based transport seeds the
+  per-call snapshot the same way: it captures the authenticated principal at its boundary (`HttpContext.User`
+  for JSON-RPC, `RequestContext.User` for MCP) into a `DispatchScopeContext`, and one initializer applies it —
+  no `IHttpContextAccessor`, no `AsyncLocal`. Plain HTTP endpoints were unaffected. See
+  [`docs/capabilities/current-user`](docs/capabilities/current-user.mdx).
 
 ### Added
-- **Generic per-call dispatch-scope seeding (`Elarion.JsonRpc`).** `IDispatchScopeInitializer` +
-  `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(...)` helper carry request-boundary state
-  into the per-call child scope dispatcher-based transports create. Hosts register their own initializers
-  (tenant, correlation, …) via `TryAddEnumerable`.
-- **Scope inheritance via copy (`IScopeCopyable<T>` + `AddDispatchScopeInherited<T>()` +
-  `CopyingDispatchScopeInitializer<T>`).** When an originating request scope exists (JSON-RPC, HTTP batch),
-  the rail copies an already-built request-scoped instance into each per-call scope instead of rebuilding it
-  (`CreateDispatchScope(inheritFrom: …)`). Current-user composes the two single-purpose pieces: it inherits the
-  middleware's snapshot for JSON-RPC/HTTP (materialized claims reused — no re-parsing) and a dedicated
-  `CurrentUserMcpScopeInitializer` builds from the captured principal for MCP, keyed solely on whether a
-  request scope is present.
+- **Per-call dispatch-scope seeding (`Elarion.JsonRpc`).** `IDispatchScopeInitializer` +
+  `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(context)` helper carry request-boundary
+  state into the fresh per-call child scope dispatcher-based transports (JSON-RPC, MCP) create. Current-user
+  is one registered consumer; hosts add their own (tenant, correlation, …) via `TryAddEnumerable`.
+
+### Changed
+- **`CurrentUserSnapshot` materializes claims lazily** (on first access, cached) instead of eagerly on
+  `Initialize`, so seeding a fresh snapshot per dispatch call costs nothing until a claim is read and no
+  claims are parsed twice — making per-call seeding uniform across transports without copying.
+- **Breaking (custom batch strategies):** `IBatchExecutionStrategy.ExecuteAsync` takes a
+  `DispatchScopeContext context`; strategies create each per-item scope via
+  `CreateDispatchScope(context)` so scoped state (current user, …) is seeded per item.
 
 ### Documentation
 - Tutorial `features.mdx` now shows the no-reflection `IResultFailureFactory<TResponse>` /

@@ -47,26 +47,6 @@ public sealed class CurrentUserScopeSeedingTests {
     }
 
     [Fact]
-    public async Task CreateDispatchScope_InheritsRequestScopeSnapshot_WithoutReParsingPrincipal() {
-        using var provider = BuildProvider();
-        // Simulate the JSON-RPC request scope: the middleware builds the snapshot once.
-        using var request = provider.CreateScope();
-        var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext {
-            User = Authenticated(new Claim("sub", "user-7"), new Claim("permission", "x")),
-        };
-        await new CurrentUserMiddleware(_ => Task.CompletedTask)
-            .InvokeAsync(httpContext, request.ServiceProvider.GetRequiredService<CurrentUserSnapshot>());
-
-        // No principal captured in the context — the initializer must copy from the request scope.
-        using var call = request.ServiceProvider.CreateDispatchScope(inheritFrom: request.ServiceProvider);
-        var user = call.ServiceProvider.GetRequiredService<ICurrentUser>();
-
-        user.IsAuthenticated.Should().BeTrue();
-        user.UserId.Should().Be("user-7");
-        user.HasClaim("permission", "x").Should().BeTrue();
-    }
-
-    [Fact]
     public void CreateDispatchScope_NoPrincipal_CurrentUserIsAnonymousAndDoesNotThrow() {
         using var provider = BuildProvider();
 

@@ -25,13 +25,10 @@ public static class CurrentUserServiceCollectionExtensions {
         services.TryAddScoped<ICurrentUser>(sp => sp.GetRequiredService<CurrentUserSnapshot>());
 
         // Seed the snapshot into the per-call child scopes the JSON-RPC / MCP dispatchers create, where the
-        // request-scope snapshot from CurrentUserMiddleware is not visible. Two complementary initializers,
-        // keyed on whether an originating request scope exists:
-        //  - JSON-RPC / HTTP batch: inherit (copy) the request-scope snapshot — no re-parsing of claims.
-        //  - MCP (no request scope): build from the per-message principal captured in the dispatch context.
-        services.AddDispatchScopeInherited<CurrentUserSnapshot>();
+        // request-scope snapshot from CurrentUserMiddleware is not visible. One initializer for every
+        // dispatcher-based transport — it reads the principal each captured into the dispatch context.
         services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IDispatchScopeInitializer, CurrentUserMcpScopeInitializer>());
+            ServiceDescriptor.Singleton<IDispatchScopeInitializer, CurrentUserScopeInitializer>());
 
         return services;
     }
