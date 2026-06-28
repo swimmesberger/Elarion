@@ -203,7 +203,34 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             list.Sort(RpcMethodOrder);
         unmatchedRpc.Sort(RpcMethodOrder);
 
+        // Operation names key the single shared bus, so a collision (across modules, or an inferred name clashing
+        // with an explicit one) would silently drop a handler at runtime — report it at compile time instead.
+        ReportDuplicateOperationNames(rpcByModule, unmatchedRpc, spc.ReportDiagnostic);
+
         return new TransportMaps(httpByModule, unmatchedHttp, rpcByModule, unmatchedRpc);
+    }
+
+    private static void ReportDuplicateOperationNames(
+        Dictionary<string, List<RpcMethodEmission.Model>> rpcByModule,
+        List<RpcMethodEmission.Model> unmatchedRpc,
+        Action<Diagnostic> report)
+    {
+        // The bus keys names case-insensitively, so detect collisions the same way.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var reported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Scan(List<RpcMethodEmission.Model> entries)
+        {
+            foreach (var entry in entries)
+            {
+                if (!seen.Add(entry.MethodName) && reported.Add(entry.MethodName))
+                    report(Diagnostic.Create(RpcMethodEmission.DuplicateOperationName, Location.None, entry.MethodName));
+            }
+        }
+
+        foreach (var list in rpcByModule.Values)
+            Scan(list);
+        Scan(unmatchedRpc);
     }
 
     private static int RpcMethodOrder(RpcMethodEmission.Model a, RpcMethodEmission.Model b)

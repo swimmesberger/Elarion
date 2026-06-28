@@ -23,6 +23,7 @@ JSON-RPC method emission for `[Handler]` handlers. See
 | --- | --- | --- | --- |
 | ELRPC001 | Warning | A `[Handler]` handler's namespace is not under any `[AppModule]`; it is registered unconditionally (not gated by a module feature flag). MCP reuses this id since it is built on `[Handler]`. | Move the handler under a module's namespace so its RPC/MCP registration is module-scoped and feature-gated. |
 | ELRPC002 | Warning | A `[Handler]` handler does not implement `IHandler<TRequest, TResponse>` with a `Result<T>` response, so no RPC method can be generated. | Make the handler implement `IHandler<TRequest, Result<TResponse>>` (or the `IHandler<T>` sugar) so the request/response shape is resolvable. |
+| ELRPC003 | Warning | Two handlers resolve to the same operation name on the shared bus (e.g. an inferred name colliding with another inferred or explicit one); one would silently win at runtime. | Give one handler an explicit `[Handler("...")]` name so every operation name is unique across the bus. |
 
 ## ELHTTP — HTTP endpoint generation
 

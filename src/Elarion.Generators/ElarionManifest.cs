@@ -8,7 +8,10 @@ internal static class ElarionManifest
     public const string SchemaVersion = "1";
     public const string ModuleKey = "Elarion.Manifest.Module.v1";
     public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v1";
-    public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v1";
+    // v2 added the IsNameInferred field. v1 (9 fields, always explicit names) is still read for cross-version
+    // references built on an older package, so handlers are never silently dropped on a version skew.
+    public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v2";
+    public const string RpcMethodV1Key = "Elarion.Manifest.RpcMethod.v1";
 
     public sealed record Module(
         string ModuleName,
@@ -179,18 +182,22 @@ internal static class ElarionManifest
     public static bool TryDecodeRpcMethod(string value, out RpcMethodEmission.Model? model)
     {
         model = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 10)
+        // v2 = 10 fields (adds IsNameInferred); v1 = 9 fields (legacy, always explicit names).
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || (fields.Count != 9 && fields.Count != 10))
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
-            fields[8] is null || fields[9] is null)
+            fields[8] is null)
         {
             return false;
         }
 
+        var isNameInferred = false;
+        if (fields.Count == 10 && (fields[9] is null || !TryDecodeBool(fields[9], out isNameInferred)))
+            return false;
+
         if (!TryDecodeBool(fields[5], out var onJsonRpc) ||
             !TryDecodeBool(fields[6], out var onMcp) ||
-            !ElarionManifestCodec.TryDecodeParameters(fields[8]!, out var parameters) ||
-            !TryDecodeBool(fields[9], out var isNameInferred))
+            !ElarionManifestCodec.TryDecodeParameters(fields[8]!, out var parameters))
         {
             return false;
         }
@@ -367,6 +374,7 @@ internal static class ElarionManifestReader
                     httpEndpoints.Add(httpEndpoint);
                 break;
             case ElarionManifest.RpcMethodKey:
+            case ElarionManifest.RpcMethodV1Key:
                 if (ElarionManifest.TryDecodeRpcMethod(value, out var rpcMethod) && rpcMethod is not null)
                     rpcMethods.Add(rpcMethod);
                 break;

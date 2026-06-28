@@ -16,7 +16,7 @@ internal static class RpcMethodEmission
     public const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
 
-    // Suffixes stripped from a handler type name when inferring an operation name (e.g. CreateClientCommand -> create-client).
+    // Suffixes stripped from a handler type name when inferring an operation name (e.g. CreateClientCommand -> createClient).
     private static readonly string[] OperationNameSuffixes = ["Handler", "Command", "Query", "Request"];
 
     public static readonly DiagnosticDescriptor UnmatchedModule = new(
@@ -35,6 +35,16 @@ internal static class RpcMethodEmission
         messageFormat:
         "Handler '{0}' is annotated with [Handler] but does not implement IHandler<TRequest, TResponse> with a "
         + "Result<T> response; no operation will be generated",
+        category: "Elarion.JsonRpc",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor DuplicateOperationName = new(
+        id: "ELRPC003",
+        title: "Duplicate operation name",
+        messageFormat:
+        "Operation name '{0}' is produced by more than one handler; operation names must be unique across the bus — "
+        + "give one an explicit [Handler(\"...\")] name (inferred names can collide)",
         category: "Elarion.JsonRpc",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);

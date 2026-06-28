@@ -30,6 +30,10 @@ public sealed class HandlerDispatcher {
         if (_frozen is not null) {
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
         }
+        if (_building.ContainsKey(name)) {
+            throw new InvalidOperationException(
+                $"An operation named '{name}' is already registered; operation names must be unique across the bus.");
+        }
 
         _building[name] = new HandlerRoute(
             name,
@@ -59,6 +63,10 @@ public sealed class HandlerDispatcher {
         where TRequest : class {
         if (_frozen is not null) {
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
+        }
+        if (_building.ContainsKey(name)) {
+            throw new InvalidOperationException(
+                $"An operation named '{name}' is already registered; operation names must be unique across the bus.");
         }
 
         _building[name] = new HandlerRoute(

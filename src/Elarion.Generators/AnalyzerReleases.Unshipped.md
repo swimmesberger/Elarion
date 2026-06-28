@@ -32,6 +32,7 @@ ELAPI003 | Elarion.Modules | Warning | Module API interface is not in any module
 ELAPI004 | Elarion.Modules | Error | Duplicate module API method
 ELRPC001 | Elarion.JsonRpc | Warning | RPC method handler is not in any module
 ELRPC002 | Elarion.JsonRpc | Warning | RPC handler has no resolvable request/response shape
+ELRPC003 | Elarion.JsonRpc | Warning | Duplicate operation name across the handler bus
 ELRES001 | Elarion.Abstractions.Resilience | Error | Invalid resilience policy
 ELRES002 | Elarion.Abstractions.Resilience | Error | Duplicate resilience policy name
 ELCACHE001 | Elarion.Abstractions.Caching | Error | Handler cannot be both cacheable and cache-invalidating

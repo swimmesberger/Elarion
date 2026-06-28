@@ -67,7 +67,7 @@ The operation name is **optional**: `[Handler]` alone is valid. When omitted, th
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `operationName` | `string?` (ctor) → `OperationName` | optional | The operation name, e.g. `"clients.create"`. When omitted, inferred by convention as `{module}.{operation}`. |
+| `name` | `string?` (ctor) → `Name` | optional | The operation name, e.g. `"clients.create"`. When omitted, inferred by convention as `{module}.{operation}`. |
 | `Transports` | `HandlerTransports` (init, `[Flags]`) | `All` (`JsonRpc \| Mcp`) | Which dispatcher transports expose the handler. |
 
 **`HandlerTransports`:** `JsonRpc` (= 1), `Mcp` (= 2), `All` (= `JsonRpc \| Mcp`).

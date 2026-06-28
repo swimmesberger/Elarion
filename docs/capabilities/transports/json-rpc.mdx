@@ -61,7 +61,7 @@ too: JSON-RPC is optional and outside the core package, and modules can expose o
 [Minimal API endpoints](/docs/concepts/modules#endpoints-in-modules) alongside — or instead of —
 JSON-RPC methods. You are not locked into one transport.
 
-## One bus, one adapter
+## One bus, thin adapters
 
 JSON-RPC is not a self-contained dispatcher. The transport-neutral core is a single **named
 request/reply bus** — `HandlerDispatcher` (in `Elarion.Abstractions`, namespace

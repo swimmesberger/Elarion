@@ -16,6 +16,12 @@ public static class JsonRpcDispatcherServiceExtensions {
     /// <paramref name="registerHandlers"/> map and frozen. Idempotent (<c>TryAddSingleton</c>), so every transport
     /// host that needs the bus (JSON-RPC, MCP, …) can call it with the same delegate and the registry is built once.
     /// </summary>
+    /// <remarks>
+    /// <b>First registration wins.</b> Pass the <b>same</b> registration delegate (e.g.
+    /// <c>ModuleBootstrapper.RegisterHandlers</c>) to every transport — <c>AddElarionJsonRpc</c> and
+    /// <c>AddElarionMcp</c> both route through this method, and a divergent second delegate is silently ignored
+    /// because the bus is a single shared singleton.
+    /// </remarks>
     public static IServiceCollection AddElarionHandlerDispatcher(
         this IServiceCollection services,
         Func<HandlerDispatcher, HandlerDispatcher> registerHandlers) {
@@ -33,6 +39,7 @@ public static class JsonRpcDispatcherServiceExtensions {
     /// <c>Elarion.JsonRpc</c> package stays free of a configuration dependency; ASP.NET hosts get an
     /// <c>IConfiguration</c>-flavored overload from <c>Elarion.AspNetCore</c>.
     /// </summary>
+    /// <remarks><b>First registration wins</b> — see the other overload; pass the same delegate to every transport.</remarks>
     public static IServiceCollection AddElarionHandlerDispatcher(
         this IServiceCollection services,
         Func<HandlerDispatcher, IServiceProvider, HandlerDispatcher> registerHandlers) {

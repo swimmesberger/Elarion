@@ -49,7 +49,11 @@ minor releases may include breaking changes.
   resolve, and the JSON-RPC `MapHandler` bridge is removed in favor of mapping onto the `HandlerDispatcher`
   (`dispatcher.Map<Req,Resp>("x")` / `dispatcher.MapDelegate<Req,Resp>("x", fn)`). To upgrade: rename the
   attributes/enum, and change host calls to pass `ModuleBootstrapper.RegisterHandlers` to
-  `AddElarionJsonRpc(serializerOptions, …)` and `AddElarionMcp(metadata, serializerOptions, …, configure)`.
+  `AddElarionJsonRpc(serializerOptions, …)` and `AddElarionMcp(metadata, serializerOptions, …, configure)`. Pass
+  the **same** `RegisterHandlers` delegate to both transports — the shared bus is built once (first registration
+  wins). MCP tool calls now dispatch directly through the bus and no longer emit the JSON-RPC transport-level OTel
+  span/metric (handler-level tracing is unchanged); operation names must be unique across the bus, and a collision
+  is reported at compile time (`ELRPC003`) and rejected at registration.
 - **`Elarion` core is now transport-agnostic — it no longer references `Elarion.JsonRpc`.** The
   transport-neutral dispatch-scope rail (`DispatchScopeContext` / `IDispatchScopeInitializer` /
   `CreateDispatchScope` / `SeedScope`) moved to `Elarion.Abstractions` (namespace

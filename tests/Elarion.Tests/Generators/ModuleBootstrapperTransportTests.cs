@@ -327,6 +327,42 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_WarnsOnDuplicateOperationName() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Dup {
+                [AppModule("Dup", Kind = AppModuleKind.Core)]
+                public static class DupModule { }
+
+                [Handler("dup.op")]
+                public sealed class FirstOp : IHandler<FirstOp.Query, Result<FirstOp.Response>> {
+                    public sealed record Query;
+                    public sealed record Response(string V);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("a"));
+                }
+
+                [Handler("dup.op")]
+                public sealed class SecondOp : IHandler<SecondOp.Query, Result<SecondOp.Response>> {
+                    public sealed record Query;
+                    public sealed record Response(string V);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("b"));
+                }
+            }
+            """;
+
+        var diagnostics = RunGeneratorDiagnostics(modulesSource);
+
+        diagnostics.Should().Contain(d => d.Id == "ELRPC003" && d.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
     public void Bootstrapper_InfersOperationName_FromModuleAndHandlerName() {
         const string modulesSource =
             """
@@ -447,6 +483,8 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             "0",
             null);
+        // A legacy v1 (9-field) RPC manifest entry — proves a reference built on the previous package still
+        // decodes (IsNameInferred defaults to false) rather than being silently dropped.
         var rpc = EncodeFields(
             "manifest.get",
             "ManifestOnly",
@@ -456,8 +494,7 @@ public sealed class ModuleBootstrapperTransportTests {
             "1",
             "1",
             null,
-            string.Empty,
-            "0");
+            string.Empty);
 
         return $$"""
             using System.Threading;

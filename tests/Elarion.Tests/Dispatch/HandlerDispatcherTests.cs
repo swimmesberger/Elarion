@@ -112,4 +112,14 @@ public sealed class HandlerDispatcherTests {
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*after Freeze()*");
     }
+
+    [Fact]
+    public void Map_DuplicateName_ThrowsInsteadOfSilentlyOverwriting() {
+        var registry = new HandlerDispatcher().Map<Ping, Pong>("dup");
+
+        var act = () => registry.MapDelegate<Ping, Pong>(
+            "dup", (request, _, _) => ValueTask.FromResult<Result<Pong>>(new Pong(request.Value)));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*already registered*");
+    }
 }

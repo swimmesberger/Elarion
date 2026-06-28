@@ -56,7 +56,7 @@ public sealed class RpcDispatcherHandlerTests {
         };
 
     [Fact]
-    public async Task MapHandler_SuccessfulHandler_ReturnsResponseValue() {
+    public async Task Dispatch_SuccessfulHandler_ReturnsResponseValue() {
         var (dispatcher, services) = Build();
         await using var scope = services.CreateAsyncScope();
 
@@ -71,7 +71,7 @@ public sealed class RpcDispatcherHandlerTests {
     [Theory]
     [InlineData("missing", -32001)] // ErrorKind.NotFound
     [InlineData("dup", -32002)]     // ErrorKind.Conflict
-    public async Task MapHandler_HandlerReturnsAppError_MapsToJsonRpcErrorCode(string name, int expectedCode) {
+    public async Task Dispatch_HandlerReturnsAppError_MapsToJsonRpcErrorCode(string name, int expectedCode) {
         var (dispatcher, services) = Build();
         await using var scope = services.CreateAsyncScope();
 
@@ -88,7 +88,7 @@ public sealed class RpcDispatcherHandlerTests {
     }
 
     [Fact]
-    public async Task MapHandler_RegisteredErrorTranslator_OverridesErrorCode() {
+    public async Task Dispatch_RegisteredErrorTranslator_OverridesErrorCode() {
         var dispatcher = new JsonRpcDispatcher(Options).Map<EchoCommand, EchoResponse>("echo").Freeze();
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
