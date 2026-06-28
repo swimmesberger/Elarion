@@ -7,6 +7,12 @@ Elarion ships three transports — HTTP `[HttpEndpoint]`, JSON-RPC, and MCP — 
 turns an inbound request into a handler invocation over the same transport-neutral seams. This page is for
 authoring a new one (gRPC, a CLI, a message-queue consumer, …).
 
+A note on packages, since it trips people up: **JSON-RPC and MCP are protocols** (the JSON-RPC message
+format + dispatcher live in `Elarion.JsonRpc`, which has no ASP.NET dependency), while **`Elarion.AspNetCore`
+is the host** that binds them to the wire — it serves JSON-RPC over `/rpc` (and REST) on Kestrel. So
+`Elarion.JsonRpc` isn't "the HTTP server"; it's the protocol the host serves. A new transport is its own
+host: it may reuse a protocol package, or just invoke handlers directly (see below).
+
 A transport has four jobs:
 
 1. **Capture identity** — get the caller's `ClaimsPrincipal` (or build one) at the boundary.
