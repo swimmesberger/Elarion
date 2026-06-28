@@ -231,8 +231,11 @@ public sealed class ClientNumberGenerator(BillingDbContext db) : IClientNumberGe
 
 `CreateClient` is a state change, so its request is a nested `Command`. It runs through the default
 pipeline (logging → validation → transaction), scopes the row to the current user, invalidates the
-clients cache on success, and is exposed over JSON-RPC. The `[Description]` attributes flow straight
-through to the [MCP tool](/docs/capabilities/transports/mcp) surface.
+clients cache on success, and is exposed over JSON-RPC. `[Handler]` names the operation; the name is
+optional, and when omitted Elarion infers `{module}.{operation}` by convention (here `clients.createClient`
+from module `Clients` and the handler type name minus its `Handler`/`Command`/`Query`/`Request` suffix,
+camelCased). An explicit name like `"clients.create"` is recommended for stable public/wire contracts. The
+`[Description]` attributes flow straight through to the [MCP tool](/docs/capabilities/transports/mcp) surface.
 
 ```csharp title="src/Billing.Application/Modules/Clients/Handlers/CreateClient.cs"
 using System.ComponentModel;
@@ -247,7 +250,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Application.Modules.Clients.Handlers;
 
-[RpcMethod("clients.create")]
+[Handler("clients.create")]
 [CacheInvalidate("clients")]
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(
@@ -339,7 +342,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Billing.Application.Modules.Clients.Handlers;
 
 [Cacheable("clients", DurationSeconds = 120)]
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient(BillingDbContext db, ICurrentUser user)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id) : IQuery;
@@ -372,7 +375,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Billing.Application.Modules.Clients.Handlers;
 
 [Cacheable("clients", DurationSeconds = 60)]
-[RpcMethod("clients.list")]
+[Handler("clients.list")]
 public sealed class ListClients(BillingDbContext db, ICurrentUser user)
     : IHandler<ListClients.Query, Result<ListClients.Response>> {
     public sealed record Query : IQuery;

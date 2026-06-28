@@ -13,7 +13,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 /// <summary>Creates a client. Runs the default pipeline (logging → validation → transaction), scopes the
 /// row to the current user, invalidates the clients cache on success, and is exposed over JSON-RPC and
 /// as an MCP tool. The <c>[Description]</c> attributes flow through to the MCP tool surface.</summary>
-[RpcMethod("clients.create")]
+[Handler("clients.create")]
 [CacheInvalidate("clients")]
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(

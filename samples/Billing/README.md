@@ -35,7 +35,8 @@ for when each would graduate to its own assembly.
 - **The full cross-cutting machinery** — a one-line decorator pipeline (logging → validation →
   transaction, attached by compile-time predicate), per-user caching with tag invalidation, a durable
   integration-event outbox, deferred-retry background jobs with a resilience policy, and a nightly cron.
-- **Every transport from one definition** — `[RpcMethod]` handlers served over JSON-RPC **and** MCP.
+- **Every transport from one definition** — `[Handler]` handlers map onto one shared `HandlerDispatcher`,
+  with JSON-RPC **and** MCP as thin adapters over it (each surface chosen via the handler's `Transports` flag).
 - **Real persistence** — PostgreSQL via EF Core, migrations applied on startup, all provisioned by Aspire.
 - **The full chain** — a C# handler becomes a JSON-RPC method, an exported `rpc-schema.json`, a generated
   TypeScript client, and a typed React call, all driven by the same contract.

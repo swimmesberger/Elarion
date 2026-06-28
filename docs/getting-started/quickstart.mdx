@@ -118,7 +118,7 @@ logic, not an infrastructure detail); the quickstart keeps everything in one pro
 
 ### Write a handler
 
-Handlers are the unit of work. This one is exposed over JSON-RPC with `[RpcMethod]`, injects
+Handlers are the unit of work. This one is exposed over JSON-RPC with `[Handler]`, injects
 `AppDbContext`, and returns a `Result<T>`.
 
 ```csharp title="MyApp.Application/Modules/Clients/Handlers/GetClient.cs"
@@ -128,7 +128,7 @@ using MyApp.Application;
 
 namespace MyApp.Application.Modules.Clients.Handlers;
 
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
@@ -147,7 +147,7 @@ public sealed class GetClient(AppDbContext db)
 }
 ```
 
-The RPC generator reads the request and response straight from the
+The handler generator reads the request and response straight from the
 `IHandler<TRequest, Result<TResponse>>` interface — here the nested `Query` and `Response` types, though
 they could equally be top-level; nesting carries no semantic weight. The handler queries the generated
 `db.Clients` `DbSet` directly with EF Core async LINQ.
@@ -179,7 +179,7 @@ public sealed partial class ClientsJsonContext : JsonSerializerContext;
 ### Add the host bootstrapper
 
 In the host, one small partial class tells the generator to emit the cross-module wiring — including the
-gated JSON-RPC registration, so disabling a module also removes its `[RpcMethod]` methods.
+gated handler registration, so disabling a module also removes its `[Handler]` operations.
 
 ```csharp title="MyApp.Api/Hosting/ModuleBootstrapper.cs"
 using Elarion.AspNetCore;
@@ -221,8 +221,8 @@ var serializerOptions = new JsonSerializerOptions {
 };
 
 builder.Services.AddSingleton(serializerOptions);
-// Gated dispatcher: only enabled modules' [RpcMethod] handlers are registered.
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+// Gated dispatcher: only enabled modules' [Handler] operations are registered.
+builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
 
 var app = builder.Build();
 

@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
-using Elarion.JsonRpc;
 using Elarion.JsonRpc.Mcp;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
@@ -11,8 +11,8 @@ using ModelContextProtocol.Server;
 namespace Elarion.AspNetCore.Mcp;
 
 /// <summary>
-/// An <see cref="McpServerTool"/> that proxies a single registered JSON-RPC method through the live
-/// <see cref="JsonRpcDispatcher"/> via <see cref="RpcToolInvoker"/>.
+/// An <see cref="McpServerTool"/> that proxies a single registered operation through the shared
+/// <see cref="HandlerDispatcher"/> (filtered to <see cref="HandlerTransports.Mcp"/>) via <see cref="RpcToolInvoker"/>.
 /// </summary>
 /// <remarks>
 /// The dispatcher is resolved from DI at invocation time so the configured singleton (with logging) is used.
@@ -46,8 +46,9 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
         // host disabled ScopeRequests; either way the per-message principal (below) is the current-user source.
         var services = request.Services
             ?? throw new InvalidOperationException("MCP request has no service provider.");
-        var dispatcher = services.GetRequiredService<McpDispatcher>().Inner;
-        var jsonOptions = dispatcher.JsonOptions;
+        var mcp = services.GetRequiredService<McpDispatcher>();
+        var dispatcher = mcp.Inner;
+        var jsonOptions = mcp.SerializerOptions;
 
         // Convert the MCP argument dictionary into a JSON object for the dispatcher. The document is kept alive
         // for the whole dispatch call (deserialization happens during DispatchAsync), then disposed.
@@ -65,7 +66,8 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
         }
 
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, _methodName, argumentsDocument?.RootElement, services, context, cancellationToken);
+            dispatcher, HandlerTransports.Mcp, _methodName, argumentsDocument?.RootElement, services, jsonOptions,
+            context, cancellationToken);
 
         return ToCallToolResult(result, jsonOptions);
     }

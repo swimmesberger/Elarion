@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AwesomeAssertions;
+using Elarion.Abstractions;
 using Elarion.JsonRpc;
 using Xunit;
 
@@ -10,9 +11,9 @@ public sealed class JsonRpcSchemaExporterTests {
     public void Generate_FrozenDispatcher_ExportsRegisteredMethods() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var dispatcher = new JsonRpcDispatcher(options)
-            .Map<PingRequest, PingResponse>(
+            .MapDelegate<PingRequest, PingResponse>(
                 "sample.ping",
-                (request, _, _) => Task.FromResult(RpcResult<PingResponse>.Success(new PingResponse(request.Message))))
+                (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)))
             .Freeze();
 
         var schema = JsonRpcSchemaExporter.Generate(dispatcher, options);
@@ -27,9 +28,9 @@ public sealed class JsonRpcSchemaExporterTests {
     public void Generate_UnfrozenDispatcher_ThrowsActionableError() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var dispatcher = new JsonRpcDispatcher(options)
-            .Map<PingRequest, PingResponse>(
+            .MapDelegate<PingRequest, PingResponse>(
                 "sample.ping",
-                (request, _, _) => Task.FromResult(RpcResult<PingResponse>.Success(new PingResponse(request.Message))));
+                (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)));
 
         var act = () => JsonRpcSchemaExporter.Generate(dispatcher, options);
 
@@ -52,9 +53,9 @@ public sealed class JsonRpcSchemaExporterTests {
     public void Generate_InjectsPropertyDescriptions_FromDescriptionAttribute() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var dispatcher = new JsonRpcDispatcher(options)
-            .Map<DescribedRequest, PingResponse>(
+            .MapDelegate<DescribedRequest, PingResponse>(
                 "sample.described",
-                (request, _, _) => Task.FromResult(RpcResult<PingResponse>.Success(new PingResponse(request.Message))))
+                (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)))
             .Freeze();
 
         var schema = JsonRpcSchemaExporter.Generate(dispatcher, options);

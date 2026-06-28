@@ -51,7 +51,7 @@ public sealed class ElarionMcpEndToEndTests {
         builder.Logging.ClearProviders();
 
         builder.Services.AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>();
-        builder.Services.AddElarionJsonRpc(Options, d => d.MapHandler<EchoCommand, EchoResponse>("echo"));
+        builder.Services.AddElarionJsonRpc(Options, d => d.Map<EchoCommand, EchoResponse>("echo"));
         builder.Services.AddElarionMcp(
             new RpcMcpMetadataSource([
                 new RpcMcpMethodMetadata {
@@ -61,7 +61,7 @@ public sealed class ElarionMcpEndToEndTests {
                 },
             ]),
             Options,
-            d => d.MapHandler<EchoCommand, EchoResponse>("echo"),
+            d => d.Map<EchoCommand, EchoResponse>("echo"),
             o => o.ServerName = "Test");
 
         await using var app = builder.Build();

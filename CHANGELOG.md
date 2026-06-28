@@ -35,6 +35,21 @@ minor releases may include breaking changes.
   `AppErrorMapper` codes), so a host can override JSON-RPC error codes by registering its own.
 
 ### Changed
+- **Named handler dispatch is now transport-agnostic (breaking — source + generated host wiring).** A handler
+  is mapped onto a single transport-neutral request/reply bus, `HandlerDispatcher`
+  (`Elarion.Abstractions.Dispatch`), which owns no serialization or wire format; **JSON-RPC and MCP are now
+  thin adapters over that one shared bus** (each serving only the operations flagged for its surface) rather
+  than two separate dispatcher instances. `[RpcMethod]` is renamed to **`[Handler]`** and its name is now
+  **optional** — when omitted the operation name is inferred by convention as `{module}.{operation}` (the
+  handler type name minus a `Handler`/`Command`/`Query`/`Request` suffix, camelCased; an explicit name is
+  recommended for stable public/wire contracts). `RpcTransports` is renamed to **`HandlerTransports`**
+  (`JsonRpc`/`Mcp`/`All` unchanged) and `[McpMethod]` to **`[McpHandler]`**. The generated host wiring's two
+  methods `RegisterRpcMethods`/`RegisterMcpMethods` (and the per-module `Add{Module}JsonRpc`/`Add{Module}Mcp`)
+  are replaced by a single **`RegisterHandlers`** (per-module `Add{Module}Handlers`) that both adapters
+  resolve, and the JSON-RPC `MapHandler` bridge is removed in favor of mapping onto the `HandlerDispatcher`
+  (`dispatcher.Map<Req,Resp>("x")` / `dispatcher.MapDelegate<Req,Resp>("x", fn)`). To upgrade: rename the
+  attributes/enum, and change host calls to pass `ModuleBootstrapper.RegisterHandlers` to
+  `AddElarionJsonRpc(serializerOptions, …)` and `AddElarionMcp(metadata, serializerOptions, …, configure)`.
 - **`Elarion` core is now transport-agnostic — it no longer references `Elarion.JsonRpc`.** The
   transport-neutral dispatch-scope rail (`DispatchScopeContext` / `IDispatchScopeInitializer` /
   `CreateDispatchScope` / `SeedScope`) moved to `Elarion.Abstractions` (namespace

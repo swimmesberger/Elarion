@@ -16,13 +16,13 @@ it, grouped by prefix and sorted by id.
 
 ## ELRPC — JSON-RPC method generation
 
-JSON-RPC method emission for `[RpcMethod]` handlers. See
+JSON-RPC method emission for `[Handler]` handlers. See
 [JSON-RPC](/docs/capabilities/transports/json-rpc).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELRPC001 | Warning | An `[RpcMethod]` handler's namespace is not under any `[AppModule]`; it is registered unconditionally (not gated by a module feature flag). MCP reuses this id since it is built on `[RpcMethod]`. | Move the handler under a module's namespace so its RPC/MCP registration is module-scoped and feature-gated. |
-| ELRPC002 | Warning | An `[RpcMethod]` handler does not implement `IHandler<TRequest, TResponse>` with a `Result<T>` response, so no RPC method can be generated. | Make the handler implement `IHandler<TRequest, Result<TResponse>>` (or the `IHandler<T>` sugar) so the request/response shape is resolvable. |
+| ELRPC001 | Warning | A `[Handler]` handler's namespace is not under any `[AppModule]`; it is registered unconditionally (not gated by a module feature flag). MCP reuses this id since it is built on `[Handler]`. | Move the handler under a module's namespace so its RPC/MCP registration is module-scoped and feature-gated. |
+| ELRPC002 | Warning | A `[Handler]` handler does not implement `IHandler<TRequest, TResponse>` with a `Result<T>` response, so no RPC method can be generated. | Make the handler implement `IHandler<TRequest, Result<TResponse>>` (or the `IHandler<T>` sugar) so the request/response shape is resolvable. |
 
 ## ELHTTP — HTTP endpoint generation
 
@@ -38,11 +38,11 @@ Minimal-API endpoint emission for `[HttpEndpoint]` handlers. See
 
 ## ELMCP — MCP customization
 
-MCP tool customization for `[McpMethod]`. See [MCP](/docs/capabilities/transports/mcp).
+MCP tool customization for `[McpHandler]`. See [MCP](/docs/capabilities/transports/mcp).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELMCP003 | Warning | A handler carries `[McpMethod]` (tool-name customization) but its `[RpcMethod]` `Transports` flag does not include `RpcTransports.Mcp`, so the customization has no effect. | Remove `[McpMethod]`, or include `RpcTransports.Mcp` in the handler's `[RpcMethod]` `Transports`. |
+| ELMCP003 | Warning | A handler carries `[McpHandler]` (tool-name customization) but its `[Handler]` `Transports` flag does not include `HandlerTransports.Mcp`, so the customization has no effect. | Remove `[McpHandler]`, or include `HandlerTransports.Mcp` in the handler's `[Handler]` `Transports`. |
 
 ## ELEVT — Event consumers
 

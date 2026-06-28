@@ -44,7 +44,7 @@ use case: input (`Query`), work (the EF Core query), output (`Result<Response>`)
 using Elarion.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
@@ -88,6 +88,13 @@ The generators discover and wire handlers from their shape and location:
   response types are read from the `IHandler<,>` interface itself, so they may be declared anywhere —
   nesting them (as `Command`/`Query`/`Response`) is an organizational convention, **not** a
   requirement. See [JSON-RPC usage](/docs/capabilities/transports/json-rpc).
+
+A handler exposes itself over the dispatcher transports with `[Handler]`. The operation name is
+**optional**: with `[Handler("clients.get")]` you name it explicitly; with a bare `[Handler]` the name
+is inferred by convention as `{module}.{operation}`, where `operation` is the handler type name with a
+trailing `Handler`/`Command`/`Query`/`Request` suffix removed and the rest camelCased — so a
+`CreateClient` handler in the `Clients` module becomes `clients.createClient`. Prefer an explicit name
+for stable public or wire-facing contracts.
 
 The handler registration generator emits an `Add{HandlerName}()` method and aggregates them into the
 module's `Add{Module}Handlers()` method. You never register a handler by hand.

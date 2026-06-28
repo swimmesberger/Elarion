@@ -11,7 +11,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 /// <summary>Lists the current account's clients. Cached under the same <c>clients</c> tag that
 /// <see cref="CreateClient"/> invalidates, so the list refreshes the moment a client is added.</summary>
 [Cacheable("clients", DurationSeconds = 60)]
-[RpcMethod("clients.list")]
+[Handler("clients.list")]
 public sealed class ListClients(BillingDbContext db, ICurrentUser user)
     : IHandler<ListClients.Query, Result<ListClients.Response>> {
     public sealed record Query : IQuery;

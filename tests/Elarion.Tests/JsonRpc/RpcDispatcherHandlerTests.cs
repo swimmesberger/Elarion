@@ -9,8 +9,9 @@ using Xunit;
 namespace Elarion.Tests.JsonRpc;
 
 /// <summary>
-/// Runtime tests for the <c>Elarion</c>-core handler bridge (<see cref="RpcDispatcherExtensions.MapHandler{TRequest,TResponse}"/>)
-/// and <see cref="AppErrorMapper"/>. These exercise the glue the generated <c>RegisterRpcMethods</c> map depends on.
+/// Runtime tests for the JSON-RPC adapter over the handler bus (<see cref="JsonRpcDispatcher"/> resolving an
+/// <see cref="IHandler{TRequest,TResponse}"/> from the registry) and <see cref="AppErrorMapper"/>. These exercise
+/// the glue the generated <c>RegisterHandlers</c> map depends on.
 /// </summary>
 public sealed class RpcDispatcherHandlerTests {
     private sealed record EchoCommand {
@@ -36,7 +37,7 @@ public sealed class RpcDispatcherHandlerTests {
 
     private static (JsonRpcDispatcher Dispatcher, IServiceProvider Services) Build() {
         var dispatcher = new JsonRpcDispatcher(Options)
-            .MapHandler<EchoCommand, EchoResponse>("echo")
+            .Map<EchoCommand, EchoResponse>("echo")
             .Freeze();
 
         var services = new ServiceCollection()
@@ -88,7 +89,7 @@ public sealed class RpcDispatcherHandlerTests {
 
     [Fact]
     public async Task MapHandler_RegisteredErrorTranslator_OverridesErrorCode() {
-        var dispatcher = new JsonRpcDispatcher(Options).MapHandler<EchoCommand, EchoResponse>("echo").Freeze();
+        var dispatcher = new JsonRpcDispatcher(Options).Map<EchoCommand, EchoResponse>("echo").Freeze();
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
             .AddSingleton<IAppErrorTranslator<RpcError>, FixedCodeErrorTranslator>()

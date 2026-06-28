@@ -12,10 +12,10 @@ peers — the same handler can be exposed over any combination of them with no c
     REST-style routes generated from `[HttpEndpoint]` — verbs, route binding, and RFC 7807 errors.
   </Card>
   <Card title="JSON-RPC" href="/docs/capabilities/transports/json-rpc">
-    Operation-shaped methods from `[RpcMethod]`, with a build-time schema and a typed TypeScript client.
+    Operation-shaped methods from `[Handler]`, with a build-time schema and a typed TypeScript client.
   </Card>
   <Card title="MCP" href="/docs/capabilities/transports/mcp">
-    The same `[RpcMethod]` handlers exposed to AI agents as Model Context Protocol tools.
+    The same `[Handler]` operations exposed to AI agents as Model Context Protocol tools.
   </Card>
 </Cards>
 
@@ -27,10 +27,17 @@ handler or declared top-level — the nesting carries no meaning. The transport 
 value from `Result<T>` and maps an `AppError` to its own failure representation centrally, so the
 handler never encodes protocol concerns.
 
-JSON-RPC and MCP share a single identity. A handler opts into them with one `[RpcMethod("module.action")]`
-attribute, and the `Transports` flag (`RpcTransports.JsonRpc`, `RpcTransports.Mcp`, or `RpcTransports.All`,
-the default) selects which of the two surface it. HTTP is a separate opt-in via `[HttpEndpoint]` because
-it needs route, verb, and parameter binding that do not fit a flags enum.
+JSON-RPC and MCP share a single identity. A handler opts into them with one `[Handler("module.action")]`
+attribute (the operation name is optional — `[Handler]` alone is valid and the name is inferred by
+convention), and the `Transports` flag (`HandlerTransports.JsonRpc`, `HandlerTransports.Mcp`, or
+`HandlerTransports.All`, the default) selects which of the two surface it. HTTP is a separate opt-in via
+`[HttpEndpoint]` because it needs route, verb, and parameter binding that do not fit a flags enum.
+
+Under the hood, JSON-RPC and MCP are not two parallel stacks. There is one transport-neutral
+**named request/reply bus** — `HandlerDispatcher` — that maps an operation name to a handler and invokes
+it through the full decorator pipeline. JSON-RPC and MCP are thin **adapters** over that one bus: each
+serves only the operations flagged for its surface. The generator builds one registry; both adapters
+resolve it. So a handler is *define once, choose surfaces via the `Transports` flag*.
 
 ## Which transport should I use?
 

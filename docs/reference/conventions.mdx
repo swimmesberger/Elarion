@@ -34,7 +34,7 @@ module. A common per-module layout:
 ClientsModule.cs            # [AppModule("Clients")] + optional ConfigureServices / JSON resolver
 ClientsJsonContext.cs       # [JsonSerializable(...)] per request/response type
 Handlers/
-├─ GetClient.cs             # [RpcMethod] IHandler<GetClientQuery, Result<ClientResponse>>
+├─ GetClient.cs             # [Handler] IHandler<GetClientQuery, Result<ClientResponse>>
 └─ CreateClient/
    ├─ CreateClient.cs       # handler
    └─ CreateClientValidator.cs
@@ -67,7 +67,7 @@ MyApp.Application.Modules.Billing.Invoices   → owned by Billing (prefix match)
 MyApp.Application.Modules.Reporting          → not owned by Billing
 ```
 
-A `[RpcMethod]`/`[HttpEndpoint]` handler whose namespace falls under **no** module is not dropped — it is
+A `[Handler]`/`[HttpEndpoint]` handler whose namespace falls under **no** module is not dropped — it is
 mapped ungated and a warning is raised (`ELRPC001` for RPC/MCP, `ELHTTP003` for HTTP). Module-scoped
 runtime registrations that require an owner (scheduled jobs, event consumers) are instead left
 unregistered with `ELSG010` / `ELEVT003`.
@@ -83,17 +83,22 @@ weight. (The older convention of scanning for nested `Command`/`Query`/`Response
 public sealed record GetClientQuery(Guid Id) : IQuery;
 public sealed record ClientResponse(Guid Id, string Name);
 
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient : IHandler<GetClientQuery, Result<ClientResponse>> {
     public ValueTask<Result<ClientResponse>> HandleAsync(GetClientQuery request, CancellationToken ct) =>
         /* ... */;
 }
 ```
 
-A handler annotated with `[RpcMethod]`/`[HttpEndpoint]` that does not implement `IHandler<,>` with a
+A handler annotated with `[Handler]`/`[HttpEndpoint]` that does not implement `IHandler<,>` with a
 `Result<T>` response generates no endpoint and reports `ELRPC002` / `ELHTTP001`. For HTTP, when no explicit
 verb is given, the verb is inferred from the request's CQRS marker (`ICommand` → POST, `IQuery` → GET);
 neither marker present without an explicit verb reports `ELHTTP004`.
+
+The `[Handler]` operation name is **optional**: `[Handler]` alone is valid. When omitted, the name is
+inferred by convention as `{module}.{operation}`, where `operation` is the handler type name minus a
+`Handler`/`Command`/`Query`/`Request` suffix, camelCased (e.g. module `Clients` + `CreateClient` →
+`clients.createClient`). Supply an explicit name for stable public/wire contracts.
 
 ### `[Service]` contract & lifetime resolution
 

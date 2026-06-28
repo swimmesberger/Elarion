@@ -276,7 +276,7 @@ delivery timing — that is the bus + host configuration. The injected interface
 guarantee.
 
 ```csharp
-[RpcMethod("invoices.create")]
+[Handler("invoices.create")]
 public sealed class CreateInvoice(
     AppDbContext db,
     IDomainEventBus domainEvents,

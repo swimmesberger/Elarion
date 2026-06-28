@@ -53,7 +53,7 @@ MyApp.Application/Modules/Clients/
 ├─ ClientsModule.cs            # [AppModule("Clients")] + ConfigureServices / JSON resolver
 ├─ ClientsJsonContext.cs       # [JsonSerializable(...)] per request/response type
 ├─ Handlers/
-│  ├─ GetClient.cs             # [RpcMethod] IHandler<Query, Result<Response>>
+│  ├─ GetClient.cs             # [Handler] IHandler<Query, Result<Response>>
 │  └─ CreateClient/
 │     ├─ CreateClient.cs       # handler
 │     └─ CreateClientValidator.cs
@@ -125,6 +125,6 @@ concrete infrastructure classes, or deployment-specific packages.
 4. Add services under the namespace and annotate them with `[Service]`.
 5. Add handlers implementing `IHandler<TRequest, Result<TResponse>>`.
 6. Add validators in the same namespace.
-7. Mark handlers for a transport, e.g. `[RpcMethod("billing.someAction")]` or `[HttpEndpoint("billing")]`.
+7. Mark handlers for a transport, e.g. `[Handler("billing.someAction")]` or `[HttpEndpoint("billing")]`.
 8. Build. The generators emit the module's `ConfigureDefaultServices`, which the host bootstrapper
    calls automatically — there is no registration list to maintain.

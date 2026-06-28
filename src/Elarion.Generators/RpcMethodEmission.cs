@@ -5,21 +5,25 @@ using Microsoft.CodeAnalysis.CSharp;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Shared discovery for <c>[Elarion.Abstractions.RpcMethod]</c> handlers (including MCP metadata) and statement-style
-/// <c>MapHandler</c> emission, consumed by <see cref="AppModuleDiscoveryGenerator"/> for the module-grouped,
-/// feature-flag-gated registration (the only transport-wiring path).
+/// Shared discovery for <c>[Elarion.Abstractions.Handler]</c> handlers (including MCP metadata) and statement-style
+/// <c>Map</c> emission onto the transport-neutral <c>HandlerDispatcher</c>, consumed by
+/// <see cref="AppModuleDiscoveryGenerator"/> for the module-grouped, feature-flag-gated registration (the only
+/// transport-wiring path).
 /// </summary>
 internal static class RpcMethodEmission
 {
-    public const string RpcMethodAttributeMetadataName = "Elarion.Abstractions.RpcMethodAttribute";
-    private const string McpMethodAttributeMetadataName = "Elarion.Abstractions.McpMethodAttribute";
+    public const string HandlerAttributeMetadataName = "Elarion.Abstractions.HandlerAttribute";
+    public const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
+
+    // Suffixes stripped from a handler type name when inferring an operation name (e.g. CreateClientCommand -> create-client).
+    private static readonly string[] OperationNameSuffixes = ["Handler", "Command", "Query", "Request"];
 
     public static readonly DiagnosticDescriptor UnmatchedModule = new(
         id: "ELRPC001",
-        title: "RPC method handler is not in any module",
+        title: "Handler is not in any module",
         messageFormat:
-        "Handler '{0}' is annotated with [RpcMethod] but its namespace is not under any [AppModule]; it will be "
+        "Handler '{0}' is annotated with [Handler] but its namespace is not under any [AppModule]; it will be "
         + "registered unconditionally (not gated by a module feature flag)",
         category: "Elarion.JsonRpc",
         defaultSeverity: DiagnosticSeverity.Warning,
@@ -27,10 +31,10 @@ internal static class RpcMethodEmission
 
     public static readonly DiagnosticDescriptor MissingHandlerShape = new(
         id: "ELRPC002",
-        title: "RPC handler has no resolvable request/response shape",
+        title: "Handler has no resolvable request/response shape",
         messageFormat:
-        "Handler '{0}' is annotated with [RpcMethod] but does not implement IHandler<TRequest, TResponse> with a "
-        + "Result<T> response; no RPC method will be generated",
+        "Handler '{0}' is annotated with [Handler] but does not implement IHandler<TRequest, TResponse> with a "
+        + "Result<T> response; no operation will be generated",
         category: "Elarion.JsonRpc",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
@@ -39,8 +43,8 @@ internal static class RpcMethodEmission
         id: "ELMCP003",
         title: "MCP customization is ignored",
         messageFormat:
-        "Handler '{0}' uses [McpMethod] but its [RpcMethod] transports exclude MCP; remove [McpMethod] or include "
-        + "RpcTransports.Mcp for method '{1}'",
+        "Handler '{0}' uses [McpHandler] but its [Handler] transports exclude MCP; remove [McpHandler] or include "
+        + "HandlerTransports.Mcp for operation '{1}'",
         category: "Elarion.Mcp",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
@@ -56,13 +60,29 @@ internal static class RpcMethodEmission
         bool OnJsonRpc,
         bool OnMcp,
         string? Description,
-        EquatableArray<ParameterDescription> Parameters
+        EquatableArray<ParameterDescription> Parameters,
+        bool IsNameInferred
     );
 
-    /// <summary>Emits a single statement-style <c>MapHandler</c> registration onto <paramref name="dispatcherVar"/>.</summary>
-    public static void AppendMapHandler(StringBuilder sb, Model entry, string indent, string dispatcherVar) =>
+    /// <summary>
+    /// Emits one statement-style <c>Map</c> registration onto the neutral <paramref name="registryVar"/>
+    /// (<c>HandlerDispatcher</c>) using the entry's (already module-resolved) operation name and transport flags.
+    /// </summary>
+    public static void AppendMapHandler(StringBuilder sb, Model entry, string indent, string registryVar) =>
         sb.AppendLine(
-            $"{indent}{dispatcherVar}.MapHandler<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>({Literal(entry.MethodName)});");
+            $"{indent}{registryVar}.Map<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>("
+            + $"{Literal(entry.MethodName)}, {TransportsExpression(entry)});");
+
+    /// <summary>The fully-qualified <c>HandlerTransports</c> flag expression for an entry's surfaces.</summary>
+    public static string TransportsExpression(Model entry)
+    {
+        const string ns = "global::Elarion.Abstractions.HandlerTransports";
+        if (entry.OnJsonRpc && entry.OnMcp)
+            return $"{ns}.All";
+        if (entry.OnMcp)
+            return $"{ns}.Mcp";
+        return $"{ns}.JsonRpc";
+    }
 
     public static bool TryCreateModel(
         INamedTypeSymbol type,
@@ -76,11 +96,12 @@ internal static class RpcMethodEmission
     {
         model = null;
 
-        if (attr.ConstructorArguments.Length == 0)
-            return false;
-
-        if (attr.ConstructorArguments[0].Value is not string methodName)
-            return false;
+        // [Handler] has two ctors: the parameterless one (name inferred) and [Handler(string name)] (explicit).
+        var explicitName = attr.ConstructorArguments.Length > 0
+            ? attr.ConstructorArguments[0].Value as string
+            : null;
+        var isNameInferred = string.IsNullOrEmpty(explicitName);
+        var operationName = isNameInferred ? InferOperationName(type.Name) : explicitName!;
 
         var (onJsonRpc, onMcp) = ReadTransports(attr);
 
@@ -99,14 +120,14 @@ internal static class RpcMethodEmission
                 McpCustomizationIgnored,
                 Location.None,
                 type.ToDisplayString(),
-                methodName));
+                operationName));
         }
 
         var description = GetDescription(type, descriptionType);
         var parameters = CollectParameterDescriptions(requestType, descriptionType);
 
         model = new Model(
-            methodName,
+            operationName,
             type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
             requestType.ToDisplayString(fmt),
             responseInner.ToDisplayString(fmt),
@@ -114,11 +135,35 @@ internal static class RpcMethodEmission
             onJsonRpc,
             onMcp,
             description,
-            parameters);
+            parameters,
+            isNameInferred);
         return true;
     }
 
-    // RpcTransports flags: JsonRpc = 1, Mcp = 2, All = 3 (default when the named argument is absent).
+    /// <summary>
+    /// Infers the operation part of a name from a handler type name: strip a trailing
+    /// Handler/Command/Query/Request, then camel-case the first character (CreateClient -> createClient).
+    /// The caller prepends the owning module (e.g. clients.createClient).
+    /// </summary>
+    public static string InferOperationName(string typeName)
+    {
+        var name = typeName;
+        foreach (var suffix in OperationNameSuffixes)
+        {
+            if (name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                name = name.Substring(0, name.Length - suffix.Length);
+                break;
+            }
+        }
+
+        if (name.Length == 0)
+            name = typeName;
+
+        return char.IsUpper(name[0]) ? char.ToLowerInvariant(name[0]) + name.Substring(1) : name;
+    }
+
+    // HandlerTransports flags: JsonRpc = 1, Mcp = 2, All = 3 (default when the named argument is absent).
     private static (bool OnJsonRpc, bool OnMcp) ReadTransports(AttributeData attr)
     {
         var transports = 3;

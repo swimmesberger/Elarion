@@ -16,7 +16,7 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 /// <summary>Persists a <c>Draft</c> invoice and enqueues the send job in deferred-retry mode, returning
 /// the stable <c>JobId</c> so the caller can poll progress. The <see cref="InvoiceCreated"/> integration
 /// event is recorded in the same unit of work — it commits with the invoice, or not at all.</summary>
-[RpcMethod("invoices.create")]
+[Handler("invoices.create")]
 [CacheInvalidate("invoices")]
 [Description("Creates a draft invoice and sends it to the client in the background.")]
 public sealed class CreateInvoice(

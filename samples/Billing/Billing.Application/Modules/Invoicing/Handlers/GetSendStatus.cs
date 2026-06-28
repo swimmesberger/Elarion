@@ -7,7 +7,7 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 /// create handler returned (not a per-attempt <c>RunId</c>), so it reports the aggregate state —
 /// <c>WaitingRetry</c> between attempts, <c>Succeeded</c> once delivered, <c>Failed</c> once retries
 /// are exhausted.</summary>
-[RpcMethod("invoices.sendStatus")]
+[Handler("invoices.sendStatus")]
 public sealed class GetSendStatus(IJobSchedulerInspector scheduler)
     : IHandler<GetSendStatus.Query, Result<GetSendStatus.Response>> {
     public sealed record Query(Guid JobId) : IQuery;

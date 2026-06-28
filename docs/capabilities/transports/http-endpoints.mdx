@@ -11,7 +11,12 @@ or an RFC 7807 ProblemDetails with the right status code on failure.
 
 Like JSON-RPC, the mapping lives in `Elarion.AspNetCore` (plus the `[HttpEndpoint]` attribute in
 `Elarion.Abstractions`), so applications that don't need it pay nothing, and handlers stay
-transport-neutral — the same handler can carry both `[HttpEndpoint]` and `[RpcMethod]`.
+transport-neutral — the same handler can carry both `[HttpEndpoint]` and `[Handler]`.
+
+REST is a separate exposure model from JSON-RPC and MCP. Those two are adapters over one
+named request/reply bus (`HandlerDispatcher`), keyed by operation name; `[HttpEndpoint]` is route- and
+verb-based, so it stays its own opt-in rather than a flag on `[Handler]`. A handler can carry both
+without conflict.
 
 ## Marking a handler
 
@@ -165,6 +170,6 @@ code comes from `AppError.Kind`, mirroring how JSON-RPC maps the same kinds to i
 
 Both transports map the same handlers, so the choice is per-handler, not per-app. Reach for
 `[HttpEndpoint]` when you want resourceful URLs, HTTP caching/CDN semantics, file uploads, or
-third-party/public consumers; reach for [`[RpcMethod]`](/docs/capabilities/transports/json-rpc) when one team owns both ends and
+third-party/public consumers; reach for [`[Handler]`](/docs/capabilities/transports/json-rpc) when one team owns both ends and
 wants an operation-shaped, end-to-end-typed contract with a generated TypeScript client. A handler can
 expose both.

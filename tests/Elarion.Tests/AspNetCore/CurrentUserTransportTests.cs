@@ -90,7 +90,8 @@ public sealed class CurrentUserTransportTests {
         context.Set<ClaimsPrincipal>(Authenticated("user-mcp"));
 
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, "whoami", JsonSerializer.SerializeToElement(new { }, SerializerOptions), provider, context,
+            dispatcher.Registry, HandlerTransports.Mcp, "whoami",
+            JsonSerializer.SerializeToElement(new { }, SerializerOptions), provider, SerializerOptions, context,
             TestContext.Current.CancellationToken);
 
         result.IsError.Should().BeFalse();
@@ -105,7 +106,7 @@ public sealed class CurrentUserTransportTests {
 
     private static ServiceProvider BuildProvider() {
         var dispatcher = new JsonRpcDispatcher(SerializerOptions)
-            .MapHandler<WhoAmIQuery, WhoAmIResponse>("whoami")
+            .Map<WhoAmIQuery, WhoAmIResponse>("whoami")
             .Freeze();
 
         var services = new ServiceCollection();

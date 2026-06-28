@@ -13,6 +13,23 @@ is the host** that binds them to the wire — it serves JSON-RPC over `/rpc` (an
 `Elarion.JsonRpc` isn't "the HTTP server"; it's the protocol the host serves. A new transport is its own
 host: it may reuse a protocol package, or just invoke handlers directly (see below).
 
+## One bus, thin adapters
+
+Underneath every dispatcher-based transport is a single **transport-neutral named request/reply bus**:
+the `HandlerDispatcher` in `Elarion.Abstractions` (namespace `Elarion.Abstractions.Dispatch`). It maps an
+**operation name** to a handler and invokes it through the full decorator pipeline — and it owns **no**
+serialization or wire format. JSON-RPC and MCP are thin **adapters** over that one bus:
+
+- `JsonRpcDispatcher` (`Elarion.JsonRpc`) is the JSON-RPC adapter; it serves only operations flagged
+  `HandlerTransports.JsonRpc`.
+- `McpDispatcher` (`Elarion.JsonRpc.Mcp`) is the MCP adapter; it serves only operations flagged
+  `HandlerTransports.Mcp`.
+
+The generator builds **one** operation registry (`RegisterHandlers`) and **both** adapters resolve it, so a
+handler is "define once, choose surfaces via the `Transports` flag." (Previously there were two separate
+dispatcher instances; now it is one bus filtered by flag.) REST `[HttpEndpoint]` is a separate exposure model
+— route- and verb-based — and is not part of this bus.
+
 A transport has four jobs:
 
 1. **Capture identity** — get the caller's `ClaimsPrincipal` (or build one) at the boundary.
@@ -26,6 +43,7 @@ A transport has four jobs:
 | Seam | Package | Role |
 | --- | --- | --- |
 | `IHandler<TRequest, TResponse>`, `Result<T>`, `AppError`/`ErrorKind` | `Elarion.Abstractions` | the handler contract and result/error model |
+| `HandlerDispatcher` | `Elarion.Abstractions` (`.Dispatch`) | the transport-neutral named request/reply bus (operation name → handler; no wire format) |
 | `ICurrentUser`, `IAuthorizer` | `Elarion.Abstractions` | identity + authorization (the decorator is auto-attached) |
 | `DispatchScopeContext`, `IDispatchScopeInitializer`, `IServiceProvider.CreateDispatchScope`/`SeedScope` | `Elarion.Abstractions` (`.Dispatch`) | the per-call scope-seeding rail (transport-neutral) |
 | `HandlerInvoker.InvokeAsync<TRequest,TResponse>` | `Elarion` | typed-direct "seed scope + invoke handler + dispose" |
@@ -79,11 +97,21 @@ var result = await HandlerInvoker.InvokeAsync<CreateClientCommand, ClientDto>(
     rootProvider, command, context, ct);
 ```
 
-**Name-based** — when you route dynamically by method name (what JSON-RPC and MCP do):
+**Name-based** — when you route dynamically by operation name (what JSON-RPC and MCP do, through the
+shared `HandlerDispatcher` bus). Map operations onto the bus, then dispatch by name. The generated
+registration emits one `registry.Map<TRequest, TResponse>("operation", HandlerTransports.X)` per handler; in
+hand-written or test code, map a DI-resolved handler with `dispatcher.Map<TRequest, TResponse>("operation")`
+or a delegate with `dispatcher.MapDelegate<TRequest, TResponse>("operation", fn)`:
 
 ```csharp
-var response = await dispatcher.DispatchAsync(jsonRpcRequest, scope.ServiceProvider, ct);
+dispatcher.Map<CreateClientCommand, ClientDto>("clients.create");          // DI-resolved handler
+dispatcher.MapDelegate<PingRequest, PongResponse>("ping", (req, ct) => …);  // inline delegate
+
+var response = await dispatcher.DispatchAsync("clients.create", command, scope.ServiceProvider, ct);
 ```
+
+The JSON-RPC and MCP adapters are layered over this same bus — they decode the wire message, dispatch by
+operation name, then encode the result — so a name-based transport you author reuses the identical mapping.
 
 ## Mapping `Result` and `AppError`
 
@@ -112,9 +140,10 @@ error. Implement `IAppErrorTranslator<TError>` for your wire type (the JSON-RPC 
 ## Packaging
 
 A non-HTTP transport references `Elarion` and `Elarion.Abstractions`. Core is **transport-agnostic** — it does
-not reference any transport package — so you reference `Elarion.JsonRpc` only if you use the name-based
-dispatcher, and `Elarion.AspNetCore` only if you are co-hosted in ASP.NET. The scope rail and `HandlerInvoker`
-need no transport package (rail in `Elarion.Abstractions`, `HandlerInvoker` in `Elarion`).
+not reference any transport package. The named bus (`HandlerDispatcher`) lives in `Elarion.Abstractions`, so a
+name-based transport needs no transport package; you reference `Elarion.JsonRpc` only if you serve the JSON-RPC
+or MCP wire adapters, and `Elarion.AspNetCore` only if you are co-hosted in ASP.NET. The scope rail and
+`HandlerInvoker` need no transport package (rail in `Elarion.Abstractions`, `HandlerInvoker` in `Elarion`).
 
 ## Worked example: a console transport
 

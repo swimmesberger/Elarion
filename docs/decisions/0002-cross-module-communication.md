@@ -227,8 +227,8 @@ the seam stays "own the convention and the analyzer," not "generate adapters."
 
 ## Deferred follow-ups
 
-- **Renaming `[RpcMethod]`.** It already drives both JSON-RPC and MCP, and the in-process API is
-  deliberately *not* tied to it (it keys off handler discovery, not `[RpcMethod]`). A
+- **Renaming `[Handler]`.** It already drives both JSON-RPC and MCP, and the in-process API is
+  deliberately *not* tied to it (it keys off handler discovery, not `[Handler]`). A
   transport-neutral rename (e.g. `[Operation]` with an exposure-surface flags enum) is a coherent
   but broad breaking change, intentionally out of scope here.
 - **A generated gRPC/HTTP client backend** for `[ModuleContract]`, for when a module is extracted

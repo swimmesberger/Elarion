@@ -11,13 +11,15 @@ namespace Elarion.Generators;
 /// with <c>[AppModule]</c> and emits feature-flag-gated calls to their convention-based
 /// static methods (<c>ConfigureServices</c>, <c>MapEndpoints</c>, <c>GetJsonTypeInfoResolver</c>).
 /// <para>
-/// It additionally groups <c>[HttpEndpoint]</c> and <c>[RpcMethod]</c> handlers by their owning module
-/// (longest-prefix namespace match) and emits per-module, per-transport methods — <c>Map{Module}Http</c>,
-/// <c>Add{Module}JsonRpc</c>, <c>Add{Module}Mcp</c>, and <c>Get{Module}McpMetadata</c> — plus gated aggregate
-/// entry points (<c>MapElarionEndpoints</c>, <c>RegisterRpcMethods</c>, <c>RegisterMcpMethods</c>,
-/// <c>GetMcpMetadata</c>). A handler chooses its dispatcher-based surfaces via
-/// <c>[RpcMethod(..., Transports = RpcTransports.JsonRpc | RpcTransports.Mcp)]</c> (both by default), so a method can
-/// be JSON-RPC-only, MCP-only, or both. This makes a disabled module disappear across every transport surface, and
+/// It additionally groups <c>[HttpEndpoint]</c> and <c>[Handler]</c> handlers by their owning module
+/// (longest-prefix namespace match) and emits per-module methods — <c>Map{Module}Http</c>,
+/// <c>Add{Module}Handlers</c>, and <c>Get{Module}McpMetadata</c> — plus gated aggregate entry points
+/// (<c>MapElarionEndpoints</c>, <c>RegisterHandlers</c>, <c>GetMcpMetadata</c>). <c>RegisterHandlers</c> builds
+/// the single transport-neutral <c>HandlerDispatcher</c> (the named bus); each operation carries its
+/// <c>HandlerTransports</c> flags, so the JSON-RPC and MCP adapters each expose only the subset they serve. A
+/// handler chooses its surfaces via <c>[Handler(..., Transports = HandlerTransports.JsonRpc | HandlerTransports.Mcp)]</c>
+/// (both by default), so an operation can be JSON-RPC-only, MCP-only, or both. This makes a disabled module
+/// disappear across every transport surface, and
 /// the per-module methods are emitted as extension methods, so they double as the customization hook (e.g.
 /// <c>app.MapGroup("/billing").RequireAuthorization(policy).MapBillingHttp()</c>).
 /// Transport-specific emission/discovery is shared with the flat generators via
@@ -78,6 +80,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         public bool HasJsonRpc => HasRpcSurface(static m => m.OnJsonRpc);
 
         public bool HasMcp => HasRpcSurface(static m => m.OnMcp);
+
+        /// <summary>Any <c>[Handler]</c> at all (every handler is on at least one transport) — drives the shared registry.</summary>
+        public bool HasHandlers => RpcByModule.Count > 0 || UnmatchedRpc.Count > 0;
 
         private bool HasRpcSurface(Func<RpcMethodEmission.Model, bool> predicate)
         {
@@ -179,19 +184,51 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         foreach (var entry in rpcEntries)
         {
             var module = FindBestModule(entry.HandlerNamespace, modules);
+            // Resolve an inferred operation into its final, module-qualified name now that the owning module is
+            // known, so the registry route and the MCP metadata table agree on one name.
+            var resolved = ResolveOperationName(entry, module?.ModuleName);
             if (module is null)
             {
-                unmatchedRpc.Add(entry);
+                unmatchedRpc.Add(resolved);
                 spc.ReportDiagnostic(Diagnostic.Create(
-                    RpcMethodEmission.UnmatchedModule, Location.None, entry.MethodName));
+                    RpcMethodEmission.UnmatchedModule, Location.None, resolved.MethodName));
                 continue;
             }
 
-            Bucket(rpcByModule, module.ModuleName).Add(entry);
+            Bucket(rpcByModule, module.ModuleName).Add(resolved);
         }
+
+        // Final names may differ from the pre-sort operation names; re-sort each bucket for deterministic output.
+        foreach (var list in rpcByModule.Values)
+            list.Sort(RpcMethodOrder);
+        unmatchedRpc.Sort(RpcMethodOrder);
 
         return new TransportMaps(httpByModule, unmatchedHttp, rpcByModule, unmatchedRpc);
     }
+
+    private static int RpcMethodOrder(RpcMethodEmission.Model a, RpcMethodEmission.Model b)
+    {
+        var byName = string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal);
+        return byName != 0 ? byName : string.Compare(a.RequestTypeFqn, b.RequestTypeFqn, StringComparison.Ordinal);
+    }
+
+    // An inferred name becomes "{module}.{operation}" (module camel-cased); an explicit name is used verbatim.
+    // Unmatched inferred handlers keep the bare operation (no module to qualify with).
+    private static RpcMethodEmission.Model ResolveOperationName(RpcMethodEmission.Model entry, string? moduleName)
+    {
+        if (!entry.IsNameInferred)
+            return entry;
+
+        var name = moduleName is null
+            ? entry.MethodName
+            : $"{CamelCaseModule(moduleName)}.{entry.MethodName}";
+        return entry with { MethodName = name, IsNameInferred = false };
+    }
+
+    private static string CamelCaseModule(string moduleName) =>
+        moduleName.Length > 0 && char.IsUpper(moduleName[0])
+            ? char.ToLowerInvariant(moduleName[0]) + moduleName.Substring(1)
+            : moduleName;
 
     private static List<T> Bucket<T>(Dictionary<string, List<T>> map, string key)
     {
@@ -554,23 +591,15 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
 
-        // Usings are added only when transport mapping is emitted, so hosts without [HttpEndpoint]/[RpcMethod]
-        // handlers get the exact same output as before (and no unused-using churn).
+        // Usings are added only for HTTP mapping, so hosts without [HttpEndpoint] handlers get the exact same
+        // output as before. The handler registry and MCP metadata are emitted fully-qualified (no using needed).
         if (transport.HasHttp)
         {
             sb.AppendLine("using Elarion.AspNetCore;");
             sb.AppendLine("using Microsoft.AspNetCore.Builder;");
             sb.AppendLine("using Microsoft.AspNetCore.Http;");
-        }
-
-        if (transport.HasJsonRpc || transport.HasMcp)
-        {
-            // MapHandler (the IHandler -> JsonRpcDispatcher bridge) lives in Elarion.JsonRpc.
-            sb.AppendLine("using Elarion.JsonRpc;");
-        }
-
-        if (transport.HasHttp || transport.HasJsonRpc || transport.HasMcp)
             sb.AppendLine();
+        }
 
         if (target.Namespace is not null)
         {
@@ -623,49 +652,31 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // --- RegisterRpcMethods (generated [RpcMethod] JSON-RPC registration, gated) — only when JSON-RPC handlers exist ---
-        if (transport.HasJsonRpc)
+        // --- RegisterHandlers (generated [Handler] registration onto the neutral bus, gated) — only when handlers exist ---
+        if (transport.HasHandlers)
         {
-            sb.AppendLine("    /// <summary>Registers JSON-RPC-exposed [RpcMethod] handlers for all enabled modules on the dispatcher.</summary>");
-            sb.AppendLine("    public static global::Elarion.JsonRpc.JsonRpcDispatcher RegisterRpcMethods(");
-            sb.AppendLine("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher,");
+            sb.AppendLine("    /// <summary>Registers all [Handler] operations for all enabled modules onto the shared handler dispatcher (the named bus).</summary>");
+            sb.AppendLine("    public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher RegisterHandlers(");
+            sb.AppendLine("        this global::Elarion.Abstractions.Dispatch.HandlerDispatcher dispatcher,");
             sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
             sb.AppendLine("    {");
             foreach (var entry in entries)
             {
-                if (ModuleHasJsonRpc(transport, entry.ModuleName))
-                    EmitModuleCall(sb, entry, $"{JsonRpcMethodName(entry.ModuleName)}(dispatcher);");
+                if (ModuleHasHandlers(transport, entry.ModuleName))
+                    EmitModuleCall(sb, entry, $"{HandlersMethodName(entry.ModuleName)}(dispatcher);");
             }
 
-            if (AnyJsonRpc(transport.UnmatchedRpc))
-                sb.AppendLine($"        {JsonRpcMethodName(UnmatchedModuleName)}(dispatcher);");
+            if (transport.UnmatchedRpc.Count > 0)
+                sb.AppendLine($"        {HandlersMethodName(UnmatchedModuleName)}(dispatcher);");
 
             sb.AppendLine("        return dispatcher;");
             sb.AppendLine("    }");
             sb.AppendLine();
         }
 
-        // --- RegisterMcpMethods + GetMcpMetadata (generated MCP surface, gated) — only when MCP handlers exist ---
+        // --- GetMcpMetadata (generated MCP tool table, gated) — only when MCP handlers exist ---
         if (transport.HasMcp)
         {
-            sb.AppendLine("    /// <summary>Registers MCP-exposed [RpcMethod] handlers for all enabled modules on the MCP dispatcher.</summary>");
-            sb.AppendLine("    public static global::Elarion.JsonRpc.JsonRpcDispatcher RegisterMcpMethods(");
-            sb.AppendLine("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher,");
-            sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
-            sb.AppendLine("    {");
-            foreach (var entry in entries)
-            {
-                if (ModuleHasMcp(transport, entry.ModuleName))
-                    EmitModuleCall(sb, entry, $"{McpMethodName(entry.ModuleName)}(dispatcher);");
-            }
-
-            if (McpMetadataEmission.AnyMcp(transport.UnmatchedRpc))
-                sb.AppendLine($"        {McpMethodName(UnmatchedModuleName)}(dispatcher);");
-
-            sb.AppendLine("        return dispatcher;");
-            sb.AppendLine("    }");
-            sb.AppendLine();
-
             sb.AppendLine("    /// <summary>Collects MCP tool metadata for all enabled modules.</summary>");
             sb.AppendLine($"    public static {McpMetadataEmission.Ns}.IRpcMcpMetadataSource GetMcpMetadata(");
             sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
@@ -758,8 +769,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         // --- Per-module transport methods (group hooks) ---
         AppendHttpMethods(sb, entries, transport);
-        AppendRpcMethods(sb, entries, transport);
-        AppendMcpMethods(sb, entries, transport);
+        AppendHandlersMethods(sb, entries, transport);
+        AppendMcpMetadataMethods(sb, entries, transport);
 
         sb.AppendLine("}");
 
@@ -793,69 +804,42 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
     }
 
-    private static void AppendRpcMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
+    private static void AppendHandlersMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
     {
         foreach (var entry in entries)
         {
-            if (ModuleHasJsonRpc(transport, entry.ModuleName))
-                AppendRpcMethod(sb, entry.ModuleName, transport.RpcByModule[entry.ModuleName]);
+            if (ModuleHasHandlers(transport, entry.ModuleName))
+                AppendHandlersMethod(sb, entry.ModuleName, transport.RpcByModule[entry.ModuleName]);
         }
 
-        if (AnyJsonRpc(transport.UnmatchedRpc))
-            AppendRpcMethod(sb, UnmatchedModuleName, transport.UnmatchedRpc);
+        if (transport.UnmatchedRpc.Count > 0)
+            AppendHandlersMethod(sb, UnmatchedModuleName, transport.UnmatchedRpc);
     }
 
-    private static void AppendRpcMethod(StringBuilder sb, string moduleName, IReadOnlyList<RpcMethodEmission.Model> methods)
+    private static void AppendHandlersMethod(StringBuilder sb, string moduleName, IReadOnlyList<RpcMethodEmission.Model> methods)
     {
         sb.AppendLine();
-        sb.AppendLine($"    /// <summary>Registers the JSON-RPC-exposed [RpcMethod] handlers in the '{moduleName}' module on <paramref name=\"dispatcher\"/>.</summary>");
-        sb.AppendLine($"    public static global::Elarion.JsonRpc.JsonRpcDispatcher {JsonRpcMethodName(moduleName)}(");
-        sb.AppendLine("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher)");
+        sb.AppendLine($"    /// <summary>Registers the [Handler] operations in the '{moduleName}' module onto <paramref name=\"dispatcher\"/> (with each operation's transport flags).</summary>");
+        sb.AppendLine($"    public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher {HandlersMethodName(moduleName)}(");
+        sb.AppendLine("        this global::Elarion.Abstractions.Dispatch.HandlerDispatcher dispatcher)");
         sb.AppendLine("    {");
         foreach (var method in methods)
-        {
-            if (method.OnJsonRpc)
-                RpcMethodEmission.AppendMapHandler(sb, method, "        ", "dispatcher");
-        }
+            RpcMethodEmission.AppendMapHandler(sb, method, "        ", "dispatcher");
 
         sb.AppendLine("        return dispatcher;");
         sb.AppendLine("    }");
     }
 
-    private static void AppendMcpMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
+    private static void AppendMcpMetadataMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
     {
         foreach (var entry in entries)
         {
-            if (!ModuleHasMcp(transport, entry.ModuleName))
-                continue;
-
-            var methods = transport.RpcByModule[entry.ModuleName];
-            AppendMcpMethod(sb, entry.ModuleName, methods);
-            AppendMcpMetadataMethod(sb, entry.ModuleName, methods);
+            if (ModuleHasMcp(transport, entry.ModuleName))
+                AppendMcpMetadataMethod(sb, entry.ModuleName, transport.RpcByModule[entry.ModuleName]);
         }
 
         if (McpMetadataEmission.AnyMcp(transport.UnmatchedRpc))
-        {
-            AppendMcpMethod(sb, UnmatchedModuleName, transport.UnmatchedRpc);
             AppendMcpMetadataMethod(sb, UnmatchedModuleName, transport.UnmatchedRpc);
-        }
-    }
-
-    private static void AppendMcpMethod(StringBuilder sb, string moduleName, IReadOnlyList<RpcMethodEmission.Model> methods)
-    {
-        sb.AppendLine();
-        sb.AppendLine($"    /// <summary>Registers the MCP-exposed [RpcMethod] handlers in the '{moduleName}' module on the MCP <paramref name=\"dispatcher\"/>.</summary>");
-        sb.AppendLine($"    public static global::Elarion.JsonRpc.JsonRpcDispatcher {McpMethodName(moduleName)}(");
-        sb.AppendLine("        this global::Elarion.JsonRpc.JsonRpcDispatcher dispatcher)");
-        sb.AppendLine("    {");
-        foreach (var method in methods)
-        {
-            if (method.OnMcp)
-                RpcMethodEmission.AppendMapHandler(sb, method, "        ", "dispatcher");
-        }
-
-        sb.AppendLine("        return dispatcher;");
-        sb.AppendLine("    }");
     }
 
     private static void AppendMcpMetadataMethod(StringBuilder sb, string moduleName, IReadOnlyList<RpcMethodEmission.Model> methods)
@@ -871,28 +855,15 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
     }
 
-    private static bool ModuleHasJsonRpc(TransportMaps transport, string moduleName) =>
-        transport.RpcByModule.TryGetValue(moduleName, out var methods) && AnyJsonRpc(methods);
+    private static bool ModuleHasHandlers(TransportMaps transport, string moduleName) =>
+        transport.RpcByModule.TryGetValue(moduleName, out var methods) && methods.Count > 0;
 
     private static bool ModuleHasMcp(TransportMaps transport, string moduleName) =>
         transport.RpcByModule.TryGetValue(moduleName, out var methods) && McpMetadataEmission.AnyMcp(methods);
 
-    private static bool AnyJsonRpc(IEnumerable<RpcMethodEmission.Model> methods)
-    {
-        foreach (var method in methods)
-        {
-            if (method.OnJsonRpc)
-                return true;
-        }
-
-        return false;
-    }
-
     private static string HttpMethodName(string moduleName) => $"Map{ModuleMethodNamePart(moduleName)}Http";
 
-    private static string JsonRpcMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}JsonRpc";
-
-    private static string McpMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}Mcp";
+    private static string HandlersMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}Handlers";
 
     private static string McpMetadataMethodName(string moduleName) => $"Get{ModuleMethodNamePart(moduleName)}McpMetadata";
 

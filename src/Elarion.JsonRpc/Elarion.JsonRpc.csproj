@@ -6,8 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Abstractions: the JSON-RPC transport bridges Elarion handlers (IHandler/Result/AppError) onto the
-         dispatcher (MapHandler, AppErrorMapper) and uses the dispatch-scope rail. -->
+    <!-- Abstractions: the JSON-RPC/MCP adapters serve the shared HandlerDispatcher bus, map Result/AppError to the
+         wire (AppErrorMapper), and use the dispatch-scope rail. -->
     <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
   </ItemGroup>
 
