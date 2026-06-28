@@ -160,10 +160,15 @@ Cross-cutting behavior — logging, validation, transactions, caching, resilienc
 ## Calling a handler from other code
 
 In-process, **call handlers typed-directly** — you keep compile-time safety, cross no serialization
-boundary, and still run the full decorator pipeline. Three typed paths, in rough order of preference:
+boundary, and still run the full decorator pipeline. Typed paths, in rough order of preference:
 
 - **Inject `IHandler<TRequest, Result<TResponse>>`** straight into another handler, a `[Service]`, or a
   test and call `HandleAsync`. The handler resolves fully decorated from DI.
+- **`IHandlerSender.SendAsync<TRequest, TResponse>(request, ct)`** — a typed *mediator send*: it resolves
+  the handler **by type** from the ambient scope (your transaction), so one injection dispatches several
+  handlers without naming each `IHandler<,>`. Register it with `AddElarionHandlerSender()`. This is the
+  in-process, in-transaction request/reply primitive (the typed replacement for the removed
+  `IDomainEventBus.RequestAsync`).
 - **`HandlerInvoker.InvokeAsync<TRequest, TResponse>(provider, request, …)`** when you only hold the root
   `IServiceProvider` — a custom transport, a gRPC/CLI adapter, a background job. It creates a seeded
   per-call scope, resolves the decorated handler, invokes it, and disposes the scope.
@@ -192,7 +197,7 @@ another's internals, use a `[ModuleContract]` (typed) instead: same "don't refer
 without losing compile-time safety.
 
 <Callout type="info">
-  Don't confuse the named bus with `IDomainEventBus.RequestAsync<TRequest, TResponse>`. That is an
-  in-process, **type-keyed** request/reply that runs *inline in the caller's transaction* (Plane A) for
-  domain messages — not a transport and not name-based. See [Events](/docs/capabilities/events).
+  The [event bus](/docs/capabilities/events) is **pub/sub-only** (ADR-0010): `PublishAsync` for fan-out
+  notifications, never request/reply. For a typed in-process reply (what `IDomainEventBus.RequestAsync`
+  used to do) use `IHandlerSender`/`IHandler` above — not the event bus, and not the named bus.
 </Callout>

@@ -1,9 +1,15 @@
 # ADR-0001: Event dispatch timing and transactional delivery
 
-- Status: Accepted
+- Status: Accepted (amended by [ADR-0010](0010-event-bus-is-pub-sub-only.md))
 - Date: 2026-06-20
 - Related: the in-memory event bus plan (`IDomainEventBus`/`IIntegrationEventBus`,
   `[ConsumeEvent]`), [decorator pipelines](../concepts/decorator-pipelines.mdx)
+
+> **Amendment (ADR-0010):** this ADR originally gave Plane A a request/reply method
+> (`IDomainEventBus.RequestAsync`) alongside `PublishAsync`. That was later removed — the event bus is now
+> **pub/sub-only**, and request/reply is served by typed dispatch (`IHandlerSender`/`IHandler`). The
+> two-plane, transaction-phase decision below stands unchanged; only the `RequestAsync` mentions are
+> historical.
 
 ## Context
 

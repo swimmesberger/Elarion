@@ -1,4 +1,3 @@
-using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
 
 namespace Elarion.Messaging;
@@ -39,21 +38,5 @@ internal sealed class InMemoryDomainEventBus(
         if (failures is not null) {
             throw failures.Count == 1 ? failures[0] : new AggregateException(failures);
         }
-    }
-
-    public async ValueTask<Result<TResponse>> RequestAsync<TRequest, TResponse>(
-        TRequest request,
-        CancellationToken ct = default)
-        where TRequest : IDomainEvent {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var responder = registry.GetDomainResponder(typeof(TRequest))
-            ?? throw new InvalidOperationException(
-                $"No responder is registered for request type '{typeof(TRequest)}'.");
-
-        var context = new EventContext<TRequest>(request, Guid.NewGuid(), EventPlane.Domain);
-        var result = await responder.InvokeRequestAsync!(serviceProvider, request, context, ct)
-            .ConfigureAwait(false);
-        return (Result<TResponse>)result;
     }
 }

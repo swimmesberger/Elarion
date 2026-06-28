@@ -150,8 +150,8 @@ See [Scheduling](/docs/capabilities/scheduling), [Schedules](/docs/capabilities/
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** method | class
 - **Triggers:** marks an event consumer, discovered by the event-consumer generator and registered as an `EventSubscriptionDescriptor`.
-  - **Handler form (preferred):** on a class implementing `IHandler<TEvent, Result<T>>` (or `IHandler<TEvent>` sugar) whose request type *is* the event; runs through the full decorator pipeline. Role inferred from the response type: `Result<Unit>` = fan-out subscriber, `Result<T>` with `T != Unit` = single `RequestAsync` responder.
-  - **Method form:** on a method of a `[Service]` class (no pipeline); plane taken from the message type marker (`IDomainEvent`/`IIntegrationEvent`), role from the return type.
+  - **Handler form (preferred):** on a class implementing `IHandler<TEvent>` (sugar over `IHandler<TEvent, Result<Unit>>`) whose request type *is* the event; runs through the full decorator pipeline. Always a fan-out subscriber — the event bus is pub/sub-only. A non-`Unit` `Result<T>` return is rejected (`ELEVT005`).
+  - **Method form:** on a method of a `[Service]` class (no pipeline); plane taken from the message type marker (`IDomainEvent`/`IIntegrationEvent`). Always a fan-out subscriber, returning `void`/`Task`/`ValueTask`.
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |

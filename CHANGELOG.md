@@ -35,6 +35,16 @@ minor releases may include breaking changes.
   `AppErrorMapper` codes), so a host can override JSON-RPC error codes by registering its own.
 
 ### Changed
+- **The event bus is now pub/sub-only; request/reply is unified under typed dispatch (breaking).** See
+  [ADR-0010](docs/decisions/0010-event-bus-is-pub-sub-only.md). `IDomainEventBus.RequestAsync` and the single-
+  **responder** role of `[ConsumeEvent]` are removed — `[ConsumeEvent]` now means exactly one thing, a fan-out
+  subscriber (handler form returns `Result<Unit>`/`IHandler<TEvent>`; method form returns `void`/`Task`/`ValueTask`),
+  and a non-`Unit` `Result<T>` consumer is rejected (`ELEVT005` handler-form, `ELEVT002` method-form; the
+  duplicate-responder `ELEVT004` is retired). For an in-process, in-transaction typed request/reply, inject the new
+  **`IHandlerSender`** and call `SendAsync<TRequest, TResponse>(request, ct)` (register with
+  `AddElarionHandlerSender()`), or inject `IHandler<TRequest, Result<TResponse>>` directly. To upgrade a former
+  responder: drop `[ConsumeEvent]` and the `IDomainEvent` marker on the request, and replace
+  `bus.RequestAsync<R, T>(r, ct)` with `sender.SendAsync<R, T>(r, ct)`.
 - **Named handler dispatch is now transport-agnostic (breaking — source + generated host wiring).** A handler
   is mapped onto a single transport-neutral request/reply bus, `HandlerDispatcher`
   (`Elarion.Abstractions.Dispatch`), which owns no serialization or wire format; **JSON-RPC and MCP are now

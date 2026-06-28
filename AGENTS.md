@@ -107,14 +107,15 @@ common dependencies such as Zod when they materially improve safety.
 
 The named `HandlerDispatcher` bus is a **transport seam**, not an in-process call path: it exists so name-keyed
 transports (JSON-RPC, MCP) can route a wire *string* to a handler. **In-process, always call handlers
-typed-directly** — inject `IHandler<TRequest, Result<TResponse>>`, use `HandlerInvoker.InvokeAsync<,>` (custom
-transports/jobs), or, across modules, the typed `[GenerateModuleApi]` facade behind a `[ModuleContract]` — so a
-rename is a compile error, not a runtime surprise. The bus *is* an injectable singleton and `DispatchAsync(name, …)`
-works, but it takes `object`/returns `Result<object>` (no compile-time type, no schema), so use it from application
-code only when you must dispatch by a dynamic/string name and cannot reference the handler's type (the mediator
-niche); prefer `[ModuleContract]` for cross-module decoupling. This is distinct from `IDomainEventBus.RequestAsync`
-(type-keyed, inline in the transaction — Plane A domain request/reply, not a transport). See
-[Cross-module communication](#cross-module-communication).
+typed-directly** — inject `IHandler<TRequest, Result<TResponse>>`, inject `IHandlerSender` and call
+`SendAsync<,>` (the typed mediator send — resolves by type from the ambient scope/transaction; register with
+`AddElarionHandlerSender`), use `HandlerInvoker.InvokeAsync<,>` (custom transports/jobs, fresh scope), or, across
+modules, the typed `[GenerateModuleApi]` facade behind a `[ModuleContract]` — so a rename is a compile error, not
+a runtime surprise. The bus *is* an injectable singleton and `DispatchAsync(name, …)` works, but it takes
+`object`/returns `Result<object>` (no compile-time type, no schema), so use it from application code only when you
+must dispatch by a dynamic/string name and cannot reference the handler's type (the mediator niche); prefer
+`[ModuleContract]` for cross-module decoupling. The event bus is **pub/sub-only** — it has no request/reply (see
+[Event / messaging model](#event--messaging-model)). See [Cross-module communication](#cross-module-communication).
 
 ## HTTP endpoint model
 
@@ -224,9 +225,8 @@ for the full rationale.
    **inline within the caller's DI scope**, and therefore within the caller's transaction:
    consumers share the scoped `DbContext`, their writes commit atomically with the command,
    and a consumer failure fails the command. `PublishAsync<TEvent> where TEvent : IDomainEvent`
-   fans out to every consumer in ascending `[ConsumeEvent(Order = …)]`, aggregating failures;
-   `RequestAsync<TRequest, TResponse>` dispatches to a single responder returning
-   `Result<TResponse>`. Never broker-portable.
+   fans out to every consumer in ascending `[ConsumeEvent(Order = …)]`, aggregating failures.
+   Pub/sub only — never broker-portable.
 2. **Plane B — integration events (`IIntegrationEventBus`).** Notifications **recorded within
    the caller's unit of work and delivered after the transaction commits**, on a separate
    scope, retried independently; a consumer failure never fails the command, and a rollback
@@ -246,15 +246,16 @@ the full decorator pipeline, exactly like a command/query handler. The consumer 
 implementing `IHandler<TEvent, Result<T>>` (or the `IHandler<TEvent>` sugar) whose request type
 *is* the event, annotated with a class-level `[ConsumeEvent]`. It is dispatched through its full
 decorator pipeline (tracing, resilience, validation, cache-invalidation) — the generated
-descriptor resolves the `IHandler<,>` interface from DI so the decorated chain runs — and its
-role is inferred from the response type: `Result<Unit>` (or the `IHandler<TEvent>` sugar) is a
-**fan-out subscriber** whose failed `Result` surfaces as an `EventConsumerFailedException` (each
-backend handles it per its plane — domain aggregates and rethrows, failing the command; the
-in-memory integration pump logs and isolates; the outbox retries), while a domain handler
-returning `Result<T>` (`T ≠ Unit`) is the **single `RequestAsync` responder**, returning its
-typed `Result<T>` to the caller without throwing. Integration events are fan-out only, so an
-integration handler returning a non-`Unit` `Result<T>` is rejected (`ELEVT005`). A class-level
-`[ConsumeEvent]` on a non-handler is reported (`ELEVT005`).
+descriptor resolves the `IHandler<,>` interface from DI so the decorated chain runs. Every
+consumer is a **fan-out subscriber**: `Result<Unit>` (or the `IHandler<TEvent>` sugar) whose failed
+`Result` surfaces as an `EventConsumerFailedException` (each backend handles it per its plane —
+domain aggregates and rethrows, failing the command; the in-memory integration pump logs and
+isolates; the outbox retries). The event bus is **pub/sub-only** (see
+[ADR-0010](docs/decisions/0010-event-bus-is-pub-sub-only.md)) — a non-`Unit` `Result<T>` response is
+request/reply, not a notification, and is rejected (`ELEVT005` handler-form, `ELEVT002` method-form);
+for a typed reply, call a handler **by type** with `IHandlerSender`/`IHandler` (see
+[the handler-call guidance](docs/concepts/handlers.mdx#calling-a-handler-from-other-code)). A
+class-level `[ConsumeEvent]` on a non-handler is reported (`ELEVT005`).
 
 Because the domain plane dispatches **inline in the publisher's scope**, a domain-event handler's
 decorator pipeline runs **nested within the command's** (same scope, `DbContext`, and transaction), so
@@ -268,14 +269,13 @@ and the `AppliesTo` predicate are both evaluated at compile time by `HandlerRegi
 
 The **method form** is a lightweight alternative for a small side effect on an existing
 `[Service]`: the consumer is an instance method on a `[Service]` class (no decorator pipeline);
-the marker selects the plane and the return type selects the role (`void`/`Task`/`ValueTask` →
-fan-out subscriber, `Result<TResponse>` → the single responder). Its optional
-`IEventContext`/`IEventContext<TEvent>` and `CancellationToken` parameters are supplied by the
-runtime.
+the message parameter's marker selects the plane, and the method returns `void`/`Task`/`ValueTask`
+(a fan-out subscriber). Its optional `IEventContext`/`IEventContext<TEvent>` and `CancellationToken`
+parameters are supplied by the runtime.
 
 `EventConsumerRegistrationGenerator` (triggered by `[GenerateEventConsumers]` or
 `[UseElarion]`) discovers consumers, validates signatures (diagnostics `ELEVT001`/`ELEVT002`/
-`ELEVT004`), and emits a per-module `Add{Module}EventConsumers(IServiceCollection)` (longest-prefix
+`ELEVT005`), and emits a per-module `Add{Module}EventConsumers(IServiceCollection)` (longest-prefix
 namespace match) that registers each consumer service plus an `EventSubscriptionDescriptor`, wired
 into that module's `ConfigureDefaultServices` — see
 [Module default services](#module-default-services). The in-memory domain tier in `Elarion/Messaging`
@@ -319,8 +319,8 @@ module author wiring them by hand. The mechanism is a cross-generator partial-me
 ## Cross-module communication
 
 Direct, synchronous module-to-module calls (the in-process analog of a gRPC call) go through a
-**published contract**, not through another module's internals or `IDomainEventBus.RequestAsync`
-(Plane A is in-process by nature and not an extraction path). See
+**published contract**, not through another module's internals or a direct typed handler call
+(`IHandlerSender`/`IHandler` couple you to the other module's types and don't survive extraction). See
 [ADR-0002](docs/decisions/0002-cross-module-communication.md). The framework owns the convention and
 the analyzer; mapping between a contract's DTOs and a module's handler DTOs is the **module's concern**
 (hand-written or any mapper) — there is no generated forwarder and no mapper dependency.

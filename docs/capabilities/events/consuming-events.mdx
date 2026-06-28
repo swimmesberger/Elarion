@@ -5,9 +5,12 @@ description: Declare event consumers as handlers or service methods, for both in
 
 `[ConsumeEvent]` is the **single, unified way to subscribe** — you never pick a bus or a plane on the
 consumer. The same attribute consumes either a domain or an integration event; the event type's marker
-(`IDomainEvent` / `IIntegrationEvent`) decides which plane delivers it, and the consumer's **return type**
-decides the role. So a consumer reads identically whether the event runs inline or after commit. (For the
-two-plane model itself, see the [events overview](/docs/capabilities/events).)
+(`IDomainEvent` / `IIntegrationEvent`) decides which plane delivers it. Every consumer is a **fan-out
+subscriber**: the event bus is **pub/sub-only** and never returns a value to the publisher. So a consumer
+reads identically whether the event runs inline or after commit. (For the two-plane model itself, see the
+[events overview](/docs/capabilities/events).) For request/reply — one typed response from a single
+target — don't use the event bus; call the handler directly (see
+[calling a handler from other code](/docs/concepts/handlers#calling-a-handler-from-other-code)).
 
 There are two ways to write the consumer. Prefer the **handler form** — it makes the consumer a
 first-class unit of business logic with the full decorator pipeline; the **method form** is a lightweight
@@ -15,9 +18,9 @@ alternative for a small side effect on a service you already have.
 
 ## Handler form (preferred)
 
-A consumer is a class implementing `IHandler<TEvent, Result<T>>` — its request type *is* the event —
-annotated with a class-level `[ConsumeEvent]`. The simplest case uses the `IHandler<TEvent>` sugar over
-`Result<Unit>`, which returns the non-generic `Result`:
+A consumer is a class implementing `IHandler<TEvent>` (the sugar over `IHandler<TEvent, Result<Unit>>`) —
+its request type *is* the event — annotated with a class-level `[ConsumeEvent]`. The sugar returns the
+non-generic `Result`:
 
 ```csharp
 using Elarion.Abstractions;
@@ -38,30 +41,19 @@ registered, and feature-gated by its module like every other handler. The event 
 more trigger for the same unit of business logic. Use `[ConsumeEvent(Order = n)]` to order fan-out
 subscribers; `Order` ascends, and equal-order consumers run in a stable, generator-determined sequence.
 
-### The role-by-return-type rule
+### Every consumer is a fan-out subscriber
 
-The response type selects the consumer's role:
+The event bus is **pub/sub-only**, so a handler-form consumer always returns `Result<Unit>` — use the
+`IHandler<TEvent>` sugar, or the explicit `IHandler<TEvent, Result<Unit>>`. Every matching consumer runs.
+A failed `Result` has no return channel to the publisher, so it surfaces as an
+`EventConsumerFailedException`, which each backend handles per its plane (the in-memory domain bus
+aggregates and rethrows, failing the command; the in-memory integration pump logs and isolates; the
+outbox dispatcher lets it propagate to trigger a retry).
 
-- **`Result<Unit>` (or the `IHandler<TEvent>` sugar) → a fan-out subscriber.** Every matching consumer
-  runs. A failed `Result` has no return channel to the publisher, so it surfaces as an
-  `EventConsumerFailedException`, which each backend handles per its plane (the in-memory domain bus
-  aggregates and rethrows, failing the command; the in-memory integration pump logs and isolates; the
-  outbox dispatcher lets it propagate to trigger a retry).
-- **`Result<T>` with `T ≠ Unit` → the single `RequestAsync` responder** for the event, returning its
-  typed result through the same pipeline. Domain plane only.
-
-```csharp
-public sealed record PriceQuote(string Sku) : IDomainEvent;
-
-[ConsumeEvent]
-public sealed class QuotePrice(IPriceBook prices) : IHandler<PriceQuote, Result<Money>> {
-    public ValueTask<Result<Money>> HandleAsync(PriceQuote q, CancellationToken ct) =>
-        new(prices.Quote(q.Sku));
-}
-```
-
-Integration events are **fan-out only**, so an integration handler must return `Result` / `Result<Unit>`;
-a non-`Unit` response is rejected as `ELEVT005`.
+A consumer that returns a non-`Unit` `Result<T>` is rejected (`ELEVT005`) on either plane — the bus has no
+response channel. When you need **one typed response** from a single target, that is request/reply, not
+pub/sub: call the target handler directly instead of publishing an event (see
+[calling a handler from other code](/docs/concepts/handlers#calling-a-handler-from-other-code)).
 
 <Callout type="warn">
   **A domain-event handler runs nested in the command's pipeline.** The domain plane dispatches inline in
@@ -114,11 +106,10 @@ public sealed class InvoiceNotifications(ILogger<InvoiceNotifications> logger) {
 }
 ```
 
-Here too the **return type selects the role**:
-
-- `void` / `Task` / `ValueTask` → a **fan-out subscriber** (every matching consumer runs).
-- `Result<TResponse>` / `Task<Result<TResponse>>` / `ValueTask<Result<TResponse>>` → the **single
-  responder** for `IDomainEventBus.RequestAsync` (exactly one allowed; domain plane only).
+Here too the method is a **fan-out subscriber** — it returns `void` / `Task` / `ValueTask` (every matching
+consumer runs). The event bus is pub/sub-only, so a method that returns a `Result<TResponse>` is rejected
+(`ELEVT002`); when you need one typed response, call the target handler directly instead of consuming an
+event (see [calling a handler from other code](/docs/concepts/handlers#calling-a-handler-from-other-code)).
 
 Beyond the message parameter, a method-form consumer may optionally declare — in any order — an
 `IEventContext` (or `IEventContext<TEvent>`) for the correlation id and message, and a `CancellationToken`.
@@ -126,8 +117,7 @@ Both are supplied by the runtime; omit what you don't need, and use `[ConsumeEve
 fan-out subscribers. (The handler form takes the event and an optional `CancellationToken`.)
 
 A class-level `[ConsumeEvent]` on a non-handler class, or a method-form consumer not on a `[Service]`, is
-reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`; a second `RequestAsync` responder for
-the same event is `ELEVT004`.
+reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`.
 
 <Callout type="info">
   What the `CancellationToken` *means* differs by plane. For **domain** consumers it is the originating
@@ -208,8 +198,8 @@ public async ValueTask OnInvoiceCreated(
 `EventSubscriptionDescriptor`s are **registered in DI** — the generator simply emits those registrations.
 The descriptor type is public (`Elarion.Abstractions.Messaging`), so you can register one by hand for tests
 or advanced host wiring. It is the **same unified shape for both planes**: `Plane` selects domain vs
-integration, and a set `ResponseType`/`InvokeRequestAsync` (responder) vs `InvokeAsync` (fan-out subscriber)
-selects the role:
+integration, and `InvokeAsync` is the fan-out subscriber callback (the bus is pub/sub-only, so every
+descriptor is a fan-out subscriber):
 
 ```csharp
 using Elarion.Abstractions.Messaging;
