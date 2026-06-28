@@ -483,8 +483,6 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             "0",
             null);
-        // A legacy v1 (9-field) RPC manifest entry — proves a reference built on the previous package still
-        // decodes (IsNameInferred defaults to false) rather than being silently dropped.
         var rpc = EncodeFields(
             "manifest.get",
             "ManifestOnly",
@@ -494,7 +492,8 @@ public sealed class ModuleBootstrapperTransportTests {
             "1",
             "1",
             null,
-            string.Empty);
+            string.Empty,
+            "0");
 
         return $$"""
             using System.Threading;

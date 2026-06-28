@@ -39,6 +39,11 @@ it through the full decorator pipeline. JSON-RPC and MCP are thin **adapters** o
 serves only the operations flagged for its surface. The generator builds one registry; both adapters
 resolve it. So a handler is *define once, choose surfaces via the `Transports` flag*.
 
+The bus is a **transport seam**, not an in-process call path: it exists because JSON-RPC and MCP carry an
+operation *name* on the wire. HTTP doesn't use it — a `[HttpEndpoint]` route resolves its handler
+typed-directly, since the route already pins the type. To call a handler from your own code, prefer the
+typed paths in [Calling a handler from code](/docs/concepts/handlers#calling-a-handler-from-other-code).
+
 ## Which transport should I use?
 
 <Cards>

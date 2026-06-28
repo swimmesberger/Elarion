@@ -105,13 +105,24 @@ Generated TypeScript should remain portable across browser and Node.js server
 runtimes. Prefer standard `fetch`, injectable transport, `AbortSignal`, and small
 common dependencies such as Zod when they materially improve safety.
 
+The named `HandlerDispatcher` bus is a **transport seam**, not an in-process call path: it exists so name-keyed
+transports (JSON-RPC, MCP) can route a wire *string* to a handler. **In-process, always call handlers
+typed-directly** — inject `IHandler<TRequest, Result<TResponse>>`, use `HandlerInvoker.InvokeAsync<,>` (custom
+transports/jobs), or, across modules, the typed `[GenerateModuleApi]` facade behind a `[ModuleContract]` — so a
+rename is a compile error, not a runtime surprise. The bus *is* an injectable singleton and `DispatchAsync(name, …)`
+works, but it takes `object`/returns `Result<object>` (no compile-time type, no schema), so use it from application
+code only when you must dispatch by a dynamic/string name and cannot reference the handler's type (the mediator
+niche); prefer `[ModuleContract]` for cross-module decoupling. This is distinct from `IDomainEventBus.RequestAsync`
+(type-keyed, inline in the transaction — Plane A domain request/reply, not a transport). See
+[Cross-module communication](#cross-module-communication).
+
 ## HTTP endpoint model
 
 Plain HTTP/REST is a parallel first-class optional transport that maps the same handlers:
 
 1. Application handlers declare `[HttpEndpoint("route")]` or `[HttpEndpoint(HttpVerb.X, "route")]`. The request/response are read from the handler's `IHandler<TRequest, Result<TResponse>>` interface (success type unwrapped from `Result<T>`), so they may be nested or top-level — nesting/naming carry no semantic weight. Verb precedence: an explicit verb wins; else the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); else `ELHTTP004`. A handler with no resolvable shape reports `ELHTTP001`.
 2. `AppModuleDiscoveryGenerator` (triggered by `[GenerateModuleBootstrapper]`) emits per-module `Map{Module}Http(this IEndpointRouteBuilder)` extension-method bodies of strongly-typed minimal-API registrations (one `MapGet`/`MapPost`/... per handler), aggregated and feature-gated by the `endpoints.MapElarion(configuration)` extension method.
-3. Each emitted lambda binds the request (`[AsParameters]` for GET/DELETE and opt-in custom-bound requests; JSON body for default POST/PUT/PATCH) and translates `Result<T>` via `ElarionHttpResults` — `200`/`204` on success, RFC 7807 ProblemDetails on failure with the status from `HttpAppErrorMapper`.
+3. Each emitted lambda binds the request (`[AsParameters]` for GET/DELETE and opt-in custom-bound requests; JSON body for default POST/PUT/PATCH), **resolves the handler typed-directly** (`[FromServices] IHandler<TRequest, Result<TResponse>>` — HTTP does **not** go through the named bus, since the route already pins the type), and translates `Result<T>` via `ElarionHttpResults` — `200`/`204` on success, RFC 7807 ProblemDetails on failure with the status from `HttpAppErrorMapper`.
 
 Keep the generator emitting concrete-typed lambdas (no open generics, no reflection
 binding) so output stays AOT/RDG friendly. The `[HttpEndpoint]` attribute lives in

@@ -38,7 +38,7 @@ public sealed class ElarionManifestGeneratorTests {
         generated.Should().Contain("Elarion.Manifest.Schema")
             .And.Contain("Elarion.Manifest.Module.v1")
             .And.Contain("Elarion.Manifest.HttpEndpoint.v1")
-            .And.Contain("Elarion.Manifest.RpcMethod.v2")
+            .And.Contain("Elarion.Manifest.RpcMethod.v1")
             .And.Contain("AssemblyMetadataAttribute");
     }
 
