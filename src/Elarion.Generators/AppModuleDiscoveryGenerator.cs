@@ -565,7 +565,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         if (transport.HasJsonRpc || transport.HasMcp)
         {
-            sb.AppendLine("using Elarion;");
+            // MapHandler (the IHandler -> JsonRpcDispatcher bridge) lives in Elarion.JsonRpc.
+            sb.AppendLine("using Elarion.JsonRpc;");
         }
 
         if (transport.HasHttp || transport.HasJsonRpc || transport.HasMcp)

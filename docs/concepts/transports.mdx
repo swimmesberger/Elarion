@@ -21,7 +21,7 @@ A transport has four jobs:
 | --- | --- | --- |
 | `IHandler<TRequest, TResponse>`, `Result<T>`, `AppError`/`ErrorKind` | `Elarion.Abstractions` | the handler contract and result/error model |
 | `ICurrentUser`, `IAuthorizer` | `Elarion.Abstractions` | identity + authorization (the decorator is auto-attached) |
-| `DispatchScopeContext`, `IDispatchScopeInitializer`, `IServiceProvider.CreateDispatchScope`/`SeedScope` | `Elarion.JsonRpc` | the per-call scope-seeding rail (transport-neutral) |
+| `DispatchScopeContext`, `IDispatchScopeInitializer`, `IServiceProvider.CreateDispatchScope`/`SeedScope` | `Elarion.Abstractions` (`.Dispatch`) | the per-call scope-seeding rail (transport-neutral) |
 | `HandlerInvoker.InvokeAsync<TRequest,TResponse>` | `Elarion` | typed-direct "seed scope + invoke handler + dispose" |
 | `AddElarionClaimsCurrentUser` / `ClaimsPrincipalCurrentUser` | `Elarion` | claims-based `ICurrentUser`, **no ASP.NET dependency** |
 | `IAppErrorTranslator<TError>` | `Elarion.Abstractions` | map `AppError` to your wire error type |
@@ -105,9 +105,10 @@ error. Implement `IAppErrorTranslator<TError>` for your wire type (the JSON-RPC 
 
 ## Packaging
 
-A non-HTTP transport references `Elarion` and `Elarion.Abstractions`. Avoid `Elarion.AspNetCore` unless you are
-co-hosted in ASP.NET. (`Elarion.JsonRpc` comes in transitively via `Elarion`; you only touch it directly if you
-use the name-based dispatcher.)
+A non-HTTP transport references `Elarion` and `Elarion.Abstractions`. Core is **transport-agnostic** — it does
+not reference any transport package — so you reference `Elarion.JsonRpc` only if you use the name-based
+dispatcher, and `Elarion.AspNetCore` only if you are co-hosted in ASP.NET. The scope rail and `HandlerInvoker`
+need no transport package (rail in `Elarion.Abstractions`, `HandlerInvoker` in `Elarion`).
 
 ## Worked example: a console transport
 
@@ -115,10 +116,10 @@ A complete transport with no ASP.NET — the smallest proof the seams compose:
 
 ```csharp
 using System.Security.Claims;
-using Elarion;                       // HandlerInvoker
-using Elarion.Identity;              // AddElarionClaimsCurrentUser
-using Elarion.JsonRpc;              // DispatchScopeContext
-using Elarion.Authorization;        // AddElarionAuthorization
+using Elarion;                          // HandlerInvoker
+using Elarion.Abstractions.Dispatch;    // DispatchScopeContext
+using Elarion.Identity;                 // AddElarionClaimsCurrentUser
+using Elarion.Authorization;            // AddElarionAuthorization
 using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();

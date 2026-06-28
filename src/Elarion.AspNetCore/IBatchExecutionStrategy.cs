@@ -1,3 +1,4 @@
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 
 namespace Elarion.AspNetCore;

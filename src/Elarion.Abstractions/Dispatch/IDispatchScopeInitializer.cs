@@ -1,4 +1,4 @@
-namespace Elarion.JsonRpc;
+namespace Elarion.Abstractions.Dispatch;
 
 /// <summary>
 /// A hook that seeds scoped services in a per-call dispatch scope from the captured

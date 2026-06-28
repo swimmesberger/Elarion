@@ -6,6 +6,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Abstractions: the JSON-RPC transport bridges Elarion handlers (IHandler/Result/AppError) onto the
+         dispatcher (MapHandler, AppErrorMapper) and uses the dispatch-scope rail. -->
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- DI.Abstractions: RpcToolInvoker owns the per-call service scope (CreateAsyncScope). -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />

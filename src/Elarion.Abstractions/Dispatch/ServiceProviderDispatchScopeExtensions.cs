@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Elarion.JsonRpc;
+namespace Elarion.Abstractions.Dispatch;
 
 /// <summary>
 /// Creates the per-call DI scope used by dispatcher-based transports, running every registered

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;

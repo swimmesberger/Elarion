@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Elarion.JsonRpc;
+using Elarion.Abstractions.Dispatch;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.Identity;

@@ -2,10 +2,10 @@ using System.Security.Claims;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Authorization;
+using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Identity;
 using Elarion.AspNetCore.Identity;
 using Elarion.Authorization;
-using Elarion.JsonRpc;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 

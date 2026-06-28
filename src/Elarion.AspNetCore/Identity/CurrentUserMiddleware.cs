@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Elarion.JsonRpc;
+using Elarion.Abstractions.Dispatch;
 using Microsoft.AspNetCore.Http;
 
 namespace Elarion.AspNetCore.Identity;

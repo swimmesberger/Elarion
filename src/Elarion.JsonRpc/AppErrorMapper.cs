@@ -1,7 +1,6 @@
 using Elarion.Abstractions;
-using Elarion.JsonRpc;
 
-namespace Elarion;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Maps the framework's transport-agnostic <see cref="AppError"/> / <see cref="ErrorKind"/> onto JSON-RPC 2.0

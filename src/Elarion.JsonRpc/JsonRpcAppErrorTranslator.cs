@@ -1,7 +1,6 @@
 using Elarion.Abstractions;
-using Elarion.JsonRpc;
 
-namespace Elarion;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// The default <see cref="IAppErrorTranslator{TError}"/> for the JSON-RPC transport: maps an

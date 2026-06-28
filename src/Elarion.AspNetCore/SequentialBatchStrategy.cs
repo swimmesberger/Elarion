@@ -1,3 +1,4 @@
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Microsoft.Extensions.DependencyInjection;
 

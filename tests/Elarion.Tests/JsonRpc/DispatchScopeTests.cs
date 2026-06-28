@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Elarion.JsonRpc.Mcp;
 using Microsoft.Extensions.DependencyInjection;

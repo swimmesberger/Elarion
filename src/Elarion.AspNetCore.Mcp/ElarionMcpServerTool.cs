@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Elarion.JsonRpc.Mcp;
 using Microsoft.Extensions.DependencyInjection;

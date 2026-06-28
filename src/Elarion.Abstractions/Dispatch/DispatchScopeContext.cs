@@ -1,4 +1,4 @@
-namespace Elarion.JsonRpc;
+namespace Elarion.Abstractions.Dispatch;
 
 /// <summary>
 /// A transport-neutral, type-keyed carrier of values captured at a dispatch boundary (the JSON-RPC

@@ -1,8 +1,7 @@
 using Elarion.Abstractions;
-using Elarion.JsonRpc;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Elarion;
+namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Bridges Elarion <see cref="IHandler{TRequest,TResponse}"/> handlers into the transport-neutral
