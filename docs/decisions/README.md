@@ -36,4 +36,6 @@ designs that are not yet implemented.
 - [ADR-0013: Resource-based and data-level authorization](0013-resource-and-data-level-authorization.md)
 - [ADR-0014: Cross-assembly generator composition](0014-cross-assembly-generator-composition.md)
 - [ADR-0015: EF Core stores enlist in the caller's ambient transaction](0015-ef-core-transaction-participation.md)
-- [ADR-0016: Generated infrastructure is framework-named, not user-declared](0016-generated-infrastructure-is-framework-named.md)
+- [ADR-0016: Feature-flag gating (`[FeatureGate]` over an OpenFeature-backed seam)](0016-feature-flag-gating.md)
+- [ADR-0017: Elarion core is dependency-light; provider defaults are opt-in packages](0017-dependency-light-core.md)
+- [ADR-0018: Generated infrastructure is framework-named, not user-declared](0018-generated-infrastructure-is-framework-named.md)

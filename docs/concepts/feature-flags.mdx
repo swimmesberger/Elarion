@@ -1,0 +1,112 @@
+---
+title: Feature flags
+description: Declarative, transport-neutral feature-flag gating for handlers — [FeatureGate] over an OpenFeature-backed IFeatureFlagService, with any provider behind it.
+---
+
+Feature flags in Elarion gate a **handler** behind one or more flags. You annotate the handler with
+`[FeatureGate(...)]`; a generated decorator evaluates the flags before the handler runs, under every
+transport (JSON-RPC, MCP, HTTP) identically. A disabled feature short-circuits to a `404 Not Found` — a
+gated-off operation is indistinguishable from one that doesn't exist, so a flag doubles as a hide-the-roadmap
+switch, exactly like Microsoft's MVC `[FeatureGate]`, but as a transport-neutral handler gate.
+
+The flag *backend* is not baked in. The gate evaluates against a thin `IFeatureFlagService` seam whose default
+implementation targets [OpenFeature](https://openfeature.dev) — the CNCF vendor-neutral standard — so the same
+`[FeatureGate]` works against Microsoft.FeatureManagement, LaunchDarkly, ConfigCat, flagd, Flagsmith, or any
+other OpenFeature provider without touching your handlers.
+
+## Handler gates vs. module flags
+
+Elarion has two distinct flag mechanisms; reach for the right one:
+
+- **Module flags** (`Modules:{Name}:Enabled`) are **compose-time**: a disabled feature module disappears
+  entirely — its services, endpoints, JSON-RPC/MCP operations, jobs, and consumers are never registered. See
+  [modules](/docs/concepts/modules).
+- **Feature gates** (`[FeatureGate]`) are **runtime**: the handler is always registered, but each call is
+  evaluated against the flag provider, so you get gradual rollouts, targeting, percentage rollouts, and kill
+  switches that flip without a redeploy.
+
+## Declaring gates
+
+Annotate the handler class. The attribute mirrors the familiar ASP.NET MVC `[FeatureGate]`:
+
+```csharp
+[Handler("billing.export")]
+[FeatureGate("new-export")]
+public sealed class ExportInvoices(AppDbContext db)
+    : IHandler<ExportInvoices.Command, Result<ExportInvoices.Response>> { /* ... */ }
+```
+
+| Form | Gate is satisfied when |
+| --- | --- |
+| `[FeatureGate("a")]` | `a` is enabled |
+| `[FeatureGate("a", "b")]` | **both** `a` and `b` are enabled (the default, `FeatureRequirement.All`) |
+| `[FeatureGate(FeatureRequirement.Any, "a", "b")]` | **either** `a` or `b` is enabled |
+| `[FeatureGate("legacy", Negate = true)]` | `legacy` is **disabled** (fence off a legacy path during rollout) |
+
+The attribute is `AllowMultiple`, so stacking several `[FeatureGate]` attributes ANDs them. When any gate is
+unsatisfied the call returns `AppError.NotFound` and the handler never runs.
+
+The gate sits in the decorator pipeline **just inside the authorization gate** (authorization stays the
+outermost functional gate), so authorization runs first — an unauthenticated caller is never told whether a
+gated feature exists — and a disabled feature still never touches caching, validation, or the handler.
+
+A handler whose response type cannot represent failure (no `IResultFailureFactory<T>`, i.e. not a `Result<T>`
+/ `Result`) is reported at build time as **`ELFEAT001`** — the gate could not short-circuit, so it would be
+silently skipped. A `[FeatureGate]` with no feature name is **`ELFEAT002`** (the gate has no effect).
+
+## Checking a flag at runtime
+
+The same seam is injectable, so application code can branch on a flag imperatively:
+
+```csharp
+public sealed class Dashboard(IFeatureFlagService features) {
+    public async Task<View> RenderAsync(CancellationToken ct) =>
+        await features.IsEnabledAsync("new-dashboard", ct)
+            ? RenderNew()
+            : RenderClassic();
+}
+```
+
+```csharp
+public interface IFeatureFlagService {
+    ValueTask<bool> IsEnabledAsync(string feature, CancellationToken ct = default);
+}
+```
+
+Targeting is **ambient**: the default provider derives the OpenFeature evaluation context from the current
+[`ICurrentUser`](/docs/concepts/handlers) — the user id becomes the targeting key (and the `UserId`/`Groups`
+attributes the Microsoft.FeatureManagement provider reads), so percentage and targeting rollouts work off-HTTP
+the same as on, with no `HttpContext`.
+
+## Choosing a provider
+
+The seam (`IFeatureFlagService`, `[FeatureGate]`, `FeatureGateDecorator`) lives in `Elarion.Abstractions` and
+carries no feature-management dependency. Two opt-in packages provide a backend:
+
+- **`Elarion.FeatureManagement`** — the batteries-included default. One call wires the OpenFeature
+  Microsoft.FeatureManagement provider so `[FeatureGate]` reads config-driven flags out of the box:
+
+  ```csharp
+  builder.Services.AddElarionFeatureManagement(builder.Configuration);
+  ```
+
+  Flags are defined in the conventional `FeatureManagement` configuration section.
+
+- **`Elarion.OpenFeature`** — the provider-neutral base. Bring your own OpenFeature provider and register our
+  service over it:
+
+  ```csharp
+  builder.Services.AddOpenFeature(b => b.AddProvider(/* LaunchDarkly, ConfigCat, flagd, ... */));
+  builder.Services.AddElarionOpenFeature();
+  ```
+
+`AddElarionFeatureManagement` is just sugar over `AddOpenFeature(...) + AddElarionOpenFeature()`. Because both
+go through the same `IFeatureFlagService` seam, switching providers never touches a `[FeatureGate]`. To replace
+the backend wholesale (a custom store, a test double), register your own `IFeatureFlagService` — the gate and
+all imperative checks follow.
+
+## See also
+
+- [ADR-0016: Feature-flag gating](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0016-feature-flag-gating.md) — why a thin Elarion seam over OpenFeature rather than `IFeatureManager` directly.
+- [Decorator pipelines](/docs/concepts/decorator-pipelines) — how the gate composes with authorization, caching, and resilience.
+- [Authorization](/docs/concepts/authorization) — the sibling declarative gate the feature gate is modeled on.

@@ -19,6 +19,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string RequireResourceAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireResourceAttribute";
     private const string AllowAnonymousAttributeMetadataName = "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
     private const string AuthorizationDefaultsAttributeMetadataName = "Elarion.Abstractions.Authorization.ElarionAuthorizationDefaultsAttribute";
+    private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
 
     private sealed record HandlerInfo(
@@ -34,6 +35,7 @@ public sealed partial class HandlerRegistrationGenerator {
         bool HasAuthorization,
         bool RequireAuthenticatedByDefault,
         EquatableArray<ResourceBindingInfo> ResourceBindings,
+        bool HasFeatureGates,
         EquatableArray<DiagnosticInfo> Diagnostics
     );
 
@@ -123,5 +125,23 @@ public sealed partial class HandlerRegistrationGenerator {
         + "request type '{2}'; use nameof(Request.Id) or a dotted path of existing properties",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor FeatureGateResponseNotFailureCapable = new(
+        "ELFEAT001",
+        "Feature-gated handler response cannot represent failure",
+        "Handler '{0}' declares a [FeatureGate] but its response type '{1}' does not implement "
+        + "IResultFailureFactory<T>, so the gate cannot short-circuit and would be silently skipped; "
+        + "return Result<T> or Result",
+        "Elarion.Abstractions.Features",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor EmptyFeatureGateDescriptor = new(
+        "ELFEAT002",
+        "FeatureGate declares no feature name",
+        "Handler '{0}' declares a [FeatureGate] with no feature name (or a blank one); the gate has no effect",
+        "Elarion.Abstractions.Features",
+        DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 }

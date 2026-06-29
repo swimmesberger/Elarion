@@ -26,7 +26,7 @@ namespace Elarion.Generators;
 /// </para>
 /// <para>
 /// Trigger: <c>[assembly: GenerateModuleBootstrapper]</c> in the host project. The generator emits the
-/// fixed-name <c>ElarionBootstrapper</c> static into the host's root namespace (ADR-0016), consumes per-assembly
+/// fixed-name <c>ElarionBootstrapper</c> static into the host's root namespace (ADR-0018), consumes per-assembly
 /// Elarion manifests from references, directly reads modules in the current compilation, and topologically sorts
 /// discovered modules by declared dependencies.
 /// </para>
@@ -118,7 +118,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             .Collect();
 
         // The generated bootstrapper is framework-named (ElarionBootstrapper) and emitted into the host's root
-        // namespace, so every Elarion host exposes the same composition root (ADR-0016). Triggered by the
+        // namespace, so every Elarion host exposes the same composition root (ADR-0018). Triggered by the
         // assembly attribute, not a user-declared partial.
         var rootNamespace = context.CompilationProvider
             .Select(static (compilation, _) => compilation.AssemblyName ?? string.Empty)

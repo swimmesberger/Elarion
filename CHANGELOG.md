@@ -14,7 +14,7 @@ minor releases may include breaking changes.
   and `AppModuleDiscoveryGenerator` emits the host wiring (`AddElarion`, `MapElarionEndpoints`,
   `RegisterHandlers`, `GetMcpMetadata`, …) as a framework-named `ElarionBootstrapper` static in the host's root
   namespace — you no longer declare a `partial class`. Framework-owned names give every Elarion host the same
-  composition root (see [ADR-0016](docs/decisions/0016-generated-infrastructure-is-framework-named.md)).
+  composition root (see [ADR-0018](docs/decisions/0018-generated-infrastructure-is-framework-named.md)).
   **Migration:** delete your `[GenerateModuleBootstrapper]` partial class, add
   `[assembly: GenerateModuleBootstrapper]`, and reference `ElarionBootstrapper.RegisterHandlers` (etc.) instead of
   your old type name.

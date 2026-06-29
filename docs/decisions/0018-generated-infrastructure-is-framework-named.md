@@ -1,4 +1,4 @@
-# ADR-0016: Generated infrastructure is framework-named, not user-declared
+# ADR-0018: Generated infrastructure is framework-named, not user-declared
 
 - Status: Accepted
 - Date: 2026-06-29

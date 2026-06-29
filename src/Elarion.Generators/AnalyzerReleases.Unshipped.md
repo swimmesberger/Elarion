@@ -44,3 +44,5 @@ ELPOL001 | Elarion.Abstractions.Authorization | Error | [AuthorizationPolicy] mu
 ELPOL002 | Elarion.Abstractions.Authorization | Warning | Authorization policy is not in any module
 ELPERM001 | Elarion.Abstractions.Authorization | Warning | Authorization requirement is not in any module
 ELPERM002 | Elarion.Abstractions.Authorization | Warning | Permission produces a duplicate typed accessor
+ELFEAT001 | Elarion.Abstractions.Features | Error | Feature-gated handler response cannot represent failure
+ELFEAT002 | Elarion.Abstractions.Features | Warning | FeatureGate declares no feature name
