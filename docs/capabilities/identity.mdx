@@ -77,11 +77,13 @@ keep the Identity defaults. The underlying primitive, `modelBuilder.ApplyElarion
 
 ## What stays in your app
 
-The package is deliberately minimal. Your roles/permissions catalog, seeding, sign-in/registration
-endpoints, and user-management surface stay app-owned — they are domain decisions, not framework mechanics.
-Permissions are typically issued as a `permission` claim (the default
-[`AuthorizationOptions.PermissionClaimType`](/docs/concepts/authorization)) on roles, and enforced on
-handlers with `[RequirePermission]`.
+The package is deliberately minimal. Role→permission policy, seeding, sign-in/registration endpoints, and the
+user-management surface stay app-owned — they are domain decisions, not framework mechanics. Permissions are
+typically issued as a `permission` claim (the default
+[`AuthorizationOptions.PermissionClaimType`](/docs/concepts/authorization)) on roles, and enforced on handlers
+with `[RequirePermission]`. You no longer hand-maintain the *list* of permissions, though: inject
+[`IPermissionCatalog`](/docs/concepts/authorization#permission-catalog) to enumerate every `[RequirePermission]`/`[RequireRole]`
+across your modules when seeding.
 
 ## See also
 

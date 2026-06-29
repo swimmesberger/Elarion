@@ -28,6 +28,9 @@ public static class AuthorizationServiceCollectionExtensions {
         services.TryAddScoped<IAuthorizer, ClaimsAuthorizer>();
         // Fail-closed default; AddElarionResourceAuthorization replaces it with the grants-backed authorizer.
         services.TryAddScoped<IResourceAuthorizer, DenyResourceAuthorizer>();
+        // The generated per-module PermissionCatalogModule contributions (registered via ConfigureDefaultServices)
+        // aggregate into this catalog, so seeding/admin code can enumerate every [RequirePermission]/[RequireRole].
+        services.TryAddSingleton<IPermissionCatalog, PermissionCatalog>();
         return services;
     }
 

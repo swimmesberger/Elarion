@@ -171,6 +171,33 @@ The very same `[RequireRole("Admin")]` / `[RequirePolicy("AtLeast21")]` handlers
 Entra's token claims — and would behave identically over JSON-RPC or MCP. That independence is the point:
 authentication is a host concern, authorization is a handler concern, and they meet only at `ICurrentUser`.
 
+## Permission catalog
+
+A handler *declares* the permission it needs inline (`[RequirePermission("clients:write")]`) — no central
+registry to edit. But the **set of all permission strings** is still needed elsewhere: to **seed** permission
+claims onto roles at startup, and to drive a role→permission admin surface. Hand-maintaining that list is the
+one file that grows per feature — the "edit-for-every-module" smell the generators otherwise eliminate.
+
+`IPermissionCatalog` removes it. The generator discovers every `[RequirePermission]` and `[RequireRole]`,
+groups them by owning module, and registers each module's set; the catalog aggregates them. Inject it and
+enumerate — adding a guarded handler contributes its permission with **zero** central edits:
+
+```csharp
+public sealed class IdentitySeeder(IPermissionCatalog catalog, RoleManager<AppRole> roles) {
+    public async Task SeedAdminAsync(AppRole admin) {
+        foreach (var permission in catalog.Permissions)          // every [RequirePermission] across all modules
+            await roles.AddClaimAsync(admin, new Claim("permission", permission));
+    }
+}
+```
+
+`catalog.Permissions` and `catalog.Roles` are the deduplicated, sorted universe; `catalog.Modules` is the
+per-module breakdown. It is populated cross-assembly the same way services and validators are — each module
+contributes through its generated `ConfigureDefaultServices`, **gated by module enablement**, so a disabled
+module's permissions never appear and a referenced module library's permissions are included automatically.
+`AddElarionAuthorization` registers the catalog; generation is on under `[assembly: UseElarion]` (or the
+narrower `[assembly: GeneratePermissionCatalog]`). A guarded handler under no module is reported (`ELPERM001`).
+
 ## See also
 
 - [Resource authorization](/docs/concepts/resource-authorization) — per-resource (read/write) checks and efficient database-level filtering.

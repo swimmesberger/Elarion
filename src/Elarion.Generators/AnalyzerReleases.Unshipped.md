@@ -42,3 +42,4 @@ ELAUTH001 | Elarion.Abstractions.Authorization | Error | Authorized handler resp
 ELAUTH002 | Elarion.Abstractions.Authorization | Error | RequireResource id path does not resolve
 ELPOL001 | Elarion.Abstractions.Authorization | Error | [AuthorizationPolicy] must be on an IAuthorizationPolicy
 ELPOL002 | Elarion.Abstractions.Authorization | Warning | Authorization policy is not in any module
+ELPERM001 | Elarion.Abstractions.Authorization | Warning | Authorization requirement is not in any module
