@@ -17,31 +17,34 @@ public sealed class PermissionCatalogGeneratorTests {
         [assembly: UseElarion]
         """;
 
+    private const string AppSource = Preamble +
+        """
+
+        namespace Sample.App {
+            [AppModule("App")]
+            public static partial class AppModule { }
+
+            [RequirePermission("clients:read", PermissionKind.Read)]
+            [RequirePermission("clients:write", PermissionKind.Write)]
+            public sealed class CreateClient { }
+
+            [RequireRole("admin")]
+            public sealed class DeleteClient { }
+        }
+        """;
+
     [Fact]
-    public void EmitsPerModuleCatalogContributionAndComposes() {
-        const string source = Preamble +
-            """
-
-            namespace Sample.App {
-                [AppModule("App")]
-                public static partial class AppModule { }
-
-                [RequirePermission("clients:read")]
-                [RequirePermission("clients:write")]
-                public sealed class CreateClient { }
-
-                [RequireRole("admin")]
-                public sealed class DeleteClient { }
-            }
-            """;
-
-        var result = Generate(source);
+    public void EmitsPerModuleCatalogContributionWithKindsAndComposes() {
+        var result = Generate(AppSource);
         var extensions = GetGenerated(result, "AppPermissionCatalogExtensions.g.cs");
 
         extensions.Should().Contain("public static IServiceCollection AddAppPermissions(");
         extensions.Should().Contain("new global::Elarion.Abstractions.Authorization.PermissionCatalogModule");
         extensions.Should().Contain("Module = \"App\",");
-        extensions.Should().Contain("Permissions = new string[] { \"clients:read\", \"clients:write\" },");
+        extensions.Should().Contain(
+            "Name = \"clients:read\", Kind = global::Elarion.Abstractions.Authorization.PermissionKind.Read");
+        extensions.Should().Contain(
+            "Name = \"clients:write\", Kind = global::Elarion.Abstractions.Authorization.PermissionKind.Write");
         extensions.Should().Contain("Roles = new string[] { \"admin\" },");
 
         // The ConfigureDefaultServices filler wires it into the module aggregation (the new AddPermissions hook).
@@ -54,7 +57,28 @@ public sealed class PermissionCatalogGeneratorTests {
     }
 
     [Fact]
-    public void DeduplicatesAndSortsAcrossHandlers() {
+    public void EmitsElarionPermissionsStaticWithGroupingsAndTypedAccessors() {
+        var permissions = GetGenerated(Generate(AppSource), "ElarionPermissions.g.cs");
+
+        permissions.Should().Contain("public static partial class ElarionPermissions");
+        permissions.Should().Contain(
+            "public static global::System.Collections.Generic.IReadOnlyList<string> All { get; } = new string[] { \"clients:read\", \"clients:write\" };");
+        permissions.Should().Contain(
+            "public static global::System.Collections.Generic.IReadOnlyList<string> Roles { get; } = new string[] { \"admin\" };");
+        permissions.Should().Contain("[\"App\"] = new string[] { \"clients:read\", \"clients:write\" },");
+        permissions.Should().Contain(
+            "[global::Elarion.Abstractions.Authorization.PermissionKind.Read] = new string[] { \"clients:read\" },");
+        permissions.Should().Contain(
+            "[global::Elarion.Abstractions.Authorization.PermissionKind.Write] = new string[] { \"clients:write\" },");
+
+        // Typed accessors: first segment becomes a nested class, the rest a const member.
+        permissions.Should().Contain("public static class Clients");
+        permissions.Should().Contain("public const string Read = \"clients:read\";");
+        permissions.Should().Contain("public const string Write = \"clients:write\";");
+    }
+
+    [Fact]
+    public void StaticAllDeduplicatesAndSortsAcrossHandlers() {
         const string source = Preamble +
             """
 
@@ -71,10 +95,10 @@ public sealed class PermissionCatalogGeneratorTests {
             }
             """;
 
-        var extensions = GetGenerated(Generate(source), "AppPermissionCatalogExtensions.g.cs");
+        var permissions = GetGenerated(Generate(source), "ElarionPermissions.g.cs");
 
-        extensions.Should().Contain("Permissions = new string[] { \"a:read\", \"z:write\" },");
-        extensions.Should().Contain("Roles = global::System.Array.Empty<string>(),");
+        permissions.Should().Contain(
+            "public static global::System.Collections.Generic.IReadOnlyList<string> All { get; } = new string[] { \"a:read\", \"z:write\" };");
     }
 
     [Fact]
@@ -114,32 +138,21 @@ public sealed class PermissionCatalogGeneratorTests {
             }
             """;
 
-        var result = RunForDiagnostics(source: source, out var trees);
+        var trees = RunForTrees(source);
 
-        result.Should().BeEmpty();
         trees.Should().NotContain(tree => tree.FilePath.EndsWith("PermissionCatalogExtensions.g.cs", StringComparison.Ordinal));
+        trees.Should().NotContain(tree => tree.FilePath.EndsWith("ElarionPermissions.g.cs", StringComparison.Ordinal));
     }
 
     [Fact]
     public void IrrelevantEditReusesOutputs() {
-        const string source = Preamble +
-            """
-
-            namespace Sample.App {
-                [AppModule("App")]
-                public static partial class AppModule { }
-
-                [RequirePermission("clients:read")]
-                public sealed class CreateClient { }
-            }
-            """;
-
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new PermissionCatalogGenerator(),
-            source,
+            AppSource,
             "PermissionCatalogPermissions",
             "PermissionCatalogRoles",
-            "PermissionCatalogCombined");
+            "PermissionCatalogPerModule",
+            "PermissionCatalogStatic");
     }
 
     private static GeneratorDriverRunResult Generate(string source) {
@@ -170,9 +183,12 @@ public sealed class PermissionCatalogGeneratorTests {
     }
 
     private static IReadOnlyList<Diagnostic> RunForDiagnostics(string source) =>
-        RunForDiagnostics(source, out _);
+        Run(source).Diagnostics;
 
-    private static IReadOnlyList<Diagnostic> RunForDiagnostics(string source, out IReadOnlyList<SyntaxTree> trees) {
+    private static IReadOnlyList<SyntaxTree> RunForTrees(string source) =>
+        Run(source).GeneratedTrees;
+
+    private static GeneratorDriverRunResult Run(string source) {
         var ct = TestContext.Current.CancellationToken;
         var compilation = CSharpCompilation.Create(
             "PermissionCatalogGeneratorDiagnostics",
@@ -181,9 +197,7 @@ public sealed class PermissionCatalogGeneratorTests {
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new PermissionCatalogGenerator());
-        var runResult = driver.RunGenerators(compilation, ct).GetRunResult();
-        trees = runResult.GeneratedTrees;
-        return runResult.Diagnostics;
+        return driver.RunGenerators(compilation, ct).GetRunResult();
     }
 
     private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>

@@ -173,14 +173,38 @@ authentication is a host concern, authorization is a handler concern, and they m
 
 ## Permission catalog
 
-A handler *declares* the permission it needs inline (`[RequirePermission("clients:write")]`) — no central
-registry to edit. But the **set of all permission strings** is still needed elsewhere: to **seed** permission
-claims onto roles at startup, and to drive a role→permission admin surface. Hand-maintaining that list is the
-one file that grows per feature — the "edit-for-every-module" smell the generators otherwise eliminate.
+A handler *declares* the permission it needs inline (`[RequirePermission("properties.write")]`) — no central
+registry to edit. But the **set of all permission strings** is still needed: to **seed** permission claims onto
+roles at startup, and to drive role→permission policy. Hand-maintaining that `All`/`ReadOnly` list is the one
+file that grows per feature — the "edit-for-every-module" smell the generators otherwise eliminate.
 
-`IPermissionCatalog` removes it. The generator discovers every `[RequirePermission]` and `[RequireRole]`,
-groups them by owning module, and registers each module's set; the catalog aggregates them. Inject it and
-enumerate — adding a guarded handler contributes its permission with **zero** central edits:
+The generator removes it. It discovers every `[RequirePermission]`/`[RequireRole]` — resolving the constant when
+you write `[RequirePermission(Permissions.PropertiesWrite)]` — and emits two surfaces.
+
+### `ElarionPermissions` — compile-time
+
+A static class in your assembly's **root namespace** (above every `[AppModule]`, so referencing it never trips
+the `ELMOD002` module-boundary analyzer), aggregated **cross-assembly** from the Elarion manifest. Reference it
+from static role policy instead of a hand-kept list:
+
+```csharp
+// Roles.cs — no All/ReadOnly list to maintain
+[Admin]   = ElarionPermissions.All,
+[Manager] = [.. ElarionPermissions.All.Where(p => p != ElarionPermissions.Users.Manage)],
+[Viewer]  = ElarionPermissions.ByKind[PermissionKind.Read],
+```
+
+- `All` / `Roles` — the deduplicated, ordinally sorted universe.
+- `ByModule["Billing"]` — permissions grouped by owning `[AppModule]`.
+- `ByKind[PermissionKind.Read]` — grouped by the optional classification on
+  `[RequirePermission("x", PermissionKind.Read)]`, so a Viewer grant doesn't depend on a `.read` string-suffix
+  convention.
+- typed accessors — `ElarionPermissions.Users.Manage` (the first path segment becomes a nested class), so policy
+  references stay type-safe and survive the permission consts moving into modules.
+
+### `IPermissionCatalog` — runtime
+
+For code that enumerates permissions dynamically (a permissions admin screen), inject the DI catalog:
 
 ```csharp
 public sealed class IdentitySeeder(IPermissionCatalog catalog, RoleManager<AppRole> roles) {
@@ -191,12 +215,13 @@ public sealed class IdentitySeeder(IPermissionCatalog catalog, RoleManager<AppRo
 }
 ```
 
-`catalog.Permissions` and `catalog.Roles` are the deduplicated, sorted universe; `catalog.Modules` is the
-per-module breakdown. It is populated cross-assembly the same way services and validators are — each module
-contributes through its generated `ConfigureDefaultServices`, **gated by module enablement**, so a disabled
-module's permissions never appear and a referenced module library's permissions are included automatically.
-`AddElarionAuthorization` registers the catalog; generation is on under `[assembly: UseElarion]` (or the
-narrower `[assembly: GeneratePermissionCatalog]`). A guarded handler under no module is reported (`ELPERM001`).
+It exposes the same `Permissions`/`Roles`/`ByKind`, plus a per-module `Modules` breakdown, populated the same way
+services and validators are — each module contributes through its generated `ConfigureDefaultServices`, **gated by
+module enablement**, so a disabled module's permissions never appear and a referenced module library's are
+included automatically. `AddElarionAuthorization` registers it.
+
+Generation is on under `[assembly: UseElarion]` (or the narrower `[assembly: GeneratePermissionCatalog]`); a
+guarded handler under no module is reported (`ELPERM001`).
 
 ## See also
 
