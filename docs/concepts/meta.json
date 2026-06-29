@@ -12,6 +12,7 @@
     "authorization",
     "resource-authorization",
     "settings",
+    "persistence-and-transactions",
     "variable-substitution",
     "cross-module-communication",
     "transports",
