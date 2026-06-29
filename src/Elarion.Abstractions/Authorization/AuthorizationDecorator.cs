@@ -22,7 +22,8 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
     HandlerMetadata metadata,
     IAuthorizer authorizer,
-    bool requireAuthenticatedByDefault = false
+    bool requireAuthenticatedByDefault = false,
+    IReadOnlyList<ResourceRequirementBinding<TRequest>>? resourceBindings = null
 ) : IHandler<TRequest, TResponse>
     where TResponse : IResultFailureFactory<TResponse> {
     // Parsed-from-attributes requirements are cached per concrete handler type; the cheap default-policy
@@ -32,6 +33,19 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         var requirements = ResolveRequirements();
+
+        // Resource ids are per-call state, so they are resolved here from the generated typed accessors (never
+        // parsed at run time) and merged into the requirements the authorizer evaluates.
+        if (resourceBindings is { Count: > 0 }) {
+            var resolved = new ResourceRequirement[resourceBindings.Count];
+            for (var i = 0; i < resourceBindings.Count; i++) {
+                var binding = resourceBindings[i];
+                resolved[i] = new ResourceRequirement(binding.ResourceType, binding.Operation, binding.IdSelector(request));
+            }
+
+            requirements = requirements with { Resources = resolved };
+        }
+
         var error = await authorizer.AuthorizeAsync(requirements, request, ct).ConfigureAwait(false);
         return error is not null
             ? TResponse.Failure(error)
@@ -61,7 +75,8 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
             Permissions: permissions,
             Roles: roles,
             Claims: claims,
-            Policies: policies);
+            Policies: policies,
+            Resources: []);
     }
 
     // ConditionalWeakTable requires a reference-type value, so the requirements struct is boxed once per type.

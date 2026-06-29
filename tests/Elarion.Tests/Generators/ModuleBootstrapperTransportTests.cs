@@ -310,6 +310,30 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_RegistersResourceFiltersFromReferencedManifest_Gated() {
+        var filterReference = CompileToImage(ResourceFilterLibSource(), "Sample.FilterLib");
+
+        var generated = RunGenerator([filterReference], out var compilationWithGenerated);
+
+        // The feature module's filters are registered through AddElarion, gated by the module flag.
+        Slice(generated, "public static void AddElarion(")
+            .Should().Contain("if (IsModuleEnabled(configuration, \"FilterLib\"))")
+            .And.Contain("AddFilterLibResourceFilters(services);");
+
+        // A field-only spec registers its static Specification as a singleton; a shared spec registers scoped.
+        var method = Slice(generated, "IServiceCollection AddFilterLibResourceFilters(");
+        method.Should().Contain(
+            "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::FilterLib.Contact>>(services, global::FilterLib.ContactAccess.Specification);");
+        method.Should().Contain(
+            "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::FilterLib.Order>, global::FilterLib.OrderAccess>(services);");
+
+        // The registrations reference the referenced assembly's real types, so the generated code compiles.
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_GeneratedCodeCompiles() {
         RunGenerator(out var compilationWithGenerated);
 
@@ -514,6 +538,47 @@ public sealed class ModuleBootstrapperTransportTests {
                 public sealed record Response(string Name);
                 public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
                     ValueTask.FromResult<Result<Response>>(new Response("manifest"));
+            }
+            """;
+    }
+
+    private static string ResourceFilterLibSource() {
+        // A feature module (IsCore = 0) so its filter registration is gated by the module flag.
+        var module = EncodeFields(
+            "FilterLib", "FilterLib", "global::FilterLib.FilterModule", null, "0", "0", "0", "0", "0");
+        var owner = EncodeFields(
+            "global::FilterLib.ContactAccess", "global::FilterLib.Contact", "FilterLib", "0");
+        var shared = EncodeFields(
+            "global::FilterLib.OrderAccess", "global::FilterLib.Order", "FilterLib", "1");
+
+        return $$"""
+            using System;
+            using System.Linq.Expressions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Identity;
+            using Elarion.Authorization.EntityFrameworkCore;
+
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{owner}}")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{shared}}")]
+
+            namespace FilterLib;
+
+            public static class FilterModule { }
+
+            public sealed class Contact { public Guid Id { get; set; } }
+            public sealed class Order { public Guid Id { get; set; } }
+
+            public sealed class ContactAccess : IQueryAuthorizer<Contact> {
+                public static ContactAccess Specification { get; } = new();
+                private ContactAccess() { }
+                public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+            }
+
+            public sealed class OrderAccess : IQueryAuthorizer<Order> {
+                public OrderAccess(IResourceGrantSource grants) { }
+                public Expression<Func<Order, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
             }
             """;
     }

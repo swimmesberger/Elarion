@@ -17,6 +17,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
     private const string AppModuleAttributeMetadataName = "Elarion.Abstractions.Modules.AppModuleAttribute";
     private const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
+    private const string ResourceFilterAttributeMetadataName = "Elarion.Paging.ResourceFilterAttribute`1";
 
     private sealed record ManifestItem<T>(T? Model, ImmutableArray<Diagnostic> Diagnostics);
 
@@ -48,12 +49,47 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             .Where(static item => item.Model is not null || item.Diagnostics.Length > 0)
             .Collect();
 
-        var combined = modules.Combine(httpEndpoints).Combine(rpcMethods);
+        var resourceFilters = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ResourceFilterAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => CreateResourceFilter(ctx))
+            .Where(static filter => filter is not null)
+            .Select(static (filter, _) => filter!)
+            .Collect();
+
+        var combined = modules.Combine(httpEndpoints).Combine(rpcMethods).Combine(resourceFilters);
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var ((moduleEntries, httpEndpointEntries), rpcMethodEntries) = source;
-            EmitManifest(spc, moduleEntries, httpEndpointEntries, rpcMethodEntries);
+            var (((moduleEntries, httpEndpointEntries), rpcMethodEntries), resourceFilterEntries) = source;
+            EmitManifest(spc, moduleEntries, httpEndpointEntries, rpcMethodEntries, resourceFilterEntries);
         });
+    }
+
+    private static ElarionManifest.ResourceFilter? CreateResourceFilter(GeneratorAttributeSyntaxContext ctx)
+    {
+        if (ctx.TargetSymbol is not INamedTypeSymbol specType)
+            return null;
+
+        if (ctx.Attributes.Length == 0 ||
+            ctx.Attributes[0].AttributeClass is not { TypeArguments.Length: 1 } attributeClass ||
+            attributeClass.TypeArguments[0] is not INamedTypeSymbol entity)
+        {
+            return null;
+        }
+
+        var shared = false;
+        foreach (var named in ctx.Attributes[0].NamedArguments)
+        {
+            if (named.Key == "Shared" && named.Value.Value is true)
+                shared = true;
+        }
+
+        return new ElarionManifest.ResourceFilter(
+            specType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            entity.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            specType.ContainingNamespace?.ToDisplayString() ?? string.Empty,
+            shared);
     }
 
     private static ElarionManifest.Module? CreateModule(GeneratorAttributeSyntaxContext ctx)
@@ -152,7 +188,8 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         SourceProductionContext spc,
         ImmutableArray<ElarionManifest.Module> modules,
         ImmutableArray<ManifestItem<HttpEndpointEmission.Model>> httpEndpointItems,
-        ImmutableArray<ManifestItem<RpcMethodEmission.Model>> rpcMethodItems)
+        ImmutableArray<ManifestItem<RpcMethodEmission.Model>> rpcMethodItems,
+        ImmutableArray<ElarionManifest.ResourceFilter> resourceFilters)
     {
         foreach (var item in httpEndpointItems)
         {
@@ -175,7 +212,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             .Select(static item => item.Model!)
             .ToArray();
 
-        if (modules.Length == 0 && httpEndpoints.Length == 0 && rpcMethods.Length == 0)
+        if (modules.Length == 0 && httpEndpoints.Length == 0 && rpcMethods.Length == 0 && resourceFilters.Length == 0)
             return;
 
         var sb = new StringBuilder();
@@ -203,6 +240,11 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
                      .ThenBy(static m => m.RequestTypeFqn, StringComparer.Ordinal))
         {
             AppendAssemblyMetadata(sb, ElarionManifest.RpcMethodKey, ElarionManifest.EncodeRpcMethod(method));
+        }
+
+        foreach (var filter in resourceFilters.OrderBy(static f => f.SpecFqn, StringComparer.Ordinal))
+        {
+            AppendAssemblyMetadata(sb, ElarionManifest.ResourceFilterKey, ElarionManifest.EncodeResourceFilter(filter));
         }
 
         spc.AddSource("ElarionManifest.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));

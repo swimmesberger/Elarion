@@ -16,6 +16,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string RequirePermissionAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
     private const string RequireRoleAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireRoleAttribute";
     private const string RequirePolicyAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePolicyAttribute";
+    private const string RequireResourceAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireResourceAttribute";
     private const string AllowAnonymousAttributeMetadataName = "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
     private const string AuthorizationDefaultsAttributeMetadataName = "Elarion.Abstractions.Authorization.ElarionAuthorizationDefaultsAttribute";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
@@ -32,7 +33,16 @@ public sealed partial class HandlerRegistrationGenerator {
         CacheInvalidationInfo? CacheInvalidation,
         bool HasAuthorization,
         bool RequireAuthenticatedByDefault,
+        EquatableArray<ResourceBindingInfo> ResourceBindings,
         EquatableArray<DiagnosticInfo> Diagnostics
+    );
+
+    // A [RequireResource] binding: the resource type, the operation, and the compile-checked request path the
+    // generator validated and emits as a typed accessor (ADR-0012, Tier 1).
+    private sealed record ResourceBindingInfo(
+        string ResourceTypeFqn,
+        string Operation,
+        string IdPath
     );
 
     private sealed record DecoratorInfo(
@@ -102,6 +112,15 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' declares an authorization requirement but its response type '{1}' does not implement "
         + "IResultFailureFactory<T>, so the authorization check cannot short-circuit and would be silently "
         + "skipped; return Result<T> or Result",
+        "Elarion.Abstractions.Authorization",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ResourceIdPathNotFound = new(
+        "ELAUTH002",
+        "RequireResource id path does not resolve",
+        "Handler '{0}' declares [RequireResource] with Id path '{1}', which does not resolve to a property on "
+        + "request type '{2}'; use nameof(Request.Id) or a dotted path of existing properties",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);

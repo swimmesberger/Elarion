@@ -72,10 +72,14 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         IReadOnlyDictionary<string, List<HttpEndpointEmission.Model>> HttpByModule,
         IReadOnlyList<HttpEndpointEmission.Model> UnmatchedHttp,
         IReadOnlyDictionary<string, List<RpcMethodEmission.Model>> RpcByModule,
-        IReadOnlyList<RpcMethodEmission.Model> UnmatchedRpc
+        IReadOnlyList<RpcMethodEmission.Model> UnmatchedRpc,
+        IReadOnlyDictionary<string, List<ElarionManifest.ResourceFilter>> ResourceFiltersByModule,
+        IReadOnlyList<ElarionManifest.ResourceFilter> UnmatchedResourceFilters
     )
     {
         public bool HasHttp => HttpByModule.Count > 0 || UnmatchedHttp.Count > 0;
+
+        public bool HasResourceFilters => ResourceFiltersByModule.Count > 0 || UnmatchedResourceFilters.Count > 0;
 
         public bool HasJsonRpc => HasRpcSurface(static m => m.OnJsonRpc);
 
@@ -207,7 +211,22 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         // with an explicit one) would silently drop a handler at runtime — report it at compile time instead.
         ReportDuplicateOperationNames(rpcByModule, unmatchedRpc, spc.ReportDiagnostic);
 
-        return new TransportMaps(httpByModule, unmatchedHttp, rpcByModule, unmatchedRpc);
+        var resourceFiltersByModule = new Dictionary<string, List<ElarionManifest.ResourceFilter>>(StringComparer.Ordinal);
+        var unmatchedResourceFilters = new List<ElarionManifest.ResourceFilter>();
+        var resourceFilterEntries = manifest.ResourceFilters.ToList();
+        resourceFilterEntries.Sort(static (a, b) => string.Compare(a.SpecFqn, b.SpecFqn, StringComparison.Ordinal));
+        foreach (var entry in resourceFilterEntries)
+        {
+            var module = FindBestModule(entry.Namespace, modules);
+            // A filter under no module is registered ungated rather than silently dropped (mirrors transports).
+            if (module is null)
+                unmatchedResourceFilters.Add(entry);
+            else
+                Bucket(resourceFiltersByModule, module.ModuleName).Add(entry);
+        }
+
+        return new TransportMaps(
+            httpByModule, unmatchedHttp, rpcByModule, unmatchedRpc, resourceFiltersByModule, unmatchedResourceFilters);
     }
 
     private static void ReportDuplicateOperationNames(
@@ -663,6 +682,20 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
                     $"{entry.TypeFqn}.ConfigureServices(services, configuration);");
         }
 
+        // Data-level authorization filters ([ResourceFilter]) are registered as IQueryAuthorizer<T>, gated per module.
+        // Discovered from each assembly's Elarion manifest, so a referenced module library's filters register here too.
+        if (transport.HasResourceFilters)
+        {
+            foreach (var entry in entries)
+            {
+                if (transport.ResourceFiltersByModule.ContainsKey(entry.ModuleName))
+                    EmitModuleCall(sb, entry, $"{ResourceFiltersMethodName(entry.ModuleName)}(services);");
+            }
+
+            if (transport.UnmatchedResourceFilters.Count > 0)
+                sb.AppendLine($"        {ResourceFiltersMethodName(UnmatchedModuleName)}(services);");
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine();
 
@@ -800,10 +833,52 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         AppendHttpMethods(sb, entries, transport);
         AppendHandlersMethods(sb, entries, transport);
         AppendMcpMetadataMethods(sb, entries, transport);
+        AppendResourceFilterMethods(sb, entries, transport);
 
         sb.AppendLine("}");
 
         return sb.ToString();
+    }
+
+    private static void AppendResourceFilterMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
+    {
+        foreach (var entry in entries)
+        {
+            if (transport.ResourceFiltersByModule.TryGetValue(entry.ModuleName, out var filters) && filters.Count > 0)
+                AppendResourceFilterMethod(sb, entry.ModuleName, filters);
+        }
+
+        if (transport.UnmatchedResourceFilters.Count > 0)
+            AppendResourceFilterMethod(sb, UnmatchedModuleName, transport.UnmatchedResourceFilters);
+    }
+
+    private static void AppendResourceFilterMethod(
+        StringBuilder sb, string moduleName, IReadOnlyList<ElarionManifest.ResourceFilter> filters)
+    {
+        sb.AppendLine();
+        sb.AppendLine($"    /// <summary>Registers the [ResourceFilter] data-level authorizers in the '{moduleName}' module as IQueryAuthorizer&lt;T&gt;.</summary>");
+        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {ResourceFiltersMethodName(moduleName)}(");
+        sb.AppendLine("        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        sb.AppendLine("    {");
+        foreach (var filter in filters)
+        {
+            var serviceType = $"global::Elarion.Abstractions.Authorization.IQueryAuthorizer<{filter.EntityFqn}>";
+            if (filter.IsShared)
+            {
+                // A shared filter consults the grants set (an EXISTS), so it is a scoped service.
+                sb.AppendLine(
+                    $"        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<{serviceType}, {filter.SpecFqn}>(services);");
+            }
+            else
+            {
+                // A field-only filter is a stateless singleton exposed as the static Specification.
+                sb.AppendLine(
+                    $"        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<{serviceType}>(services, {filter.SpecFqn}.Specification);");
+            }
+        }
+
+        sb.AppendLine("        return services;");
+        sb.AppendLine("    }");
     }
 
     private static void AppendHttpMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
@@ -895,6 +970,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private static string HandlersMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}Handlers";
 
     private static string McpMetadataMethodName(string moduleName) => $"Get{ModuleMethodNamePart(moduleName)}McpMetadata";
+
+    private static string ResourceFiltersMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}ResourceFilters";
 
     private static string ModuleMethodNamePart(string moduleName)
     {
