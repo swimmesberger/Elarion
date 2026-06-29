@@ -1,7 +1,7 @@
 import { cn } from '@/lib/cn';
 
 const surfaces = [
-  { label: 'Registered service', sub: 'DI, no Program.cs entry', y: 68 },
+  { label: 'Registered handler', sub: 'DI, no Program.cs entry', y: 68 },
   { label: 'JSON-RPC method', sub: 'POST /rpc', y: 172 },
   { label: 'MCP tool', sub: 'for AI agents', y: 276 },
   { label: 'HTTP endpoint', sub: 'REST + ProblemDetails', y: 380 },
@@ -26,8 +26,16 @@ const codeLines: { indent: number; segs: { t: string; c: string }[] }[] = [
   {
     indent: 0,
     segs: [
-      { t: '[RpcMethod(', c: C.attr },
+      { t: '[Handler(', c: C.attr },
       { t: '"clients.get"', c: C.string },
+      { t: ')]', c: C.attr },
+    ],
+  },
+  {
+    indent: 0,
+    segs: [
+      { t: '[RequirePermission(', c: C.attr },
+      { t: '"clients:read"', c: C.string },
       { t: ')]', c: C.attr },
     ],
   },
