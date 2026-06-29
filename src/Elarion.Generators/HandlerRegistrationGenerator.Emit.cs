@@ -45,6 +45,7 @@ public sealed partial class HandlerRegistrationGenerator {
         // initializer (which references __handlerMetadata) sees it initialized — static initializers run in order.
         AppendHandlerMetadataField(sb, handler);
         AppendAppliesToFields(sb, handler);
+        AppendResourceBindingsField(sb, handler);
         AppendRegistrationMethod(sb, handler);
 
         if (handler.Cacheable is not null)
@@ -186,6 +187,24 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"                    new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference {{ Name = {FormatStringLiteral(handler.ResiliencePolicyName)} }});");
     }
 
+    private static void AppendResourceBindingsField(StringBuilder sb, HandlerInfo handler) {
+        if (handler.ResourceBindings.IsEmpty)
+            return;
+
+        // ADR-0012 Tier 1: each [RequireResource] id path is bound as a generated typed accessor (r => r.Id) —
+        // no reflection on the request at run time.
+        var bindingType = $"global::Elarion.Abstractions.Authorization.ResourceRequirementBinding<{handler.RequestFqn}>";
+        sb.AppendLine($"    private static readonly global::System.Collections.Generic.IReadOnlyList<{bindingType}> __resourceBindings =");
+        sb.AppendLine($"        new {bindingType}[]");
+        sb.AppendLine("        {");
+        foreach (var binding in handler.ResourceBindings.AsImmutableArray) {
+            sb.AppendLine(
+                $"            new(typeof({binding.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({FormatStringLiteral(binding.Operation)}), static __r => __r.{binding.IdPath}),");
+        }
+
+        sb.AppendLine("        };");
+    }
+
     private static void AppendAuthorizationDecorator(StringBuilder sb, HandlerInfo handler) {
         if (!handler.HasAuthorization)
             return;
@@ -193,12 +212,20 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"                handler = new global::Elarion.Abstractions.Authorization.AuthorizationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    __handlerMetadata,");
+        sb.Append("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>()");
         if (handler.RequireAuthenticatedByDefault) {
-            sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>(),");
-            sb.AppendLine("                    requireAuthenticatedByDefault: true);");
-        } else {
-            sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>());");
+            sb.Append(",");
+            sb.AppendLine();
+            sb.Append("                    requireAuthenticatedByDefault: true");
         }
+
+        if (!handler.ResourceBindings.IsEmpty) {
+            sb.Append(",");
+            sb.AppendLine();
+            sb.Append("                    resourceBindings: __resourceBindings");
+        }
+
+        sb.AppendLine(");");
     }
 
     private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {

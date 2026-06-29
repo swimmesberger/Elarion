@@ -10,6 +10,7 @@
     "validators",
     "decorator-pipelines",
     "authorization",
+    "resource-authorization",
     "settings",
     "variable-substitution",
     "cross-module-communication",

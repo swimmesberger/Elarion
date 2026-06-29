@@ -53,6 +53,22 @@ minor releases may include breaking changes.
   variables through `IVariableSource`; when the source is observable, a watched-variable change **reschedules
   affected recurring jobs immediately** (signature-based change detection; supersede + re-enqueue; mid-run
   fixed-delay chains reschedule themselves), beyond per-occurrence next-fire pickup.
+- **Resource-based & data-level authorization (`Elarion.Abstractions` + `Elarion.Paging` + new `Elarion.Authorization.EntityFrameworkCore`).**
+  Per-resource read/write checks **and** efficient database-level filtering, as two opt-in legs driven from one
+  declarative source. *List filtering:* `[ResourceFilter<TEntity>]` generates a reflection-free `IQueryAuthorizer<T>`
+  predicate composed into `IQueryable` via `.WhereAuthorized(spec, user)` **before** paging — the database filters,
+  with correct counts/pagination (never in-memory `@PostFilter`); rules are `OwnerProperty`/`TenantProperty` plus a
+  `Shared` rule that becomes a correlated `EXISTS` over the grants table for the caller's user **or any of their
+  roles**. *Point check:* `[RequireResource(typeof(T), Operation = "read", Id = nameof(Req.Id))]` extends the
+  `AuthorizationDecorator` with an `IResourceAuthorizer` seam — the resource id is a compile-checked request path, not
+  an `#id` string ([ADR-0012](docs/decisions/0012-dynamic-variable-references.md)) — and `IResourceAuthorizer` doubles
+  as the escape hatch for handler-owned pre-write validation. *Sharing:* the auth-provider-neutral
+  `Elarion.Authorization.EntityFrameworkCore` package ships a DB-native `ResourceGrant` table (user/role shares),
+  `IResourceGrantStore`, the grants-backed authorizer, and the Identity-consistent `[GenerateElarionResourceGrants]`
+  DbSet generator — composes with, but does not depend on, ASP.NET Identity. Generated filter specs are
+  auto-registered and module-feature-gated by the host bootstrapper via the assembly manifest. See
+  [`docs/concepts/resource-authorization`](docs/concepts/resource-authorization.mdx) and
+  [ADR-0013](docs/decisions/0013-resource-and-data-level-authorization.md).
 
 ### Changed
 - **The event bus is now pub/sub-only; request/reply is unified under typed dispatch (breaking).** See

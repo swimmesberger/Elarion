@@ -77,8 +77,8 @@ public sealed partial class HandlerRegistrationGenerator {
         var resiliencePolicyName = ParseResilient(classSymbol);
         diagnostics.AddRange(ValidateCacheMetadata(classSymbol, cacheable, cacheInvalidation));
 
-        var (hasAuthorization, requireAuthenticatedByDefault) = ParseAuthorization(
-            classDecl, classSymbol, responseType, compilation, moduleAuthDefaults, assemblyRequireAuthenticated, diagnostics);
+        var (hasAuthorization, requireAuthenticatedByDefault, resourceBindings) = ParseAuthorization(
+            classDecl, classSymbol, requestType, responseType, compilation, moduleAuthDefaults, assemblyRequireAuthenticated, diagnostics);
 
         return new HandlerInfo(
             handlerFqn,
@@ -92,6 +92,7 @@ public sealed partial class HandlerRegistrationGenerator {
             cacheInvalidation,
             hasAuthorization,
             requireAuthenticatedByDefault,
+            resourceBindings,
             diagnostics.ToImmutable());
     }
 
@@ -123,16 +124,20 @@ public sealed partial class HandlerRegistrationGenerator {
     // attachment is a compile-time presence decision the generator makes by inspecting the handler symbol — an
     // AppliesTo predicate is a runtime gate that always emits the decorator. A default policy
     // ([ElarionAuthorizationDefaults] at module/assembly scope) attaches to every non-anonymous handler.
-    private static (bool HasAuthorization, bool RequireAuthenticatedByDefault) ParseAuthorization(
+    private static (bool HasAuthorization, bool RequireAuthenticatedByDefault, EquatableArray<ResourceBindingInfo> ResourceBindings) ParseAuthorization(
         ClassDeclarationSyntax classDecl,
         INamedTypeSymbol classSymbol,
+        ITypeSymbol requestType,
         ITypeSymbol responseType,
         Compilation compilation,
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated,
         ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        EquatableArray<ResourceBindingInfo> noBindings = ImmutableArray<ResourceBindingInfo>.Empty;
+
         var isAllowAnonymous = false;
         var hasExplicit = false;
+        var resourceAttributes = new List<AttributeData>();
         foreach (var attribute in classSymbol.GetAttributes()) {
             switch (attribute.AttributeClass?.ToDisplayString()) {
                 case AllowAnonymousAttributeMetadataName:
@@ -144,17 +149,21 @@ public sealed partial class HandlerRegistrationGenerator {
                 case RequirePolicyAttributeMetadataName:
                     hasExplicit = true;
                     break;
+                case RequireResourceAttributeMetadataName:
+                    hasExplicit = true;
+                    resourceAttributes.Add(attribute);
+                    break;
             }
         }
 
         // AllowAnonymous wins: the handler is public, so no decorator is attached.
         if (isAllowAnonymous)
-            return (false, false);
+            return (false, false, noBindings);
 
         var defaultRequireAuthenticated =
             ResolveAuthorizationDefault(classSymbol, moduleAuthDefaults, assemblyRequireAuthenticated);
         if (!hasExplicit && !defaultRequireAuthenticated)
-            return (false, false);
+            return (false, false, noBindings);
 
         // Denial returns TResponse.Failure(...), which needs IResultFailureFactory<TResponse>. Without it the
         // check could not short-circuit and would be silently skipped — report ELAUTH001 instead of failing open.
@@ -164,10 +173,88 @@ public sealed partial class HandlerRegistrationGenerator {
                 classDecl.Identifier.GetLocation(),
                 classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 responseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
-            return (false, false);
+            return (false, false, noBindings);
         }
 
-        return (true, defaultRequireAuthenticated);
+        var bindings = BuildResourceBindings(classDecl, classSymbol, requestType, resourceAttributes, diagnostics);
+        return (true, defaultRequireAuthenticated, bindings);
+    }
+
+    // ADR-0012 Tier 1: a [RequireResource] references the resource id by a compile-checked path on the request.
+    // The path is validated against the request type and emitted as a typed accessor; an unresolvable path is
+    // ELAUTH002 (never a runtime surprise).
+    private static EquatableArray<ResourceBindingInfo> BuildResourceBindings(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol classSymbol,
+        ITypeSymbol requestType,
+        List<AttributeData> resourceAttributes,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        if (resourceAttributes.Count == 0)
+            return ImmutableArray<ResourceBindingInfo>.Empty;
+
+        var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
+        var builder = ImmutableArray.CreateBuilder<ResourceBindingInfo>();
+        foreach (var attribute in resourceAttributes) {
+            if (attribute.ConstructorArguments.Length == 0 ||
+                attribute.ConstructorArguments[0].Value is not INamedTypeSymbol resourceType)
+                continue;
+
+            var operation = "read";
+            var idPath = "Id";
+            foreach (var named in attribute.NamedArguments) {
+                if (named.Key == "Operation" && named.Value.Value is string op && op.Length > 0)
+                    operation = op;
+                else if (named.Key == "Id" && named.Value.Value is string id && id.Length > 0)
+                    idPath = id;
+            }
+
+            if (!ResourcePathResolves(requestType, idPath)) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    ResourceIdPathNotFound,
+                    classDecl.Identifier.GetLocation(),
+                    classSymbol.ToDisplayString(fmt),
+                    idPath,
+                    requestType.ToDisplayString(fmt)));
+                continue;
+            }
+
+            builder.Add(new ResourceBindingInfo(resourceType.ToDisplayString(fmt), operation, idPath));
+        }
+
+        return builder.ToImmutable();
+    }
+
+    private static bool ResourcePathResolves(ITypeSymbol requestType, string path) {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        var current = requestType;
+        foreach (var rawSegment in path.Split('.')) {
+            var segment = rawSegment.Trim();
+            if (segment.Length == 0)
+                return false;
+
+            var property = FindPublicInstanceProperty(current, segment);
+            if (property is null)
+                return false;
+
+            current = property.Type;
+        }
+
+        return true;
+    }
+
+    private static IPropertySymbol? FindPublicInstanceProperty(ITypeSymbol type, string name) {
+        for (ITypeSymbol? current = type; current is not null; current = current.BaseType) {
+            foreach (var member in current.GetMembers(name)) {
+                if (member is IPropertySymbol { IsStatic: false, GetMethod: not null } property &&
+                    property.DeclaredAccessibility == Accessibility.Public) {
+                    return property;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static bool ResolveAuthorizationDefault(

@@ -18,12 +18,64 @@ public sealed class AuthorizationDecoratorTests {
         AuthorizationOptions? options = null) {
         var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
         var authorizer = new ClaimsAuthorizer(
-            user, policies ?? [], options ?? new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
+            user, policies ?? [], new StubResourceAuthorizer(), options ?? new AuthorizationOptions(),
+            NullLogger<ClaimsAuthorizer>.Instance);
         return new AuthorizationDecorator<GuardedCommand, Result<string>>(
             inner,
             new HandlerMetadata(handlerType, typeof(GuardedCommand), typeof(Result<string>)),
             authorizer,
             requireAuthenticatedByDefault);
+    }
+
+    private static AuthorizationDecorator<GuardedCommand, Result<string>> DecorateWithResource(
+        ICurrentUser user,
+        IResourceAuthorizer resourceAuthorizer) {
+        var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
+        var authorizer = new ClaimsAuthorizer(
+            user, [], resourceAuthorizer, new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
+        return new AuthorizationDecorator<GuardedCommand, Result<string>>(
+            inner,
+            new HandlerMetadata(typeof(NoAttributesHandler), typeof(GuardedCommand), typeof(Result<string>)),
+            authorizer,
+            requireAuthenticatedByDefault: false,
+            resourceBindings: [new ResourceRequirementBinding<GuardedCommand>(
+                typeof(string), ResourceOperation.Update, static command => command.Id)]);
+    }
+
+    [Fact]
+    public async Task RequireResource_ResolvesIdFromRequest_AndDeniesWhenAuthorizerDenies() {
+        var resourceAuthorizer = new StubResourceAuthorizer(allow: false);
+        var decorator = DecorateWithResource(new FakeCurrentUser { IsAuthenticated = true }, resourceAuthorizer);
+
+        var result = await decorator.HandleAsync(new GuardedCommand(42), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Kind.Should().Be(ErrorKind.Forbidden);
+        resourceAuthorizer.Calls.Should().ContainSingle();
+        resourceAuthorizer.Calls[0].ResourceId.Should().Be(42);
+        resourceAuthorizer.Calls[0].Operation.Should().Be(ResourceOperation.Update);
+        resourceAuthorizer.Calls[0].ResourceType.Should().Be(typeof(string));
+    }
+
+    [Fact]
+    public async Task RequireResource_AllowsWhenAuthorizerAllows() {
+        var decorator = DecorateWithResource(
+            new FakeCurrentUser { IsAuthenticated = true }, new StubResourceAuthorizer(allow: true));
+
+        var result = await decorator.HandleAsync(new GuardedCommand(7), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RequireResource_UnauthenticatedReturnsUnauthorized_WithoutCallingResourceAuthorizer() {
+        var resourceAuthorizer = new StubResourceAuthorizer(allow: true);
+        var decorator = DecorateWithResource(new FakeCurrentUser { IsAuthenticated = false }, resourceAuthorizer);
+
+        var result = await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
+
+        result.Error.Kind.Should().Be(ErrorKind.Unauthorized);
+        resourceAuthorizer.Calls.Should().BeEmpty();
     }
 
     [Fact]

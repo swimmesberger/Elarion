@@ -25,6 +25,8 @@ public static class AuthorizationServiceCollectionExtensions {
 
         services.TryAddSingleton(options);
         services.TryAddScoped<IAuthorizer, ClaimsAuthorizer>();
+        // Fail-closed default; AddElarionResourceAuthorization replaces it with the grants-backed authorizer.
+        services.TryAddScoped<IResourceAuthorizer, DenyResourceAuthorizer>();
         return services;
     }
 

@@ -64,7 +64,7 @@ public sealed class CurrentUserScopeSeedingTests {
             Authenticated(new Claim("sub", "user-1"), new Claim("permission", "tenants.read")));
         var requirements = new AuthorizationRequirements(
             AllowAnonymous: false, RequireAuthenticated: false, Permissions: ["tenants.read"], Roles: [],
-            Claims: [], Policies: []);
+            Claims: [], Policies: [], Resources: []);
 
         using var scope = provider.CreateDispatchScope(context);
         var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizer>();
@@ -78,7 +78,7 @@ public sealed class CurrentUserScopeSeedingTests {
         using var provider = BuildProvider(withAuthorization: true);
         var requirements = new AuthorizationRequirements(
             AllowAnonymous: false, RequireAuthenticated: false, Permissions: ["tenants.read"], Roles: [],
-            Claims: [], Policies: []);
+            Claims: [], Policies: [], Resources: []);
 
         using var scope = provider.CreateDispatchScope();
         var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizer>();

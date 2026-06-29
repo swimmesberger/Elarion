@@ -21,6 +21,16 @@ internal sealed class FakeCurrentUser : ICurrentUser {
         Claims.Where(claim => claim.Type == type).Select(claim => claim.Value);
 }
 
+/// <summary>A configurable <see cref="IResourceAuthorizer"/> that records its calls.</summary>
+internal sealed class StubResourceAuthorizer(bool allow = true) : IResourceAuthorizer {
+    public List<ResourceAuthorizationContext> Calls { get; } = [];
+
+    public ValueTask<bool> AuthorizeResourceAsync(ResourceAuthorizationContext context, CancellationToken ct) {
+        Calls.Add(context);
+        return ValueTask.FromResult(allow);
+    }
+}
+
 /// <summary>A pass-through inner handler that records whether it ran and returns a fixed response.</summary>
 internal sealed class StubInnerHandler<TRequest, TResponse>(TResponse response) : IHandler<TRequest, TResponse> {
     public bool WasInvoked { get; private set; }

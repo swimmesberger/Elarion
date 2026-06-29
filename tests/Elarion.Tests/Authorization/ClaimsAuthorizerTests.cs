@@ -11,8 +11,10 @@ public sealed class ClaimsAuthorizerTests {
     private static ClaimsAuthorizer Create(
         FakeCurrentUser user,
         IEnumerable<NamedAuthorizationPolicy>? policies = null,
-        AuthorizationOptions? options = null) =>
-        new(user, policies ?? [], options ?? new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
+        AuthorizationOptions? options = null,
+        IResourceAuthorizer? resourceAuthorizer = null) =>
+        new(user, policies ?? [], resourceAuthorizer ?? new StubResourceAuthorizer(),
+            options ?? new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
 
     private static AuthorizationRequirements Requirements(
         bool requireAuthenticated = false,
@@ -20,8 +22,9 @@ public sealed class ClaimsAuthorizerTests {
         IReadOnlyList<string>? roles = null,
         IReadOnlyList<RequireClaimAttribute>? claims = null,
         IReadOnlyList<string>? policies = null,
-        bool allowAnonymous = false) =>
-        new(allowAnonymous, requireAuthenticated, permissions ?? [], roles ?? [], claims ?? [], policies ?? []);
+        bool allowAnonymous = false,
+        IReadOnlyList<ResourceRequirement>? resources = null) =>
+        new(allowAnonymous, requireAuthenticated, permissions ?? [], roles ?? [], claims ?? [], policies ?? [], resources ?? []);
 
     [Fact]
     public async Task AllowAnonymousShortCircuits() {

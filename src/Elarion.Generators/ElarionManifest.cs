@@ -9,6 +9,18 @@ internal static class ElarionManifest
     public const string ModuleKey = "Elarion.Manifest.Module.v1";
     public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v1";
     public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v1";
+    public const string ResourceFilterKey = "Elarion.Manifest.ResourceFilter.v1";
+
+    // A generated [ResourceFilter] data-level authorizer that the host bootstrapper registers as
+    // IQueryAuthorizer<TEntity>. The emitted-member contract: a non-shared spec exposes a static
+    // `Specification` singleton (registered AddSingleton); a shared spec is a scoped service with a
+    // grant-source constructor (registered AddScoped). See ADR-0014.
+    public sealed record ResourceFilter(
+        string SpecFqn,
+        string EntityFqn,
+        string Namespace,
+        bool IsShared
+    );
 
     public sealed record Module(
         string ModuleName,
@@ -25,24 +37,28 @@ internal static class ElarionManifest
     public sealed record Data(
         IReadOnlyList<Module> Modules,
         IReadOnlyList<HttpEndpointEmission.Model> HttpEndpoints,
-        IReadOnlyList<RpcMethodEmission.Model> RpcMethods
+        IReadOnlyList<RpcMethodEmission.Model> RpcMethods,
+        IReadOnlyList<ResourceFilter> ResourceFilters
     )
     {
-        public static readonly Data Empty = new([], [], []);
+        public static readonly Data Empty = new([], [], [], []);
 
-        public bool HasEntries => Modules.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0;
+        public bool HasEntries =>
+            Modules.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0 || ResourceFilters.Count > 0;
 
         public static Data Combine(IEnumerable<Data> manifests)
         {
             var modules = new List<Module>();
             var httpEndpoints = new List<HttpEndpointEmission.Model>();
             var rpcMethods = new List<RpcMethodEmission.Model>();
+            var resourceFilters = new List<ResourceFilter>();
 
             foreach (var manifest in manifests)
             {
                 modules.AddRange(manifest.Modules);
                 httpEndpoints.AddRange(manifest.HttpEndpoints);
                 rpcMethods.AddRange(manifest.RpcMethods);
+                resourceFilters.AddRange(manifest.ResourceFilters);
             }
 
             modules.Sort(static (a, b) =>
@@ -73,7 +89,9 @@ internal static class ElarionManifest
                 return string.Compare(a.RequestTypeFqn, b.RequestTypeFqn, StringComparison.Ordinal);
             });
 
-            return new Data(modules, httpEndpoints, rpcMethods);
+            resourceFilters.Sort(static (a, b) => string.Compare(a.SpecFqn, b.SpecFqn, StringComparison.Ordinal));
+
+            return new Data(modules, httpEndpoints, rpcMethods, resourceFilters);
         }
     }
 
@@ -114,6 +132,27 @@ internal static class ElarionManifest
             model.Description,
             ElarionManifestCodec.EncodeParameters(model.Parameters),
             EncodeBool(model.IsNameInferred));
+
+    public static string EncodeResourceFilter(ResourceFilter filter) =>
+        ElarionManifestCodec.EncodeFields(
+            filter.SpecFqn,
+            filter.EntityFqn,
+            filter.Namespace,
+            EncodeBool(filter.IsShared));
+
+    public static bool TryDecodeResourceFilter(string value, out ResourceFilter? filter)
+    {
+        filter = null;
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 4)
+            return false;
+        if (fields[0] is null || fields[1] is null || fields[2] is null)
+            return false;
+        if (!TryDecodeBool(fields[3], out var isShared))
+            return false;
+
+        filter = new ResourceFilter(fields[0]!, fields[1]!, fields[2]!, isShared);
+        return true;
+    }
 
     public static bool TryDecodeModule(string value, out Module? module)
     {
@@ -334,25 +373,28 @@ internal static class ElarionManifestReader
         var modules = new List<ElarionManifest.Module>();
         var httpEndpoints = new List<HttpEndpointEmission.Model>();
         var rpcMethods = new List<RpcMethodEmission.Model>();
+        var resourceFilters = new List<ElarionManifest.ResourceFilter>();
 
         foreach (var (key, value) in AssemblyMetadataReader.ReadRawEntries(reference, ct))
-            AddEntry(key, value, modules, httpEndpoints, rpcMethods);
+            AddEntry(key, value, modules, httpEndpoints, rpcMethods, resourceFilters);
 
-        return CreateData(modules, httpEndpoints, rpcMethods);
+        return CreateData(modules, httpEndpoints, rpcMethods, resourceFilters);
     }
 
     private static ElarionManifest.Data CreateData(
         List<ElarionManifest.Module> modules,
         List<HttpEndpointEmission.Model> httpEndpoints,
-        List<RpcMethodEmission.Model> rpcMethods) =>
-        ElarionManifest.Data.Combine([new ElarionManifest.Data(modules, httpEndpoints, rpcMethods)]);
+        List<RpcMethodEmission.Model> rpcMethods,
+        List<ElarionManifest.ResourceFilter> resourceFilters) =>
+        ElarionManifest.Data.Combine([new ElarionManifest.Data(modules, httpEndpoints, rpcMethods, resourceFilters)]);
 
     private static void AddEntry(
         string key,
         string value,
         List<ElarionManifest.Module> modules,
         List<HttpEndpointEmission.Model> httpEndpoints,
-        List<RpcMethodEmission.Model> rpcMethods)
+        List<RpcMethodEmission.Model> rpcMethods,
+        List<ElarionManifest.ResourceFilter> resourceFilters)
     {
         switch (key)
         {
@@ -369,6 +411,10 @@ internal static class ElarionManifestReader
             case ElarionManifest.RpcMethodKey:
                 if (ElarionManifest.TryDecodeRpcMethod(value, out var rpcMethod) && rpcMethod is not null)
                     rpcMethods.Add(rpcMethod);
+                break;
+            case ElarionManifest.ResourceFilterKey:
+                if (ElarionManifest.TryDecodeResourceFilter(value, out var resourceFilter) && resourceFilter is not null)
+                    resourceFilters.Add(resourceFilter);
                 break;
         }
     }
