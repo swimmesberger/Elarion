@@ -79,7 +79,7 @@ public sealed partial class HandlerRegistrationGenerator {
         // authorization decorator needs it). It captures the concrete handler type so an attribute-reading
         // decorator sees the true handler regardless of its position in the chain (the inner.GetType() approach
         // only works when innermost — a fail-open footgun).
-        var wantsMetadata = handler.HasAuthorization;
+        var wantsMetadata = handler.HasAuthorization || handler.HasFeatureGates;
         foreach (var dec in handler.Decorators) {
             // An `AppliesTo(HandlerMetadata)` predicate or a constructor HandlerMetadata dependency both need it.
             if (dec.HasAppliesTo) {
@@ -134,6 +134,10 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendPipelineDecorators(sb, handler.Decorators);
         AppendResilienceDecorator(sb, handler);
         AppendCacheInvalidationDecorator(sb, handler);
+        // The feature gate sits just inside authorization: a disabled feature never touches caching, the pipeline,
+        // or the handler, but authorization still runs first so an unauthenticated caller is never told whether a
+        // gated feature exists.
+        AppendFeatureGateDecorator(sb, handler);
         // Authorization is the outermost functional gate (just inside tracing): a denied request never touches
         // caching, the pipeline (validation/transaction), or the handler, yet the denial is still traced.
         AppendAuthorizationDecorator(sb, handler);
@@ -226,6 +230,16 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         sb.AppendLine(");");
+    }
+
+    private static void AppendFeatureGateDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (!handler.HasFeatureGates)
+            return;
+
+        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Features.FeatureGateDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine("                    __handlerMetadata,");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Features.IFeatureFlagService>());");
     }
 
     private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {
