@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Elarion.Abstractions.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,7 +35,7 @@ public static class AuthorizationServiceCollectionExtensions {
     /// Registers a named <see cref="IAuthorizationPolicy"/> (resolved from DI, so it may inject services),
     /// bound to <paramref name="name"/>. Usually emitted by the generator from <c>[AuthorizationPolicy("name")]</c>.
     /// </summary>
-    public static IServiceCollection AddElarionAuthorizationPolicy<TPolicy>(this IServiceCollection services, string name)
+    public static IServiceCollection AddElarionAuthorizationPolicy<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TPolicy>(this IServiceCollection services, string name)
         where TPolicy : class, IAuthorizationPolicy {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -48,7 +49,7 @@ public static class AuthorizationServiceCollectionExtensions {
     /// Registers a named <see cref="IAuthorizationPolicy"/> whose name is read from its
     /// <see cref="AuthorizationPolicyAttribute"/>. Convenience for manual registration of an attributed policy.
     /// </summary>
-    public static IServiceCollection AddElarionAuthorizationPolicy<TPolicy>(this IServiceCollection services)
+    public static IServiceCollection AddElarionAuthorizationPolicy<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TPolicy>(this IServiceCollection services)
         where TPolicy : class, IAuthorizationPolicy {
         ArgumentNullException.ThrowIfNull(services);
 

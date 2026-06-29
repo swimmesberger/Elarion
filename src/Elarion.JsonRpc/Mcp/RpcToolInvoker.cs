@@ -60,7 +60,7 @@ public static class RpcToolInvoker {
         object? requestObject;
         try {
             requestObject = arguments is { ValueKind: not JsonValueKind.Undefined } args
-                ? args.Deserialize(route.RequestType, serializerOptions)
+                ? args.Deserialize(serializerOptions.GetTypeInfo(route.RequestType))
                 : Activator.CreateInstance(route.RequestType);
         } catch (JsonException ex) {
             return new RpcToolResult { IsError = true, Text = $"Invalid params: {ex.Message}", ErrorCode = -32602 };
@@ -84,9 +84,10 @@ public static class RpcToolInvoker {
             };
         }
 
-        // Serialize by the runtime result type so the configured source-gen contracts apply.
+        // Serialize by the runtime result type, resolving its contract through the configured (source-gen)
+        // resolver so this stays reflection-free and Native-AOT-safe.
         var text = result.Value is { } value
-            ? JsonSerializer.Serialize(value, value.GetType(), serializerOptions)
+            ? JsonSerializer.Serialize(value, serializerOptions.GetTypeInfo(value.GetType()))
             : "{}";
 
         return new RpcToolResult { IsError = false, Text = text };

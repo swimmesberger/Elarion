@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Pipeline;
@@ -22,7 +21,11 @@ public sealed class LoggingDecorator<TRequest, TResponse>(
 public sealed class ValidationDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
     IEnumerable<IValidator<TRequest>> validators
-) : IHandler<TRequest, TResponse> {
+) : IHandler<TRequest, TResponse>
+    // Constraining TResponse to the framework's static-abstract failure factory lets the decorator build a
+    // failed result without reflection; the generator evaluates this constraint at pipeline-build time, so the
+    // decorator only attaches to handlers whose response is a Result<T>/Result.
+    where TResponse : IResultFailureFactory<TResponse> {
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         var failures = new List<string>();
         foreach (var validator in validators) {
@@ -34,7 +37,7 @@ public sealed class ValidationDecorator<TRequest, TResponse>(
             return await inner.HandleAsync(request, ct);
         }
 
-        return ResultFactory.Failure<TResponse>(
+        return TResponse.Failure(
             AppError.Validation(string.Join("; ", failures), failures));
     }
 }
@@ -60,20 +63,5 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
         }
 
         return response;
-    }
-}
-
-internal static class ResultFactory {
-    public static TResponse Failure<TResponse>(AppError error) {
-        var responseType = typeof(TResponse);
-        if (responseType.IsGenericType &&
-            responseType.GetGenericTypeDefinition() == typeof(Result<>)) {
-            var failureMethod = responseType.GetMethod(
-                nameof(Result<object>.Failure), BindingFlags.Static | BindingFlags.Public)!;
-            return (TResponse)failureMethod.Invoke(null, [error])!;
-        }
-
-        throw new InvalidOperationException(
-            $"Cannot map AppError to {responseType.Name}. Handler must return Result<T>.");
     }
 }

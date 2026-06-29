@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
@@ -13,12 +14,21 @@ namespace Elarion.JsonRpc;
 /// generators (e.g., TypeScript/Zod client stubs).
 /// </summary>
 public static class JsonRpcSchemaExporter {
+    // JSON Schema export has no System.Text.Json source-gen equivalent — JsonSchemaExporter walks type metadata
+    // reflectively — so this whole surface is build-time-only and inherently reflection/dynamic-code dependent.
+    // The requirement is declared honestly here and flows to callers (the build-time schema tool, MCP tool-schema
+    // registration) rather than being silently suppressed.
+    internal const string SchemaReflectionMessage =
+        "JSON Schema export reflects over the request/response types; it is a build-time operation and is not supported under trimming or Native AOT.";
+
     /// <summary>
     /// Generates a JSON schema string from the dispatcher's registered methods.
     /// </summary>
     /// <param name="dispatcher">A fully configured dispatcher with all methods registered.</param>
     /// <param name="jsonOptions">Optional serializer options (used for type info resolution).</param>
     /// <returns>A formatted JSON string containing the schema document.</returns>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
     public static string Generate(JsonRpcDispatcher dispatcher, JsonSerializerOptions? jsonOptions = null) {
         var options = CreateSchemaOptions(jsonOptions);
         IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType)> methods;
@@ -67,6 +77,8 @@ public static class JsonRpcSchemaExporter {
     /// such as description injection. Single source of truth shared by the full schema export and the MCP
     /// input-schema builder, so the two cannot drift on null-handling or normalization.
     /// </summary>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
     internal static JsonNode BuildSchemaNode(
         Type type,
         JsonSerializerOptions options,
@@ -123,6 +135,8 @@ public static class JsonRpcSchemaExporter {
         return schema;
     }
 
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
     internal static JsonSerializerOptions CreateSchemaOptions(JsonSerializerOptions? jsonOptions) {
         var options = jsonOptions is null
             ? new JsonSerializerOptions {
