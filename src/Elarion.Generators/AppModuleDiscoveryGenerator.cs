@@ -37,8 +37,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private const string TriggerAttributeMetadataName =
         "Elarion.AspNetCore.GenerateModuleBootstrapperAttribute";
 
-    private const string AppModuleAttributeMetadataName =
-        "Elarion.Abstractions.Modules.AppModuleAttribute";
+    private const string AppModuleAttributeMetadataName = ElarionGeneratorConventions.AppModuleAttribute;
 
     private const string UnmatchedModuleName = "<Unmatched>";
 
@@ -862,7 +861,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    {");
         foreach (var filter in filters)
         {
-            var serviceType = $"global::Elarion.Abstractions.Authorization.IQueryAuthorizer<{filter.EntityFqn}>";
+            var serviceType = $"{ElarionGeneratorConventions.QueryAuthorizerTypeFqn}<{filter.EntityFqn}>";
             if (filter.IsShared)
             {
                 // A shared filter consults the grants set (an EXISTS), so it is a scoped service.
@@ -873,7 +872,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             {
                 // A field-only filter is a stateless singleton exposed as the static Specification.
                 sb.AppendLine(
-                    $"        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<{serviceType}>(services, {filter.SpecFqn}.Specification);");
+                    $"        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<{serviceType}>(services, {filter.SpecFqn}.{ElarionGeneratorConventions.ResourceFilterSpecificationMember});");
             }
         }
 

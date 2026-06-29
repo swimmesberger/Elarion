@@ -18,10 +18,10 @@ namespace Elarion.EntityFrameworkCore.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class ResourceFilterGenerator : IIncrementalGenerator
 {
-    private const string ResourceFilterAttributeName = "Elarion.Paging.ResourceFilterAttribute`1";
+    private const string ResourceFilterAttributeName = ElarionGeneratorConventions.ResourceFilterAttribute;
     private const string CurrentUserType = "global::Elarion.Abstractions.Identity.ICurrentUser";
     private const string OperationType = "global::Elarion.Abstractions.Authorization.ResourceOperation";
-    private const string QueryAuthorizerType = "global::Elarion.Abstractions.Authorization.IQueryAuthorizer";
+    private const string QueryAuthorizerType = ElarionGeneratorConventions.QueryAuthorizerTypeFqn;
     private const string GrantSourceType = "global::Elarion.Authorization.EntityFrameworkCore.IResourceGrantSource";
     private const string ServiceCollectionType = "global::Microsoft.Extensions.DependencyInjection.IServiceCollection";
     private const string ServiceCollectionExtensions = "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions";

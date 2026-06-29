@@ -106,6 +106,10 @@ sharing one fragile partial-method signature.
   `AppModuleDiscoveryGenerator`. All follow [ADR-0006](0006-incremental-source-generator-conventions.md).
 - Tests: a cross-assembly `CompileToImage` → reference → bootstrapper test (asserting the gated registration
   and that the generated code compiles against the referenced types), plus the existing determinism check.
-- Future direction: a shared `ModuleConventions` source file (linked like `EquatableArray.cs`) can centralize
-  the FQN/encoding/hook-name functions so independent generators agree by *calling the same code*, not by
-  copying literals — the natural next step as more features adopt this pattern.
+- Shared conventions live in `ElarionGeneratorConventions` (in `Elarion.Generators`, `<Compile Include>`-linked
+  into the EF and resource-grants generator packages like `EquatableArray.cs`). It centralizes the genuinely
+  cross-package agreements — the marker-attribute metadata names, the EF model-configuration seam naming
+  (`ModelConfigurationSeamName`), and the `[ResourceFilter]` emitted-member contract — so independent
+  generators agree by *calling the same code*, not by copying literals. New cross-package conventions are added
+  here. The drift is caught by integration tests that run the cooperating generators together and assert the
+  merged output compiles (e.g. the DbContext-seam-declares / feature-generator-implements compose test).

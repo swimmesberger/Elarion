@@ -21,7 +21,7 @@ namespace Elarion.EntityFrameworkCore.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class DbContextGenerator : IIncrementalGenerator
 {
-    private const string GenerateDbSetsAttributeName = "Elarion.EntityFrameworkCore.GenerateDbSetsAttribute";
+    private const string GenerateDbSetsAttributeName = ElarionGeneratorConventions.GenerateDbSetsAttribute;
     private const string DbContextName = "Microsoft.EntityFrameworkCore.DbContext";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -124,16 +124,10 @@ public sealed class DbContextGenerator : IIncrementalGenerator
     // single legacy OnEntitiesConfigured seam.
     private static ImmutableArray<string> DiscoverModelHooks(INamedTypeSymbol classSymbol)
     {
-        const string prefix = "GenerateElarion";
-        const string suffix = "Attribute";
-
         return classSymbol.GetAttributes()
             .Select(attribute => attribute.AttributeClass?.Name)
-            .Where(name => name is not null &&
-                name.StartsWith(prefix, StringComparison.Ordinal) &&
-                name.EndsWith(suffix, StringComparison.Ordinal) &&
-                name.Length > suffix.Length)
-            .Select(name => "OnEntitiesConfigured_" + name!.Substring(0, name.Length - suffix.Length))
+            .Where(ElarionGeneratorConventions.IsModelConfigurationFeatureAttribute)
+            .Select(name => ElarionGeneratorConventions.ModelConfigurationSeamName(name!))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToImmutableArray();

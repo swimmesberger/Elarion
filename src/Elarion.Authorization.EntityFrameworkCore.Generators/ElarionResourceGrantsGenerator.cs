@@ -16,12 +16,13 @@ namespace Elarion.Authorization.EntityFrameworkCore.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
     private const string AttributeMetadataName = "Elarion.Authorization.EntityFrameworkCore.GenerateElarionResourceGrantsAttribute";
-    private const string GenerateDbSetsAttributeName = "Elarion.EntityFrameworkCore.GenerateDbSetsAttribute";
+    private const string GenerateDbSetsAttributeName = ElarionGeneratorConventions.GenerateDbSetsAttribute;
     private const string GrantsNamespace = "global::Elarion.Authorization.EntityFrameworkCore";
 
-    // Must match the per-feature seam DbContextGenerator emits: "OnEntitiesConfigured_" + attribute short name
-    // without the "Attribute" suffix.
-    private const string SeamMethodName = "OnEntitiesConfigured_GenerateElarionResourceGrants";
+    // The per-feature seam DbContextGenerator declares for this attribute — both sides derive the name from the
+    // same convention, so they cannot drift.
+    private static readonly string SeamMethodName =
+        ElarionGeneratorConventions.ModelConfigurationSeamName("GenerateElarionResourceGrantsAttribute");
 
     private static readonly DiagnosticDescriptor MissingGenerateDbSets = new(
         "ELRG001",

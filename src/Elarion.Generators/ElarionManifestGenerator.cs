@@ -14,10 +14,10 @@ namespace Elarion.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class ElarionManifestGenerator : IIncrementalGenerator
 {
-    private const string AppModuleAttributeMetadataName = "Elarion.Abstractions.Modules.AppModuleAttribute";
+    private const string AppModuleAttributeMetadataName = ElarionGeneratorConventions.AppModuleAttribute;
     private const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
-    private const string ResourceFilterAttributeMetadataName = "Elarion.Paging.ResourceFilterAttribute`1";
+    private const string ResourceFilterAttributeMetadataName = ElarionGeneratorConventions.ResourceFilterAttribute;
 
     private sealed record ManifestItem<T>(T? Model, ImmutableArray<Diagnostic> Diagnostics);
 
