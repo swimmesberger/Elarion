@@ -87,7 +87,7 @@ builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.Registe
 
 // MCP: an equally gated transport adapter over the same shared handler registry (the named bus).
 builder.Services.AddElarionMcp(
-    ModuleBootstrapper.GetMcpMetadata(builder.Configuration),
+    builder.Configuration.GetMcpMetadata(),
     serializerOptions,
     ModuleBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
