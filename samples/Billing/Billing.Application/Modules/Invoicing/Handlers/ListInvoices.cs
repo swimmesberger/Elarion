@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Billing.Application.Domain;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -9,9 +10,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Billing.Application.Modules.Invoicing.Handlers;
 
 /// <summary>Lists the current account's invoices through a cached query, invalidated by the
-/// <c>invoices</c> tag whenever <see cref="CreateInvoice"/> succeeds.</summary>
-[Cacheable("invoices", DurationSeconds = 30)]
+/// <c>invoices</c> tag whenever <see cref="CreateInvoice"/> succeeds. Requires the <c>invoices:read</c>
+/// permission.</summary>
 [Handler("invoices.list")]
+[RequirePermission("invoices:read")]
+[Cacheable("invoices", DurationSeconds = 30)]
 public sealed class ListInvoices(BillingDbContext db, ICurrentUser user)
     : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
     public sealed record Query : IQuery;

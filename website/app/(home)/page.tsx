@@ -4,16 +4,22 @@ import {
   ArrowRight,
   Binary,
   Bot,
-  Boxes,
   CalendarClock,
   CheckCircle2,
   Database,
   GitBranch,
+  Globe,
+  Inbox,
+  LockKeyhole,
+  Network,
   Plug,
-  Shuffle,
+  Radio,
+  ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Star,
   Terminal,
+  Workflow,
   XCircle,
   type LucideIcon,
 } from 'lucide-react';
@@ -31,6 +37,7 @@ export default function HomePage() {
       <TrustStrip />
       <Fanout />
       <Features />
+      <SecurityBand />
       <Comparison />
       <Philosophy />
       <Architecture />
@@ -82,8 +89,8 @@ function Hero() {
             style={{ animationDelay: '160ms' }}
           >
             Elarion turns modules, handlers, and attributes into deterministic, compile-time
-            wiring. One annotated class becomes a use case, a service, a JSON-RPC method, an MCP
-            tool, an HTTP endpoint, and a typed client — with{' '}
+            wiring. One annotated class becomes a use case, a JSON-RPC method, an MCP tool, and an
+            HTTP endpoint — authorized, cached, and validated by the same generated pipeline, with{' '}
             <span className="font-medium text-fd-foreground">no runtime reflection scanning</span>.
           </p>
 
@@ -127,13 +134,18 @@ function Hero() {
 function HandlerSnippet() {
   return (
     <pre className="whitespace-pre">
-      <span className="a">[RpcMethod(</span>
+      <span className="a">[Handler(</span>
       <span className="s">&quot;clients.get&quot;</span>
       <span className="a">)]</span>
       {'\n'}
+      <span className="a">[RequirePermission(</span>
+      <span className="s">&quot;clients:read&quot;</span>
+      <span className="a">)]</span>
+      <span className="c">{'  // one check, every transport'}</span>
+      {'\n'}
       <span className="k">public sealed class</span> <span className="t">GetClient</span>
       <span className="p">(</span>
-      <span className="t">IAppDbContext</span> db<span className="p">)</span>
+      <span className="t">BillingDbContext</span> db<span className="p">,</span> <span className="t">ICurrentUser</span> user<span className="p">)</span>
       {'\n  '}
       <span className="p">:</span> <span className="t">IHandler</span>
       <span className="p">&lt;</span><span className="t">Query</span>
@@ -145,7 +157,7 @@ function HandlerSnippet() {
       {'\n  '}
       <span className="k">public sealed record</span> <span className="t">Query</span>
       <span className="p">(</span>
-      <span className="t">Guid</span> Id<span className="p">);</span>
+      <span className="t">Guid</span> Id<span className="p">) :</span> <span className="t">IQuery</span><span className="p">;</span>
       {'\n  '}
       <span className="k">public sealed record</span> <span className="t">Response</span>
       <span className="p">(</span>
@@ -166,8 +178,9 @@ function HandlerSnippet() {
       {'\n      '}
       <span className="p">.</span>
       <span className="f">Where</span>
-      <span className="p">(</span>c <span className="p">=&gt;</span> c.Id <span className="p">==</span> q.Id
+      <span className="p">(</span>c <span className="p">=&gt;</span> c.OwnerId <span className="p">==</span> user.UserId <span className="p">&amp;&amp;</span> c.Id <span className="p">==</span> q.Id
       <span className="p">)</span>
+      <span className="c">{'  // scoped to the caller'}</span>
       {'\n      '}
       <span className="p">.</span>
       <span className="f">Select</span>
@@ -203,6 +216,7 @@ const trustItems = [
   '.NET 10 · C# 14',
   'AOT & trim-safe',
   'Zero runtime reflection',
+  'Authorization built in',
   'OpenTelemetry built in',
   'Inspectable generated code',
 ];
@@ -235,13 +249,16 @@ function Fanout() {
           <p className="mt-5 max-w-md text-fd-muted-foreground">
             Your application assemblies declare modules and handlers. Source generators emit the
             registrations, transports, and contracts as ordinary DI code at build time. Nothing is
-            discovered at startup, so missing wiring is a build error — never a runtime surprise.
+            discovered at startup, so missing wiring is a build error — never a runtime surprise. The
+            transport-agnostic named bus (HandlerDispatcher) is the single registry every name-routed
+            transport adapts, so JSON-RPC and MCP route to the same handler.
           </p>
           <ul className="mt-7 space-y-3">
             {[
               'No registration lists to keep in sync',
               'Deterministic, AOT-friendly startup',
               'The same handler, surfaced to humans and AI agents',
+              'One shared HandlerDispatcher routes every name-based transport',
             ].map((point) => (
               <li key={point} className="flex items-start gap-3 text-sm text-fd-foreground">
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-aqua" />
@@ -280,56 +297,98 @@ const features: Feature[] = [
   {
     icon: Binary,
     title: 'Compile-time, not reflection',
-    body: 'Handlers, services, validators, modules, RPC maps, and scheduled jobs are generated as ordinary DI code. Startup is deterministic and AOT-friendly; missing wiring is a build error.',
+    body: 'Handlers, services, validators, modules, transport maps, and scheduled jobs are emitted as ordinary, inspectable DI code at build time. Startup is deterministic and AOT-friendly; missing wiring is a build error, never a runtime surprise.',
     href: '/docs/concepts/source-generation',
     span: 'lg:col-span-3',
   },
   {
-    icon: Boxes,
-    title: 'Modules own their surface',
-    body: 'A module is a namespace plus an [AppModule] marker. Add a handler under it and the module publishes it automatically through generated, feature-gated registrations.',
-    href: '/docs/concepts/modules',
+    icon: Network,
+    title: 'One handler, every transport',
+    body: 'A single [Handler] registers with the transport-agnostic named bus, and JSON-RPC and MCP both route to it from one shared HandlerDispatcher while in-process callers stay typed-direct. A HandlerTransports flag picks which surfaces each operation exposes.',
+    href: '/docs/concepts/transports',
     span: 'lg:col-span-3',
   },
   {
     icon: Plug,
     title: 'End-to-end JSON-RPC',
-    body: 'Mark a handler, export a schema at build time, and generate a typed TypeScript + Zod client — without hand-writing DTOs.',
+    body: 'Mark a handler, export an rpc-schema.json at build time, and generate a typed TypeScript + Zod client. The wire contract is derived from the handler\'s Result<T> shape, never hand-written.',
     href: '/docs/capabilities/transports/json-rpc',
     span: 'lg:col-span-2',
   },
   {
     icon: Bot,
     title: 'AI-native MCP tools',
-    body: 'Expose the same handlers to AI agents as an MCP server. Tool names, descriptions, and schemas are generated from your code.',
+    body: 'Expose the same handlers to AI agents as an MCP server over Streamable HTTP. Tool names, descriptions, and schemas are generated from your code, filtered to the MCP surface — no parallel tool registry.',
     href: '/docs/capabilities/transports/mcp',
     span: 'lg:col-span-2',
   },
   {
-    icon: Shuffle,
-    title: 'Transport-neutral results',
-    body: 'Handlers return Result<T> with a transport-agnostic AppError. The host maps failures to JSON-RPC, HTTP, or any protocol.',
-    href: '/docs/concepts/results-and-errors',
+    icon: Globe,
+    title: 'HTTP & REST endpoints',
+    body: 'The same handler also maps to a minimal-API endpoint via [HttpEndpoint], with verb inference from the IQuery/ICommand markers. Failures become RFC 7807 ProblemDetails through a shared error mapper.',
+    href: '/docs/capabilities/transports/http-endpoints',
+    span: 'lg:col-span-2',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Authorization in the pipeline',
+    body: 'Gate any handler with [RequirePermission], [RequireRole], [RequireClaim], or a named [RequirePolicy] — the generator auto-attaches the authorization decorator. The same rules run under JSON-RPC, MCP, and HTTP, with opt-in deny-by-default and no ASP.NET coupling.',
+    href: '/docs/concepts/authorization',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: LockKeyhole,
+    title: 'Resource & data-level access control',
+    body: 'Point-check a resource with [RequireResource], or filter whole result sets at the database with [ResourceFilter<TEntity>] and WhereAuthorized(spec, user) — owner, tenant, and role-based sharing compiled into EF Core predicates. The query never returns rows the caller can\'t see; there is no in-memory post-filter.',
+    href: '/docs/concepts/resource-authorization',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: Radio,
+    title: 'Events split by the transaction',
+    body: 'An in-process, pub/sub-only event bus with two planes: domain events dispatch inline and commit with the command, while integration events deliver after commit on a fresh scope. [ConsumeEvent] handlers run the full decorator pipeline.',
+    href: '/docs/capabilities/events',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: Inbox,
+    title: 'Durable outbox or in-memory delivery',
+    body: 'Pick at-least-once delivery with the EF Core transactional outbox and its polling worker, or a best-effort in-memory bus — both behind the same IIntegrationEventBus and gated on your DbContext transaction commit. Swap backends without touching consumers.',
+    href: '/docs/capabilities/events/backends',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: SlidersHorizontal,
+    title: 'Runtime settings & substitution',
+    body: 'Read and write key/value settings at runtime through the AOT-clean ISettingsManager — global or per-user, backed by an in-process or EF Core store — with an IConfiguration adapter that live-reloads. Spring-style ${key:-default} placeholders resolve from a change-observable source.',
+    href: '/docs/concepts/settings',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: Workflow,
+    title: 'Modules with enforced boundaries',
+    body: 'A module is a namespace plus an [AppModule] marker, publishing its handlers, services, and jobs through generated, feature-gated registrations. Modules talk only through a published [ModuleContract] — kept honest by the ELMOD002 boundary analyzer.',
+    href: '/docs/concepts/cross-module-communication',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: Database,
+    title: 'EF Core, paging & transactions',
+    body: 'Generate DbSets and entity configuration from [EntityConfiguration]/[GenerateDbSets], page with keyset cursors, and rely on explicit transaction participation so stores and event buses commit and roll back together. Streaming-first blob contracts round out persistence.',
+    href: '/docs/capabilities/entity-framework',
     span: 'lg:col-span-2',
   },
   {
     icon: CalendarClock,
-    title: 'In-process scheduling',
-    body: 'Source-generated jobs share one scheduler with explicit overlap, misfire, and resilience policies — fully instrumented.',
+    title: 'Scheduling & resilience',
+    body: 'Source-generated jobs share one scheduler with explicit overlap, misfire, and named retry/timeout resilience policies — and those policies attach to ordinary handlers too. Recurrence accepts ${...} variables, so a setting change reschedules the job.',
     href: '/docs/capabilities/scheduling',
-    span: 'lg:col-span-2',
-  },
-  {
-    icon: Database,
-    title: 'EF Core & blob storage',
-    body: 'Generate DbSets and entity configuration, page with keyset cursors, and depend on provider-neutral, streaming-first blob contracts.',
-    href: '/docs/capabilities/entity-framework',
     span: 'lg:col-span-2',
   },
   {
     icon: Activity,
     title: 'Observable by default',
-    body: 'JSON-RPC, scheduling, caching, and resilience emit OpenTelemetry-compatible traces and metrics through System.Diagnostics.',
+    body: 'Transports, scheduling, caching, and resilience emit OpenTelemetry-compatible traces and metrics through System.Diagnostics — no separate instrumentation layer. Result<T> with a transport-agnostic AppError keeps error mapping consistent everywhere.',
     href: '/docs/capabilities/telemetry',
     span: 'lg:col-span-2',
   },
@@ -345,8 +404,9 @@ function Features() {
             A thin host. A rich application surface.
           </h2>
           <p className="mt-4 text-fd-muted-foreground">
-            Auto-detect application patterns, explicitly wire platform capabilities. Everything that
-            can be derived from your code is generated for you.
+            Auto-detect application patterns, explicitly wire platform capabilities — including
+            authorization, data-level access control, and runtime settings. Everything that can be
+            derived from your code is generated for you.
           </p>
         </Reveal>
 
@@ -377,6 +437,106 @@ function FeatureCard({ icon: Icon, title, body, href }: Feature) {
         <ArrowRight className="size-3.5" />
       </span>
     </Link>
+  );
+}
+
+/* ----------------------------------------------- Security & access control */
+
+const gateChips = ['[RequirePermission]', '[RequireRole]', '[RequireClaim]', '[RequirePolicy]'];
+const filterChips = ['[RequireResource]', '[ResourceFilter<T>]', 'WhereAuthorized(spec, user)'];
+
+function SecurityBand() {
+  return (
+    <section className="relative isolate overflow-hidden border-b border-fd-border py-24">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-grid opacity-25" />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-24 right-[-8rem] -z-10 size-[28rem] rounded-full bg-iris/15 blur-[120px]"
+      />
+      <div className="mx-auto w-full max-w-7xl px-6">
+        <Reveal className="max-w-2xl">
+          <SectionEyebrow>Guardrails, not glue</SectionEyebrow>
+          <h2 className="mt-4 font-display text-4xl font-semibold tracking-[-0.02em] text-fd-foreground">
+            Authorization that lives in the pipeline —{' '}
+            <span className="text-gradient">and in the query</span>
+          </h2>
+          <p className="mt-4 text-fd-muted-foreground">
+            The same rules apply under JSON-RPC, MCP, and HTTP because they run in the handler
+            pipeline, not the transport. They evaluate against{' '}
+            <span className="font-mono text-fd-foreground">ICurrentUser</span> with no{' '}
+            <span className="font-mono text-fd-foreground">HttpContext</span> dependency, so they
+            hold off-HTTP in jobs and custom transports too.
+          </p>
+        </Reveal>
+
+        <div className="mt-12 grid gap-5 md:grid-cols-2">
+          <Reveal>
+            <div className="panel flex h-full flex-col p-8">
+              <div className="flex size-11 items-center justify-center rounded-xl border border-fd-border bg-fd-muted/40 text-fd-primary">
+                <ShieldCheck className="size-5" />
+              </div>
+              <h3 className="mt-5 font-display text-xl font-semibold tracking-[-0.01em] text-fd-foreground">
+                Gate the handler
+              </h3>
+              <p className="mt-2.5 text-sm leading-relaxed text-fd-muted-foreground">
+                Annotate a handler and the generator auto-attaches the authorization decorator. Flip
+                an assembly or module to deny-by-default with{' '}
+                <span className="font-mono text-fd-foreground">[ElarionAuthorizationDefaults]</span>;
+                unauthenticated callers get 401, denied callers 403, mapped per transport. Optional
+                ASP.NET Core Identity composes onto a plain DbContext — but any OIDC/JWT provider
+                works, since authentication only populates the current user.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {gateChips.map((c) => (
+                  <span key={c} className="chip font-mono text-fd-foreground/80">
+                    {c}
+                  </span>
+                ))}
+              </div>
+              <Link
+                href="/docs/concepts/authorization"
+                className="group mt-auto inline-flex items-center gap-2 pt-6 text-sm font-medium text-fd-primary"
+              >
+                Authorization
+                <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+              </Link>
+            </div>
+          </Reveal>
+
+          <Reveal delay={120}>
+            <div className="panel flex h-full flex-col p-8">
+              <div className="flex size-11 items-center justify-center rounded-xl border border-fd-border bg-fd-muted/40 text-fd-primary">
+                <LockKeyhole className="size-5" />
+              </div>
+              <h3 className="mt-5 font-display text-xl font-semibold tracking-[-0.01em] text-fd-foreground">
+                Filter the data
+              </h3>
+              <p className="mt-2.5 text-sm leading-relaxed text-fd-muted-foreground">
+                Point-check one resource, or filter entire result sets at the database — owner,
+                tenant, and a role/user grant table compile into EF Core{' '}
+                <span className="font-mono text-fd-foreground">AND(scope) AND OR(grant)</span>{' '}
+                predicates. The database never returns rows the caller cannot see: there is no
+                in-memory post-filter, and the grants table is auth-provider-neutral.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {filterChips.map((c) => (
+                  <span key={c} className="chip font-mono text-fd-foreground/80">
+                    {c}
+                  </span>
+                ))}
+              </div>
+              <Link
+                href="/docs/concepts/resource-authorization"
+                className="group mt-auto inline-flex items-center gap-2 pt-6 text-sm font-medium text-fd-primary"
+              >
+                Resource authorization
+                <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+              </Link>
+            </div>
+          </Reveal>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -491,13 +651,13 @@ const layers = [
     tone: 'app',
   },
   {
-    label: 'Elarion.Generators',
-    detail: 'Compile-time wiring · diagnostics · inspectable output',
+    label: 'Compile-time generators',
+    detail: 'Bundled in Elarion · diagnostics · inspectable output',
     tone: 'gen',
   },
   {
     label: 'Elarion runtime',
-    detail: 'Decorator pipelines · Result<T> · scheduler · events',
+    detail: 'Decorator pipelines · authorization · Result<T> · scheduler · settings · events',
     tone: 'rt',
   },
 ];
@@ -506,10 +666,14 @@ const surfaces = [
   'JSON-RPC',
   'HTTP / REST',
   'MCP tools',
+  'Authorization',
+  'Resource grants',
+  'Identity',
+  'Settings',
+  'Events & outbox',
   'EF Core',
   'Blob storage',
   'Paging',
-  'Outbox',
   'Telemetry',
 ];
 
@@ -524,7 +688,8 @@ function Architecture() {
           </h2>
           <p className="mt-4 text-fd-muted-foreground">
             A clean dependency direction: abstractions at the base, a reusable runtime above, and
-            opt-in transports and data layers at the edge. The host stays a thin composition shell.
+            opt-in transports, authorization, and data layers at the edge. The host stays a thin
+            composition shell.
           </p>
         </Reveal>
 
@@ -618,7 +783,9 @@ const footerColumns: { heading: string; links: { label: string; href: string }[]
     heading: 'Features',
     links: [
       { label: 'Source generation', href: '/docs/concepts/source-generation' },
+      { label: 'Authorization', href: '/docs/concepts/authorization' },
       { label: 'JSON-RPC & MCP', href: '/docs/capabilities/transports/json-rpc' },
+      { label: 'Settings', href: '/docs/concepts/settings' },
       { label: 'Scheduling', href: '/docs/capabilities/scheduling' },
       { label: 'Events', href: '/docs/capabilities/events' },
     ],
