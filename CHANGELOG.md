@@ -9,6 +9,15 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Changed
+- **The module bootstrapper is auto-generated as the fixed-name `ElarionBootstrapper` (breaking).**
+  `[GenerateModuleBootstrapper]` becomes an **assembly** attribute (`[assembly: GenerateModuleBootstrapper]`)
+  and `AppModuleDiscoveryGenerator` emits the host wiring (`AddElarion`, `MapElarionEndpoints`,
+  `RegisterHandlers`, `GetMcpMetadata`, …) as a framework-named `ElarionBootstrapper` static in the host's root
+  namespace — you no longer declare a `partial class`. Framework-owned names give every Elarion host the same
+  composition root (see [ADR-0016](docs/decisions/0016-generated-infrastructure-is-framework-named.md)).
+  **Migration:** delete your `[GenerateModuleBootstrapper]` partial class, add
+  `[assembly: GenerateModuleBootstrapper]`, and reference `ElarionBootstrapper.RegisterHandlers` (etc.) instead of
+  your old type name.
 - **Split the web-free Identity model into `Elarion.EntityFrameworkCore.Identity` (breaking).** The
   `[GenerateElarionIdentity]` marker, its bundled source generator, and the `ApplyElarionIdentity` model
   helper moved out of `Elarion.AspNetCore.Identity` into a new `Elarion.EntityFrameworkCore.Identity` package

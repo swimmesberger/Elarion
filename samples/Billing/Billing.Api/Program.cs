@@ -2,7 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using Billing.Api.Hosting;
+using Billing.Api;
 using Billing.Application;
 using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
@@ -83,13 +83,13 @@ builder.Services.AddElarion(builder.Configuration);
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
 
 // MCP: an equally gated transport adapter over the same shared handler registry (the named bus).
 builder.Services.AddElarionMcp(
-    ModuleBootstrapper.GetMcpMetadata(builder.Configuration),
+    ElarionBootstrapper.GetMcpMetadata(builder.Configuration),
     serializerOptions,
-    ModuleBootstrapper.RegisterHandlers,
+    ElarionBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
 
 // Telemetry: register the Elarion sources/meters; the Aspire dashboard collects them over OTLP.

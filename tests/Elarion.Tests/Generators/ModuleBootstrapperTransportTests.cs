@@ -84,10 +84,7 @@ public sealed class ModuleBootstrapperTransportTests {
         """
         using Elarion.AspNetCore;
 
-        namespace Host;
-
-        [GenerateModuleBootstrapper]
-        public static partial class ModuleBootstrapper;
+        [assembly: GenerateModuleBootstrapper]
         """;
 
     [Fact]
@@ -480,7 +477,7 @@ public sealed class ModuleBootstrapperTransportTests {
             .Should().BeEmpty();
 
         return driver.GetRunResult().GeneratedTrees
-            .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), "ModuleBootstrapper.g.cs", StringComparison.Ordinal))
+            .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), "ElarionBootstrapper.g.cs", StringComparison.Ordinal))
             .GetText()
             .ToString();
     }

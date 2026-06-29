@@ -199,8 +199,10 @@ runs in the handler pipeline, so the same rules apply under JSON-RPC, MCP, and H
 ## Module-aware transport gating
 
 All three transports become **module-scoped and feature-flag-gated** when a host opts in with
-`[GenerateModuleBootstrapper]`. `AppModuleDiscoveryGenerator` associates each `[Handler]`/`[HttpEndpoint]`
-handler with a module by longest-prefix namespace match and emits, on the host bootstrapper partial:
+`[assembly: GenerateModuleBootstrapper]` — an assembly trigger that emits the fixed-name `ElarionBootstrapper`
+static into the host's root namespace (framework-owned for cross-project consistency, [ADR-0016](docs/decisions/0016-generated-infrastructure-is-framework-named.md); you never declare a partial).
+`AppModuleDiscoveryGenerator` associates each `[Handler]`/`[HttpEndpoint]`
+handler with a module by longest-prefix namespace match and emits, on the generated `ElarionBootstrapper`:
 
 - per-module **extension methods** `Map{Module}Http(this IEndpointRouteBuilder)`, `Add{Module}Handlers(this HandlerDispatcher)` (maps the module's `[Handler]` operations with their transport flags), and the parameterless `Get{Module}McpMetadata()`;
 - aggregate **extension methods** `services.AddElarion(configuration)`, `endpoints.MapElarion(configuration)` (module `MapEndpoints` + `[HttpEndpoint]`), `dispatcher.RegisterHandlers(configuration)` (builds the single shared `HandlerDispatcher`), `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and `configuration.IsModuleEnabled(name)`.
@@ -230,8 +232,8 @@ Per-endpoint authorization/conventions are the host's job, via the per-module ex
 `MapEndpoints` escape hatch — the generator never reads `[Authorize]`/`[AllowAnonymous]`. RPC/MCP gating needs
 `IConfiguration` at registry-compose time, so `AddElarionHandlerDispatcher`/`AddElarionJsonRpcDispatcher`
 (transport-neutral, via `IServiceProvider`) and `AddJsonRpc`/`AddElarionMcp` (ASP.NET, via `IConfiguration`)
-expose config-aware registration overloads, used as `AddJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers)`
-and `AddElarionMcp(config.GetMcpMetadata(), serializerOptions, ModuleBootstrapper.RegisterHandlers, configure)`
+expose config-aware registration overloads, used as `AddJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers)`
+and `AddElarionMcp(config.GetMcpMetadata(), serializerOptions, ElarionBootstrapper.RegisterHandlers, configure)`
 (the same `RegisterHandlers` delegate is passed to both as a method group, so the shared bus is built once).
 
 ## Event / messaging model

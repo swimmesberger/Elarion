@@ -1,13 +1,12 @@
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 namespace Elarion.Generators;
 
 /// <summary>
-/// Generates a <c>ModuleBootstrapper</c> class that auto-discovers all classes annotated
+/// Generates the fixed-name <c>ElarionBootstrapper</c> class that auto-discovers all classes annotated
 /// with <c>[AppModule]</c> and emits feature-flag-gated calls to their convention-based
 /// static methods (<c>ConfigureServices</c>, <c>MapEndpoints</c>, <c>GetJsonTypeInfoResolver</c>).
 /// <para>
@@ -26,9 +25,10 @@ namespace Elarion.Generators;
 /// <see cref="HttpEndpointEmission"/>, <see cref="RpcMethodEmission"/>, and <see cref="McpMetadataEmission"/>.
 /// </para>
 /// <para>
-/// Trigger: annotate a partial class with <c>[GenerateModuleBootstrapper]</c> in the host
-/// project. The generator consumes per-assembly Elarion manifests from references, directly reads modules in the
-/// current compilation, and topologically sorts discovered modules by declared dependencies.
+/// Trigger: <c>[assembly: GenerateModuleBootstrapper]</c> in the host project. The generator emits the
+/// fixed-name <c>ElarionBootstrapper</c> static into the host's root namespace (ADR-0016), consumes per-assembly
+/// Elarion manifests from references, directly reads modules in the current compilation, and topologically sorts
+/// discovered modules by declared dependencies.
 /// </para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
@@ -108,30 +108,32 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         }
     }
 
+    private const string BootstrapperTypeName = "ElarionBootstrapper";
+
     /// <inheritdoc/>
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var classProvider = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                TriggerAttributeMetadataName,
-                static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, _) =>
-                {
-                    var ns = ctx.TargetSymbol.ContainingNamespace;
-                    return new ClassTarget(
-                        ns.IsGlobalNamespace ? null : ns.ToDisplayString(),
-                        ctx.TargetSymbol.Name);
-                });
-
         var manifestProvider = context.MetadataReferencesProvider
             .Select(static (reference, ct) => ElarionManifestReader.Read(reference, ct))
             .Collect();
 
-        var combined = classProvider.Combine(manifestProvider).Combine(context.CompilationProvider);
+        // The generated bootstrapper is framework-named (ElarionBootstrapper) and emitted into the host's root
+        // namespace, so every Elarion host exposes the same composition root (ADR-0016). Triggered by the
+        // assembly attribute, not a user-declared partial.
+        var rootNamespace = context.CompilationProvider
+            .Select(static (compilation, _) => compilation.AssemblyName ?? string.Empty)
+            .Combine(context.AnalyzerConfigOptionsProvider.Select(static (options, _) =>
+                options.GlobalOptions.TryGetValue("build_property.RootNamespace", out var ns) ? ns : null))
+            .Select(static (pair, _) => string.IsNullOrEmpty(pair.Right) ? pair.Left : pair.Right!);
+
+        var combined = manifestProvider.Combine(context.CompilationProvider).Combine(rootNamespace);
 
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var ((target, manifests), compilation) = source;
+            var ((manifests, compilation), rootNs) = source;
+            if (!HasBootstrapperTrigger(compilation))
+                return;
+
             var manifest = ElarionManifest.Data.Combine(manifests);
             var entries = CollectModuleEntries(
                 compilation,
@@ -142,9 +144,21 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
             var transport = CollectTransportMaps(manifest, entries, spc);
 
+            var target = new ClassTarget(rootNs.Length == 0 ? null : rootNs, BootstrapperTypeName);
             var code = BuildSource(target, sorted, transport);
-            spc.AddSource("ModuleBootstrapper.g.cs", SourceText.From(code, Encoding.UTF8));
+            spc.AddSource("ElarionBootstrapper.g.cs", SourceText.From(code, Encoding.UTF8));
         });
+    }
+
+    private static bool HasBootstrapperTrigger(Compilation compilation)
+    {
+        foreach (var attribute in compilation.Assembly.GetAttributes())
+        {
+            if (attribute.AttributeClass?.ToDisplayString() == TriggerAttributeMetadataName)
+                return true;
+        }
+
+        return false;
     }
 
     private static TransportMaps CollectTransportMaps(
