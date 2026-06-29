@@ -2,6 +2,9 @@
 
   <PropertyGroup>
     <Description>Opinionated application primitives for module-based handler pipelines.</Description>
+    <!-- Enables the trim + Native AOT analyzers so reflection that breaks AOT is a build warning here, not a
+         surprise in a consuming app. Core is transport-/EF-free and must stay AOT-clean. -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

@@ -103,7 +103,9 @@ public sealed class JsonRpcDispatcher {
         try {
             object? requestObject;
             if (request.Params is { ValueKind: not JsonValueKind.Undefined } paramsElement) {
-                requestObject = paramsElement.Deserialize(route.RequestType, _jsonOptions);
+                // Resolve the contract through the configured (source-gen) resolver so deserialization stays
+                // reflection-free and Native-AOT-safe instead of using the RequiresDynamicCode Type overload.
+                requestObject = paramsElement.Deserialize(_jsonOptions.GetTypeInfo(route.RequestType));
             } else {
                 requestObject = Activator.CreateInstance(route.RequestType);
             }

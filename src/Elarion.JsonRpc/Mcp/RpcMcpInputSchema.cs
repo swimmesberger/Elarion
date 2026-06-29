@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -22,6 +23,8 @@ public static class RpcMcpInputSchema {
     /// regardless of the configured <see cref="JsonSerializerOptions.PropertyNamingPolicy"/> — no JSON-name
     /// guessing at compile time. The returned element owns its memory independently of the transient schema node.
     /// </remarks>
+    [RequiresUnreferencedCode(JsonRpcSchemaExporter.SchemaReflectionMessage)]
+    [RequiresDynamicCode(JsonRpcSchemaExporter.SchemaReflectionMessage)]
     public static JsonElement Build(
         Type requestType,
         JsonSerializerOptions jsonOptions,

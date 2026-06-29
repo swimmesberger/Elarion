@@ -13,7 +13,9 @@ so each can evolve independently — see [ADR-0011](../decisions/0011-runtime-se
   store (`Elarion.Settings.EntityFrameworkCore`). Both notify **only within the current process**.
   Consume settings natively (below), or as `IConfiguration`/`IOptionsMonitor<T>` via the
   `Elarion.Settings.Configuration` adapter. Cross-instance change sources (Postgres `LISTEN/NOTIFY`, Redis)
-  are planned providers over the same contracts.
+  are planned providers over the same contracts. The EF Core store writes on your injected `DbContext`, so a
+  `SetAsync`/`RemoveAsync` made inside a transaction commits or rolls back with it — see
+  [persistence & transactions](persistence-and-transactions.mdx).
 </Callout>
 
 ## Two sides
