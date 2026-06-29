@@ -52,10 +52,10 @@ major vendor behind one client — so targeting it once makes `[FeatureGate]` wo
 
 Two opt-in packages ship:
 
-- **`Elarion.OpenFeature`** — `OpenFeatureFeatureFlagService : IFeatureFlagService` over `IFeatureClient`, plus
+- **`Elarion.FeatureFlags.OpenFeature`** — `OpenFeatureFeatureFlagService : IFeatureFlagService` over `IFeatureClient`, plus
   the `ICurrentUser` → `EvaluationContext` mapping (`ElarionEvaluationContext`). Depends only on `OpenFeature`
   core. `AddElarionOpenFeature()` registers the service; the host brings the provider via `AddOpenFeature(...)`.
-- **`Elarion.FeatureManagement`** — the batteries-included default. `AddElarionFeatureManagement(config)` wires
+- **`Elarion.FeatureFlags.FeatureManagement`** — the batteries-included default. `AddElarionFeatureManagement(config)` wires
   the `OpenFeature.Contrib.Provider.FeatureManagement` provider (which is built on the current
   `IVariantFeatureManager`) and `AddElarionOpenFeature()`. It is one line of sugar over the base, isolating the
   Microsoft.FeatureManagement dependency so it is pulled only when used.
@@ -94,7 +94,7 @@ MS's `DefaultHttpTargetingContextAccessor`).
 
 - The seam is boolean-only; multivariate/variant flags need a dedicated accessor, not `[FeatureGate]`.
 - The shipped Microsoft.FeatureManagement OpenFeature provider is an early-stage (`0.x-preview`) community
-  package; it is isolated to the optional `Elarion.FeatureManagement` package, and any other OpenFeature
+  package; it is isolated to the optional `Elarion.FeatureFlags.FeatureManagement` package, and any other OpenFeature
   provider is a drop-in alternative.
 - Targeting flows through OpenFeature's `EvaluationContext`; a provider that ignores the context (or the MS
   provider's preview limitations) limits targeting fidelity — a provider concern, not a gate concern.
@@ -105,6 +105,6 @@ MS's `DefaultHttpTargetingContextAccessor`).
   (`IFeatureFlagService`, `FeatureGateAttribute`, `FeatureRequirement`, `FeatureGateDecorator`).
 - Generation: `HandlerRegistrationGenerator.Discovery.cs` (`ParseFeatureGates`) and `.Emit.cs`
   (`AppendFeatureGateDecorator`); diagnostics `ELFEAT001`/`ELFEAT002` in `.Models.cs`.
-- OpenFeature backend: `src/Elarion.OpenFeature/` (`OpenFeatureFeatureFlagService`, `ElarionEvaluationContext`,
+- OpenFeature backend: `src/Elarion.FeatureFlags.OpenFeature/` (`OpenFeatureFeatureFlagService`, `ElarionEvaluationContext`,
   `AddElarionOpenFeature`).
-- Microsoft.FeatureManagement default: `src/Elarion.FeatureManagement/` (`AddElarionFeatureManagement`).
+- Microsoft.FeatureManagement default: `src/Elarion.FeatureFlags.FeatureManagement/` (`AddElarionFeatureManagement`).

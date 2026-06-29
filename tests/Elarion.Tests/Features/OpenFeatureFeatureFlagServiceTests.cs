@@ -1,8 +1,8 @@
 using AwesomeAssertions;
 using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Identity;
-using Elarion.FeatureManagement;
-using Elarion.OpenFeature;
+using Elarion.FeatureFlags.FeatureManagement;
+using Elarion.FeatureFlags.OpenFeature;
 using Elarion.Tests.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

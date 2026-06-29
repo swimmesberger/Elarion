@@ -36,7 +36,7 @@ dependency lives in its own opt-in package, so the dependency is pulled only whe
 | --- | --- | --- |
 | `Elarion.Caching` | `HybridHandlerCache` + `AddElarionHandlerCaching` | `Microsoft.Extensions.Caching.Hybrid` |
 | `Elarion.Resilience` | `MicrosoftResiliencePipelineRunner` + `AddMicrosoftResilienceRuntime` | `Microsoft.Extensions.Resilience` |
-| `Elarion.OpenFeature` / `Elarion.FeatureManagement` | `IFeatureFlagService` backends | OpenFeature / Microsoft.FeatureManagement |
+| `Elarion.FeatureFlags.OpenFeature` / `Elarion.FeatureFlags.FeatureManagement` | `IFeatureFlagService` backends | OpenFeature / Microsoft.FeatureManagement |
 
 The moved files keep their original namespaces (`Elarion.Caching`, `Elarion.Resilience`), so consuming code
 changes only its *package reference*, not its `using` directives.

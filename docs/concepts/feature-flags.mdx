@@ -83,7 +83,7 @@ the same as on, with no `HttpContext`.
 The seam (`IFeatureFlagService`, `[FeatureGate]`, `FeatureGateDecorator`) lives in `Elarion.Abstractions` and
 carries no feature-management dependency. Two opt-in packages provide a backend:
 
-- **`Elarion.FeatureManagement`** — the batteries-included default. One call wires the OpenFeature
+- **`Elarion.FeatureFlags.FeatureManagement`** — the batteries-included default. One call wires the OpenFeature
   Microsoft.FeatureManagement provider so `[FeatureGate]` reads config-driven flags out of the box:
 
   ```csharp
@@ -92,7 +92,7 @@ carries no feature-management dependency. Two opt-in packages provide a backend:
 
   Flags are defined in the conventional `FeatureManagement` configuration section.
 
-- **`Elarion.OpenFeature`** — the provider-neutral base. Bring your own OpenFeature provider and register our
+- **`Elarion.FeatureFlags.OpenFeature`** — the provider-neutral base. Bring your own OpenFeature provider and register our
   service over it:
 
   ```csharp

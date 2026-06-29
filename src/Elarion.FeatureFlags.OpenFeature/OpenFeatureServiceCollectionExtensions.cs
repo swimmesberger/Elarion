@@ -2,7 +2,7 @@ using Elarion.Abstractions.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Elarion.OpenFeature;
+namespace Elarion.FeatureFlags.OpenFeature;
 
 /// <summary>
 /// Registration helpers for the OpenFeature-backed Elarion feature-flag provider.
