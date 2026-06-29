@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>EF Core Identity model for Elarion: the [GenerateElarionIdentity] marker and ApplyElarionIdentity helper that compose a snake_case ASP.NET Core Identity model onto a plain DbContext (no IdentityDbContext inheritance). Web-framework-free, so a persistence/application layer can model Identity without referencing the ASP.NET shared framework.</Description>
+  </PropertyGroup>
+
+  <!-- Only the EF Core Identity stores package; no Microsoft.AspNetCore.App FrameworkReference. This is the
+       whole point of the split: the Identity *model* surface depends on EF Core + Identity stores only, so a
+       web-free data layer can compose it. The host wiring (AddElarionIdentity) lives in Elarion.AspNetCore.Identity. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <!-- Bundle the Identity model source generator's analyzer into this package. NuGet analyzer assets are not
+       transitive, so the generator lives in the package the annotated assembly (the one declaring
+       [GenerateElarionIdentity] on its DbContext) references directly. ReferenceOutputAssembly=false keeps it
+       off the runtime surface; PrivateAssets=all keeps it from becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.EntityFrameworkCore.Identity.Generators\Elarion.EntityFrameworkCore.Identity.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="_BundleElarionEntityFrameworkCoreIdentityGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.EntityFrameworkCore.Identity.Generators\Elarion.EntityFrameworkCore.Identity.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionEntityFrameworkCoreIdentityGeneratorAnalyzer" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_ElarionEntityFrameworkCoreIdentityGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>

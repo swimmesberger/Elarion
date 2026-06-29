@@ -133,8 +133,10 @@ authentication provider. Two setups, identical handlers:
 
 ### ASP.NET Core Identity
 
-The optional `Elarion.AspNetCore.Identity` package wires Identity onto a **plain** `DbContext` (no
-`IdentityDbContext` inheritance) and maps the current user to the Identity claim types:
+The optional Identity packages wire Identity onto a **plain** `DbContext` (no `IdentityDbContext`
+inheritance) and map the current user to the Identity claim types — `[GenerateElarionIdentity]` (the
+web-free model, in `Elarion.EntityFrameworkCore.Identity`) on the context, `AddElarionIdentity` (the host
+wiring, in `Elarion.AspNetCore.Identity`) in `Program.cs`:
 
 ```csharp
 [GenerateDbSets]

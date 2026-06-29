@@ -8,6 +8,19 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **Split the web-free Identity model into `Elarion.EntityFrameworkCore.Identity` (breaking).** The
+  `[GenerateElarionIdentity]` marker, its bundled source generator, and the `ApplyElarionIdentity` model
+  helper moved out of `Elarion.AspNetCore.Identity` into a new `Elarion.EntityFrameworkCore.Identity` package
+  that depends only on EF Core + `Microsoft.AspNetCore.Identity.EntityFrameworkCore` (no
+  `Microsoft.AspNetCore.App` `FrameworkReference`). A persistence/application layer that owns the `DbContext`
+  can now compose the snake_case Identity model **without** pulling in the ASP.NET shared framework — the same
+  EF-only ↔ web split as `Elarion.EntityFrameworkCore` ↔ `Elarion.AspNetCore`. The host wiring
+  (`AddElarionIdentity`, the `ICurrentUser` mapping, the authorizer) stays in `Elarion.AspNetCore.Identity`.
+  **Migration:** reference `Elarion.EntityFrameworkCore.Identity` from the project that declares
+  `[GenerateElarionIdentity]` / calls `ApplyElarionIdentity`, and change its `using Elarion.AspNetCore.Identity;`
+  to `using Elarion.EntityFrameworkCore.Identity;`. See [`docs/capabilities/identity`](docs/capabilities/identity.mdx).
+
 ### Fixed
 - **`ICurrentUser` now resolves inside JSON-RPC and MCP handlers (and so does authorization).** The
   dispatchers run each call in a fresh DI child scope, which does not inherit the request scope's scoped
