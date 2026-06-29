@@ -80,6 +80,8 @@ public sealed partial class HandlerRegistrationGenerator {
         var (hasAuthorization, requireAuthenticatedByDefault, resourceBindings) = ParseAuthorization(
             classDecl, classSymbol, requestType, responseType, compilation, moduleAuthDefaults, assemblyRequireAuthenticated, diagnostics);
 
+        var hasFeatureGates = ParseFeatureGates(classDecl, classSymbol, responseType, compilation, diagnostics);
+
         return new HandlerInfo(
             handlerFqn,
             handlerName,
@@ -93,6 +95,7 @@ public sealed partial class HandlerRegistrationGenerator {
             hasAuthorization,
             requireAuthenticatedByDefault,
             resourceBindings,
+            hasFeatureGates,
             diagnostics.ToImmutable());
     }
 
@@ -345,5 +348,63 @@ public sealed partial class HandlerRegistrationGenerator {
 
         var constructed = failureFactory.Construct(responseType);
         return SatisfiesType(responseType, constructed);
+    }
+
+    // Decides whether the feature-gate decorator attaches to this handler. Like authorization, attachment is a
+    // compile-time presence decision (any [FeatureGate] on the handler), and a closed gate returns
+    // TResponse.Failure(AppError.NotFound(...)) — so the response must implement IResultFailureFactory<TResponse>
+    // (ELFEAT001) or the gate would be silently skipped. A [FeatureGate] with no/blank feature name is reported
+    // (ELFEAT002) but is otherwise inert.
+    private static bool ParseFeatureGates(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol classSymbol,
+        ITypeSymbol responseType,
+        Compilation compilation,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        var gateAttributes = classSymbol.GetAttributes()
+            .Where(candidate => candidate.AttributeClass?.ToDisplayString() == FeatureGateAttributeMetadataName)
+            .ToList();
+        if (gateAttributes.Count == 0)
+            return false;
+
+        var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
+
+        if (!ResponseSupportsFailure(responseType, compilation)) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                FeatureGateResponseNotFailureCapable,
+                classDecl.Identifier.GetLocation(),
+                classSymbol.ToDisplayString(fmt),
+                responseType.ToDisplayString(fmt)));
+            return false;
+        }
+
+        foreach (var attribute in gateAttributes) {
+            if (HasBlankFeatureName(attribute)) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    EmptyFeatureGateDescriptor,
+                    classDecl.Identifier.GetLocation(),
+                    classSymbol.ToDisplayString(fmt)));
+            }
+        }
+
+        return true;
+    }
+
+    // The feature names are the trailing `params string[]` constructor argument, which Roslyn surfaces as a single
+    // array-kind TypedConstant regardless of which [FeatureGate] constructor was used.
+    private static bool HasBlankFeatureName(AttributeData attribute) {
+        if (attribute.ConstructorArguments.Length == 0)
+            return true;
+
+        var featuresArg = attribute.ConstructorArguments[attribute.ConstructorArguments.Length - 1];
+        if (featuresArg.Kind != TypedConstantKind.Array || featuresArg.Values.Length == 0)
+            return true;
+
+        foreach (var value in featuresArg.Values) {
+            if (value.Value is not string feature || string.IsNullOrWhiteSpace(feature))
+                return true;
+        }
+
+        return false;
     }
 }

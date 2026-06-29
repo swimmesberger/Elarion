@@ -17,6 +17,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="OpenFeature.Hosting" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
@@ -38,6 +39,10 @@
     <ProjectReference Include="../../src/Elarion.Authorization.EntityFrameworkCore.Generators/Elarion.Authorization.EntityFrameworkCore.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.Generators/Elarion.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.OpenFeature/Elarion.OpenFeature.csproj" />
+    <ProjectReference Include="../../src/Elarion.FeatureManagement/Elarion.FeatureManagement.csproj" />
+    <ProjectReference Include="../../src/Elarion.Caching/Elarion.Caching.csproj" />
+    <ProjectReference Include="../../src/Elarion.Resilience/Elarion.Resilience.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.Identity.Generators/Elarion.AspNetCore.Identity.Generators.csproj" />
   </ItemGroup>

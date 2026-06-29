@@ -8,12 +8,16 @@ namespace Elarion.Resilience;
 /// Registers Elarion resilience integration services.
 /// </summary>
 public static class ResilienceServiceCollectionExtensions {
-    /// <summary>Adds the default Microsoft/Polly-backed resilience runtime.</summary>
-    public static IServiceCollection AddMicrosoftResilienceRuntime(this IServiceCollection services) {
+    /// <summary>
+    /// Adds the dependency-light in-memory resilience policy catalog (<see cref="IResiliencePolicyCatalog"/>).
+    /// This carries no third-party runtime dependency and is what the scheduler needs to resolve policy metadata;
+    /// the executable Polly-backed pipeline runner is opt-in via <c>AddMicrosoftResilienceRuntime</c> in the
+    /// <c>Elarion.Resilience</c> package.
+    /// </summary>
+    public static IServiceCollection AddElarionResiliencePolicyCatalog(this IServiceCollection services) {
         // Note 29: TryAdd keeps host applications free to replace these services with custom implementations.
         services.TryAddSingleton<InMemoryResiliencePolicyCatalog>();
         services.TryAddSingleton<IResiliencePolicyCatalog>(sp => sp.GetRequiredService<InMemoryResiliencePolicyCatalog>());
-        services.TryAddSingleton<IResiliencePipelineRunner, MicrosoftResiliencePipelineRunner>();
         return services;
     }
 

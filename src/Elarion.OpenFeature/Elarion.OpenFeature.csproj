@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>OpenFeature-backed default for Elarion feature-flag gating: implements IFeatureFlagService over the OpenFeature IFeatureClient and maps Elarion's ICurrentUser into the OpenFeature EvaluationContext (targeting key + UserId/Groups), so [FeatureGate] works with any OpenFeature provider (LaunchDarkly, ConfigCat, flagd, Microsoft.FeatureManagement, ...). Opt-in via AddElarionOpenFeature; bring your own OpenFeature provider.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="OpenFeature" />
+  </ItemGroup>
+
+</Project>

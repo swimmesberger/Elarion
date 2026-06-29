@@ -11,6 +11,7 @@
     "decorator-pipelines",
     "authorization",
     "resource-authorization",
+    "feature-flags",
     "settings",
     "persistence-and-transactions",
     "variable-substitution",
