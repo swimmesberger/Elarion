@@ -12,6 +12,7 @@ using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
+using Elarion.Authorization;
 using Elarion.Caching;
 using Elarion.JsonRpc;
 using Elarion.Messaging.Outbox;
@@ -54,6 +55,11 @@ builder.Services.AddElarionHandlerCaching();
 
 // Transport-neutral current user, filled from the authenticated principal.
 builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");
+
+// Declarative authorization: the [RequirePermission]/[RequireRole]/… attributes on handlers are enforced by
+// a generated decorator before the handler runs — the same check under JSON-RPC, MCP, and HTTP, evaluated
+// against ICurrentUser's claims with no HttpContext dependency. Registers the default ClaimsAuthorizer.
+builder.Services.AddElarionAuthorization();
 
 // Authentication: a JWT bearer issuer of your choice (Entra, Auth0, Keycloak, …). Locally, the
 // Development-only middleware below stamps a dev principal so the sample runs without an issuer.
@@ -118,12 +124,22 @@ using (var scope = app.Services.CreateScope()) {
 app.UseCors(DevCorsPolicy);
 app.UseAuthentication();
 
-// Development-only: stamp a stable dev principal so ICurrentUser resolves without an external issuer.
+// Development-only: stamp a stable dev principal so ICurrentUser resolves without an external issuer. It
+// carries the permission claims the handlers require ([RequirePermission("clients:read")], …) so the
+// authorization checks pass locally; a real issuer would mint these from the user's roles/scopes.
 if (app.Environment.IsDevelopment()) {
     app.Use(async (context, next) => {
         if (context.User.Identity?.IsAuthenticated != true) {
             context.User = new ClaimsPrincipal(
-                new ClaimsIdentity([new Claim("sub", "dev-user")], "Development"));
+                new ClaimsIdentity(
+                    [
+                        new Claim("sub", "dev-user"),
+                        new Claim("permission", "clients:read"),
+                        new Claim("permission", "clients:write"),
+                        new Claim("permission", "invoices:read"),
+                        new Claim("permission", "invoices:write"),
+                    ],
+                    "Development"));
         }
         await next();
     });

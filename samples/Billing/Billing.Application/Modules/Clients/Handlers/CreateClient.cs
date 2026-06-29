@@ -4,16 +4,19 @@ using Billing.Application.Modules.Clients.Services;
 using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Application.Modules.Clients.Handlers;
 
-/// <summary>Creates a client. Runs the default pipeline (logging → validation → transaction), scopes the
-/// row to the current user, invalidates the clients cache on success, and is exposed over JSON-RPC and
-/// as an MCP tool. The <c>[Description]</c> attributes flow through to the MCP tool surface.</summary>
+/// <summary>Creates a client. <c>[RequirePermission]</c> requires the <c>clients:write</c> permission before
+/// the handler runs. Then it runs the default pipeline (logging → validation → transaction), scopes the row
+/// to the current user, invalidates the clients cache on success, and is exposed over JSON-RPC and as an MCP
+/// tool. The <c>[Description]</c> attributes flow through to the MCP tool surface.</summary>
 [Handler("clients.create")]
+[RequirePermission("clients:write")]
 [CacheInvalidate("clients")]
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(
