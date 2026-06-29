@@ -13,11 +13,10 @@ internal static class ElarionManifest
     public const string PermissionKey = "Elarion.Manifest.Permission.v1";
     public const string RoleKey = "Elarion.Manifest.Role.v1";
 
-    // A [RequirePermission]/[RequireRole] string declared by a handler, carried so the host-side
+    // A [RequirePermission(resource, verb)]/[RequireRole] declared by a handler, carried so the host-side
     // ElarionPermissions static can aggregate the permission catalog across referenced module assemblies.
-    // Namespace is the declaring handler's namespace (the static resolves the owning module by longest prefix);
-    // Kind is the PermissionKind member name (e.g. "Read"), "Unspecified" when none was given.
-    public sealed record Permission(string Namespace, string Value, string Kind);
+    // Namespace is the declaring handler's namespace (the static resolves the owning module by longest prefix).
+    public sealed record Permission(string Namespace, string Resource, string Verb);
 
     public sealed record Role(string Namespace, string Value);
 
@@ -110,11 +109,11 @@ internal static class ElarionManifest
 
             permissions.Sort(static (a, b) =>
             {
-                var byValue = string.Compare(a.Value, b.Value, StringComparison.Ordinal);
-                if (byValue != 0)
-                    return byValue;
-                var byNs = string.Compare(a.Namespace, b.Namespace, StringComparison.Ordinal);
-                return byNs != 0 ? byNs : string.Compare(a.Kind, b.Kind, StringComparison.Ordinal);
+                var byResource = string.Compare(a.Resource, b.Resource, StringComparison.Ordinal);
+                if (byResource != 0)
+                    return byResource;
+                var byVerb = string.Compare(a.Verb, b.Verb, StringComparison.Ordinal);
+                return byVerb != 0 ? byVerb : string.Compare(a.Namespace, b.Namespace, StringComparison.Ordinal);
             });
 
             roles.Sort(static (a, b) =>
@@ -187,7 +186,7 @@ internal static class ElarionManifest
     }
 
     public static string EncodePermission(Permission permission) =>
-        ElarionManifestCodec.EncodeFields(permission.Namespace, permission.Value, permission.Kind);
+        ElarionManifestCodec.EncodeFields(permission.Namespace, permission.Resource, permission.Verb);
 
     public static bool TryDecodePermission(string value, out Permission? permission)
     {

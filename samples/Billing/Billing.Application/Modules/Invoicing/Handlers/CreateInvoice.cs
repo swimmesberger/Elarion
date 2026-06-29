@@ -15,11 +15,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Billing.Application.Modules.Invoicing.Handlers;
 
 /// <summary>Persists a <c>Draft</c> invoice and enqueues the send job in deferred-retry mode, returning
-/// the stable <c>JobId</c> so the caller can poll progress. Requires the <c>invoices:write</c> permission.
+/// the stable <c>JobId</c> so the caller can poll progress. Requires the <c>invoices.write</c> permission.
 /// The <see cref="InvoiceCreated"/> integration event is recorded in the same unit of work — it commits
 /// with the invoice, or not at all.</summary>
 [Handler("invoices.create")]
-[RequirePermission("invoices:write")]
+[RequirePermission("invoices", Verbs.Write)]
 [CacheInvalidate("invoices")]
 [Description("Creates a draft invoice and sends it to the client in the background.")]
 public sealed class CreateInvoice(

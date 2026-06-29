@@ -24,8 +24,8 @@ public sealed class PermissionCatalogGeneratorTests {
             [AppModule("App")]
             public static partial class AppModule { }
 
-            [RequirePermission("clients:read", PermissionKind.Read)]
-            [RequirePermission("clients:write", PermissionKind.Write)]
+            [RequirePermission("clients", Verbs.Read)]
+            [RequirePermission("clients", Verbs.Write)]
             public sealed class CreateClient { }
 
             [RequireRole("admin")]
@@ -34,7 +34,7 @@ public sealed class PermissionCatalogGeneratorTests {
         """;
 
     [Fact]
-    public void EmitsPerModuleCatalogContributionWithKindsAndComposes() {
+    public void EmitsPerModuleCatalogContributionWithResourceVerbAndComposes() {
         var result = Generate(AppSource);
         var extensions = GetGenerated(result, "AppPermissionCatalogExtensions.g.cs");
 
@@ -42,9 +42,9 @@ public sealed class PermissionCatalogGeneratorTests {
         extensions.Should().Contain("new global::Elarion.Abstractions.Authorization.PermissionCatalogModule");
         extensions.Should().Contain("Module = \"App\",");
         extensions.Should().Contain(
-            "Name = \"clients:read\", Kind = global::Elarion.Abstractions.Authorization.PermissionKind.Read");
+            "new global::Elarion.Abstractions.Authorization.PermissionCatalogEntry { Permission = \"clients.read\", Resource = \"clients\", Verb = \"read\" },");
         extensions.Should().Contain(
-            "Name = \"clients:write\", Kind = global::Elarion.Abstractions.Authorization.PermissionKind.Write");
+            "new global::Elarion.Abstractions.Authorization.PermissionCatalogEntry { Permission = \"clients.write\", Resource = \"clients\", Verb = \"write\" },");
         extensions.Should().Contain("Roles = new string[] { \"admin\" },");
 
         // The ConfigureDefaultServices filler wires it into the module aggregation (the new AddPermissions hook).
@@ -57,24 +57,23 @@ public sealed class PermissionCatalogGeneratorTests {
     }
 
     [Fact]
-    public void EmitsElarionPermissionsStaticWithGroupingsAndTypedAccessors() {
+    public void EmitsElarionPermissionsStaticWithKubernetesAxesAndTypedAccessors() {
         var permissions = GetGenerated(Generate(AppSource), "ElarionPermissions.g.cs");
 
         permissions.Should().Contain("public static partial class ElarionPermissions");
         permissions.Should().Contain(
-            "public static global::System.Collections.Generic.IReadOnlyList<string> All { get; } = new string[] { \"clients:read\", \"clients:write\" };");
+            "public static global::System.Collections.Generic.IReadOnlyList<string> All { get; } = new string[] { \"clients.read\", \"clients.write\" };");
         permissions.Should().Contain(
             "public static global::System.Collections.Generic.IReadOnlyList<string> Roles { get; } = new string[] { \"admin\" };");
-        permissions.Should().Contain("[\"App\"] = new string[] { \"clients:read\", \"clients:write\" },");
-        permissions.Should().Contain(
-            "[global::Elarion.Abstractions.Authorization.PermissionKind.Read] = new string[] { \"clients:read\" },");
-        permissions.Should().Contain(
-            "[global::Elarion.Abstractions.Authorization.PermissionKind.Write] = new string[] { \"clients:write\" },");
+        permissions.Should().Contain("[\"App\"] = new string[] { \"clients.read\", \"clients.write\" },");        // ByModule
+        permissions.Should().Contain("[\"clients\"] = new string[] { \"clients.read\", \"clients.write\" },");    // ByResource
+        permissions.Should().Contain("[\"read\"] = new string[] { \"clients.read\" },");                          // ByVerb
+        permissions.Should().Contain("[\"write\"] = new string[] { \"clients.write\" },");
 
-        // Typed accessors: first segment becomes a nested class, the rest a const member.
+        // Typed accessors: resource becomes a nested class, verb a const member.
         permissions.Should().Contain("public static class Clients");
-        permissions.Should().Contain("public const string Read = \"clients:read\";");
-        permissions.Should().Contain("public const string Write = \"clients:write\";");
+        permissions.Should().Contain("public const string Read = \"clients.read\";");
+        permissions.Should().Contain("public const string Write = \"clients.write\";");
     }
 
     [Fact]
@@ -86,11 +85,11 @@ public sealed class PermissionCatalogGeneratorTests {
                 [AppModule("App")]
                 public static partial class AppModule { }
 
-                [RequirePermission("z:write")]
+                [RequirePermission("z", "write")]
                 public sealed class One { }
 
-                [RequirePermission("a:read")]
-                [RequirePermission("z:write")]
+                [RequirePermission("a", "read")]
+                [RequirePermission("z", "write")]
                 public sealed class Two { }
             }
             """;
@@ -98,7 +97,7 @@ public sealed class PermissionCatalogGeneratorTests {
         var permissions = GetGenerated(Generate(source), "ElarionPermissions.g.cs");
 
         permissions.Should().Contain(
-            "public static global::System.Collections.Generic.IReadOnlyList<string> All { get; } = new string[] { \"a:read\", \"z:write\" };");
+            "public static global::System.Collections.Generic.IReadOnlyList<string> All { get; } = new string[] { \"a.read\", \"z.write\" };");
     }
 
     [Fact]
@@ -112,7 +111,7 @@ public sealed class PermissionCatalogGeneratorTests {
             }
 
             namespace Sample.Outside {
-                [RequirePermission("orphan:read")]
+                [RequirePermission("orphan", "read")]
                 public sealed class OrphanHandler { }
             }
             """;
@@ -133,7 +132,7 @@ public sealed class PermissionCatalogGeneratorTests {
                 [AppModule("App")]
                 public static partial class AppModule { }
 
-                [RequirePermission("clients:read")]
+                [RequirePermission("clients", Verbs.Read)]
                 public sealed class CreateClient { }
             }
             """;

@@ -237,11 +237,11 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         var permissionSet = new HashSet<ElarionManifest.Permission>();
         foreach (var guard in permissionGuards)
         foreach (var value in guard.Values)
-            permissionSet.Add(new ElarionManifest.Permission(guard.Namespace, value.Value, value.Kind));
+            permissionSet.Add(new ElarionManifest.Permission(guard.Namespace, value.Resource, value.Verb));
         var permissions = permissionSet
-            .OrderBy(static p => p.Value, StringComparer.Ordinal)
+            .OrderBy(static p => p.Resource, StringComparer.Ordinal)
+            .ThenBy(static p => p.Verb, StringComparer.Ordinal)
             .ThenBy(static p => p.Namespace, StringComparer.Ordinal)
-            .ThenBy(static p => p.Kind, StringComparer.Ordinal)
             .ToArray();
 
         var roleSet = new HashSet<ElarionManifest.Role>();

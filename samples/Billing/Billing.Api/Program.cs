@@ -125,7 +125,7 @@ app.UseCors(DevCorsPolicy);
 app.UseAuthentication();
 
 // Development-only: stamp a stable dev principal so ICurrentUser resolves without an external issuer. It
-// carries the permission claims the handlers require ([RequirePermission("clients:read")], …) so the
+// carries the permission claims the handlers require ([RequirePermission("clients", Verbs.Read)], …) so the
 // authorization checks pass locally; a real issuer would mint these from the user's roles/scopes.
 if (app.Environment.IsDevelopment()) {
     app.Use(async (context, next) => {
@@ -134,10 +134,10 @@ if (app.Environment.IsDevelopment()) {
                 new ClaimsIdentity(
                     [
                         new Claim("sub", "dev-user"),
-                        new Claim("permission", "clients:read"),
-                        new Claim("permission", "clients:write"),
-                        new Claim("permission", "invoices:read"),
-                        new Claim("permission", "invoices:write"),
+                        new Claim("permission", "clients.read"),
+                        new Claim("permission", "clients.write"),
+                        new Claim("permission", "invoices.read"),
+                        new Claim("permission", "invoices.write"),
                     ],
                     "Development"));
         }

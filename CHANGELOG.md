@@ -32,19 +32,20 @@ minor releases may include breaking changes.
   [`docs/capabilities/current-user`](docs/capabilities/current-user.mdx).
 
 ### Added
-- **Source-generated permission catalog (`ElarionPermissions` + `IPermissionCatalog`).** A new
-  `PermissionCatalogGenerator` discovers every `[RequirePermission]`/`[RequireRole]` (resolving a
-  `const`-referenced permission to its value) and emits two surfaces, so seeding and role→permission policy
-  enumerate the full set instead of a hand-kept `Permissions.All`/`ReadOnly` list — zero central edits per guarded
-  handler. The **compile-time** `ElarionPermissions` static (in the assembly's root namespace) exposes
-  `All`/`Roles`/`ByModule`/`ByKind` and typed accessors (`ElarionPermissions.Users.Manage`) for static role
-  policy, aggregated cross-assembly from the Elarion manifest. The **runtime** `IPermissionCatalog`
-  (`Elarion.Abstractions.Authorization`, registered by `AddElarionAuthorization`) exposes the same data for
-  dynamic enumeration, aggregating one `PermissionCatalogModule` per module via the module's gated
-  `ConfigureDefaultServices` (cross-assembly; a disabled module contributes nothing). The optional
-  `[RequirePermission("x", PermissionKind.Read)]` classification drives `ByKind`. Generation is on under
-  `[assembly: UseElarion]` or `[assembly: GeneratePermissionCatalog]`; diagnostics `ELPERM001` (handler under no
-  module) and `ELPERM002` (colliding typed accessor). See
+- **Source-generated permission catalog (`ElarionPermissions` + `IPermissionCatalog`), Kubernetes-RBAC style.**
+  `[RequirePermission]` now takes a **`(resource, verb)`** pair (`[RequirePermission("properties", Verbs.Read)]`,
+  enforced as the composed claim `properties.read`; verb vocabulary open via the new `Verbs` constants or any
+  string). A new `PermissionCatalogGenerator` discovers every `[RequirePermission(resource, verb)]`/`[RequireRole]`
+  and emits two surfaces, so seeding and role→permission policy enumerate the full set instead of a hand-kept
+  `Permissions.All`/`ReadOnly` list — zero central edits per guarded handler. The **compile-time**
+  `ElarionPermissions` static (in the assembly's root namespace) exposes `All`/`Roles`/`ByModule`/`ByResource`/
+  `ByVerb` and typed accessors (`ElarionPermissions.Properties.Read`), aggregated cross-assembly from the Elarion
+  manifest — so static role policy reads like K8s rules (`ByResource["properties"]`, `ByVerb["read"]`). The
+  **runtime** `IPermissionCatalog` (`Elarion.Abstractions.Authorization`, registered by `AddElarionAuthorization`)
+  exposes the same data for dynamic enumeration, aggregating one `PermissionCatalogModule` per module via the
+  module's gated `ConfigureDefaultServices` (cross-assembly; a disabled module contributes nothing). Generation is
+  on under `[assembly: UseElarion]` or `[assembly: GeneratePermissionCatalog]`; diagnostics `ELPERM001` (handler
+  under no module) and `ELPERM002` (colliding typed accessor). See
   [`docs/concepts/authorization`](docs/concepts/authorization.mdx#permission-catalog).
 - **Per-call dispatch-scope seeding (`Elarion.JsonRpc`).** `IDispatchScopeInitializer` +
   `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(context)` / `SeedScope(context)` helpers

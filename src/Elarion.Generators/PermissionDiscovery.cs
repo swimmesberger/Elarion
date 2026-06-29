@@ -4,11 +4,11 @@ using Microsoft.CodeAnalysis;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Shared discovery of <c>[RequirePermission]</c>/<c>[RequireRole]</c> strings (and the permission's
-/// <c>PermissionKind</c>) off a handler, used by both <see cref="ElarionManifestGenerator"/> (which records them
-/// in the assembly manifest for cross-assembly aggregation) and <see cref="PermissionCatalogGenerator"/> (which
-/// emits the runtime catalog contributions and the compile-time <c>ElarionPermissions</c> static). Keeping it in
-/// one place means the two generators can never drift on how a requirement is read.
+/// Shared discovery of <c>[RequirePermission(resource, verb)]</c>/<c>[RequireRole("…")]</c> off a handler, used by
+/// both <see cref="ElarionManifestGenerator"/> (which records them in the assembly manifest for cross-assembly
+/// aggregation) and <see cref="PermissionCatalogGenerator"/> (which emits the runtime catalog contributions and
+/// the compile-time <c>ElarionPermissions</c> static). Keeping it in one place means the two generators can never
+/// drift on how a requirement is read or how the permission string is composed.
 /// </summary>
 internal static class PermissionDiscovery
 {
@@ -17,10 +17,11 @@ internal static class PermissionDiscovery
     public const string RequireRoleAttributeMetadataName =
         "Elarion.Abstractions.Authorization.RequireRoleAttribute";
 
-    private const string UnspecifiedKind = "Unspecified";
+    // Must match RequirePermissionAttribute.Separator — the resource/verb join in the composed permission string.
+    public const string Separator = ".";
 
-    /// <summary>A permission string with its declared <c>PermissionKind</c> member name (e.g. "Read").</summary>
-    public sealed record PermissionValue(string Value, string Kind);
+    /// <summary>A permission as <c>(resource, verb)</c> plus the composed <c>{resource}.{verb}</c> string.</summary>
+    public sealed record PermissionValue(string Resource, string Verb, string Permission);
 
     /// <summary>Every <c>[RequirePermission]</c> on one handler.</summary>
     public sealed record PermissionGuard(
@@ -44,11 +45,11 @@ internal static class PermissionDiscovery
         var values = ImmutableArray.CreateBuilder<PermissionValue>();
         foreach (var attribute in ctx.Attributes)
         {
-            if (attribute.ConstructorArguments.Length > 0 &&
-                attribute.ConstructorArguments[0].Value is string value &&
-                !string.IsNullOrWhiteSpace(value))
+            if (attribute.ConstructorArguments.Length >= 2 &&
+                attribute.ConstructorArguments[0].Value is string resource && !string.IsNullOrWhiteSpace(resource) &&
+                attribute.ConstructorArguments[1].Value is string verb && !string.IsNullOrWhiteSpace(verb))
             {
-                values.Add(new PermissionValue(value, ResolveKind(attribute)));
+                values.Add(new PermissionValue(resource, verb, resource + Separator + verb));
             }
         }
 
@@ -86,28 +87,6 @@ internal static class PermissionDiscovery
             Namespace(type),
             values.ToImmutable().ToEquatableArray(),
             LocationInfo.From(type));
-    }
-
-    // The PermissionKind member name from the attribute's optional second argument; "Unspecified" when omitted.
-    private static string ResolveKind(AttributeData attribute)
-    {
-        if (attribute.ConstructorArguments.Length < 2)
-            return UnspecifiedKind;
-
-        var argument = attribute.ConstructorArguments[1];
-        if (argument.Kind == TypedConstantKind.Error || argument.Value is null)
-            return UnspecifiedKind;
-
-        if (argument.Type is INamedTypeSymbol enumType)
-        {
-            foreach (var member in enumType.GetMembers())
-            {
-                if (member is IFieldSymbol { HasConstantValue: true } field && Equals(field.ConstantValue, argument.Value))
-                    return field.Name;
-            }
-        }
-
-        return UnspecifiedKind;
     }
 
     private static string Namespace(INamedTypeSymbol type) =>
