@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using Elarion.AspNetCore.Identity.Generators;
+using Elarion.EntityFrameworkCore.Identity.Generators;
 using Elarion.EntityFrameworkCore.Generators;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -14,7 +14,7 @@ public sealed class ElarionIdentityGeneratorTests {
         using Microsoft.AspNetCore.Identity;
         using Microsoft.EntityFrameworkCore;
         using Elarion.EntityFrameworkCore;
-        using Elarion.AspNetCore.Identity;
+        using Elarion.EntityFrameworkCore.Identity;
 
         namespace Sample.App {
             public sealed class AppUser : IdentityUser<Guid>;
@@ -39,7 +39,7 @@ public sealed class ElarionIdentityGeneratorTests {
         generated.Should().Contain("global::Microsoft.AspNetCore.Identity.IdentityUserToken<global::System.Guid>");
         generated.Should().Contain("partial void OnEntitiesConfigured(ModelBuilder modelBuilder)");
         generated.Should().Contain(
-            "global::Elarion.AspNetCore.Identity.IdentityModelBuilderExtensions.ApplyElarionIdentity"
+            "global::Elarion.EntityFrameworkCore.Identity.IdentityModelBuilderExtensions.ApplyElarionIdentity"
             + "<global::Sample.App.AppUser, global::Sample.App.AppRole, global::System.Guid>(");
         generated.Should().Contain("snakeCase: true");
     }
@@ -62,7 +62,7 @@ public sealed class ElarionIdentityGeneratorTests {
             using System;
             using Microsoft.AspNetCore.Identity;
             using Microsoft.EntityFrameworkCore;
-            using Elarion.AspNetCore.Identity;
+            using Elarion.EntityFrameworkCore.Identity;
 
             namespace Sample.App {
                 public sealed class AppUser : IdentityUser<Guid>;

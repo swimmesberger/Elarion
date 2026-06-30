@@ -8,6 +8,28 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **The module bootstrapper is auto-generated as the fixed-name `ElarionBootstrapper` (breaking).**
+  `[GenerateModuleBootstrapper]` becomes an **assembly** attribute (`[assembly: GenerateModuleBootstrapper]`)
+  and `AppModuleDiscoveryGenerator` emits the host wiring (`AddElarion`, `MapElarionEndpoints`,
+  `RegisterHandlers`, `GetMcpMetadata`, …) as a framework-named `ElarionBootstrapper` static in the host's root
+  namespace — you no longer declare a `partial class`. Framework-owned names give every Elarion host the same
+  composition root (see [ADR-0018](docs/decisions/0018-generated-infrastructure-is-framework-named.md)).
+  **Migration:** delete your `[GenerateModuleBootstrapper]` partial class, add
+  `[assembly: GenerateModuleBootstrapper]`, and reference `ElarionBootstrapper.RegisterHandlers` (etc.) instead of
+  your old type name.
+- **Split the web-free Identity model into `Elarion.EntityFrameworkCore.Identity` (breaking).** The
+  `[GenerateElarionIdentity]` marker, its bundled source generator, and the `ApplyElarionIdentity` model
+  helper moved out of `Elarion.AspNetCore.Identity` into a new `Elarion.EntityFrameworkCore.Identity` package
+  that depends only on EF Core + `Microsoft.AspNetCore.Identity.EntityFrameworkCore` (no
+  `Microsoft.AspNetCore.App` `FrameworkReference`). A persistence/application layer that owns the `DbContext`
+  can now compose the snake_case Identity model **without** pulling in the ASP.NET shared framework — the same
+  EF-only ↔ web split as `Elarion.EntityFrameworkCore` ↔ `Elarion.AspNetCore`. The host wiring
+  (`AddElarionIdentity`, the `ICurrentUser` mapping, the authorizer) stays in `Elarion.AspNetCore.Identity`.
+  **Migration:** reference `Elarion.EntityFrameworkCore.Identity` from the project that declares
+  `[GenerateElarionIdentity]` / calls `ApplyElarionIdentity`, and change its `using Elarion.AspNetCore.Identity;`
+  to `using Elarion.EntityFrameworkCore.Identity;`. See [`docs/capabilities/identity`](docs/capabilities/identity.mdx).
+
 ### Fixed
 - **`ICurrentUser` now resolves inside JSON-RPC and MCP handlers (and so does authorization).** The
   dispatchers run each call in a fresh DI child scope, which does not inherit the request scope's scoped
@@ -19,6 +41,21 @@ minor releases may include breaking changes.
   [`docs/capabilities/current-user`](docs/capabilities/current-user.mdx).
 
 ### Added
+- **Source-generated permission catalog (`ElarionPermissions` + `IPermissionCatalog`), Kubernetes-RBAC style.**
+  `[RequirePermission]` now takes a **`(resource, verb)`** pair (`[RequirePermission("properties", Verbs.Read)]`,
+  enforced as the composed claim `properties.read`; verb vocabulary open via the new `Verbs` constants or any
+  string). A new `PermissionCatalogGenerator` discovers every `[RequirePermission(resource, verb)]`/`[RequireRole]`
+  and emits two surfaces, so seeding and role→permission policy enumerate the full set instead of a hand-kept
+  `Permissions.All`/`ReadOnly` list — zero central edits per guarded handler. The **compile-time**
+  `ElarionPermissions` static (in the assembly's root namespace) exposes `All`/`Roles`/`ByModule`/`ByResource`/
+  `ByVerb` and typed accessors (`ElarionPermissions.Properties.Read`), aggregated cross-assembly from the Elarion
+  manifest — so static role policy reads like K8s rules (`ByResource["properties"]`, `ByVerb["read"]`). The
+  **runtime** `IPermissionCatalog` (`Elarion.Abstractions.Authorization`, registered by `AddElarionAuthorization`)
+  exposes the same data for dynamic enumeration, aggregating one `PermissionCatalogModule` per module via the
+  module's gated `ConfigureDefaultServices` (cross-assembly; a disabled module contributes nothing). Generation is
+  on under `[assembly: UseElarion]` or `[assembly: GeneratePermissionCatalog]`; diagnostics `ELPERM001` (handler
+  under no module) and `ELPERM002` (colliding typed accessor). See
+  [`docs/concepts/authorization`](docs/concepts/authorization.mdx#permission-catalog).
 - **Per-call dispatch-scope seeding (`Elarion.JsonRpc`).** `IDispatchScopeInitializer` +
   `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(context)` / `SeedScope(context)` helpers
   carry request-boundary state into the fresh per-call child scope dispatcher-based transports (JSON-RPC, MCP)

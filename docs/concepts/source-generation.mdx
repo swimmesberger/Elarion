@@ -35,7 +35,8 @@ using MyApp.Application.Pipeline;
 `[assembly: UseElarion]` enables the framework-owned assembly-level generators for module handlers,
 module services, module validators, scheduled jobs, event consumers, and resilience policies. It
 intentionally does **not** replace application-owned policy attributes such as `[DefaultPipeline]`, nor
-the class-targeted host trigger `[GenerateModuleBootstrapper]` or `[GenerateDbSets]`.
+the dedicated triggers `[assembly: GenerateModuleBootstrapper]` (the host) or `[GenerateDbSets]` (the
+application's `DbContext`).
 
 ## Narrow triggers
 
@@ -61,7 +62,7 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 | `EventConsumerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateEventConsumers]` | Per-module `Add{Module}EventConsumers()` registering each `[ConsumeEvent]` consumer (handler or `[Service]` method) plus its `EventSubscriptionDescriptor`. See [Events](/docs/capabilities/events). |
 | `ResiliencePolicyGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |
 | `ElarionManifestGenerator` | Any project containing `[AppModule]`, `[HttpEndpoint]`, or `[Handler]` | Internal assembly metadata manifests consumed by host-side generators for referenced modules and transport handlers. |
-| `AppModuleDiscoveryGenerator` | `[GenerateModuleBootstrapper]` on a host partial class | Extension methods on their natural receivers — `services.AddElarion(configuration)`, `endpoints.MapElarionEndpoints(configuration)`, `dispatcher.RegisterHandlers(configuration)`, `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, `configuration.IsModuleEnabled(name)` — plus the parameterless `GetAllModuleNames`, the per-module transport extension methods `Map{Module}Http` / `Add{Module}Handlers`, and the parameterless `Get{Module}McpMetadata`. The single transport-wiring path for `[HttpEndpoint]`, JSON-RPC, and MCP. See [Hosting](/docs/capabilities/hosting) and [HTTP endpoints](/docs/capabilities/transports/http-endpoints). |
+| `AppModuleDiscoveryGenerator` | `[assembly: GenerateModuleBootstrapper]` on the host → the fixed-name `ElarionBootstrapper` static | Extension methods on their natural receivers — `services.AddElarion(configuration)`, `endpoints.MapElarionEndpoints(configuration)`, `dispatcher.RegisterHandlers(configuration)`, `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, `configuration.IsModuleEnabled(name)` — plus the parameterless `GetAllModuleNames`, the per-module transport extension methods `Map{Module}Http` / `Add{Module}Handlers`, and the parameterless `Get{Module}McpMetadata`. The single transport-wiring path for `[HttpEndpoint]`, JSON-RPC, and MCP. See [Hosting](/docs/capabilities/hosting) and [HTTP endpoints](/docs/capabilities/transports/http-endpoints). |
 | EF Core `DbSet` generator | `[GenerateDbSets]` on the concrete partial `DbContext` class (entities supplied by `[EntityConfiguration]` classes) | `DbSet<T>` members and entity configuration application via direct `ApplyConfiguration<T>` calls. See [Entity Framework Core](/docs/capabilities/entity-framework). |
 
 Generated code intentionally uses explicit type names and DI factory registrations. Startup behavior

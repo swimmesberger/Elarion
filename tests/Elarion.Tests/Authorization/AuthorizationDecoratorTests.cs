@@ -112,7 +112,7 @@ public sealed class AuthorizationDecoratorTests {
 
     [Fact]
     public async Task MultiplePermissionsAreAnded() {
-        var user = new FakeCurrentUser { IsAuthenticated = true, Claims = [("permission", "a")] };
+        var user = new FakeCurrentUser { IsAuthenticated = true, Claims = [("permission", "a.read")] };
         var decorator = Decorate(typeof(RequireBothPermissionsHandler), user);
 
         var result = await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);

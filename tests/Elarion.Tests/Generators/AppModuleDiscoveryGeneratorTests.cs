@@ -11,8 +11,10 @@ public sealed class AppModuleDiscoveryGeneratorTests {
     public void GenerateBootstrapper_CoreModule_IsAlwaysEnabledAndOrderedBeforeFeatures() {
         const string source =
             """
+            [assembly: Elarion.AspNetCore.GenerateModuleBootstrapper]
+
             namespace Elarion.AspNetCore {
-                [System.AttributeUsage(System.AttributeTargets.Class)]
+                [System.AttributeUsage(System.AttributeTargets.Assembly)]
                 public sealed class GenerateModuleBootstrapperAttribute : System.Attribute;
             }
 
@@ -53,11 +55,6 @@ public sealed class AppModuleDiscoveryGeneratorTests {
                     public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddElarionHandlerSender(
                         Microsoft.Extensions.DependencyInjection.IServiceCollection services) => services;
                 }
-            }
-
-            namespace Host {
-                [Elarion.AspNetCore.GenerateModuleBootstrapper]
-                public static partial class ModuleBootstrapper;
             }
 
             namespace Sample.Modules.Core {
@@ -164,7 +161,7 @@ public sealed class AppModuleDiscoveryGeneratorTests {
 
         var generatedTree = result.GeneratedTrees.Single(
             tree => tree.FilePath.EndsWith(
-                "ModuleBootstrapper.g.cs",
+                "ElarionBootstrapper.g.cs",
                 StringComparison.Ordinal));
 
         return generatedTree.GetText().ToString();

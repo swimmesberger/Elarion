@@ -9,12 +9,12 @@ using Microsoft.EntityFrameworkCore;
 namespace Billing.Application.Modules.Clients.Handlers;
 
 /// <summary>Reads a client by id. <c>[RequirePermission]</c> gates the call before it runs: the generated
-/// authorization decorator denies a caller without the <c>clients:read</c> permission with a 403 — the
+/// authorization decorator denies a caller without the <c>clients.read</c> permission with a 403 — the
 /// same check under JSON-RPC, MCP, and HTTP. An <see cref="IQuery"/>, so the transaction decorator's
 /// <c>AppliesTo</c> predicate excludes it; <c>[Cacheable]</c> caches per-user (the default scope), and the
 /// query is scoped to <c>OwnerId == user.UserId</c> so one account never sees another's data.</summary>
 [Handler("clients.get")]
-[RequirePermission("clients:read")]
+[RequirePermission("clients", Verbs.Read)]
 [Cacheable("clients", DurationSeconds = 120)]
 public sealed class GetClient(BillingDbContext db, ICurrentUser user)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {

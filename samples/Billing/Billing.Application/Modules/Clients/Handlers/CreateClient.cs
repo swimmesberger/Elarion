@@ -11,12 +11,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Application.Modules.Clients.Handlers;
 
-/// <summary>Creates a client. <c>[RequirePermission]</c> requires the <c>clients:write</c> permission before
+/// <summary>Creates a client. <c>[RequirePermission]</c> requires the <c>clients.write</c> permission before
 /// the handler runs. Then it runs the default pipeline (logging → validation → transaction), scopes the row
 /// to the current user, invalidates the clients cache on success, and is exposed over JSON-RPC and as an MCP
 /// tool. The <c>[Description]</c> attributes flow through to the MCP tool surface.</summary>
 [Handler("clients.create")]
-[RequirePermission("clients:write")]
+[RequirePermission("clients", Verbs.Write)]
 [CacheInvalidate("clients")]
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(

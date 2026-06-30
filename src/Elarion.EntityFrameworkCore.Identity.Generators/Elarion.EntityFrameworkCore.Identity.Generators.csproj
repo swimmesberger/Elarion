@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Source generator for Elarion ASP.NET Core Identity: emits the Identity DbSets and model-configuration seam from [GenerateElarionIdentity].</Description>
+    <Description>Source generator for the Elarion EF Core Identity model: emits the Identity DbSets and model-configuration seam from [GenerateElarionIdentity].</Description>
     <TargetFramework>netstandard2.0</TargetFramework>
     <IsRoslynComponent>true</IsRoslynComponent>
     <LangVersion>latest</LangVersion>
@@ -12,7 +12,7 @@
     <IncludeSymbols>false</IncludeSymbols>
     <DevelopmentDependency>true</DevelopmentDependency>
     <NoPackageAnalysis>true</NoPackageAnalysis>
-    <!-- Not a standalone package; the analyzer DLL is bundled into the Elarion.AspNetCore.Identity package. -->
+    <!-- Not a standalone package; the analyzer DLL is bundled into the Elarion.EntityFrameworkCore.Identity package. -->
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

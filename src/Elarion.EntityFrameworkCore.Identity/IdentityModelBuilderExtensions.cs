@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Elarion.AspNetCore.Identity;
+namespace Elarion.EntityFrameworkCore.Identity;
 
 /// <summary>
 /// Applies the ASP.NET Core Identity entity model to a <b>plain</b> <see cref="DbContext"/> — the keys,

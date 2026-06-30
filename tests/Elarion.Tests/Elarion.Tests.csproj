@@ -44,6 +44,7 @@
     <ProjectReference Include="../../src/Elarion.Caching/Elarion.Caching.csproj" />
     <ProjectReference Include="../../src/Elarion.Resilience/Elarion.Resilience.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj" />
-    <ProjectReference Include="../../src/Elarion.AspNetCore.Identity.Generators/Elarion.AspNetCore.Identity.Generators.csproj" />
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj" />
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity.Generators/Elarion.EntityFrameworkCore.Identity.Generators.csproj" />
   </ItemGroup>
 </Project>

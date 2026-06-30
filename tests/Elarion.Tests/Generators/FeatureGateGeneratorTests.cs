@@ -66,7 +66,7 @@ public sealed class FeatureGateGeneratorTests {
                 public sealed record DoThingCommand(int Id) : ICommand;
                 public sealed record DoThingResponse(string Name);
 
-                [RequirePermission("billing.write")]
+                [RequirePermission("billing", "write")]
                 [FeatureGate("new-billing")]
                 public sealed class GuardedGatedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
                     public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
