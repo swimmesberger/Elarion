@@ -46,9 +46,9 @@ One built-in handler returns the whole client picture for the current user + dep
 
 Because the handler is **framework-owned**, the host cannot decorate it with attributes (`[Handler]`/`[HttpEndpoint]`
 are compile-time on the class). So exposure is **imperative**, host-chosen, via a thin capability extension:
-`AddElarionClientCapabilities()` registers it, the host opts it onto the **named bus** (JSON-RPC/MCP) through the
+`AddElarionSession()` registers it, the host opts it onto the **named bus** (JSON-RPC/MCP) through the
 imperative `MapHandler<…>(name, transports)` seam, and onto **REST** through a concrete, framework-authored
-`MapElarionClientCapabilities("/session")` (concrete types, so ASP.NET's Request Delegate Generator stays
+`MapElarionSession("/session")` (concrete types, so ASP.NET's Request Delegate Generator stays
 AOT/trim-safe — a generic HTTP map would not). This is the general gap for exposing any handler whose class the host
 doesn't own; it has its own record in [ADR-0020](0020-imperative-handler-transport-mapping.md). The handler composes
 existing seams only: `IsModuleEnabled`, `IFeatureFlagService.IsEnabledAsync`, `IFeatureVariantService.GetVariantAsync`,
@@ -161,8 +161,8 @@ exposed imperatively instead — see [ADR-0020](0020-imperative-handler-transpor
   `AppModuleDiscoveryGenerator`.
 - A built-in bootstrap handler composing `IsModuleEnabled` + `IFeatureFlagService` + `IFeatureVariantService` +
   `ICurrentUser`, returning the `{ user, modules, flags, variants }` contract, exposed via the imperative mapping of
-  [ADR-0020](0020-imperative-handler-transport-mapping.md) (`AddElarionClientCapabilities` + the bus `MapHandler` seam
-  + a concrete `MapElarionClientCapabilities` for REST).
+  [ADR-0020](0020-imperative-handler-transport-mapping.md) (`AddElarionSession` + the bus `MapHandler` seam
+  + a concrete `MapElarionSession` for REST).
 - TypeScript generator: the typed snapshot client, the `@openfeature/web-sdk` provider, and the typed key constants.
 - Docs: a `concepts/client-capabilities.mdx`, and a short "choosing transport exposure" section added to
   `transports.mdx` (today that decision lives only in the attribute XML docs).

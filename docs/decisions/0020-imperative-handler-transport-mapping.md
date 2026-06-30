@@ -54,7 +54,7 @@ Therefore HTTP exposure is **always a concrete call**:
   response types, e.g.:
 
   ```csharp
-  public static IEndpointConventionBuilder MapElarionClientCapabilities(
+  public static IEndpointConventionBuilder MapElarionSession(
       this IEndpointRouteBuilder endpoints, string route = "/session") =>
       endpoints.MapGet(route, (
           [AsParameters] SessionRequest request,
