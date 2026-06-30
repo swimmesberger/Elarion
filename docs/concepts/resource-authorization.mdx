@@ -33,19 +33,34 @@ Declare a filter for an entity on a dedicated partial class (the entity stays cl
 public sealed partial class ContactAccess;
 ```
 
-The generator completes the class as an `IQueryAuthorizer<Contact>` with a static `Specification`. Compose it
-into the query **before** paging:
+The generator completes the class as an `IQueryAuthorizer<Contact>` and auto-registers it. Inject it into the
+handler and compose it into the query **before** paging:
 
 ```csharp
-var page = await db.Contacts
-    .WhereAuthorized(ContactAccess.Specification, currentUser)   // owner OR shared-with-user OR shared-with-role
-    .Where(c => c.Category == request.Category)                  // your business filters
-    .ToKeysetPageAsync(request, RecentContacts.Definition, c => new ContactDto(c.Id));
+public sealed class ListContacts(AppDbContext db, ICurrentUser user, IQueryAuthorizer<Contact> access)
+    : IHandler<ListContacts.Query, Result<Page<ContactDto>>> {
+
+    public async ValueTask<Result<Page<ContactDto>>> HandleAsync(Query request, CancellationToken ct) =>
+        await db.Contacts
+            .WhereAuthorized(access, user)                           // owner OR shared-with-user OR shared-with-role
+            .Where(c => c.Category == request.Category)             // your business filters
+            .ToKeysetPageAsync(request, RecentContacts.Definition, c => new ContactDto(c.Id), ct);
+}
 ```
 
 The predicate is part of the single SQL statement, so the database filters the rows — pagination and total
 counts are correct, and unauthorized rows are never returned. The rules compose as **`AND(scopes) AND
 OR(grants)`**: a row is visible when it satisfies every scope (tenant) and at least one grant (owner, or a share).
+
+<Callout type="info">
+  **Inject the authorizer; the static `Specification` is a shortcut for field-only filters.** A filter that uses
+  `Shared` consults the grants table, so it is a **scoped service** — you must inject `IQueryAuthorizer<Contact>`
+  (as above), and there is no static accessor. A filter with only field rules
+  (`OwnerProperty`/`TenantProperty`) is stateless, so the generator *also* exposes a static
+  `ContactAccess.Specification` singleton you can hand to `WhereAuthorized` without DI. Both forms are
+  auto-registered as `IQueryAuthorizer<Contact>` by the host bootstrapper (module-feature-gated), so injection
+  works for either.
+</Callout>
 
 <Callout type="warn">
   Never filter a list in memory after the query (the `@PostFilter` shape). It returns short pages, wrong
@@ -80,6 +95,16 @@ await grants.GrantAsync(
 
 The `Shared` filter turns this into an indexed correlated `EXISTS` over the caller's user id **or any of their
 roles** — a small, bounded lookup that scales.
+
+Grants are **operation-scoped**, and the `Shared` rule only matches grants for the operation `WhereAuthorized`
+asks about — which **defaults to `Read`**. To list the rows a caller may *edit*, pass the operation explicitly:
+
+```csharp
+db.Contacts.WhereAuthorized(access, user, ResourceOperation.Update)   // EXISTS matches "update" grants
+```
+
+The operation narrows only the **grant** (`Shared`) lookup; the `OwnerProperty`/`TenantProperty` rules are
+operation-independent, so an owner still sees their own rows under any operation.
 
 ## Leg A — the per-resource point check
 
