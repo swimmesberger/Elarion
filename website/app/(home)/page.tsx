@@ -10,15 +10,18 @@ import {
   GitBranch,
   Globe,
   Inbox,
+  Layers,
   LockKeyhole,
   Network,
   Plug,
   Radio,
+  Shuffle,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Star,
   Terminal,
+  ToggleRight,
   Workflow,
   XCircle,
   type LucideIcon,
@@ -344,6 +347,27 @@ const features: Feature[] = [
     span: 'lg:col-span-3',
   },
   {
+    icon: ToggleRight,
+    title: 'Feature flags in the pipeline',
+    body: 'Gate any handler with [FeatureGate("new-export")] — a generated decorator evaluates the flag under JSON-RPC, MCP, and HTTP alike, and a disabled feature returns 404 so it is indistinguishable from one that does not exist. Provider-neutral over OpenFeature, so the same gate works against Microsoft.FeatureManagement, LaunchDarkly, or any OpenFeature provider.',
+    href: '/docs/concepts/feature-flags',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: Shuffle,
+    title: 'Variant service injection',
+    body: 'Bind multiple [Service] implementations of one contract with [FeatureVariant]; a feature flag\'s allocated variant picks which resolves per request, while consumers inject the plain contract transparently. Outside a handler, reach for IVariantServiceProvider<T> — A/B tests and algorithm swaps with zero conditional plumbing.',
+    href: '/docs/concepts/feature-flags',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: Layers,
+    title: 'Dependency-light core',
+    body: 'Core depends only on Microsoft.Extensions.* abstractions. Caching (Elarion.Caching), resilience (Elarion.Resilience), and feature-flag backends are separate packages you add only when a handler asks — never pulling Polly or HybridCache into a service that does not use them.',
+    href: '/docs/reference/packages',
+    span: 'lg:col-span-3',
+  },
+  {
     icon: Radio,
     title: 'Events split by the transaction',
     body: 'An in-process, pub/sub-only event bus with two planes: domain events dispatch inline and commit with the command, while integration events deliver after commit on a fresh scope. [ConsumeEvent] handlers run the full decorator pipeline.',
@@ -381,14 +405,14 @@ const features: Feature[] = [
   {
     icon: CalendarClock,
     title: 'Scheduling & resilience',
-    body: 'Source-generated jobs share one scheduler with explicit overlap, misfire, and named retry/timeout resilience policies — and those policies attach to ordinary handlers too. Recurrence accepts ${...} variables, so a setting change reschedules the job.',
+    body: 'Source-generated jobs share one scheduler with explicit overlap and misfire handling. Add Elarion.Resilience to opt [Resilient] handlers and deferred scheduler retries into named retry/timeout policies — the scheduler no longer wires a runner you did not ask for. Recurrence accepts ${...} variables, so a setting change reschedules the job.',
     href: '/docs/capabilities/scheduling',
     span: 'lg:col-span-2',
   },
   {
     icon: Activity,
     title: 'Observable by default',
-    body: 'Transports, scheduling, caching, and resilience emit OpenTelemetry-compatible traces and metrics through System.Diagnostics — no separate instrumentation layer. Result<T> with a transport-agnostic AppError keeps error mapping consistent everywhere.',
+    body: 'Transports and scheduling emit OpenTelemetry-compatible traces and metrics through System.Diagnostics — no separate instrumentation layer — and caching and resilience join in when you reference their packages. Result<T> with a transport-agnostic AppError keeps error mapping consistent everywhere.',
     href: '/docs/capabilities/telemetry',
     span: 'lg:col-span-2',
   },
@@ -484,7 +508,13 @@ function SecurityBand() {
                 <span className="font-mono text-fd-foreground">[ElarionAuthorizationDefaults]</span>;
                 unauthenticated callers get 401, denied callers 403, mapped per transport. Optional
                 ASP.NET Core Identity composes onto a plain DbContext — but any OIDC/JWT provider
-                works, since authentication only populates the current user.
+                works, since authentication only populates the current user.{' '}
+                <span className="font-mono text-fd-foreground">[GeneratePermissionCatalog]</span>{' '}
+                derives a K8s-style resource+verb catalog (
+                <span className="font-mono text-fd-foreground">IPermissionCatalog</span>) from every{' '}
+                <span className="font-mono text-fd-foreground">[RequirePermission]</span>/
+                <span className="font-mono text-fd-foreground">[RequireRole]</span> — a drift-free
+                permission list.
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 {gateChips.map((c) => (
@@ -667,11 +697,14 @@ const surfaces = [
   'HTTP / REST',
   'MCP tools',
   'Authorization',
+  'Feature flags',
   'Resource grants',
   'Identity',
   'Settings',
   'Events & outbox',
   'EF Core',
+  'Caching',
+  'Resilience',
   'Blob storage',
   'Paging',
   'Telemetry',
@@ -784,6 +817,7 @@ const footerColumns: { heading: string; links: { label: string; href: string }[]
     links: [
       { label: 'Source generation', href: '/docs/concepts/source-generation' },
       { label: 'Authorization', href: '/docs/concepts/authorization' },
+      { label: 'Feature flags', href: '/docs/concepts/feature-flags' },
       { label: 'JSON-RPC & MCP', href: '/docs/capabilities/transports/json-rpc' },
       { label: 'Settings', href: '/docs/concepts/settings' },
       { label: 'Scheduling', href: '/docs/capabilities/scheduling' },

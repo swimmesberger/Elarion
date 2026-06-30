@@ -185,6 +185,12 @@ See [Consuming events](/docs/capabilities/events/consuming-events) and [Backends
 | `tags` | `params string[]` (ctor) → `Tags` | empty | Logical cache tags to invalidate after a successful handler result. |
 | `Scope` | `HandlerCacheScope` (init) | `CurrentUser` | Whether invalidation applies to the current user's entries or globally shared entries. |
 
+<Callout type="warn">
+  **Runtime:** the cache itself was extracted out of Elarion core ([ADR-0017](/docs/decisions)). `[Cacheable]`/`[CacheInvalidate]`
+  now **require** the `Elarion.Caching` package — the host wires the `HybridCache`-backed `IHandlerCache` with
+  `services.AddElarionHandlerCaching()`. Without it the attributes are inert.
+</Callout>
+
 See [Caching](/docs/capabilities/caching).
 
 ## Resilience
@@ -215,7 +221,65 @@ See [Caching](/docs/capabilities/caching).
 | --- | --- | --- | --- |
 | `policyName` | `string` (ctor) → `PolicyName` | required | Stable policy name registered by a `[ResiliencePolicy]` type or a manual resilience pipeline registration. |
 
+<Callout type="warn">
+  **Runtime:** the resilience runner was extracted out of Elarion core ([ADR-0017](/docs/decisions)). `[Resilient]`
+  handlers and scheduler-deferred retries now **require** the `Elarion.Resilience` package — the host wires the
+  Microsoft/Polly-backed `IResiliencePipelineRunner` with `services.AddMicrosoftResilienceRuntime()`. **Breaking:**
+  `AddInMemoryScheduler` no longer auto-wires the runner, so deferred scheduler retries opt in through this package too.
+</Callout>
+
 See [Resilience](/docs/capabilities/resilience).
+
+## Feature flags
+
+### `[FeatureGate]`
+
+- **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (`AllowMultiple`, inherited)
+- **Triggers:** gates a handler behind one or more feature flags. The handler-registration generator auto-attaches the `FeatureGateDecorator<TRequest, TResponse>` **just inside the authorization gate** so the flag is evaluated *before* the handler runs (before caching and the rest of the pipeline). When the gate is not satisfied the call short-circuits to `AppError.NotFound` (404) — a disabled feature is indistinguishable from a missing one, so the feature name is **never leaked** (MS-MVC-style "hide the roadmap"). Transport-neutral: identical under JSON-RPC, MCP, and HTTP. Stacking multiple `[FeatureGate]` attributes ANDs them. The flag is evaluated through the `IFeatureFlagService` seam; the default provider ships in `Elarion.FeatureFlags.OpenFeature`.
+
+The attribute has two constructors:
+
+| Constructor | Parameters | Effect |
+| --- | --- | --- |
+| `FeatureGateAttribute(params string[] features)` | `features` | Gates on `features` with `Requirement = FeatureRequirement.All`. |
+| `FeatureGateAttribute(FeatureRequirement requirement, params string[] features)` | `requirement`, `features` | Gates on `features` with the explicit `requirement`. |
+
+Read-only / settable properties:
+
+| Property | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Features` | `IReadOnlyList<string>` | required (≥ 1 non-blank) | The feature names this gate evaluates. A blank/empty set has no effect (`ELFEAT002`). |
+| `Requirement` | `FeatureRequirement` | `All` | `All` = every feature must be on (AND); `Any` = at least one must be on (OR). |
+| `Negate` | `bool` (init) | `false` | When `true`, the gate is satisfied when the feature(s) are **off** (an inverse / kill-switch gate). |
+
+**`FeatureRequirement`:** `All`, `Any`.
+
+<Callout type="warn">
+  The gated handler's response must be able to represent failure (`Result<T>` / `Result`); otherwise the gate
+  cannot short-circuit and `ELFEAT001` is reported. A `[FeatureGate]` with no non-blank feature name reports
+  `ELFEAT002`. Module flags (`Modules:{Name}:Enabled`) are *compose-time* (the module disappears); feature gates
+  are *runtime* (gradual rollouts, targeting, kill switches without a redeploy).
+</Callout>
+
+See [Feature flags](/docs/capabilities/feature-flags).
+
+### `[FeatureVariant]`
+
+- **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (single, not inherited)
+- **Triggers:** a **modifier on a `[Service]` registration** that binds multiple implementations of one contract; a named feature flag's allocated variant picks which implementation resolves per request. The implementation class **must also carry `[Service]`** (which declares the contract(s) and lifetime) — otherwise `ELVAR007`. The contract is not repeated here: it is whatever `[Service]` registers under, and each registered contract becomes variant-resolved. Consumers inject the plain contract transparently — a handler injecting it directly is registered behind an async-resolving proxy that awaits the right variant for the current user; outside a handler constructor, inject `IVariantServiceProvider<TService>`. Runtime seams: `IFeatureVariantService` + `IVariantServiceProvider<T>`; the `VariantServiceRegistrationGenerator` emits the wiring ([ADR-0019](/docs/decisions)).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `feature` | `string` (ctor) → `Feature` | required | The single feature whose allocated variant selects the implementation. All variants of one contract must name the same feature (`ELVAR004`). |
+| `Variant` | `string?` (init) | `null` | The variant key this implementation serves. Omit it on exactly **one** implementation to mark it the default (used when no variant is allocated); a contract without a default warns `ELVAR003`, and a duplicate variant key reports `ELVAR001`. |
+
+<Callout type="warn">
+  Diagnostics: `ELVAR001` (duplicate variant key), `ELVAR003` (no default implementation — warning), `ELVAR004`
+  (contract bound to more than one feature), `ELVAR005` (blank feature name — warning), `ELVAR006` (generic
+  implementation unsupported), `ELVAR007` (missing `[Service]`). `ELVAR002` is intentionally unused.
+</Callout>
+
+See [Feature flags](/docs/capabilities/feature-flags).
 
 ## EF Core
 
@@ -296,7 +360,7 @@ See [Cross-module communication](/docs/concepts/cross-module-communication).
 ### `[UseElarion]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** enables all Elarion source-generation features at once — equivalent to applying `[GenerateModuleHandlers]`, `[GenerateModuleServices]`, `[GenerateModuleValidators]`, `[GenerateScheduledJobs]`, `[GenerateEventConsumers]`, and `[GenerateResiliencePolicies]`. Application-owned attributes such as pipeline defaults remain explicit. Marker only — no parameters.
+- **Triggers:** enables the core Elarion source-generation features at once — equivalent to applying `[GenerateModuleHandlers]`, `[GenerateModuleServices]`, `[GenerateModuleValidators]`, `[GenerateScheduledJobs]`, `[GenerateEventConsumers]`, and `[GenerateResiliencePolicies]`. It does **not** subsume `[GeneratePermissionCatalog]`, which has its own assembly-level trigger (below). Application-owned attributes such as pipeline defaults also remain explicit. Marker only — no parameters.
 
 ### Individual generation triggers
 
@@ -310,6 +374,17 @@ All are `Elarion.Abstractions`, applied to the assembly, marker-only (no paramet
 | `[GenerateScheduledJobs]` | Source-generated scheduler descriptor registration. |
 | `[GenerateEventConsumers]` | Source-generated event-consumer descriptor registration. |
 | `[GenerateResiliencePolicies]` | Source-generated resilience-policy registration. |
+
+### `[GeneratePermissionCatalog]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** assembly
+- **Triggers:** runs the `PermissionCatalogGenerator` to harvest every `[RequirePermission]`/`[RequireRole]` in the assembly into a runtime `IPermissionCatalog` (a K8s-style resource + verb catalog, with `Verbs`, in `Elarion.Abstractions.Authorization`) — so admin UIs, role editors, and audits read straight from the handler attributes with no second source of truth to drift. Marker only — no parameters. **Not** subsumed by `[UseElarion]`; apply it explicitly. Diagnostics `ELPERM001` (handler with requirements outside any `[AppModule]`) / `ELPERM002` (two permissions colliding on the same typed accessor).
+
+```csharp
+[assembly: GeneratePermissionCatalog]
+```
+
+See [Authorization](/docs/concepts/authorization).
 
 ### `[UseElarionEntityFrameworkCore]`
 
@@ -327,7 +402,7 @@ See [Entity Framework](/docs/capabilities/entity-framework).
 ## Related references
 
 <Cards>
-  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELEVT/ELKEY/ELAPI/ELSG) referenced above.</Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELEVT/ELKEY/ELAPI/ELSG/ELFEAT/ELVAR/ELPERM/ELCACHE/ELRES) referenced above.</Card>
   <Card title="Configuration" href="/docs/reference/configuration">Feature flags (`Modules:{Name}:Enabled`) and other settings keys.</Card>
   <Card title="Conventions" href="/docs/reference/conventions">Module statics, namespace matching, and naming rules.</Card>
   <Card title="Packages" href="/docs/reference/packages">Which package each attribute ships in.</Card>

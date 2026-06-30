@@ -44,6 +44,13 @@ dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
 cd ../..
 ```
 
+<Callout type="info">
+  Handler caching and resilience are opt-in packages — `Elarion.Caching` (`[Cacheable]`/`[CacheInvalidate]`)
+  and `Elarion.Resilience` (`[Resilient]` and deferred scheduler retries). Since ADR-0017 the Elarion core
+  no longer ships these runtimes, so reference each package only when you use it; the
+  [installation page](/docs/getting-started/installation) lists them.
+</Callout>
+
 </Step>
 
 <Step>
