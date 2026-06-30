@@ -20,7 +20,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string AllowAnonymousAttributeMetadataName = "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
     private const string AuthorizationDefaultsAttributeMetadataName = "Elarion.Abstractions.Authorization.ElarionAuthorizationDefaultsAttribute";
     private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
-    private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute`1";
+    private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
 
     private sealed record HandlerInfo(

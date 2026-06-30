@@ -39,23 +39,30 @@ public sealed partial class HandlerRegistrationGenerator {
         return builder.ToImmutable();
     }
 
-    // The TContract of a [FeatureVariant<TContract>] attribute, fully qualified — the contract a variant implements.
-    private static string? GetVariantContractFqn(GeneratorAttributeSyntaxContext ctx) {
-        if (ctx.Attributes.Length == 0)
-            return null;
-
-        var attributeClass = ctx.Attributes[0].AttributeClass;
-        if (attributeClass is null || attributeClass.TypeArguments.Length != 1)
-            return null;
-
-        return attributeClass.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-    }
-
-    private static EquatableArray<string> ToSortedDistinct(ImmutableArray<string> values) {
-        if (values.IsDefaultOrEmpty)
+    // The contracts a [FeatureVariant] class is selected for — exactly what its [Service] registers under (shared
+    // resolver), so a handler injecting any of them is wrapped in the async-resolving proxy. A [FeatureVariant]
+    // without [Service] is reported by the variant generator (ELVAR007); here it simply contributes no contracts.
+    private static EquatableArray<string> GetVariantContractFqns(GeneratorAttributeSyntaxContext ctx) {
+        if (ctx.TargetSymbol is not INamedTypeSymbol classSymbol)
             return EquatableArray<string>.Empty;
 
-        return values.Distinct(StringComparer.Ordinal).OrderBy(static value => value, StringComparer.Ordinal).ToImmutableArray();
+        var serviceAttr = ServiceContractResolver.FindServiceAttribute(classSymbol);
+        if (serviceAttr is null)
+            return EquatableArray<string>.Empty;
+
+        return ServiceContractResolver.ResolveContractFqns(
+            classSymbol, serviceAttr, SymbolDisplayFormat.FullyQualifiedFormat);
+    }
+
+    private static EquatableArray<string> FlattenSortedDistinct(ImmutableArray<EquatableArray<string>> groups) {
+        if (groups.IsDefaultOrEmpty)
+            return EquatableArray<string>.Empty;
+
+        return groups
+            .SelectMany(static group => group.AsImmutableArray)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(static value => value, StringComparer.Ordinal)
+            .ToImmutableArray();
     }
 
     private static HandlerInfo? GetHandlerInfo(

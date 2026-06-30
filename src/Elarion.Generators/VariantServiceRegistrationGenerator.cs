@@ -16,18 +16,12 @@ namespace Elarion.Generators;
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator {
-    private const string VariantServiceAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute`1";
-    private const string ServiceAttributeMetadataName = "Elarion.Abstractions.ServiceAttribute";
+    private const string VariantServiceAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string TriggerAttributeMetadataName = "Elarion.Abstractions.GenerateModuleServicesAttribute";
 
     private static readonly DiagnosticDescriptor DuplicateVariantKey = new(
         "ELVAR001", "Duplicate variant key",
         "Variant key '{0}' is declared more than once for contract '{1}'",
-        "Elarion.Abstractions.Features", DiagnosticSeverity.Error, isEnabledByDefault: true);
-
-    private static readonly DiagnosticDescriptor ImplementationNotAssignable = new(
-        "ELVAR002", "Variant implementation does not implement its contract",
-        "Variant service '{0}' is not assignable to contract '{1}'",
         "Elarion.Abstractions.Features", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor NoDefaultVariant = new(
@@ -67,7 +61,9 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
         string Namespace,
         LocationInfo Location);
 
-    private sealed record VariantResult(VariantImpl? Impl, EquatableArray<DiagnosticInfo> Diagnostics);
+    // One [FeatureVariant] class yields one VariantImpl per service contract (a multi-interface [Service] is
+    // variant-resolved on each of its contracts), or diagnostics that rejected it.
+    private sealed record VariantResult(EquatableArray<VariantImpl> Impls, EquatableArray<DiagnosticInfo> Diagnostics);
 
     private static class TrackingNames {
         public const string Variants = "VariantServices";
@@ -104,8 +100,7 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
             }
 
             var impls = results
-                .Where(static r => r.Impl is not null)
-                .Select(static r => r.Impl!)
+                .SelectMany(static r => r.Impls.AsImmutableArray)
                 .ToList();
 
             var groups = BuildContractGroups(spc, impls);
@@ -125,13 +120,6 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
         }
 
         var attribute = ctx.Attributes[0];
-        var attributeClass = attribute.AttributeClass;
-        if (attributeClass is null || attributeClass.TypeArguments.Length != 1) {
-            return null;
-        }
-
-        var contractSymbol = attributeClass.TypeArguments[0];
-
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         var location = LocationInfo.From((ctx.TargetNode as ClassDeclarationSyntax)?.Identifier.GetLocation());
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
@@ -139,13 +127,7 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
 
         if (IsGenericOrNested(classSymbol)) {
             diagnostics.Add(DiagnosticInfo.Create(GenericImplementation, location, implFqn));
-            return new VariantResult(null, diagnostics.ToImmutable());
-        }
-
-        if (!IsAssignableTo(classSymbol, contractSymbol)) {
-            diagnostics.Add(DiagnosticInfo.Create(
-                ImplementationNotAssignable, location, implFqn, contractSymbol.ToDisplayString(fmt)));
-            return new VariantResult(null, diagnostics.ToImmutable());
+            return new VariantResult(EquatableArray<VariantImpl>.Empty, diagnostics.ToImmutable());
         }
 
         var feature = attribute.ConstructorArguments.Length > 0
@@ -153,17 +135,18 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
             : string.Empty;
         if (string.IsNullOrWhiteSpace(feature)) {
             diagnostics.Add(DiagnosticInfo.Create(BlankFeature, location, implFqn));
-            return new VariantResult(null, diagnostics.ToImmutable());
+            return new VariantResult(EquatableArray<VariantImpl>.Empty, diagnostics.ToImmutable());
         }
 
-        // [FeatureVariant] is a modifier on a [Service]: the [Service] declares the service and its lifetime, and is
-        // required (ELVAR007). The service generator skips the plain registration for a [FeatureVariant] class, so
-        // this generator owns the keyed + transparent registration.
-        var serviceAttr = classSymbol.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == ServiceAttributeMetadataName);
+        // [FeatureVariant] is a modifier on a [Service]: the [Service] declares the service, its contract(s), and
+        // its lifetime, and is required (ELVAR007). The contracts are exactly what [Service] registers under (shared
+        // resolver), so the variant is applied to each of them — nothing to repeat on [FeatureVariant]. The service
+        // generator skips the plain registration for a [FeatureVariant] class, so this generator owns the keyed +
+        // transparent registration.
+        var serviceAttr = ServiceContractResolver.FindServiceAttribute(classSymbol);
         if (serviceAttr is null) {
             diagnostics.Add(DiagnosticInfo.Create(VariantRequiresService, location, implFqn));
-            return new VariantResult(null, diagnostics.ToImmutable());
+            return new VariantResult(EquatableArray<VariantImpl>.Empty, diagnostics.ToImmutable());
         }
 
         string? variant = null;
@@ -173,18 +156,25 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
             }
         }
 
-        var scope = ParseServiceLifetime(serviceAttr);
+        var lifetime = ParseServiceLifetime(serviceAttr);
+        var variantKey = variant ?? "global::Elarion.Abstractions.Features.VariantServiceKeys.Default";
+        var ns = GetNamespace(classSymbol);
 
-        var impl = new VariantImpl(
-            ContractFqn: contractSymbol.ToDisplayString(fmt),
-            Feature: feature,
-            ImplFqn: implFqn,
-            VariantKey: variant ?? "global::Elarion.Abstractions.Features.VariantServiceKeys.Default",
-            IsDefault: variant is null,
-            Lifetime: scope,
-            Namespace: GetNamespace(classSymbol),
-            Location: location);
-        return new VariantResult(impl, ImmutableArray<DiagnosticInfo>.Empty);
+        var contracts = ServiceContractResolver.ResolveContractFqns(classSymbol, serviceAttr, fmt);
+        var builder = ImmutableArray.CreateBuilder<VariantImpl>(contracts.Length);
+        foreach (var contractFqn in contracts) {
+            builder.Add(new VariantImpl(
+                ContractFqn: contractFqn,
+                Feature: feature,
+                ImplFqn: implFqn,
+                VariantKey: variantKey,
+                IsDefault: variant is null,
+                Lifetime: lifetime,
+                Namespace: ns,
+                Location: location));
+        }
+
+        return new VariantResult(builder.ToImmutable(), ImmutableArray<DiagnosticInfo>.Empty);
     }
 
     private sealed record ContractGroup(
@@ -359,25 +349,6 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
     private static bool IsGenericOrNested(INamedTypeSymbol classSymbol) {
         for (INamedTypeSymbol? current = classSymbol; current is not null; current = current.ContainingType) {
             if (current.TypeParameters.Length > 0) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsAssignableTo(INamedTypeSymbol source, ITypeSymbol destination) {
-        if (SymbolEqualityComparer.Default.Equals(source, destination)) {
-            return true;
-        }
-
-        if (destination.TypeKind == TypeKind.Interface &&
-            source.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i, destination))) {
-            return true;
-        }
-
-        for (var baseType = source.BaseType; baseType is not null; baseType = baseType.BaseType) {
-            if (SymbolEqualityComparer.Default.Equals(baseType, destination)) {
                 return true;
             }
         }

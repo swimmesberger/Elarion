@@ -55,15 +55,20 @@ normal instance, **the variant interface may have synchronous members** (an adva
 - **`IFeatureVariantService`** (`Elarion.Abstractions.Features`) — `ValueTask<string?> GetVariantAsync(string
   feature, ct)`. A *sibling* of the boolean `IFeatureFlagService` (ADR-0016 kept that seam frozen), implemented in
   `Elarion.FeatureFlags.OpenFeature` by reading `FlagEvaluationDetails<string>.Variant` (OpenFeature spec §1.4.6).
-- **`[FeatureVariant<TContract>("feature", Variant = "x")]`** on implementations (no `Variant` ⇒ the default) +
+- **`[FeatureVariant("feature", Variant = "x")]`** on implementations (no `Variant` ⇒ the default) +
   `VariantServiceRegistrationGenerator`, emitting per contract: keyed implementation registrations, a
   `VariantServiceBinding<T>` (feature + default key), the imperative `IVariantServiceProvider<T>`, and the
   **transparent** unkeyed registration of the contract that reads the per-scope `VariantResolutionCache` the proxy
-  warmed. Wired into modules via a new `AddVariantServices` `ConfigureDefaultServices` hook. Diagnostics
-  `ELVAR001`–`ELVAR007`. `[FeatureVariant]` is a **modifier on `[Service]`**, not a separate registration path: the
-  impl must also carry `[Service]` (which declares the service and its lifetime; `ELVAR007` otherwise), and
-  `ModuleServiceRegistrationGenerator` skips the plain registration for a `[FeatureVariant]` class so the keyed +
-  transparent registration is the only one — keeping `[Service]` the single consistent way to register a service.
+  warmed. Wired into modules via a new `AddVariantServices` `ConfigureDefaultServices` hook. Diagnostics `ELVAR001`,
+  `ELVAR003`–`ELVAR007`. `[FeatureVariant]` is a **modifier on `[Service]`**, not a separate registration path: the
+  impl must also carry `[Service]` (which declares the service, its contract(s), and lifetime; `ELVAR007` otherwise),
+  and `ModuleServiceRegistrationGenerator` skips the plain registration for a `[FeatureVariant]` class so the keyed +
+  transparent registration is the only one — keeping `[Service]` the single consistent way to register a service. The
+  contract is **not repeated** on the attribute: it comes from the `[Service]` via the shared
+  `ServiceContractResolver` (implemented interfaces, or explicit `[Service(typeof(IX))]`), so a service that
+  registers under several interfaces is variant-resolved on each — making the previous generic `<TContract>`
+  redundant. (`ELVAR002` "implementation does not implement its contract" is gone with the generic — the contract is
+  always one the `[Service]` already provides.)
   A variant applies to a *service* a handler injects — not to the handler itself; handlers are selected by request
   type, so behaviour is varied via a strategy service, never by swapping the whole handler.
 - The imperative **`IVariantServiceProvider<T>.GetAsync(ct)`** is the escape hatch (resolve outside a proxied
@@ -110,7 +115,8 @@ hosted lifecycle. A startup *validation* (bindings + keyed impls registered) is 
   `VariantServiceBinding`/`VariantServiceKeys`, `VariantResolutionCache`, `IVariantServiceProvider` /
   `DefaultVariantServiceProvider`, `VariantServiceCollectionExtensions`).
 - Accessor impl: `src/Elarion.FeatureFlags.OpenFeature/OpenFeatureFeatureVariantService.cs`.
-- Generation: `src/Elarion.Generators/VariantServiceRegistrationGenerator.cs` (ELVAR001–007, requires `[Service]`),
-  the `[FeatureVariant]`-class skip in `ModuleServiceRegistrationGenerator`, and the variant-dep
+- Generation: `src/Elarion.Generators/VariantServiceRegistrationGenerator.cs` (requires `[Service]`; contracts via
+  the shared `ServiceContractResolver`), the `[FeatureVariant]`-class skip in `ModuleServiceRegistrationGenerator`
+  (also refactored onto `ServiceContractResolver`, no duplicated resolution), and the variant-dep
   detection + proxy emission in `HandlerRegistrationGenerator.{Discovery,Models,Emit}.cs`; the `AddVariantServices`
   hook in `ModuleDefaultsEmitter`.

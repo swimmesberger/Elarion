@@ -113,11 +113,11 @@ injects the contract like any service; only the *implementations* are variant-aw
 
 ```csharp
 [Service]                                                                     // declare it like any service
-[FeatureVariant<IForecastAlgorithm>("ForecastAlgorithm")]                     // the default (no Variant)
+[FeatureVariant("ForecastAlgorithm")]                                         // the default (no Variant)
 public sealed class LinearForecast : IForecastAlgorithm { /* ... */ }
 
 [Service]
-[FeatureVariant<IForecastAlgorithm>("ForecastAlgorithm", Variant = "neural")]
+[FeatureVariant("ForecastAlgorithm", Variant = "neural")]
 public sealed class NeuralForecast : IForecastAlgorithm { /* ... */ }
 
 public sealed class RunForecast(IForecastAlgorithm algorithm)                 // no variant awareness
@@ -138,13 +138,15 @@ This is the recommended way to apply variants to handler logic.
 </Callout>
 
 **`[FeatureVariant]` is a modifier on `[Service]`.** A variant implementation is declared like every other
-service — with `[Service]` — and `[FeatureVariant]` only changes *how* the contract is resolved. So `[Service]` is
-**required** (a `[FeatureVariant]` without it is reported as `ELVAR007`), and it stays the single, consistent way to
-register a service: with the modifier you get variant-keyed resolution, without it you get a plain registration. The
-service generator yields the contract to the variant path (keyed implementations + the binding + the imperative
-provider + the transparent registration the proxy reads), so the two never double-register. The implementation's DI
-lifetime comes from its `[Service]` (`Scope = ServiceScope.Singleton`, etc.), and variant implementations may take
-their own constructor dependencies.
+service — with `[Service]` — and `[FeatureVariant]` only changes *how* it is resolved. The **contract is not
+repeated** on `[FeatureVariant]`: it is whatever `[Service]` registers under (the implemented interface, or explicit
+`[Service(typeof(IX))]` types), so a class that registers under several contracts is variant-resolved on each. So
+`[Service]` is **required** (a `[FeatureVariant]` without it is reported as `ELVAR007`) and stays the single,
+consistent way to register a service: with the modifier you get variant-keyed resolution, without it a plain
+registration. The service generator yields the contract to the variant path (keyed implementations + the binding +
+the imperative provider + the transparent registration the proxy reads), so the two never double-register. The DI
+lifetime comes from `[Service]` (`Scope = ServiceScope.Singleton`, etc.), and variant implementations may take their
+own constructor dependencies.
 
 **How it stays transparent.** Variant selection is an async flag evaluation, but constructor injection is
 synchronous. When a handler's constructor depends on a variant contract, the generator registers it behind an

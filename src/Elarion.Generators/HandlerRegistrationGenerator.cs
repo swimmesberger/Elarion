@@ -24,11 +24,9 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataName(
                 FeatureVariantAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, _) => GetVariantContractFqn(ctx))
-            .Where(static fqn => fqn is not null)
-            .Select(static (fqn, _) => fqn!)
+                static (ctx, _) => GetVariantContractFqns(ctx))
             .Collect()
-            .Select(static (fqns, _) => ToSortedDistinct(fqns))
+            .Select(static (groups, _) => FlattenSortedDistinct(groups))
             .WithTrackingName("VariantContracts");
 
         var handlerProvider = context.SyntaxProvider

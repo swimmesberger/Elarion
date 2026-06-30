@@ -26,10 +26,10 @@ public sealed class VariantServiceGeneratorTests {
             [AppModule("App")] public static class AppModule { }
             public interface IAlgorithm { }
             [Service]
-            [FeatureVariant<IAlgorithm>("ForecastAlgorithm")]
+            [FeatureVariant("ForecastAlgorithm")]
             public sealed class LinearAlgo : IAlgorithm { }
             [Service]
-            [FeatureVariant<IAlgorithm>("ForecastAlgorithm", Variant = "neural")]
+            [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
             public sealed class NeuralAlgo : IAlgorithm { }
         }
         """;
@@ -79,21 +79,32 @@ public sealed class VariantServiceGeneratorTests {
     }
 
     [Fact]
-    public void ReportsElvar002_WhenImplementationDoesNotImplementContract() {
+    public void MultiInterfaceVariant_AppliesToEachContract() {
+        // The contract(s) come from [Service]; a variant impl that registers under several interfaces is
+        // variant-resolved on each of them — the same rule [Service] uses, applied to all.
         var source = Preamble +
             """
 
             namespace Sample.App {
                 [AppModule("App")] public static class AppModule { }
                 public interface IAlgorithm { }
-                [FeatureVariant<IAlgorithm>("ForecastAlgorithm")]
-                public sealed class NotAnAlgorithm { }
+                public interface IWarmup { }
+                [Service]
+                [FeatureVariant("ForecastAlgorithm")]
+                public sealed class LinearAlgo : IAlgorithm, IWarmup { }
+                [Service]
+                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
+                public sealed class NeuralAlgo : IAlgorithm, IWarmup { }
             }
             """;
 
-        var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+        var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
-        diagnostics.Any(d => d.Id == "ELVAR002" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+        diagnostics.Any(d => d.Id.StartsWith("ELVAR") && d.Severity == DiagnosticSeverity.Error).Should().BeFalse();
+        var generated = AllGenerated(result);
+        generated.Should().Contain("AddElarionVariantService<global::Sample.App.IAlgorithm>");
+        generated.Should().Contain("AddElarionVariantService<global::Sample.App.IWarmup>");
+        generated.Should().Contain("typeof(global::Sample.App.NeuralAlgo)");
     }
 
     [Fact]
@@ -104,7 +115,7 @@ public sealed class VariantServiceGeneratorTests {
             namespace Sample.App {
                 [AppModule("App")] public static class AppModule { }
                 public interface IAlgorithm { }
-                [FeatureVariant<IAlgorithm>("ForecastAlgorithm")]
+                [FeatureVariant("ForecastAlgorithm")]
                 public sealed class LinearAlgo : IAlgorithm { }
             }
             """;
@@ -134,7 +145,7 @@ public sealed class VariantServiceGeneratorTests {
                 [AppModule("App")] public static class AppModule { }
                 public interface IAlgorithm { }
                 [Service]
-                [FeatureVariant<IAlgorithm>("ForecastAlgorithm", Variant = "neural")]
+                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
                 public sealed class NeuralAlgo : IAlgorithm { }
             }
             """;
@@ -153,10 +164,10 @@ public sealed class VariantServiceGeneratorTests {
                 [AppModule("App")] public static class AppModule { }
                 public interface IAlgorithm { }
                 [Service]
-                [FeatureVariant<IAlgorithm>("ForecastAlgorithm", Variant = "neural")]
+                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
                 public sealed class NeuralA : IAlgorithm { }
                 [Service]
-                [FeatureVariant<IAlgorithm>("ForecastAlgorithm", Variant = "neural")]
+                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
                 public sealed class NeuralB : IAlgorithm { }
             }
             """;
