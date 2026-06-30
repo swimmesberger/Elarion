@@ -22,7 +22,7 @@ public sealed class JsonRpcDispatcher {
 
     /// <summary>
     /// Initializes a dispatcher over its own fresh <see cref="HandlerDispatcher"/> — for manual wiring or tests.
-    /// Register operations with <see cref="MapDelegate{TRequest,TResponse}"/> or <see cref="Map{TRequest,TResponse}"/>.
+    /// Register operations with <see cref="MapDelegate{TRequest,TResponse}"/> or <see cref="MapHandler{TRequest,TResponse}"/>.
     /// </summary>
     public JsonRpcDispatcher(JsonSerializerOptions jsonOptions, ILogger<JsonRpcDispatcher>? logger = null)
         : this(new HandlerDispatcher(), jsonOptions, logger) {
@@ -44,10 +44,10 @@ public sealed class JsonRpcDispatcher {
     public HandlerDispatcher Registry => _registry;
 
     /// <summary>Registers a DI-resolved handler on the underlying registry (convenience forwarder).</summary>
-    public JsonRpcDispatcher Map<TRequest, TResponse>(
+    public JsonRpcDispatcher MapHandler<TRequest, TResponse>(
         string methodName, HandlerTransports transports = HandlerTransports.All)
         where TRequest : class {
-        _registry.Map<TRequest, TResponse>(methodName, transports);
+        _registry.MapHandler<TRequest, TResponse>(methodName, transports);
         return this;
     }
 

@@ -23,9 +23,9 @@ public sealed class HandlerDispatcherTests {
     [Fact]
     public void TryGetRoute_RespectsTransportFlags() {
         var registry = new HandlerDispatcher()
-            .Map<Ping, Pong>("rpc.only", HandlerTransports.JsonRpc)
-            .Map<Ping, Pong>("mcp.only", HandlerTransports.Mcp)
-            .Map<Ping, Pong>("both", HandlerTransports.All)
+            .MapHandler<Ping, Pong>("rpc.only", HandlerTransports.JsonRpc)
+            .MapHandler<Ping, Pong>("mcp.only", HandlerTransports.Mcp)
+            .MapHandler<Ping, Pong>("both", HandlerTransports.All)
             .Freeze();
 
         registry.TryGetRoute("rpc.only", HandlerTransports.JsonRpc, out _).Should().BeTrue();
@@ -39,9 +39,9 @@ public sealed class HandlerDispatcherTests {
     [Fact]
     public void RoutesFor_ReturnsOnlyTheFlaggedSubset() {
         var registry = new HandlerDispatcher()
-            .Map<Ping, Pong>("rpc.only", HandlerTransports.JsonRpc)
-            .Map<Ping, Pong>("mcp.only", HandlerTransports.Mcp)
-            .Map<Ping, Pong>("both", HandlerTransports.All)
+            .MapHandler<Ping, Pong>("rpc.only", HandlerTransports.JsonRpc)
+            .MapHandler<Ping, Pong>("mcp.only", HandlerTransports.Mcp)
+            .MapHandler<Ping, Pong>("both", HandlerTransports.All)
             .Freeze();
 
         registry.RoutesFor(HandlerTransports.JsonRpc).Select(route => route.Name)
@@ -54,7 +54,7 @@ public sealed class HandlerDispatcherTests {
 
     [Fact]
     public async Task DispatchAsync_ResolvesDecoratedHandlerFromScope_AndBoxesResult() {
-        var registry = new HandlerDispatcher().Map<Ping, Pong>("ping").Freeze();
+        var registry = new HandlerDispatcher().MapHandler<Ping, Pong>("ping").Freeze();
         using var provider = new ServiceCollection()
             .AddScoped<IHandler<Ping, Result<Pong>>, PingHandler>()
             .BuildServiceProvider();
@@ -69,7 +69,7 @@ public sealed class HandlerDispatcherTests {
 
     [Fact]
     public async Task DispatchAsync_UnknownName_ReturnsNotFound() {
-        var registry = new HandlerDispatcher().Map<Ping, Pong>("ping").Freeze();
+        var registry = new HandlerDispatcher().MapHandler<Ping, Pong>("ping").Freeze();
         using var provider = new ServiceCollection().BuildServiceProvider();
 
         var result = await registry.DispatchAsync(
@@ -97,7 +97,7 @@ public sealed class HandlerDispatcherTests {
 
     [Fact]
     public void Reads_BeforeFreeze_Throw() {
-        var registry = new HandlerDispatcher().Map<Ping, Pong>("ping");
+        var registry = new HandlerDispatcher().MapHandler<Ping, Pong>("ping");
 
         var act = () => registry.TryGetRoute("ping", out _);
 
@@ -106,16 +106,16 @@ public sealed class HandlerDispatcherTests {
 
     [Fact]
     public void Map_AfterFreeze_Throws() {
-        var registry = new HandlerDispatcher().Map<Ping, Pong>("ping").Freeze();
+        var registry = new HandlerDispatcher().MapHandler<Ping, Pong>("ping").Freeze();
 
-        var act = () => registry.Map<Ping, Pong>("late");
+        var act = () => registry.MapHandler<Ping, Pong>("late");
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*after Freeze()*");
     }
 
     [Fact]
     public void Map_DuplicateName_ThrowsInsteadOfSilentlyOverwriting() {
-        var registry = new HandlerDispatcher().Map<Ping, Pong>("dup");
+        var registry = new HandlerDispatcher().MapHandler<Ping, Pong>("dup");
 
         var act = () => registry.MapDelegate<Ping, Pong>(
             "dup", (request, _, _) => ValueTask.FromResult<Result<Pong>>(new Pong(request.Value)));

@@ -70,7 +70,7 @@ public sealed class DispatchScopeTests {
 
     [Fact]
     public async Task RpcToolInvoker_SeedsScopedStateFromContext_VisibleToHandler() {
-        var dispatcher = new JsonRpcDispatcher(Options).Map<ProbeQuery, ProbeResponse>("probe").Freeze();
+        var dispatcher = new JsonRpcDispatcher(Options).MapHandler<ProbeQuery, ProbeResponse>("probe").Freeze();
         var services = new ServiceCollection()
             .AddScoped<ProbeState>()
             .AddSingleton<IDispatchScopeInitializer, SeedProbeInitializer>()

@@ -11,8 +11,11 @@ namespace Elarion.Abstractions.Dispatch;
 /// <see cref="HandlerRoute.RequestType"/>, dispatch, and map the <see cref="Result{T}"/> onto their wire.
 /// </summary>
 /// <remarks>
-/// Built once (typically by the generated bootstrapper, one <see cref="Map{TRequest,TResponse}"/> per
-/// <c>[Handler]</c>), then <see cref="Freeze"/>d and shared across transports.
+/// Built once (typically by the generated bootstrapper, one <see cref="MapHandler{TRequest,TResponse}"/> per
+/// <c>[Handler]</c>), then <see cref="Freeze"/>d and shared across transports. The same
+/// <see cref="MapHandler{TRequest,TResponse}"/> is also the <b>imperative exposure seam</b> a host uses to map a
+/// handler whose class it does not own (a framework- or third-party-shipped handler) onto the name-routed
+/// transports — see <c>ADR-0021</c>.
 /// </remarks>
 public sealed class HandlerDispatcher {
     private readonly Dictionary<string, HandlerRoute> _building = new(StringComparer.OrdinalIgnoreCase);
@@ -21,10 +24,15 @@ public sealed class HandlerDispatcher {
     private FrozenDictionary<string, HandlerRoute> Routes =>
         _frozen ?? throw new InvalidOperationException("Call Freeze() after registering all handlers.");
 
-    /// <summary>Registers a handler under <paramref name="name"/>. Call before <see cref="Freeze"/>.</summary>
+    /// <summary>
+    /// Registers a DI-resolved handler under <paramref name="name"/> on <paramref name="transports"/>. Call before
+    /// <see cref="Freeze"/>. The route resolves <c>IHandler&lt;TRequest, Result&lt;TResponse&gt;&gt;</c> from the call
+    /// scope and invokes its decorated pipeline. This is the seam the generated bootstrapper uses (one call per
+    /// <c>[Handler]</c>) and the <b>imperative</b> way a host exposes a handler it does not own — see <c>ADR-0021</c>.
+    /// </summary>
     /// <typeparam name="TRequest">The handler request type.</typeparam>
     /// <typeparam name="TResponse">The handler success value type.</typeparam>
-    public HandlerDispatcher Map<TRequest, TResponse>(
+    public HandlerDispatcher MapHandler<TRequest, TResponse>(
         string name, HandlerTransports transports = HandlerTransports.All)
         where TRequest : class {
         if (_frozen is not null) {
@@ -86,7 +94,7 @@ public sealed class HandlerDispatcher {
 
     /// <summary>
     /// Freezes the registry into a <see cref="FrozenDictionary{TKey,TValue}"/> for fast lookups. Must be called once
-    /// after all <c>Map</c>/<c>MapDelegate</c> registrations and before any routing; reads throw until it is.
+    /// after all <c>MapHandler</c>/<c>MapDelegate</c> registrations and before any routing; reads throw until it is.
     /// </summary>
     public HandlerDispatcher Freeze() {
         _frozen ??= _building.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);

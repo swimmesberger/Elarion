@@ -16,6 +16,13 @@ internal static class ElarionGeneratorConventions
     /// <summary><c>[AppModule]</c> — discovered by the manifest and bootstrapper generators.</summary>
     public const string AppModuleAttribute = "Elarion.Abstractions.Modules.AppModuleAttribute";
 
+    /// <summary>
+    /// <c>[ClientFeatures]</c> — declared on an <c>[AppModule]</c> type and read by the manifest generator
+    /// (which publishes the exposed names) <b>and</b> the bootstrapper generator (which emits the client-capability
+    /// manifest the session handler consumes). See ADR-0020.
+    /// </summary>
+    public const string ClientFeaturesAttribute = "Elarion.Abstractions.Modules.ClientFeaturesAttribute";
+
     /// <summary><c>[GenerateDbSets]</c> — required by the EF DbContext, Identity, and resource-grants generators.</summary>
     public const string GenerateDbSetsAttribute = "Elarion.EntityFrameworkCore.GenerateDbSetsAttribute";
 

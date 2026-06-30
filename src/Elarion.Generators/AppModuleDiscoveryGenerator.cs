@@ -39,6 +39,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
     private const string AppModuleAttributeMetadataName = ElarionGeneratorConventions.AppModuleAttribute;
 
+    private const string ClientFeaturesAttributeMetadataName = ElarionGeneratorConventions.ClientFeaturesAttribute;
+
     private const string UnmatchedModuleName = "<Unmatched>";
 
     private static readonly DiagnosticDescriptor SharedModuleNamespace = new(
@@ -63,7 +65,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         bool HasMapEndpoints,
         bool HasGetJsonTypeInfoResolver,
         bool HasConfigureEndpointGroup,
-        bool EmitDefaultServices
+        bool EmitDefaultServices,
+        EquatableArray<string> ClientFeatures
     );
 
     /// <summary>Grouped transport handlers, keyed by owning module name, plus the unmatched buckets.</summary>
@@ -344,10 +347,12 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             return entries;
         }
 
+        var clientFeaturesType = compilation.GetTypeByMetadataName(ClientFeaturesAttributeMetadataName);
+
         // Scan the current compilation's assembly first.
         CollectFromNamespace(
             compilation.Assembly.GlobalNamespace,
-            attributeType, entries, ct);
+            attributeType, clientFeaturesType, entries, ct);
 
         foreach (var module in manifestModules)
             entries.Add(ToModuleEntry(module, SiblingExists(compilation, module.TypeFqn)));
@@ -374,7 +379,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             module.HasMapEndpoints,
             module.HasGetJsonTypeInfoResolver,
             module.HasConfigureEndpointGroup,
-            emitDefaultServices);
+            emitDefaultServices,
+            module.ClientFeatures);
 
     /// <summary>
     /// Whether the module's generated <c>ConfigureDefaultServices</c> sibling exists for a referenced module.
@@ -460,6 +466,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private static void CollectFromNamespace(
         INamespaceSymbol ns,
         INamedTypeSymbol attributeType,
+        INamedTypeSymbol? clientFeaturesType,
         List<ModuleEntry> entries,
         CancellationToken ct)
     {
@@ -504,11 +511,38 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
                 isCore,
                 hasConfigureServices, hasMapEndpoints, hasGetJsonTypeInfoResolver, hasConfigureEndpointGroup,
                 // Current-compilation modules: the ConfigureDefaultServices skeleton is generated in the same pass.
-                EmitDefaultServices: true));
+                EmitDefaultServices: true,
+                ReadClientFeatures(type, clientFeaturesType)));
         }
 
         foreach (var sub in ns.GetNamespaceMembers())
-            CollectFromNamespace(sub, attributeType, entries, ct);
+            CollectFromNamespace(sub, attributeType, clientFeaturesType, entries, ct);
+    }
+
+    /// <summary>Reads the names listed by a module's <c>[ClientFeatures(...)]</c> attribute (empty when absent).</summary>
+    private static EquatableArray<string> ReadClientFeatures(INamedTypeSymbol type, INamedTypeSymbol? clientFeaturesType)
+    {
+        if (clientFeaturesType is null)
+            return EquatableArray<string>.Empty;
+
+        foreach (var attr in type.GetAttributes())
+        {
+            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, clientFeaturesType))
+                continue;
+            if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Kind != TypedConstantKind.Array)
+                return EquatableArray<string>.Empty;
+
+            var names = new List<string>();
+            foreach (var value in attr.ConstructorArguments[0].Values)
+            {
+                if (value.Value is string name && name.Length > 0)
+                    names.Add(name);
+            }
+
+            return names.ToEquatableArray();
+        }
+
+        return EquatableArray<string>.Empty;
     }
 
     private static bool HasStaticMethod(INamedTypeSymbol type, string name, int paramCount)
@@ -842,6 +876,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         sb.AppendLine("    }");
 
+        // --- GetClientCapabilityManifest (ADR-0020) — only when a module exposes [ClientFeatures] ---
+        AppendClientCapabilityManifest(sb, entries);
+
         // --- Per-module transport methods (group hooks) ---
         AppendHttpMethods(sb, entries, transport);
         AppendHandlersMethods(sb, entries, transport);
@@ -851,6 +888,54 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("}");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Emits the deployment-resolved client-capability manifest the session bootstrap handler consumes: every module
+    /// with its <c>IsModuleEnabled</c> state plus the names from its <c>[ClientFeatures]</c> list (empty for modules
+    /// that expose none). Emitted only when at least one module opts in, so hosts that never use the feature get
+    /// byte-identical output.
+    /// </summary>
+    private static void AppendClientCapabilityManifest(StringBuilder sb, List<ModuleEntry> entries)
+    {
+        var hasClientFeatures = false;
+        foreach (var entry in entries)
+        {
+            if (!entry.ClientFeatures.IsEmpty)
+            {
+                hasClientFeatures = true;
+                break;
+            }
+        }
+
+        if (!hasClientFeatures)
+            return;
+
+        const string ManifestFqn = "global::Elarion.Session.ClientCapabilityManifest";
+        const string ModuleManifestFqn = "global::Elarion.Session.ClientModuleManifest";
+
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Builds the deployment-resolved client-capability manifest (modules + exposed feature names) the session bootstrap evaluates per user.</summary>");
+        sb.AppendLine($"    public static {ManifestFqn} GetClientCapabilityManifest(");
+        sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        return new {ManifestFqn}");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            Modules = new {ModuleManifestFqn}[]");
+        sb.AppendLine("            {");
+        foreach (var entry in entries)
+        {
+            var features = entry.ClientFeatures.IsEmpty
+                ? "global::System.Array.Empty<string>()"
+                : $"new string[] {{ {string.Join(", ", entry.ClientFeatures.Select(SourceString))} }}";
+            sb.AppendLine(
+                $"                new {ModuleManifestFqn} {{ Name = {SourceString(entry.ModuleName)}, "
+                + $"Enabled = IsModuleEnabled(configuration, {SourceString(entry.ModuleName)}), Features = {features} }},");
+        }
+
+        sb.AppendLine("            },");
+        sb.AppendLine("        };");
+        sb.AppendLine("    }");
     }
 
     private static void AppendResourceFilterMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)

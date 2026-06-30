@@ -6,7 +6,7 @@ namespace Elarion.Generators;
 
 /// <summary>
 /// Shared discovery for <c>[Elarion.Abstractions.Handler]</c> handlers (including MCP metadata) and statement-style
-/// <c>Map</c> emission onto the transport-neutral <c>HandlerDispatcher</c>, consumed by
+/// <c>MapHandler</c> emission onto the transport-neutral <c>HandlerDispatcher</c>, consumed by
 /// <see cref="AppModuleDiscoveryGenerator"/> for the module-grouped, feature-flag-gated registration (the only
 /// transport-wiring path).
 /// </summary>
@@ -75,12 +75,12 @@ internal static class RpcMethodEmission
     );
 
     /// <summary>
-    /// Emits one statement-style <c>Map</c> registration onto the neutral <paramref name="registryVar"/>
+    /// Emits one statement-style <c>MapHandler</c> registration onto the neutral <paramref name="registryVar"/>
     /// (<c>HandlerDispatcher</c>) using the entry's (already module-resolved) operation name and transport flags.
     /// </summary>
     public static void AppendMapHandler(StringBuilder sb, Model entry, string indent, string registryVar) =>
         sb.AppendLine(
-            $"{indent}{registryVar}.Map<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>("
+            $"{indent}{registryVar}.MapHandler<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>("
             + $"{Literal(entry.MethodName)}, {TransportsExpression(entry)});");
 
     /// <summary>The fully-qualified <c>HandlerTransports</c> flag expression for an entry's surfaces.</summary>

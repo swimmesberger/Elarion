@@ -8,8 +8,10 @@ using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
 using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
+using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;
+using Elarion.Session;
 using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
 using Elarion.Authorization;
@@ -80,16 +82,27 @@ builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
 // consumers — each gated by Modules:{Name}:Enabled.
 builder.Services.AddElarion(builder.Configuration);
 
+// Client-capability bootstrap (ADR-0020): a framework-shipped handler that returns module enablement, the
+// [ClientFeatures] flags/variants, and the user's grants for the frontend. The manifest is built once from the
+// generated bootstrapper; the handler evaluates the flags per user.
+builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityManifest());
+
+// The session bootstrap is framework-owned (no [Handler] attribute), so it is mapped onto the named bus
+// imperatively (ADR-0021) — chained into the same RegisterHandlers delegate passed to every transport, so the
+// shared dispatcher is still built once.
+var registerHandlers = (HandlerDispatcher dispatcher, IConfiguration configuration) =>
+    ElarionBootstrapper.RegisterHandlers(dispatcher, configuration).MapElarionSession();
+
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(serializerOptions, registerHandlers);
 
 // MCP: an equally gated transport adapter over the same shared handler registry (the named bus).
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
     serializerOptions,
-    ElarionBootstrapper.RegisterHandlers,
+    registerHandlers,
     o => o.ServerName = "Billing");
 
 // Telemetry: register the Elarion sources/meters; the Aspire dashboard collects them over OTLP.
@@ -149,6 +162,7 @@ app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
 app.MapElarionEndpoints(app.Configuration);
+app.MapElarionSession();                                // GET /session — client-capability snapshot (anonymous-friendly)
 app.MapElarionJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
@@ -161,6 +175,6 @@ static JsonSerializerOptions CreateSerializerOptions(IConfiguration configuratio
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         TypeInfoResolver = JsonTypeInfoResolver.Combine(
-            [JsonRpcJsonContext.Default, .. moduleResolvers, new DefaultJsonTypeInfoResolver()]),
+            [JsonRpcJsonContext.Default, SessionJsonContext.Default, .. moduleResolvers, new DefaultJsonTypeInfoResolver()]),
     };
 }
