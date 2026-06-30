@@ -44,11 +44,15 @@ One built-in handler returns the whole client picture for the current user + dep
   "variants": { "ForecastAlgorithm": "neural" } }
 ```
 
-It is an ordinary `[Handler]`, so by default (`HandlerTransports.All`) it is reachable over **JSON-RPC and MCP**; a
-host that wants it on **REST** adds `[HttpEndpoint]`. The host therefore chooses the transport with the existing
-mechanism — no special path (see [the exposure model below](#how-a-handler-chooses-its-transport-the-existing-api)).
-It composes existing seams only: `IsModuleEnabled`, `IFeatureFlagService.IsEnabledAsync`,
-`IFeatureVariantService.GetVariantAsync`, and `ICurrentUser`.
+Because the handler is **framework-owned**, the host cannot decorate it with attributes (`[Handler]`/`[HttpEndpoint]`
+are compile-time on the class). So exposure is **imperative**, host-chosen, via a thin capability extension:
+`AddElarionClientCapabilities()` registers it, the host opts it onto the **named bus** (JSON-RPC/MCP) through the
+imperative `MapHandler<…>(name, transports)` seam, and onto **REST** through a concrete, framework-authored
+`MapElarionClientCapabilities("/session")` (concrete types, so ASP.NET's Request Delegate Generator stays
+AOT/trim-safe — a generic HTTP map would not). This is the general gap for exposing any handler whose class the host
+doesn't own; it has its own record in [ADR-0020](0020-imperative-handler-transport-mapping.md). The handler composes
+existing seams only: `IsModuleEnabled`, `IFeatureFlagService.IsEnabledAsync`, `IFeatureVariantService.GetVariantAsync`,
+and `ICurrentUser`.
 
 ### 2. Explicit per-module exposure — `[ClientFeatures]`
 
@@ -124,7 +128,9 @@ handler:
 - `[McpHandler(ToolName = …)]` — only customizes the MCP tool name.
 
 The host turns each surface on independently: `AddElarionJsonRpc` + `MapElarionJsonRpc`, `AddElarionMcp` +
-`MapElarionMcp`, and the generated `MapElarion`/`Map{Module}Http` for `[HttpEndpoint]` handlers.
+`MapElarionMcp`, and the generated `MapElarion`/`Map{Module}Http` for `[HttpEndpoint]` handlers. This declarative path
+covers handlers **you own**; a handler whose class you do not own (a framework handler like this bootstrap) is
+exposed imperatively instead — see [ADR-0020](0020-imperative-handler-transport-mapping.md).
 
 ## Consequences
 
@@ -154,7 +160,9 @@ The host turns each surface on independently: `AddElarionJsonRpc` + `MapElarionJ
 - `[ClientFeatures]` attribute in `Elarion.Abstractions`, collected per module into a client-feature manifest by
   `AppModuleDiscoveryGenerator`.
 - A built-in bootstrap handler composing `IsModuleEnabled` + `IFeatureFlagService` + `IFeatureVariantService` +
-  `ICurrentUser`, returning the `{ user, modules, flags, variants }` contract.
+  `ICurrentUser`, returning the `{ user, modules, flags, variants }` contract, exposed via the imperative mapping of
+  [ADR-0020](0020-imperative-handler-transport-mapping.md) (`AddElarionClientCapabilities` + the bus `MapHandler` seam
+  + a concrete `MapElarionClientCapabilities` for REST).
 - TypeScript generator: the typed snapshot client, the `@openfeature/web-sdk` provider, and the typed key constants.
 - Docs: a `concepts/client-capabilities.mdx`, and a short "choosing transport exposure" section added to
   `transports.mdx` (today that decision lives only in the attribute XML docs).

@@ -40,3 +40,4 @@ designs that are not yet implemented.
 - [ADR-0017: Elarion core is dependency-light; provider defaults are opt-in packages](0017-dependency-light-core.md)
 - [ADR-0018: Variant service injection (transparent, via an opt-in async-resolving handler proxy)](0018-variant-service-injection.md)
 - [ADR-0019: Client capability bootstrap (modules, flags/variants, and grants projected to the frontend over OpenFeature)](0019-client-capability-bootstrap.md)
+- [ADR-0020: Imperative handler transport mapping (and why HTTP stays concrete)](0020-imperative-handler-transport-mapping.md)
