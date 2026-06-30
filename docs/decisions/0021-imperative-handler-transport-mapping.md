@@ -1,8 +1,8 @@
-# ADR-0020: Imperative handler transport mapping (and why HTTP stays concrete)
+# ADR-0021: Imperative handler transport mapping (and why HTTP stays concrete)
 
 - Status: Accepted
 - Date: 2026-06-30
-- Related: [ADR-0019](0019-client-capability-bootstrap.md) (its bootstrap handler is the first consumer),
+- Related: [ADR-0020](0020-client-capability-bootstrap.md) (its bootstrap handler is the first consumer),
   [ADR-0006](0006-incremental-source-generator-conventions.md) (AOT/RDG-friendly generation), the
   [transports](../concepts/transports.mdx) concept doc, and the named `HandlerDispatcher` bus.
 
@@ -15,7 +15,7 @@ registration/mapping code in the host's compilation.
 That only works for a handler **whose class you own** — you put the attribute on the class declaration. It cannot
 expose:
 
-- a **framework-shipped** handler (e.g. the client-capability bootstrap of [ADR-0019](0019-client-capability-bootstrap.md));
+- a **framework-shipped** handler (e.g. the client-capability bootstrap of [ADR-0020](0020-client-capability-bootstrap.md));
 - a **third-party** handler from a referenced package;
 - a handler whose exposure you want to **decide at startup** (per environment/config) rather than bake into source.
 
@@ -70,7 +70,7 @@ precedent).
 
 A framework feature therefore ships: `AddElarionX()` (DI — the handler, its dependencies, and its `JsonTypeInfo`
 resolver), a bus contribution via `MapHandler<…>` (chained into the host's `RegisterHandlers`), and a concrete
-`MapElarionX(route)` for REST. The host opts in and chooses which surfaces it wants. [ADR-0019](0019-client-capability-bootstrap.md)'s
+`MapElarionX(route)` for REST. The host opts in and chooses which surfaces it wants. [ADR-0020](0020-client-capability-bootstrap.md)'s
 bootstrap is the first consumer.
 
 ## Consequences

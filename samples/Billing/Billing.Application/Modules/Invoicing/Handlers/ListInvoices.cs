@@ -10,10 +10,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Billing.Application.Modules.Invoicing.Handlers;
 
 /// <summary>Lists the current account's invoices through a cached query, invalidated by the
-/// <c>invoices</c> tag whenever <see cref="CreateInvoice"/> succeeds. Requires the <c>invoices:read</c>
+/// <c>invoices</c> tag whenever <see cref="CreateInvoice"/> succeeds. Requires the <c>invoices.read</c>
 /// permission.</summary>
 [Handler("invoices.list")]
-[RequirePermission("invoices:read")]
+[RequirePermission("invoices", Verbs.Read)]
 [Cacheable("invoices", DurationSeconds = 30)]
 public sealed class ListInvoices(BillingDbContext db, ICurrentUser user)
     : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {

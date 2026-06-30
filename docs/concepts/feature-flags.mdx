@@ -170,12 +170,12 @@ Variant service injection needs an OpenFeature provider that surfaces the alloca
 §1.4.6) — flagd, LaunchDarkly, ConfigCat, and the in-memory provider do. The current
 `OpenFeature.Contrib.Provider.FeatureManagement` (preview) evaluates the variant's value but does **not** yet
 surface its name, so variant injection is unavailable through the `AddElarionFeatureManagement` default (boolean
-`[FeatureGate]` is unaffected). See [ADR-0018](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0018-variant-service-injection.md).
+`[FeatureGate]` is unaffected). See [ADR-0019](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0019-variant-service-injection.md).
 </Callout>
 
 ## See also
 
 - [ADR-0016: Feature-flag gating](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0016-feature-flag-gating.md) — why a thin Elarion seam over OpenFeature rather than `IFeatureManager` directly.
-- [ADR-0018: Variant service injection](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0018-variant-service-injection.md) — transparent per-variant implementation injection via the async-resolving handler proxy.
+- [ADR-0019: Variant service injection](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0019-variant-service-injection.md) — transparent per-variant implementation injection via the async-resolving handler proxy.
 - [Decorator pipelines](/docs/concepts/decorator-pipelines) — how the gate composes with authorization, caching, and resilience.
 - [Authorization](/docs/concepts/authorization) — the sibling declarative gate the feature gate is modeled on.

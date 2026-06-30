@@ -15,16 +15,13 @@ endpoints, and telemetry. None of this leaks back into the modules.
 
 One partial class tells the generator to emit the cross-module wiring **in the host assembly**.
 
-```csharp title="src/Billing.Api/Hosting/ModuleBootstrapper.cs"
+```csharp title="src/Billing.Api/ElarionAssembly.cs"
 using Elarion.AspNetCore;
 
-namespace Billing.Api.Hosting;
-
-[GenerateModuleBootstrapper]
-public static partial class ModuleBootstrapper;
+[assembly: GenerateModuleBootstrapper]
 ```
 
-`ModuleBootstrapper` gains `AddElarion`, `MapElarionEndpoints`, `RegisterHandlers` (the single
+`ElarionBootstrapper` gains `AddElarion`, `MapElarionEndpoints`, `RegisterHandlers` (the single
 transport-neutral registry feeding both JSON-RPC and MCP), `GetMcpMetadata` (MCP), and
 `GetAllJsonTypeInfoResolvers`. Every transport is **feature-flag-gated per module**, so a disabled
 module disappears from all of them at once.
@@ -125,13 +122,13 @@ builder.Services.AddElarion(builder.Configuration);
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
 
 // MCP: a thin adapter over the same handler bus, equally gated; both surfaces share one registry.
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
     serializerOptions,
-    ModuleBootstrapper.RegisterHandlers,
+    ElarionBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
 
 // Telemetry: register the Elarion sources/meters; the host owns the exporters.

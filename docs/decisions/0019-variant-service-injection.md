@@ -1,4 +1,4 @@
-# ADR-0018: Variant service injection (transparent, via an opt-in async-resolving handler proxy)
+# ADR-0019: Variant service injection (transparent, via an opt-in async-resolving handler proxy)
 
 - Status: Accepted
 - Date: 2026-06-30

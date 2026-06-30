@@ -18,7 +18,7 @@ public static class JsonRpcDispatcherServiceExtensions {
     /// </summary>
     /// <remarks>
     /// <b>First registration wins.</b> Pass the <b>same</b> registration delegate (e.g.
-    /// <c>ModuleBootstrapper.RegisterHandlers</c>) to every transport — <c>AddElarionJsonRpc</c> and
+    /// <c>ElarionBootstrapper.RegisterHandlers</c>) to every transport — <c>AddElarionJsonRpc</c> and
     /// <c>AddElarionMcp</c> both route through this method, and a divergent second delegate is silently ignored
     /// because the bus is a single shared singleton.
     /// </remarks>
@@ -56,7 +56,7 @@ public static class JsonRpcDispatcherServiceExtensions {
     /// </summary>
     /// <example>
     /// <code>
-    /// builder.Services.AddElarionJsonRpcDispatcher(serializerOptions, ModuleBootstrapper.RegisterHandlers);
+    /// builder.Services.AddElarionJsonRpcDispatcher(serializerOptions, ElarionBootstrapper.RegisterHandlers);
     /// </code>
     /// </example>
     public static IServiceCollection AddElarionJsonRpcDispatcher(

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 
-namespace Elarion.AspNetCore.Identity;
+namespace Elarion.EntityFrameworkCore.Identity;
 
 /// <summary>
 /// Declares that the annotated partial <c>DbContext</c> hosts ASP.NET Core Identity for the given user,

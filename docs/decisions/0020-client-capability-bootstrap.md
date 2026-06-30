@@ -1,8 +1,8 @@
-# ADR-0019: Client capability bootstrap — modules, flags/variants, and grants projected to the frontend over OpenFeature
+# ADR-0020: Client capability bootstrap — modules, flags/variants, and grants projected to the frontend over OpenFeature
 
 - Status: Accepted
 - Date: 2026-06-30
-- Related: [ADR-0016](0016-feature-flag-gating.md) (the boolean `IFeatureFlagService` seam), [ADR-0018](0018-variant-service-injection.md)
+- Related: [ADR-0016](0016-feature-flag-gating.md) (the boolean `IFeatureFlagService` seam), [ADR-0019](0019-variant-service-injection.md)
   (the `IFeatureVariantService` variant accessor), [ADR-0009](0009-authorization-building-blocks.md) (authorization /
   `ICurrentUser`), the [modules](../concepts/modules.mdx) and [transports](../concepts/transports.mdx) concept docs.
   The source-generated permission catalog (separate work) composes with the grants exposed here.
@@ -50,7 +50,7 @@ are compile-time on the class). So exposure is **imperative**, host-chosen, via 
 imperative `MapHandler<…>(name, transports)` seam, and onto **REST** through a concrete, framework-authored
 `MapElarionSession("/session")` (concrete types, so ASP.NET's Request Delegate Generator stays
 AOT/trim-safe — a generic HTTP map would not). This is the general gap for exposing any handler whose class the host
-doesn't own; it has its own record in [ADR-0020](0020-imperative-handler-transport-mapping.md). The handler composes
+doesn't own; it has its own record in [ADR-0021](0021-imperative-handler-transport-mapping.md). The handler composes
 existing seams only: `IsModuleEnabled`, `IFeatureFlagService.IsEnabledAsync`, `IFeatureVariantService.GetVariantAsync`,
 and `ICurrentUser`.
 
@@ -130,7 +130,7 @@ handler:
 The host turns each surface on independently: `AddElarionJsonRpc` + `MapElarionJsonRpc`, `AddElarionMcp` +
 `MapElarionMcp`, and the generated `MapElarion`/`Map{Module}Http` for `[HttpEndpoint]` handlers. This declarative path
 covers handlers **you own**; a handler whose class you do not own (a framework handler like this bootstrap) is
-exposed imperatively instead — see [ADR-0020](0020-imperative-handler-transport-mapping.md).
+exposed imperatively instead — see [ADR-0021](0021-imperative-handler-transport-mapping.md).
 
 ## Consequences
 
@@ -161,7 +161,7 @@ exposed imperatively instead — see [ADR-0020](0020-imperative-handler-transpor
   `AppModuleDiscoveryGenerator`.
 - A built-in bootstrap handler composing `IsModuleEnabled` + `IFeatureFlagService` + `IFeatureVariantService` +
   `ICurrentUser`, returning the `{ user, modules, flags, variants }` contract, exposed via the imperative mapping of
-  [ADR-0020](0020-imperative-handler-transport-mapping.md) (`AddElarionSession` + the bus `MapHandler` seam
+  [ADR-0021](0021-imperative-handler-transport-mapping.md) (`AddElarionSession` + the bus `MapHandler` seam
   + a concrete `MapElarionSession` for REST).
 - TypeScript generator: the typed snapshot client, the `@openfeature/web-sdk` provider, and the typed key constants.
 - Docs: a `concepts/client-capabilities.mdx`, and a short "choosing transport exposure" section added to

@@ -2,7 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using Billing.Api.Hosting;
+using Billing.Api;
 using Billing.Application;
 using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
@@ -83,13 +83,13 @@ builder.Services.AddElarion(builder.Configuration);
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
 
 // MCP: an equally gated transport adapter over the same shared handler registry (the named bus).
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
     serializerOptions,
-    ModuleBootstrapper.RegisterHandlers,
+    ElarionBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
 
 // Telemetry: register the Elarion sources/meters; the Aspire dashboard collects them over OTLP.
@@ -125,7 +125,7 @@ app.UseCors(DevCorsPolicy);
 app.UseAuthentication();
 
 // Development-only: stamp a stable dev principal so ICurrentUser resolves without an external issuer. It
-// carries the permission claims the handlers require ([RequirePermission("clients:read")], …) so the
+// carries the permission claims the handlers require ([RequirePermission("clients", Verbs.Read)], …) so the
 // authorization checks pass locally; a real issuer would mint these from the user's roles/scopes.
 if (app.Environment.IsDevelopment()) {
     app.Use(async (context, next) => {
@@ -134,10 +134,10 @@ if (app.Environment.IsDevelopment()) {
                 new ClaimsIdentity(
                     [
                         new Claim("sub", "dev-user"),
-                        new Claim("permission", "clients:read"),
-                        new Claim("permission", "clients:write"),
-                        new Claim("permission", "invoices:read"),
-                        new Claim("permission", "invoices:write"),
+                        new Claim("permission", "clients.read"),
+                        new Claim("permission", "clients.write"),
+                        new Claim("permission", "invoices.read"),
+                        new Claim("permission", "invoices.write"),
                     ],
                     "Development"));
         }

@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using Elarion.AspNetCore.Identity;
+using Elarion.EntityFrameworkCore.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
