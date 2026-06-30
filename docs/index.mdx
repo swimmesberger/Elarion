@@ -67,6 +67,11 @@ registration list.
     Source-generated scheduled jobs share one scheduler with explicit overlap, misfire, and
     resilience policies — and full OpenTelemetry instrumentation.
   </Card>
+  <Card title="Declarative feature flags" href="/docs/concepts/feature-flags">
+    Gate any handler behind a flag with `[FeatureGate]` — runtime rollouts, kill switches, and
+    per-variant service injection over OpenFeature. Transport-neutral and provider-agnostic, a closed
+    gate returns 404 so the feature name never leaks.
+  </Card>
   <Card title="Blob storage" href="/docs/capabilities/blob-storage">
     Depend on provider-neutral blob contracts in application code and choose PostgreSQL-backed
     storage in the host.

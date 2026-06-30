@@ -60,6 +60,58 @@ Spring-style configuration placeholders, re-resolved per occurrence:
 
 See [Schedules](/docs/capabilities/scheduling/schedules).
 
+## Feature flags
+
+`[FeatureGate]` and `[FeatureVariant]` evaluate against the `IFeatureFlagService` seam. Where the flag values
+come from depends on which provider package the host wires.
+
+### Batteries-included config-driven flags
+
+`AddElarionFeatureManagement(IConfiguration)` (from `Elarion.FeatureFlags.FeatureManagement`) wires the
+Microsoft.FeatureManagement OpenFeature provider behind the OpenFeature-backed `IFeatureFlagService`, so
+`[FeatureGate]`/`[FeatureVariant]` read flags out of the conventional `FeatureManagement` configuration section:
+
+```json
+{
+  "FeatureManagement": {
+    "BetaCheckout": true,
+    "PricingExperiment": {
+      "Variants": [
+        { "Name": "control", "ConfigurationValue": "control" },
+        { "Name": "treatment", "ConfigurationValue": "treatment" }
+      ],
+      "Allocation": {
+        "DefaultWhenEnabled": "control",
+        "Percentile": [
+          { "Variant": "treatment", "From": 0, "To": 50 },
+          { "Variant": "control", "From": 50, "To": 100 }
+        ]
+      },
+      "EnabledFor": [ { "Name": "AlwaysOn" } ]
+    }
+  }
+}
+```
+
+`BetaCheckout` is a boolean gate (drives a `[FeatureGate("BetaCheckout")]`); `PricingExperiment` is a variant
+flag whose allocated variant selects a `[FeatureVariant("PricingExperiment", Variant = "treatment")]`
+implementation.
+
+| Section | Read by | Effect |
+| --- | --- | --- |
+| `FeatureManagement` | `AddElarionFeatureManagement(configuration)` | Standard Microsoft.FeatureManagement schema (booleans, filters, variants/allocations) surfaced to `[FeatureGate]`/`[FeatureVariant]`. |
+
+### Bring-your-own provider
+
+`AddElarionOpenFeature()` (from `Elarion.FeatureFlags.OpenFeature`) registers the default OpenFeature-backed
+`IFeatureFlagService`/`IFeatureVariantService` and takes its flag values from whatever OpenFeature provider the
+host registers separately (`services.AddOpenFeature(b => b.AddProvider(...))` — LaunchDarkly, ConfigCat, flagd,
+Flagsmith, …), not from an Elarion-owned config section. It maps `ICurrentUser` into the OpenFeature
+`EvaluationContext` off-HTTP (targeting key plus the user id / groups), so per-user targeting works under
+JSON-RPC, MCP, and HTTP alike. Configure the provider per its own documentation.
+
+See [Feature flags](/docs/capabilities/feature-flags).
+
 ## JSON-RPC schema generation (MSBuild)
 
 Properties read by `Elarion.AspNetCore.SchemaGeneration` during build:

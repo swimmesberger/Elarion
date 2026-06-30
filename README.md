@@ -30,7 +30,7 @@ startup.
 
 ```csharp
 [Handler("clients.get")]
-public sealed class GetClient(IAppDbContext db)
+public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
     public sealed record Response(Guid Id, string Name);
@@ -74,6 +74,11 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
   generated from your handlers and `[Description]` attributes at compile time — no separate tool layer, no
   duplicated schemas, no runtime reflection. Choose a handler's transports with
   `[Handler(Transports = …)]` (JSON-RPC, MCP, or both) and rename a tool with `[McpHandler]`.
+- **Feature flags & variants** — gate any handler with `[FeatureGate]`; a generated decorator
+  evaluates the flag before the handler runs and a closed gate returns **404 Not Found**, so a
+  disabled feature is indistinguishable from one that doesn't exist (the name is never leaked).
+  `[FeatureVariant]` swaps a `[Service]` implementation per user behind a flag. Both work identically
+  under JSON-RPC, MCP, and HTTP, against any [OpenFeature](https://openfeature.dev) provider.
 - **In-process scheduling** — source-generated scheduled jobs with explicit overlap, misfire, and
   resilience policies.
 - **Observable by default** — JSON-RPC, scheduling, caching, and resilience emit
@@ -102,7 +107,11 @@ JSON-RPC endpoint end to end.
 | Package | Purpose |
 | --- | --- |
 | [`Elarion.Abstractions`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Abstractions) | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
-| [`Elarion`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion) | Runtime primitives: handler caches, decorators, the in-memory scheduler, resilience runtime, current-user access. Bundles the Elarion source generator (handlers, services, validators, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers). |
+| [`Elarion`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion) | Runtime primitives: decorators, the in-memory scheduler, current-user access, and the default authorizer. Depends only on `Microsoft.Extensions.*` abstractions (ADR-0017) — caching and resilience moved to their own opt-in packages. Bundles the Elarion source generator (handlers, services, validators, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers). |
+| [`Elarion.Caching`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Caching) | `HybridCache`-backed default `IHandlerCache` for handler result caching (`AddElarionHandlerCaching()`). Required by `[Cacheable]`/`[CacheInvalidate]` (extracted from core, ADR-0017). |
+| [`Elarion.Resilience`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Resilience) | Microsoft/Polly-backed default `IResiliencePipelineRunner` (`AddMicrosoftResilienceRuntime()`). Required by `[Resilient]` handlers and deferred scheduler retries (extracted from core, ADR-0017). |
+| [`Elarion.FeatureFlags.OpenFeature`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.FeatureFlags.OpenFeature) | Default `IFeatureFlagService` over OpenFeature for `[FeatureGate]`/`[FeatureVariant]`; maps `ICurrentUser` into the evaluation context off-HTTP (`AddElarionOpenFeature()`). Bring your own OpenFeature provider. |
+| [`Elarion.FeatureFlags.FeatureManagement`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.FeatureFlags.FeatureManagement) | Batteries-included config-driven flags via the Microsoft.FeatureManagement OpenFeature provider (`AddElarionFeatureManagement(configuration)`). |
 | [`Elarion.Blobs`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Blobs) | Provider-neutral blob storage contracts and DTOs. |
 | [`Elarion.Blobs.PostgreSql`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Blobs.PostgreSql) | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O. |
 | [`Elarion.Messaging.InMemory`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Messaging.InMemory) | In-memory integration-event bus (best-effort, commit-gated by the EF Core transaction). |
@@ -113,6 +122,7 @@ JSON-RPC endpoint end to end.
 | [`Elarion.AspNetCore.Mcp`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.Mcp) | Exposes your handlers as a Model Context Protocol (MCP) server for AI agents, over Streamable HTTP — an MCP adapter over the shared `HandlerDispatcher`. |
 | [`Elarion.AspNetCore.SchemaGeneration`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.SchemaGeneration) | MSBuild package that exports `rpc-schema.json` during `dotnet build`. |
 | [`Elarion.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore) | Marker attributes for generated `DbSet`s and entity inclusion. Bundles the EF Core source generator (`DbSet` properties, entity configuration, keyset pagination). |
+| [`Elarion.EntityFrameworkCore.Identity`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore.Identity) | The web-free ASP.NET Core Identity *model*: `[GenerateElarionIdentity]` + `ApplyElarionIdentity` compose a snake_case Identity model onto a plain `DbContext` (no ASP.NET `FrameworkReference`). Bundles its model generator. |
 | [`@swimmesberger/elarion-jsonrpc-client-generator`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, Zod schemas, and a fetch client. |
 
 ## Documentation
@@ -121,7 +131,7 @@ Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/
 
 - **[Introduction](https://elarion.wimmesberger.dev/docs/)** · **[Why Elarion](https://elarion.wimmesberger.dev/docs/why-elarion/)** · **[Installation](https://elarion.wimmesberger.dev/docs/getting-started/installation/)** · **[Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/)**
 - **Concepts** — [source generation](https://elarion.wimmesberger.dev/docs/concepts/source-generation/), [handlers](https://elarion.wimmesberger.dev/docs/concepts/handlers/), [results & errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors/), [modules](https://elarion.wimmesberger.dev/docs/concepts/modules/), [services](https://elarion.wimmesberger.dev/docs/concepts/services/), [validators](https://elarion.wimmesberger.dev/docs/concepts/validators/), [pipelines](https://elarion.wimmesberger.dev/docs/concepts/decorator-pipelines/), [cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication/)
-- **Capabilities** — [hosting](https://elarion.wimmesberger.dev/docs/capabilities/hosting/), [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints/), [JSON-RPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/json-rpc/), [MCP server](https://elarion.wimmesberger.dev/docs/capabilities/transports/mcp/), [scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling/), [resilience](https://elarion.wimmesberger.dev/docs/capabilities/resilience/), [events & messaging](https://elarion.wimmesberger.dev/docs/capabilities/events/), [EF Core](https://elarion.wimmesberger.dev/docs/capabilities/entity-framework/), [caching](https://elarion.wimmesberger.dev/docs/capabilities/caching/), [current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user/), [blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage/), [telemetry](https://elarion.wimmesberger.dev/docs/capabilities/telemetry/)
+- **Capabilities** — [hosting](https://elarion.wimmesberger.dev/docs/capabilities/hosting/), [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints/), [JSON-RPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/json-rpc/), [MCP server](https://elarion.wimmesberger.dev/docs/capabilities/transports/mcp/), [authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization/), [feature flags](https://elarion.wimmesberger.dev/docs/capabilities/feature-flags/), [identity](https://elarion.wimmesberger.dev/docs/capabilities/identity/), [scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling/), [resilience](https://elarion.wimmesberger.dev/docs/capabilities/resilience/), [events & messaging](https://elarion.wimmesberger.dev/docs/capabilities/events/), [EF Core](https://elarion.wimmesberger.dev/docs/capabilities/entity-framework/), [caching](https://elarion.wimmesberger.dev/docs/capabilities/caching/), [current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user/), [blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage/), [telemetry](https://elarion.wimmesberger.dev/docs/capabilities/telemetry/)
 - **Reference** — [packages](https://elarion.wimmesberger.dev/docs/reference/packages/), [configuration](https://elarion.wimmesberger.dev/docs/reference/configuration/), [troubleshooting](https://elarion.wimmesberger.dev/docs/reference/troubleshooting/)
 
 ## Requirements
