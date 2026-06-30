@@ -22,6 +22,9 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
     private const string ServiceScopeMetadataName =
         "Elarion.Abstractions.ServiceScope";
 
+    private const string FeatureVariantAttributeMetadataName =
+        "Elarion.Abstractions.Features.FeatureVariantAttribute`1";
+
     private const string HostedServiceMetadataName =
         "Microsoft.Extensions.Hosting.IHostedService";
 
@@ -147,6 +150,15 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         }
 
         var compilation = ctx.SemanticModel.Compilation;
+
+        // A [FeatureVariant] modifies how its [Service] is registered (keyed + transparent contract registration,
+        // emitted by VariantServiceRegistrationGenerator). Skip the plain registration here so the two never
+        // double-register the same contract.
+        if (HasFeatureVariantAttribute(classSymbol, compilation))
+        {
+            return null;
+        }
+
         var serviceScopeSymbol = compilation.GetTypeByMetadataName(ServiceScopeMetadataName);
         if (serviceScopeSymbol is null)
         {
@@ -233,6 +245,27 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
             isHostedService,
             contractsForRegistration);
         return new ServiceResult(service, ImmutableArray<DiagnosticInfo>.Empty);
+    }
+
+    private static bool HasFeatureVariantAttribute(INamedTypeSymbol classSymbol, Compilation compilation)
+    {
+        var featureVariantSymbol = compilation.GetTypeByMetadataName(FeatureVariantAttributeMetadataName);
+        if (featureVariantSymbol is null)
+        {
+            return false;
+        }
+
+        foreach (var attribute in classSymbol.GetAttributes())
+        {
+            // The attribute is the generic FeatureVariantAttribute<TContract>; compare the unbound definition.
+            if (attribute.AttributeClass is { } attributeClass &&
+                SymbolEqualityComparer.Default.Equals(attributeClass.OriginalDefinition, featureVariantSymbol))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static ServiceScope ParseScope(AttributeData serviceAttr, INamedTypeSymbol serviceScopeSymbol)

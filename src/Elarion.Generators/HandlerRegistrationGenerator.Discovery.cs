@@ -14,6 +14,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private static EquatableArray<HandlerInfo> ResolveHandlers(
         ImmutableArray<ClassDeclarationSyntax> nodes,
         Compilation compilation,
+        EquatableArray<string> variantContracts,
         CancellationToken ct) {
         if (nodes.IsDefaultOrEmpty)
             return EquatableArray<HandlerInfo>.Empty;
@@ -21,17 +22,40 @@ public sealed partial class HandlerRegistrationGenerator {
         var moduleDecoratorLists = BuildModuleDecoratorMap(compilation, ct);
         var moduleAuthDefaults = BuildModuleAuthorizationDefaultsMap(compilation, ct);
         var assemblyRequireAuthenticated = ResolveAssemblyAuthorizationDefault(compilation);
+        var variantContractSet = variantContracts.IsEmpty
+            ? null
+            : new HashSet<string>(variantContracts.AsImmutableArray, StringComparer.Ordinal);
         var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
         foreach (var node in nodes) {
             ct.ThrowIfCancellationRequested();
             var semanticModel = compilation.GetSemanticModel(node.SyntaxTree);
             var info = GetHandlerInfo(
-                node, semanticModel, moduleDecoratorLists, moduleAuthDefaults, assemblyRequireAuthenticated, ct);
+                node, semanticModel, moduleDecoratorLists, moduleAuthDefaults, assemblyRequireAuthenticated,
+                variantContractSet, ct);
             if (info is not null)
                 builder.Add(info);
         }
 
         return builder.ToImmutable();
+    }
+
+    // The TContract of a [FeatureVariant<TContract>] attribute, fully qualified — the contract a variant implements.
+    private static string? GetVariantContractFqn(GeneratorAttributeSyntaxContext ctx) {
+        if (ctx.Attributes.Length == 0)
+            return null;
+
+        var attributeClass = ctx.Attributes[0].AttributeClass;
+        if (attributeClass is null || attributeClass.TypeArguments.Length != 1)
+            return null;
+
+        return attributeClass.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+    }
+
+    private static EquatableArray<string> ToSortedDistinct(ImmutableArray<string> values) {
+        if (values.IsDefaultOrEmpty)
+            return EquatableArray<string>.Empty;
+
+        return values.Distinct(StringComparer.Ordinal).OrderBy(static value => value, StringComparer.Ordinal).ToImmutableArray();
     }
 
     private static HandlerInfo? GetHandlerInfo(
@@ -40,6 +64,7 @@ public sealed partial class HandlerRegistrationGenerator {
         IReadOnlyList<(string Namespace, AttributeData DecoratorList)> moduleDecoratorLists,
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated,
+        HashSet<string>? variantContracts,
         CancellationToken ct) {
         if (semanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol classSymbol)
             return null;
@@ -82,6 +107,8 @@ public sealed partial class HandlerRegistrationGenerator {
 
         var hasFeatureGates = ParseFeatureGates(classDecl, classSymbol, responseType, compilation, diagnostics);
 
+        var variantContractDeps = GetVariantContractDeps(classSymbol, variantContracts, fmt);
+
         return new HandlerInfo(
             handlerFqn,
             handlerName,
@@ -96,7 +123,49 @@ public sealed partial class HandlerRegistrationGenerator {
             requireAuthenticatedByDefault,
             resourceBindings,
             hasFeatureGates,
+            variantContractDeps,
             diagnostics.ToImmutable());
+    }
+
+    // A handler whose constructor injects a variant contract is registered behind the async-resolving proxy so the
+    // contract's variant is awaited (per user) before the handler is built. Returns the distinct variant contracts
+    // the handler depends on, in constructor-parameter order; empty for the common (no-variant) case.
+    private static EquatableArray<string> GetVariantContractDeps(
+        INamedTypeSymbol classSymbol,
+        HashSet<string>? variantContracts,
+        SymbolDisplayFormat fmt) {
+        if (variantContracts is null)
+            return EquatableArray<string>.Empty;
+
+        var constructor = SelectConstructor(classSymbol);
+        if (constructor is null)
+            return EquatableArray<string>.Empty;
+
+        ImmutableArray<string>.Builder? builder = null;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var parameter in constructor.Parameters) {
+            var parameterFqn = parameter.Type.ToDisplayString(fmt);
+            if (variantContracts.Contains(parameterFqn) && seen.Add(parameterFqn)) {
+                builder ??= ImmutableArray.CreateBuilder<string>();
+                builder.Add(parameterFqn);
+            }
+        }
+
+        return builder is null ? EquatableArray<string>.Empty : builder.ToImmutable();
+    }
+
+    // The constructor DI resolves: the public instance constructor with the most parameters (greedy selection).
+    private static IMethodSymbol? SelectConstructor(INamedTypeSymbol classSymbol) {
+        IMethodSymbol? best = null;
+        foreach (var constructor in classSymbol.InstanceConstructors) {
+            if (constructor.DeclaredAccessibility != Accessibility.Public)
+                continue;
+
+            if (best is null || constructor.Parameters.Length > best.Parameters.Length)
+                best = constructor;
+        }
+
+        return best;
     }
 
     private static INamedTypeSymbol? FindHandlerInterface(INamedTypeSymbol classSymbol) {

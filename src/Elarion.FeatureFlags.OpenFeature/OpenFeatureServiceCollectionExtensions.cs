@@ -16,6 +16,7 @@ public static class OpenFeatureServiceCollectionExtensions {
     /// </summary>
     public static IServiceCollection AddElarionOpenFeature(this IServiceCollection services) {
         services.TryAddScoped<IFeatureFlagService, OpenFeatureFeatureFlagService>();
+        services.TryAddScoped<IFeatureVariantService, OpenFeatureFeatureVariantService>();
 
         return services;
     }

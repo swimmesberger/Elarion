@@ -105,8 +105,75 @@ go through the same `IFeatureFlagService` seam, switching providers never touche
 the backend wholesale (a custom store, a test double), register your own `IFeatureFlagService` — the gate and
 all imperative checks follow.
 
+## Variant service injection
+
+Beyond on/off gating, a feature flag can allocate a **variant** to each user, and you can ship a different service
+*implementation* per variant (the A/B-tested-algorithm pattern). The consuming handler stays transparent — it
+injects the contract like any service; only the *implementations* are variant-aware:
+
+```csharp
+[Service]                                                                     // declare it like any service
+[FeatureVariant<IForecastAlgorithm>("ForecastAlgorithm")]                     // the default (no Variant)
+public sealed class LinearForecast : IForecastAlgorithm { /* ... */ }
+
+[Service]
+[FeatureVariant<IForecastAlgorithm>("ForecastAlgorithm", Variant = "neural")]
+public sealed class NeuralForecast : IForecastAlgorithm { /* ... */ }
+
+public sealed class RunForecast(IForecastAlgorithm algorithm)                 // no variant awareness
+    : IHandler<RunForecast.Command, Result<Forecast>> {
+    public ValueTask<Result<Forecast>> HandleAsync(Command c, CancellationToken ct)
+        => algorithm.RunAsync(c.Input, ct);
+}
+```
+
+The user allocated the `neural` variant gets `NeuralForecast`; everyone else gets the default `LinearForecast`.
+
+<Callout type="info">
+**Vary behavior with a variant *service*, not a variant *handler*.** There is no "pick handler A vs handler B by
+flag" — a handler is chosen by its request type, so authorization, the route/transport contract, and the pipeline
+are fixed for that request. To make a command behave differently per variant, keep **one** handler and inject a
+variant **strategy service** (the `IForecastAlgorithm` above); only that one dependency changes between variants.
+This is the recommended way to apply variants to handler logic.
+</Callout>
+
+**`[FeatureVariant]` is a modifier on `[Service]`.** A variant implementation is declared like every other
+service — with `[Service]` — and `[FeatureVariant]` only changes *how* the contract is resolved. So `[Service]` is
+**required** (a `[FeatureVariant]` without it is reported as `ELVAR007`), and it stays the single, consistent way to
+register a service: with the modifier you get variant-keyed resolution, without it you get a plain registration. The
+service generator yields the contract to the variant path (keyed implementations + the binding + the imperative
+provider + the transparent registration the proxy reads), so the two never double-register. The implementation's DI
+lifetime comes from its `[Service]` (`Scope = ServiceScope.Singleton`, etc.), and variant implementations may take
+their own constructor dependencies.
+
+**How it stays transparent.** Variant selection is an async flag evaluation, but constructor injection is
+synchronous. When a handler's constructor depends on a variant contract, the generator registers it behind an
+async-resolving proxy (`AsyncResolvedHandler`) that, on the first call, `await`s the variant for the current user
+into a per-scope cache and then builds the handler normally — so the handler injects the contract with no async
+ceremony, and handlers that use no variant pay nothing (their registration is unchanged). For cases the proxy
+doesn't cover — a variant injected *transitively* through another service, or needed outside a handler — inject the
+imperative escape hatch instead:
+
+```csharp
+public sealed class Pricing(IVariantServiceProvider<IForecastAlgorithm> algorithms) {
+    public async Task RunAsync(CancellationToken ct) {
+        var algorithm = await algorithms.GetAsync(ct);   // variant for the current user, or the default
+        // ...
+    }
+}
+```
+
+<Callout type="warn">
+Variant service injection needs an OpenFeature provider that surfaces the allocated variant *name* (per spec
+§1.4.6) — flagd, LaunchDarkly, ConfigCat, and the in-memory provider do. The current
+`OpenFeature.Contrib.Provider.FeatureManagement` (preview) evaluates the variant's value but does **not** yet
+surface its name, so variant injection is unavailable through the `AddElarionFeatureManagement` default (boolean
+`[FeatureGate]` is unaffected). See [ADR-0018](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0018-variant-service-injection.md).
+</Callout>
+
 ## See also
 
 - [ADR-0016: Feature-flag gating](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0016-feature-flag-gating.md) — why a thin Elarion seam over OpenFeature rather than `IFeatureManager` directly.
+- [ADR-0018: Variant service injection](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0018-variant-service-injection.md) — transparent per-variant implementation injection via the async-resolving handler proxy.
 - [Decorator pipelines](/docs/concepts/decorator-pipelines) — how the gate composes with authorization, caching, and resilience.
 - [Authorization](/docs/concepts/authorization) — the sibling declarative gate the feature gate is modeled on.
