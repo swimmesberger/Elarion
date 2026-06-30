@@ -54,7 +54,7 @@ public sealed class ElarionMcpEndToEndTests {
         builder.Services.AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>();
         // Both transports must share ONE registration delegate — the bus is a single shared singleton.
         static HandlerDispatcher RegisterHandlers(HandlerDispatcher dispatcher) =>
-            dispatcher.Map<EchoCommand, EchoResponse>("echo");
+            dispatcher.MapHandler<EchoCommand, EchoResponse>("echo");
         builder.Services.AddElarionJsonRpc(Options, RegisterHandlers);
         builder.Services.AddElarionMcp(
             new RpcMcpMetadataSource([

@@ -37,7 +37,7 @@ public sealed class RpcDispatcherHandlerTests {
 
     private static (JsonRpcDispatcher Dispatcher, IServiceProvider Services) Build() {
         var dispatcher = new JsonRpcDispatcher(Options)
-            .Map<EchoCommand, EchoResponse>("echo")
+            .MapHandler<EchoCommand, EchoResponse>("echo")
             .Freeze();
 
         var services = new ServiceCollection()
@@ -89,7 +89,7 @@ public sealed class RpcDispatcherHandlerTests {
 
     [Fact]
     public async Task Dispatch_RegisteredErrorTranslator_OverridesErrorCode() {
-        var dispatcher = new JsonRpcDispatcher(Options).Map<EchoCommand, EchoResponse>("echo").Freeze();
+        var dispatcher = new JsonRpcDispatcher(Options).MapHandler<EchoCommand, EchoResponse>("echo").Freeze();
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
             .AddSingleton<IAppErrorTranslator<RpcError>, FixedCodeErrorTranslator>()

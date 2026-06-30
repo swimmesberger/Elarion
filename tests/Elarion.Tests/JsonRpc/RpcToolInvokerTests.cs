@@ -30,7 +30,7 @@ public sealed class RpcToolInvokerTests {
     };
 
     private static (HandlerDispatcher Dispatcher, IServiceProvider Services) Build() {
-        var dispatcher = new JsonRpcDispatcher(Options).Map<EchoCommand, EchoResponse>("echo").Freeze();
+        var dispatcher = new JsonRpcDispatcher(Options).MapHandler<EchoCommand, EchoResponse>("echo").Freeze();
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
             .BuildServiceProvider();

@@ -106,7 +106,7 @@ public sealed class CurrentUserTransportTests {
 
     private static ServiceProvider BuildProvider() {
         var dispatcher = new JsonRpcDispatcher(SerializerOptions)
-            .Map<WhoAmIQuery, WhoAmIResponse>("whoami")
+            .MapHandler<WhoAmIQuery, WhoAmIResponse>("whoami")
             .Freeze();
 
         var services = new ServiceCollection();

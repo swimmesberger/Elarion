@@ -90,10 +90,13 @@ bootstrap is the first consumer.
   (un-owned). That is intentional: they serve different ownership cases. Docs steer owned handlers to attributes;
   imperative mapping is for the cases attributes structurally cannot reach.
 
-## Implementation (follow-up — not in this ADR)
+## Implementation (shipped)
 
 - `HandlerDispatcher.MapHandler<TRequest, TResponse>(string name, HandlerTransports transports)` in
-  `Elarion.Abstractions.Dispatch` (fluent, returns the dispatcher).
+  `Elarion.Abstractions.Dispatch` (fluent, returns the dispatcher) — this is the existing DI-resolved registration the
+  generated bootstrapper already used (renamed from `Map` to the clearer, intent-revealing `MapHandler`), now also the
+  host-facing imperative seam.
 - Framework capability extensions author their own concrete REST `Map*` method; **no** generic HTTP mapping API is
-  provided, by design.
-- A short "exposing a handler you don't own" section in `concepts/transports.mdx`.
+  provided, by design. [ADR-0020](0020-client-capability-bootstrap.md)'s `MapElarionSession` is the first such
+  extension.
+- An "exposing a handler you do not own" section in `concepts/transports.mdx`.

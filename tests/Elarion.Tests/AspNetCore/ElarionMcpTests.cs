@@ -127,7 +127,7 @@ public sealed class ElarionMcpTests {
     public void AddElarionJsonRpcDispatcher_RegistersFrozenUsableDispatcher() {
         var services = new ServiceCollection();
         services.AddElarionJsonRpcDispatcher(
-            Options, d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"));
+            Options, d => d.MapHandler<CreateClientCommand, CreateClientResponse>("clients.create"));
 
         using var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<JsonRpcDispatcher>();
@@ -143,7 +143,7 @@ public sealed class ElarionMcpTests {
         var builder = services.AddElarionMcp(
             BuildMetadata(),
             Options,
-            d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"),
+            d => d.MapHandler<CreateClientCommand, CreateClientResponse>("clients.create"),
             o => o.ServerName = "MyApp");
 
         builder.Should().NotBeNull();

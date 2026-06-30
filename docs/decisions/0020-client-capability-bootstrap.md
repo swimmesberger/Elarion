@@ -155,14 +155,21 @@ exposed imperatively instead — see [ADR-0021](0021-imperative-handler-transpor
 - Exposed flag names are **not validated** against the provider config (flags live in external config; a typo
   resolves to the provider default, as everywhere else) — a soft diagnostic could be added later.
 
-## Implementation (follow-up — not in this ADR)
+## Implementation (shipped)
 
-- `[ClientFeatures]` attribute in `Elarion.Abstractions`, collected per module into a client-feature manifest by
-  `AppModuleDiscoveryGenerator`.
-- A built-in bootstrap handler composing `IsModuleEnabled` + `IFeatureFlagService` + `IFeatureVariantService` +
-  `ICurrentUser`, returning the `{ user, modules, flags, variants }` contract, exposed via the imperative mapping of
-  [ADR-0021](0021-imperative-handler-transport-mapping.md) (`AddElarionSession` + the bus `MapHandler` seam
-  + a concrete `MapElarionSession` for REST).
-- TypeScript generator: the typed snapshot client, the `@openfeature/web-sdk` provider, and the typed key constants.
-- Docs: a `concepts/client-capabilities.mdx`, and a short "choosing transport exposure" section added to
-  `transports.mdx` (today that decision lives only in the attribute XML docs).
+- `[ClientFeatures]` attribute in `Elarion.Abstractions.Modules`, collected per module by `AppModuleDiscoveryGenerator`
+  (and round-tripped cross-assembly through the Elarion manifest) into a gated
+  `configuration.GetClientCapabilityManifest()` on the generated `ElarionBootstrapper`, emitted only when a module
+  opts in.
+- The `SessionHandler` in `Elarion` core composes `GetClientCapabilityManifest` + `IFeatureFlagService` +
+  `IFeatureVariantService` + `ICurrentUser`, returning the `{ user, modules, flags, variants }` `SessionResponse`. The
+  flag/variant services are optional, so a host without feature flags still gets modules + grants. Exposed via the
+  imperative mapping of [ADR-0021](0021-imperative-handler-transport-mapping.md): `AddElarionSession(manifest)` (DI),
+  the bus `MapElarionSession()` (a `MapHandler` over `"elarion.session"`), the concrete REST `MapElarionSession(route)`
+  in `Elarion.AspNetCore`, and the `SessionJsonContext` AOT resolver.
+- TypeScript generator: a self-contained `session-client.ts` (typed `ClientSnapshot`, `SessionCapabilities`, the
+  OpenFeature web-SDK provider that dispatches the reserved namespaces, and the typed `Keys`), emitted only when the
+  schema exposes `elarion.session`.
+- Docs: `concepts/client-capabilities.mdx` and an "exposing a handler you do not own" section in
+  `concepts/transports.mdx`. The Billing sample wires the whole path (`[ClientFeatures]` on the Clients module +
+  `AddElarionSession`/`MapElarionSession`).

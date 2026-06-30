@@ -8,7 +8,25 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Client capability bootstrap — modules, flags/variants, and grants for the frontend
+  ([ADR-0020](docs/decisions/0020-client-capability-bootstrap.md)).** A framework-shipped `SessionHandler`
+  (`Elarion.Session`) returns one snapshot — which modules are enabled, the exposed flags/variants, and the user's
+  roles/permissions — composing existing seams only (`IsModuleEnabled` + `IFeatureFlagService` +
+  `IFeatureVariantService` + `ICurrentUser`). A module opts names in with `[ClientFeatures("a", "b")]` on its
+  `[AppModule]` type (opt-in by enumeration, leak-safe; a listed name needs no `[FeatureGate]` behind it). Wire it
+  with `AddElarionSession(configuration.GetClientCapabilityManifest())`, the bus `MapElarionSession()`, and the
+  concrete REST `MapElarionSession(route)`. The TypeScript generator emits a self-contained `session-client.ts`
+  (typed `ClientSnapshot`, `SessionCapabilities`, typed `Keys`, and an OpenFeature web-SDK provider) when the schema
+  exposes `elarion.session`. It is a read-only UX projection — the handler's authorization stays the real gate.
+
 ### Changed
+- **The named bus registration method is `MapHandler` (renamed from `Map`)
+  ([ADR-0021](docs/decisions/0021-imperative-handler-transport-mapping.md), breaking — source).**
+  `HandlerDispatcher.Map<TRequest, TResponse>(name, transports)` and the `JsonRpcDispatcher` forwarder are now
+  `MapHandler<TRequest, TResponse>(name, transports)` — a clearer name that disambiguates from `MapDelegate` and the
+  ASP.NET `MapGet`/`MapPost` family, and the documented **imperative seam** for exposing a handler whose class you do
+  not own. **Migration:** rename `dispatcher.Map<…>(…)` calls to `dispatcher.MapHandler<…>(…)`.
 - **The module bootstrapper is auto-generated as the fixed-name `ElarionBootstrapper` (breaking).**
   `[GenerateModuleBootstrapper]` becomes an **assembly** attribute (`[assembly: GenerateModuleBootstrapper]`)
   and `AppModuleDiscoveryGenerator` emits the host wiring (`AddElarion`, `MapElarionEndpoints`,
