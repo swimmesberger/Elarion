@@ -10,6 +10,15 @@ internal static class ElarionManifest
     public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v1";
     public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v1";
     public const string ResourceFilterKey = "Elarion.Manifest.ResourceFilter.v1";
+    public const string PermissionKey = "Elarion.Manifest.Permission.v1";
+    public const string RoleKey = "Elarion.Manifest.Role.v1";
+
+    // A [RequirePermission(resource, verb)]/[RequireRole] declared by a handler, carried so the host-side
+    // ElarionPermissions static can aggregate the permission catalog across referenced module assemblies.
+    // Namespace is the declaring handler's namespace (the static resolves the owning module by longest prefix).
+    public sealed record Permission(string Namespace, string Resource, string Verb);
+
+    public sealed record Role(string Namespace, string Value);
 
     // A generated [ResourceFilter] data-level authorizer that the host bootstrapper registers as
     // IQueryAuthorizer<TEntity>. The emitted-member contract: a non-shared spec exposes a static
@@ -38,13 +47,16 @@ internal static class ElarionManifest
         IReadOnlyList<Module> Modules,
         IReadOnlyList<HttpEndpointEmission.Model> HttpEndpoints,
         IReadOnlyList<RpcMethodEmission.Model> RpcMethods,
-        IReadOnlyList<ResourceFilter> ResourceFilters
+        IReadOnlyList<ResourceFilter> ResourceFilters,
+        IReadOnlyList<Permission> Permissions,
+        IReadOnlyList<Role> Roles
     )
     {
-        public static readonly Data Empty = new([], [], [], []);
+        public static readonly Data Empty = new([], [], [], [], [], []);
 
         public bool HasEntries =>
-            Modules.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0 || ResourceFilters.Count > 0;
+            Modules.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0 || ResourceFilters.Count > 0
+            || Permissions.Count > 0 || Roles.Count > 0;
 
         public static Data Combine(IEnumerable<Data> manifests)
         {
@@ -52,6 +64,8 @@ internal static class ElarionManifest
             var httpEndpoints = new List<HttpEndpointEmission.Model>();
             var rpcMethods = new List<RpcMethodEmission.Model>();
             var resourceFilters = new List<ResourceFilter>();
+            var permissions = new List<Permission>();
+            var roles = new List<Role>();
 
             foreach (var manifest in manifests)
             {
@@ -59,6 +73,8 @@ internal static class ElarionManifest
                 httpEndpoints.AddRange(manifest.HttpEndpoints);
                 rpcMethods.AddRange(manifest.RpcMethods);
                 resourceFilters.AddRange(manifest.ResourceFilters);
+                permissions.AddRange(manifest.Permissions);
+                roles.AddRange(manifest.Roles);
             }
 
             modules.Sort(static (a, b) =>
@@ -91,7 +107,22 @@ internal static class ElarionManifest
 
             resourceFilters.Sort(static (a, b) => string.Compare(a.SpecFqn, b.SpecFqn, StringComparison.Ordinal));
 
-            return new Data(modules, httpEndpoints, rpcMethods, resourceFilters);
+            permissions.Sort(static (a, b) =>
+            {
+                var byResource = string.Compare(a.Resource, b.Resource, StringComparison.Ordinal);
+                if (byResource != 0)
+                    return byResource;
+                var byVerb = string.Compare(a.Verb, b.Verb, StringComparison.Ordinal);
+                return byVerb != 0 ? byVerb : string.Compare(a.Namespace, b.Namespace, StringComparison.Ordinal);
+            });
+
+            roles.Sort(static (a, b) =>
+            {
+                var byValue = string.Compare(a.Value, b.Value, StringComparison.Ordinal);
+                return byValue != 0 ? byValue : string.Compare(a.Namespace, b.Namespace, StringComparison.Ordinal);
+            });
+
+            return new Data(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles);
         }
     }
 
@@ -151,6 +182,36 @@ internal static class ElarionManifest
             return false;
 
         filter = new ResourceFilter(fields[0]!, fields[1]!, fields[2]!, isShared);
+        return true;
+    }
+
+    public static string EncodePermission(Permission permission) =>
+        ElarionManifestCodec.EncodeFields(permission.Namespace, permission.Resource, permission.Verb);
+
+    public static bool TryDecodePermission(string value, out Permission? permission)
+    {
+        permission = null;
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 3)
+            return false;
+        if (fields[0] is null || fields[1] is null || fields[2] is null)
+            return false;
+
+        permission = new Permission(fields[0]!, fields[1]!, fields[2]!);
+        return true;
+    }
+
+    public static string EncodeRole(Role role) =>
+        ElarionManifestCodec.EncodeFields(role.Namespace, role.Value);
+
+    public static bool TryDecodeRole(string value, out Role? role)
+    {
+        role = null;
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 2)
+            return false;
+        if (fields[0] is null || fields[1] is null)
+            return false;
+
+        role = new Role(fields[0]!, fields[1]!);
         return true;
     }
 
@@ -374,19 +435,24 @@ internal static class ElarionManifestReader
         var httpEndpoints = new List<HttpEndpointEmission.Model>();
         var rpcMethods = new List<RpcMethodEmission.Model>();
         var resourceFilters = new List<ElarionManifest.ResourceFilter>();
+        var permissions = new List<ElarionManifest.Permission>();
+        var roles = new List<ElarionManifest.Role>();
 
         foreach (var (key, value) in AssemblyMetadataReader.ReadRawEntries(reference, ct))
-            AddEntry(key, value, modules, httpEndpoints, rpcMethods, resourceFilters);
+            AddEntry(key, value, modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles);
 
-        return CreateData(modules, httpEndpoints, rpcMethods, resourceFilters);
+        return CreateData(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles);
     }
 
     private static ElarionManifest.Data CreateData(
         List<ElarionManifest.Module> modules,
         List<HttpEndpointEmission.Model> httpEndpoints,
         List<RpcMethodEmission.Model> rpcMethods,
-        List<ElarionManifest.ResourceFilter> resourceFilters) =>
-        ElarionManifest.Data.Combine([new ElarionManifest.Data(modules, httpEndpoints, rpcMethods, resourceFilters)]);
+        List<ElarionManifest.ResourceFilter> resourceFilters,
+        List<ElarionManifest.Permission> permissions,
+        List<ElarionManifest.Role> roles) =>
+        ElarionManifest.Data.Combine(
+            [new ElarionManifest.Data(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles)]);
 
     private static void AddEntry(
         string key,
@@ -394,7 +460,9 @@ internal static class ElarionManifestReader
         List<ElarionManifest.Module> modules,
         List<HttpEndpointEmission.Model> httpEndpoints,
         List<RpcMethodEmission.Model> rpcMethods,
-        List<ElarionManifest.ResourceFilter> resourceFilters)
+        List<ElarionManifest.ResourceFilter> resourceFilters,
+        List<ElarionManifest.Permission> permissions,
+        List<ElarionManifest.Role> roles)
     {
         switch (key)
         {
@@ -415,6 +483,14 @@ internal static class ElarionManifestReader
             case ElarionManifest.ResourceFilterKey:
                 if (ElarionManifest.TryDecodeResourceFilter(value, out var resourceFilter) && resourceFilter is not null)
                     resourceFilters.Add(resourceFilter);
+                break;
+            case ElarionManifest.PermissionKey:
+                if (ElarionManifest.TryDecodePermission(value, out var permission) && permission is not null)
+                    permissions.Add(permission);
+                break;
+            case ElarionManifest.RoleKey:
+                if (ElarionManifest.TryDecodeRole(value, out var role) && role is not null)
+                    roles.Add(role);
                 break;
         }
     }

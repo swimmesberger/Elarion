@@ -26,7 +26,7 @@ adapters resolve. You never have to mount (or even register) the public JSON-RPC
 
 ## Setup
 
-The MCP server is wired through the generated `ModuleBootstrapper` ([modules are the single hosting
+The MCP server is wired through the generated `ElarionBootstrapper` ([modules are the single hosting
 path](/docs/capabilities/hosting)), which exposes the gated MCP peers alongside the JSON-RPC and HTTP ones:
 
 ```csharp
@@ -37,13 +37,13 @@ var serializerOptions = CreateSerializerOptions(builder.Configuration);
 
 // The public JSON-RPC endpoint (optional, independent of MCP): the JSON-RPC adapter over the shared bus,
 // serving the JSON-RPC-surfaced operations of enabled modules at /rpc.
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
 
 // The MCP server: the MCP adapter over the same bus, serving the MCP-surfaced operations as one tool each.
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(), // reflection-free, gated tool table
     serializerOptions,
-    ModuleBootstrapper.RegisterHandlers,    // the single, gated handler registry both adapters resolve
+    ElarionBootstrapper.RegisterHandlers,    // the single, gated handler registry both adapters resolve
     o => o.ServerName = "MyApp");
 
 var app = builder.Build();
@@ -133,7 +133,7 @@ public sealed class CreateClient : IHandler<...> { ... }
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
     serializerOptions,
-    ModuleBootstrapper.RegisterHandlers,
+    ElarionBootstrapper.RegisterHandlers,
     o => {
         o.ServerName = "MyApp";                            // required
         o.ServerVersion = "1.0";

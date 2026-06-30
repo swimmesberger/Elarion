@@ -181,13 +181,10 @@ public sealed partial class ClientsJsonContext : JsonSerializerContext;
 In the host, one small partial class tells the generator to emit the cross-module wiring — including the
 gated handler registration, so disabling a module also removes its `[Handler]` operations.
 
-```csharp title="MyApp.Api/Hosting/ModuleBootstrapper.cs"
+```csharp title="MyApp.Api/ElarionAssembly.cs"
 using Elarion.AspNetCore;
 
-namespace MyApp.Api.Hosting;
-
-[GenerateModuleBootstrapper]
-public static partial class ModuleBootstrapper;
+[assembly: GenerateModuleBootstrapper]
 ```
 
 </Step>
@@ -222,7 +219,7 @@ var serializerOptions = new JsonSerializerOptions {
 
 builder.Services.AddSingleton(serializerOptions);
 // Gated dispatcher: only enabled modules' [Handler] operations are registered.
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
 
 var app = builder.Build();
 

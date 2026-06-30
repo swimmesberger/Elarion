@@ -61,8 +61,7 @@ interface (the success type is unwrapped from `Result<T>`); the types may be nes
 method; a module disabled with `Modules:{Name}:Enabled = false` drops its routes:
 
 ```csharp
-[GenerateModuleBootstrapper]
-public static partial class ModuleBootstrapper;
+[assembly: Elarion.AspNetCore.GenerateModuleBootstrapper]
 
 // Program.cs
 builder.Services.AddProblemDetails();   // RFC 7807 responses

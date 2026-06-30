@@ -63,7 +63,7 @@ public sealed class OpenFeatureFeatureFlagServiceTests {
         (await service.GetVariantAsync("missing", ct)).Should().BeNull();
     }
 
-    // The gate (ADR-0018 risk #2): the preview OpenFeature.Contrib.Provider.FeatureManagement (0.1.2-preview)
+    // The gate (ADR-0019 risk #2): the preview OpenFeature.Contrib.Provider.FeatureManagement (0.1.2-preview)
     // EVALUATES the variant (returning its configuration_value as .Value) but does NOT populate
     // FlagEvaluationDetails.Variant with the variant NAME. So variant *service injection* requires a native
     // OpenFeature provider (InMemory/flagd/LaunchDarkly/ConfigCat) that surfaces .Variant per spec §1.4.6. This

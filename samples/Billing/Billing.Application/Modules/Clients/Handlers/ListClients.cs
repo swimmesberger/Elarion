@@ -9,11 +9,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Billing.Application.Modules.Clients.Handlers;
 
-/// <summary>Lists the current account's clients. Requires the <c>clients:read</c> permission, and is cached
+/// <summary>Lists the current account's clients. Requires the <c>clients.read</c> permission, and is cached
 /// under the same <c>clients</c> tag that <see cref="CreateClient"/> invalidates, so the list refreshes the
 /// moment a client is added.</summary>
 [Handler("clients.list")]
-[RequirePermission("clients:read")]
+[RequirePermission("clients", Verbs.Read)]
 [Cacheable("clients", DurationSeconds = 60)]
 public sealed class ListClients(BillingDbContext db, ICurrentUser user)
     : IHandler<ListClients.Query, Result<ListClients.Response>> {

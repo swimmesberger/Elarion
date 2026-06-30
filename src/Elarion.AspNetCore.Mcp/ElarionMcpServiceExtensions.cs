@@ -26,7 +26,7 @@ public static class ElarionMcpServiceExtensions {
     /// Registers an MCP server (Streamable HTTP) whose tools are the MCP-exposed operations in the generated
     /// <paramref name="metadata"/> table, backed by an <see cref="McpDispatcher"/> over the shared
     /// <see cref="HandlerDispatcher"/> built from <paramref name="registerHandlers"/>
-    /// (e.g. <c>ModuleBootstrapper.RegisterHandlers</c>).
+    /// (e.g. <c>ElarionBootstrapper.RegisterHandlers</c>).
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="metadata">The generated MCP metadata table (e.g. <c>configuration.GetMcpMetadata()</c>).</param>
@@ -36,7 +36,7 @@ public static class ElarionMcpServiceExtensions {
     /// </param>
     /// <param name="registerHandlers">
     /// The generated registration delegate that maps the operations onto the shared registry and returns it
-    /// (e.g. <c>ModuleBootstrapper.RegisterHandlers</c>). Pass the same delegate to <c>AddElarionJsonRpc</c> to
+    /// (e.g. <c>ElarionBootstrapper.RegisterHandlers</c>). Pass the same delegate to <c>AddElarionJsonRpc</c> to
     /// share one registry.
     /// </param>
     /// <param name="configure">Configures the server identity and behavior. <see cref="ElarionMcpOptions.ServerName"/> is required.</param>
@@ -57,13 +57,13 @@ public static class ElarionMcpServiceExtensions {
     /// <summary>
     /// Registers an MCP server using a <paramref name="registerHandlers"/> delegate that also receives the
     /// application <see cref="IConfiguration"/> — the setup for a module-based host, where
-    /// <c>ModuleBootstrapper.RegisterHandlers</c> maps only the operations of enabled modules. Pair it with
+    /// <c>ElarionBootstrapper.RegisterHandlers</c> maps only the operations of enabled modules. Pair it with
     /// <c>configuration.GetMcpMetadata()</c> for the gated tool table.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="metadata">The (already gated) MCP metadata table, e.g. <c>builder.Configuration.GetMcpMetadata()</c>.</param>
     /// <param name="serializerOptions">The serializer options used for tool input schemas and the MCP dispatcher.</param>
-    /// <param name="registerHandlers">The registration delegate (e.g. <c>ModuleBootstrapper.RegisterHandlers</c>).</param>
+    /// <param name="registerHandlers">The registration delegate (e.g. <c>ElarionBootstrapper.RegisterHandlers</c>).</param>
     /// <param name="configure">Configures the server identity and behavior. <see cref="ElarionMcpOptions.ServerName"/> is required.</param>
     /// <returns>The underlying <see cref="IMcpServerBuilder"/> for further composition (e.g. auth filters).</returns>
     public static IMcpServerBuilder AddElarionMcp(

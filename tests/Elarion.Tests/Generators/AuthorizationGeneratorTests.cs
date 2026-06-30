@@ -31,7 +31,7 @@ public sealed class AuthorizationGeneratorTests {
                 public sealed record DoThingCommand(int Id) : ICommand;
                 public sealed record DoThingResponse(string Name);
 
-                [RequirePermission("tenants.write")]
+                [RequirePermission("tenants", "write")]
                 public sealed class GuardedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
                     public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
                         ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
@@ -136,7 +136,7 @@ public sealed class AuthorizationGeneratorTests {
                 public sealed record PlainResponse(string Name);
 
                 // Bare (non-Result) response: authorization cannot short-circuit -> ELAUTH001.
-                [RequirePermission("x")]
+                [RequirePermission("x", "read")]
                 public sealed class PlainHandler : IHandler<PlainQuery, PlainResponse> {
                     public ValueTask<PlainResponse> HandleAsync(PlainQuery request, CancellationToken ct) =>
                         ValueTask.FromResult(new PlainResponse("x"));
@@ -162,7 +162,7 @@ public sealed class AuthorizationGeneratorTests {
                 public sealed record DoThingCommand(int Id) : ICommand;
                 public sealed record DoThingResponse(string Name);
 
-                [RequirePermission("tenants.write")]
+                [RequirePermission("tenants", "write")]
                 public sealed class GuardedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
                     public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
                         ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
