@@ -52,6 +52,14 @@ The predicate is part of the single SQL statement, so the database filters the r
 counts are correct, and unauthorized rows are never returned. The rules compose as **`AND(scopes) AND
 OR(grants)`**: a row is visible when it satisfies every scope (tenant) and at least one grant (owner, or a share).
 
+In plain terms, the `Shared` flag decides **how wide the list is**:
+
+- **`Shared = false`** (owner/tenant rules only) — the caller sees **only the rows they own**, within their tenant.
+- **`Shared = true`** — the caller *also* sees **rows explicitly shared with them**, either directly or with a
+  role they belong to, recorded in the [grants table](#sharing-with-users-and-roles).
+
+Either way, a row the caller neither owns nor was granted is never returned — and never counted.
+
 <Callout type="info">
   **Inject the authorizer; the static `Specification` is a shortcut for field-only filters.** A filter that uses
   `Shared` consults the grants table, so it is a **scoped service** — you must inject `IQueryAuthorizer<Contact>`
