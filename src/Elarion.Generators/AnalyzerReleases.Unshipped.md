@@ -46,3 +46,9 @@ ELPERM001 | Elarion.Abstractions.Authorization | Warning | Authorization require
 ELPERM002 | Elarion.Abstractions.Authorization | Warning | Permission produces a duplicate typed accessor
 ELFEAT001 | Elarion.Abstractions.Features | Error | Feature-gated handler response cannot represent failure
 ELFEAT002 | Elarion.Abstractions.Features | Warning | FeatureGate declares no feature name
+ELVAR001 | Elarion.Abstractions.Features | Error | Duplicate variant key
+ELVAR003 | Elarion.Abstractions.Features | Warning | Variant contract has no default implementation
+ELVAR004 | Elarion.Abstractions.Features | Error | Conflicting variant feature
+ELVAR005 | Elarion.Abstractions.Features | Warning | Variant service declares a blank feature
+ELVAR006 | Elarion.Abstractions.Features | Error | Generic variant implementation is not supported
+ELVAR007 | Elarion.Abstractions.Features | Error | Variant implementation must also be a [Service]

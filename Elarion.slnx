@@ -29,8 +29,8 @@
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.Identity.Generators/Elarion.EntityFrameworkCore.Identity.Generators.csproj" />
-    <Project Path="src/Elarion.FeatureManagement/Elarion.FeatureManagement.csproj" />
-    <Project Path="src/Elarion.OpenFeature/Elarion.OpenFeature.csproj" />
+    <Project Path="src/Elarion.FeatureFlags.FeatureManagement/Elarion.FeatureFlags.FeatureManagement.csproj" />
+    <Project Path="src/Elarion.FeatureFlags.OpenFeature/Elarion.FeatureFlags.OpenFeature.csproj" />
     <Project Path="src/Elarion.Generators/Elarion.Generators.csproj" />
     <Project Path="src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <Project Path="src/Elarion/Elarion.csproj" />

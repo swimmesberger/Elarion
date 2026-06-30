@@ -47,6 +47,7 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendAppliesToFields(sb, handler);
         AppendResourceBindingsField(sb, handler);
         AppendRegistrationMethod(sb, handler);
+        AppendBuildPipelineMethods(sb, handler);
 
         if (handler.Cacheable is not null)
             AppendCachePolicy(sb, handler);
@@ -124,10 +125,30 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"        services.Add(new ServiceDescriptor(typeof({handler.HandlerFqn}), typeof({handler.HandlerFqn}), lifetime));");
         sb.AppendLine("        services.Add(new ServiceDescriptor(");
         sb.AppendLine($"            typeof(global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}>),");
-        sb.AppendLine("            sp =>");
-        sb.AppendLine("            {");
-        // Note 57: The generated factory builds the decorator chain once per DI resolution, preserving normal scoped lifetimes.
-        sb.AppendLine($"                global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}> handler =");
+
+        if (handler.VariantContractDeps.IsEmpty) {
+            // Normal case: the synchronous pipeline factory builds the decorator chain per resolution.
+            sb.AppendLine("            sp => BuildPipeline(sp),");
+        } else {
+            // The handler depends on a feature-flag variant, which is resolved asynchronously (per user). Register
+            // the async-resolving proxy that awaits the variant builder on first dispatch instead of building
+            // synchronously; everything else stays the same shared pipeline factory.
+            sb.AppendLine(
+                $"            sp => new global::Elarion.Abstractions.Pipeline.AsyncResolvedHandler<{handler.RequestFqn}, {handler.ResponseFqn}>(sp, BuildPipelineAsync),");
+        }
+
+        sb.AppendLine("            lifetime));");
+    }
+
+    // The shared pipeline factory: builds the decorator chain once per resolution, preserving normal scoped
+    // lifetimes (Note 57). The normal registration calls it synchronously; a variant handler's async builder calls
+    // the same method after awaiting its variant dependencies, so the chain is defined exactly once.
+    private static void AppendBuildPipelineMethods(StringBuilder sb, HandlerInfo handler) {
+        var ifaceFqn = $"global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}>";
+
+        sb.AppendLine($"    private static {ifaceFqn} BuildPipeline(global::System.IServiceProvider sp)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"                {ifaceFqn} handler =");
         sb.AppendLine($"                    sp.GetRequiredService<{handler.HandlerFqn}>();");
 
         AppendCacheDecorator(sb, handler);
@@ -146,8 +167,25 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendTracingDecorator(sb, handler);
 
         sb.AppendLine("                return handler;");
-        sb.AppendLine("            },");
-        sb.AppendLine("            lifetime));");
+        sb.AppendLine("    }");
+
+        if (handler.VariantContractDeps.IsEmpty)
+            return;
+
+        // The asynchronous builder: await-resolve each variant the handler depends on into the scoped cache (so the
+        // transparent unkeyed registration reads the right implementation), then build the same pipeline.
+        sb.AppendLine($"    private static async global::System.Threading.Tasks.ValueTask<{ifaceFqn}> BuildPipelineAsync(");
+        sb.AppendLine("        global::System.IServiceProvider sp,");
+        sb.AppendLine("        global::System.Threading.CancellationToken ct)");
+        sb.AppendLine("    {");
+        sb.AppendLine(
+            "        var __variantCache = sp.GetRequiredService<global::Elarion.Abstractions.Features.VariantResolutionCache>();");
+        foreach (var contractFqn in handler.VariantContractDeps.AsImmutableArray) {
+            sb.AppendLine($"        await __variantCache.WarmAsync<{contractFqn}>(sp, ct).ConfigureAwait(false);");
+        }
+
+        sb.AppendLine("        return BuildPipeline(sp);");
+        sb.AppendLine("    }");
     }
 
     private static void AppendCacheDecorator(StringBuilder sb, HandlerInfo handler) {

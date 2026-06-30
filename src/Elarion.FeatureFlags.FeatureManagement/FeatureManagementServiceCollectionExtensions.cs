@@ -1,10 +1,10 @@
-using Elarion.OpenFeature;
+using Elarion.FeatureFlags.OpenFeature;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OpenFeature;
 using OpenFeature.Contrib.Providers.FeatureManagement;
 
-namespace Elarion.FeatureManagement;
+namespace Elarion.FeatureFlags.FeatureManagement;
 
 /// <summary>
 /// Registration helper for the Microsoft.FeatureManagement-backed default Elarion feature-flag provider.

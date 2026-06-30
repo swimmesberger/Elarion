@@ -4,7 +4,7 @@ namespace Elarion.Abstractions.Features;
 /// The transport-neutral feature-flag seam Elarion gates handlers on, and that application code can inject to
 /// check a flag imperatively at run time. It deliberately exposes only the boolean enablement question — the
 /// 80% case — keeping the abstraction AOT-clean and provider-agnostic so the backend can be Microsoft
-/// <c>FeatureManagement</c> (the shipped default, <c>Elarion.FeatureManagement</c>), OpenFeature, LaunchDarkly,
+/// <c>FeatureManagement</c> (the shipped default, <c>Elarion.FeatureFlags.FeatureManagement</c>), OpenFeature, LaunchDarkly,
 /// ConfigCat, Unleash, Flagsmith, or a custom store by registering a different implementation.
 /// </summary>
 /// <remarks>

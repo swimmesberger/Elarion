@@ -2,7 +2,7 @@ using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Identity;
 using OpenFeature;
 
-namespace Elarion.OpenFeature;
+namespace Elarion.FeatureFlags.OpenFeature;
 
 /// <summary>
 /// Default <see cref="IFeatureFlagService"/> implementation backed by the OpenFeature <see cref="IFeatureClient"/>.

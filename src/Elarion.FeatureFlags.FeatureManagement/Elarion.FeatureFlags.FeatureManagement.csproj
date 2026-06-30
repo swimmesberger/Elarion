@@ -1,15 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Batteries-included default for Elarion feature flags: wires the OpenFeature Microsoft.FeatureManagement provider behind Elarion's OpenFeature-backed IFeatureFlagService, so [FeatureGate] reads config-driven feature flags out of the box. Opt-in via AddElarionFeatureManagement; built on Elarion.OpenFeature, so swapping to another OpenFeature provider (LaunchDarkly, ConfigCat, flagd, ...) needs no gating changes.</Description>
+    <Description>Batteries-included default for Elarion feature flags: wires the OpenFeature Microsoft.FeatureManagement provider behind Elarion's OpenFeature-backed IFeatureFlagService, so [FeatureGate] reads config-driven feature flags out of the box. Opt-in via AddElarionFeatureManagement; built on Elarion.FeatureFlags.OpenFeature, so swapping to another OpenFeature provider (LaunchDarkly, ConfigCat, flagd, ...) needs no gating changes.</Description>
     <!-- NU5104: the only OpenFeature .NET provider for Microsoft.FeatureManagement ships as a prerelease
          (0.x-preview). Depending on it from a stable package is deliberate (see ADR-0016) — any other OpenFeature
-         provider via Elarion.OpenFeature is a stable alternative. -->
+         provider via Elarion.FeatureFlags.OpenFeature is a stable alternative. -->
     <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.OpenFeature\Elarion.OpenFeature.csproj" />
+    <ProjectReference Include="..\Elarion.FeatureFlags.OpenFeature\Elarion.FeatureFlags.OpenFeature.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using Elarion.OpenFeature;
+using Elarion.FeatureFlags.OpenFeature;
 using Elarion.Tests.Authorization;
 using Xunit;
 

@@ -1,7 +1,7 @@
 using Elarion.Abstractions.Identity;
 using OpenFeature.Model;
 
-namespace Elarion.OpenFeature;
+namespace Elarion.FeatureFlags.OpenFeature;
 
 /// <summary>
 /// Builds an OpenFeature <see cref="EvaluationContext"/> from Elarion's <see cref="ICurrentUser"/>, so targeting and

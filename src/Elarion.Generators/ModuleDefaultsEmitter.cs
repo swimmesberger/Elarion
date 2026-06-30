@@ -26,6 +26,7 @@ internal static class ModuleDefaultsEmitter
 
     public const string AddHandlersMethod = "AddHandlers";
     public const string AddServicesMethod = "AddServices";
+    public const string AddVariantServicesMethod = "AddVariantServices";
     public const string AddValidatorsMethod = "AddValidators";
     public const string AddScheduledJobsMethod = "AddScheduledJobs";
     public const string AddEventConsumersMethod = "AddEventConsumers";
@@ -41,6 +42,7 @@ internal static class ModuleDefaultsEmitter
     [
         AddHandlersMethod,
         AddServicesMethod,
+        AddVariantServicesMethod,
         AddValidatorsMethod,
         AddScheduledJobsMethod,
         AddEventConsumersMethod,

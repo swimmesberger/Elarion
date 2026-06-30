@@ -22,6 +22,9 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
     private const string ServiceScopeMetadataName =
         "Elarion.Abstractions.ServiceScope";
 
+    private const string FeatureVariantAttributeMetadataName =
+        "Elarion.Abstractions.Features.FeatureVariantAttribute";
+
     private const string HostedServiceMetadataName =
         "Microsoft.Extensions.Hosting.IHostedService";
 
@@ -147,6 +150,15 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         }
 
         var compilation = ctx.SemanticModel.Compilation;
+
+        // A [FeatureVariant] modifies how its [Service] is registered (keyed + transparent contract registration,
+        // emitted by VariantServiceRegistrationGenerator). Skip the plain registration here so the two never
+        // double-register the same contract.
+        if (HasFeatureVariantAttribute(classSymbol, compilation))
+        {
+            return null;
+        }
+
         var serviceScopeSymbol = compilation.GetTypeByMetadataName(ServiceScopeMetadataName);
         if (serviceScopeSymbol is null)
         {
@@ -171,7 +183,7 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         }
 
         var scope = ParseScope(serviceAttr, serviceScopeSymbol);
-        var explicitContracts = GetExplicitContracts(serviceAttr).ToImmutableArray();
+        var explicitContracts = ServiceContractResolver.GetExplicitContracts(serviceAttr);
         var hasInvalidExplicitContracts = false;
         foreach (var explicitContract in explicitContracts)
         {
@@ -193,7 +205,7 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
             return new ServiceResult(null, diagnostics.ToImmutable());
         }
 
-        var resolvedContracts = ResolveContracts(classSymbol, explicitContracts, fmt);
+        var resolvedContracts = ServiceContractResolver.ResolveContractFqns(classSymbol, serviceAttr, fmt);
         var isHostedService = IsHostedService(classSymbol, hostedServiceSymbol, backgroundServiceSymbol);
         if (isHostedService && scope != ServiceScope.Singleton)
         {
@@ -235,6 +247,27 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         return new ServiceResult(service, ImmutableArray<DiagnosticInfo>.Empty);
     }
 
+    private static bool HasFeatureVariantAttribute(INamedTypeSymbol classSymbol, Compilation compilation)
+    {
+        var featureVariantSymbol = compilation.GetTypeByMetadataName(FeatureVariantAttributeMetadataName);
+        if (featureVariantSymbol is null)
+        {
+            return false;
+        }
+
+        foreach (var attribute in classSymbol.GetAttributes())
+        {
+            // The attribute is the generic FeatureVariantAttribute<TContract>; compare the unbound definition.
+            if (attribute.AttributeClass is { } attributeClass &&
+                SymbolEqualityComparer.Default.Equals(attributeClass.OriginalDefinition, featureVariantSymbol))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static ServiceScope ParseScope(AttributeData serviceAttr, INamedTypeSymbol serviceScopeSymbol)
     {
         foreach (var namedArgument in serviceAttr.NamedArguments)
@@ -261,60 +294,6 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         }
 
         return ServiceScope.Scoped;
-    }
-
-    private static IEnumerable<ITypeSymbol> GetExplicitContracts(AttributeData serviceAttr)
-    {
-        if (serviceAttr.ConstructorArguments.Length == 0)
-        {
-            return Enumerable.Empty<ITypeSymbol>();
-        }
-
-        var firstArg = serviceAttr.ConstructorArguments[0];
-        if (firstArg.Kind != TypedConstantKind.Array)
-        {
-            return Enumerable.Empty<ITypeSymbol>();
-        }
-
-        return firstArg.Values
-            .Where(v => v.Value is ITypeSymbol)
-            .Select(v => (ITypeSymbol)v.Value!);
-    }
-
-    private static ImmutableArray<string> ResolveContracts(
-        INamedTypeSymbol classSymbol,
-        ImmutableArray<ITypeSymbol> explicitContracts,
-        SymbolDisplayFormat fmt)
-    {
-        var contracts = new List<string>();
-        if (!explicitContracts.IsEmpty)
-        {
-            contracts.AddRange(explicitContracts.Select(c => c.ToDisplayString(fmt)));
-            return DistinctPreservingOrder(contracts);
-        }
-
-        contracts.AddRange(classSymbol.Interfaces.Select(i => i.ToDisplayString(fmt)));
-        if (contracts.Count == 0)
-        {
-            contracts.Add(classSymbol.ToDisplayString(fmt));
-        }
-
-        return DistinctPreservingOrder(contracts);
-    }
-
-    private static ImmutableArray<string> DistinctPreservingOrder(IEnumerable<string> contracts)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var result = ImmutableArray.CreateBuilder<string>();
-        foreach (var contract in contracts)
-        {
-            if (seen.Add(contract))
-            {
-                result.Add(contract);
-            }
-        }
-
-        return result.ToImmutable();
     }
 
     private static ImmutableArray<string> RemoveHostedServiceContract(ImmutableArray<string> contracts)
