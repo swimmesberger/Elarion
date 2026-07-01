@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AwesomeAssertions;
 using Elarion.Abstractions.Messaging;
+using Elarion.Abstractions.Serialization;
 using Elarion.Messaging.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +14,15 @@ namespace Elarion.Tests.Messaging;
 
 public sealed record OutboxTestEvent(int Id, string Name) : IIntegrationEvent;
 
+/// <summary>A canonical serializer for the outbox unit tests: reflection fallback so the plain test DTOs resolve.</summary>
+internal static class OutboxTestJson {
+    public static readonly IElarionJsonSerialization Instance =
+        new ServiceCollection()
+            .ConfigureElarionJson(o => o.EnableReflectionFallback = true)
+            .BuildServiceProvider()
+            .GetRequiredService<IElarionJsonSerialization>();
+}
+
 public sealed class OutboxIntegrationEventBusTests
 {
     [Fact]
@@ -20,7 +30,7 @@ public sealed class OutboxIntegrationEventBusTests
     {
         var store = new FakeOutboxStore();
         var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-02T03:04:05Z"));
-        var bus = new OutboxIntegrationEventBus(store, new OutboxOptions(), time);
+        var bus = new OutboxIntegrationEventBus(store, new OutboxOptions(), OutboxTestJson.Instance, time);
 
         await bus.PublishAsync(new OutboxTestEvent(7, "alice"), TestContext.Current.CancellationToken);
 
@@ -30,14 +40,14 @@ public sealed class OutboxIntegrationEventBusTests
         message.CorrelationId.Should().NotBe(Guid.Empty);
         message.ProcessedOnUtc.Should().BeNull();
 
-        var roundTripped = JsonSerializer.Deserialize<OutboxTestEvent>(message.Payload, new OutboxOptions().SerializerOptions);
+        var roundTripped = JsonSerializer.Deserialize<OutboxTestEvent>(message.Payload, OutboxTestJson.Instance.Options);
         roundTripped.Should().Be(new OutboxTestEvent(7, "alice"));
     }
 
     [Fact]
     public async Task PublishAsync_NullEvent_Throws()
     {
-        var bus = new OutboxIntegrationEventBus(new FakeOutboxStore(), new OutboxOptions(), TimeProvider.System);
+        var bus = new OutboxIntegrationEventBus(new FakeOutboxStore(), new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
 
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
             await bus.PublishAsync<OutboxTestEvent>(null!, TestContext.Current.CancellationToken));
@@ -118,14 +128,15 @@ public sealed class OutboxEventDispatcherTests
                     InvokeAsync = invoke
                 }
             ],
-            new OutboxOptions());
+            new OutboxOptions(),
+            OutboxTestJson.Instance);
 
     private static OutboxMessage CreateMessage(OutboxTestEvent @event, Guid correlationId) => new()
     {
         Id = Guid.NewGuid(),
         OccurredOnUtc = DateTimeOffset.UnixEpoch,
         EventType = typeof(OutboxTestEvent).FullName!,
-        Payload = JsonSerializer.Serialize(@event, new OutboxOptions().SerializerOptions),
+        Payload = JsonSerializer.Serialize(@event, OutboxTestJson.Instance.Options),
         CorrelationId = correlationId
     };
 }
@@ -172,7 +183,8 @@ public sealed class OutboxDeliveryServiceTests
                     InvokeAsync = recordingDispatcher
                 }
             ],
-            new OutboxOptions());
+            new OutboxOptions(),
+            OutboxTestJson.Instance);
 
         var service = new OutboxDeliveryService(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -194,7 +206,7 @@ public sealed class OutboxDeliveryServiceTests
             Id = id,
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
-            Payload = JsonSerializer.Serialize(@event, new OutboxOptions().SerializerOptions),
+            Payload = JsonSerializer.Serialize(@event, OutboxTestJson.Instance.Options),
             CorrelationId = Guid.NewGuid()
         };
     }

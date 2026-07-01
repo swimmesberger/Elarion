@@ -123,7 +123,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
 
             var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
             var builder = WebApplication.CreateSlimBuilder(args);
-            builder.Services.AddElarionJsonRpc(o => o.SerializerOptions = options);
+            builder.Services.AddElarionJsonRpc();
 
             var dispatcher = new JsonRpcDispatcher(options)
                 .MapDelegate<PingRequest, PingResponse>(

@@ -27,14 +27,14 @@ public sealed class SchedulerVariableReschedulingTests {
         await hosted.StartAsync(cts.Token);
 
         try {
-            var before = await PollNextDueAsync(inspector, "test.live", _ => true, cts.Token);
-            before.Should().Be(Origin + TimeSpan.FromMinutes(10));
+            // The initial occurrence is enqueued synchronously during StartAsync, and the variable change
+            // resyncs synchronously inside Update (the watch token fires on the calling thread), so the state
+            // is fully settled by the time each call returns — no polling or wall-clock wait is involved.
+            NextDue(inspector, "test.live").Should().Be(Origin + TimeSpan.FromMinutes(10));
 
             source.Update(new Dictionary<string, string?> { ["Jobs:Interval"] = "2m" });
 
-            var after = await PollNextDueAsync(
-                inspector, "test.live", due => due == Origin + TimeSpan.FromMinutes(2), cts.Token);
-            after.Should().Be(Origin + TimeSpan.FromMinutes(2));
+            NextDue(inspector, "test.live").Should().Be(Origin + TimeSpan.FromMinutes(2));
         } finally {
             await hosted.StopAsync(cts.Token);
         }
@@ -52,7 +52,8 @@ public sealed class SchedulerVariableReschedulingTests {
         await hosted.StartAsync(cts.Token);
 
         try {
-            await PollNextDueAsync(inspector, "test.literal", _ => true, cts.Token);
+            // The literal-schedule occurrence is enqueued synchronously during StartAsync.
+            NextDue(inspector, "test.literal").Should().Be(Origin + TimeSpan.FromMinutes(10));
             var originalRunId = QueuedRunId(inspector, "test.literal");
 
             source.Update(new Dictionary<string, string?> { ["Unrelated"] = "after" });
@@ -83,8 +84,8 @@ public sealed class SchedulerVariableReschedulingTests {
 
             source.Update(new Dictionary<string, string?> { ["Cron"] = "0 0 3 * * *" });
 
-            var after = await PollNextDueAsync(inspector, "test.cron", _ => true, cts.Token);
-            after.Should().Be(DateTimeOffset.Parse("2026-01-01T03:00:00Z"));
+            // Resync runs synchronously inside Update, so the newly enabled occurrence is queued before it returns.
+            NextDue(inspector, "test.cron").Should().Be(DateTimeOffset.Parse("2026-01-01T03:00:00Z"));
         } finally {
             await hosted.StopAsync(cts.Token);
         }
@@ -129,21 +130,6 @@ public sealed class SchedulerVariableReschedulingTests {
 
     private static Guid QueuedRunId(IJobSchedulerInspector inspector, string name) =>
         inspector.GetSnapshot().QueuedRuns.Single(run => run.JobName == name).RunId;
-
-    private static async Task<DateTimeOffset> PollNextDueAsync(
-        IJobSchedulerInspector inspector,
-        string name,
-        Func<DateTimeOffset, bool> predicate,
-        CancellationToken ct) {
-        while (true) {
-            if (NextDue(inspector, name) is { } due && predicate(due)) {
-                return due;
-            }
-
-            ct.ThrowIfCancellationRequested();
-            await Task.Delay(10, ct);
-        }
-    }
 
     private sealed class MutableVariableSource(Dictionary<string, string?> values) : IObservableVariableSource {
         private readonly Lock _gate = new();

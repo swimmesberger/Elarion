@@ -1,3 +1,4 @@
+using Elarion.Abstractions.Serialization;
 using Elarion.Settings.InProcess;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -15,6 +16,7 @@ public static class SettingsServiceCollectionExtensions {
     public static IServiceCollection AddElarionSettings(this IServiceCollection services) {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddElarionJson();
         services.TryAddSingleton(TimeProvider.System);
 
         // One in-process instance backs both the watch (source) and signal (publisher) seams.

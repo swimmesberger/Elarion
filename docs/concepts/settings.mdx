@@ -51,13 +51,16 @@ interpret the tree. Watch a prefix to observe a whole subtree.
 
 ## Using the typed accessor
 
-`ISettingsManager` is registered scoped by `AddElarionSettings()`. Typed access binds through a
-source-generated `JsonTypeInfo<T>` — no reflection — so it works under trimming/AOT (the repo disables
-reflection-based JSON by default).
+`ISettingsManager` is registered scoped by `AddElarionSettings()`. Typed access serializes through the
+canonical [`IElarionJsonSerialization`](/docs/capabilities/serialization) options — a source-generated
+`JsonTypeInfo<T>`, no reflection — so it works under trimming/AOT (the repo disables reflection-based JSON
+by default). Register your settings types in a JSON context and contribute it to the canonical serializer
+(module contexts are contributed automatically by `AddElarion`; a standalone type uses `ConfigureElarionJson`):
 
 ```csharp
 // Program.cs
 builder.Services.AddElarionSettings();
+builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(AppSettingsJsonContext.Default));
 
 // A source-generated context for your settings types.
 [JsonSerializable(typeof(SmtpSettings))]
@@ -72,9 +75,8 @@ public sealed record SmtpSettings {
 ```csharp
 public sealed class SendEmailHandler(ISettingsManager settings) : IHandler<SendEmail, Result<Unit>> {
     public async ValueTask<Result<Unit>> HandleAsync(SendEmail request, CancellationToken ct) {
-        // Global, typed, with a fallback when unset.
+        // Global, typed, with a fallback when unset. Type info comes from the canonical serializer.
         var smtp = await settings.GetAsync(
-            AppSettingsJsonContext.Default.SmtpSettings,
             "app:smtp",
             fallback: new SmtpSettings { Host = "localhost" },
             cancellationToken: ct);

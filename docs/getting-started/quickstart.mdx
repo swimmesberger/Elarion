@@ -207,19 +207,12 @@ var builder = WebApplication.CreateSlimBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase("quickstart"));
 
+// Registers modules and contributes every enabled module's source-generated JSON context to the
+// canonical serializer every subsystem reads — no hand-built JsonSerializerOptions needed.
 builder.Services.AddElarion(builder.Configuration);
 
-var resolvers = builder.Configuration.GetAllJsonTypeInfoResolvers();
-var serializerOptions = new JsonSerializerOptions {
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    PropertyNameCaseInsensitive = true,
-    TypeInfoResolver = JsonTypeInfoResolver.Combine(
-        [JsonRpcJsonContext.Default, .. resolvers, new DefaultJsonTypeInfoResolver()]),
-};
-
-builder.Services.AddSingleton(serializerOptions);
 // Gated dispatcher: only enabled modules' [Handler] operations are registered.
-builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
 
 var app = builder.Build();
 

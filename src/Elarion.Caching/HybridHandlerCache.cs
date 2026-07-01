@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.Serialization;
 
 namespace Elarion.Caching;
 
@@ -16,7 +17,7 @@ namespace Elarion.Caching;
 public sealed class HybridHandlerCache(
     HybridCache cache,
     IServiceProvider services,
-    JsonSerializerOptions jsonOptions
+    IElarionJsonSerialization jsonSerialization
 ) : IHandlerCache {
     /// <inheritdoc />
     public async ValueTask<TResponse> GetOrCreateAsync<TRequest, TResponse>(
@@ -41,7 +42,7 @@ public sealed class HybridHandlerCache(
 
             if (policy is IHandlerCachePayloadPolicy<TRequest, TResponse> payloadPolicy) {
                 // Note 11: Payload policies store a serialized representation, useful when response types should not be cached directly.
-                var payloadState = new PayloadFactoryState<TRequest, TResponse>(payloadPolicy, factory, jsonOptions, activity);
+                var payloadState = new PayloadFactoryState<TRequest, TResponse>(payloadPolicy, factory, jsonSerialization.Options, activity);
                 try {
                     var response = await GetOrCreatePayloadAsync(payloadState, key, options, tags, ct);
                     outcome = payloadState.FactoryExecuted ? "miss-factory-executed" : "cached-or-coalesced";
@@ -129,7 +130,7 @@ public sealed class HybridHandlerCache(
             tags,
             cancellationToken: ct);
 
-        return payloadState.Policy.Deserialize(payload, jsonOptions);
+        return payloadState.Policy.Deserialize(payload, jsonSerialization.Options);
     }
 
     private string CreatePhysicalKey<TRequest>(IHandlerCachePolicy<TRequest> policy, TRequest request) {

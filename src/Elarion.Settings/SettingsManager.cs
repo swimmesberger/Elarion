@@ -1,6 +1,6 @@
 using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Primitives;
 
@@ -15,34 +15,31 @@ namespace Elarion.Settings;
 public sealed class SettingsManager(
     ISettingsStore store,
     ISettingsChangeSource changeSource,
+    IElarionJsonSerialization jsonSerialization,
     IServiceProvider services) : ISettingsManager {
     /// <inheritdoc />
     public async ValueTask<T> GetAsync<T>(
-        JsonTypeInfo<T> typeInfo,
         string key,
         T fallback,
         SettingsScope? scope = null,
         CancellationToken cancellationToken = default) {
-        ArgumentNullException.ThrowIfNull(typeInfo);
         var raw = await store.GetAsync(ResolveScope(scope), key, cancellationToken).ConfigureAwait(false);
         if (raw is null) {
             return fallback;
         }
 
-        var value = JsonSerializer.Deserialize(raw, typeInfo);
+        var value = JsonSerializer.Deserialize(raw, jsonSerialization.GetTypeInfo<T>());
         return value is null ? fallback : value;
     }
 
     /// <inheritdoc />
     public ValueTask<SettingWriteResult> SetAsync<T>(
-        JsonTypeInfo<T> typeInfo,
         string key,
         T value,
         SettingsScope? scope = null,
         int? expectedVersion = null,
         CancellationToken cancellationToken = default) {
-        ArgumentNullException.ThrowIfNull(typeInfo);
-        var raw = JsonSerializer.Serialize(value, typeInfo);
+        var raw = JsonSerializer.Serialize(value, jsonSerialization.GetTypeInfo<T>());
         return store.SetAsync(ResolveScope(scope), key, raw, expectedVersion, cancellationToken);
     }
 

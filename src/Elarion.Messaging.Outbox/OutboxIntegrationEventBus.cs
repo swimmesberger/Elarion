@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Elarion.Abstractions.Messaging;
+using Elarion.Abstractions.Serialization;
 
 namespace Elarion.Messaging.Outbox;
 
@@ -13,7 +14,11 @@ namespace Elarion.Messaging.Outbox;
 /// transaction. If the transaction rolls back, the event is discarded with every other change — the
 /// per-scope buffer the in-memory tier needs is unnecessary here because the database transaction provides atomicity.
 /// </remarks>
-public sealed class OutboxIntegrationEventBus(IOutboxStore store, OutboxOptions options, TimeProvider timeProvider)
+public sealed class OutboxIntegrationEventBus(
+    IOutboxStore store,
+    OutboxOptions options,
+    IElarionJsonSerialization jsonSerialization,
+    TimeProvider timeProvider)
     : IIntegrationEventBus
 {
     /// <inheritdoc />
@@ -22,7 +27,7 @@ public sealed class OutboxIntegrationEventBus(IOutboxStore store, OutboxOptions 
     {
         ArgumentNullException.ThrowIfNull(@event);
 
-        var payload = JsonSerializer.Serialize(@event, options.SerializerOptions);
+        var payload = JsonSerializer.Serialize(@event, options.SerializerOptions ?? jsonSerialization.Options);
         store.Append(new OutboxMessage
         {
             Id = Guid.NewGuid(),

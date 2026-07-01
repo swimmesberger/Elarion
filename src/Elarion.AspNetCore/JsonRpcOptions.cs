@@ -1,10 +1,8 @@
-using System.Text.Json;
-using Elarion.JsonRpc;
-
 namespace Elarion.AspNetCore;
 
 /// <summary>
-/// Configuration options for the JSON-RPC 2.0 endpoint.
+/// Configuration options for the JSON-RPC 2.0 endpoint. JSON serialization is configured centrally through the
+/// canonical <c>IElarionJsonSerialization</c> options (via <c>ConfigureElarionJson</c>), not here.
 /// </summary>
 public sealed class JsonRpcOptions {
     /// <summary>
@@ -19,17 +17,4 @@ public sealed class JsonRpcOptions {
     /// Default is <c>/rpc</c>.
     /// </summary>
     public string EndpointPath { get; set; } = "/rpc";
-
-    /// <summary>
-    /// Pre-built <see cref="JsonSerializerOptions"/> to use for serialising and deserialising
-    /// JSON-RPC requests and responses. When set, the library registers this instance directly
-    /// as the DI singleton and calls <see cref="JsonSerializerOptions.MakeReadOnly"/> on it to
-    /// prevent accidental mutation after startup.
-    /// <para>
-    /// When <see langword="null"/> (the default), a minimal options instance is built
-    /// automatically with camelCase naming and the built-in <see cref="JsonRpcJsonContext"/>
-    /// resolver for envelope types.
-    /// </para>
-    /// </summary>
-    public JsonSerializerOptions? SerializerOptions { get; set; }
 }

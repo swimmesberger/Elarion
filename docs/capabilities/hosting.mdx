@@ -55,13 +55,12 @@ builder.Services.AddMyAppApplicationScheduledJobs();
 builder.Services.AddMyAppApplicationResiliencePolicies();
 builder.Services.AddInMemoryScheduler(builder.Configuration);
 builder.AddMyAppPlatformCapabilities();
+// Also contributes every enabled module's source-generated JSON context to the canonical serializer.
 builder.Services.AddElarion(builder.Configuration);
 
-var serializerOptions = CreateSerializerOptions(builder.Configuration);
-builder.Services.AddSingleton(serializerOptions);
-
-// Registers JSON-RPC options and the frozen JsonRpcDispatcher singleton, gated per module.
-builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+// Registers JSON-RPC options and the frozen JsonRpcDispatcher singleton, gated per module. Serialization
+// comes from the canonical IElarionJsonSerialization — no hand-built JsonSerializerOptions is threaded in.
+builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
 
 var app = builder.Build();
 
@@ -71,9 +70,10 @@ app.MapElarionJsonRpc();
 app.Run();
 ```
 
-See [Serialization](/docs/capabilities/serialization) for `CreateSerializerOptions`.
+See [Serialization](/docs/capabilities/serialization) for the canonical `IElarionJsonSerialization` and
+`ConfigureElarionJson`.
 
-`AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers)` is the **config-aware** overload: it
+`AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers)` is the **config-aware** overload: it
 resolves `IConfiguration` when the dispatcher singleton is built and registers only the enabled modules'
 handlers. The JSON-RPC adapter then serves only the operations flagged `HandlerTransports.JsonRpc`.
 `MapElarionEndpoints` does the same gating for module `MapEndpoints`

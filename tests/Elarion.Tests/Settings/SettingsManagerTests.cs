@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using AwesomeAssertions;
 using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.Serialization;
 using Elarion.Settings;
 using Elarion.Tests.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +18,7 @@ public sealed class SettingsManagerTests {
             services.AddSingleton(currentUser);
         }
 
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SettingsTestJsonContext.Default));
         services.AddElarionSettings();
         return services.BuildServiceProvider();
     }
@@ -30,9 +32,8 @@ public sealed class SettingsManagerTests {
         var manager = Resolve(provider);
         var settings = new WidgetSettings { MaxItems = 7, Title = "Inbox" };
 
-        await manager.SetAsync(SettingsTestJsonContext.Default.WidgetSettings, "widgets", settings, cancellationToken: Ct);
-        var loaded = await manager.GetAsync(
-            SettingsTestJsonContext.Default.WidgetSettings, "widgets", new WidgetSettings(), cancellationToken: Ct);
+        await manager.SetAsync("widgets", settings, cancellationToken: Ct);
+        var loaded = await manager.GetAsync("widgets", new WidgetSettings(), cancellationToken: Ct);
 
         loaded.Should().Be(settings);
     }
@@ -43,8 +44,7 @@ public sealed class SettingsManagerTests {
         var manager = Resolve(provider);
         var fallback = new WidgetSettings { MaxItems = 1, Title = "default" };
 
-        var loaded = await manager.GetAsync(
-            SettingsTestJsonContext.Default.WidgetSettings, "missing", fallback, cancellationToken: Ct);
+        var loaded = await manager.GetAsync("missing", fallback, cancellationToken: Ct);
 
         loaded.Should().Be(fallback);
     }

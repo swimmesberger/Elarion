@@ -47,8 +47,28 @@ minor releases may include breaking changes.
   `params._meta`) to those operations — configurable via `idempotency` on the client and a per-call
   `idempotencyKey` override. Retry stays a higher-layer concern (e.g. TanStack Query); the client only attaches
   the key.
+- **Canonical JSON serialization (`IElarionJsonSerialization`).** One framework-owned `JsonSerializerOptions`
+  that every subsystem reads — JSON-RPC, MCP, idempotency, caching, the outbox, and settings — so a host
+  configures the JSON type context once instead of threading options into each subsystem. `ElarionJsonOptions`
+  (naming knobs, an ordered resolver list, `EnableReflectionFallback`, `PostConfigure`) and the
+  `IElarionJsonSerialization` accessor live in `Elarion.Abstractions.Serialization`; `AddElarionJson` /
+  `ConfigureElarionJson` register and compose it over a plain contributor seam (no `Microsoft.Extensions.Options`
+  dependency). The generated `AddElarion(configuration)` contributes every enabled module's source-generated
+  context automatically. **AOT-strict by default:** a type missing from every source-gen context throws instead
+  of silently reflecting; reflection is opt-in via `EnableReflectionFallback`. No bare `JsonSerializerOptions`
+  is registered in DI, so Elarion never collides with a host's own registration. See
+  [ADR-0023](docs/decisions/0023-canonical-json-serialization.md).
 
 ### Changed
+- **JSON serialization is configured centrally, not per subsystem (breaking).** `AddElarionJsonRpc` and
+  `AddElarionMcp` no longer take a `JsonSerializerOptions` parameter, and `JsonRpcOptions.SerializerOptions` is
+  removed — both read the canonical `IElarionJsonSerialization`. `ISettingsManager` typed access is now
+  ergonomic-only (`GetAsync<T>(key, fallback)` / `SetAsync<T>(key, value)`, resolving type info from the
+  accessor) instead of taking an explicit `JsonTypeInfo<T>`. `OutboxOptions.SerializerOptions` is now nullable
+  and defaults to the canonical options (its reflection-based default is removed). **Migration:** delete any
+  hand-built `JsonSerializerOptions` and its `AddSingleton`; call `AddElarion(configuration)` (which contributes
+  module contexts) and, if needed, `ConfigureElarionJson(o => …)` for custom naming/resolvers; drop the options
+  argument from `AddElarionJsonRpc`/`AddElarionMcp`.
 - **The module bootstrapper is auto-generated as the fixed-name `ElarionBootstrapper` (breaking).**
   `[GenerateModuleBootstrapper]` becomes an **assembly** attribute (`[assembly: GenerateModuleBootstrapper]`)
   and `AppModuleDiscoveryGenerator` emits the host wiring (`AddElarion`, `MapElarionEndpoints`,

@@ -92,7 +92,8 @@ protected override void OnModelCreating(ModelBuilder modelBuilder) {
 
 ```csharp title="Program.cs"
 builder.Services.AddElarionOutbox<BillingDbContext>(o => {
-    o.SerializerOptions     = serializerOptions;        // reuse the host's source-generated options for AOT
+    // Event payloads use the canonical IElarionJsonSerialization by default (contributed by AddElarion) —
+    // register your event DTOs in a module JSON context. Set o.SerializerOptions only to override.
     // o.PollingInterval    = TimeSpan.FromSeconds(1);  // idle poll interval
     // o.BatchSize          = 100;                       // messages claimed per poll
     // o.LeaseDuration      = TimeSpan.FromMinutes(2);   // claim lease before another worker may reclaim
@@ -159,10 +160,10 @@ await retention purge. Filtered indexes are supported on PostgreSQL, SQL Server,
 supply an unfiltered index in your own model.
 
 <Callout type="info">
-  **Serializer options.** `OutboxOptions.SerializerOptions` defaults to `JsonSerializerDefaults.Web` with a
-  reflection-based `DefaultJsonTypeInfoResolver`. For trimming/AOT, supply the host's source-generated
-  `IJsonTypeInfoResolver` — the same options used at runtime. See
-  [serialization](/docs/capabilities/serialization).
+  **Serializer options.** `OutboxOptions.SerializerOptions` is `null` by default, so event payloads use the
+  canonical [`IElarionJsonSerialization`](/docs/capabilities/serialization) — register each event DTO in a
+  module JSON context and it is trim/AOT-safe. Set `SerializerOptions` only to serialize the outbox
+  differently from the rest of the app.
 </Callout>
 
 <Cards>
@@ -170,6 +171,6 @@ supply an unfiltered index in your own model.
     The consumer model both backends deliver to, and how to keep consumers idempotent.
   </Card>
   <Card title="Serialization" href="/docs/capabilities/serialization">
-    Source-generated `JsonSerializerOptions` to reuse for the outbox payload serializer.
+    The canonical `IElarionJsonSerialization` the outbox payload serializer uses by default.
   </Card>
 </Cards>
