@@ -48,7 +48,8 @@ public sealed class IdempotencyDecoratorTests {
 
     [Fact]
     public async Task Replay_ReturnsStoredResult_WithoutRunningHandler() {
-        var payload = JsonSerializer.Serialize(new StoredResult<string> { Ok = true, Value = "first" }, Json);
+        var payload = JsonSerializer.Serialize(
+            new StoredResult { Ok = true, Value = JsonSerializer.SerializeToElement("first", Json) }, Json);
         var inner = new RecordingHandler(Result<string>.Success("second"));
         var store = new RecordingStore(IdempotencyBeginResult.Replay(payload));
         var uow = new RecordingUnitOfWork();
@@ -193,7 +194,7 @@ public sealed class IdempotencyDecoratorTests {
     [Fact]
     public async Task DefinitiveFailureReplay_ReturnsStoredFailure() {
         var payload = JsonSerializer.Serialize(
-            new StoredResult<string> { Ok = false, Error = AppError.BusinessRule("declined") }, Json);
+            new StoredResult { Ok = false, Error = AppError.BusinessRule("declined") }, Json);
         var store = new RecordingStore(IdempotencyBeginResult.Replay(payload, isFailurePayload: true));
 
         var result = await Decorate(new RecordingHandler(Result<string>.Success("x")), store, new RecordingUnitOfWork(), "k1")
@@ -252,15 +253,16 @@ public sealed class IdempotencyDecoratorTests {
         public string Serialize(Result<string> response, JsonSerializerOptions options) =>
             JsonSerializer.Serialize(
                 response.IsSuccess
-                    ? new StoredResult<string> { Ok = true, Value = response.Value }
-                    : new StoredResult<string> { Ok = false, Error = response.Error },
+                    ? new StoredResult { Ok = true, Value = JsonSerializer.SerializeToElement(response.Value, options) }
+                    : new StoredResult { Ok = false, Error = response.Error },
                 options);
 
         public Result<string> Deserialize(string payload, JsonSerializerOptions options) {
-            var stored = JsonSerializer.Deserialize<StoredResult<string>>(payload, options)!;
-            return stored.Ok
-                ? Result<string>.Success(stored.Value!)
-                : Result<string>.Failure(stored.Error ?? AppError.InternalError);
+            var stored = JsonSerializer.Deserialize<StoredResult>(payload, options)!;
+            if (!stored.Ok)
+                return Result<string>.Failure(stored.Error ?? AppError.InternalError);
+            var value = stored.Value is { } element ? element.Deserialize<string>(options) : null;
+            return Result<string>.Success(value!);
         }
     }
 

@@ -162,6 +162,39 @@ public sealed class FeatureGateGeneratorTests {
     }
 
     [Fact]
+    public void AttachesFeatureGateFromBaseHandlerClass() {
+        // [FeatureGate] is Inherited = true, so a gate declared on a BASE handler must attach the decorator to the
+        // derived handler — otherwise the derived handler ships ungated (C5).
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+
+                [FeatureGate("new-billing")]
+                public abstract class GatedBase : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public abstract ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct);
+                }
+
+                public sealed class DerivedHandler : GatedBase {
+                    public override ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var (result, _) = Run(source);
+        var generated = GetGenerated(result, "Sample_App_DerivedHandler.g.cs");
+
+        generated.Should().Contain("global::Elarion.Abstractions.Features.FeatureGateDecorator<");
+        AssertCompiles(source, generated);
+    }
+
+    [Fact]
     public void IrrelevantEditReusesPipeline() {
         const string source = Preamble +
             """

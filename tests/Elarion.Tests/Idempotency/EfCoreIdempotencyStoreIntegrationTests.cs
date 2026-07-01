@@ -131,11 +131,20 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         public TimeSpan Retention => TimeSpan.FromHours(24);
 
         public string Serialize(Result<string> response, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(new StoredResult<string> { Ok = response.IsSuccess, Value = response.IsSuccess ? response.Value : null, Error = response.IsSuccess ? null : response.Error }, options);
+            JsonSerializer.Serialize(
+                new StoredResult {
+                    Ok = response.IsSuccess,
+                    Value = response.IsSuccess ? JsonSerializer.SerializeToElement(response.Value, options) : null,
+                    Error = response.IsSuccess ? null : response.Error,
+                },
+                options);
 
         public Result<string> Deserialize(string payload, JsonSerializerOptions options) {
-            var stored = JsonSerializer.Deserialize<StoredResult<string>>(payload, options)!;
-            return stored.Ok ? Result<string>.Success(stored.Value!) : Result<string>.Failure(stored.Error ?? AppError.InternalError);
+            var stored = JsonSerializer.Deserialize<StoredResult>(payload, options)!;
+            if (!stored.Ok)
+                return Result<string>.Failure(stored.Error ?? AppError.InternalError);
+            var value = stored.Value is { } element ? element.Deserialize<string>(options) : null;
+            return Result<string>.Success(value!);
         }
     }
 

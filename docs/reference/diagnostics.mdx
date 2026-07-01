@@ -152,6 +152,7 @@ Decorator attachment in handler registration. See [Decorator pipelines](/docs/co
 | --- | --- | --- | --- |
 | ELPIPE001 | Error | A decorator declares an `AppliesTo` attachment-predicate method that is not public, so the generated registration cannot call it to decide attachment. | Declare the predicate as `public static bool AppliesTo(HandlerMetadata handler)`. |
 | ELPIPE002 | Error | A decorator declares an `AppliesTo` method with an unsupported signature (e.g. the older `AppliesTo(System.Type request)`). | Use the one supported form, `public static bool AppliesTo(HandlerMetadata handler)`; for request-based checks use `handler.RequestType`. |
+| ELPIPE003 | Error | A handler carries `[Resilient]` but consumes a domain event (`request : IDomainEvent`), which is dispatched inline within the publisher's transaction; a Polly retry would re-apply the handler's tracked mutations inside that live transaction. | Remove `[Resilient]` from the domain-event consumer. Integration-event consumers run on a fresh post-commit scope and may be resilient. |
 
 ## ELRES — Resilience policies
 
@@ -195,6 +196,9 @@ Handler caching configuration for `[Cacheable]` / `[CacheInvalidate]`. See [Cach
 | ELCACHE002 | Error | A handler's cache configuration defines no non-empty cache tag (at least one is required). | Define at least one non-empty cache tag on the handler's caching attribute. |
 | ELCACHE003 | Error | A handler declares a cache tag that fails validation (invalid format/value). | Replace the invalid cache tag with a valid tag value. |
 | ELCACHE004 | Error | A cacheable handler's cache duration is not positive (must define a positive duration). | Set a positive cache duration on the handler's `[Cacheable]` configuration. |
+| ELCACHE005 | Error | A handler carries `[Cacheable]` but consumes an event (`request : IDomainEvent`/`IIntegrationEvent`); caching a fan-out consumer's `Result<Unit>` would silently skip the side effect on a legitimate re-delivery. | Remove `[Cacheable]` from the event consumer. (`[CacheInvalidate]` on a consumer is legitimate — reacting to an event by evicting caches — and is left attached.) |
+| ELCACHE006 | Error | A request property participating in the cache key has a type with no stable key formatting (it would fall back to `object.ToString()`, colliding across values and risking a cross-request cache leak). | Use a scalar key property (primitive, `string`, `char`, `bool`, `Guid`, enum, `DateTime`/`DateTimeOffset`/`DateOnly`/`TimeOnly`/`TimeSpan`, `decimal`, or a `Nullable` of those), or restrict the key with `[Cacheable(KeyProperties = ...)]`. |
+| ELCACHE007 | Error | A `[Cacheable(KeyProperties = ...)]` names a property that is not a public instance property on the request type, so it would be silently dropped from the key. | Reference an existing request property, e.g. `nameof(Request.Id)`. |
 
 ## ELFEAT — Feature gates
 
