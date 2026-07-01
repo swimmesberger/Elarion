@@ -44,6 +44,7 @@
     <ProjectReference Include="../../src/Elarion.FeatureFlags.OpenFeature/Elarion.FeatureFlags.OpenFeature.csproj" />
     <ProjectReference Include="../../src/Elarion.FeatureFlags.FeatureManagement/Elarion.FeatureFlags.FeatureManagement.csproj" />
     <ProjectReference Include="../../src/Elarion.Caching/Elarion.Caching.csproj" />
+    <ProjectReference Include="../../src/Elarion.Caching.PostgreSql/Elarion.Caching.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Resilience/Elarion.Resilience.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj" />

@@ -1,4 +1,4 @@
-# ADR-0020: Idempotency (`[Idempotent]` over a single-transaction, unique-constrained key store)
+# ADR-0021: Idempotency (`[Idempotent]` over a single-transaction, unique-constrained key store)
 
 - Status: Accepted
 - Date: 2026-07-01

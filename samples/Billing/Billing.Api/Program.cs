@@ -14,6 +14,7 @@ using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
 using Elarion.Authorization;
 using Elarion.Caching;
+using Elarion.Caching.PostgreSql;
 using Elarion.EntityFrameworkCore.UnitOfWork;
 using Elarion.JsonRpc;
 using Elarion.Messaging.Outbox;
@@ -52,8 +53,10 @@ builder.Services.AddInMemoryScheduler(builder.Configuration);
 builder.Services.AddBilling_ApplicationResiliencePolicies();
 builder.Services.AddMicrosoftResilienceRuntime();
 
-// Per-user handler caching, backed by HybridCache.
-builder.Services.AddElarionHandlerCaching();
+// Per-user handler caching, backed by HybridCache with a PostgreSQL L2 — the recommended L2 for most apps
+// already on Postgres: it reuses the "billing" database (an auto-created UNLOGGED cache table) instead of
+// operating a separate Redis. HybridCache's in-process L1 still carries the hot path.
+builder.Services.AddElarionPostgreSqlHandlerCaching(builder.Configuration.GetConnectionString("billing")!);
 
 // Transport-neutral current user, filled from the authenticated principal.
 builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");

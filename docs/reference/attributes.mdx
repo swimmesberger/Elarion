@@ -281,6 +281,108 @@ See [Feature flags](/docs/capabilities/feature-flags).
 
 See [Feature flags](/docs/capabilities/feature-flags).
 
+## Authorization
+
+Handler requirements are class attributes the handler-registration generator reads to auto-attach the `AuthorizationDecorator` (the outermost functional gate, just inside tracing). Different attribute *kinds* AND together; multiple of one kind AND; OR lives inside a single `[RequireClaim]`. All are transport-neutral (identical under JSON-RPC, MCP, and HTTP) and evaluate against `ICurrentUser` — an unauthenticated caller yields `AppError.Unauthorized` (401), authenticated-but-denied yields `AppError.Forbidden` (403). The gated handler's response must be able to represent failure (`Result<T>`/`Result`) or `ELAUTH001` is reported.
+
+### `[RequirePermission]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)
+- **Triggers:** requires the principal to hold a permission to perform a verb on a resource — the Kubernetes-RBAC `(resource, verb)` shape, sugar for `[RequireClaim(PermissionClaimType, "{resource}.{verb}")]`. Surfaced into the generated permission catalog (see `[GeneratePermissionCatalog]`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `resource` | `string` (ctor) → `Resource` | required | The resource the permission applies to, e.g. `"properties"`. |
+| `verb` | `string` (ctor) → `Verb` | required | The action on the resource; a `Verbs` constant or any string (open vocabulary). |
+| `Permission` | `string` (read-only) | derived | The composed claim value enforced — `{Resource}.{Verb}` (separator `"."`). |
+
+**`Verbs`** (constants, open vocabulary): `Read` (`"read"`), `List` (`"list"`), `Create` (`"create"`), `Update` (`"update"`), `Write` (`"write"`), `Delete` (`"delete"`), `Manage` (`"manage"`).
+
+### `[RequireRole]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)
+- **Triggers:** requires the principal to be in the named role. Also surfaced into the permission catalog.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `role` | `string` (ctor) → `Role` | required | The required role name. |
+
+### `[RequireClaim]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)
+- **Triggers:** requires the principal to carry a claim of the given type; with values supplied the principal must match at least one (OR). The general primitive `[RequirePermission]`/`[RequireRole]` build on.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `claimType` | `string` (ctor) → `ClaimType` | required | The claim type the principal must carry. |
+| `allowedValues` | `params string[]` (ctor) → `AllowedValues` (`IReadOnlyList<string>`) | empty | Accepted values (OR); empty means presence-only. |
+
+### `[RequirePolicy]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)
+- **Triggers:** requires a named `IAuthorizationPolicy` (an Elarion-native policy evaluated against `ICurrentUser` + the request, **not** the ASP.NET policy engine) to pass.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `policy` | `string` (ctor) → `Policy` | required | The policy name, matched against `IAuthorizationPolicy.Name` / `[AuthorizationPolicy("name")]`. |
+
+### `[AllowAnonymous]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (single, inherited)
+- **Triggers:** marks a handler as public; authorization is skipped entirely and wins over any `Require*` attribute and over an `[ElarionAuthorizationDefaults]` deny-by-default scope. Marker only — no parameters.
+
+### `[AuthorizationPolicy]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (single, not inherited)
+- **Triggers:** marks an `IAuthorizationPolicy` implementation as a named, auto-registered policy (per module, like `[Service]`), referenced by `[RequirePolicy("name")]`. Diagnostics `ELPOL001`/`ELPOL002`.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `name` | `string` (ctor) → `Name` | required | The policy name `[RequirePolicy]` resolves. |
+
+### `[ElarionAuthorizationDefaults]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** assembly | class (single, not inherited)
+- **Triggers:** flips the in-scope handlers to **deny-by-default** — every handler requires authentication unless `[AllowAnonymous]`. Resolved most-specific-wins (a `[AppModule]`-class scope overrides the assembly scope), like `[DefaultPipeline]`.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `RequireAuthenticated` | `bool` (init) | `true` | Whether in-scope handlers require an authenticated principal. |
+
+### `[RequireResource]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)
+- **Triggers:** the per-resource point check (the BOLA-class "may I touch *this* one?" gate). The decorator reads the resource id from the request by a **compile-checked path** (no reflection) and calls the `IResourceAuthorizer` seam; the shipped default authorizes from the grants table and **fails closed** when no backend is registered. An unresolvable `Id` path is `ELAUTH002`.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `resourceType` | `Type` (ctor) → `ResourceType` | required | The resource type being accessed, e.g. `typeof(Contact)`. |
+| `Operation` | `string` (init) | `"read"` | The operation name (an open `ResourceOperation` value). |
+| `Id` | `string` (init) | `"Id"` | Request property path naming the resource id, e.g. `nameof(Query.Id)` or a dotted path of existing properties. |
+
+### `[ResourceFilter<TEntity>]`
+
+- **Package:** `Elarion.Paging` · **Applies to:** class (generic attribute, `where TEntity : class`)
+- **Triggers:** the data-level **list filter** (Leg B). Declared on a dedicated partial class (the entity stays clean, like `[Keyset<T>]`); the EF Core generator completes it as an `IQueryAuthorizer<TEntity>` whose predicate composes the rules as `AND(scope rules) AND OR(grant rules)` and pushes it into SQL via `source.WhereAuthorized(authorizer, currentUser)` **before** paging. Diagnostics `ELRES001`–`ELRES005`.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `TEntity` | type parameter (`where TEntity : class`) | required | The entity being authorized. |
+| `OwnerProperty` | `string?` (init) | `null` | A **grant** (OR): the row is visible when this column equals the caller's `UserId`. Type Guid/string/int/long. |
+| `TenantProperty` | `string?` (init) | `null` | A **scope** (AND): every visible row's column must equal the caller's tenant claim. Type Guid/string/int/long. |
+| `TenantClaimType` | `string` (init) | `"tenant"` | The claim type the tenant value is read from. |
+| `Shared` | `bool` (init) | `false` | A **grant** (OR): a correlated `EXISTS` over the resource-grants table for the caller's user **or any of their roles**, for the operation `WhereAuthorized` asks (defaults to `Read`). Makes the filter a **scoped service** (no static `Specification`); requires `ResourceTypeName` (else `ELRES005`) and a reference to `Elarion.Authorization.EntityFrameworkCore`. |
+| `ResourceTypeName` | `string?` (init) | `null` | The resource-type discriminator stored in the grants table (e.g. `"Contact"`), used by the `Shared` `EXISTS`. |
+| `IdProperty` | `string` (init) | `"Id"` | The entity key property whose stringified value matches the grant's resource id. Type Guid/string/int/long. |
+
+<Callout type="info">
+  Consume the filter by injecting `IQueryAuthorizer<TEntity>` (the form that works for `Shared`). A field-only
+  filter (`OwnerProperty`/`TenantProperty`, no `Shared`) is stateless, so the generator *also* exposes a static
+  `Specification` singleton. Both are auto-registered as `IQueryAuthorizer<TEntity>`, module-feature-gated.
+</Callout>
+
+See [Authorization](/docs/concepts/authorization) and [Resource authorization](/docs/concepts/resource-authorization).
+
 ## EF Core
 
 ### `[EntityConfiguration]`
@@ -314,6 +416,26 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `scopes` | `params string[]` (ctor) → `Scopes` (`IReadOnlyList<string>`) | empty | Optional context scopes generated for this class. Omit scopes to include every `[EntityConfiguration]`; a scoped class includes only configurations whose scopes intersect. |
+
+### `[GenerateElarionIdentity<TUser, TRole, TKey>]`
+
+- **Package:** `Elarion.EntityFrameworkCore.Identity` · **Applies to:** class (generic attribute; `TUser : IdentityUser<TKey>`, `TRole : IdentityRole<TKey>`, `TKey : IEquatable<TKey>`)
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the seven Identity `DbSet`s and applies the self-contained snake_case Identity model (keys, composite keys, indexes, table/column names) through the EF generator's per-feature model-config seam — **no** `IdentityDbContext` inheritance and **no** `EFCore.NamingConventions` dependency. The web-free Identity *model*; the host wiring is `AddElarionIdentity` in `Elarion.AspNetCore.Identity`. Requires `[GenerateDbSets]` (else `ELIDN001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+
+### `[GenerateElarionResourceGrants]`
+
+- **Package:** `Elarion.Authorization.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<ResourceGrantEntity>` and applies the grants model configuration — the table backing `[ResourceFilter(Shared = true)]` and the `[RequireResource]` point check. The hand-written equivalent is `modelBuilder.ApplyElarionResourceGrants()`. Requires `[GenerateDbSets]` (else `ELRG001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+
+See [Resource authorization](/docs/concepts/resource-authorization) and [Identity](/docs/capabilities/identity).
 
 ### `[Keyset<TEntity>]`
 
@@ -402,7 +524,7 @@ See [Entity Framework](/docs/capabilities/entity-framework).
 ## Related references
 
 <Cards>
-  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELEVT/ELKEY/ELAPI/ELSG/ELFEAT/ELVAR/ELPERM/ELCACHE/ELRES) referenced above.</Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELEVT/ELKEY/ELAPI/ELSG/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELCACHE) referenced above.</Card>
   <Card title="Configuration" href="/docs/reference/configuration">Feature flags (`Modules:{Name}:Enabled`) and other settings keys.</Card>
   <Card title="Conventions" href="/docs/reference/conventions">Module statics, namespace matching, and naming rules.</Card>
   <Card title="Packages" href="/docs/reference/packages">Which package each attribute ships in.</Card>

@@ -12,6 +12,7 @@
     <ProjectReference Include="..\..\..\src\Elarion.Messaging.Outbox\Elarion.Messaging.Outbox.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore.UnitOfWork\Elarion.EntityFrameworkCore.UnitOfWork.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.Caching\Elarion.Caching.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Caching.PostgreSql\Elarion.Caching.PostgreSql.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.Resilience\Elarion.Resilience.csproj" />
     <ProjectReference Include="..\Billing.Application\Billing.Application.csproj" />
     <ProjectReference Include="..\Billing.Infrastructure\Billing.Infrastructure.csproj" />

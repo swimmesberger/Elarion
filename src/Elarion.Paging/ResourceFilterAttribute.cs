@@ -3,16 +3,24 @@ namespace Elarion.Paging;
 /// <summary>
 /// Declares a data-level authorization filter for <typeparamref name="TEntity"/> on the annotated partial
 /// class. The source generator fills the class with a strongly-typed, reflection-free
-/// <c>IQueryAuthorizer&lt;TEntity&gt;</c> implementation plus a static <c>Specification</c> singleton, so a
-/// handler restricts a list query to the rows the caller may see with
-/// <c>source.WhereAuthorized(MyAccess.Specification, currentUser)</c> before paging.
+/// <c>IQueryAuthorizer&lt;TEntity&gt;</c> implementation and auto-registers it, so a handler restricts a list
+/// query to the rows the caller may see with <c>source.WhereAuthorized(authorizer, currentUser)</c> before paging.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Declare one partial class per entity, near the feature that lists it — the entity stays free of
 /// authorization concerns (mirroring <c>[Keyset&lt;TEntity&gt;]</c>). The generated predicate composes the
 /// declared rules as <c>AND(scope rules) AND OR(grant rules)</c>: a row is visible when it satisfies every
 /// scope (e.g. <see cref="TenantProperty"/>) and at least one grant (e.g. <see cref="OwnerProperty"/>).
 /// At least one rule must be declared.
+/// </para>
+/// <para>
+/// <b>Consumption.</b> A filter with only field rules (<see cref="OwnerProperty"/>/<see cref="TenantProperty"/>)
+/// is stateless, so the generator also exposes a static <c>Specification</c> singleton you can pass to
+/// <c>WhereAuthorized</c> without DI. A filter that sets <see cref="Shared"/> consults the grants table, so it
+/// is a <b>scoped service</b> with no static accessor — inject <c>IQueryAuthorizer&lt;TEntity&gt;</c> instead.
+/// Both forms are registered as <c>IQueryAuthorizer&lt;TEntity&gt;</c>, so constructor injection works either way.
+/// </para>
 /// </remarks>
 /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
 /// <example>
@@ -57,6 +65,13 @@ public sealed class ResourceFilterAttribute<TEntity> : Attribute
     /// so role sharing is filtered in the database. Requires <see cref="ResourceTypeName"/>, and the owning
     /// assembly to reference <c>Elarion.Authorization.EntityFrameworkCore</c>.
     /// </summary>
+    /// <remarks>
+    /// The matched operation is the one passed to <c>WhereAuthorized</c>/<c>IQueryAuthorizer.GetFilter</c>,
+    /// which <b>defaults to <c>Read</c></b>, so the same filter lists read- or write-shared rows depending on
+    /// the operation argument; the scope/owner rules are operation-independent. Enabling this makes the
+    /// generated filter a <b>scoped service</b> (it injects the grants source), so consume it via an injected
+    /// <c>IQueryAuthorizer&lt;TEntity&gt;</c> rather than a static <c>Specification</c>.
+    /// </remarks>
     public bool Shared { get; set; }
 
     /// <summary>

@@ -23,7 +23,7 @@ minor releases may include breaking changes.
   generator, and retention purge in the new **`Elarion.Idempotency.EntityFrameworkCore`**; the EF unit of work
   in the new **`Elarion.EntityFrameworkCore.UnitOfWork`**; and the `Idempotency-Key` HTTP header capture
   (`UseElarionIdempotencyKey`) in `Elarion.AspNetCore`. New diagnostics `ELIDEM001`–`ELIDEM004` and
-  `ELIDEMEF001`. See [ADR-0020](docs/decisions/0020-idempotency.md) and
+  `ELIDEMEF001`. See [ADR-0021](docs/decisions/0021-idempotency.md) and
   [the idempotency concept doc](docs/concepts/idempotency.mdx).
 - **Idempotency across the wire.** The JSON-RPC schema export now marks each `[Idempotent]` operation with
   `"idempotent": true`, the server reads a per-call key at `params._meta` (batch-correct, JSON-RPC and MCP), and
