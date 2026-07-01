@@ -24,8 +24,9 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         SettingsIntegrationDbContext context,
         out InProcessSettingsChangeSource changeSource) {
         changeSource = new InProcessSettingsChangeSource();
-        return new EfCoreSettingsStore<SettingsIntegrationDbContext>(context, changeSource, TimeProvider.System,
-            NullLogger<EfCoreSettingsStore<SettingsIntegrationDbContext>>.Instance);
+        var notifier = new ChangePublisherSettingsChangeNotifier(
+            changeSource, NullLogger<ChangePublisherSettingsChangeNotifier>.Instance);
+        return new EfCoreSettingsStore<SettingsIntegrationDbContext>(context, notifier, TimeProvider.System);
     }
 
     [Fact]

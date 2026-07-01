@@ -20,8 +20,10 @@ public static class SettingsEntityFrameworkCoreServiceCollectionExtensions {
     /// change written on one node is not observed by another node's watchers or scheduler until that node
     /// restarts. When both are active, a <see cref="MultiInstanceChangeNotificationWarning"/> hosted service
     /// logs a startup Warning so the single-instance limitation is visible at runtime, not only in the docs.
-    /// Replace <see cref="ISettingsChangeSource"/>/<see cref="ISettingsChangePublisher"/> with a cross-instance
-    /// backend (Postgres <c>LISTEN/NOTIFY</c>, Redis) to propagate changes across nodes.
+    /// Register the PostgreSQL <c>LISTEN/NOTIFY</c> source (<c>AddElarionPostgreSqlSettingsChanges</c> in
+    /// <c>Elarion.Settings.PostgreSql</c>) — or another cross-instance
+    /// <see cref="ISettingsChangeSource"/>/<see cref="ISettingsChangePublisher"/> backend — to propagate
+    /// changes across nodes.
     /// </remarks>
     /// <typeparam name="TDbContext">The context whose model includes <see cref="Setting"/>.</typeparam>
     public static IServiceCollection AddElarionSettingsEntityFrameworkCore<TDbContext>(this IServiceCollection services)
@@ -31,6 +33,11 @@ public static class SettingsEntityFrameworkCoreServiceCollectionExtensions {
         services.AddElarionSettings();
         services.RemoveAll<ISettingsStore>();
         services.AddScoped<ISettingsStore, EfCoreSettingsStore<TDbContext>>();
+
+        // How the store signals a successful write. The default publishes through the in-process publisher and
+        // skips transactional writes; a backend-aware source (PostgreSQL LISTEN/NOTIFY) replaces it with a
+        // notifier whose delivery the database commit-gates.
+        services.TryAddSingleton<IEfCoreSettingsChangeNotifier, ChangePublisherSettingsChangeNotifier>();
 
         // Surface the single-instance-notification limitation of the durable store + in-process source at runtime.
         services.TryAddEnumerable(
