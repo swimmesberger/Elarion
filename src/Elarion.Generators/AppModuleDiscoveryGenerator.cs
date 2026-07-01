@@ -134,7 +134,13 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             if (!HasBootstrapperTrigger(compilation))
                 return;
 
-            var manifest = ElarionManifest.Data.Combine(manifests);
+            foreach (var result in manifests)
+            {
+                if (result.Diagnostic is { } manifestDiagnostic)
+                    spc.ReportDiagnostic(manifestDiagnostic.ToDiagnostic());
+            }
+
+            var manifest = ElarionManifest.Data.Combine(manifests.Select(static r => r.Data));
             var entries = CollectModuleEntries(
                 compilation,
                 manifest.Modules,

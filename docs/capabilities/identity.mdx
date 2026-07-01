@@ -60,10 +60,13 @@ public sealed class ApplicationRole : IdentityRole<Guid>;
 
 The bundled generator emits the seven Identity `DbSet`s (`db.Users`, `db.Roles`, `db.UserClaims`, …) and
 applies the full Identity model configuration — keys, composite keys, unique normalized indexes,
-relationships, max-lengths — through the EF generator's neutral `OnEntitiesConfigured` seam. So the single
-`ConfigureEntities(modelBuilder)` call configures **both** your domain entities (from `[EntityConfiguration]`)
-and Identity, with no `<TUser, TRole, TKey>` repeated at the call site and no `IdentityDbContext` in the
-hierarchy. (Requires `[GenerateDbSets]` on the same context, else `ELIDN001`.)
+relationships, max-lengths — through the EF generator's **per-feature** model-configuration seam (one seam per
+`[GenerateElarion…]` feature, so Identity composes with resource grants, idempotency keys, and any other feature
+on the same context). The neutral `OnEntitiesConfigured` seam stays reserved for **your** hand-written model
+configuration — implement it for a global query filter or extra mapping without colliding with Identity. So the
+single `ConfigureEntities(modelBuilder)` call configures **both** your domain entities (from
+`[EntityConfiguration]`) and Identity, with no `<TUser, TRole, TKey>` repeated at the call site and no
+`IdentityDbContext` in the hierarchy. (Requires `[GenerateDbSets]` on the same context, else `ELIDN001`.)
 
 ## snake_case
 

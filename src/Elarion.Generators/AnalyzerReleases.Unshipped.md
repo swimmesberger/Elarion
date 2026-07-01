@@ -26,6 +26,7 @@ ELHTTP003 | Elarion.Http | Warning | HTTP endpoint handler is not in any module
 ELHTTP004 | Elarion.Http | Warning | Cannot infer HTTP verb
 ELMOD001 | Elarion.Modules | Warning | Multiple app modules share a namespace
 ELMOD002 | Elarion.Modules | Warning | Cross-module reference to a module-internal type
+ELMOD003 | Elarion.Modules | Warning | Referenced assembly advertises an unsupported Elarion manifest schema version
 ELAPI001 | Elarion.Modules | Error | Module API interface must be partial
 ELAPI002 | Elarion.Modules | Error | Module API interface must be top-level
 ELAPI003 | Elarion.Modules | Warning | Module API interface is not in any module

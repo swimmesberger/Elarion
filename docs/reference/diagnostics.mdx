@@ -65,6 +65,7 @@ App-module discovery and the `ModuleBoundaryAnalyzer`. See
 | --- | --- | --- | --- |
 | ELMOD001 | Warning | Two `[AppModule]` types share the same namespace; generated transport handlers in that namespace are associated with the alphabetically first matching module (ambiguous ownership). | Give each module a distinct namespace so handler-to-module association is unambiguous. |
 | ELMOD002 | Warning | Location-based: a type in one `[AppModule]` depends (via constructor parameter, field, or property) on a type **inside** another module — an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]` — that is not a published `[ModuleContract]`. Everything **outside** every module (the shared kernel and platform ports) is shareable; a shared-kernel entity is exempt because of *where it lives*, not because entities are special. | Reach the other module through its `[ModuleContract]` (used sparingly), a platform-capability port outside the modules, or move shared data/value types to the shared kernel. |
+| ELMOD003 | Warning | A referenced assembly advertises an Elarion manifest whose schema version this generator does not understand; its manifest entries (modules, HTTP/RPC endpoints, permission-catalog entries) are skipped rather than misparsed. | Rebuild the referenced assembly against a matching Elarion version so its manifest schema aligns with the consuming generator. |
 
 ## ELAUTH — Authorization
 
@@ -113,6 +114,7 @@ EF Core entity configuration discovery for `[EntityConfiguration]`. See
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELEFC001 | Warning | An `[EntityConfiguration]` class implements no `IEntityTypeConfiguration<T>`, so no `DbSet` or configuration is generated for it. | Make the class implement at least one `IEntityTypeConfiguration<T>`, or remove the `[EntityConfiguration]` attribute. |
+| ELEFC002 | Warning | Two `[EntityConfiguration]` entities share a short type name across namespaces and map to the same `DbSet` property name; the colliding `DbSet` is skipped (the first entity by name wins) to avoid a `CS0102` duplicate member. | Rename one of the entities, or place it in a differently-scoped context so the two never map onto the same context. |
 
 ## ELKEY — Keyset pagination
 
