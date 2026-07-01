@@ -76,12 +76,15 @@ export function generateRpcClientFiles(
   schemasLines.push('export type RpcResultSchemas = typeof rpcResultSchemas')
   schemasLines.push('')
 
+  const idempotentMethods = methods.filter((method) => schema.methods[method].idempotent === true)
+
   const clientSource = generateRpcClientSource({
     generatedBy,
     sourceLabel,
     typesFileName,
     schemasFileName,
     methods,
+    idempotentMethods,
   })
 
   return {

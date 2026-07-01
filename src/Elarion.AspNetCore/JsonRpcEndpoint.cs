@@ -201,6 +201,15 @@ public static class JsonRpcEndpoint {
     private static DispatchScopeContext CreateDispatchContext(HttpContext ctx) {
         var context = new DispatchScopeContext();
         context.Set<ClaimsPrincipal>(ctx.User);
+
+        // Single-call sugar: accept the HTTP Idempotency-Key header for a JSON-RPC-over-HTTP request. The
+        // canonical per-call location is params._meta (correct for batches); the header applies to the whole
+        // HTTP request, so it is only meaningful for a single (non-batch) call.
+        if (ctx.Request.Headers.TryGetValue(Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader, out var key) &&
+            key.Count > 0 && !string.IsNullOrWhiteSpace(key[0])) {
+            context.Set(new Abstractions.Idempotency.IdempotencyKey(key[0]!));
+        }
+
         return context;
     }
 

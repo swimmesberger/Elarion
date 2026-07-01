@@ -70,6 +70,11 @@ public static class RpcToolInvoker {
             return new RpcToolResult { IsError = true, Text = "Could not construct request params", ErrorCode = -32602 };
         }
 
+        // Per-call idempotency key from the tool arguments' _meta (the batch-correct, transport-neutral location).
+        if (route.Idempotent && JsonRpcDispatcher.TryReadMetaIdempotencyKey(arguments, out var idempotencyKey)) {
+            scope.ServiceProvider.GetService<Elarion.Abstractions.Idempotency.IIdempotencyKeySeed>()?.Seed(idempotencyKey);
+        }
+
         var result = await route.InvokeAsync(requestObject, scope.ServiceProvider, ct).ConfigureAwait(false);
 
         if (!result.IsSuccess) {

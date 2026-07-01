@@ -12,6 +12,7 @@
     "authorization",
     "resource-authorization",
     "feature-flags",
+    "idempotency",
     "settings",
     "persistence-and-transactions",
     "variable-substitution",

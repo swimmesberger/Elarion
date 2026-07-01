@@ -162,7 +162,8 @@ internal static class ElarionManifest
             EncodeBool(model.OnMcp),
             model.Description,
             ElarionManifestCodec.EncodeParameters(model.Parameters),
-            EncodeBool(model.IsNameInferred));
+            EncodeBool(model.IsNameInferred),
+            EncodeBool(model.IsIdempotent));
 
     public static string EncodeResourceFilter(ResourceFilter filter) =>
         ElarionManifestCodec.EncodeFields(
@@ -279,10 +280,10 @@ internal static class ElarionManifest
     public static bool TryDecodeRpcMethod(string value, out RpcMethodEmission.Model? model)
     {
         model = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 10)
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 11)
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
-            fields[8] is null || fields[9] is null)
+            fields[8] is null || fields[9] is null || fields[10] is null)
         {
             return false;
         }
@@ -290,7 +291,8 @@ internal static class ElarionManifest
         if (!TryDecodeBool(fields[5], out var onJsonRpc) ||
             !TryDecodeBool(fields[6], out var onMcp) ||
             !ElarionManifestCodec.TryDecodeParameters(fields[8]!, out var parameters) ||
-            !TryDecodeBool(fields[9], out var isNameInferred))
+            !TryDecodeBool(fields[9], out var isNameInferred) ||
+            !TryDecodeBool(fields[10], out var isIdempotent))
         {
             return false;
         }
@@ -305,7 +307,8 @@ internal static class ElarionManifest
             onMcp,
             fields[7],
             parameters.ToEquatableArray(),
-            isNameInferred);
+            isNameInferred,
+            isIdempotent);
         return true;
     }
 

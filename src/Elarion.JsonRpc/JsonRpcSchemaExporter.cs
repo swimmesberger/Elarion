@@ -31,7 +31,7 @@ public static class JsonRpcSchemaExporter {
     [RequiresDynamicCode(SchemaReflectionMessage)]
     public static string Generate(JsonRpcDispatcher dispatcher, JsonSerializerOptions? jsonOptions = null) {
         var options = CreateSchemaOptions(jsonOptions);
-        IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType)> methods;
+        IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)> methods;
         try {
             methods = dispatcher.GetRegisteredMethods();
         } catch (InvalidOperationException ex) {
@@ -46,14 +46,20 @@ public static class JsonRpcSchemaExporter {
         }
 
         var methodsObj = new JsonObject();
-        foreach (var (methodName, requestType, responseType) in methods) {
+        foreach (var (methodName, requestType, responseType, idempotent) in methods) {
             var requestSchema = BuildSchemaNode(requestType, options, InjectReflectedDescription);
             var responseSchema = BuildSchemaNode(responseType, options, InjectReflectedDescription);
 
-            methodsObj[methodName] = new JsonObject {
+            var method = new JsonObject {
                 ["params"] = requestSchema,
                 ["result"] = responseSchema,
             };
+            // Only emit the flag when set, so the schema stays byte-identical for non-idempotent methods.
+            if (idempotent) {
+                method["idempotent"] = true;
+            }
+
+            methodsObj[methodName] = method;
         }
 
         var schema = new JsonObject {

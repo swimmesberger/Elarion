@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
+using Elarion.Abstractions.Idempotency;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -45,9 +47,9 @@ public sealed class JsonRpcDispatcher {
 
     /// <summary>Registers a DI-resolved handler on the underlying registry (convenience forwarder).</summary>
     public JsonRpcDispatcher Map<TRequest, TResponse>(
-        string methodName, HandlerTransports transports = HandlerTransports.All)
+        string methodName, HandlerTransports transports = HandlerTransports.All, bool idempotent = false)
         where TRequest : class {
-        _registry.Map<TRequest, TResponse>(methodName, transports);
+        _registry.Map<TRequest, TResponse>(methodName, transports, idempotent);
         return this;
     }
 
@@ -55,9 +57,10 @@ public sealed class JsonRpcDispatcher {
     public JsonRpcDispatcher MapDelegate<TRequest, TResponse>(
         string methodName,
         Func<TRequest, IServiceProvider, CancellationToken, ValueTask<Result<TResponse>>> handler,
-        HandlerTransports transports = HandlerTransports.All)
+        HandlerTransports transports = HandlerTransports.All,
+        bool idempotent = false)
         where TRequest : class {
-        _registry.MapDelegate(methodName, handler, transports);
+        _registry.MapDelegate(methodName, handler, transports, idempotent);
         return this;
     }
 
@@ -115,6 +118,12 @@ public sealed class JsonRpcDispatcher {
                 return JsonRpcResponse.FromError(request, RpcError.InvalidParams("Could not construct request params"));
             }
 
+            // Per-call idempotency key: an idempotent operation carries its key at params._meta (batch-correct);
+            // seed the scope directly (overriding any transport-boundary key) before dispatch.
+            if (route.Idempotent && TryReadMetaIdempotencyKey(request.Params, out var idempotencyKey)) {
+                scopeProvider.GetService<IIdempotencyKeySeed>()?.Seed(idempotencyKey);
+            }
+
             var result = await route.InvokeAsync(requestObject, scopeProvider, ct).ConfigureAwait(false);
 
             if (result.IsSuccess) {
@@ -158,6 +167,27 @@ public sealed class JsonRpcDispatcher {
         }
     }
 
+    /// <summary>
+    /// Reads the idempotency key from a request's <c>params._meta</c> (the framework-owned
+    /// <see cref="IdempotencyKeyNames.MetaKey"/>), the batch-correct per-call location.
+    /// </summary>
+    internal static bool TryReadMetaIdempotencyKey(JsonElement? paramsElement, [NotNullWhen(true)] out string? key) {
+        key = null;
+        if (paramsElement is not { ValueKind: JsonValueKind.Object } parameters ||
+            !parameters.TryGetProperty("_meta", out var meta) || meta.ValueKind != JsonValueKind.Object ||
+            !meta.TryGetProperty(IdempotencyKeyNames.MetaKey, out var value) || value.ValueKind != JsonValueKind.String) {
+            return false;
+        }
+
+        var candidate = value.GetString();
+        if (string.IsNullOrWhiteSpace(candidate)) {
+            return false;
+        }
+
+        key = candidate;
+        return true;
+    }
+
     /// <summary>Freezes the underlying registry; must be called once after all registrations and before dispatch.</summary>
     public JsonRpcDispatcher Freeze() {
         _registry.Freeze();
@@ -176,10 +206,10 @@ public sealed class JsonRpcDispatcher {
     /// Returns all JSON-RPC-exposed methods with their request and response types.
     /// Used by schema export to ensure the same methods as the runtime dispatcher.
     /// </summary>
-    public IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType)> GetRegisteredMethods() =>
+    public IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)> GetRegisteredMethods() =>
         _registry.RoutesFor(HandlerTransports.JsonRpc)
             .OrderBy(static route => route.Name, StringComparer.Ordinal)
-            .Select(static route => (route.Name, route.RequestType, route.ResponseType))
+            .Select(static route => (route.Name, route.RequestType, route.ResponseType, route.Idempotent))
             .ToList();
 
     internal static void RecordEndpointError(Activity? activity, string method, string statusCode, string description, string phase, long startTimestamp) =>
