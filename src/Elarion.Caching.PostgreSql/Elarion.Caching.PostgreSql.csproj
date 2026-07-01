@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>PostgreSQL UNLOGGED-table L2 distributed cache for Elarion handler result caching — the recommended L2 backing store for most Elarion applications that already run PostgreSQL. AddElarionPostgreSqlHandlerCaching wires the official Microsoft.Extensions.Caching.Postgres distributed cache (UseWAL=false ⇒ an UNLOGGED cache table) behind HybridCache and AddElarionHandlerCaching in one call.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Caching\Elarion.Caching.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Caching.Postgres" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+</Project>
