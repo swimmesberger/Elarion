@@ -20,8 +20,12 @@ override it for individual modules or handlers.
 
 ## Defining named pipelines
 
-The framework does **not** ship concrete decorators or default presets, because decorators usually
-depend on app choices (your logging, your `DbContext`, your tenancy model). Instead, define your
+The framework **does** ship built-in decorators for the common cross-cutting concerns —
+[transactions](/docs/concepts/persistence-and-transactions), [idempotency](/docs/concepts/idempotency),
+[authorization](/docs/concepts/authorization), [feature gating](/docs/concepts/feature-flags),
+[caching](/docs/capabilities/caching), [resilience](/docs/capabilities/resilience), tracing, and the
+async-resolved handler proxy — and the generator auto-attaches them from the handler's own attributes.
+You still add your own for app-specific behavior (your logging, your tenancy model): define your
 decorators in the application and expose named pipeline attributes with `[DecoratorList]`:
 
 ```csharp
@@ -95,31 +99,40 @@ public sealed class LoggingDecorator<TRequest, TResponse>(
 
 ### Transaction decorator
 
-A transaction decorator commits on success and rolls back on failure, using `IResultLike` to inspect
-the outcome without knowing the concrete response type. "Should this handler open a unit of work?" is
-true for **commands and integration-event handlers** and false for **queries and domain-event
-handlers** (which run inside the publisher's transaction) — a *union* no `where` clause can express. A
-[`static bool AppliesTo`](#conditional-attachment-with-appliesto) predicate states it exactly, so the
-decorator body stays trivial:
+The framework ships this one for you: `Elarion.Abstractions.Pipeline.TransactionDecorator<TRequest, TResponse>`
+commits on success and rolls back on failure, using `IResultLike` to inspect the outcome without knowing the
+concrete response type. It wraps the handler in a single [`IUnitOfWork`](/docs/concepts/persistence-and-transactions)
+boundary rather than a raw `DbContext`, so every feature composes the same unit of work. Wire it with
+`AddElarionUnitOfWork<AppDbContext>()` and it auto-attaches from the request markers — no `[DecoratorList]` entry
+needed.
+
+"Should this handler open a unit of work?" is true for **commands and integration-event handlers** and false for
+**queries and domain-event handlers** (which run inside the publisher's transaction) — a *union* no `where` clause
+can express. A [`static bool AppliesTo`](#conditional-attachment-with-appliesto) predicate states it exactly, and
+also excludes [`[Idempotent]`](/docs/concepts/idempotency) handlers, which own their unit of work already (so a
+handler is never wrapped in two nested transactions):
 
 ```csharp
+namespace Elarion.Abstractions.Pipeline;
+
 public sealed class TransactionDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
-    DbContext db
+    IUnitOfWork unitOfWork
 ) : IHandler<TRequest, TResponse> {
     // Attach only where a new unit of work is needed. The generator calls this once per handler type.
     public static bool AppliesTo(HandlerMetadata handler) =>
-        handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
-        handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent));
+        (handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
+         handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent)))
+        && handler.GetAttribute<IdempotentAttribute>() is null;
 
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var scope = await unitOfWork.BeginAsync(UnitOfWorkOptions.Default, ct);
         var response = await inner.HandleAsync(request, ct);
 
         if (response is IResultLike { IsSuccess: true }) {
-            await transaction.CommitAsync(ct);
+            await scope.CommitAsync(ct);
         } else {
-            await transaction.RollbackAsync(ct);
+            await scope.RollbackAsync(ct);
         }
 
         return response;
@@ -133,6 +146,7 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
 | Query (`IQuery`) | false | not attached |
 | Domain-event handler (`IDomainEvent`, inline in the command) | false | not attached — rides the publisher's transaction |
 | Integration-event handler (`IIntegrationEvent`, fresh post-commit scope) | true | opens its own transaction |
+| `[Idempotent]` command | false | not attached — the idempotency decorator owns the unit of work |
 
 No runtime check, no empty transaction on a query, and domain-event handlers get no decorator at all —
 the chains show exactly what attached. (The one residual wart: a *read-only* integration consumer is

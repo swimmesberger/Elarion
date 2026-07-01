@@ -7,6 +7,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Database,
+  Fingerprint,
   GitBranch,
   Globe,
   Inbox,
@@ -382,6 +383,20 @@ const features: Feature[] = [
     span: 'lg:col-span-3',
   },
   {
+    icon: Fingerprint,
+    title: 'Exactly-once with [Idempotent]',
+    body: 'A single-transaction, unique-constrained key store: an INSERT ... ON CONFLICT DO NOTHING commits atomically inside the caller\'s transaction, so the claim is fenced by the row itself with no distributed lock. A retried request replays the stored result, while a concurrent duplicate still in flight returns 409.',
+    href: '/docs/concepts/idempotency',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: Layers,
+    title: 'Two-tier caching, no Redis',
+    body: 'Handler results cache through a two-tier HybridCache — in-process L1 plus an optional distributed L2. The recommended L2 is a PostgreSQL UNLOGGED table via AddElarionPostgreSqlHandlerCaching, so you reuse the Postgres you already run instead of operating a separate Redis — which still wins for very-high-throughput or multi-region caches.',
+    href: '/docs/capabilities/caching',
+    span: 'lg:col-span-3',
+  },
+  {
     icon: SlidersHorizontal,
     title: 'Runtime settings & substitution',
     body: 'Read and write key/value settings at runtime through the AOT-clean ISettingsManager — global or per-user, backed by an in-process or EF Core store — with an IConfiguration adapter that live-reloads. Spring-style ${key:-default} placeholders resolve from a change-observable source.',
@@ -687,7 +702,7 @@ const layers = [
   },
   {
     label: 'Elarion runtime',
-    detail: 'Decorator pipelines · authorization · Result<T> · scheduler · settings · events',
+    detail: 'Decorator pipelines · authorization · Result<T> · scheduler · settings · events · idempotency',
     tone: 'rt',
   },
 ];
@@ -702,6 +717,7 @@ const surfaces = [
   'Identity',
   'Settings',
   'Events & outbox',
+  'Idempotency',
   'EF Core',
   'Caching',
   'Resilience',

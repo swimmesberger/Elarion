@@ -110,9 +110,13 @@ The attributes and generated policies are runtime-neutral. The host chooses the 
 default is backed by [`HybridCache`](https://learn.microsoft.com/aspnet/core/performance/caching/hybrid):
 
 ```csharp
+// dotnet add package Elarion.Caching
 builder.Services.AddElarionHandlerCaching();
 ```
 
+`Elarion.Caching` is an opt-in sibling package — referencing it is what pulls
+`Microsoft.Extensions.Caching.Hybrid`, so the core stays dependency-light
+([ADR-0017](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0017-dependency-light-core.md)).
 This registers `HybridCache` and the default `IHandlerCache` (`HybridHandlerCache`). There are three
 ways to change the backing store, from least to most invasive:
 
