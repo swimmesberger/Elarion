@@ -23,7 +23,7 @@ public static class VariantServiceCollectionExtensions {
         string? defaultKey = VariantServiceKeys.Default,
         ServiceLifetime lifetime = ServiceLifetime.Scoped) where TService : class {
         services.TryAddScoped<VariantResolutionCache>();
-        services.AddSingleton(new VariantServiceBinding<TService> { Feature = feature, DefaultKey = defaultKey });
+        services.TryAddSingleton(new VariantServiceBinding<TService> { Feature = feature, DefaultKey = defaultKey });
         services.TryAdd(new ServiceDescriptor(
             typeof(IVariantServiceProvider<TService>), typeof(DefaultVariantServiceProvider<TService>), lifetime));
         // Transparent unkeyed registration: ordinary construction reads the value the proxy warmed.
