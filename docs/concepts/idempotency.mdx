@@ -57,7 +57,9 @@ The decorator short-circuits with `AppError`s that map to the IETF `Idempotency-
 
 - **Missing key** (when `KeyRequired`) → `400`.
 - **Concurrent in-flight duplicate** → `409` (Conflict mode, the industry default) — the client retries shortly
-  and then replays. `WaitThenReplay` blocks on the key lock and replays instead.
+  and then replays. `WaitThenReplay` blocks on the key lock and replays instead — but the wait is still **bounded**
+  (a longer `lock_timeout` than the fast-fail path), so a stuck winner can never pin the duplicate's database
+  connection forever; on timeout the duplicate degrades to the same `409`.
 - **Same key, different request body** → `422` (fingerprint mismatch).
 - **Retried after completion** → the stored result is replayed, without re-running the handler.
 
@@ -114,10 +116,14 @@ useMutation({
 
 When two application nodes process the same key at once, they contend on the **same PostgreSQL row**, so the
 database itself is the cross-node serialization point — no Redis/Redlock. The unique constraint on
-`(scope, owner, key)` makes one INSERT win; the other blocks on the uncommitted index entry and then either
-replays (the winner committed) or proceeds (the winner rolled back). This is exactly how MassTransit,
+`(operation, scope, owner, key)` makes one INSERT win; the other blocks on the uncommitted index entry and then
+either replays (the winner committed) or proceeds (the winner rolled back). This is exactly how MassTransit,
 NServiceBus, Stripe, and AWS handle it. A short `lock_timeout` (Npgsql) turns the wait into a fast `409` for the
 `Conflict` behavior.
+
+The key is discriminated by **operation** (the handler's request type) as well as scope/owner/key, so two
+different `[Idempotent]` handlers that happen to receive the same client-supplied key never collide on one
+record — the second operation claims its own row rather than replaying the first operation's stored response.
 
 ## Wiring
 
@@ -150,6 +156,28 @@ The `[Idempotent]` decorator and the framework transaction decorator
 boundary — the key row commits **atomically inside the same transaction** as the handler's business writes. See
 [Persistence & transactions](/docs/concepts/persistence-and-transactions) for how handlers, decorators, and
 events share that transaction.
+
+Three properties of that shared EF Core unit of work are worth calling out:
+
+- **Commit flushes the change tracker.** The scope calls `SaveChangesAsync` before committing, so a handler that
+  mutated the `DbContext` but forgot to save still has its writes persisted atomically with the transaction (a
+  no-op when the handler already saved).
+- **Nested transactional handlers join, not clash.** A transactional command that invokes another transactional
+  command through `IHandlerSender` on the **same** scope/`DbContext` does not open a second physical transaction
+  (which the provider would reject). The inner scope joins the ambient transaction with a **savepoint**: its
+  commit releases the savepoint, its rollback rolls back only the inner handler's writes, and the outer scope
+  still owns the real commit.
+- **The commit is uncancellable.** Once the handler has returned success, the finalizing commit runs with
+  `CancellationToken.None`, so a cancellation racing in between success and commit can never silently roll back a
+  completed command (or leave its idempotency key claimable again).
+
+<Callout type="warn">
+The core in-memory `IIdempotencyStore` and the no-op `IUnitOfWork` (registered by `AddElarionIdempotency` alone)
+are for single-process dev/test only — they are non-durable, non-cross-node, and non-transactional, and each logs
+a one-time warning on first use. Register
+`AddElarionIdempotencyEntityFrameworkCore<AppDbContext>` (which wires the durable store **and** the EF Core unit
+of work) for the production guarantees.
+</Callout>
 
 ## Side effects and cooperative recipients
 

@@ -26,9 +26,19 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
 ) : IHandler<TRequest, TResponse>
     where TResponse : IResultFailureFactory<TResponse> {
     // A short lock wait so a concurrent in-flight duplicate fast-fails to a 409 instead of blocking for the
-    // whole handler; tolerant of momentary contention. Only used in Conflict mode.
+    // whole handler; tolerant of momentary contention. Used in Conflict mode.
     private static readonly TimeSpan ConflictLockTimeout = TimeSpan.FromMilliseconds(250);
+
+    // WaitThenReplay deliberately blocks on the in-flight winner's row to replay its result, but the wait is
+    // still bounded so a stuck winner can never pin the duplicate's database connection forever. On timeout the
+    // duplicate degrades to the same "in progress" 409 the fast path returns, rather than hanging.
+    private static readonly TimeSpan WaitLockTimeout = TimeSpan.FromSeconds(30);
+
     private const string SavepointName = "elarion_idempotency";
+
+    // The operation identity that discriminates the stored key so two different [Idempotent] handlers sharing a
+    // client key never collide. The request type is unique per handler and stable across runs.
+    private static readonly string Operation = typeof(TRequest).FullName ?? typeof(TRequest).Name;
 
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
@@ -45,11 +55,16 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
         }
 
         var owner = policy.Scope == IdempotencyScope.CurrentUser ? Hash(currentUser.UserId) : string.Empty;
-        var storeKey = new IdempotencyStoreKey(policy.Scope, owner, key);
+        var storeKey = new IdempotencyStoreKey(Operation, policy.Scope, owner, key);
         var fingerprint = policy.Fingerprint ? ComputeFingerprint(request) : string.Empty;
 
         var options = new UnitOfWorkOptions {
-            LockTimeout = policy.ConflictBehavior == IdempotencyConflictBehavior.Conflict ? ConflictLockTimeout : null,
+            // Both paths bound the wait on a concurrent in-flight duplicate's row: Conflict fast-fails to a 409,
+            // WaitThenReplay blocks (to replay) but only up to a longer ceiling so a stuck winner cannot pin the
+            // connection indefinitely. On timeout the store surfaces the "in progress" 409 either way.
+            LockTimeout = policy.ConflictBehavior == IdempotencyConflictBehavior.Conflict
+                ? ConflictLockTimeout
+                : WaitLockTimeout,
         };
 
         await using var scope = await unitOfWork.BeginAsync(options, ct).ConfigureAwait(false);
@@ -85,19 +100,22 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
         }
 
         if (response is IResultLike { IsSuccess: true }) {
-            await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), isFailure: false, policy.Retention, ct)
+            // The handler succeeded: finalize the key and commit uncancellably. A cancellation arriving now must
+            // not roll back completed work and leave the key claimable again — that would re-run a done command.
+            await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), isFailure: false, policy.Retention, CancellationToken.None)
                 .ConfigureAwait(false);
-            await scope.CommitAsync(ct).ConfigureAwait(false);
+            await scope.CommitAsync(CancellationToken.None).ConfigureAwait(false);
             return response;
         }
 
         if (storeFailures && IsDefinitiveFailure(response)) {
             // Discard the handler's business writes but keep the key row (claimed before the savepoint), then
-            // record the definitive failure so a retry replays it — all in the one transaction.
-            await scope.RollbackToSavepointAsync(SavepointName, ct).ConfigureAwait(false);
-            await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), isFailure: true, policy.Retention, ct)
+            // record the definitive failure so a retry replays it — all in the one transaction. The outcome is
+            // decided, so finalize uncancellably (see the success path above).
+            await scope.RollbackToSavepointAsync(SavepointName, CancellationToken.None).ConfigureAwait(false);
+            await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), isFailure: true, policy.Retention, CancellationToken.None)
                 .ConfigureAwait(false);
-            await scope.CommitAsync(ct).ConfigureAwait(false);
+            await scope.CommitAsync(CancellationToken.None).ConfigureAwait(false);
             return response;
         }
 

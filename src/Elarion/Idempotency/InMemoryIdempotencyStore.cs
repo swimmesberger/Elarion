@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Elarion.Abstractions.Idempotency;
+using Microsoft.Extensions.Logging;
 
 namespace Elarion.Idempotency;
 
@@ -10,8 +11,11 @@ namespace Elarion.Idempotency;
 /// constraint), and a per-entry signal lets <see cref="IdempotencyConflictBehavior.WaitThenReplay"/> callers
 /// wait for the winner. Not durable and not cross-instance — use the EF Core store for the real guarantees.
 /// </summary>
-internal sealed class InMemoryIdempotencyStore(TimeProvider timeProvider) : IIdempotencyStore {
+internal sealed class InMemoryIdempotencyStore(
+    TimeProvider timeProvider,
+    ILogger<InMemoryIdempotencyStore>? logger = null) : IIdempotencyStore {
     private readonly ConcurrentDictionary<IdempotencyStoreKey, Entry> _entries = new();
+    private int _warned;
 
     /// <inheritdoc />
     public async ValueTask<IdempotencyBeginResult> TryBeginAsync(
@@ -19,6 +23,7 @@ internal sealed class InMemoryIdempotencyStore(TimeProvider timeProvider) : IIde
         string fingerprint,
         IdempotencyConflictBehavior conflictBehavior,
         CancellationToken ct) {
+        WarnOnce();
         while (true) {
             ct.ThrowIfCancellationRequested();
 
@@ -90,6 +95,18 @@ internal sealed class InMemoryIdempotencyStore(TimeProvider timeProvider) : IIde
         }
 
         return new ValueTask<int>(removed);
+    }
+
+    private void WarnOnce() {
+        if (logger is null || Interlocked.Exchange(ref _warned, 1) != 0) {
+            return;
+        }
+
+        logger.LogWarning(
+            "The in-memory IIdempotencyStore is in use: it is single-process and non-durable, so on a multi-node " +
+            "deployment two nodes can both claim the same key and both execute. It is for single-process dev/test " +
+            "only. Call AddElarionIdempotencyEntityFrameworkCore<TDbContext>() from " +
+            "Elarion.Idempotency.EntityFrameworkCore for the durable, cross-node guarantee in production.");
     }
 
     private sealed class Entry(string fingerprint) {
