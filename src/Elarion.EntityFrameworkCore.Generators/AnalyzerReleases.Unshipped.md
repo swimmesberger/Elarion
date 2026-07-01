@@ -3,6 +3,7 @@
 Rule ID | Category | Severity | Notes
 --------|----------|----------|------
 ELEFC001 | Elarion.EntityFrameworkCore | Warning | EntityConfiguration implements no IEntityTypeConfiguration<T>
+ELEFC002 | Elarion.EntityFrameworkCore | Warning | Two entities map to the same DbSet property name; the colliding DbSet is not generated
 ELKEY001 | Elarion.EntityFrameworkCore | Error | Keyset column does not match a property
 ELKEY002 | Elarion.EntityFrameworkCore | Error | Keyset column type is not supported
 ELKEY003 | Elarion.EntityFrameworkCore | Error | Keyset column must be non-nullable

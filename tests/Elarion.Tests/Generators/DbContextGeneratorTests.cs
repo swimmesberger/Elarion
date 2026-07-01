@@ -117,6 +117,60 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
+    public void GenerateDbSets_DuplicateDbSetPropertyName_ReportsElefc002AndSkipsCollision()
+    {
+        // Regression (M17): two [EntityConfiguration] entities that share a short type name across namespaces
+        // would emit two identical DbSet property names (CS0102). The generator must report ELEFC002 and emit
+        // only one DbSet so the context still compiles.
+        var source =
+            CreateSource(
+                """
+                namespace Sales.Domain {
+                    public sealed class Order {
+                    }
+                }
+
+                namespace Billing.Domain {
+                    public sealed class Order {
+                    }
+                }
+
+                namespace Sample.Infrastructure {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets]
+                    public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class SalesOrderConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sales.Domain.Order> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sales.Domain.Order> builder) {
+                        }
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class BillingOrderConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Billing.Domain.Order> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Billing.Domain.Order> builder) {
+                        }
+                    }
+                }
+                """);
+
+        var result = GenerateAllowingDiagnostics(source);
+
+        result.Diagnostics
+            .Count(diagnostic => diagnostic.Id == "ELEFC002")
+            .Should().Be(1);
+
+        var dbContextSource = GetGeneratedSource(result, "AppDbContext.DbSets.g.cs");
+
+        // Exactly one Orders DbSet property is emitted; the second entity is skipped.
+        System.Text.RegularExpressions.Regex
+            .Matches(dbContextSource, @"DbSet<Order> Orders")
+            .Count.Should().Be(1);
+    }
+
+    [Fact]
     public void GenerateDbSets_ScopedContext_FiltersConfigurationsAndEntities()
     {
         var source =

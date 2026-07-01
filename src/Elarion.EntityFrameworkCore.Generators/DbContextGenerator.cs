@@ -24,6 +24,18 @@ public sealed class DbContextGenerator : IIncrementalGenerator
     private const string GenerateDbSetsAttributeName = ElarionGeneratorConventions.GenerateDbSetsAttribute;
     private const string DbContextName = "Microsoft.EntityFrameworkCore.DbContext";
 
+    // Two [EntityConfiguration] entities with the same short type name (different namespaces/modules) would
+    // pluralize to the same DbSet property name, producing CS0102 in the generated context. Detect the clash,
+    // report it, and skip the colliding entities deterministically so the context still compiles.
+    private static readonly DiagnosticDescriptor DuplicateDbSetName = new(
+        id: "ELEFC002",
+        title: "Duplicate DbSet property name",
+        messageFormat: "Entities '{0}' and '{1}' both map to DbSet property '{2}' on context '{3}'; rename one entity "
+            + "or place it in a differently-scoped context — the colliding DbSet is not generated",
+        category: "Elarion.EntityFrameworkCore",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // The target is the partial DbContext class carrying [GenerateDbSets]; the DbSets are emitted onto
@@ -277,9 +289,27 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine(string.Format("partial class {0} {{", target.Name));
 
+        // Deterministically resolve DbSet property-name collisions: entities are already sorted by short name,
+        // so the first entity to claim a property name keeps it and any later entity mapping to the same name is
+        // skipped with a diagnostic. This prevents CS0102 (duplicate member) in the generated context when two
+        // [EntityConfiguration] entities share a short type name across namespaces/modules.
+        var claimedNames = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entity in entities)
         {
             var pluralName = Pluralize(entity.Name);
+            if (claimedNames.TryGetValue(pluralName, out var owner))
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DuplicateDbSetName,
+                    Location.None,
+                    owner,
+                    entity.FullName,
+                    pluralName,
+                    target.FullName));
+                continue;
+            }
+
+            claimedNames.Add(pluralName, entity.FullName);
             sb.AppendLine(string.Format("    public DbSet<{0}> {1} => Set<{0}>();", entity.Name, pluralName));
         }
 

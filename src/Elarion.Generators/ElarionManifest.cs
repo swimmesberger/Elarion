@@ -6,6 +6,22 @@ internal static class ElarionManifest
 {
     public const string SchemaKey = "Elarion.Manifest.Schema";
     public const string SchemaVersion = "1";
+
+    /// <summary>
+    /// A referenced assembly advertises an Elarion manifest whose schema version this generator does not
+    /// understand. Its entries (modules, HTTP/RPC endpoints, permission-catalog entries) are skipped rather than
+    /// misparsed — reported loudly because dropping permission/role entries silently would weaken authorization.
+    /// </summary>
+    public static readonly DiagnosticDescriptor UnsupportedManifestSchema = new(
+        id: "ELMOD003",
+        title: "Unsupported Elarion manifest schema version",
+        messageFormat:
+            "Referenced assembly '{0}' advertises Elarion manifest schema version '{1}', but this generator "
+            + "understands version '{2}'; its manifest entries (modules, endpoints, permissions) are skipped. "
+            + "Rebuild the reference against a matching Elarion version.",
+        category: "Elarion.Modules",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
     public const string ModuleKey = "Elarion.Manifest.Module.v1";
     public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v1";
     public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v1";
@@ -430,9 +446,17 @@ internal static class ElarionManifestCodec
     }
 }
 
+/// <summary>
+/// The outcome of reading one referenced assembly's Elarion manifest: the decoded <see cref="ElarionManifest.Data"/>
+/// plus an optional <see cref="DiagnosticInfo"/> when the assembly advertises an unsupported schema version (in
+/// which case <see cref="Data"/> is <see cref="ElarionManifest.Data.Empty"/>, so no entry is misparsed). The
+/// diagnostic is carried as data — the consuming generator reports it — keeping the reader a pure transform.
+/// </summary>
+internal readonly record struct ManifestReadResult(ElarionManifest.Data Data, DiagnosticInfo? Diagnostic);
+
 internal static class ElarionManifestReader
 {
-    public static ElarionManifest.Data Read(MetadataReference reference, CancellationToken ct)
+    public static ManifestReadResult Read(MetadataReference reference, CancellationToken ct)
     {
         var modules = new List<ElarionManifest.Module>();
         var httpEndpoints = new List<HttpEndpointEmission.Model>();
@@ -441,10 +465,59 @@ internal static class ElarionManifestReader
         var permissions = new List<ElarionManifest.Permission>();
         var roles = new List<ElarionManifest.Role>();
 
-        foreach (var (key, value) in AssemblyMetadataReader.ReadRawEntries(reference, ct))
+        var entries = AssemblyMetadataReader.ReadRawEntries(reference, ct);
+
+        string? schemaVersion = null;
+        var hasElarionEntries = false;
+        foreach (var (key, value) in entries)
+        {
+            if (key == ElarionManifest.SchemaKey)
+            {
+                schemaVersion = value;
+                continue;
+            }
+
+            if (IsElarionManifestKey(key))
+                hasElarionEntries = true;
+        }
+
+        // A version we do not understand (or Elarion entries with no advertised version at all) means a format we
+        // may misparse. Skip the whole assembly's manifest and surface it loudly, since silently dropping
+        // permission/role entries would weaken authorization.
+        if ((schemaVersion is not null && schemaVersion != ElarionManifest.SchemaVersion)
+            || (schemaVersion is null && hasElarionEntries))
+        {
+            var diagnostic = DiagnosticInfo.Create(
+                ElarionManifest.UnsupportedManifestSchema,
+                LocationInfo.From((Location?)null),
+                DescribeReference(reference),
+                schemaVersion ?? "<none>",
+                ElarionManifest.SchemaVersion);
+            return new ManifestReadResult(ElarionManifest.Data.Empty, diagnostic);
+        }
+
+        foreach (var (key, value) in entries)
             AddEntry(key, value, modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles);
 
-        return CreateData(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles);
+        return new ManifestReadResult(
+            CreateData(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles),
+            null);
+    }
+
+    private static bool IsElarionManifestKey(string key) =>
+        key is ElarionManifest.ModuleKey
+            or ElarionManifest.HttpEndpointKey
+            or ElarionManifest.RpcMethodKey
+            or ElarionManifest.ResourceFilterKey
+            or ElarionManifest.PermissionKey
+            or ElarionManifest.RoleKey;
+
+    private static string DescribeReference(MetadataReference reference)
+    {
+        if (reference is CompilationReference compilationReference)
+            return compilationReference.Compilation.AssemblyName ?? "<unknown>";
+
+        return string.IsNullOrEmpty(reference.Display) ? "<unknown>" : reference.Display!;
     }
 
     private static ElarionManifest.Data CreateData(
