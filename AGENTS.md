@@ -185,7 +185,8 @@ the JSON type context once instead of threading options into each subsystem. See
    Contributions apply in registration order when the options first materialize — transports insert their
    envelope context first (`TypeInfoResolvers.Insert(0, …)`), the generated `AddElarion(configuration)` adds the
    module contexts from `GetAllJsonTypeInfoResolvers()`, the host adds extras. Resolver order is
-   **first-match-wins**.
+   **first-match-wins**; the host-priority `OverrideTypeInfoResolvers` segment composes ahead of every
+   `TypeInfoResolvers` entry, so a host can override even a type a transport envelope context registers.
 4. **AOT-strict by default:** no reflection tail is added unless `EnableReflectionFallback` is set, matching the
    repo-wide `JsonSerializerIsReflectionEnabledByDefault=false`. A type missing from every source-generated
    context throws at runtime (surfacing a missing `[JsonSerializable]`) rather than silently reflecting. The

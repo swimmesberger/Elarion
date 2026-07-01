@@ -177,6 +177,7 @@ builder.Services.ConfigureElarionJson(o => {
 | `DefaultIgnoreCondition` | `WhenWritingNull` |
 | `EnableReflectionFallback` | `false` (AOT-strict; a type missing from every source-gen context throws) |
 | `TypeInfoResolvers` | Transport envelope + module contexts, composed first-match-wins |
+| `OverrideTypeInfoResolvers` | empty (host-priority resolvers composed ahead of every `TypeInfoResolvers` entry — the way to override a type a transport envelope context also registers) |
 | `PostConfigure` | none (escape hatch for converters/encoder) |
 
 See [Serialization](/docs/capabilities/serialization).

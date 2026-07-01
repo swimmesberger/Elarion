@@ -181,6 +181,39 @@ public sealed class ElarionJsonSerializationTests {
     }
 
     [Fact]
+    public void OverrideResolvers_WinOverTransportStyleInsertAtZero() {
+        static string Serialize(bool withOverride) {
+            var services = new ServiceCollection();
+            // Simulates a transport contribution: inserted at index 0 of the ordinary list, the position that
+            // beats every other TypeInfoResolvers entry regardless of registration order.
+            services.ConfigureElarionJson(o => o.TypeInfoResolvers.Insert(0, new TaggingResolver("transport")));
+            if (withOverride) {
+                // The host override is registered later, yet must win first-match for the shared type.
+                services.ConfigureElarionJson(o => o.OverrideTypeInfoResolvers.Add(new TaggingResolver("override")));
+            }
+
+            var accessor = Resolve(services);
+            return JsonSerializer.Serialize(new OverrideProbeDto(), accessor.GetTypeInfo<OverrideProbeDto>());
+        }
+
+        Serialize(withOverride: false).Should().Be("\"transport\"");
+        Serialize(withOverride: true).Should().Be("\"override\"");
+    }
+
+    [Fact]
+    public void OverrideResolvers_ComposeAheadOfEveryContributedResolver() {
+        var overrideResolver = new TaggingResolver("override");
+        var services = new ServiceCollection();
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SampleJsonContext.Default));
+        services.ConfigureElarionJson(o => o.OverrideTypeInfoResolvers.Add(overrideResolver));
+
+        var options = Resolve(services).Options;
+
+        options.TypeInfoResolverChain[0].Should().BeSameAs(overrideResolver);
+        options.TypeInfoResolverChain[1].Should().BeSameAs(SampleJsonContext.Default);
+    }
+
+    [Fact]
     public void AddElarionJson_DoesNotRegisterBareJsonSerializerOptions() {
         var services = new ServiceCollection();
         services.AddElarionJson();
@@ -191,6 +224,23 @@ public sealed class ElarionJsonSerializationTests {
     private sealed class ThrowingResolver : IJsonTypeInfoResolver {
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) =>
             throw new InvalidOperationException("should not be consulted");
+    }
+
+    /// <summary>Resolves <see cref="OverrideProbeDto"/> with a converter that writes a fixed tag, so a test can
+    /// observe which chain segment won first-match resolution for a contested type.</summary>
+    private sealed class TaggingResolver(string tag) : IJsonTypeInfoResolver {
+        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) =>
+            type == typeof(OverrideProbeDto)
+                ? JsonMetadataServices.CreateValueInfo<OverrideProbeDto>(options, new TagConverter(tag))
+                : null;
+
+        private sealed class TagConverter(string tag) : JsonConverter<OverrideProbeDto> {
+            public override OverrideProbeDto Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+                throw new NotSupportedException();
+
+            public override void Write(Utf8JsonWriter writer, OverrideProbeDto value, JsonSerializerOptions options) =>
+                writer.WriteStringValue(tag);
+        }
     }
 
     private sealed class SampleConverter : JsonConverter<SampleDto> {
@@ -209,3 +259,5 @@ internal sealed record SampleDto {
 
 [JsonSerializable(typeof(SampleDto))]
 internal sealed partial class SampleJsonContext : JsonSerializerContext;
+
+internal sealed record OverrideProbeDto;

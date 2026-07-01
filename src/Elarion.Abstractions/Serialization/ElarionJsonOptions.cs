@@ -32,8 +32,24 @@ public sealed class ElarionJsonOptions {
     public JsonIgnoreCondition DefaultIgnoreCondition { get; set; } = JsonIgnoreCondition.WhenWritingNull;
 
     /// <summary>
+    /// Host-priority resolvers composed <b>before</b> every <see cref="TypeInfoResolvers"/> contribution.
+    /// Because resolution is first-match-wins, a resolver added here overrides how any type is serialized —
+    /// including types a transport envelope context or a module context also registers, which the ordinary
+    /// <see cref="TypeInfoResolvers"/> list can never beat (transports insert there at index 0 when they
+    /// register, regardless of when the host's contribution runs).
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// services.ConfigureElarionJson(o => o.OverrideTypeInfoResolvers.Add(MyOverridesJsonContext.Default));
+    /// </code>
+    /// </example>
+    public IList<IJsonTypeInfoResolver> OverrideTypeInfoResolvers { get; } = new List<IJsonTypeInfoResolver>();
+
+    /// <summary>
     /// The ordered source-generated resolvers composed into the resolver chain (first-match-wins at runtime).
-    /// Transport envelope contexts insert at index 0; module and host contexts append.
+    /// Transport envelope contexts insert at index 0; module and host contexts append. The full composed order
+    /// is <see cref="OverrideTypeInfoResolvers"/>, then this list, then the always-seeded framework context,
+    /// then the optional reflection fallback.
     /// </summary>
     public IList<IJsonTypeInfoResolver> TypeInfoResolvers { get; } = new List<IJsonTypeInfoResolver>();
 
