@@ -19,10 +19,11 @@ public static class PostgreSqlTusStorageModelBuilderExtensions {
             builder.ToTable("tus_uploads");
             builder.HasKey(e => e.Id);
 
-            // Partial index over incomplete sessions only: the garbage collector's "oldest expiry first"
-            // scan stays a tiny indexed probe regardless of how many completed sessions linger.
-            builder.HasIndex(e => e.ExpiresAt)
-                .HasFilter("blob_id IS NULL");
+            // Index over the expiry instant so the garbage collector's "oldest expiry first" scan stays an
+            // indexed probe. It is not filtered on incompleteness: a completed session also carries an
+            // expiry (its completed-retention window), and the collector reaps both kinds by ExpiresAt, so
+            // completed rows never grow the staging table unbounded.
+            builder.HasIndex(e => e.ExpiresAt);
 
             builder.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
             builder.Property(e => e.Container).HasColumnName("container").IsRequired();

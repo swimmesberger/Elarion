@@ -269,41 +269,49 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     private static void AppendIdempotencyPayloadMethods(StringBuilder sb, HandlerInfo handler, IdempotentInfo info) {
+        // The envelope is the framework's non-generic StoredResult, which ElarionFrameworkJsonContext registers, so
+        // it (and the AppError it carries) always serialize under source generation — even on an AOT-strict host.
+        // The success value is (de)serialized SEPARATELY through the canonical options' GetTypeInfo(typeof(T)) — the
+        // module-generated contexts register handler response types, so a closed StoredResult<T> is never needed
+        // (and would never be registered). See StoredResult / ADR-0023.
+        const string stored = "global::Elarion.Abstractions.Idempotency.StoredResult";
+
         if (info.ResultValueFqn is not null) {
-            // Result<T>: store the success value, or (when storing failures) the AppError, so replay reconstructs
-            // the exact Result<T>.
-            var storedType = $"global::Elarion.Abstractions.Idempotency.StoredResult<{info.ResultValueFqn}>";
+            // Result<T>: store the success value as embedded JSON, or (when storing failures) the AppError, so
+            // replay reconstructs the exact Result<T>.
             sb.AppendLine($"        public string Serialize({handler.ResponseFqn} response, global::System.Text.Json.JsonSerializerOptions options)");
             sb.AppendLine("        {");
             sb.AppendLine($"            var stored = response.IsSuccess");
-            sb.AppendLine($"                ? new {storedType} {{ Ok = true, Value = response.Value }}");
-            sb.AppendLine($"                : new {storedType} {{ Ok = false, Error = response.Error }};");
-            sb.AppendLine("            return global::System.Text.Json.JsonSerializer.Serialize(stored, options);");
+            sb.AppendLine($"                ? new {stored} {{ Ok = true, Value = global::System.Text.Json.JsonSerializer.SerializeToElement(response.Value, options.GetTypeInfo(typeof({info.ResultValueFqn}))) }}");
+            sb.AppendLine($"                : new {stored} {{ Ok = false, Error = response.Error }};");
+            sb.AppendLine($"            return global::System.Text.Json.JsonSerializer.Serialize(stored, global::Elarion.Abstractions.Serialization.ElarionFrameworkJsonContext.Default.StoredResult);");
             sb.AppendLine("        }");
             sb.AppendLine();
             sb.AppendLine($"        public {handler.ResponseFqn} Deserialize(string payload, global::System.Text.Json.JsonSerializerOptions options)");
             sb.AppendLine("        {");
-            sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize<{storedType}>(payload, options)!;");
-            sb.AppendLine("            return stored.Ok");
-            sb.AppendLine($"                ? global::Elarion.Abstractions.Result<{info.ResultValueFqn}>.Success(stored.Value!)");
-            sb.AppendLine($"                : global::Elarion.Abstractions.Result<{info.ResultValueFqn}>.Failure(stored.Error ?? global::Elarion.Abstractions.AppError.InternalError);");
+            sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize(payload, global::Elarion.Abstractions.Serialization.ElarionFrameworkJsonContext.Default.StoredResult)!;");
+            sb.AppendLine("            if (!stored.Ok)");
+            sb.AppendLine($"                return global::Elarion.Abstractions.Result<{info.ResultValueFqn}>.Failure(stored.Error ?? global::Elarion.Abstractions.AppError.InternalError);");
+            sb.AppendLine($"            var value = stored.Value is {{ }} __element");
+            sb.AppendLine($"                ? global::System.Text.Json.JsonSerializer.Deserialize(__element, (global::System.Text.Json.Serialization.Metadata.JsonTypeInfo<{info.ResultValueFqn}>)options.GetTypeInfo(typeof({info.ResultValueFqn})))");
+            sb.AppendLine($"                : default;");
+            sb.AppendLine($"            return global::Elarion.Abstractions.Result<{info.ResultValueFqn}>.Success(value!);");
             sb.AppendLine("        }");
             return;
         }
 
         // Non-generic Result response: no value, only success/failure.
-        const string nonGenericStored = "global::Elarion.Abstractions.Idempotency.StoredResult";
         sb.AppendLine($"        public string Serialize({handler.ResponseFqn} response, global::System.Text.Json.JsonSerializerOptions options)");
         sb.AppendLine("        {");
         sb.AppendLine($"            var stored = response.IsSuccess");
-        sb.AppendLine($"                ? new {nonGenericStored} {{ Ok = true }}");
-        sb.AppendLine($"                : new {nonGenericStored} {{ Ok = false, Error = response.Error }};");
-        sb.AppendLine("            return global::System.Text.Json.JsonSerializer.Serialize(stored, options);");
+        sb.AppendLine($"                ? new {stored} {{ Ok = true }}");
+        sb.AppendLine($"                : new {stored} {{ Ok = false, Error = response.Error }};");
+        sb.AppendLine($"            return global::System.Text.Json.JsonSerializer.Serialize(stored, global::Elarion.Abstractions.Serialization.ElarionFrameworkJsonContext.Default.StoredResult);");
         sb.AppendLine("        }");
         sb.AppendLine();
         sb.AppendLine($"        public {handler.ResponseFqn} Deserialize(string payload, global::System.Text.Json.JsonSerializerOptions options)");
         sb.AppendLine("        {");
-        sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize<{nonGenericStored}>(payload, options)!;");
+        sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize(payload, global::Elarion.Abstractions.Serialization.ElarionFrameworkJsonContext.Default.StoredResult)!;");
         sb.AppendLine("            return stored.Ok");
         sb.AppendLine("                ? global::Elarion.Abstractions.Result.Success()");
         sb.AppendLine("                : global::Elarion.Abstractions.Result.Failure(stored.Error ?? global::Elarion.Abstractions.AppError.InternalError);");
@@ -321,8 +329,11 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"        new {bindingType}[]");
         sb.AppendLine("        {");
         foreach (var binding in handler.ResourceBindings.AsImmutableArray) {
+            var resourceTypeNameArg = binding.ResourceTypeName is null
+                ? string.Empty
+                : $", {FormatStringLiteral(binding.ResourceTypeName)}";
             sb.AppendLine(
-                $"            new(typeof({binding.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({FormatStringLiteral(binding.Operation)}), static __r => __r.{binding.IdPath}),");
+                $"            new(typeof({binding.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({FormatStringLiteral(binding.Operation)}), static __r => __r.{binding.IdPath}{resourceTypeNameArg}),");
         }
 
         sb.AppendLine("        };");

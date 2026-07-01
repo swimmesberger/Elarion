@@ -35,7 +35,11 @@ public interface IUnitOfWork {
 /// An open unit-of-work scope. Dispose without an explicit commit rolls back.
 /// </summary>
 public interface IUnitOfWorkScope : IAsyncDisposable {
-    /// <summary>Commits all work done in the scope.</summary>
+    /// <summary>
+    /// Commits all work done in the scope. A backend that owns a change tracker (the EF Core implementation)
+    /// first flushes pending changes so a handler that forgot to save still persists its writes atomically with
+    /// the transaction — a no-op when the handler already saved.
+    /// </summary>
     ValueTask CommitAsync(CancellationToken ct);
 
     /// <summary>Rolls back all work done in the scope.</summary>

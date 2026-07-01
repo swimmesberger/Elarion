@@ -19,44 +19,48 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     /// <summary>
-    /// Builds the module [DecoratorList] map once per resolution pass — the [AppModule] types that carry a
-    /// pipeline attribute, with their namespace — so <see cref="FindModuleDecoratorList"/> is a longest-prefix
-    /// lookup instead of a per-handler full-compilation scan.
+    /// Builds the module [DecoratorList] and [ElarionAuthorizationDefaults] maps once per resolution pass, by
+    /// re-resolving each discovered [AppModule] type from the CURRENT compilation (a symbol-table lookup per
+    /// module — never a tree scan) and reading its attributes fresh. Reading fresh matters: the [DecoratorList]
+    /// meta-attribute usually sits on a pipeline-attribute CLASS in another file, so a cached read against the
+    /// module's own tree would go stale when that class changes.
     /// </summary>
-    private static List<(string Namespace, AttributeData DecoratorList)> BuildModuleDecoratorMap(
+    private static (List<(string Namespace, AttributeData DecoratorList)> DecoratorLists,
+        List<(string Namespace, bool RequireAuthenticated)> AuthDefaults) BuildModuleMaps(
         Compilation compilation,
+        EquatableArray<ModuleScanner.Module> modules,
         CancellationToken ct) {
-        var result = new List<(string, AttributeData)>();
+        var decoratorLists = new List<(string, AttributeData)>();
+        var authDefaults = new List<(string, bool)>();
         var decoratorListMeta = compilation.GetTypeByMetadataName(DecoratorListAttributeMetadataName);
-        var moduleAttrSymbol = compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
-        if (decoratorListMeta is null || moduleAttrSymbol is null)
-            return result;
+        var defaultsAttr = compilation.GetTypeByMetadataName(AuthorizationDefaultsAttributeMetadataName);
+        if (decoratorListMeta is null && defaultsAttr is null)
+            return (decoratorLists, authDefaults);
 
-        foreach (var syntaxTree in compilation.SyntaxTrees) {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot(ct);
+        // Deterministic order: modules sorted by namespace then name, matching ELMOD001's documented
+        // "alphabetically first" ownership tie-break for modules sharing a namespace.
+        foreach (var module in modules.OrderBy(static m => m.Namespace, StringComparer.Ordinal)
+                     .ThenBy(static m => m.Name, StringComparer.Ordinal)) {
+            ct.ThrowIfCancellationRequested();
+            if (compilation.Assembly.GetTypeByMetadataName(module.MetadataName) is not { } moduleSymbol)
+                continue;
 
-            foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>()) {
-                if (semanticModel.GetDeclaredSymbol(typeDecl, ct) is not INamedTypeSymbol typeSymbol)
-                    continue;
+            var attributes = moduleSymbol.GetAttributes();
+            if (decoratorListMeta is not null) {
+                var decoratorList = FindDecoratorListFromPipelineAttributes(attributes, decoratorListMeta);
+                if (decoratorList is not null)
+                    decoratorLists.Add((module.Namespace, decoratorList));
+            }
 
-                var hasAppModule = typeSymbol.GetAttributes()
-                    .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, moduleAttrSymbol));
-                if (!hasAppModule)
-                    continue;
-
-                var decoratorList = FindDecoratorListFromPipelineAttributes(typeSymbol.GetAttributes(), decoratorListMeta);
-                if (decoratorList is null)
-                    continue;
-
-                var moduleNamespace = typeSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
-                    ? containing.ToDisplayString()
-                    : "";
-                result.Add((moduleNamespace, decoratorList));
+            if (defaultsAttr is not null) {
+                var defaults = attributes
+                    .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, defaultsAttr));
+                if (defaults is not null)
+                    authDefaults.Add((module.Namespace, ReadRequireAuthenticated(defaults)));
             }
         }
 
-        return result;
+        return (decoratorLists, authDefaults);
     }
 
     private static AttributeData? FindModuleDecoratorList(

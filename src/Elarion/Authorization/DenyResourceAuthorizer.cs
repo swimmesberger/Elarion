@@ -13,7 +13,7 @@ internal sealed class DenyResourceAuthorizer(ILogger<DenyResourceAuthorizer> log
         logger.LogWarning(
             "No IResourceAuthorizer is registered (e.g. via AddElarionResourceAuthorization); denying access to "
             + "resource '{ResourceType}'.",
-            context.ResourceType.Name);
+            context.ResourceTypeName);
         return ValueTask.FromResult(false);
     }
 }

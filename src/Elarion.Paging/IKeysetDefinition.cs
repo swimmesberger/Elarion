@@ -31,9 +31,14 @@ public interface IKeysetDefinition<TEntity>
 
     /// <summary>
     /// Builds the seek predicate selecting rows strictly after <paramref name="cursor"/> in the
-    /// paging direction, or <c>null</c> when the cursor is malformed (treated as "no cursor").
+    /// paging direction.
     /// </summary>
-    Expression<Func<TEntity, bool>>? BuildSeek(string cursor, bool forward);
+    /// <exception cref="MalformedCursorException">
+    /// The cursor is malformed — not valid Base64Url, an unexpected format version, truncated, has
+    /// trailing bytes, or was minted by a different keyset (identity-tag mismatch). Callers surface this
+    /// as a client error rather than silently paging from the first row.
+    /// </exception>
+    Expression<Func<TEntity, bool>> BuildSeek(string cursor, bool forward);
 
     /// <summary>
     /// Projects <paramref name="query"/> server-side to <paramref name="selector"/>'s shape plus the

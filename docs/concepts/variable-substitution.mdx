@@ -74,4 +74,7 @@ watched variable changes it **reschedules affected recurring jobs immediately**,
 variables changed and replacing its queued occurrence (a job with a literal schedule, or one whose variables
 didn't change, is left untouched; a fixed-delay job mid-run reschedules itself on completion). So shortening a
 job's interval, changing its cron, or enabling a `${...}`-disabled job takes effect at once rather than after
-the (possibly long) current interval.
+the (possibly long) current interval. A reschedule only replaces the *queued successor* — it never injects an
+extra run alongside one already executing: when a fixed-rate or cron job has a run in flight, its recomputed
+successor lands on the new grid strictly after now, so the new schedule applies without a duplicate immediate
+execution.

@@ -83,12 +83,27 @@ public static class JsonRpcEndpoint {
             return;
         }
 
-        await using var scope = ctx.RequestServices.CreateDispatchScope(CreateDispatchContext(ctx));
-        var response = await dispatcher.DispatchAsync(
-            request, scope.ServiceProvider, ctx.RequestAborted);
+        JsonRpcResponse response;
+        await using (var scope = ctx.RequestServices.CreateDispatchScope(CreateDispatchContext(ctx, includeIdempotencyKey: true))) {
+            try {
+                response = await dispatcher.DispatchAsync(
+                    request, scope.ServiceProvider, ctx.RequestAborted);
+            } catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested) {
+                // The client disconnected mid-dispatch. Bail quietly — do not write a response into the
+                // aborted request and do not surface this as an error (expected cancellation).
+                logger.LogDebug("JSON-RPC request aborted by the client before completion");
+                return;
+            }
+        }
 
         if (IsNotification(request)) {
             ctx.Response.StatusCode = StatusCodes.Status204NoContent;
+            return;
+        }
+
+        // The request may have been aborted after dispatch but before we write; skip writing into a dead request.
+        if (ctx.RequestAborted.IsCancellationRequested) {
+            logger.LogDebug("JSON-RPC request aborted by the client before the response was written");
             return;
         }
 
@@ -104,6 +119,19 @@ public static class JsonRpcEndpoint {
         JsonRpcOptions options,
         ILogger logger) {
         using var batchActivity = JsonRpcTelemetry.Source.StartActivity("jsonrpc batch", ActivityKind.Server);
+
+        // The HTTP Idempotency-Key header applies to the whole HTTP request, so it is ambiguous for a batch: it
+        // would (incorrectly) key every distinct operation in the batch to the same key, replaying the first
+        // item's stored response for the rest. Reject it — a batch must carry a per-item key via each request's
+        // own params._meta (the batch-correct, per-call location).
+        if (HasHttpIdempotencyKey(ctx)) {
+            logger.LogWarning(
+                "JSON-RPC batch rejected: the HTTP {Header} header is ambiguous for a batch; carry a per-item key at each request's params._meta instead",
+                Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader);
+            RecordBatchError(batchActivity, 0, "400", "Idempotency-Key not allowed for batches", "batch-idempotency-key");
+            await WriteBatchIdempotencyKeyRejection(ctx, jsonOptions);
+            return;
+        }
 
         var array = doc.RootElement;
         var count = array.GetArrayLength();
@@ -178,15 +206,28 @@ public static class JsonRpcEndpoint {
         }
 
         var strategy = ctx.RequestServices.GetRequiredService<IBatchExecutionStrategy>();
-        var responses = await strategy.ExecuteAsync(
-            requests,
-            dispatcher,
-            ctx.RequestServices,
-            CreateDispatchContext(ctx),
-            ctx.RequestAborted);
+        List<JsonRpcResponse> responses;
+        try {
+            responses = await strategy.ExecuteAsync(
+                requests,
+                dispatcher,
+                ctx.RequestServices,
+                CreateDispatchContext(ctx),
+                ctx.RequestAborted);
+        } catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested) {
+            // The client disconnected mid-batch. Bail quietly (expected cancellation, no response written).
+            logger.LogDebug("JSON-RPC batch aborted by the client before completion");
+            return;
+        }
 
         if (responses.Count == 0) {
             ctx.Response.StatusCode = StatusCodes.Status204NoContent;
+            return;
+        }
+
+        // Skip writing into a request the client already aborted.
+        if (ctx.RequestAborted.IsCancellationRequested) {
+            logger.LogDebug("JSON-RPC batch aborted by the client before the response was written");
             return;
         }
 
@@ -198,19 +239,42 @@ public static class JsonRpcEndpoint {
     // seed it into each per-call child scope — child scopes do not inherit the request scope's scoped
     // services, so ICurrentUser/authorization would otherwise be unset. (MCP captures RequestContext.User the
     // same way; the snapshot materializes lazily, so seeding per call costs no extra parsing.)
-    private static DispatchScopeContext CreateDispatchContext(HttpContext ctx) {
+    private static DispatchScopeContext CreateDispatchContext(HttpContext ctx, bool includeIdempotencyKey = false) {
         var context = new DispatchScopeContext();
         context.Set<ClaimsPrincipal>(ctx.User);
 
         // Single-call sugar: accept the HTTP Idempotency-Key header for a JSON-RPC-over-HTTP request. The
         // canonical per-call location is params._meta (correct for batches); the header applies to the whole
-        // HTTP request, so it is only meaningful for a single (non-batch) call.
-        if (ctx.Request.Headers.TryGetValue(Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader, out var key) &&
+        // HTTP request, so it is only meaningful for a single (non-batch) call — the batch path rejects the
+        // header outright (it would key every distinct operation to the same value) and never sets this flag.
+        if (includeIdempotencyKey &&
+            ctx.Request.Headers.TryGetValue(Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader, out var key) &&
             key.Count > 0 && !string.IsNullOrWhiteSpace(key[0])) {
             context.Set(new Abstractions.Idempotency.IdempotencyKey(key[0]!));
         }
 
         return context;
+    }
+
+    private static bool HasHttpIdempotencyKey(HttpContext ctx) =>
+        ctx.Request.Headers.TryGetValue(Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader, out var key) &&
+        key.Count > 0 && !string.IsNullOrWhiteSpace(key[0]);
+
+    private static async Task WriteBatchIdempotencyKeyRejection(HttpContext ctx, JsonSerializerOptions jsonOptions) {
+        // Reject with HTTP 400 and a JSON-RPC error envelope (Invalid Request, -32600). A JSON-RPC error is written
+        // rather than a ProblemDetails so it serializes through the same JSON-RPC context every other envelope on
+        // this endpoint uses (staying AOT-strict), and clients that speak JSON-RPC get a shape they can parse.
+        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+        ctx.Response.ContentType = "application/json";
+        var error = new RpcError {
+            Code = -32600,
+            Message =
+                $"The HTTP {Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader} header is not allowed on a JSON-RPC batch: " +
+                "it applies to the whole request and cannot key the batch's distinct operations. Carry a per-item key at each " +
+                $"request's params._meta.{Abstractions.Idempotency.IdempotencyKeyNames.MetaKey} instead.",
+        };
+        await JsonSerializer.SerializeAsync(
+            ctx.Response.Body, JsonRpcResponse.FromError((string?)null, error), jsonOptions, ctx.RequestAborted);
     }
 
     private static void RecordEndpointInvalidRequest(string method, string phase) {

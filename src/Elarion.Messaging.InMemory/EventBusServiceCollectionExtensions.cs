@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace Elarion.Messaging.InMemory;
 
@@ -91,11 +92,18 @@ public static class EventBusServiceCollectionExtensions {
         services.TryAddSingleton(options);
         services.TryAddSingleton<EventSubscriptionRegistry>();
         services.TryAddSingleton<EventDispatchPump>();
-        services.AddHostedService(sp => sp.GetRequiredService<EventDispatchPump>());
+        // TryAddEnumerable keyed on the concrete factory-target keeps a second registration call from adding a
+        // second reader to the SingleReader channel (undefined behaviour). Every registration below is idempotent
+        // so AddInMemoryIntegrationEventBus is safe to call more than once (e.g. via AddInMemoryEventBus).
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, EventDispatchPump>(
+                sp => sp.GetRequiredService<EventDispatchPump>()));
         services.TryAddScoped<EventDispatchScope>();
         services.TryAddScoped<IIntegrationEventBus, InMemoryIntegrationEventBus>();
-        services.AddScoped<IInterceptor, EventDispatchSaveChangesInterceptor>();
-        services.AddScoped<IInterceptor, EventDispatchTransactionInterceptor>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Scoped<IInterceptor, EventDispatchSaveChangesInterceptor>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Scoped<IInterceptor, EventDispatchTransactionInterceptor>());
         return services;
     }
 

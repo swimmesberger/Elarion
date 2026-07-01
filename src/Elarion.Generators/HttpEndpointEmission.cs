@@ -69,7 +69,7 @@ internal static class HttpEndpointEmission
         string? Description
     );
 
-    public static void ReportDuplicateRoutes(IEnumerable<Model> entries, Action<Diagnostic> report)
+    public static void ReportDuplicateRoutes(IEnumerable<Model> entries, List<DiagnosticInfo> diagnostics)
     {
         var seen = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entry in entries)
@@ -77,8 +77,8 @@ internal static class HttpEndpointEmission
             var key = $"{entry.Verb} {entry.Route}";
             if (seen.TryGetValue(key, out var existing))
             {
-                report(Diagnostic.Create(
-                    DuplicateRoute, Location.None, entry.Verb.ToUpperInvariant(), entry.Route, existing, entry.EndpointName));
+                diagnostics.Add(DiagnosticInfo.Create(
+                    DuplicateRoute, (Location?)null, entry.Verb.ToUpperInvariant(), entry.Route, existing, entry.EndpointName));
             }
             else
             {

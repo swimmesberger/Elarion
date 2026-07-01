@@ -185,7 +185,8 @@ the JSON type context once instead of threading options into each subsystem. See
    Contributions apply in registration order when the options first materialize — transports insert their
    envelope context first (`TypeInfoResolvers.Insert(0, …)`), the generated `AddElarion(configuration)` adds the
    module contexts from `GetAllJsonTypeInfoResolvers()`, the host adds extras. Resolver order is
-   **first-match-wins**.
+   **first-match-wins**; the host-priority `OverrideTypeInfoResolvers` segment composes ahead of every
+   `TypeInfoResolvers` entry, so a host can override even a type a transport envelope context registers.
 4. **AOT-strict by default:** no reflection tail is added unless `EnableReflectionFallback` is set, matching the
    repo-wide `JsonSerializerIsReflectionEnabledByDefault=false`. A type missing from every source-generated
    context throws at runtime (surfacing a missing `[JsonSerializable]`) rather than silently reflecting. The
@@ -377,12 +378,14 @@ class-level `[ConsumeEvent]` on a non-handler is reported (`ELEVT005`).
 Because the domain plane dispatches **inline in the publisher's scope**, a domain-event handler's
 decorator pipeline runs **nested within the command's** (same scope, `DbContext`, and transaction), so
 a domain consumer must not open its own transaction or resilience scope. The recommended way is a
-transaction decorator that declares a `static bool AppliesTo(Type request)` predicate matching only
-`ICommand`/`IIntegrationEvent` (see [ADR-0003](docs/decisions/0003-decorator-attachment-predicates.md)
-and [decorator pipelines](docs/concepts/decorator-pipelines.mdx)): the generator then never attaches it
+transaction decorator that declares a `static bool AppliesTo(HandlerMetadata handler)` predicate matching only
+`ICommand`/`IIntegrationEvent` requests (see [ADR-0003](docs/decisions/0003-decorator-attachment-predicates.md)
+and [decorator pipelines](docs/concepts/decorator-pipelines.mdx)): the predicate then never attaches it
 to a domain-event handler, while integration consumers run on a **fresh post-commit scope** and
 correctly take the transaction (their request is an `IIntegrationEvent`). Generic `where` constraints
-and the `AppliesTo` predicate are both evaluated at compile time by `HandlerRegistrationGenerator`.
+are evaluated at compile time by `HandlerRegistrationGenerator`; the `AppliesTo` predicate is a **runtime
+call** the generated registration evaluates once per closed handler type (cached in a generated
+`static readonly bool`), never per request.
 
 The **method form** is a lightweight alternative for a small side effect on an existing
 `[Service]`: the consumer is an instance method on a `[Service]` class (no decorator pipeline);

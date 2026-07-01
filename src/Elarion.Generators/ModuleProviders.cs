@@ -52,7 +52,7 @@ internal static class ModuleProviders
                 var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing
                     ? containing.ToDisplayString()
                     : string.Empty;
-                return new ModuleScanner.Module(name, ns, type.Name);
+                return new ModuleScanner.Module(name, ns, type.Name, ModuleScanner.BuildMetadataName(type));
             }
         }
 

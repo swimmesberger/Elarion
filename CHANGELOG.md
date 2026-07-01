@@ -9,6 +9,10 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Host-priority JSON resolver overrides.** `ElarionJsonOptions.OverrideTypeInfoResolvers` composes ahead of
+  every `TypeInfoResolvers` entry, so a host can override how any type serializes — including envelope types a
+  transport context registers first-match (previously unbeatable). The full chain is overrides → contributed
+  resolvers → the framework context → the optional reflection fallback.
 - **Blob upload lifecycle + resumable (tus) transports.** A "pre-upload then reference, reclaim if
   abandoned" model for attaching files to an entity over a JSON transport that cannot carry binary.
   `Elarion.Blobs` gains the provider-neutral, S3-free lifecycle: `BlobLifecycleState` (`Pending`/`Committed`),
@@ -60,6 +64,22 @@ minor releases may include breaking changes.
   [ADR-0023](docs/decisions/0023-canonical-json-serialization.md).
 
 ### Changed
+- **Soundness-hardening pass: breaking contract and schema changes (breaking).** A full adversarial audit of the
+  framework's concurrency, transaction, authorization, and AOT paths was fixed in one pass; the correctness fixes
+  below ride on these breaks. **Migrations:** the idempotency key table gains a leading `operation` PK column
+  (`(operation, scope, owner, key)`); `stored_blobs` gains an `owner_id` column and the `tus_uploads` staging
+  index changes shape — regenerate migrations for all three. `IOutboxStore.MarkProcessedAsync`/`MarkFailedAsync`
+  now take the claimant's `lockId` and return `bool`, and `MarkPermanentlyFailedAsync` parks poison messages.
+  `StoredResult<T>` is replaced by a non-generic `StoredResult` (value carried as pre-serialized JSON) so
+  `[Idempotent]` round-trips AOT-strict. Resource grants are keyed by `Type.FullName` (was `Type.Name`) — re-key
+  existing grant rows or set an explicit `ResourceTypeName` on all three paths. `[CacheInvalidate]` defaults to
+  `Scope = Global` (was `CurrentUser` — the old default let an admin's mutation strand another user's cached
+  read). Keyset cursors carry a keyset-identity tag (format v2): previously-issued cursors are rejected loudly,
+  and a malformed cursor now throws `MalformedCursorException` instead of silently returning page 1.
+  `ITusUploadStore.AppendAsync` drops its unused chunk-length parameter. An unseeded `ICurrentUser` is now
+  anonymous (`IsAuthenticated == false`) instead of throwing, so deny-by-default fails closed off-transport.
+  Nested `IUnitOfWork.BeginAsync` joins the ambient transaction via a savepoint (command-calling-command via
+  `IHandlerSender` no longer throws), and `CommitAsync` flushes pending `DbContext` changes before committing.
 - **JSON serialization is configured centrally, not per subsystem (breaking).** `AddElarionJsonRpc` and
   `AddElarionMcp` no longer take a `JsonSerializerOptions` parameter, and `JsonRpcOptions.SerializerOptions` is
   removed — both read the canonical `IElarionJsonSerialization`. `ISettingsManager` typed access is now
@@ -91,6 +111,32 @@ minor releases may include breaking changes.
   to `using Elarion.EntityFrameworkCore.Identity;`. See [`docs/capabilities/identity`](docs/capabilities/identity.mdx).
 
 ### Fixed
+- **Soundness-hardening pass: ~50 adversarially-verified findings across every subsystem.** Highlights by area —
+  *outbox:* finalize is lease-guarded (a stalled worker can no longer wipe a legitimate re-claimant's lease and
+  trigger cascading redelivery), failed messages retry with exponential backoff instead of head-of-line blocking,
+  and an unresolvable event type is parked loudly instead of silently marked delivered. *Idempotency/transactions:*
+  `[Idempotent]` on `Result<T>` handlers no longer throws `NotSupportedException` under the AOT-strict default;
+  savepoint rollbacks truncate buffered integration events (consumers never see rolled-back state); the
+  `WaitThenReplay` path is bounded by `lock_timeout`; the in-memory store/no-op unit of work warn once that they
+  are single-process. *Security:* `[Require*]`/`[FeatureGate]` on a base handler class are honored by the
+  generator (a derived handler no longer ships unguarded); grants insert via `ON CONFLICT DO NOTHING` (a duplicate
+  grant no longer poisons the ambient transaction); same-named entities in different modules no longer share
+  authorization; deny-by-default no longer crashes event consumers. *Generators:* cache keys reject non-scalar
+  properties and misspelled `KeyProperties` (new `ELCACHE005–007`, `ELPIPE003`, `ELEFC002`, `ELMOD003`
+  diagnostics); `[Resilient]`/`[Cacheable]` are rejected on the event-consumer plane; duplicate `DbSet` names and
+  unsupported manifest schema versions are diagnosed; the Identity generator no longer squats the host's
+  `OnEntitiesConfigured` seam; `HandlerRegistrationGenerator` and `AppModuleDiscoveryGenerator` discover per node
+  (no full-compilation re-bind per keystroke) with strict cache-reuse tests. *Transports:* client disconnects are
+  no longer logged as errors or answered into aborted requests; a JSON-RPC batch with an `Idempotency-Key` header
+  is rejected instead of replaying item 1's response for item 2; REST responses serialize through the canonical
+  JSON options and fail loudly when they're missing; MCP tool exceptions are logged and sanitized. *Runtime:*
+  unconditional settings writes no longer drop updates under concurrency; the settings refresher loads before
+  other hosted services start; a live variable reschedule no longer injects a concurrent extra run; `[Resilient]`
+  jobs without the resilience runtime fail fast at startup; variant resolution is race-free on concurrent first
+  calls; the in-memory event pump survives dispatch faults, warns on never-committed events, and domain-event
+  re-entrancy is depth-bounded. *Blobs/tus:* `AddElarionTusPostgreSql` wires the pending-blob GC (no more
+  leaked pending blobs), finalization is atomic, completed sessions are reaped, ownership checks are exact and
+  fail-closed. Every fix carries a regression test (798 tests, Postgres-backed races included).
 - **`ICurrentUser` now resolves inside JSON-RPC and MCP handlers (and so does authorization).** The
   dispatchers run each call in a fresh DI child scope, which does not inherit the request scope's scoped
   `CurrentUserSnapshot`, so a handler injecting `ICurrentUser` — or the `AuthorizationDecorator`, which

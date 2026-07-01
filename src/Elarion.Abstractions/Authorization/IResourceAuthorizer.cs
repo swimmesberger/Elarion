@@ -23,6 +23,7 @@ public interface IResourceAuthorizer {
 public sealed class ResourceAuthorizationContext(
     ICurrentUser user,
     Type resourceType,
+    string resourceTypeName,
     ResourceOperation operation,
     object? resourceId) {
     /// <summary>The current principal (claims and roles).</summary>
@@ -30,6 +31,14 @@ public sealed class ResourceAuthorizationContext(
 
     /// <summary>The resource type being accessed.</summary>
     public Type ResourceType { get; } = resourceType;
+
+    /// <summary>
+    /// The resource-type discriminator matched against the grants table — the stable, unambiguous string
+    /// (default <see cref="System.Type.FullName"/>) every resource-authorization path agrees on. Compared with
+    /// <see cref="System.StringComparison.Ordinal"/>. Prefer this over <see cref="ResourceType"/>'s name when
+    /// looking up grants.
+    /// </summary>
+    public string ResourceTypeName { get; } = resourceTypeName;
 
     /// <summary>The operation requested.</summary>
     public ResourceOperation Operation { get; } = operation;

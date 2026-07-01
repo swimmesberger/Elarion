@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Elarion.Blobs\Elarion.Blobs.csproj" />
+    <ProjectReference Include="..\Elarion.Blobs.PostgreSql\Elarion.Blobs.PostgreSql.csproj" />
     <ProjectReference Include="..\Elarion.Blobs.Tus\Elarion.Blobs.Tus.csproj" />
   </ItemGroup>
 

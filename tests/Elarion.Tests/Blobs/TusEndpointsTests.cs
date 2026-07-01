@@ -179,6 +179,22 @@ public sealed class TusEndpointsTests {
     }
 
     [Fact]
+    public async Task Head_UnauthenticatedCallerWithMatchingId_Returns404() {
+        // Regression (fail closed): an owner-scoped operation requires an authenticated caller. Even a
+        // caller whose id equals the recorded owner is denied while unauthenticated, so a null/empty owner
+        // id can never be matched.
+        var ct = TestContext.Current.CancellationToken;
+        var user = new MutableCurrentUser { UserId = "user-1", IsAuthenticated = true };
+        await using var host = await StartAsync(ct, user: user);
+        var uploadPath = await CreateAsync(host.Client, 4, "a.bin", "application/octet-stream", ct);
+
+        user.IsAuthenticated = false;
+        var head = await host.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, uploadPath), ct);
+
+        head.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task Delete_RemovesSession() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);

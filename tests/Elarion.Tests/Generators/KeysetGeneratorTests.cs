@@ -368,6 +368,131 @@ public sealed class KeysetGeneratorTests
             .Should().BeEquivalentTo("Sample_Domain_ClientSeek.Keyset.g.cs");
     }
 
+    [Fact]
+    public void Keyset_ConventionalEntityIdNotInKeyset_Warns()
+    {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class AuditEntry {
+                    public System.Guid AuditEntryId { get; set; }
+                    public System.DateTime CreatedAt { get; set; }
+                }
+
+                [Elarion.Paging.Keyset<AuditEntry>("CreatedAt")]
+                public sealed partial class RecentAudits { }
+            }
+            """);
+
+        // The PK is named {EntityTypeName}Id, not "Id"; the non-determinism warning must still fire.
+        result.Diagnostics.Should().Contain(d => d.Id == "ELKEY004");
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Keyset_KeyAttributedPropertyNotInKeyset_Warns()
+    {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class AuditEntry {
+                    [System.ComponentModel.DataAnnotations.Key]
+                    public System.Guid Reference { get; set; }
+                    public System.DateTime CreatedAt { get; set; }
+                }
+
+                [Elarion.Paging.Keyset<AuditEntry>("CreatedAt")]
+                public sealed partial class RecentAudits { }
+            }
+            """);
+
+        // A [Key]-annotated property with a non-conventional name still triggers the warning.
+        result.Diagnostics.Should().Contain(d => d.Id == "ELKEY004");
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Keyset_ConventionalEntityIdInKeyset_DoesNotWarn()
+    {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class AuditEntry {
+                    public System.Guid AuditEntryId { get; set; }
+                    public System.DateTime CreatedAt { get; set; }
+                }
+
+                [Elarion.Paging.Keyset<AuditEntry>("CreatedAt", "AuditEntryId")]
+                public sealed partial class RecentAudits { }
+            }
+            """);
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "ELKEY004");
+    }
+
+    [Fact]
+    public void Keyset_EmitsIdentityTagAndVerifiesItOnDecode()
+    {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Client {
+                    public System.Guid Id { get; set; }
+                    public System.DateTime CreatedAt { get; set; }
+                }
+
+                [Elarion.Paging.Keyset<Client>("CreatedAt", "Id")]
+                public sealed partial class ClientSeek { }
+            }
+            """);
+
+        NoErrors(result);
+        var source = GetGeneratedSource(result, "Sample_Domain_ClientSeek.Keyset.g.cs");
+
+        source.Should().Contain("private const uint __CursorTag =");
+        source.Should().Contain("new global::Elarion.Paging.CursorWriter(__CursorTag)");
+        source.Should().Contain("global::Elarion.Paging.CursorReader.TryCreate(cursor, __CursorTag, out var reader)");
+        source.Should().Contain("throw new global::Elarion.Paging.MalformedCursorException();");
+        // BuildSeek no longer returns a nullable expression.
+        source.Should().Contain(
+            "public global::System.Linq.Expressions.Expression<global::System.Func<global::Sample.Domain.Client, bool>> BuildSeek(string cursor, bool forward)");
+    }
+
+    [Fact]
+    public void Keyset_DifferentDefinitions_ProduceDifferentIdentityTags()
+    {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Post {
+                    public System.Guid Id { get; set; }
+                    public System.DateTime CreatedAt { get; set; }
+                    public string Title { get; set; } = "";
+                }
+
+                [Elarion.Paging.Keyset<Post>("CreatedAt", "Id")]
+                public sealed partial class ByDate { }
+
+                [Elarion.Paging.Keyset<Post>("Title", "Id")]
+                public sealed partial class ByTitle { }
+            }
+            """);
+
+        NoErrors(result);
+        var byDate = TagOf(GetGeneratedSource(result, "Sample_Domain_ByDate.Keyset.g.cs"));
+        var byTitle = TagOf(GetGeneratedSource(result, "Sample_Domain_ByTitle.Keyset.g.cs"));
+
+        byDate.Should().NotBe(byTitle);
+    }
+
+    private static string TagOf(string source)
+    {
+        const string marker = "private const uint __CursorTag = ";
+        var start = source.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        var end = source.IndexOf(';', start);
+        return source.Substring(start, end - start);
+    }
+
     private static GeneratorDriverRunResult Generate(string testSource, string assemblyAttributes = "")
     {
         var source =

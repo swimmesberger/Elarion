@@ -37,11 +37,58 @@ public sealed class ElarionIdentityGeneratorTests {
         generated.Should().Contain("public DbSet<global::Sample.App.AppRole> Roles");
         generated.Should().Contain("global::Microsoft.AspNetCore.Identity.IdentityUserClaim<global::System.Guid>");
         generated.Should().Contain("global::Microsoft.AspNetCore.Identity.IdentityUserToken<global::System.Guid>");
-        generated.Should().Contain("partial void OnEntitiesConfigured(ModelBuilder modelBuilder)");
+        // Implements the per-feature seam, NOT the neutral OnEntitiesConfigured (which stays the host's own hook).
+        generated.Should().Contain(
+            "partial void OnEntitiesConfigured_GenerateElarionIdentity(ModelBuilder modelBuilder)");
+        generated.Should().NotContain("partial void OnEntitiesConfigured(ModelBuilder modelBuilder)");
         generated.Should().Contain(
             "global::Elarion.EntityFrameworkCore.Identity.IdentityModelBuilderExtensions.ApplyElarionIdentity"
             + "<global::Sample.App.AppUser, global::Sample.App.AppRole, global::System.Guid>(");
         generated.Should().Contain("snakeCase: true");
+    }
+
+    [Fact]
+    public void HostCanImplementNeutralSeamAlongsideIdentity() {
+        // Regression (H14): the Identity generator must implement a per-feature seam, leaving the neutral
+        // OnEntitiesConfigured free for the host — otherwise a host that adds its own OnEntitiesConfigured
+        // (e.g. for a global query filter) trips CS0757 (duplicate partial implementation).
+        const string source =
+            """
+            using System;
+            using Microsoft.AspNetCore.Identity;
+            using Microsoft.EntityFrameworkCore;
+            using Elarion.EntityFrameworkCore;
+            using Elarion.EntityFrameworkCore.Identity;
+
+            namespace Sample.App {
+                public sealed class AppUser : IdentityUser<Guid>;
+                public sealed class AppRole : IdentityRole<Guid>;
+
+                [GenerateDbSets]
+                [GenerateElarionIdentity<AppUser, AppRole, Guid>]
+                public sealed partial class AuthDbContext : DbContext {
+                    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+                    partial void OnEntitiesConfigured(ModelBuilder modelBuilder) { /* host's own configuration */ }
+                }
+            }
+            """;
+
+        var ct = TestContext.Current.CancellationToken;
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var compilation = CSharpCompilation.Create(
+            "ElarionIdentityHostSeam",
+            [CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: ct)],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            new[] { new DbContextGenerator().AsSourceGenerator(), new ElarionIdentityGenerator().AsSourceGenerator() },
+            parseOptions: parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, ct);
+
+        output.GetDiagnostics(ct)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
     }
 
     [Fact]

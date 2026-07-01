@@ -54,6 +54,9 @@ public static class PostgreSqlBlobStorageModelBuilderExtensions {
 
             builder.Property(e => e.ExpiresAt)
                 .HasColumnName("expires_at");
+
+            builder.Property(e => e.OwnerId)
+                .HasColumnName("owner_id");
         });
 
         modelBuilder.Entity<BlobContentRow>(builder => {

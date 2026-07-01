@@ -19,6 +19,15 @@ public sealed class RequireResourceAttribute(Type resourceType) : Attribute {
     /// <summary>The resource type being accessed (e.g. <c>typeof(Contact)</c>).</summary>
     public Type ResourceType { get; } = resourceType;
 
+    /// <summary>
+    /// An explicit resource-type discriminator matched against the grants table, overriding the default derived
+    /// from <see cref="ResourceType"/> (its <see cref="System.Type.FullName"/>). Set this only when a stable,
+    /// namespace-independent discriminator is required, and set the <b>same</b> string on the corresponding
+    /// <c>[ResourceFilter].ResourceTypeName</c> and on every <c>IResourceGrantStore</c> grant for the resource —
+    /// all three paths must agree. Compared with <see cref="System.StringComparison.Ordinal"/>.
+    /// </summary>
+    public string? ResourceTypeName { get; set; }
+
     /// <summary>The operation name (an open <see cref="ResourceOperation"/> value). Defaults to <c>"read"</c>.</summary>
     public string Operation { get; set; } = "read";
 

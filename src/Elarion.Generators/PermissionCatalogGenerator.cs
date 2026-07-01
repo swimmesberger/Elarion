@@ -236,10 +236,16 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         ImmutableArray<PermissionDiscovery.PermissionGuard> permissions,
         ImmutableArray<PermissionDiscovery.RoleGuard> roles,
         EquatableArray<ModuleScanner.Module> currentModules,
-        ImmutableArray<ElarionManifest.Data> manifests,
+        ImmutableArray<ManifestReadResult> manifests,
         string targetNamespace)
     {
-        var manifest = ElarionManifest.Data.Combine(manifests);
+        foreach (var result in manifests)
+        {
+            if (result.Diagnostic is { } manifestDiagnostic)
+                spc.ReportDiagnostic(manifestDiagnostic.ToDiagnostic());
+        }
+
+        var manifest = ElarionManifest.Data.Combine(manifests.Select(static r => r.Data));
 
         // Modules to resolve against: this assembly's plus every referenced assembly's (from the manifest).
         var moduleScopes = new List<(string Name, string Namespace)>();

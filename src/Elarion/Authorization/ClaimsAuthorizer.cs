@@ -65,9 +65,13 @@ public sealed class ClaimsAuthorizer(
 
         foreach (var resourceRequirement in requirements.Resources) {
             var context = new ResourceAuthorizationContext(
-                user, resourceRequirement.ResourceType, resourceRequirement.Operation, resourceRequirement.ResourceId);
+                user,
+                resourceRequirement.ResourceType,
+                resourceRequirement.ResourceTypeName,
+                resourceRequirement.Operation,
+                resourceRequirement.ResourceId);
             if (!await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false)) {
-                return Forbidden(resourceRequirement.ResourceType.Name);
+                return Forbidden(resourceRequirement.ResourceTypeName);
             }
         }
 

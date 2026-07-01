@@ -4,6 +4,7 @@ Rule ID | Category | Severity | Notes
 --------|----------|----------|------
 ELPIPE001 | Elarion.Generators | Error | Decorator AppliesTo predicate must be public
 ELPIPE002 | Elarion.Generators | Error | Decorator AppliesTo predicate has an unsupported signature
+ELPIPE003 | Elarion.Abstractions.Resilience | Error | Domain-event consumer cannot be resilient
 ELSG001 | Elarion.Generators | Error | Hosted service scope must be singleton
 ELSG002 | Elarion.Generators | Error | Invalid explicit service contract
 ELSG003 | Elarion.Generators | Error | Generic services are not supported
@@ -25,6 +26,7 @@ ELHTTP003 | Elarion.Http | Warning | HTTP endpoint handler is not in any module
 ELHTTP004 | Elarion.Http | Warning | Cannot infer HTTP verb
 ELMOD001 | Elarion.Modules | Warning | Multiple app modules share a namespace
 ELMOD002 | Elarion.Modules | Warning | Cross-module reference to a module-internal type
+ELMOD003 | Elarion.Modules | Warning | Referenced assembly advertises an unsupported Elarion manifest schema version
 ELAPI001 | Elarion.Modules | Error | Module API interface must be partial
 ELAPI002 | Elarion.Modules | Error | Module API interface must be top-level
 ELAPI003 | Elarion.Modules | Warning | Module API interface is not in any module
@@ -38,6 +40,9 @@ ELCACHE001 | Elarion.Abstractions.Caching | Error | Handler cannot be both cache
 ELCACHE002 | Elarion.Abstractions.Caching | Error | Handler cache tags are required
 ELCACHE003 | Elarion.Abstractions.Caching | Error | Handler cache tag is invalid
 ELCACHE004 | Elarion.Abstractions.Caching | Error | Handler cache duration is invalid
+ELCACHE005 | Elarion.Abstractions.Caching | Error | Event-consumer handler cannot be cacheable
+ELCACHE006 | Elarion.Abstractions.Caching | Error | Cache-key property type is not supported
+ELCACHE007 | Elarion.Abstractions.Caching | Error | Cache-key property does not exist
 ELAUTH001 | Elarion.Abstractions.Authorization | Error | Authorized handler response cannot represent failure
 ELAUTH002 | Elarion.Abstractions.Authorization | Error | RequireResource id path does not resolve
 ELPOL001 | Elarion.Abstractions.Authorization | Error | [AuthorizationPolicy] must be on an IAuthorizationPolicy

@@ -101,6 +101,7 @@ public static class BlobUploadEndpointsExtensions {
             ContentLength = lengthHint,
             InitialState = BlobLifecycleState.Pending,
             ExpiresAt = timeProvider.GetUtcNow() + options.Ttl,
+            OwnerId = currentUser.UserId,
         };
 
         try {
@@ -131,7 +132,7 @@ public static class BlobUploadEndpointsExtensions {
         // ownership is never leaked. Cancel is intended for a pending blob before it is committed.
         if (metadata is null
             || metadata.Container != options.Container
-            || !IsOwnedBy(metadata.Name, currentUser.UserId)) {
+            || !IsOwnedBy(metadata, currentUser.UserId)) {
             return Results.NotFound();
         }
 
@@ -142,8 +143,11 @@ public static class BlobUploadEndpointsExtensions {
     private static string BuildStorageName(string ownerId, string clientName) =>
         $"{ownerId}/{Guid.NewGuid():N}/{SanitizeFileName(clientName)}";
 
-    private static bool IsOwnedBy(string storageName, string ownerId) =>
-        storageName.StartsWith(ownerId + "/", StringComparison.Ordinal);
+    // Ownership is compared against the recorded owner id exactly, not parsed from the storage name, so an
+    // owner id that happens to contain the naming separator cannot be forged. A blob with no recorded owner
+    // is denied to everyone (fail closed).
+    private static bool IsOwnedBy(BlobMetadata metadata, string ownerId) =>
+        metadata.OwnerId is not null && string.Equals(metadata.OwnerId, ownerId, StringComparison.Ordinal);
 
     private static string SanitizeFileName(string name) {
         if (string.IsNullOrWhiteSpace(name)) {

@@ -92,7 +92,7 @@ public static class TusEndpointsExtensions {
         // A zero-length upload is complete on creation (tus needs no PATCH), so finalize it now —
         // appending nothing drives the same completion path and yields the blob reference.
         if (length == 0) {
-            upload = await store.AppendAsync(upload.Id, 0, Stream.Null, 0, cancellationToken);
+            upload = await store.AppendAsync(upload.Id, 0, Stream.Null, cancellationToken);
         }
 
         response.Headers.Location = BuildLocation(context.Request, options.RoutePrefix, upload.Id);
@@ -172,8 +172,7 @@ public static class TusEndpointsExtensions {
 
         TusUpload updated;
         try {
-            updated = await store.AppendAsync(
-                id, offset, context.Request.Body, context.Request.ContentLength, cancellationToken);
+            updated = await store.AppendAsync(id, offset, context.Request.Body, cancellationToken);
         }
         catch (TusOffsetConflictException) {
             response.StatusCode = StatusCodes.Status409Conflict;
@@ -217,8 +216,13 @@ public static class TusEndpointsExtensions {
         }
     }
 
+    // Owner-scoped operations require an authenticated caller whose id matches the upload's recorded owner.
+    // A session with no recorded owner is denied to everyone (fail closed), matching the direct-upload
+    // endpoint's stance, so a null/empty owner id can never be matched by an unauthenticated caller.
     private static bool IsOwner(TusUpload upload, ICurrentUser currentUser) =>
-        upload.OwnerId is null || string.Equals(upload.OwnerId, currentUser.UserId, StringComparison.Ordinal);
+        currentUser.IsAuthenticated
+        && upload.OwnerId is not null
+        && string.Equals(upload.OwnerId, currentUser.UserId, StringComparison.Ordinal);
 
     private static bool IsOffsetContentType(string? contentType) =>
         contentType is not null

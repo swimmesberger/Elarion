@@ -1,14 +1,17 @@
+using System.Collections.Concurrent;
 using AwesomeAssertions;
 using Elarion.Abstractions.Idempotency;
+using Elarion.Abstractions.Pipeline;
 using Elarion.Idempotency;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace Elarion.Tests.Idempotency;
 
 public sealed class InMemoryIdempotencyStoreTests {
-    private static readonly IdempotencyStoreKey Key = new(IdempotencyScope.Global, string.Empty, "k1");
+    private static readonly IdempotencyStoreKey Key = new("op.a", IdempotencyScope.Global, string.Empty, "k1");
 
     private static (IIdempotencyStore Store, FakeTimeProvider Time) CreateStore() {
         var time = new FakeTimeProvider();
@@ -20,6 +23,36 @@ public sealed class InMemoryIdempotencyStoreTests {
     }
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task InMemoryStore_WarnsOnce_ThatItIsSingleProcess() {
+        var log = new CapturingLoggerProvider();
+        var services = new ServiceCollection();
+        services.AddLogging(b => b.AddProvider(log));
+        services.AddElarionIdempotency();
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IIdempotencyStore>();
+
+        await store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.Conflict, Ct);
+        await store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.Conflict, Ct);
+
+        log.Warnings.Should().ContainSingle().Which.Should().Contain("single-process");
+    }
+
+    [Fact]
+    public async Task NoOpUnitOfWork_WarnsOnce_ThatItIsNonTransactional() {
+        var log = new CapturingLoggerProvider();
+        var services = new ServiceCollection();
+        services.AddLogging(b => b.AddProvider(log));
+        services.AddElarionIdempotency();
+        await using var provider = services.BuildServiceProvider();
+        var uow = provider.GetRequiredService<IUnitOfWork>();
+
+        await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
+        await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
+
+        log.Warnings.Should().ContainSingle().Which.Should().Contain("no-op");
+    }
 
     [Fact]
     public async Task Begin_Complete_Replay() {
@@ -103,6 +136,25 @@ public sealed class InMemoryIdempotencyStoreTests {
     }
 
     [Fact]
+    public async Task DifferentOperations_SameClientKey_DoNotCollide() {
+        var (store, _) = CreateStore();
+        var opA = new IdempotencyStoreKey("op.a", IdempotencyScope.Global, string.Empty, "shared-key");
+        var opB = new IdempotencyStoreKey("op.b", IdempotencyScope.Global, string.Empty, "shared-key");
+
+        (await store.TryBeginAsync(opA, "fp", IdempotencyConflictBehavior.Conflict, Ct)).Status
+            .Should().Be(IdempotencyBeginStatus.Began);
+        await store.CompleteAsync(opA, "payload-a", isFailure: false, TimeSpan.FromHours(1), Ct);
+
+        // A different operation with the same client key must claim its own record, not replay op.a's response.
+        var beginB = await store.TryBeginAsync(opB, "fp", IdempotencyConflictBehavior.Conflict, Ct);
+        beginB.Status.Should().Be(IdempotencyBeginStatus.Began);
+
+        await store.CompleteAsync(opB, "payload-b", isFailure: false, TimeSpan.FromHours(1), Ct);
+        (await store.TryBeginAsync(opB, "fp", IdempotencyConflictBehavior.Conflict, Ct)).Payload.Should().Be("payload-b");
+        (await store.TryBeginAsync(opA, "fp", IdempotencyConflictBehavior.Conflict, Ct)).Payload.Should().Be("payload-a");
+    }
+
+    [Fact]
     public async Task Purge_RemovesExpiredCompletedRecords() {
         var (store, time) = CreateStore();
 
@@ -113,5 +165,27 @@ public sealed class InMemoryIdempotencyStoreTests {
         var purged = await store.PurgeCompletedAsync(time.GetUtcNow(), Ct);
 
         purged.Should().Be(1);
+    }
+
+    private sealed class CapturingLoggerProvider : ILoggerProvider {
+        public ConcurrentQueue<string> Warnings { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Warnings);
+
+        public void Dispose() { }
+
+        private sealed class CapturingLogger(ConcurrentQueue<string> warnings) : ILogger {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter) {
+                if (logLevel == LogLevel.Warning) {
+                    warnings.Enqueue(formatter(state, exception));
+                }
+            }
+        }
     }
 }

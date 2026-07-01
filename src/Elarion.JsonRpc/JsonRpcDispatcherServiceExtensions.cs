@@ -81,7 +81,9 @@ public static class JsonRpcDispatcherServiceExtensions {
     }
 
     private static void AddElarionJsonRpcAdapter(this IServiceCollection services) {
-        // Contribute the JSON-RPC envelope context to the canonical options, first so it wins for envelope types.
+        // Contribute the JSON-RPC envelope context to the canonical options, first so it wins for envelope types
+        // over module/host contexts. A host that must override an envelope type registers its context in
+        // ElarionJsonOptions.OverrideTypeInfoResolvers, which is composed ahead of this list.
         services.ConfigureElarionJson(static o => {
             if (!o.TypeInfoResolvers.Contains(JsonRpcJsonContext.Default)) {
                 o.TypeInfoResolvers.Insert(0, JsonRpcJsonContext.Default);

@@ -17,20 +17,39 @@ namespace Elarion.Abstractions.Features;
 /// <see cref="IVariantServiceProvider{TService}"/> and resolve explicitly.
 /// </remarks>
 public sealed class VariantResolutionCache {
+    // A scope can be used concurrently: two first invocations of the same command type in one scope (the
+    // IHandlerSender fan-out via Task.WhenAll) both warm/read this cache, so a plain Dictionary would tear.
     private readonly Dictionary<Type, object> _resolved = [];
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>
     /// Resolves the variant implementation of <typeparamref name="TService"/> for the current user (once) and
-    /// stores it. Idempotent within the scope.
+    /// stores it. Idempotent within the scope, and safe under concurrent first calls.
     /// </summary>
     public async ValueTask WarmAsync<TService>(IServiceProvider services, CancellationToken ct)
         where TService : class {
-        if (_resolved.ContainsKey(typeof(TService)))
+        if (ContainsResolved(typeof(TService)))
             return;
 
-        var provider = services.GetRequiredService<IVariantServiceProvider<TService>>();
-        var instance = await provider.GetAsync(ct).ConfigureAwait(false);
-        _resolved[typeof(TService)] = instance;
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try {
+            if (ContainsResolved(typeof(TService)))
+                return;
+
+            var provider = services.GetRequiredService<IVariantServiceProvider<TService>>();
+            var instance = await provider.GetAsync(ct).ConfigureAwait(false);
+            lock (_resolved) {
+                _resolved[typeof(TService)] = instance;
+            }
+        } finally {
+            _gate.Release();
+        }
+    }
+
+    private bool ContainsResolved(Type service) {
+        lock (_resolved) {
+            return _resolved.ContainsKey(service);
+        }
     }
 
     /// <summary>
@@ -38,8 +57,10 @@ public sealed class VariantResolutionCache {
     /// warmed in this scope.
     /// </summary>
     public TService Get<TService>() where TService : class {
-        if (_resolved.TryGetValue(typeof(TService), out var instance))
-            return (TService)instance;
+        lock (_resolved) {
+            if (_resolved.TryGetValue(typeof(TService), out var instance))
+                return (TService)instance;
+        }
 
         throw new InvalidOperationException(
             $"No variant of '{typeof(TService)}' was resolved in this scope. A variant contract is resolved "

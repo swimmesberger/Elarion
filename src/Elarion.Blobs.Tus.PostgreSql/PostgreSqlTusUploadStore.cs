@@ -17,6 +17,7 @@ public sealed class PostgreSqlTusUploadStore<TDbContext>(
     TDbContext dbContext,
     IBlobStore blobStore,
     TusOptions options,
+    TusGcOptions gcOptions,
     TimeProvider timeProvider) : ITusUploadStore
     where TDbContext : DbContext {
     /// <inheritdoc />
@@ -59,7 +60,6 @@ public sealed class PostgreSqlTusUploadStore<TDbContext>(
         string uploadId,
         long offset,
         Stream chunk,
-        long? chunkLength,
         CancellationToken cancellationToken) {
         var row = await dbContext.Set<TusUploadRow>()
             .AsNoTracking()
@@ -102,9 +102,14 @@ public sealed class PostgreSqlTusUploadStore<TDbContext>(
     public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
 
+        // Reap both kinds of expired session by their eligibility instant: an incomplete session past its
+        // upload-expiry window (the "abort incomplete multipart upload" analog), and a completed session
+        // past its completed-retention window (finalization stamps ExpiresAt = now + CompletedRetention),
+        // so completed rows do not grow the staging table unbounded. A completed row still lives long
+        // enough for a HEAD to fetch its Elarion-Blob-Ref.
         var ids = await dbContext.Set<TusUploadRow>()
             .AsNoTracking()
-            .Where(r => r.BlobId == null && r.ExpiresAt < olderThanUtc)
+            .Where(r => r.ExpiresAt < olderThanUtc)
             .OrderBy(r => r.ExpiresAt)
             .Take(batchSize)
             .Select(r => r.Id)
@@ -115,7 +120,7 @@ public sealed class PostgreSqlTusUploadStore<TDbContext>(
         }
 
         return await dbContext.Set<TusUploadRow>()
-            .Where(r => ids.Contains(r.Id) && r.BlobId == null && r.ExpiresAt < olderThanUtc)
+            .Where(r => ids.Contains(r.Id) && r.ExpiresAt < olderThanUtc)
             .ExecuteDeleteAsync(cancellationToken);
     }
 
@@ -128,28 +133,54 @@ public sealed class PostgreSqlTusUploadStore<TDbContext>(
             return Map(row, row.UploadOffset, row.BlobId);
         }
 
-        var blobRef = await blobStore.SaveAsync(
-            new BlobUploadRequest {
-                Container = row.Container,
-                Name = row.Name,
-                ContentType = row.ContentType,
-                ContentLength = row.UploadLength,
-                InitialState = BlobLifecycleState.Pending,
-                ExpiresAt = timeProvider.GetUtcNow() + options.Ttl,
-            },
-            new MemoryStream(row.Data, writable: false),
-            cancellationToken);
-
-        // Mark complete and drop the staged bytes; the content now lives in the blob.
-        await dbContext.Set<TusUploadRow>()
-            .Where(r => r.Id == uploadId && r.BlobId == null)
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(r => r.BlobId, blobRef.Value)
-                    .SetProperty(r => r.Data, Array.Empty<byte>()),
+        // Write the pending blob and stamp the session's blob_id atomically: a crash between the two would
+        // otherwise leave a completed session (offset == length) with no blob reference — the client would
+        // see a finished upload that never yields Elarion-Blob-Ref, and the garbage collector would later
+        // delete it silently. A single transaction makes both land or neither. The blob store shares this
+        // DbContext, so its own SaveAsync joins this ambient transaction instead of committing on its own.
+        var ownsTransaction = dbContext.Database.CurrentTransaction is null;
+        var transaction = ownsTransaction
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        try {
+            var blobRef = await blobStore.SaveAsync(
+                new BlobUploadRequest {
+                    Container = row.Container,
+                    Name = row.Name,
+                    ContentType = row.ContentType,
+                    ContentLength = row.UploadLength,
+                    InitialState = BlobLifecycleState.Pending,
+                    ExpiresAt = timeProvider.GetUtcNow() + options.Ttl,
+                    OwnerId = row.OwnerId,
+                },
+                new MemoryStream(row.Data, writable: false),
                 cancellationToken);
 
-        return Map(row, row.UploadLength, blobRef.Value);
+            // Mark complete, drop the staged bytes (the content now lives in the blob), and record when the
+            // completed session becomes eligible for reclamation so it lives long enough for a HEAD.
+            var completedExpiresAt = timeProvider.GetUtcNow() + gcOptions.CompletedRetention;
+            await dbContext.Set<TusUploadRow>()
+                .Where(r => r.Id == uploadId && r.BlobId == null)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(r => r.BlobId, blobRef.Value)
+                        .SetProperty(r => r.Data, Array.Empty<byte>())
+                        .SetProperty(r => r.ExpiresAt, completedExpiresAt),
+                    cancellationToken);
+
+            if (transaction is not null) {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            // The scan above is AsNoTracking, so mutating the local row only shapes the returned snapshot.
+            row.ExpiresAt = completedExpiresAt;
+            return Map(row, row.UploadLength, blobRef.Value);
+        }
+        finally {
+            if (transaction is not null) {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     private static TusUpload Map(TusUploadRow row, long offset, string? blobId) =>

@@ -122,16 +122,27 @@ backward, or neither for the first page. `Size` is clamped to `maxSize` (default
   `Where(c => c.OwnerId == user.UserId)`); never trust a cursor for access control.
 </Callout>
 
+Each cursor embeds a build-stable **keyset-identity tag** (a hash of the definition's fully-qualified
+name and its ordered column types), so a cursor minted by one keyset endpoint is rejected — not
+silently reinterpreted — when fed to another. A cursor that is malformed, truncated, of the wrong
+format version, or carries a mismatched identity tag makes `BuildSeek` (and therefore
+`ToKeysetPageAsync`) throw a `MalformedCursorException` rather than resetting to the first page.
+Map it to a validation / `400 Bad Request` response so the client learns its cursor is invalid; its
+message names no key values and is safe to surface.
+
 ### Keyset column rules
 
-The generator enforces the column rules at compile time, so a typo or a column that breaks
-deterministic ordering is a **build error**, not a runtime bug:
+The generator enforces the hard column rules at compile time, so a typo or a column that cannot be
+translated is a **build error**, not a runtime bug:
 
-- Column names must match a property (`ELKEY001`), so a typo — or a rename you forget to propagate —
-  fails the build. That is why the `"-Column"` string form needs no `nameof`.
-- Columns must be **non-nullable** (`ELKEY003`) for deterministic SQL ordering.
-- If the entity has an `Id` property that is not part of the keyset, the generator warns (`ELKEY004`)
-  that paging may skip or repeat rows; append a unique column such as the key.
+- Column names must match a property (`ELKEY001`, error), so a typo — or a rename you forget to
+  propagate — fails the build. That is why the `"-Column"` string form needs no `nameof`.
+- Columns must be **non-nullable** (`ELKEY003`, error) for deterministic SQL ordering.
+- If the entity has a primary-key property that is not part of the keyset, the generator **warns**
+  (`ELKEY004`) that paging may skip or repeat rows; append it (or another unique column). The key is
+  detected as a `[Key]`-annotated property, or the EF conventional name `Id` or `{EntityType}Id`. It
+  stays a warning rather than an error because a keyset whose own columns are already unique is
+  legitimately deterministic without the key.
 - Supported column types are the integral types (`int`, `long`, `short`, `byte`),
   `decimal`/`double`/`float`, `string`, `Guid`, `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`,
   and enums; others report `ELKEY002`.

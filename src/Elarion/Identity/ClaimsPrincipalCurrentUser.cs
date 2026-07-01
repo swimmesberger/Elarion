@@ -15,17 +15,27 @@ namespace Elarion.Identity;
 /// dispatch-scope rail — capture the principal into a <c>DispatchScopeContext</c> at the transport boundary
 /// and the registered current-user initializer applies it — rather than calling <see cref="Initialize"/>
 /// directly (which is internal).
+/// <para>
+/// When no principal has been seeded (e.g. a background delivery scope such as the integration-event pump or
+/// the outbox, which run consumers off any request boundary), this instance behaves as an <b>anonymous</b>
+/// caller — <see cref="IsAuthenticated"/> is <see langword="false"/>, <see cref="Roles"/> and the claim
+/// accessors are empty, and <see cref="HasClaim"/> returns <see langword="false"/> — so an authorization or
+/// feature-gate check <b>fails closed</b> (denies) rather than throwing. Only <see cref="UserId"/> still
+/// throws, because the contract is non-nullable and there is genuinely no id for an anonymous caller;
+/// authorization consults <see cref="IsAuthenticated"/> first, so it never reaches that path for an
+/// unauthenticated caller.
+/// </para>
 /// </remarks>
 public sealed class ClaimsPrincipalCurrentUser(ClaimsCurrentUserOptions options) : ICurrentUser {
+    private static readonly ClaimsPrincipal AnonymousPrincipal = new(new ClaimsIdentity());
+
     private ClaimsPrincipal? _principal;
     private ILookup<string, string>? _claims;
     private IReadOnlyList<string>? _roles;
 
-    private ClaimsPrincipal Principal =>
-        _principal ?? throw new InvalidOperationException(
-            "Current user has not been initialized. Seed it from the dispatch scope (capture the caller's " +
-            "ClaimsPrincipal into the DispatchScopeContext, or via UseElarionCurrentUser on an HTTP host) " +
-            "before accessing ICurrentUser.");
+    // When unseeded, expose an anonymous (unauthenticated, claim-less) principal so authorization and
+    // feature-gate targeting fail closed instead of crashing background delivery scopes that never seed a user.
+    private ClaimsPrincipal Principal => _principal ?? AnonymousPrincipal;
 
     /// <inheritdoc />
     public string UserId =>

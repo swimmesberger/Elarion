@@ -11,12 +11,16 @@ namespace Elarion.Generators;
 public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator {
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context) {
-        // A handler's generated pipeline depends on cross-file state: the effective [DecoratorList] can come
-        // from the handler, its [AppModule], or the assembly. So resolution must be re-derived whenever the
-        // compilation changes (correctness) — hence the Combine(CompilationProvider). Incrementality comes from
-        // two places instead: the module [DecoratorList] map is built ONCE per pass (not rescanned per handler,
-        // the old O(handlers x all-trees) cost), and the result is a value-equatable array so an edit that does
-        // not change any handler model does not re-emit.
+        // Discovery is split into two stages (ADR-0006). Stage one identifies handler CANDIDATES per node —
+        // concrete IHandler<,> implementations — and carries only their metadata names, so it is cached per
+        // syntax tree and an edit re-binds only the edited file (never the whole compilation, the old
+        // O(all-classes) per-keystroke cost). Stage two re-resolves each candidate from the CURRENT compilation
+        // via IAssemblySymbol.GetTypeByMetadataName (symbol-table lookups, no tree binding) and parses the full
+        // pipeline there. Stage two deliberately combines the compilation: a handler's effective pipeline
+        // depends on cross-file state — the [DecoratorList] on a module/assembly/pipeline-attribute class and
+        // [Require*]/[FeatureGate] on base classes — which must stay fresh rather than cached against a stale
+        // tree. Its cost is bounded by the number of actual handlers, and its value-equatable output keeps
+        // emission cached when no handler model changed.
         // The set of variant contracts ([FeatureVariant<TContract>] targets) in the compilation. A handler whose
         // constructor depends on one is registered behind the async-resolving proxy, so the contract's variant can
         // be awaited per user. Collected via the attribute syntax provider so it stays incremental.
@@ -29,14 +33,24 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
             .Select(static (groups, _) => FlattenSortedDistinct(groups))
             .WithTrackingName("VariantContracts");
 
-        var handlerProvider = context.SyntaxProvider
+        var handlerCandidates = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
-                transform: static (ctx, _) => (ClassDeclarationSyntax)ctx.Node)
+                transform: static (ctx, ct) => IdentifyHandlerCandidate(ctx, ct))
+            .Where(static candidate => candidate is not null)
+            .WithTrackingName("HandlerCandidateNodes")
             .Collect()
-            .Combine(context.CompilationProvider)
+            .Select(static (candidates, _) => FlattenSortedDistinctCandidates(candidates))
+            .WithTrackingName("HandlerCandidates");
+
+        var modules = ModuleProviders.CollectModules(context);
+
+        var handlerProvider = handlerCandidates
+            .Combine(modules)
             .Combine(variantContracts)
-            .Select(static (source, ct) => ResolveHandlers(source.Left.Left, source.Left.Right, source.Right, ct))
+            .Combine(context.CompilationProvider)
+            .Select(static (source, ct) =>
+                ResolveHandlers(source.Left.Left.Left, source.Left.Left.Right, source.Left.Right, source.Right, ct))
             .WithTrackingName("Handlers");
 
         context.RegisterSourceOutput(handlerProvider, static (spc, handlers) => {
@@ -45,7 +59,7 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
         });
 
         var moduleAggregationProvider = handlerProvider
-            .Combine(ModuleProviders.CollectModules(context))
+            .Combine(modules)
             .Combine(ModuleProviders.HasTrigger(context, TriggerAttributeMetadataName))
             .WithTrackingName("HandlerModuleAggregation");
 

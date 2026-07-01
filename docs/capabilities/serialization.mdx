@@ -101,6 +101,16 @@ builder.Services.ConfigureElarionJson(o => {
 `ElarionJsonOptions` also exposes `PropertyNameCaseInsensitive`, `DefaultIgnoreCondition`, a
 `PostConfigure` escape hatch (converters, a custom encoder), and `EnableReflectionFallback` (below).
 
+Resolution is first-match-wins, and transport envelope contexts insert themselves at the front of
+`TypeInfoResolvers` when they register — so an entry the host adds there can never beat them for a type
+they also cover. To override how such a type serializes, use `OverrideTypeInfoResolvers`, which is
+composed ahead of every contributed resolver:
+
+```csharp
+builder.Services.ConfigureElarionJson(o =>
+    o.OverrideTypeInfoResolvers.Add(MyOverridesJsonContext.Default));
+```
+
 Schema export reads the same accessor, so the exported JSON-RPC schema matches exactly what the server
 serializes.
 

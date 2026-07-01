@@ -3,6 +3,7 @@ using Elarion.Settings;
 using Elarion.Settings.EntityFrameworkCore;
 using Elarion.Settings.InProcess;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Elarion.Tests.Settings;
@@ -23,7 +24,8 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         SettingsIntegrationDbContext context,
         out InProcessSettingsChangeSource changeSource) {
         changeSource = new InProcessSettingsChangeSource();
-        return new EfCoreSettingsStore<SettingsIntegrationDbContext>(context, changeSource, TimeProvider.System);
+        return new EfCoreSettingsStore<SettingsIntegrationDbContext>(context, changeSource, TimeProvider.System,
+            NullLogger<EfCoreSettingsStore<SettingsIntegrationDbContext>>.Instance);
     }
 
     [Fact]
@@ -199,6 +201,58 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         await store.SetAsync(SettingsScope.Global, key, "v", cancellationToken: Ct);
 
         token.HasChanged.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Set_Unconditional_UpdatesValueAndIncrementsVersion() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context, out _);
+        var key = UniqueKey();
+        await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+
+        var second = await store.SetAsync(SettingsScope.Global, key, "v2", cancellationToken: Ct);
+
+        second.IsSuccess.Should().BeTrue();
+        second.Version.Should().Be(2);
+        (await store.GetAsync(SettingsScope.Global, key, Ct)).Should().Be("v2");
+    }
+
+    [Fact]
+    public async Task ConcurrentUnconditionalUpdate_BothSucceed_NoConflict() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var contextA = fixture.CreateContext();
+        await using var contextB = fixture.CreateContext();
+        var storeA = CreateStore(contextA, out _);
+        var storeB = CreateStore(contextB, out _);
+        var key = UniqueKey();
+        await storeA.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+
+        // Both writers observe version 1 and write unconditionally (expectedVersion null); last-write-wins means
+        // neither conflicts — the previous behaviour would have conflicted the second on the version guard.
+        var first = await storeA.SetAsync(SettingsScope.Global, key, "a", cancellationToken: Ct);
+        var second = await storeB.SetAsync(SettingsScope.Global, key, "b", cancellationToken: Ct);
+
+        first.IsSuccess.Should().BeTrue();
+        second.IsSuccess.Should().BeTrue();
+        // The version increments in place, so the second write lands version 3 on top of the first's version 2.
+        second.Version.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Set_InsideAmbientTransaction_DoesNotPublishChange() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context, out var changeSource);
+        var key = UniqueKey();
+        var token = changeSource.Watch(SettingsScope.Global, "app");
+
+        await using var transaction = await context.Database.BeginTransactionAsync(Ct);
+        await store.SetAsync(SettingsScope.Global, key, "v", cancellationToken: Ct);
+        await transaction.CommitAsync(Ct);
+
+        // A transactional write skips the immediate notification so a rollback cannot fire a phantom change.
+        token.HasChanged.Should().BeFalse();
     }
 
     [Fact]

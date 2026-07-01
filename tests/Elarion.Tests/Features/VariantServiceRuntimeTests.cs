@@ -31,6 +31,48 @@ public sealed class VariantServiceRuntimeTests {
     }
 
     [Fact]
+    public async Task AsyncResolvedHandler_ConcurrentFirstCalls_BuildInnerExactlyOnce() {
+        var ct = TestContext.Current.CancellationToken;
+        var builds = 0;
+        var gate = new TaskCompletionSource();
+        var inner = new CountingHandler();
+        var proxy = new AsyncResolvedHandler<ForecastCommand, Result<string>>(
+            scope: null!,
+            build: async (_, c) => {
+                Interlocked.Increment(ref builds);
+                // Hold both concurrent builders inside build() so they overlap on the first call.
+                await gate.Task.WaitAsync(c);
+                return inner;
+            });
+
+        var t1 = proxy.HandleAsync(new ForecastCommand(), ct).AsTask();
+        var t2 = proxy.HandleAsync(new ForecastCommand(), ct).AsTask();
+        gate.SetResult();
+        await Task.WhenAll(t1, t2);
+
+        builds.Should().Be(1);
+        inner.Calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Cache_ConcurrentWarm_ResolvesVariantExactlyOnce() {
+        var ct = TestContext.Current.CancellationToken;
+        var services = new ServiceCollection();
+        var provider = new CountingVariantProvider();
+        services.AddSingleton<IVariantServiceProvider<IAlgorithm>>(provider);
+        using var sp = services.BuildServiceProvider();
+        var cache = new VariantResolutionCache();
+
+        var tasks = Enumerable.Range(0, 16)
+            .Select(_ => cache.WarmAsync<IAlgorithm>(sp, ct).AsTask())
+            .ToArray();
+        await Task.WhenAll(tasks);
+
+        provider.Resolutions.Should().Be(1);
+        cache.Get<IAlgorithm>().Should().BeSameAs(provider.Instance);
+    }
+
+    [Fact]
     public async Task Provider_ResolvesAllocatedVariant_AndFallsBackToDefault() {
         var ct = TestContext.Current.CancellationToken;
 
@@ -113,6 +155,23 @@ public sealed class VariantServiceRuntimeTests {
     private sealed class RunForecast(IAlgorithm algorithm) : IHandler<ForecastCommand, Result<string>> {
         public ValueTask<Result<string>> HandleAsync(ForecastCommand request, CancellationToken ct) =>
             new(Result<string>.Success(algorithm.Name));
+    }
+
+    private sealed class CountingVariantProvider : IVariantServiceProvider<IAlgorithm> {
+        private int _resolutions;
+
+        public IAlgorithm Instance { get; } = new NeuralAlgorithm();
+
+        public int Resolutions => Volatile.Read(ref _resolutions);
+
+        public async ValueTask<IAlgorithm> GetAsync(CancellationToken ct = default) {
+            Interlocked.Increment(ref _resolutions);
+            await Task.Yield();
+            return Instance;
+        }
+
+        public async ValueTask<IAlgorithm?> GetOrDefaultAsync(CancellationToken ct = default) =>
+            await GetAsync(ct);
     }
 
     private sealed class CountingHandler : IHandler<ForecastCommand, Result<string>> {
