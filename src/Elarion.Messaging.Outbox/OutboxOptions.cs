@@ -34,6 +34,20 @@ public sealed class OutboxOptions
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
+    /// The base delay before a failed message becomes visible for its next attempt. Defaults to 5 seconds.
+    /// </summary>
+    /// <remarks>
+    /// A failed message is made invisible for an exponentially growing delay derived from its attempt count
+    /// (<c>BaseRetryDelay × 2^(attempts-1)</c>, capped at <see cref="MaxRetryDelay"/>), so a poison message no longer
+    /// re-enters the front of every claim batch at full poll frequency — head-of-line blocking is avoided and retries
+    /// back off. Set to <see cref="TimeSpan.Zero"/> to retry immediately on the next poll (the pre-backoff behavior).
+    /// </remarks>
+    public TimeSpan BaseRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>The ceiling on the exponential retry backoff computed from <see cref="BaseRetryDelay"/>. Defaults to 1 hour.</summary>
+    public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// How long delivered messages are retained before the worker purges them, or <c>null</c> to keep them forever.
     /// Defaults to 7 days.
     /// </summary>
