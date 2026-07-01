@@ -55,6 +55,9 @@ public sealed partial class HandlerRegistrationGenerator {
         if (handler.CacheInvalidation is not null)
             AppendCacheInvalidationPolicy(sb, handler);
 
+        if (handler.Idempotent is not null)
+            AppendIdempotencyPolicy(sb, handler);
+
         sb.AppendLine("}");
 
         return sb.ToString();
@@ -153,6 +156,10 @@ public sealed partial class HandlerRegistrationGenerator {
 
         AppendCacheDecorator(sb, handler);
         AppendPipelineDecorators(sb, handler.Decorators);
+        // Idempotency owns the unit-of-work transaction for [Idempotent] commands, so it wraps the handler and
+        // the inner custom decorators — inside resilience/cache-invalidation/feature-gate/authorization (a
+        // denied/gated/replayed request never claims a key) and outside the handler's own work.
+        AppendIdempotencyDecorator(sb, handler);
         AppendResilienceDecorator(sb, handler);
         AppendCacheInvalidationDecorator(sb, handler);
         // The feature gate sits just inside authorization: a disabled feature never touches caching, the pipeline,
@@ -227,6 +234,80 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Resilience.IResiliencePipelineRunner>(),");
         sb.AppendLine($"                    new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference {{ Name = {FormatStringLiteral(handler.ResiliencePolicyName)} }});");
+    }
+
+    private static void AppendIdempotencyDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (handler.Idempotent is null)
+            return;
+
+        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Idempotency.IdempotencyDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Pipeline.IUnitOfWork>(),");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>(),");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyKeyAccessor>(),");
+        sb.AppendLine($"                    new {handler.HandlerName}IdempotencyPolicy(),");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Identity.ICurrentUser>(),");
+        sb.AppendLine("                    sp.GetRequiredService<global::System.Text.Json.JsonSerializerOptions>());");
+    }
+
+    private static void AppendIdempotencyPolicy(StringBuilder sb, HandlerInfo handler) {
+        var info = handler.Idempotent!;
+
+        sb.AppendLine();
+        sb.AppendLine($"    private sealed class {handler.HandlerName}IdempotencyPolicy");
+        sb.AppendLine($"        : global::Elarion.Abstractions.Idempotency.IIdempotencyPayloadPolicy<{handler.RequestFqn}, {handler.ResponseFqn}>");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        public global::Elarion.Abstractions.Idempotency.IdempotencyScope Scope => (global::Elarion.Abstractions.Idempotency.IdempotencyScope){info.ScopeValue};");
+        sb.AppendLine($"        public bool KeyRequired => {(info.KeyRequired ? "true" : "false")};");
+        sb.AppendLine($"        public bool Fingerprint => {(info.Fingerprint ? "true" : "false")};");
+        sb.AppendLine($"        public global::Elarion.Abstractions.Idempotency.IdempotencyConflictBehavior ConflictBehavior => (global::Elarion.Abstractions.Idempotency.IdempotencyConflictBehavior){info.ConflictBehaviorValue};");
+        sb.AppendLine($"        public global::Elarion.Abstractions.Idempotency.IdempotencyFailureStorage StoreFailures => (global::Elarion.Abstractions.Idempotency.IdempotencyFailureStorage){info.StoreFailuresValue};");
+        sb.AppendLine($"        public global::System.TimeSpan Retention => global::System.TimeSpan.FromHours({info.RetentionHours});");
+        sb.AppendLine();
+        AppendIdempotencyPayloadMethods(sb, handler, info);
+        sb.AppendLine("    }");
+    }
+
+    private static void AppendIdempotencyPayloadMethods(StringBuilder sb, HandlerInfo handler, IdempotentInfo info) {
+        if (info.ResultValueFqn is not null) {
+            // Result<T>: store the success value, or (when storing failures) the AppError, so replay reconstructs
+            // the exact Result<T>.
+            var storedType = $"global::Elarion.Abstractions.Idempotency.StoredResult<{info.ResultValueFqn}>";
+            sb.AppendLine($"        public string Serialize({handler.ResponseFqn} response, global::System.Text.Json.JsonSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var stored = response.IsSuccess");
+            sb.AppendLine($"                ? new {storedType} {{ Ok = true, Value = response.Value }}");
+            sb.AppendLine($"                : new {storedType} {{ Ok = false, Error = response.Error }};");
+            sb.AppendLine("            return global::System.Text.Json.JsonSerializer.Serialize(stored, options);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine($"        public {handler.ResponseFqn} Deserialize(string payload, global::System.Text.Json.JsonSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize<{storedType}>(payload, options)!;");
+            sb.AppendLine("            return stored.Ok");
+            sb.AppendLine($"                ? global::Elarion.Abstractions.Result<{info.ResultValueFqn}>.Success(stored.Value!)");
+            sb.AppendLine($"                : global::Elarion.Abstractions.Result<{info.ResultValueFqn}>.Failure(stored.Error ?? global::Elarion.Abstractions.AppError.InternalError);");
+            sb.AppendLine("        }");
+            return;
+        }
+
+        // Non-generic Result response: no value, only success/failure.
+        const string nonGenericStored = "global::Elarion.Abstractions.Idempotency.StoredResult";
+        sb.AppendLine($"        public string Serialize({handler.ResponseFqn} response, global::System.Text.Json.JsonSerializerOptions options)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var stored = response.IsSuccess");
+        sb.AppendLine($"                ? new {nonGenericStored} {{ Ok = true }}");
+        sb.AppendLine($"                : new {nonGenericStored} {{ Ok = false, Error = response.Error }};");
+        sb.AppendLine("            return global::System.Text.Json.JsonSerializer.Serialize(stored, options);");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine($"        public {handler.ResponseFqn} Deserialize(string payload, global::System.Text.Json.JsonSerializerOptions options)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize<{nonGenericStored}>(payload, options)!;");
+        sb.AppendLine("            return stored.Ok");
+        sb.AppendLine("                ? global::Elarion.Abstractions.Result.Success()");
+        sb.AppendLine("                : global::Elarion.Abstractions.Result.Failure(stored.Error ?? global::Elarion.Abstractions.AppError.InternalError);");
+        sb.AppendLine("        }");
     }
 
     private static void AppendResourceBindingsField(StringBuilder sb, HandlerInfo handler) {

@@ -1,9 +1,5 @@
-using System;
 using Elarion.Abstractions;
-using Elarion.Abstractions.Messaging;
-using Elarion.Abstractions.Pipeline;
 using FluentValidation;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Billing.Application.Decorators;
@@ -42,26 +38,7 @@ public sealed class ValidationDecorator<TRequest, TResponse>(
     }
 }
 
-public sealed class TransactionDecorator<TRequest, TResponse>(
-    IHandler<TRequest, TResponse> inner,
-    DbContext db
-) : IHandler<TRequest, TResponse> {
-    // Attach only where a new unit of work is needed — commands and integration-event handlers. The generator
-    // evaluates this once per handler at pipeline-build time, so queries and domain-event handlers never get it.
-    public static bool AppliesTo(HandlerMetadata handler) =>
-        handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
-        handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent));
-
-    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var response = await inner.HandleAsync(request, ct);
-
-        if (response is IResultLike { IsSuccess: true }) {
-            await transaction.CommitAsync(ct);
-        } else {
-            await transaction.RollbackAsync(ct);
-        }
-
-        return response;
-    }
-}
+// The transaction/unit-of-work decorator is now framework-owned
+// (Elarion.Abstractions.Pipeline.TransactionDecorator, over IUnitOfWork) so features like idempotency compose
+// on the same boundary. The sample references it directly in its [DecoratorList] and registers the EF unit of
+// work with AddElarionUnitOfWork<BillingDbContext>().

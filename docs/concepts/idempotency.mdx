@@ -1,0 +1,131 @@
+---
+title: Idempotency
+description: Declarative, transport-neutral, exactly-once command replay — [Idempotent] over a single-transaction, unique-constrained key store, with the key committed atomically with the operation.
+---
+
+Idempotency in Elarion makes a **command handler** safe to retry: a client that times out and re-sends, or a
+duplicate that arrives concurrently, executes the operation **at most once** and gets back the first request's
+result. You annotate the handler with `[Idempotent]`; a generated decorator owns a single database transaction
+in which it writes the idempotency key **atomically with the handler's business writes**, lets a unique
+constraint reject a duplicate, and replays the stored result — under every transport identically.
+
+It is the same declarative shape as [authorization](authorization.mdx) and [feature flags](feature-flags.mdx):
+a class-level attribute, a generated decorator, a seam-in-Abstractions / impl-in-package split.
+
+## The core guarantee
+
+The key is stored and checked **atomically with the operation itself** — the safe pattern. A check-then-act
+approach races: two requests with the same key can both pass the check and both execute. Instead, the decorator
+inserts the key **in the same transaction** as the business writes and relies on a database **unique
+constraint** to reject the duplicate:
+
+```text
+BEGIN
+  INSERT key  ── unique (scope, owner, key), ON CONFLICT DO NOTHING
+     ├─ inserted → run handler (business writes share the tx) → mark completed → COMMIT   (atomic)
+     └─ conflict → key already completed → replay the stored result
+crash before COMMIT → nothing persists → the key is retryable
+```
+
+Because the key row and the business rows commit or roll back together, there is no window where one lands
+without the other, and — since the pending marker is never committed on its own — a crash leaves nothing behind
+and **needs no reaper**. This is the model the author of Stripe's reference implementation recommends whenever a
+handler only mutates local (ACID) database state.
+
+## Usage
+
+```csharp
+[Idempotent]
+public sealed class CreatePaymentHandler
+    : IHandler<CreatePaymentCommand, Result<PaymentResponse>> { … }
+```
+
+Attribute options (all optional):
+
+| Option | Default | Meaning |
+|---|---|---|
+| `RetentionHours` | `24` | How long a completed key stays replayable before purge. |
+| `KeyRequired` | `true` | Reject a request with no key (`400`), rather than run without idempotency. |
+| `Scope` | `CurrentUser` | Key namespace — per authenticated user, or `Global`. |
+| `Fingerprint` | `true` | Store a request hash and reject reusing the key with a **different** body (`422`). |
+| `ConflictBehavior` | `Conflict` | A concurrent in-flight duplicate fails fast with `409`, or `WaitThenReplay`. |
+| `StoreFailures` | `None` | Also store & replay **definitive** failures (`Definitive`), via a savepoint. |
+
+## Behavior and status codes
+
+The decorator short-circuits with `AppError`s that map to the IETF `Idempotency-Key` header draft and Stripe:
+
+- **Missing key** (when `KeyRequired`) → `400`.
+- **Concurrent in-flight duplicate** → `409` (Conflict mode, the industry default) — the client retries shortly
+  and then replays. `WaitThenReplay` blocks on the key lock and replays instead.
+- **Same key, different request body** → `422` (fingerprint mismatch).
+- **Retried after completion** → the stored result is replayed, without re-running the handler.
+
+**Success-only by default.** A failed result rolls back the transaction — discarding the key — so the same key
+stays retryable (a transient failure can succeed on retry). This matches the modern consensus (Stripe v2, AWS
+Powertools). Set `StoreFailures = Definitive` to also store and replay *definitive* failures (`Validation`,
+`BusinessRule`, `NotFound`, `Forbidden`) via a savepoint that discards the business writes while keeping the key
+row — one transaction, no atomicity loss; transient failures stay retryable.
+
+## Transport-neutral — one layer, every transport
+
+Idempotency is a pipeline decorator over `IHandler<,>`, the one code path every transport dispatches into, so
+HTTP idempotency keys and the messaging **inbox pattern** are the *same* mechanism, differing only in where the
+key comes from. The key is captured at the boundary into the dispatch-scope rail (like the current user):
+
+- **HTTP** — the `Idempotency-Key` header (or legacy `X-Idempotency-Key`), via `app.UseElarionIdempotencyKey()`.
+- **JSON-RPC / MCP** — `params._meta["dev.wimmesberger.elarion/idempotencyKey"]` (a per-call key, batch-correct);
+  the HTTP header is accepted as single-call sugar.
+- **In-band** — a request implementing `IIdempotentRequest` carries its own key (AIP-155 style) — the natural
+  source for event consumers.
+
+## Multi-node concurrency — no distributed lock
+
+When two application nodes process the same key at once, they contend on the **same PostgreSQL row**, so the
+database itself is the cross-node serialization point — no Redis/Redlock. The unique constraint on
+`(scope, owner, key)` makes one INSERT win; the other blocks on the uncommitted index entry and then either
+replays (the winner committed) or proceeds (the winner rolled back). This is exactly how MassTransit,
+NServiceBus, Stripe, and AWS handle it. A short `lock_timeout` (Npgsql) turns the wait into a fast `409` for the
+`Conflict` behavior.
+
+## Wiring
+
+Core ships an in-memory store for dev/test; the durable, atomic guarantee comes from the EF Core store:
+
+```csharp
+// Register the durable store, the EF unit of work, and the retention purge worker.
+builder.Services.AddElarionIdempotencyEntityFrameworkCore<AppDbContext>();
+
+// Map the table (or call ApplyElarionIdempotencyKeys in OnModelCreating) and own the migration.
+[GenerateDbSets]
+[GenerateElarionIdempotencyKeys(SnakeCase = true)]
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+
+// Capture the HTTP header into the request scope (after authentication).
+app.UseElarionIdempotencyKey();
+```
+
+The framework transaction decorator (`Elarion.Abstractions.Pipeline.TransactionDecorator`, over `IUnitOfWork`)
+handles the unit-of-work boundary for non-idempotent commands and composes on the same seam; register it with
+`AddElarionUnitOfWork<AppDbContext>()`.
+
+## Side effects and cooperative recipients
+
+The single-transaction model protects **database** state. A non-rollback-able foreign side effect (charging a
+card, sending mail) does not belong inline — record it as an **integration event in the outbox** in the same
+transaction as the key, and let the outbox deliver it after commit. The outbox is at-least-once, so
+**end-to-end exactly-once requires a cooperative recipient service** that accepts an idempotency key and
+deduplicates. Stamp each outbox message with a stable key derived from the event id and pass it to the provider.
+For email, SendGrid does **not** accept idempotency keys, but newer providers — **Resend, Brevo, MailPace,
+Bird** — do; for payments use a keyed API (Stripe). A duplicate email is usually tolerable; a duplicate charge is
+not.
+
+## Diagnostics
+
+- `ELIDEM001` (error) — an `[Idempotent]` handler whose response is not `Result<T>`/`Result` (the decorator
+  can't synthesize the `400`/`409`/`422`/replay outcomes).
+- `ELIDEM002` (warning) — `[Idempotent]` on a non-`ICommand` handler (no effect).
+- `ELIDEM003` (error) — non-positive `RetentionHours`.
+- `ELIDEM004` (warning) — a handler that is both `[Idempotent]` and `[Cacheable]`.

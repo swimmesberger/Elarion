@@ -14,6 +14,7 @@ using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
 using Elarion.Authorization;
 using Elarion.Caching;
+using Elarion.EntityFrameworkCore.UnitOfWork;
 using Elarion.JsonRpc;
 using Elarion.Messaging.Outbox;
 using Elarion.Resilience;
@@ -32,8 +33,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 // *registration* is the host's job — the connection string is injected by the Aspire AppHost ("billing").
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
-// The transaction decorator depends on the base DbContext, so expose BillingDbContext under it too.
-builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+// The framework transaction decorator commits over the EF Core unit of work on the billing context; features
+// like idempotency compose on the same boundary.
+builder.Services.AddElarionUnitOfWork<BillingDbContext>();
 
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
 builder.Services.AddElarionOutbox<BillingDbContext>();

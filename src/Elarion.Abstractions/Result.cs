@@ -14,7 +14,7 @@ namespace Elarion.Abstractions;
 /// return AppError.NotFound($"Project {query.Id} not found");
 /// </code>
 /// </example>
-public readonly struct Result<T> : IResultLike, IResultFailureFactory<Result<T>> {
+public readonly struct Result<T> : IResultLike, IResultError, IResultFailureFactory<Result<T>> {
     /// <inheritdoc />
     public bool IsSuccess { get; }
 

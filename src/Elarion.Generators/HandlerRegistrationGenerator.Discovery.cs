@@ -114,6 +114,9 @@ public sealed partial class HandlerRegistrationGenerator {
 
         var hasFeatureGates = ParseFeatureGates(classDecl, classSymbol, responseType, compilation, diagnostics);
 
+        var idempotent = ParseIdempotent(
+            classDecl, classSymbol, requestType, responseType, compilation, fmt, cacheable, diagnostics);
+
         var variantContractDeps = GetVariantContractDeps(classSymbol, variantContracts, fmt);
 
         return new HandlerInfo(
@@ -130,6 +133,7 @@ public sealed partial class HandlerRegistrationGenerator {
             requireAuthenticatedByDefault,
             resourceBindings,
             hasFeatureGates,
+            idempotent,
             variantContractDeps,
             diagnostics.ToImmutable());
     }

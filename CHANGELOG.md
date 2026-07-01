@@ -8,6 +8,24 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Idempotency (`[Idempotent]`).** A transport-neutral, declarative way to make a command handler safe to
+  retry: a generated decorator owns a unit-of-work transaction, writes the idempotency key **atomically with
+  the handler's business writes**, lets a database unique constraint reject duplicates, and replays the stored
+  `Result<T>`. Single-transaction and success-only by default (a failure rolls back → the key stays retryable;
+  opt-in `StoreFailures = Definitive` stores definitive failures via a savepoint); a concurrent in-flight
+  duplicate fast-fails with `409` (Postgres `lock_timeout`, configurable `WaitThenReplay`); reuse with a
+  different body is `422`; missing key is `400`. Concurrent duplicates serialize across nodes on the database
+  unique constraint — **no external distributed lock**. The `[Idempotent]` attribute, the
+  `IIdempotencyStore`/`IIdempotencyKeyAccessor`/`IUnitOfWork` seams, the `IdempotencyDecorator`, and a
+  framework-owned `TransactionDecorator` live in `Elarion.Abstractions`; the in-memory default store and
+  `AddElarionIdempotency` in `Elarion`; the durable EF Core store, `[GenerateElarionIdempotencyKeys]`
+  generator, and retention purge in the new **`Elarion.Idempotency.EntityFrameworkCore`**; the EF unit of work
+  in the new **`Elarion.EntityFrameworkCore.UnitOfWork`**; and the `Idempotency-Key` HTTP header capture
+  (`UseElarionIdempotencyKey`) in `Elarion.AspNetCore`. New diagnostics `ELIDEM001`–`ELIDEM004` and
+  `ELIDEMEF001`. See [ADR-0020](docs/decisions/0020-idempotency.md) and
+  [the idempotency concept doc](docs/concepts/idempotency.mdx).
+
 ### Changed
 - **The module bootstrapper is auto-generated as the fixed-name `ElarionBootstrapper` (breaking).**
   `[GenerateModuleBootstrapper]` becomes an **assembly** attribute (`[assembly: GenerateModuleBootstrapper]`)
