@@ -235,3 +235,22 @@ Identity-model generation for `[GenerateElarionIdentity]`. See [Identity](/docs/
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELIDN001 | Error | A context is annotated with `[GenerateElarionIdentity]` but not `[GenerateDbSets]`, so the Identity `DbSet`s and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionIdentity]`. |
+
+## ELIDEM — Idempotency
+
+Idempotency-decorator attachment for `[Idempotent]`. See [Idempotency](/docs/concepts/idempotency).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELIDEM001 | Error | A handler declares `[Idempotent]` but its response type does not implement `IResultFailureFactory<T>`, so the idempotency decorator cannot synthesize the 400/409/422/replay outcomes and would be silently skipped. | Return `Result<T>` or `Result` from the handler so the idempotency decorator can short-circuit. |
+| ELIDEM002 | Warning | A handler declares `[Idempotent]` but its request type is not an `ICommand`; idempotency only applies to state-changing commands, so the attribute has no effect. | Make the request implement `ICommand`, or remove `[Idempotent]`. |
+| ELIDEM003 | Error | A handler's `[Idempotent]` declares a non-positive `RetentionHours`. | Set a positive `RetentionHours` on `[Idempotent]`. |
+| ELIDEM004 | Warning | A handler carries both `[Idempotent]` and `[Cacheable]`; caching is for queries, idempotency for commands. | Apply only one of `[Idempotent]` or `[Cacheable]` to the handler. |
+
+## ELIDEMEF — Idempotency keys (EF Core)
+
+Idempotency-keys generation for `[GenerateElarionIdempotencyKeys]`. See [Idempotency](/docs/concepts/idempotency).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELIDEMEF001 | Error | A context is annotated with `[GenerateElarionIdempotencyKeys]` but not `[GenerateDbSets]`, so the idempotency-keys `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionIdempotencyKeys]`. |

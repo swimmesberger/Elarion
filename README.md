@@ -79,6 +79,9 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
   disabled feature is indistinguishable from one that doesn't exist (the name is never leaked).
   `[FeatureVariant]` swaps a `[Service]` implementation per user behind a flag. Both work identically
   under JSON-RPC, MCP, and HTTP, against any [OpenFeature](https://openfeature.dev) provider.
+- **Exactly-once command handlers** — mark a handler `[Idempotent]` and the idempotency key commits
+  atomically with the business writes, a retried request replays the stored result, a concurrent
+  duplicate returns **409**, and there is no distributed lock.
 - **In-process scheduling** — source-generated scheduled jobs with explicit overlap, misfire, and
   resilience policies.
 - **Observable by default** — JSON-RPC, scheduling, caching, and resilience emit
@@ -124,6 +127,13 @@ JSON-RPC endpoint end to end.
 | [`Elarion.AspNetCore.SchemaGeneration`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.SchemaGeneration) | MSBuild package that exports `rpc-schema.json` during `dotnet build`. |
 | [`Elarion.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore) | Marker attributes for generated `DbSet`s and entity inclusion. Bundles the EF Core source generator (`DbSet` properties, entity configuration, keyset pagination). |
 | [`Elarion.EntityFrameworkCore.Identity`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore.Identity) | The web-free ASP.NET Core Identity *model*: `[GenerateElarionIdentity]` + `ApplyElarionIdentity` compose a snake_case Identity model onto a plain `DbContext` (no ASP.NET `FrameworkReference`). Bundles its model generator. |
+| [`Elarion.AspNetCore.Identity`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.AspNetCore.Identity) | Optional ASP.NET Core Identity host wiring: `AddElarionIdentity<…>` (`AddIdentity` + EF stores), the Identity `ICurrentUser` claim mapping, and the transport-neutral authorizer. |
+| [`Elarion.EntityFrameworkCore.UnitOfWork`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.EntityFrameworkCore.UnitOfWork) | Framework-owned EF transaction / unit-of-work boundary: `EfUnitOfWork<TDbContext>` over the EF-free `IUnitOfWork` seam (PostgreSQL `SET LOCAL lock_timeout` + savepoints), `AddElarionUnitOfWork<TDbContext>()`. |
+| [`Elarion.Idempotency.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Idempotency.EntityFrameworkCore) | Durable exactly-once key store: `EfCoreIdempotencyStore<TDbContext>` (`INSERT … ON CONFLICT DO NOTHING` inside the caller's transaction, 409 on `lock_timeout`, success-only replay) plus a retention purge worker, `AddElarionIdempotencyEntityFrameworkCore<TDbContext>()`. |
+| [`Elarion.Authorization.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Authorization.EntityFrameworkCore) | Data-level authorization grants backend: a `ResourceGrant` table (user/role shares), `IResourceGrantStore`, and the grants-backed `IResourceAuthorizer`. |
+| [`Elarion.Settings`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Settings) | Runtime-changeable key/value settings: the swappable `ISettingsStore` sink (global and per-user scopes, in-process change notification) plus the AOT-clean `ISettingsManager` consumer. |
+| [`Elarion.Settings.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Settings.EntityFrameworkCore) | EF Core database backend for settings: a relational, provider-neutral `ISettingsStore` with optimistic concurrency. |
+| [`Elarion.Settings.Configuration`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Settings.Configuration) | `IConfiguration`/`IOptionsMonitor` adapter over the `Global` settings scope, with `IChangeToken` reload so config consumers pick up runtime changes. |
 | [`@swimmesberger/elarion-jsonrpc-client-generator`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, Zod schemas, and a fetch client. |
 
 ## Documentation

@@ -42,10 +42,57 @@ public sealed class ArchiveInvoice(
 }
 ```
 
+## Let the framework own the boundary
+
+Opening the transaction by hand is optional. `TransactionDecorator` wraps a handler in a single
+unit-of-work transaction that commits on a successful `Result` and rolls back otherwise — so the
+handler body writes as if the boundary were free:
+
+```csharp
+[Handler("billing.archive")]
+public sealed class ArchiveInvoice(
+    BillingDbContext db,
+    ISettingsManager settings,
+    IBlobStore blobs)
+    : IHandler<ArchiveInvoice.Command, Result<Unit>> {
+
+    // No BeginTransactionAsync / CommitAsync — the decorator owns the boundary.
+    public async ValueTask<Result<Unit>> HandleAsync(Command command, CancellationToken ct) {
+        db.Invoices.Remove(await db.Invoices.FindAsync([command.Id], ct));
+        await db.SaveChangesAsync(ct);
+        await settings.SetAsync($"invoice:{command.Id}:archived", "true", ct);
+        await blobs.SaveAsync(ArchiveRequest(command.Id), command.Pdf, ct);
+        return Result.Success();   // commit; a failed Result or throw rolls all three back
+    }
+}
+```
+
+The decorator attaches only where a new unit of work belongs — its compile-time
+`AppliesTo` predicate matches **commands and integration-event handlers** and skips queries,
+domain-event handlers (they run inline inside the publisher's transaction), and `[Idempotent]`
+handlers (they own the boundary themselves, so a handler is never wrapped in two nested
+transactions).
+
+Under the hood it composes the EF-free `IUnitOfWork`/`IUnitOfWorkScope` seam
+(`Elarion.Abstractions.Pipeline`). `EfUnitOfWork<TDbContext>` implements it over
+`DbContext.Database.BeginTransactionAsync`, with savepoint support and — on PostgreSQL — a
+`SET LOCAL lock_timeout` derived from `UnitOfWorkOptions.LockTimeout` (a blocked statement
+fast-fails instead of waiting; other providers ignore it). Wire it with
+`AddElarionUnitOfWork<TDbContext>()`, which replaces the default in-memory unit of work:
+
+```csharp
+services.AddElarionUnitOfWork<AppDbContext>();
+```
+
+[Idempotency](/docs/concepts/idempotency) composes this same `IUnitOfWork` boundary — the
+`[Idempotent]` handler claims its key inside the transaction it owns, which is why
+`TransactionDecorator` steps aside for it.
+
 ## What enlists, and how
 
 | Store / bus | Technique | Participates in your transaction |
 |---|---|---|
+| **Framework command boundary** (`TransactionDecorator` over `IUnitOfWork`) | `EfUnitOfWork<TDbContext>` opens the transaction; commits on success, rolls back otherwise | Yes — it *is* your transaction (commands & integration events) |
 | **Settings** (`EfCoreSettingsStore`) | `ExecuteUpdate`/`ExecuteDelete` + raw `INSERT` on the injected context | Yes |
 | **Resource grants** (`EfCoreResourceGrantStore`) | change tracker + `ExecuteDelete` | Yes |
 | **Outbox capture** (`EfCoreOutboxStore.Append`) | change tracker, committed with your data | Yes |

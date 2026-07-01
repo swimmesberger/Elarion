@@ -72,6 +72,16 @@ registration list.
     per-variant service injection over OpenFeature. Transport-neutral and provider-agnostic, a closed
     gate returns 404 so the feature name never leaks.
   </Card>
+  <Card title="Declarative authorization" href="/docs/concepts/authorization">
+    Gate any handler with `[RequirePermission]`/`[RequireRole]`/`[RequireClaim]`/`[RequirePolicy]` — the
+    generator auto-attaches the decorator, so the same rules apply under JSON-RPC, MCP, and HTTP.
+    Opt-in deny-by-default, and no ASP.NET coupling.
+  </Card>
+  <Card title="Resource & data-level access control" href="/docs/concepts/resource-authorization">
+    Point-check a resource with `[RequireResource]`, or filter whole result sets at the database with
+    `[ResourceFilter<TEntity>]` + `WhereAuthorized(spec, user)` — owner/tenant/role sharing compiled into
+    EF Core predicates, no in-memory post-filter.
+  </Card>
   <Card title="Blob storage" href="/docs/capabilities/blob-storage">
     Depend on provider-neutral blob contracts in application code and choose PostgreSQL-backed
     storage in the host.

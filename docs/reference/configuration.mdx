@@ -141,3 +141,18 @@ See [Schema generation](/docs/capabilities/transports/schema-generation).
 | `DefaultRolesWhenAuthenticated` | empty |
 
 See [Current user](/docs/capabilities/current-user).
+
+## Idempotency purge (options, not config)
+
+`AddElarionIdempotencyEntityFrameworkCore<TDbContext>(configure => …)` takes an optional
+`Action<IdempotencyPurgeOptions>` configured in code rather than `appsettings`. It tunes the background
+`IdempotencyKeyPurgeService` that reclaims expired keys:
+
+| Option | Default |
+| --- | --- |
+| `PollingInterval` | `1 hour` |
+
+Complementary to the per-handler `[Idempotent(RetentionHours = …)]`, which sets how long a completed key is
+retained; `PollingInterval` sets how often the worker sweeps out keys past that retention.
+
+See [Idempotency](/docs/concepts/idempotency).

@@ -127,6 +127,10 @@ Core ships an in-memory store for dev/test; the durable, atomic guarantee comes 
 // Register the durable store, the EF unit of work, and the retention purge worker.
 builder.Services.AddElarionIdempotencyEntityFrameworkCore<AppDbContext>();
 
+// Or tune the purge worker's cadence:
+builder.Services.AddElarionIdempotencyEntityFrameworkCore<AppDbContext>(
+    o => o.PollingInterval = TimeSpan.FromMinutes(30));
+
 // Map the table (or call ApplyElarionIdempotencyKeys in OnModelCreating) and own the migration.
 [GenerateDbSets]
 [GenerateElarionIdempotencyKeys(SnakeCase = true)]
@@ -138,9 +142,14 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
 app.UseElarionIdempotencyKey();
 ```
 
-The framework transaction decorator (`Elarion.Abstractions.Pipeline.TransactionDecorator`, over `IUnitOfWork`)
-handles the unit-of-work boundary for non-idempotent commands and composes on the same seam; register it with
-`AddElarionUnitOfWork<AppDbContext>()`.
+`PollingInterval` (default `1h`) is how often the retention purge worker sweeps expired keys; it is
+complementary to the per-handler `RetentionHours` (which decides *when* a completed key becomes expired).
+
+The `[Idempotent]` decorator and the framework transaction decorator
+(`Elarion.Abstractions.Pipeline.TransactionDecorator`, for non-idempotent commands) share the one unit-of-work
+boundary — the key row commits **atomically inside the same transaction** as the handler's business writes. See
+[Persistence & transactions](/docs/concepts/persistence-and-transactions) for how handlers, decorators, and
+events share that transaction.
 
 ## Side effects and cooperative recipients
 
@@ -160,3 +169,5 @@ not.
 - `ELIDEM002` (warning) — `[Idempotent]` on a non-`ICommand` handler (no effect).
 - `ELIDEM003` (error) — non-positive `RetentionHours`.
 - `ELIDEM004` (warning) — a handler that is both `[Idempotent]` and `[Cacheable]`.
+- `ELIDEMEF001` (error) — a context annotated with `[GenerateElarionIdempotencyKeys]` but not `[GenerateDbSets]`
+  (add `[GenerateDbSets]` so the keys `DbSet` and model-configuration seam are generated).
