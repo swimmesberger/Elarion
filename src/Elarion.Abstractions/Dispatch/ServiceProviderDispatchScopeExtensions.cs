@@ -25,10 +25,17 @@ public static class ServiceProviderDispatchScopeExtensions {
         var scope = parent.CreateAsyncScope();
         try {
             scope.ServiceProvider.SeedScope(context ?? DispatchScopeContext.Empty);
-        } catch {
+        } catch (Exception initializerFailure) {
             // An initializer threw before the caller could take ownership of the scope; dispose it so the
-            // scope (and any scoped services already resolved) does not leak.
-            scope.DisposeAsync().GetAwaiter().GetResult();
+            // scope (and any scoped services already resolved) does not leak. If disposal itself throws,
+            // keep the original initializer failure as the primary cause rather than letting the disposal
+            // exception mask it.
+            try {
+                scope.DisposeAsync().GetAwaiter().GetResult();
+            } catch (Exception disposalFailure) {
+                throw new AggregateException(initializerFailure, disposalFailure);
+            }
+
             throw;
         }
 
