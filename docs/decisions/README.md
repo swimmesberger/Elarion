@@ -42,3 +42,4 @@ designs that are not yet implemented.
 - [ADR-0019: Variant service injection (transparent, via an opt-in async-resolving handler proxy)](0019-variant-service-injection.md)
 - [ADR-0020: PostgreSQL `UNLOGGED` table is the recommended L2 distributed cache](0020-postgres-unlogged-l2-cache.md)
 - [ADR-0021: Idempotency (`[Idempotent]` over a single-transaction, unique-constrained key store)](0021-idempotency.md)
+- [ADR-0022: Inbox pattern for integration-event consumers (idempotent consumers) — Proposed](0022-inbox-idempotent-event-consumers.md)

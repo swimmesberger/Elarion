@@ -136,6 +136,8 @@ left as optional hardening:
 - The durable store targets PostgreSQL (the `ON CONFLICT` claim); other providers degrade to wait-then-replay.
 - Foreign side effects require the outbox plus a **cooperative recipient** for end-to-end exactly-once; this is
   documented, not silently guaranteed.
-- Follow-ups: the inbox for `[ConsumeEvent]` consumers, an outbox-derived external idempotency key, gRPC key
+- Follow-ups: the inbox for `[ConsumeEvent]` integration-event consumers (dedup at-least-once deliveries by the
+  event message id + consumer identity — the consuming half of outbox+inbox, designed in
+  [ADR-0022](0022-inbox-idempotent-event-consumers.md)), an outbox-derived external idempotency key, gRPC key
   capture, and purge hardening (a lease so only one instance purges, and batched deletes) — see *Key retention
   and cleanup*.
