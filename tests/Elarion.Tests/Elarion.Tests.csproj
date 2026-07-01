@@ -25,7 +25,10 @@
     <ProjectReference Include="../../src/Elarion.AspNetCore.Mcp/Elarion.AspNetCore.Mcp.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <ProjectReference Include="../../src/Elarion.Blobs/Elarion.Blobs.csproj" />
+    <ProjectReference Include="../../src/Elarion.Blobs.AspNetCore/Elarion.Blobs.AspNetCore.csproj" />
     <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql/Elarion.Blobs.PostgreSql.csproj" />
+    <ProjectReference Include="../../src/Elarion.Blobs.Tus/Elarion.Blobs.Tus.csproj" />
+    <ProjectReference Include="../../src/Elarion.Blobs.Tus.PostgreSql/Elarion.Blobs.Tus.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj" />
     <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />

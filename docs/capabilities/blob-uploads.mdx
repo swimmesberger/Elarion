@@ -1,0 +1,168 @@
+---
+title: Blob uploads
+description: Pre-upload files over an open, resumable transport (tus) or a minimal direct endpoint, reference them when creating an entity, and reclaim abandoned uploads automatically with a pending/commit/TTL lifecycle.
+---
+
+A common requirement is to **create an entity (say a `Contract`) and attach files to it**. Over a JSON
+transport (JSON-RPC) the entity and its files cannot travel together — JSON cannot carry binary. So the
+file is uploaded *separately*, the upload returns a reference, and the entity-creation call carries that
+reference. This is the same shape S3 apps use: **pre-upload, then reference**.
+
+The hard part is the orphan: if the user uploads a file but never finishes creating the entity (they
+cancel, or the browser closes), there is **no backend signal**. Elarion answers this the way S3
+lifecycle rules do — with **time plus an explicit promote**:
+
+<Steps>
+<Step>**Upload** produces a `Pending` blob with a time-to-live.</Step>
+<Step>**Commit** promotes it to `Committed` inside the same transaction that creates the referencing entity — atomic with the entity insert.</Step>
+<Step>**Garbage collection** deletes any `Pending` blob whose TTL elapses without a commit.</Step>
+</Steps>
+
+A referenced upload is kept forever; an abandoned one is reclaimed. The TTL *is* the missing signal.
+This builds directly on [blob storage](/docs/capabilities/blob-storage) and stays S3-free — the upload
+protocol lives only at the HTTP layer.
+
+## Package split
+
+| Package | Use it in | Contains |
+| --- | --- | --- |
+| `Elarion.Blobs` | Application | `BlobLifecycleState`, `IBlobLifecycle` (`CommitAsync`/`DeleteExpiredPendingAsync`), and the additive `BlobUploadRequest.InitialState`/`ExpiresAt`. |
+| `Elarion.Blobs.PostgreSql` | Infrastructure / host | The lifecycle on the PostgreSQL store, `state`/`expires_at` columns with a partial index, the `BlobGarbageCollector` sweeper, and `AddPostgreSqlBlobLifecycle`. |
+| `Elarion.Blobs.Tus` | Host | The tus 1.0 resumable transport (`MapElarionTus`, `AddElarionTus`) and the `ITusUploadStore` seam with an in-memory default. |
+| `Elarion.Blobs.Tus.PostgreSql` | Infrastructure / host | Durable PostgreSQL tus staging (`UseElarionTusStorage`, `AddElarionTusPostgreSql`) so in-progress uploads survive restarts. |
+| `Elarion.Blobs.AspNetCore` | Host | The minimal direct-upload endpoint (`MapElarionBlobUploads`, `AddElarionBlobUploads`). |
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.Blobs" Version="0.2.2" />
+  <PackageReference Include="Elarion.Blobs.PostgreSql" Version="0.2.2" />
+  <PackageReference Include="Elarion.Blobs.Tus" Version="0.2.2" />
+  <PackageReference Include="Elarion.Blobs.Tus.PostgreSql" Version="0.2.2" />
+</ItemGroup>
+```
+
+## The lifecycle
+
+The lifecycle is a small capability over `IBlobStore`, provider-neutral and S3-free. `BlobUploadRequest`
+gains `InitialState` (defaults to `Committed`, so a plain `SaveAsync` stays permanent) and `ExpiresAt`;
+upload transports save with `InitialState = Pending` and an `ExpiresAt`. `IBlobLifecycle` adds two
+operations:
+
+| Method | Purpose |
+| --- | --- |
+| `CommitAsync(blobRef, ct)` | Promotes a `Pending` blob to `Committed` and clears its expiry. Idempotent; participates in the **caller's** transaction (it mutates within the ambient transaction and persists on the caller's `SaveChangesAsync`), so the commit and the entity insert are atomic. Returns `false` when the blob no longer exists. |
+| `DeleteExpiredPendingAsync(olderThanUtc, batchSize, ct)` | The garbage-collection entry point. |
+
+Register the PostgreSQL lifecycle and its background collector:
+
+```csharp
+services.AddPostgreSqlBlobLifecycle<AppDbContext>(); // store + lifecycle + GC sweeper
+// in OnModelCreating:
+modelBuilder.UsePostgreSqlBlobStorage();
+```
+
+This adds `state` and `expires_at` columns plus a partial index over pending rows; create a migration
+(or `EnsureCreated` for throwaway databases) as for any model change.
+
+### Attaching a file to an entity
+
+```csharp
+public async ValueTask<Result<CreateContractResponse>> HandleAsync(CreateContract.Command request, CancellationToken ct) {
+    db.Contracts.Add(contract);
+
+    // Promote the pre-uploaded blob in the same transaction as the entity insert.
+    if (!await blobLifecycle.CommitAsync(new BlobRef { Value = request.AttachmentBlobRef }, ct)) {
+        return AppError.NotFound("attachment no longer available");
+    }
+
+    await db.SaveChangesAsync(ct); // commit + insert are atomic
+    return new CreateContractResponse(contract.Id);
+}
+```
+
+If the handler rolls back, the blob stays `Pending` and the collector reclaims it after
+`Ttl + SafetyMargin`. The collector deletes only rows still pending, so a commit that lands first wins
+the race and a never-committed upload is always reclaimed.
+
+<Callout type="info">
+The blob store is registered against your `DbContext` as a scoped service, so `CommitAsync` shares the
+same `DbContext` and transaction as your handler — no extra wiring. Wrap the handler in a transaction
+decorator (or rely on `SaveChangesAsync`'s implicit transaction) so the promote and the insert commit
+together.
+</Callout>
+
+## Upload transports
+
+The lifecycle is transport-neutral. Two open transports produce `Pending` blobs over it; both stay
+S3-free. Pick by client needs.
+
+### tus — the resumable standard
+
+[tus 1.0](https://tus.io) is the open, resumable upload protocol built by the Uppy authors and the
+basis of the IETF *Resumable Uploads* draft. It is **resumable, handles large files, and survives a
+browser close mid-upload**, and is supported natively by Uppy (`@uppy/tus`) and `tus-js-client`. This is
+the recommended transport for new frontends.
+
+```csharp
+services.AddElarionTus();              // in-memory staging by default
+app.MapElarionTus().RequireAuthorization();
+```
+
+`MapElarionTus` implements Creation, Core, Expiration, and Termination: `OPTIONS` advertises
+capabilities, `POST` creates an upload (baking the current user's id), `PATCH`/`HEAD` stream and resume,
+`DELETE` aborts. When an upload completes, the staged bytes are written as a `Pending` blob and its
+reference is returned in the `Elarion-Blob-Ref` response header (also available on `HEAD`) — the handle
+the client passes to entity creation.
+
+<Callout type="info">
+The default in-memory staging keeps in-progress uploads in process. For resumability **across restarts
+and instances**, add the durable PostgreSQL staging store — it persists staged bytes and reaps expired
+sessions (the analog of S3's *abort incomplete multipart upload*):
+
+```csharp
+services.AddElarionTus();
+services.AddElarionTusPostgreSql<AppDbContext>();
+modelBuilder.UseElarionTusStorage(); // in OnModelCreating
+```
+</Callout>
+
+Cross-origin frontends must expose the reference header via CORS:
+`Access-Control-Expose-Headers: Upload-Offset, Location, Upload-Expires, Elarion-Blob-Ref`. Behind a
+reverse proxy, enable `UseForwardedHeaders` so the `Location` header reflects the public scheme and host
+rather than the internal one.
+
+### Direct upload — minimal endpoint
+
+For FilePond's `process`/`revert` and plain `fetch`/`<form>` clients, a single "accept bytes, return a
+reference" endpoint is the smallest path. It is not a new protocol.
+
+```csharp
+services.AddElarionBlobUploads(o => o.MaxContentLength = 25 * 1024 * 1024);
+app.MapElarionBlobUploads().RequireAuthorization();
+```
+
+`POST` (multipart or raw body) writes a `Pending` blob and returns its id as `text/plain`; `DELETE /{id}`
+cancels an owner's pending upload. Both enforce authentication, the configured size cap, and an optional
+content-type allow-list, and namespace the stored name by owner.
+
+<Callout type="warn">
+Both transports bake the current user's id into the upload, so the host must register an `ICurrentUser`
+(via `AddElarionCurrentUser` or the optional Identity integration) and opt the route group into
+`.RequireAuthorization(...)`. Per-endpoint authorization is the host's job, as for all generated routes.
+</Callout>
+
+### Client adapters
+
+- **Uppy** — `@uppy/tus` against `MapElarionTus` (recommended), or `@uppy/aws-s3`'s
+  `getUploadParameters` / `@uppy/xhr-upload` against the direct endpoint.
+- **FilePond** — `server.process` → `POST` the direct endpoint (the response body is the file id);
+  `server.revert` → `DELETE /{id}`. FilePond's chunked mode is tus-derived but not identical, so its
+  resumable path needs a small client adapter.
+
+## Not S3 on the wire
+
+Elarion deliberately does **not** implement the S3 wire protocol (SigV4, `aws-chunked` streaming
+signatures, multipart XML). That is the interop-fragile, expensive part of S3, and upload widgets never
+need it — Uppy treats every upload URL as opaque. The S3 wire protocol is only required for real AWS SDK
+/ CLI interoperability, which is a non-goal. The abstraction stays S3-free, so a future direct-to-storage
+backend (real S3/Azure) could add a presigned-URL capability without changing the lifecycle.

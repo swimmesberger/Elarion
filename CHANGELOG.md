@@ -8,6 +8,24 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Blob upload lifecycle + resumable (tus) transports.** A "pre-upload then reference, reclaim if
+  abandoned" model for attaching files to an entity over a JSON transport that cannot carry binary.
+  `Elarion.Blobs` gains the provider-neutral, S3-free lifecycle: `BlobLifecycleState` (`Pending`/`Committed`),
+  the optional `IBlobLifecycle` capability (`CommitAsync` promotes a pending blob **atomically with the caller's
+  entity insert**; `DeleteExpiredPendingAsync` is the garbage-collection entry point), and additive
+  `BlobUploadRequest.InitialState`/`ExpiresAt` (defaults keep a plain `SaveAsync` permanent).
+  `Elarion.Blobs.PostgreSql` implements it with `state`/`expires_at` columns behind a partial index over pending
+  rows, a set-based delete that never races a concurrent commit, and the lease-free `BlobGarbageCollector` sweeper
+  (`AddPostgreSqlBlobLifecycle`). Two open HTTP transports produce pending blobs over the neutral `IBlobStore`:
+  `Elarion.Blobs.Tus` implements **tus 1.0** (Creation/Core/Expiration/Termination) — the open, resumable,
+  large-file, browser-close-resilient protocol supported natively by Uppy (`@uppy/tus`) and `tus-js-client`,
+  returning the reference in the `Elarion-Blob-Ref` header — with durable PostgreSQL staging in
+  `Elarion.Blobs.Tus.PostgreSql` so in-progress uploads survive restarts; and `Elarion.Blobs.AspNetCore` adds a
+  minimal direct-upload endpoint (`MapElarionBlobUploads`) for FilePond and plain `fetch`/`<form>` clients. The S3
+  wire protocol (SigV4/`aws-chunked`/XML) is a deliberate non-goal. See
+  [`docs/capabilities/blob-uploads`](docs/capabilities/blob-uploads.mdx).
+
 ## [0.2.2] - 2026-06-27
 
 ### Added

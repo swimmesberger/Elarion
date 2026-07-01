@@ -13,8 +13,11 @@ infrastructure stay in consuming projects.
 | --- | --- | --- |
 | `Elarion.Abstractions` | Implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, and source-generation triggers. | Application-level abstractions without provider-specific dependencies. |
 | `Elarion` | Runtime primitives: handler caches, decorators, modules, resilience runtime, current-user access, and the in-memory scheduler. Bundles the Elarion source generator (handlers, validators, services, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers) as an analyzer. | `Elarion.Abstractions`; avoids ASP.NET Core, EF Core, and transport concerns. |
-| `Elarion.Blobs` | Provider-neutral blob storage contracts and DTOs. | No provider-specific storage dependencies. |
-| `Elarion.Blobs.PostgreSql` | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O. | `Elarion.Blobs`, EF Core relational APIs, and Npgsql. |
+| `Elarion.Blobs` | Provider-neutral blob storage contracts and DTOs, plus the upload lifecycle (`BlobLifecycleState`, `IBlobLifecycle`). | No provider-specific storage dependencies. |
+| `Elarion.Blobs.PostgreSql` | PostgreSQL-backed blob storage with EF Core model configuration and Npgsql content I/O, and the `IBlobLifecycle` implementation plus the `BlobGarbageCollector` sweeper. | `Elarion.Blobs`, EF Core relational APIs, and Npgsql. |
+| `Elarion.Blobs.AspNetCore` | Minimal direct blob-upload endpoint (`MapElarionBlobUploads`) producing pending blobs, for FilePond and plain `fetch`/`<form>` clients. | `Elarion.Abstractions`, `Elarion.Blobs`, and ASP.NET Core. |
+| `Elarion.Blobs.Tus` | tus 1.0 resumable-upload transport (`MapElarionTus`) with an in-memory staging default; the recommended transport (Uppy `@uppy/tus`, `tus-js-client`). | `Elarion.Abstractions`, `Elarion.Blobs`, and ASP.NET Core; no storage dependency. |
+| `Elarion.Blobs.Tus.PostgreSql` | Durable PostgreSQL staging store for tus uploads, plus the expired-session collector. | `Elarion.Blobs.Tus`, `Elarion.Blobs`, and EF Core relational APIs. |
 | `Elarion.JsonRpc` | Transport-neutral JSON-RPC dispatcher, envelopes, result/error types, telemetry, schema export, and the RPC method-map trigger. | `System.Text.Json` and Microsoft logging abstractions. |
 | `Elarion.AspNetCore` | ASP.NET Core JSON-RPC endpoint mapping, batch execution, current-user middleware, and HTTP transport. | ASP.NET Core abstractions plus `Elarion.JsonRpc`. |
 | `Elarion.AspNetCore.Identity` | Optional ASP.NET Core Identity integration: `AddElarionIdentity`, a snake_case Identity model composed onto a plain `DbContext` via `[GenerateElarionIdentity]`, and the transport-neutral authorizer. | `Microsoft.AspNetCore.Identity.EntityFrameworkCore` plus `Elarion.AspNetCore`. |
@@ -35,7 +38,7 @@ The package split enforces clean dependencies:
 - Core framework packages stay reusable and domain-neutral — they never reference a consuming app.
 - `Elarion.Abstractions` does not depend on runtime integration packages.
 - `Elarion` may depend on abstractions but avoids ASP.NET Core, EF Core, and transport specifics.
-- `Elarion.Blobs` stays provider-neutral; `Elarion.Blobs.PostgreSql` owns PostgreSQL-specific dependencies and schema configuration.
+- `Elarion.Blobs` stays provider-neutral; `Elarion.Blobs.PostgreSql` owns PostgreSQL-specific dependencies and schema configuration. The upload **lifecycle** stays in the neutral core and is S3-free; the upload **protocol** is a source/transport at the HTTP layer only (`Elarion.Blobs.AspNetCore`, `Elarion.Blobs.Tus`, with durable tus staging in `Elarion.Blobs.Tus.PostgreSql`). The S3 wire protocol is a deliberate non-goal.
 - `Elarion.JsonRpc` owns JSON-RPC runtime contracts and schema export without ASP.NET Core.
 - `Elarion.AspNetCore` owns HTTP/JSON-RPC integration.
 - `Elarion.AspNetCore.Mcp` is the only package that references the `ModelContextProtocol` SDK; the
@@ -50,5 +53,5 @@ The package split enforces clean dependencies:
 | --- | --- |
 | Application library | `Elarion` (bundles the generator); optionally `Elarion.Blobs`, `Elarion.EntityFrameworkCore` (bundles the EF Core generator). |
 | Domain / entity library (if separate) | None — entities are plain classes with no marker. `[EntityConfiguration]` configurations live with the modules in the application library; the project holding the concrete `DbContext` references `Elarion.EntityFrameworkCore` so its generator reads the per-assembly configuration manifest and fills the context. |
-| ASP.NET Core host | `Elarion` (for the generator), `Elarion.JsonRpc`, `Elarion.AspNetCore`; optionally `Elarion.Blobs.PostgreSql`, `Elarion.AspNetCore.SchemaGeneration` (build tooling), and `Elarion.AspNetCore.Mcp` (MCP server). |
+| ASP.NET Core host | `Elarion` (for the generator), `Elarion.JsonRpc`, `Elarion.AspNetCore`; optionally `Elarion.Blobs.PostgreSql`, blob-upload transports (`Elarion.Blobs.Tus` + `Elarion.Blobs.Tus.PostgreSql`, or `Elarion.Blobs.AspNetCore`), `Elarion.AspNetCore.SchemaGeneration` (build tooling), and `Elarion.AspNetCore.Mcp` (MCP server). |
 | Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`. |

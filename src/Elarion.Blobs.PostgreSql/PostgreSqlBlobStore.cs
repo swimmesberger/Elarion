@@ -27,7 +27,7 @@ namespace Elarion.Blobs.PostgreSql;
 public sealed class PostgreSqlBlobStore<TDbContext>(
     TDbContext dbContext,
     ILogger<PostgreSqlBlobStore<TDbContext>> logger,
-    TimeProvider timeProvider) : IBlobStore
+    TimeProvider timeProvider) : IBlobStore, IBlobLifecycle
     where TDbContext : DbContext {
     /// <inheritdoc />
     public async Task<BlobRef> SaveAsync(
@@ -166,6 +166,71 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             .AnyAsync(blob => blob.Id == blobRef.Value, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<bool> CommitAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+        ValidateBlobRef(blobRef);
+
+        // Load the row tracked and mutate it: the change is persisted by the caller's next
+        // SaveChangesAsync, so the commit and the entity insert that references this blob are atomic
+        // within the caller's transaction. We deliberately do not save here.
+        var blob = await dbContext.Set<StoredBlob>()
+            .FirstOrDefaultAsync(storedBlob => storedBlob.Id == blobRef.Value, cancellationToken);
+
+        if (blob is null) {
+            return false;
+        }
+
+        if (blob.State == BlobLifecycleState.Committed) {
+            return true;
+        }
+
+        blob.State = BlobLifecycleState.Committed;
+        blob.ExpiresAt = null;
+
+        logger.LogDebug("Committing blob {BlobId}", blobRef.Value);
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> DeleteExpiredPendingAsync(
+        DateTimeOffset olderThanUtc,
+        int batchSize,
+        CancellationToken cancellationToken) {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
+
+        // Bounded set-based delete committed independently of any caller transaction. The id scan rides
+        // the partial index; the delete re-checks State == Pending so a blob committed between the scan
+        // and the delete is left alone (the garbage-collection-versus-commit guard). Content rows are
+        // removed by the blob_contents -> stored_blobs ON DELETE CASCADE foreign key.
+        var ids = await dbContext.Set<StoredBlob>()
+            .AsNoTracking()
+            .Where(blob => blob.State == BlobLifecycleState.Pending
+                && blob.ExpiresAt != null
+                && blob.ExpiresAt < olderThanUtc)
+            .OrderBy(blob => blob.ExpiresAt)
+            .Take(batchSize)
+            .Select(blob => blob.Id)
+            .ToListAsync(cancellationToken);
+
+        if (ids.Count == 0) {
+            return 0;
+        }
+
+        var deleted = await dbContext.Set<StoredBlob>()
+            .Where(blob => ids.Contains(blob.Id)
+                && blob.State == BlobLifecycleState.Pending
+                && blob.ExpiresAt != null
+                && blob.ExpiresAt < olderThanUtc)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        if (deleted > 0) {
+            logger.LogInformation("Garbage collected {Count} expired pending blob(s).", deleted);
+        }
+
+        return deleted;
+    }
+
     private async Task<string> SaveBlobAsync(
         BlobUploadRequest request,
         long size,
@@ -196,10 +261,18 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
                 cancellationToken);
         var createdAt = timeProvider.GetUtcNow();
 
+        // The lifecycle state and expiry come from the request: a plain save is Committed (no expiry),
+        // while a pre-upload transport saves Pending with an ExpiresAt. Expiry is only retained for
+        // pending blobs so a committed blob is never accidentally reclaimed.
+        var state = request.InitialState;
+        var expiresAt = state == BlobLifecycleState.Pending ? request.ExpiresAt : null;
+
         if (existing is not null) {
             existing.ContentType = request.ContentType;
             existing.Size = size;
             existing.CreatedAt = createdAt;
+            existing.State = state;
+            existing.ExpiresAt = expiresAt;
 
             logger.LogDebug(
                 "Updating existing blob {BlobId} ({Container}/{Name})",
@@ -219,6 +292,8 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             ContentType = request.ContentType,
             Size = size,
             CreatedAt = createdAt,
+            State = state,
+            ExpiresAt = expiresAt,
         });
 
         logger.LogDebug("Creating new blob {BlobId} ({Container}/{Name})", blobId, request.Container, request.Name);

@@ -1,0 +1,188 @@
+using Microsoft.EntityFrameworkCore;
+
+namespace Elarion.Blobs.Tus.PostgreSql;
+
+/// <summary>
+/// Durable PostgreSQL <see cref="ITusUploadStore"/>: stages the in-progress bytes in a <c>bytea</c> column
+/// so an upload survives a restart and can be resumed by any instance.
+/// </summary>
+/// <typeparam name="TDbContext">The EF Core context whose model includes <see cref="TusUploadRow"/> via <c>UseElarionTusStorage</c>.</typeparam>
+/// <remarks>
+/// Each chunk is appended with one conditional <c>UPDATE … SET data = data || …</c> guarded on the current
+/// offset, so a stale or concurrent <c>PATCH</c> is rejected as an offset conflict. The staged bytes are
+/// buffered in memory per chunk and again at finalization; for the very large uploads this matters, a
+/// future optimization is large-object or chunk-row storage.
+/// </remarks>
+public sealed class PostgreSqlTusUploadStore<TDbContext>(
+    TDbContext dbContext,
+    IBlobStore blobStore,
+    TusOptions options,
+    TimeProvider timeProvider) : ITusUploadStore
+    where TDbContext : DbContext {
+    /// <inheritdoc />
+    public async Task<TusUpload> CreateAsync(TusUploadCreation creation, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(creation);
+
+        var now = timeProvider.GetUtcNow();
+        var row = new TusUploadRow {
+            Id = Guid.NewGuid().ToString("N"),
+            Container = creation.Container,
+            Name = creation.Name,
+            UploadLength = creation.Length,
+            UploadOffset = 0,
+            ContentType = creation.ContentType,
+            Metadata = creation.Metadata,
+            OwnerId = creation.OwnerId,
+            ExpiresAt = now + options.UploadExpiry,
+            CreatedAt = now,
+            BlobId = null,
+            Data = [],
+        };
+
+        dbContext.Set<TusUploadRow>().Add(row);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Map(row, row.UploadOffset, row.BlobId);
+    }
+
+    /// <inheritdoc />
+    public async Task<TusUpload?> GetAsync(string uploadId, CancellationToken cancellationToken) {
+        var row = await dbContext.Set<TusUploadRow>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == uploadId, cancellationToken);
+
+        return row is null ? null : Map(row, row.UploadOffset, row.BlobId);
+    }
+
+    /// <inheritdoc />
+    public async Task<TusUpload> AppendAsync(
+        string uploadId,
+        long offset,
+        Stream chunk,
+        long? chunkLength,
+        CancellationToken cancellationToken) {
+        var row = await dbContext.Set<TusUploadRow>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == uploadId, cancellationToken);
+
+        if (row is null || row.BlobId is not null || offset != row.UploadOffset) {
+            throw new TusOffsetConflictException();
+        }
+
+        var bytes = await ReadAtMostAsync(chunk, row.UploadLength - row.UploadOffset, cancellationToken);
+        var length = bytes.Length;
+
+        // Conditional append: only advances a row still at the expected offset and not yet finalized, so a
+        // concurrent or replayed PATCH affects zero rows and is reported as an offset conflict.
+        var affected = await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            UPDATE tus_uploads
+            SET data = data || {bytes}, upload_offset = upload_offset + {length}
+            WHERE id = {uploadId} AND upload_offset = {offset} AND blob_id IS NULL
+            """,
+            cancellationToken);
+
+        if (affected == 0) {
+            throw new TusOffsetConflictException();
+        }
+
+        var newOffset = offset + length;
+        return newOffset >= row.UploadLength
+            ? await FinalizeAsync(uploadId, cancellationToken)
+            : Map(row, newOffset, blobId: null);
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteAsync(string uploadId, CancellationToken cancellationToken) =>
+        await dbContext.Set<TusUploadRow>()
+            .Where(r => r.Id == uploadId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
+
+        var ids = await dbContext.Set<TusUploadRow>()
+            .AsNoTracking()
+            .Where(r => r.BlobId == null && r.ExpiresAt < olderThanUtc)
+            .OrderBy(r => r.ExpiresAt)
+            .Take(batchSize)
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+        if (ids.Count == 0) {
+            return 0;
+        }
+
+        return await dbContext.Set<TusUploadRow>()
+            .Where(r => ids.Contains(r.Id) && r.BlobId == null && r.ExpiresAt < olderThanUtc)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
+
+    private async Task<TusUpload> FinalizeAsync(string uploadId, CancellationToken cancellationToken) {
+        var row = await dbContext.Set<TusUploadRow>()
+            .AsNoTracking()
+            .FirstAsync(r => r.Id == uploadId, cancellationToken);
+
+        if (row.BlobId is not null) {
+            return Map(row, row.UploadOffset, row.BlobId);
+        }
+
+        var blobRef = await blobStore.SaveAsync(
+            new BlobUploadRequest {
+                Container = row.Container,
+                Name = row.Name,
+                ContentType = row.ContentType,
+                ContentLength = row.UploadLength,
+                InitialState = BlobLifecycleState.Pending,
+                ExpiresAt = timeProvider.GetUtcNow() + options.Ttl,
+            },
+            new MemoryStream(row.Data, writable: false),
+            cancellationToken);
+
+        // Mark complete and drop the staged bytes; the content now lives in the blob.
+        await dbContext.Set<TusUploadRow>()
+            .Where(r => r.Id == uploadId && r.BlobId == null)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(r => r.BlobId, blobRef.Value)
+                    .SetProperty(r => r.Data, Array.Empty<byte>()),
+                cancellationToken);
+
+        return Map(row, row.UploadLength, blobRef.Value);
+    }
+
+    private static TusUpload Map(TusUploadRow row, long offset, string? blobId) =>
+        new() {
+            Id = row.Id,
+            Length = row.UploadLength,
+            Offset = offset,
+            ContentType = row.ContentType,
+            Metadata = row.Metadata,
+            OwnerId = row.OwnerId,
+            ExpiresAt = row.ExpiresAt,
+            BlobRef = blobId is null ? null : new BlobRef { Value = blobId },
+        };
+
+    private static async Task<byte[]> ReadAtMostAsync(Stream source, long max, CancellationToken cancellationToken) {
+        if (max <= 0) {
+            return [];
+        }
+
+        using var buffer = new MemoryStream();
+        var rent = new byte[81920];
+        long total = 0;
+        while (total < max) {
+            var toRead = (int)Math.Min(rent.Length, max - total);
+            var read = await source.ReadAsync(rent.AsMemory(0, toRead), cancellationToken);
+            if (read == 0) {
+                break;
+            }
+
+            buffer.Write(rent, 0, read);
+            total += read;
+        }
+
+        return buffer.ToArray();
+    }
+}

@@ -32,4 +32,20 @@ public sealed class PostgreSqlBlobStorageModelBuilderExtensionsTests {
             foreignKey.DeleteBehavior == DeleteBehavior.Cascade);
     }
 
+    [Fact]
+    public void UsePostgreSqlBlobStorage_ConfiguresLifecycleColumnsAndPartialIndex() {
+        var modelBuilder = new ModelBuilder(new ConventionSet());
+        modelBuilder.UsePostgreSqlBlobStorage();
+        var model = modelBuilder.FinalizeModel();
+
+        var storedBlob = model.FindEntityType(typeof(StoredBlob))!;
+        storedBlob.FindProperty(nameof(StoredBlob.State))!.GetColumnName().Should().Be("state");
+        storedBlob.FindProperty(nameof(StoredBlob.ExpiresAt))!.GetColumnName().Should().Be("expires_at");
+
+        var pendingIndex = storedBlob.GetIndexes().Should().ContainSingle(index =>
+            index.Properties.Count == 1 && index.Properties[0].Name == nameof(StoredBlob.ExpiresAt)).Subject;
+        pendingIndex.IsUnique.Should().BeFalse();
+        pendingIndex.GetFilter().Should().Be("state = 0 AND expires_at IS NOT NULL");
+    }
+
 }
