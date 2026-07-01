@@ -13,6 +13,13 @@ public static class SettingsConfigurationBuilderExtensions {
     /// in-process backend by default); call <c>AddElarionSettingsEntityFrameworkCore</c> as well to use the
     /// database backend. Only the <see cref="SettingsScope.Global"/> scope is surfaced — per-user settings are
     /// not app-wide configuration; read those through <see cref="ISettingsManager"/>.
+    /// <para>
+    /// The <see cref="SettingsConfigurationRefresher"/> performs its initial load in its
+    /// <c>StartAsync</c>, so it completes before subsequently-registered hosted services start. Call this
+    /// method <b>before</b> registering any hosted service that reads settings-backed <c>${...}</c>
+    /// configuration at start (for example the scheduler via <c>AddInMemoryScheduler</c>), so those services
+    /// observe the stored values rather than empty defaults.
+    /// </para>
     /// </summary>
     public static TBuilder AddElarionSettingsConfiguration<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder {

@@ -96,6 +96,23 @@ public sealed class SettingsConfigurationTests {
         value.Should().Be("second");
     }
 
+    [Fact]
+    public async Task Refresher_StartAsync_LoadsBeforeReturning() {
+        using var provider = BuildSettingsProvider();
+        var store = provider.GetRequiredService<ISettingsStore>();
+        await store.SetAsync(SettingsScope.Global, "app:title", "Elarion", cancellationToken: Ct);
+        var configurationProvider = new SettingsConfigurationProvider();
+        var refresher = CreateRefresher(provider, configurationProvider);
+
+        // The initial load runs in StartAsync, so a later-started hosted service (the scheduler) observes the
+        // stored value without depending on the background ExecuteAsync loop having run yet.
+        await refresher.StartAsync(Ct);
+
+        configurationProvider.TryGet("app:title", out var value).Should().BeTrue();
+        value.Should().Be("Elarion");
+        await refresher.StopAsync(Ct);
+    }
+
     private static ServiceProvider BuildSettingsProvider() {
         var services = new ServiceCollection();
         services.AddElarionSettings();

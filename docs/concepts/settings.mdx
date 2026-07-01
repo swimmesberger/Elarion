@@ -91,8 +91,13 @@ public sealed class SendEmailHandler(ISettingsManager settings) : IHandler<SendE
 }
 ```
 
-Write with `SetAsync`/`SetStringAsync`. Writes carry optimistic concurrency: pass an `expectedVersion` and
-a mismatch returns `SettingWriteResult.ConcurrencyConflict` rather than throwing.
+Write with `SetAsync`/`SetStringAsync`. Concurrency is opt-in per write:
+
+- **Unconditional (`expectedVersion` omitted / `null`) is last-write-wins.** The update is keyed only on the
+  setting's identity and increments the version in place, so two nodes writing the same key concurrently both
+  succeed instead of one spuriously reporting a conflict.
+- **Pass an `expectedVersion` to opt into optimistic concurrency.** A mismatch (a lost race, or a create where
+  the key already exists) returns `SettingWriteResult.ConcurrencyConflict` rather than throwing.
 
 ## Watching for changes
 
@@ -119,9 +124,19 @@ builder.Services.AddElarionSettingsEntityFrameworkCore<AppDbContext>();
 ```
 
 Writes are change-tracker-free and immediate (they never flush the caller's unrelated tracked changes),
-with optimistic concurrency via a `version` column. Generate and apply an EF migration for the
-`elarion_settings` table; the framework ships no migrations. Change notification still uses the in-process
-source (single-instance) until a cross-instance source is added.
+with a `version` column backing optimistic concurrency. Generate and apply an EF migration for the
+`elarion_settings` table; the framework ships no migrations.
+
+**Change notification and transactions.** A store write enlists in the context's ambient transaction when one
+is open. To avoid firing watchers for a value a later rollback discards, a write made *inside* a caller-owned
+transaction skips the immediate notification (and logs at Debug); the normal immediate-write path (no ambient
+transaction) notifies as before. A transaction-commit-hooked source is a planned follow-up.
+
+**Single-instance notification.** Change notification still uses the in-process source, so a settings change on
+one node is not observed by another node's watchers or scheduler until that node restarts. When the EF Core
+store is paired with the in-process source, `AddElarionSettingsEntityFrameworkCore` registers a startup service
+that logs a **Warning** making this limitation visible at runtime. A cross-instance source (Postgres
+`LISTEN/NOTIFY`, Redis) is a drop-in replacement that removes both limitations.
 
 `UseElarionSettings` takes optional `tableName` and `schema` parameters to rename the table or place it in
 a non-default schema: `modelBuilder.UseElarionSettings("app_settings", "app")`.
@@ -139,9 +154,13 @@ builder.AddElarionSettingsConfiguration();
 Now `builder.Configuration["app:title"]` reads from settings, `IOptionsMonitor<T>` reloads when a setting
 changes, and any code already reading `IConfiguration` — including the scheduler's `${...}` variable
 substitution, which re-resolves on every occurrence — picks up runtime changes automatically. Because
-`IConfiguration` is built before the DI container, values appear once the host starts (a background
-refresher loads them and reloads on change). Only the `Global` scope is surfaced; per-user settings are
-not app-wide configuration, so read those through `ISettingsManager`.
+`IConfiguration` is built before the DI container, the background refresher performs the initial load in its
+`StartAsync`, so it completes **before** later-registered hosted services (notably the scheduler) start —
+settings-backed `${...}` placeholders resolve to their stored values, not stale defaults. The initial load is
+time-bounded, so a slow or unavailable store cannot hang startup; on timeout the provider starts empty and
+values populate on the next change. Call `AddElarionSettingsConfiguration` **before** registering any hosted
+service that reads settings-backed configuration at start. Only the `Global` scope is surfaced; per-user
+settings are not app-wide configuration, so read those through `ISettingsManager`.
 
 ## Scheduler integration
 
