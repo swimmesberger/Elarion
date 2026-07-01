@@ -82,7 +82,20 @@ public sealed class OutboxEventDispatcherTests
     }
 
     [Fact]
-    public async Task DispatchAsync_UnknownEventType_IsNoOp()
+    public async Task DispatchAsync_ConsumerRuns_ReturnsDelivered()
+    {
+        var dispatcher = CreateDispatcher((_, _, _, _) => ValueTask.CompletedTask);
+
+        var outcome = await dispatcher.DispatchAsync(
+            EmptyProvider.Instance,
+            CreateMessage(new OutboxTestEvent(1, "x"), Guid.NewGuid()),
+            TestContext.Current.CancellationToken);
+
+        outcome.Should().Be(OutboxDispatchOutcome.Delivered);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_UnknownEventType_IsUnresolvableAndDoesNotInvokeConsumer()
     {
         var invoked = false;
         var dispatcher = CreateDispatcher((_, _, _, _) =>
@@ -99,9 +112,34 @@ public sealed class OutboxEventDispatcherTests
             Payload = "{}",
             CorrelationId = Guid.NewGuid()
         };
-        await dispatcher.DispatchAsync(EmptyProvider.Instance, message, TestContext.Current.CancellationToken);
+        var outcome = await dispatcher.DispatchAsync(EmptyProvider.Instance, message, TestContext.Current.CancellationToken);
 
         invoked.Should().BeFalse();
+        outcome.Should().Be(OutboxDispatchOutcome.Unresolvable);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_PayloadDeserializesToNull_IsUnresolvable()
+    {
+        var invoked = false;
+        var dispatcher = CreateDispatcher((_, _, _, _) =>
+        {
+            invoked = true;
+            return ValueTask.CompletedTask;
+        });
+
+        var message = new OutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            OccurredOnUtc = DateTimeOffset.UnixEpoch,
+            EventType = typeof(OutboxTestEvent).FullName!,
+            Payload = "null",
+            CorrelationId = Guid.NewGuid()
+        };
+        var outcome = await dispatcher.DispatchAsync(EmptyProvider.Instance, message, TestContext.Current.CancellationToken);
+
+        invoked.Should().BeFalse();
+        outcome.Should().Be(OutboxDispatchOutcome.Unresolvable);
     }
 
     [Fact]
@@ -129,7 +167,8 @@ public sealed class OutboxEventDispatcherTests
                 }
             ],
             new OutboxOptions(),
-            OutboxTestJson.Instance);
+            OutboxTestJson.Instance,
+            NullLogger<OutboxEventDispatcher>.Instance);
 
     private static OutboxMessage CreateMessage(OutboxTestEvent @event, Guid correlationId) => new()
     {
@@ -149,25 +188,83 @@ public sealed class OutboxDeliveryServiceTests
         var store = new FakeOutboxStore();
         store.Pending.Enqueue([Message(new OutboxTestEvent(1, "a"), out var id)]);
 
-        await RunUntilSignaledAsync(store, recordingDispatcher: (_, _, _, _) => ValueTask.CompletedTask);
+        await RunUntilSignaledAsync(store, new OutboxOptions { PollingInterval = TimeSpan.FromMilliseconds(20) },
+            new FakeTimeProvider(), recordingDispatcher: (_, _, _, _) => ValueTask.CompletedTask);
 
-        store.Processed.Should().ContainSingle().Which.Should().Be(id);
+        store.Processed.Should().ContainSingle().Which.Id.Should().Be(id);
+        store.Processed[0].LockId.Should().Be(store.LastLockId);
         store.Failed.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task FailedConsumer_MarksFailed()
+    public async Task FailedConsumer_MarksFailedWithBackoffVisibilityTimeout()
     {
         var store = new FakeOutboxStore();
-        store.Pending.Enqueue([Message(new OutboxTestEvent(1, "a"), out var id)]);
+        var message = Message(new OutboxTestEvent(1, "a"), out var id);
+        message.Attempts = 0;
+        store.Pending.Enqueue([message]);
+        var now = DateTimeOffset.Parse("2026-01-02T03:04:05Z");
+        var options = new OutboxOptions
+        {
+            PollingInterval = TimeSpan.FromMilliseconds(20),
+            BaseRetryDelay = TimeSpan.FromSeconds(5),
+            MaxRetryDelay = TimeSpan.FromHours(1)
+        };
 
-        await RunUntilSignaledAsync(store, recordingDispatcher: (_, _, _, _) => throw new InvalidOperationException("boom"));
+        await RunUntilSignaledAsync(store, options, new FakeTimeProvider(now),
+            recordingDispatcher: (_, _, _, _) => throw new InvalidOperationException("boom"));
 
-        store.Failed.Should().ContainSingle().Which.Id.Should().Be(id);
+        var failed = store.Failed.Should().ContainSingle().Subject;
+        failed.Id.Should().Be(id);
+        failed.LockId.Should().Be(store.LastLockId);
+        // First attempt (attempts becomes 1): base delay × 2^0 = 5s.
+        failed.RetryVisibleAfterUtc.Should().Be(now + TimeSpan.FromSeconds(5));
+        store.Processed.Should().BeEmpty();
+        store.PermanentlyFailed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UnresolvableEventType_IsParkedAndNotMarkedDelivered()
+    {
+        var store = new FakeOutboxStore();
+        store.Pending.Enqueue(
+        [
+            new OutboxMessage
+            {
+                Id = Guid.NewGuid(),
+                OccurredOnUtc = DateTimeOffset.UnixEpoch,
+                EventType = "Some.Unregistered.Type",
+                Payload = "{}",
+                CorrelationId = Guid.NewGuid()
+            }
+        ]);
+
+        await RunUntilSignaledAsync(store, new OutboxOptions { PollingInterval = TimeSpan.FromMilliseconds(20) },
+            new FakeTimeProvider(), recordingDispatcher: (_, _, _, _) => ValueTask.CompletedTask);
+
+        store.PermanentlyFailed.Should().ContainSingle();
+        store.Processed.Should().BeEmpty();
+        store.Failed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task LeaseLostOnFinalize_IsNoOp_NoRedeliveryLoop()
+    {
+        var store = new FakeOutboxStore { FinalizeSucceeds = false };
+        store.Pending.Enqueue([Message(new OutboxTestEvent(1, "a"), out _)]);
+
+        await RunUntilSignaledAsync(store, new OutboxOptions { PollingInterval = TimeSpan.FromMilliseconds(20) },
+            new FakeTimeProvider(), recordingDispatcher: (_, _, _, _) => ValueTask.CompletedTask);
+
+        // MarkProcessed was attempted but returned false (lease lost); the service must not throw or loop.
         store.Processed.Should().BeEmpty();
     }
 
-    private static async Task RunUntilSignaledAsync(FakeOutboxStore store, EventSubscriberInvokeDelegate recordingDispatcher)
+    private static async Task RunUntilSignaledAsync(
+        FakeOutboxStore store,
+        OutboxOptions options,
+        FakeTimeProvider timeProvider,
+        EventSubscriberInvokeDelegate recordingDispatcher)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IOutboxStore>(store);
@@ -183,14 +280,15 @@ public sealed class OutboxDeliveryServiceTests
                     InvokeAsync = recordingDispatcher
                 }
             ],
-            new OutboxOptions(),
-            OutboxTestJson.Instance);
+            options,
+            OutboxTestJson.Instance,
+            NullLogger<OutboxEventDispatcher>.Instance);
 
         var service = new OutboxDeliveryService(
             provider.GetRequiredService<IServiceScopeFactory>(),
             dispatcher,
-            new OutboxOptions { PollingInterval = TimeSpan.FromMilliseconds(20) },
-            new FakeTimeProvider(),
+            options,
+            timeProvider,
             NullLogger<OutboxDeliveryService>.Instance);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
@@ -239,9 +337,16 @@ internal sealed class FakeOutboxStore : IOutboxStore
 {
     public List<OutboxMessage> Appended { get; } = [];
     public Queue<IReadOnlyList<OutboxMessage>> Pending { get; } = new();
-    public List<Guid> Processed { get; } = [];
-    public List<(Guid Id, string Error)> Failed { get; } = [];
+    public List<(Guid Id, Guid LockId)> Processed { get; } = [];
+    public List<(Guid Id, Guid LockId, string Error, DateTimeOffset RetryVisibleAfterUtc)> Failed { get; } = [];
+    public List<(Guid Id, Guid LockId, string Error)> PermanentlyFailed { get; } = [];
     public TaskCompletionSource Signal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>The lease id of the most recent claim, so tests can assert finalize was guarded on it.</summary>
+    public Guid LastLockId { get; private set; }
+
+    /// <summary>When <see langword="false"/>, every finalize call reports the lease was lost (returns false).</summary>
+    public bool FinalizeSucceeds { get; init; } = true;
 
     public void Append(OutboxMessage message) => Appended.Add(message);
 
@@ -249,21 +354,48 @@ internal sealed class FakeOutboxStore : IOutboxStore
         Guid lockId,
         DateTimeOffset leaseUntil,
         int batchSize,
-        CancellationToken ct) =>
-        ValueTask.FromResult(Pending.Count > 0 ? Pending.Dequeue() : (IReadOnlyList<OutboxMessage>)[]);
-
-    public ValueTask MarkProcessedAsync(Guid id, DateTimeOffset processedOnUtc, CancellationToken ct)
+        CancellationToken ct)
     {
-        Processed.Add(id);
-        Signal.TrySetResult();
-        return ValueTask.CompletedTask;
+        LastLockId = lockId;
+        return ValueTask.FromResult(Pending.Count > 0 ? Pending.Dequeue() : (IReadOnlyList<OutboxMessage>)[]);
     }
 
-    public ValueTask MarkFailedAsync(Guid id, string error, CancellationToken ct)
+    public ValueTask<bool> MarkProcessedAsync(Guid id, Guid lockId, DateTimeOffset processedOnUtc, CancellationToken ct)
     {
-        Failed.Add((id, error));
+        if (FinalizeSucceeds)
+        {
+            Processed.Add((id, lockId));
+        }
+
         Signal.TrySetResult();
-        return ValueTask.CompletedTask;
+        return ValueTask.FromResult(FinalizeSucceeds);
+    }
+
+    public ValueTask<bool> MarkFailedAsync(
+        Guid id,
+        Guid lockId,
+        string error,
+        DateTimeOffset retryVisibleAfterUtc,
+        CancellationToken ct)
+    {
+        if (FinalizeSucceeds)
+        {
+            Failed.Add((id, lockId, error, retryVisibleAfterUtc));
+        }
+
+        Signal.TrySetResult();
+        return ValueTask.FromResult(FinalizeSucceeds);
+    }
+
+    public ValueTask<bool> MarkPermanentlyFailedAsync(Guid id, Guid lockId, string error, CancellationToken ct)
+    {
+        if (FinalizeSucceeds)
+        {
+            PermanentlyFailed.Add((id, lockId, error));
+        }
+
+        Signal.TrySetResult();
+        return ValueTask.FromResult(FinalizeSucceeds);
     }
 
     public ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) =>

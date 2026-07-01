@@ -1,8 +1,23 @@
 using System.Text.Json;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Serialization;
+using Microsoft.Extensions.Logging;
 
 namespace Elarion.Messaging.Outbox;
+
+/// <summary>The result of attempting to dispatch a persisted <see cref="OutboxMessage"/> to its consumers.</summary>
+public enum OutboxDispatchOutcome
+{
+    /// <summary>Every registered consumer ran to completion (including the case of no registered consumers).</summary>
+    Delivered,
+
+    /// <summary>
+    /// The message could not be dispatched and never will be — its stored <see cref="OutboxMessage.EventType"/>
+    /// resolves to no registered consumer/CLR type, or its payload deserialized to <see langword="null"/>. Retrying
+    /// would only spin, so the delivery worker parks the message for inspection rather than retrying it.
+    /// </summary>
+    Unresolvable
+}
 
 /// <summary>
 /// Resolves and invokes the integration-event consumers for a persisted <see cref="OutboxMessage"/> without runtime
@@ -10,11 +25,15 @@ namespace Elarion.Messaging.Outbox;
 /// </summary>
 /// <remarks>
 /// Built once as a singleton from the registered <see cref="EventSubscriptionDescriptor"/>s. The event type is
-/// resolved from the registered consumers' descriptors (by <see cref="Type.FullName"/>), so a message whose type has
-/// no consumers is a no-op and is finalized as delivered.
+/// resolved from the registered consumers' descriptors (by <see cref="Type.FullName"/>). A message whose stored type
+/// resolves to no registered consumer — or whose payload deserializes to <see langword="null"/> — is
+/// <see cref="OutboxDispatchOutcome.Unresolvable"/>: it can never be delivered (an event-type rename or dropped
+/// consumer would otherwise silently discard every in-flight event), so it is logged at <see cref="LogLevel.Error"/>
+/// and parked for inspection by the delivery worker rather than being silently finalized as delivered.
 /// </remarks>
 public sealed class OutboxEventDispatcher
 {
+    private readonly ILogger<OutboxEventDispatcher> _logger;
     private readonly JsonSerializerOptions _serializerOptions;
     private readonly Dictionary<string, Type> _typeByName = new(StringComparer.Ordinal);
     private readonly Dictionary<Type, EventSubscriptionDescriptor[]> _consumersByType = new();
@@ -23,11 +42,14 @@ public sealed class OutboxEventDispatcher
     public OutboxEventDispatcher(
         IEnumerable<EventSubscriptionDescriptor> descriptors,
         OutboxOptions options,
-        IElarionJsonSerialization jsonSerialization)
+        IElarionJsonSerialization jsonSerialization,
+        ILogger<OutboxEventDispatcher> logger)
     {
         ArgumentNullException.ThrowIfNull(descriptors);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(jsonSerialization);
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
         _serializerOptions = options.SerializerOptions ?? jsonSerialization.Options;
 
         var byType = new Dictionary<Type, List<EventSubscriptionDescriptor>>();
@@ -62,10 +84,15 @@ public sealed class OutboxEventDispatcher
 
     /// <summary>
     /// Deserializes <paramref name="message"/> and invokes every registered integration consumer on
-    /// <paramref name="serviceProvider"/>. Returns without effect when the event type has no consumers. Any consumer
-    /// exception propagates so the worker can mark the message failed and retry the whole message later.
+    /// <paramref name="serviceProvider"/>. Any consumer exception propagates so the worker can mark the message failed
+    /// and retry the whole message later.
     /// </summary>
-    public async ValueTask DispatchAsync(
+    /// <returns>
+    /// <see cref="OutboxDispatchOutcome.Delivered"/> when the consumers ran; <see cref="OutboxDispatchOutcome.Unresolvable"/>
+    /// when the stored event type resolves to no registered consumer/CLR type or the payload deserializes to
+    /// <see langword="null"/> — both logged at <see cref="LogLevel.Error"/> because a retry can never resolve them.
+    /// </returns>
+    public async ValueTask<OutboxDispatchOutcome> DispatchAsync(
         IServiceProvider serviceProvider,
         OutboxMessage message,
         CancellationToken ct)
@@ -73,13 +100,21 @@ public sealed class OutboxEventDispatcher
         if (!_typeByName.TryGetValue(message.EventType, out var eventType)
             || !_consumersByType.TryGetValue(eventType, out var consumers))
         {
-            return;
+            _logger.LogError(
+                "Outbox message {MessageId} has event type '{EventType}' that resolves to no registered integration consumer; parking it for inspection. An event-type rename or a dropped consumer can cause this.",
+                message.Id,
+                message.EventType);
+            return OutboxDispatchOutcome.Unresolvable;
         }
 
         var instance = JsonSerializer.Deserialize(message.Payload, eventType, _serializerOptions);
         if (instance is null)
         {
-            return;
+            _logger.LogError(
+                "Outbox message {MessageId} of type '{EventType}' deserialized to null; parking it for inspection.",
+                message.Id,
+                message.EventType);
+            return OutboxDispatchOutcome.Unresolvable;
         }
 
         var context = OutboxEventContext.Create(instance, eventType, message.CorrelationId);
@@ -87,6 +122,8 @@ public sealed class OutboxEventDispatcher
         {
             await descriptor.InvokeAsync!(serviceProvider, instance, context, ct).ConfigureAwait(false);
         }
+
+        return OutboxDispatchOutcome.Delivered;
     }
 }
 

@@ -31,11 +31,40 @@ public interface IOutboxStore
         int batchSize,
         CancellationToken ct);
 
-    /// <summary>Marks the message delivered and clears its lease.</summary>
-    ValueTask MarkProcessedAsync(Guid id, DateTimeOffset processedOnUtc, CancellationToken ct);
+    /// <summary>
+    /// Marks the message delivered and clears its lease, but only while <paramref name="lockId"/> still owns the lease.
+    /// </summary>
+    /// <remarks>
+    /// The update is guarded on the caller's lease token so a worker whose lease expired and was reclaimed by another
+    /// worker cannot overwrite the new owner's active lease. Returns <see langword="false"/> when no row matched
+    /// (the lease was lost), so the caller can log and skip rather than assuming success.
+    /// </remarks>
+    /// <returns><see langword="true"/> when the row was updated; <see langword="false"/> when the lease was lost.</returns>
+    ValueTask<bool> MarkProcessedAsync(Guid id, Guid lockId, DateTimeOffset processedOnUtc, CancellationToken ct);
 
-    /// <summary>Records a failed delivery attempt, stores <paramref name="error"/>, and releases the lease for retry.</summary>
-    ValueTask MarkFailedAsync(Guid id, string error, CancellationToken ct);
+    /// <summary>
+    /// Records a failed delivery attempt, stores <paramref name="error"/>, and releases the lease so the message
+    /// becomes claimable again only after <paramref name="retryVisibleAfterUtc"/> (the backoff visibility timeout),
+    /// but only while <paramref name="lockId"/> still owns the lease.
+    /// </summary>
+    /// <returns><see langword="true"/> when the row was updated; <see langword="false"/> when the lease was lost.</returns>
+    ValueTask<bool> MarkFailedAsync(
+        Guid id,
+        Guid lockId,
+        string error,
+        DateTimeOffset retryVisibleAfterUtc,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Parks the message as permanently failed — it is never claimed again but kept for inspection — storing
+    /// <paramref name="error"/>, but only while <paramref name="lockId"/> still owns the lease.
+    /// </summary>
+    /// <remarks>
+    /// Used for a failure that can never succeed on retry (an unresolvable event type or a payload that deserializes
+    /// to <see langword="null"/>), so retrying would only spin. The row is left pending-but-unclaimable for inspection.
+    /// </remarks>
+    /// <returns><see langword="true"/> when the row was updated; <see langword="false"/> when the lease was lost.</returns>
+    ValueTask<bool> MarkPermanentlyFailedAsync(Guid id, Guid lockId, string error, CancellationToken ct);
 
     /// <summary>Permanently deletes delivered messages whose <see cref="OutboxMessage.ProcessedOnUtc"/> is before <paramref name="olderThanUtc"/>.</summary>
     ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct);
