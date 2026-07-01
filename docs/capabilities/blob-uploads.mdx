@@ -116,14 +116,24 @@ the client passes to entity creation.
 
 <Callout type="info">
 The default in-memory staging keeps in-progress uploads in process. For resumability **across restarts
-and instances**, add the durable PostgreSQL staging store — it persists staged bytes and reaps expired
-sessions (the analog of S3's *abort incomplete multipart upload*):
+and instances**, add the durable PostgreSQL staging store — it persists staged bytes and reaps both
+incomplete sessions (the analog of S3's *abort incomplete multipart upload*) and completed sessions once
+past a retention window:
 
 ```csharp
 services.AddElarionTus();
 services.AddElarionTusPostgreSql<AppDbContext>();
-modelBuilder.UseElarionTusStorage(); // in OnModelCreating
+modelBuilder.UsePostgreSqlBlobStorage(); // blob tables, in OnModelCreating
+modelBuilder.UseElarionTusStorage();     // tus staging table, in OnModelCreating
 ```
+
+`AddElarionTusPostgreSql` also wires the PostgreSQL **blob lifecycle** and its `BlobGarbageCollector`
+(idempotently, via `AddPostgreSqlBlobLifecycle`) — a completed tus upload produces a *pending* blob, so
+without that collector an abandoned upload would leak its blob forever. Map the blob tables with
+`UsePostgreSqlBlobStorage()` alongside the staging table. A completed session row is retained for
+`TusGcOptions.CompletedRetention` (default 1 hour) so a client `HEAD` can still fetch the reference, then
+reclaimed; the collector applies a `SafetyMargin` (default 1 minute) to the expiry cutoff, mirroring the
+blob collector.
 </Callout>
 
 Cross-origin frontends must expose the reference header via CORS:
@@ -143,7 +153,10 @@ app.MapElarionBlobUploads().RequireAuthorization();
 
 `POST` (multipart or raw body) writes a `Pending` blob and returns its id as `text/plain`; `DELETE /{id}`
 cancels an owner's pending upload. Both enforce authentication, the configured size cap, and an optional
-content-type allow-list, and namespace the stored name by owner.
+content-type allow-list. Ownership is recorded as a dedicated `BlobUploadRequest.OwnerId` (surfaced as
+`BlobMetadata.OwnerId`) and compared **exactly** on cancel — not parsed from the stored name — so an id
+containing the naming separator cannot be forged, and a blob with no recorded owner is denied to everyone.
+The tus transport applies the same owner-exact, fail-closed check to its `HEAD`/`PATCH`/`DELETE`.
 
 <Callout type="warn">
 Both transports bake the current user's id into the upload, so the host must register an `ICurrentUser`

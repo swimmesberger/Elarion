@@ -48,7 +48,6 @@ public sealed class InMemoryTusUploadStore(
         string uploadId,
         long offset,
         Stream chunk,
-        long? chunkLength,
         CancellationToken cancellationToken) {
         if (!_entries.TryGetValue(uploadId, out var entry)) {
             throw new TusOffsetConflictException();
@@ -90,8 +89,11 @@ public sealed class InMemoryTusUploadStore(
     public Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
 
+        // Reap by expiry regardless of completion: an incomplete session past its upload-expiry window, and
+        // a completed session past the same window (the reference has long since been fetched), so completed
+        // session records do not accumulate in memory unbounded.
         var expired = _entries
-            .Where(pair => pair.Value.Upload.BlobRef is null && pair.Value.Upload.ExpiresAt < olderThanUtc)
+            .Where(pair => pair.Value.Upload.ExpiresAt < olderThanUtc)
             .Select(pair => pair.Key)
             .Take(batchSize)
             .ToList();
@@ -120,6 +122,7 @@ public sealed class InMemoryTusUploadStore(
                 ContentLength = upload.Length,
                 InitialState = BlobLifecycleState.Pending,
                 ExpiresAt = timeProvider.GetUtcNow() + options.Ttl,
+                OwnerId = upload.OwnerId,
             },
             entry.Buffer,
             cancellationToken);

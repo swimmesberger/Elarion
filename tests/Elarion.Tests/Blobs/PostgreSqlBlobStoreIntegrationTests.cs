@@ -154,6 +154,61 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
         (await store.DeleteAsync(blobRef, ct)).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task SaveAsync_RecordsAndSurfacesOwnerId() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var request = NewRequest() with { OwnerId = "owner-42" };
+
+        var blobRef = await store.SaveAsync(request, new MemoryStream(Bytes(32)), ct);
+
+        (await store.GetMetadataAsync(blobRef, ct))!.OwnerId.Should().Be("owner-42");
+    }
+
+    [Fact]
+    public async Task CommitAsync_InsideTransaction_FlipsRowImmediatelyBeforeSaveChanges() {
+        // Regression (M9): inside the caller's transaction, CommitAsync must flip the row to Committed
+        // immediately (a guarded ExecuteUpdate that also locks the row) rather than deferring the write to
+        // the caller's SaveChangesAsync, closing the window in which a GC sweep could reclaim the row.
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        var request = NewRequest() with {
+            InitialState = BlobLifecycleState.Pending,
+            ExpiresAt = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero)
+        };
+        BlobRef blobRef;
+        await using (var seed = fixture.CreateContext()) {
+            blobRef = await CreateStore(seed).SaveAsync(request, new MemoryStream(Bytes(128)), ct);
+        }
+
+        await using var commitContext = fixture.CreateContext();
+        await using var transaction = await commitContext.Database.BeginTransactionAsync(ct);
+        var lifecycle = (IBlobLifecycle)CreateStore(commitContext);
+        (await lifecycle.CommitAsync(blobRef, ct)).Should().BeTrue();
+
+        // Before SaveChangesAsync: the flip is already visible within the transaction, proving it was
+        // written by the immediate guarded UPDATE (with the old deferred-tracking approach this read would
+        // still see Pending). The row is also write-locked for the rest of the transaction.
+        var stateInTransaction = await commitContext.Database
+            .SqlQueryRaw<int>("SELECT state AS \"Value\" FROM stored_blobs WHERE id = {0}", blobRef.Value)
+            .SingleAsync(ct);
+        stateInTransaction.Should().Be((int)BlobLifecycleState.Committed);
+
+        await commitContext.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        await using (var gcContext = fixture.CreateContext()) {
+            var gc = (IBlobLifecycle)CreateStore(gcContext);
+            (await gc.DeleteExpiredPendingAsync(DateTimeOffset.UtcNow, 100, ct)).Should().Be(0);
+        }
+
+        await using var verify = fixture.CreateContext();
+        (await verify.Set<StoredBlob>().AsNoTracking().FirstAsync(b => b.Id == blobRef.Value, ct))
+            .State.Should().Be(BlobLifecycleState.Committed);
+    }
+
     private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
         new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
 

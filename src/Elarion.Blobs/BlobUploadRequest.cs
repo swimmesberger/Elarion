@@ -57,4 +57,15 @@ public sealed record BlobUploadRequest {
     /// stores clear it when the blob is committed.
     /// </remarks>
     public DateTimeOffset? ExpiresAt { get; init; }
+
+    /// <summary>
+    /// Gets the id of the principal that owns the blob, or <c>null</c> when the blob is unowned.
+    /// </summary>
+    /// <remarks>
+    /// Upload transports record the uploading user here so an owner-scoped operation (for example a cancel)
+    /// compares against a dedicated value rather than parsing it out of <see cref="Name"/>. Ownership is
+    /// stored and compared exactly, so an id containing the transport's naming separator can never be
+    /// forged. It is surfaced back as <see cref="BlobMetadata.OwnerId"/>.
+    /// </remarks>
+    public string? OwnerId { get; init; }
 }

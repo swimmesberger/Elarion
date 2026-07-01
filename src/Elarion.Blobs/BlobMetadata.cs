@@ -33,4 +33,13 @@ public sealed record BlobMetadata {
     /// Gets the UTC timestamp when the blob was stored.
     /// </summary>
     public required DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// Gets the id of the principal that owns the blob, or <c>null</c> when the blob is unowned.
+    /// </summary>
+    /// <remarks>
+    /// Recorded from <see cref="BlobUploadRequest.OwnerId"/> at save time. Owner-scoped operations compare
+    /// this exactly, so an id containing an upload transport's naming separator can never be forged.
+    /// </remarks>
+    public string? OwnerId { get; init; }
 }
