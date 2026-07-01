@@ -6,37 +6,99 @@ namespace Elarion.Generators;
 
 public sealed partial class HandlerRegistrationGenerator {
     /// <summary>
-    /// Resolves every handler in one pass. The compilation is combined in for correctness (a handler's
-    /// decorator pipeline depends on cross-file [DecoratorList] state), but the module [DecoratorList] map is
-    /// built once here rather than rescanned per handler. The result is value-equatable, so emission is
-    /// skipped when no handler model changed.
+    /// Stage-one discovery, cached per syntax tree: identifies a concrete handler class and returns its CLR
+    /// metadata name, or <see langword="null"/> for every other class. Only the metadata name is carried —
+    /// stage two (<see cref="ResolveHandlers"/>) re-resolves the symbol from the current compilation, so no
+    /// attribute or pipeline state is read against a potentially stale tree here.
+    /// </summary>
+    private static string? IdentifyHandlerCandidate(GeneratorSyntaxContext ctx, CancellationToken ct) {
+        var classDecl = (ClassDeclarationSyntax)ctx.Node;
+        if (ctx.SemanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol classSymbol)
+            return null;
+
+        if (classSymbol.IsAbstract)
+            return null;
+
+        if (FindHandlerInterface(classSymbol) is null)
+            return null;
+
+        if (classSymbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
+            return null;
+
+        return ModuleScanner.BuildMetadataName(classSymbol);
+    }
+
+    private static EquatableArray<string> FlattenSortedDistinctCandidates(ImmutableArray<string?> candidates) {
+        if (candidates.IsDefaultOrEmpty)
+            return EquatableArray<string>.Empty;
+
+        // Distinct also collapses a partial handler class (one candidate per declaration node) into a single
+        // resolution, so a partial handler never emits its registration twice.
+        return candidates
+            .Where(static candidate => candidate is not null)
+            .Select(static candidate => candidate!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(static value => value, StringComparer.Ordinal)
+            .ToImmutableArray();
+    }
+
+    /// <summary>
+    /// Stage-two resolution: binds each cached candidate against the CURRENT compilation (symbol-table lookups
+    /// only, never a tree scan) and parses the full pipeline. The compilation is combined in deliberately — the
+    /// effective [DecoratorList] can come from the handler, its [AppModule], a pipeline-attribute class, or the
+    /// assembly, and [Require*]/[FeatureGate] can sit on base classes in other files, so this state must stay
+    /// fresh. The result is value-equatable, so emission is skipped when no handler model changed.
     /// </summary>
     private static EquatableArray<HandlerInfo> ResolveHandlers(
-        ImmutableArray<ClassDeclarationSyntax> nodes,
-        Compilation compilation,
+        EquatableArray<string> candidates,
+        EquatableArray<ModuleScanner.Module> modules,
         EquatableArray<string> variantContracts,
+        Compilation compilation,
         CancellationToken ct) {
-        if (nodes.IsDefaultOrEmpty)
+        if (candidates.IsEmpty)
             return EquatableArray<HandlerInfo>.Empty;
 
-        var moduleDecoratorLists = BuildModuleDecoratorMap(compilation, ct);
-        var moduleAuthDefaults = BuildModuleAuthorizationDefaultsMap(compilation, ct);
+        var (moduleDecoratorLists, moduleAuthDefaults) = BuildModuleMaps(compilation, modules, ct);
         var assemblyRequireAuthenticated = ResolveAssemblyAuthorizationDefault(compilation);
         var variantContractSet = variantContracts.IsEmpty
             ? null
             : new HashSet<string>(variantContracts.AsImmutableArray, StringComparer.Ordinal);
         var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
-        foreach (var node in nodes) {
+        foreach (var metadataName in candidates) {
             ct.ThrowIfCancellationRequested();
-            var semanticModel = compilation.GetSemanticModel(node.SyntaxTree);
+            // Source-assembly lookup: handlers are declared in this compilation, and the assembly-scoped lookup
+            // cannot be shadowed by a same-named type in a referenced assembly.
+            if (compilation.Assembly.GetTypeByMetadataName(metadataName) is not { } classSymbol)
+                continue;
+
+            var classDecl = FindDeclaration(classSymbol, ct);
+            if (classDecl is null)
+                continue;
+
             var info = GetHandlerInfo(
-                node, semanticModel, moduleDecoratorLists, moduleAuthDefaults, assemblyRequireAuthenticated,
-                variantContractSet, ct);
+                classDecl, classSymbol, compilation, moduleDecoratorLists, moduleAuthDefaults,
+                assemblyRequireAuthenticated, variantContractSet, ct);
             if (info is not null)
                 builder.Add(info);
         }
 
         return builder.ToImmutable();
+    }
+
+    // The declaration used for diagnostic locations. Prefer the declaration that carries the base list (the one
+    // stage one matched), falling back to the first for exotic partial splits.
+    private static ClassDeclarationSyntax? FindDeclaration(INamedTypeSymbol classSymbol, CancellationToken ct) {
+        ClassDeclarationSyntax? first = null;
+        foreach (var reference in classSymbol.DeclaringSyntaxReferences) {
+            if (reference.GetSyntax(ct) is not ClassDeclarationSyntax decl)
+                continue;
+
+            first ??= decl;
+            if (decl.BaseList is not null)
+                return decl;
+        }
+
+        return first;
     }
 
     // The contracts a [FeatureVariant] class is selected for — exactly what its [Service] registers under (shared
@@ -67,25 +129,22 @@ public sealed partial class HandlerRegistrationGenerator {
 
     private static HandlerInfo? GetHandlerInfo(
         ClassDeclarationSyntax classDecl,
-        SemanticModel semanticModel,
+        INamedTypeSymbol classSymbol,
+        Compilation compilation,
         IReadOnlyList<(string Namespace, AttributeData DecoratorList)> moduleDecoratorLists,
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated,
         HashSet<string>? variantContracts,
         CancellationToken ct) {
-        if (semanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol classSymbol)
-            return null;
+        ct.ThrowIfCancellationRequested();
 
-        var compilation = semanticModel.Compilation;
-
+        // Re-validated against the current compilation: a cached candidate can drift (e.g. its base class in
+        // another file stopped implementing IHandler<,>) without its own tree changing.
         if (classSymbol.IsAbstract)
             return null;
 
         var handlerInterface = FindHandlerInterface(classSymbol);
         if (handlerInterface is null)
-            return null;
-
-        if (classSymbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
             return null;
 
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -429,43 +488,6 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         return hasModule ? bestValue : assemblyRequireAuthenticated;
-    }
-
-    private static List<(string Namespace, bool RequireAuthenticated)> BuildModuleAuthorizationDefaultsMap(
-        Compilation compilation,
-        CancellationToken ct) {
-        var result = new List<(string, bool)>();
-        var defaultsAttr = compilation.GetTypeByMetadataName(AuthorizationDefaultsAttributeMetadataName);
-        var moduleAttrSymbol = compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
-        if (defaultsAttr is null || moduleAttrSymbol is null)
-            return result;
-
-        foreach (var syntaxTree in compilation.SyntaxTrees) {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot(ct);
-
-            foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>()) {
-                if (semanticModel.GetDeclaredSymbol(typeDecl, ct) is not INamedTypeSymbol typeSymbol)
-                    continue;
-
-                var hasAppModule = typeSymbol.GetAttributes()
-                    .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, moduleAttrSymbol));
-                if (!hasAppModule)
-                    continue;
-
-                var defaults = typeSymbol.GetAttributes()
-                    .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, defaultsAttr));
-                if (defaults is null)
-                    continue;
-
-                var moduleNamespace = typeSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
-                    ? containing.ToDisplayString()
-                    : "";
-                result.Add((moduleNamespace, ReadRequireAuthenticated(defaults)));
-            }
-        }
-
-        return result;
     }
 
     private static bool ResolveAssemblyAuthorizationDefault(Compilation compilation) {
