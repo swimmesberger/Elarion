@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Elarion.Abstractions.Resilience;
 using Elarion.Abstractions.Scheduling;
 using Elarion.Abstractions.Substitution;
 using Elarion.Scheduling;
@@ -92,6 +93,64 @@ public sealed class SchedulerVariableReschedulingTests {
     }
 
     [Fact]
+    public async Task FixedRateJob_ActiveRun_ReschedulesSuccessorOnGrid_WithoutImmediateExtraRun() {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider(Origin);
+        var source = new MutableVariableSource(new Dictionary<string, string?> { ["Jobs:Interval"] = "10m" });
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // runOnStart => the first occurrence is due immediately; the grid successor is queued at dispatch,
+        // then the run blocks on the gate so it stays active while the variable change fires.
+        var descriptor = Recurring(
+            "test.active",
+            ScheduledJobSchedule.FixedRate("${Jobs:Interval:-10m}", runOnStart: true),
+            invoke: async (_, _, _, ct) => {
+                running.TrySetResult();
+                await gate.Task.WaitAsync(ct);
+            });
+        await using var provider = BuildProvider(time, source, descriptor);
+        var hosted = provider.GetRequiredService<IHostedService>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
+        await hosted.StartAsync(cts.Token);
+
+        try {
+            await running.Task.WaitAsync(cts.Token);
+            await WaitUntilAsync(() => inspector.GetSnapshot().ActiveRuns.Count == 1, cts.Token);
+            // The grid successor is queued while the first run is active.
+            NextDue(inspector, "test.active").Should().Be(Origin + TimeSpan.FromMinutes(10));
+
+            source.Update(new Dictionary<string, string?> { ["Jobs:Interval"] = "2m" });
+
+            // The superseded successor must be recomputed on the new grid strictly after the previous
+            // occurrence (Origin + 2m), NOT enqueued immediately at Origin (which would race the active run).
+            NextDue(inspector, "test.active").Should().Be(Origin + TimeSpan.FromMinutes(2));
+            inspector.GetSnapshot().ActiveRuns.Count.Should().Be(1);
+        } finally {
+            gate.TrySetResult();
+            await hosted.StopAsync(cts.Token);
+        }
+    }
+
+    [Fact]
+    public async Task StartAsync_Throws_WhenInlineResilienceJobRegistered_ButRunnerMissing() {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider(Origin);
+        var source = new MutableVariableSource([]);
+        var descriptor = Recurring("test.resilient", ScheduledJobSchedule.FixedRate("10m", runOnStart: false)) with {
+            ResiliencePolicy = new ResiliencePolicyReference { Name = "missing-runner-policy" }
+        };
+        await using var provider = BuildProvider(time, source, descriptor);
+        var hosted = provider.GetRequiredService<IHostedService>();
+
+        var act = () => hosted.StartAsync(cts.Token);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(ex => ex.Message.Contains("test.resilient")
+                && ex.Message.Contains("IResiliencePipelineRunner")
+                && ex.Message.Contains("AddMicrosoftResilienceRuntime"));
+    }
+
+    [Fact]
     public void ConfigurationVariableSource_Watch_FiresOnConfigurationReload() {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection()
@@ -117,13 +176,23 @@ public sealed class SchedulerVariableReschedulingTests {
         return services.BuildServiceProvider();
     }
 
-    private static ScheduledJobDescriptor Recurring(string name, ScheduledJobSchedule schedule) =>
+    private static ScheduledJobDescriptor Recurring(
+        string name,
+        ScheduledJobSchedule schedule,
+        ScheduledJobInvokeDelegate? invoke = null) =>
         new() {
             Name = name,
             Schedule = schedule,
             Overlap = ScheduledJobOverlap.AllowConcurrent,
-            InvokeAsync = static (_, _, _, _) => ValueTask.CompletedTask
+            InvokeAsync = invoke ?? (static (_, _, _, _) => ValueTask.CompletedTask)
         };
+
+    private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken ct) {
+        while (!condition()) {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(5, ct);
+        }
+    }
 
     private static DateTimeOffset? NextDue(IJobSchedulerInspector inspector, string name) =>
         inspector.GetSnapshot().Jobs.Single(job => job.Name == name).NextDueTimeUtc;

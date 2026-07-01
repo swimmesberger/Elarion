@@ -346,12 +346,46 @@ public sealed class InMemoryScheduler(
     /// </summary>
     public override Task StartAsync(CancellationToken cancellationToken) {
         if (options.Enabled) {
+            // A misconfigured resilience runner is a startup error, not a per-run failure loop: validate before
+            // any occurrence is enqueued so the host fails fast with a message naming the affected job(s).
+            ValidateResilienceRunnerRegistration();
             // Note 32: Startup enqueues only the next occurrence for each recurring job; future occurrences are chained as runs dispatch or complete.
             EnqueueRecurringJobs();
             SubscribeToVariableChanges();
         }
 
         return base.StartAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Fails fast when a registered job runs its resilience policy inline but the opt-in
+    /// <see cref="IResiliencePipelineRunner"/> (from <c>Elarion.Resilience</c>) is not registered. Without this a
+    /// <c>[Resilient]</c>-decorated inline job would throw on <em>every</em> run with no startup signal — a silent
+    /// per-run failure loop rather than an actionable configuration error.
+    /// </summary>
+    private void ValidateResilienceRunnerRegistration() {
+        // Inline resilience is driven by a descriptor-level policy (deferred retry takes a separate path that
+        // never resolves the runner). Runtime one-offs may also carry an inline policy, but those descriptors are
+        // exactly the ones that expose a descriptor policy or support runtime scheduling with resilience overrides;
+        // the descriptor-level policy is the compile-time-known signal we can validate at startup.
+        var jobsNeedingRunner = _descriptors
+            .Where(descriptor => descriptor.ResiliencePolicy is not null)
+            .Select(descriptor => descriptor.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        if (jobsNeedingRunner.Length == 0) {
+            return;
+        }
+
+        using var scope = scopeFactory.CreateScope();
+        if (scope.ServiceProvider.GetService<IResiliencePipelineRunner>() is not null) {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Scheduled job(s) [{string.Join(", ", jobsNeedingRunner)}] run their resilience policy inline, but no " +
+            $"{nameof(IResiliencePipelineRunner)} is registered. Reference the Elarion.Resilience package and call " +
+            "AddMicrosoftResilienceRuntime() during service registration, or remove the resilience policy from these jobs.");
     }
 
     /// <inheritdoc />
@@ -507,6 +541,17 @@ public sealed class InMemoryScheduler(
         // Skip re-enqueuing only when the job is mid-run with no queued occurrence: a fixed-delay chain
         // reschedules itself on completion and will pick up the new variables there.
         if (!supersededQueued && jobActive) {
+            return;
+        }
+
+        // For fixed-rate/cron grid schedules the chain advances at dispatch, so a run in flight always has a
+        // queued successor. Re-resolving that successor to GetFirstDueTime(now) would enqueue an *immediate*
+        // extra occurrence that races the active run (concurrently under AllowConcurrent, or an unexpected
+        // immediate execution otherwise). Instead recompute the successor on the new grid strictly after now
+        // (anchored at now) — preserving the "do not trigger a run while one is active" intent while still
+        // picking up the new schedule.
+        if (jobActive && IsRecurringGridSchedule(descriptor.Schedule)) {
+            Enqueue(BuildRecurringOccurrence(descriptor, resolved.GetNextDueTime(now, now)));
             return;
         }
 
