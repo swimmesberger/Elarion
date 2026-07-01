@@ -25,14 +25,29 @@ public sealed class RpcToolInvokerTests {
                 : ValueTask.FromResult<Result<EchoResponse>>(new EchoResponse($"Hello {request.Name}"));
     }
 
+    private sealed record ThrowCommand {
+        public required string Name { get; init; }
+    }
+
+    private sealed class ThrowHandler : IHandler<ThrowCommand, Result<EchoResponse>> {
+        public ValueTask<Result<EchoResponse>> HandleAsync(ThrowCommand request, CancellationToken ct) =>
+            request.Name == "cancel"
+                ? throw new OperationCanceledException()
+                : throw new InvalidOperationException("boom: secret internal detail");
+    }
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
 
     private static (HandlerDispatcher Dispatcher, IServiceProvider Services) Build() {
-        var dispatcher = new JsonRpcDispatcher(Options).Map<EchoCommand, EchoResponse>("echo").Freeze();
+        var dispatcher = new JsonRpcDispatcher(Options)
+            .Map<EchoCommand, EchoResponse>("echo")
+            .Map<ThrowCommand, EchoResponse>("throw")
+            .Freeze();
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
+            .AddScoped<IHandler<ThrowCommand, Result<EchoResponse>>, ThrowHandler>()
             .BuildServiceProvider();
         return (dispatcher.Registry, services);
     }
@@ -64,6 +79,33 @@ public sealed class RpcToolInvokerTests {
         result.IsError.Should().BeTrue();
         result.Text.Should().Be("client not found");
         result.ErrorCode.Should().Be(-32001);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_HandlerThrows_MapsToInternalErrorAndHidesDetail() {
+        var (dispatcher, services) = Build();
+
+        var result = await RpcToolInvoker.InvokeAsync(
+            dispatcher, HandlerTransports.All, "throw", Args(new { name = "explode" }), services, Options,
+            ct: TestContext.Current.CancellationToken);
+
+        result.IsError.Should().BeTrue();
+        result.ErrorCode.Should().Be(-32603);
+        result.Text.Should().Be("Internal error");
+        result.Text.Should().NotContain("secret internal detail");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_CallerCanceled_RethrowsWithoutFabricatingError() {
+        var (dispatcher, services) = Build();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = async () => await RpcToolInvoker.InvokeAsync(
+            dispatcher, HandlerTransports.All, "throw", Args(new { name = "cancel" }), services, Options,
+            ct: cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]

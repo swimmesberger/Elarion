@@ -140,6 +140,12 @@ public sealed class JsonRpcDispatcher {
                 request.Method, rpcError.Code, rpcError.Message);
             RecordError(activity, method, errorCode, rpcError.Message, "application-error", startTimestamp);
             return JsonRpcResponse.FromError(request, rpcError);
+        } catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+            // The caller aborted (e.g. a client disconnect). This is expected, not an internal error: do not log
+            // it as an error and do not fabricate a response — the endpoint will not write into the aborted
+            // request. Rethrow so the transport can bail quietly and no telemetry error is recorded.
+            _logger?.LogDebug("JSON-RPC {Method} canceled by the caller (request aborted)", request.Method);
+            throw;
         } catch (JsonException ex) {
             _logger?.LogWarning(ex, "JSON-RPC {Method} — invalid params (deserialization failed)", request.Method);
             RecordError(activity, method, "-32602", "Invalid params", "invalid-params", startTimestamp);
