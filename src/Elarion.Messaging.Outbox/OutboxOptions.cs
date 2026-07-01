@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 
 namespace Elarion.Messaging.Outbox;
 
@@ -41,11 +40,9 @@ public sealed class OutboxOptions
     public TimeSpan? RetentionPeriod { get; set; } = TimeSpan.FromDays(7);
 
     /// <summary>
-    /// The serializer used for event payloads. Defaults to web options with a reflection-based resolver; supply a
-    /// source-generated <see cref="IJsonTypeInfoResolver"/> for trimming/AOT.
+    /// Overrides the serializer used for event payloads. Defaults to <c>null</c> — the canonical Elarion JSON
+    /// options (<c>IElarionJsonSerialization</c>) are used, so event DTOs resolve through the app's source-generated
+    /// contexts (trim/AOT-safe). Set a non-null value only to serialize the outbox differently from the rest of the app.
     /// </summary>
-    public JsonSerializerOptions SerializerOptions { get; set; } = new(JsonSerializerDefaults.Web)
-    {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
-    };
+    public JsonSerializerOptions? SerializerOptions { get; set; }
 }

@@ -1,11 +1,16 @@
 ---
 title: Serialization
-description: Compose JSON-RPC envelope, host, and per-module JSON contexts into one runtime serializer for AOT-friendly serialization.
+description: One canonical JsonSerializerOptions that every Elarion subsystem reads, composed from per-module source-generated JSON contexts for AOT-friendly serialization.
 ---
 
-Elarion uses `System.Text.Json` source-generated metadata so request/response serialization is
-AOT-friendly and follows module boundaries. Each module contributes its own `JsonSerializerContext`;
-the host composes them into the runtime serializer.
+Elarion uses `System.Text.Json` source-generated metadata so serialization is AOT-friendly and follows
+module boundaries. Each module contributes its own `JsonSerializerContext`, and the framework composes
+them into **one canonical `JsonSerializerOptions`** that every subsystem — JSON-RPC, MCP, idempotency,
+caching, the outbox, and settings — reads through the `IElarionJsonSerialization` accessor. You configure
+the JSON type context **once**; you no longer build or thread `JsonSerializerOptions` into each subsystem.
+
+See [ADR-0023](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0023-canonical-json-serialization.md)
+for the design.
 
 ## Per-module JSON contexts
 
@@ -29,38 +34,61 @@ The module exposes it through `GetJsonTypeInfoResolver()`:
 public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => ClientsJsonContext.Default;
 ```
 
-## Composing the runtime serializer
+## The canonical serializer
 
-The host combines the JSON-RPC envelope metadata, host metadata, every module resolver, and a
-fallback resolver:
+`IElarionJsonSerialization` (in `Elarion.Abstractions.Serialization`) is the accessor for the one
+framework-wide `JsonSerializerOptions`. It materializes the options **once** from a composed
+`ElarionJsonOptions` and freezes them (`MakeReadOnly()`) on first use, then exposes `Options`,
+`GetTypeInfo<T>()`, and `GetTypeInfo(Type)`. Subsystems depend on this accessor — Elarion deliberately
+registers **no bare `JsonSerializerOptions`** in DI, so it never collides with a host's own
+(ASP.NET Core / MVC) registration.
+
+The options are **composed** from contributions, in order (first-match-wins):
+
+1. **Transport envelope contexts** — `AddElarionJsonRpc` / `AddElarionMcp` insert their envelope context first.
+2. **Module DTO contexts** — the generated `AddElarion(configuration)` contributes every enabled module's
+   `GetJsonTypeInfoResolver()` automatically (gated by `Modules:{Name}:Enabled`).
+3. **Host extras** — anything you add via `ConfigureElarionJson`.
+
+So a typical host composes nothing by hand:
 
 ```csharp
-var moduleResolvers = configuration.GetAllJsonTypeInfoResolvers();
+builder.Services.AddElarion(builder.Configuration);   // contributes module contexts + registers the accessor
 
-var resolvers = new IJsonTypeInfoResolver[2 + moduleResolvers.Length + 1];
-resolvers[0] = JsonRpcJsonContext.Default;
-resolvers[1] = HostJsonContext.Default;
-Array.Copy(moduleResolvers, 0, resolvers, 2, moduleResolvers.Length);
-resolvers[^1] = new DefaultJsonTypeInfoResolver();
-
-var options = new JsonSerializerOptions {
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    PropertyNameCaseInsensitive = true,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    TypeInfoResolver = JsonTypeInfoResolver.Combine(resolvers),
-};
+builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
+builder.Services.AddElarionMcp(
+    builder.Configuration.GetMcpMetadata(),
+    ElarionBootstrapper.RegisterHandlers,
+    o => o.ServerName = "MyApp");
 ```
 
-The **same** `JsonSerializerOptions` instance must be used by the runtime dispatcher and by schema
-export, so the exported schema matches what the server actually serializes.
+### Customizing the options
+
+Use `ConfigureElarionJson` to change naming/knobs or add an extra resolver — contributions accumulate
+across calls and layers:
+
+```csharp
+builder.Services.ConfigureElarionJson(o => {
+    o.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;   // default is CamelCase
+    o.TypeInfoResolvers.Add(SomeExtraContext.Default);
+});
+```
+
+`ElarionJsonOptions` also exposes `PropertyNameCaseInsensitive`, `DefaultIgnoreCondition`, a
+`PostConfigure` escape hatch (converters, a custom encoder), and `EnableReflectionFallback` (below).
+
+Schema export reads the same accessor, so the exported JSON-RPC schema matches exactly what the server
+serializes.
 
 ## AOT considerations
 
-<Callout type="warn">
-  For AOT-sensitive apps, register **every** command, query, response, and nested DTO type explicitly
-  with `[JsonSerializable(...)]`. The trailing `DefaultJsonTypeInfoResolver()` is a reflection-based
-  fallback — convenient in development, but do not rely on it for production-only types under AOT.
-</Callout>
+The canonical options are **AOT-strict by default**: no reflection-based `DefaultJsonTypeInfoResolver`
+is added, matching the project-wide `JsonSerializerIsReflectionEnabledByDefault=false`. A type missing
+from every source-generated context therefore **throws** at runtime, surfacing a forgotten
+`[JsonSerializable(...)]` instead of silently reflecting (and being trimmed away under AOT).
 
-The project also sets `JsonSerializerIsReflectionEnabledByDefault=false`, which surfaces missing type
-metadata early rather than silently falling back to reflection.
+<Callout type="warn">
+  Register **every** command, query, response, and nested DTO type explicitly with
+  `[JsonSerializable(...)]`. If you knowingly want a reflection fallback for development, opt in with
+  `ConfigureElarionJson(o => o.EnableReflectionFallback = true)` — but leave it off for AOT/trimmed builds.
+</Callout>

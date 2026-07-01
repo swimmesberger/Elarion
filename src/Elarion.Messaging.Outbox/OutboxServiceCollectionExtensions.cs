@@ -1,4 +1,5 @@
 using Elarion.Abstractions.Messaging;
+using Elarion.Abstractions.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -33,6 +34,7 @@ public static class OutboxServiceCollectionExtensions
         var options = new OutboxOptions();
         configure?.Invoke(options);
 
+        services.AddElarionJson();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton(options);
         services.TryAddSingleton<OutboxEventDispatcher>();

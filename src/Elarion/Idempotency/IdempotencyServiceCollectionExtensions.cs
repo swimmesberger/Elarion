@@ -1,6 +1,7 @@
 using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Idempotency;
 using Elarion.Abstractions.Pipeline;
+using Elarion.Abstractions.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -16,6 +17,7 @@ public static class IdempotencyServiceCollectionExtensions {
     public static IServiceCollection AddElarionIdempotency(this IServiceCollection services) {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddElarionJson();
         services.TryAddSingleton(TimeProvider.System);
 
         services.TryAddScoped<ScopedIdempotencyKeyAccessor>();

@@ -123,18 +123,17 @@ builder.Services.AddAuthentication("Bearer")
 builder.Services.AddAuthorization();
 
 // Compose every module's services — handlers, services, validators, scheduled jobs, and event
-// consumers — each gated by Modules:{Name}:Enabled.
+// consumers — each gated by Modules:{Name}:Enabled. This also contributes every enabled module's
+// source-generated JSON context to the canonical serializer every subsystem reads.
 builder.Services.AddElarion(builder.Configuration);
 
-// JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
-var serializerOptions = CreateSerializerOptions(builder.Configuration);
-builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+// JSON-RPC: methods gated per module. Serialization comes from the canonical IElarionJsonSerialization
+// (customize it via ConfigureElarionJson) — no hand-built JsonSerializerOptions is threaded in.
+builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
 
 // MCP: a thin adapter over the same handler bus, equally gated; both surfaces share one registry.
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
-    serializerOptions,
     ElarionBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
 
@@ -187,23 +186,15 @@ app.MapElarionJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
 app.Run();
-
-static JsonSerializerOptions CreateSerializerOptions(IConfiguration configuration) {
-    var moduleResolvers = configuration.GetAllJsonTypeInfoResolvers();
-    return new JsonSerializerOptions {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        TypeInfoResolver = JsonTypeInfoResolver.Combine(
-            [JsonRpcJsonContext.Default, .. moduleResolvers, new DefaultJsonTypeInfoResolver()]),
-    };
-}
 ```
 
 <Callout type="info">
-  The **same** `serializerOptions` instance flows into the JSON-RPC dispatcher, the MCP server, and schema
-  export — so the generated TypeScript types match exactly what the server serializes. JSON-RPC and MCP are
-  thin adapters over one handler bus, so you could expose MCP without ever calling `MapElarionJsonRpc()`.
+  The JSON-RPC dispatcher, the MCP server, and schema export all read the **one** canonical
+  `IElarionJsonSerialization` — so the generated TypeScript types match exactly what the server serializes.
+  `AddElarion(builder.Configuration)` contributes every module's source-generated context automatically; use
+  [`ConfigureElarionJson`](/docs/capabilities/serialization) only to change naming or add an extra resolver.
+  JSON-RPC and MCP are thin adapters over one handler bus, so you could expose MCP without ever calling
+  `MapElarionJsonRpc()`.
 </Callout>
 
 Add the scheduler section to configuration so the in-memory runtime is enabled:

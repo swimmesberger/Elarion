@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Elarion.Abstractions.Messaging;
+using Elarion.Abstractions.Serialization;
 
 namespace Elarion.Messaging.Outbox;
 
@@ -19,11 +20,15 @@ public sealed class OutboxEventDispatcher
     private readonly Dictionary<Type, EventSubscriptionDescriptor[]> _consumersByType = new();
 
     /// <summary>Builds the integration-event consumer index from the registered descriptors.</summary>
-    public OutboxEventDispatcher(IEnumerable<EventSubscriptionDescriptor> descriptors, OutboxOptions options)
+    public OutboxEventDispatcher(
+        IEnumerable<EventSubscriptionDescriptor> descriptors,
+        OutboxOptions options,
+        IElarionJsonSerialization jsonSerialization)
     {
         ArgumentNullException.ThrowIfNull(descriptors);
         ArgumentNullException.ThrowIfNull(options);
-        _serializerOptions = options.SerializerOptions;
+        ArgumentNullException.ThrowIfNull(jsonSerialization);
+        _serializerOptions = options.SerializerOptions ?? jsonSerialization.Options;
 
         var byType = new Dictionary<Type, List<EventSubscriptionDescriptor>>();
         foreach (var descriptor in descriptors)

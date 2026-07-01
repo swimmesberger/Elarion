@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Microsoft.AspNetCore.Builder;
@@ -17,24 +16,9 @@ public static class JsonRpcServiceExtensions {
     /// and a <see cref="JsonSerializerOptions"/> singleton.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="configure">
-    /// Optional configuration delegate for <see cref="JsonRpcOptions"/>.
-    /// Set <see cref="JsonRpcOptions.SerializerOptions"/> to provide a pre-built
-    /// <see cref="JsonSerializerOptions"/> instance (recommended). When not set, a minimal
-    /// default is built with camelCase naming and the <see cref="JsonRpcJsonContext"/> resolver.
-    /// </param>
+    /// <param name="configure">Optional configuration delegate for <see cref="JsonRpcOptions"/> (endpoint path,
+    /// batch size). JSON serialization is configured centrally via <c>ConfigureElarionJson</c>.</param>
     /// <returns>The service collection for chaining.</returns>
-    /// <example>
-    /// <code>
-    /// var serializerOptions = new JsonSerializerOptions { ... };
-    ///
-    /// // schema export
-    /// JsonRpcSchemaExporter.Generate(dispatcher, serializerOptions);
-    ///
-    /// // runtime
-    /// builder.Services.AddElarionJsonRpc(o =&gt; o.SerializerOptions = serializerOptions);
-    /// </code>
-    /// </example>
     public static IServiceCollection AddElarionJsonRpc(
         this IServiceCollection services,
         Action<JsonRpcOptions>? configure = null
@@ -52,35 +36,30 @@ public static class JsonRpcServiceExtensions {
 
     /// <summary>
     /// Adds JSON-RPC 2.0 services <em>and</em> registers the <see cref="JsonRpcDispatcher"/> singleton from the
-    /// generated <paramref name="registerAll"/> map — the one-call setup for a JSON-RPC host.
+    /// generated <paramref name="registerHandlers"/> map — the one-call setup for a JSON-RPC host. Serialization
+    /// comes from the canonical <c>IElarionJsonSerialization</c> options (configure it via <c>ConfigureElarionJson</c>).
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="serializerOptions">The serializer options used by the dispatcher and the endpoint.</param>
     /// <param name="registerHandlers">The generated registration delegate (e.g. <c>ElarionBootstrapper.RegisterHandlers</c>).</param>
     /// <param name="configure">Optional additional <see cref="JsonRpcOptions"/> configuration (e.g. endpoint path).</param>
     /// <returns>The service collection for chaining.</returns>
     /// <example>
     /// <code>
-    /// builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+    /// builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
     /// var app = builder.Build();
     /// app.MapElarionJsonRpc();
     /// </code>
     /// </example>
     public static IServiceCollection AddElarionJsonRpc(
         this IServiceCollection services,
-        JsonSerializerOptions serializerOptions,
         Func<HandlerDispatcher, HandlerDispatcher> registerHandlers,
         Action<JsonRpcOptions>? configure = null
     ) {
-        ArgumentNullException.ThrowIfNull(serializerOptions);
         ArgumentNullException.ThrowIfNull(registerHandlers);
 
-        services.AddElarionJsonRpcDispatcher(serializerOptions, registerHandlers);
+        services.AddElarionJsonRpcDispatcher(registerHandlers);
 
-        return services.AddElarionJsonRpc(options => {
-            options.SerializerOptions = serializerOptions;
-            configure?.Invoke(options);
-        });
+        return services.AddElarionJsonRpc(configure);
     }
 
     /// <summary>
@@ -89,32 +68,25 @@ public static class JsonRpcServiceExtensions {
     /// <c>ElarionBootstrapper.RegisterHandlers</c> registers only the operations of enabled modules.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="serializerOptions">The serializer options used by the dispatcher and the endpoint.</param>
     /// <param name="register">The registration delegate (e.g. <c>ElarionBootstrapper.RegisterHandlers</c>).</param>
     /// <param name="configure">Optional additional <see cref="JsonRpcOptions"/> configuration (e.g. endpoint path).</param>
     /// <returns>The service collection for chaining.</returns>
     /// <example>
     /// <code>
-    /// builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+    /// builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
     /// </code>
     /// </example>
     public static IServiceCollection AddElarionJsonRpc(
         this IServiceCollection services,
-        JsonSerializerOptions serializerOptions,
         Func<HandlerDispatcher, IConfiguration, HandlerDispatcher> register,
         Action<JsonRpcOptions>? configure = null
     ) {
-        ArgumentNullException.ThrowIfNull(serializerOptions);
         ArgumentNullException.ThrowIfNull(register);
 
         services.AddElarionJsonRpcDispatcher(
-            serializerOptions,
             (dispatcher, sp) => register(dispatcher, sp.GetRequiredService<IConfiguration>()));
 
-        return services.AddElarionJsonRpc(options => {
-            options.SerializerOptions = serializerOptions;
-            configure?.Invoke(options);
-        });
+        return services.AddElarionJsonRpc(configure);
     }
 
     /// <summary>

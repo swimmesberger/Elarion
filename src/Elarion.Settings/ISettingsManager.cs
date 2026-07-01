@@ -1,12 +1,11 @@
-using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.Primitives;
 
 namespace Elarion.Settings;
 
 /// <summary>
-/// The native, AOT-clean consuming API over the settings sink. Typed access binds through a source-generated
-/// <see cref="JsonTypeInfo{T}"/> (no reflection), and scope-aware reads resolve the per-user scope from the
-/// ambient <c>ICurrentUser</c>.
+/// The native, AOT-clean consuming API over the settings sink. Typed access serializes through the canonical
+/// <c>IElarionJsonSerialization</c> options (the app's source-generated contexts, no reflection), and scope-aware
+/// reads resolve the per-user scope from the ambient <c>ICurrentUser</c>.
 /// </summary>
 /// <remarks>
 /// Scope resolution: an omitted scope means <see cref="SettingsScope.Global"/>. Passing
@@ -16,19 +15,17 @@ namespace Elarion.Settings;
 /// </remarks>
 public interface ISettingsManager {
     /// <summary>
-    /// Reads and deserializes a typed value via <paramref name="typeInfo"/>, returning
+    /// Reads and deserializes a typed value (through the canonical serializer), returning
     /// <paramref name="fallback"/> when the key is absent (or stored as JSON null).
     /// </summary>
     ValueTask<T> GetAsync<T>(
-        JsonTypeInfo<T> typeInfo,
         string key,
         T fallback,
         SettingsScope? scope = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Serializes <paramref name="value"/> via <paramref name="typeInfo"/> and writes it.</summary>
+    /// <summary>Serializes <paramref name="value"/> (through the canonical serializer) and writes it.</summary>
     ValueTask<SettingWriteResult> SetAsync<T>(
-        JsonTypeInfo<T> typeInfo,
         string key,
         T value,
         SettingsScope? scope = null,

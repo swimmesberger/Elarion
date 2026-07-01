@@ -14,7 +14,12 @@ namespace Elarion.Tests.Services;
 
 public sealed class InMemorySchedulerTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(10);
+    // These tests drive real background job execution and poll for the outcome on the wall clock (WaitUntilAsync /
+    // AdvanceUntilAsync). The scheduler advances via FakeTimeProvider, but the loop's continuations run on the
+    // thread pool, so a heavily loaded CI runner (e.g. many Testcontainers Postgres instances in parallel) can
+    // starve them past a tight budget. Keep the ceiling generous — a healthy run still finishes in milliseconds;
+    // only a genuinely stuck scheduler waits this long before failing.
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(50);
     private const string RetryPolicyName = "test-deferred-retry";
     private const string InlineRetryPolicyName = "test-inline-retry";

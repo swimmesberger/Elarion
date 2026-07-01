@@ -33,16 +33,14 @@ path](/docs/capabilities/hosting)), which exposes the gated MCP peers alongside 
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Mcp;
 
-var serializerOptions = CreateSerializerOptions(builder.Configuration);
-
 // The public JSON-RPC endpoint (optional, independent of MCP): the JSON-RPC adapter over the shared bus,
 // serving the JSON-RPC-surfaced operations of enabled modules at /rpc.
-builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
 
 // The MCP server: the MCP adapter over the same bus, serving the MCP-surfaced operations as one tool each.
+// Both adapters read the canonical IElarionJsonSerialization (contributed by AddElarion).
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(), // reflection-free, gated tool table
-    serializerOptions,
     ElarionBootstrapper.RegisterHandlers,    // the single, gated handler registry both adapters resolve
     o => o.ServerName = "MyApp");
 
@@ -132,7 +130,6 @@ public sealed class CreateClient : IHandler<...> { ... }
 ```csharp
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
-    serializerOptions,
     ElarionBootstrapper.RegisterHandlers,
     o => {
         o.ServerName = "MyApp";                            // required

@@ -80,8 +80,9 @@ choose surfaces via the `Transports` flag*, never registered separately per tran
    [name inference](#marking-a-handler)).
 2. `AppModuleDiscoveryGenerator` (via `[GenerateModuleBootstrapper]`) emits the gated handler
    registration map (`RegisterHandlers`).
-3. The host configures a `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime; it
-   adapts the shared `HandlerDispatcher` registry to the JSON-RPC wire format.
+3. `AddElarionJsonRpc` registers the `JsonRpcDispatcher`, which reads the canonical
+   [`IElarionJsonSerialization`](/docs/capabilities/serialization) options (the same serializer the whole
+   app uses) and adapts the shared `HandlerDispatcher` registry to the JSON-RPC wire format.
 4. `JsonRpcSchemaExporter` (or the [build-time package](/docs/capabilities/transports/schema-generation)) exports
    `rpc-schema.json` from the registered dispatcher.
 5. [`elarion-jsonrpc-client-generator`](/docs/capabilities/transports/typescript-client) converts that schema into

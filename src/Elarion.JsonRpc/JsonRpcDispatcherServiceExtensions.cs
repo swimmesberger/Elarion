@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Elarion.Abstractions.Dispatch;
+using Elarion.Abstractions.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -52,42 +52,44 @@ public static class JsonRpcDispatcherServiceExtensions {
 
     /// <summary>
     /// Registers the shared <see cref="HandlerDispatcher"/> and a singleton <see cref="JsonRpcDispatcher"/> adapter
-    /// over it, using <paramref name="serializerOptions"/> for params/result handling.
+    /// over it. The adapter reads the canonical <see cref="IElarionJsonSerialization"/> options for params/result
+    /// handling, and contributes the JSON-RPC envelope context to those options.
     /// </summary>
     /// <example>
     /// <code>
-    /// builder.Services.AddElarionJsonRpcDispatcher(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+    /// builder.Services.AddElarionJsonRpcDispatcher(ElarionBootstrapper.RegisterHandlers);
     /// </code>
     /// </example>
     public static IServiceCollection AddElarionJsonRpcDispatcher(
         this IServiceCollection services,
-        JsonSerializerOptions serializerOptions,
         Func<HandlerDispatcher, HandlerDispatcher> registerHandlers) {
-        ArgumentNullException.ThrowIfNull(serializerOptions);
-
         services.AddElarionHandlerDispatcher(registerHandlers);
-        services.AddElarionJsonRpcAdapter(serializerOptions);
+        services.AddElarionJsonRpcAdapter();
         return services;
     }
 
     /// <summary>
     /// Registers the shared <see cref="HandlerDispatcher"/> (config-aware) and a singleton
-    /// <see cref="JsonRpcDispatcher"/> adapter over it.
+    /// <see cref="JsonRpcDispatcher"/> adapter over it (reading the canonical serializer options).
     /// </summary>
     public static IServiceCollection AddElarionJsonRpcDispatcher(
         this IServiceCollection services,
-        JsonSerializerOptions serializerOptions,
         Func<HandlerDispatcher, IServiceProvider, HandlerDispatcher> registerHandlers) {
-        ArgumentNullException.ThrowIfNull(serializerOptions);
-
         services.AddElarionHandlerDispatcher(registerHandlers);
-        services.AddElarionJsonRpcAdapter(serializerOptions);
+        services.AddElarionJsonRpcAdapter();
         return services;
     }
 
-    private static void AddElarionJsonRpcAdapter(this IServiceCollection services, JsonSerializerOptions serializerOptions) =>
+    private static void AddElarionJsonRpcAdapter(this IServiceCollection services) {
+        // Contribute the JSON-RPC envelope context to the canonical options, first so it wins for envelope types.
+        services.ConfigureElarionJson(static o => {
+            if (!o.TypeInfoResolvers.Contains(JsonRpcJsonContext.Default)) {
+                o.TypeInfoResolvers.Insert(0, JsonRpcJsonContext.Default);
+            }
+        });
         services.TryAddSingleton(sp => new JsonRpcDispatcher(
             sp.GetRequiredService<HandlerDispatcher>(),
-            serializerOptions,
+            sp.GetRequiredService<IElarionJsonSerialization>().Options,
             sp.GetService<ILogger<JsonRpcDispatcher>>()));
+    }
 }

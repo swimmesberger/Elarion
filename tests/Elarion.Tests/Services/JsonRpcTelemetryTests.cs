@@ -25,7 +25,7 @@ public sealed class JsonRpcTelemetryTests {
                     Value = request.Value
                 }))
             .Freeze();
-        await using var provider = CreateProvider(dispatcher, jsonOptions);
+        await using var provider = CreateProvider(dispatcher);
         var body = """
             [
               { "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "ok" }, "id": "1" },
@@ -82,7 +82,7 @@ public sealed class JsonRpcTelemetryTests {
         using var activities = new ActivityCollector(JsonRpcTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(JsonRpcTelemetry.MeterName);
         var jsonOptions = CreateJsonOptions();
-        await using var provider = CreateProvider(new JsonRpcDispatcher(jsonOptions).Freeze(), jsonOptions);
+        await using var provider = CreateProvider(new JsonRpcDispatcher(jsonOptions).Freeze());
         var context = CreateContext(provider, "{");
 
         await JsonRpcEndpoint.HandleRpc(context);
@@ -106,7 +106,7 @@ public sealed class JsonRpcTelemetryTests {
                     Value = request.Value
                 }))
             .Freeze();
-        await using var provider = CreateProvider(dispatcher, jsonOptions);
+        await using var provider = CreateProvider(dispatcher);
         var context = CreateContext(provider, """{ "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "ok" }, "id": 42 }""");
 
         await JsonRpcEndpoint.HandleRpc(context);
@@ -131,7 +131,7 @@ public sealed class JsonRpcTelemetryTests {
                     Value = request.Value
                 }))
             .Freeze();
-        await using var provider = CreateProvider(dispatcher, jsonOptions);
+        await using var provider = CreateProvider(dispatcher);
         var context = CreateContext(provider, """
             [
               { "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "notify" } }
@@ -159,7 +159,7 @@ public sealed class JsonRpcTelemetryTests {
                     Value = request.Value
                 }))
             .Freeze();
-        await using var provider = CreateProvider(dispatcher, jsonOptions);
+        await using var provider = CreateProvider(dispatcher);
         var context = CreateContext(provider, """{ "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "notify" } }""");
 
         await JsonRpcEndpoint.HandleRpc(context);
@@ -193,10 +193,10 @@ public sealed class JsonRpcTelemetryTests {
         json.Should().Contain("\"id\":null");
     }
 
-    private static ServiceProvider CreateProvider(JsonRpcDispatcher dispatcher, JsonSerializerOptions jsonOptions) {
+    private static ServiceProvider CreateProvider(JsonRpcDispatcher dispatcher) {
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.ClearProviders());
-        services.AddElarionJsonRpc(options => options.SerializerOptions = jsonOptions);
+        services.AddElarionJsonRpc();
         services.AddSingleton(dispatcher);
         return services.BuildServiceProvider();
     }

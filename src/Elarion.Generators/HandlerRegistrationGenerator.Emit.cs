@@ -247,7 +247,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyKeyAccessor>(),");
         sb.AppendLine($"                    new {handler.HandlerName}IdempotencyPolicy(),");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Identity.ICurrentUser>(),");
-        sb.AppendLine("                    sp.GetRequiredService<global::System.Text.Json.JsonSerializerOptions>());");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Serialization.IElarionJsonSerialization>().Options);");
     }
 
     private static void AppendIdempotencyPolicy(StringBuilder sb, HandlerInfo handler) {

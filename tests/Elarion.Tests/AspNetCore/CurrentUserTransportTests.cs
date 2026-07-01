@@ -111,7 +111,7 @@ public sealed class CurrentUserTransportTests {
 
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.ClearProviders());
-        services.AddElarionJsonRpc(options => options.SerializerOptions = SerializerOptions);
+        services.AddElarionJsonRpc();
         services.AddSingleton(dispatcher);
         services.AddElarionCurrentUser();
         services.AddScoped<IHandler<WhoAmIQuery, Result<WhoAmIResponse>>, WhoAmIHandler>();

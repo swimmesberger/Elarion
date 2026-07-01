@@ -57,6 +57,19 @@ public sealed class AppModuleDiscoveryGeneratorTests {
                 }
             }
 
+            namespace Elarion.Abstractions.Serialization {
+                public sealed class ElarionJsonOptions {
+                    public System.Collections.Generic.IList<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver> TypeInfoResolvers { get; } =
+                        new System.Collections.Generic.List<System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>();
+                }
+
+                public static class ElarionJsonServiceCollectionExtensions {
+                    public static Microsoft.Extensions.DependencyInjection.IServiceCollection ConfigureElarionJson(
+                        Microsoft.Extensions.DependencyInjection.IServiceCollection services,
+                        System.Action<ElarionJsonOptions> configure) => services;
+                }
+            }
+
             namespace Sample.Modules.Core {
                 [Elarion.Abstractions.Modules.AppModule("Core", Kind = Elarion.Abstractions.Modules.AppModuleKind.Core)]
                 public static class CoreModule {

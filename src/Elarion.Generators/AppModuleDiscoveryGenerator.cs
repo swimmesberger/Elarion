@@ -677,6 +677,13 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    {");
         // The typed in-process mediator send, available wherever handlers are. Idempotent (TryAddScoped).
         sb.AppendLine("        global::Elarion.HandlerSenderServiceCollectionExtensions.AddElarionHandlerSender(services);");
+        // Contribute every enabled module's source-generated JSON context to the canonical serializer options, so
+        // every subsystem (JSON-RPC, MCP, idempotency, caching, outbox, settings) reads one shared configuration.
+        sb.AppendLine("        global::Elarion.Abstractions.Serialization.ElarionJsonServiceCollectionExtensions.ConfigureElarionJson(services, o =>");
+        sb.AppendLine("        {");
+        sb.AppendLine("            foreach (var resolver in GetAllJsonTypeInfoResolvers(configuration))");
+        sb.AppendLine("                o.TypeInfoResolvers.Add(resolver);");
+        sb.AppendLine("        });");
         foreach (var entry in entries)
         {
             // Generated defaults (handlers, services, validators, scheduled jobs, event consumers) first,

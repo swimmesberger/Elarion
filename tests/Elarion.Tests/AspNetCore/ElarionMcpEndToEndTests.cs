@@ -1,9 +1,9 @@
 using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
+using Elarion.Abstractions.Serialization;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Mcp;
 using Elarion.JsonRpc;
@@ -39,10 +39,6 @@ public sealed class ElarionMcpEndToEndTests {
                 : ValueTask.FromResult<Result<EchoResponse>>(new EchoResponse($"Hello {request.Name}"));
     }
 
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
-    };
-
     [Fact]
     public async Task McpServer_ListsAndCallsTools_OverHttp_WithoutJsonRpcEndpoint() {
         var ct = TestContext.Current.CancellationToken;
@@ -52,10 +48,12 @@ public sealed class ElarionMcpEndToEndTests {
         builder.Logging.ClearProviders();
 
         builder.Services.AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>();
+        // The plain test DTOs are not in a source-gen context, so opt the canonical serializer into reflection.
+        builder.Services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
         // Both transports must share ONE registration delegate — the bus is a single shared singleton.
         static HandlerDispatcher RegisterHandlers(HandlerDispatcher dispatcher) =>
             dispatcher.Map<EchoCommand, EchoResponse>("echo");
-        builder.Services.AddElarionJsonRpc(Options, RegisterHandlers);
+        builder.Services.AddElarionJsonRpc(RegisterHandlers);
         builder.Services.AddElarionMcp(
             new RpcMcpMetadataSource([
                 new RpcMcpMethodMetadata {
@@ -64,7 +62,6 @@ public sealed class ElarionMcpEndToEndTests {
                     Description = "Echoes a greeting.",
                 },
             ]),
-            Options,
             RegisterHandlers,
             o => o.ServerName = "Test");
 

@@ -1,7 +1,4 @@
 using System.Security.Claims;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 using Billing.Api;
 using Billing.Application;
 using Billing.Application.Modules.Invoicing.Services;
@@ -82,18 +79,17 @@ builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
     p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 // Compose every module's services — handlers, services, validators, scheduled jobs, and event
-// consumers — each gated by Modules:{Name}:Enabled.
+// consumers — each gated by Modules:{Name}:Enabled. This also contributes every enabled module's
+// source-generated JSON context to the canonical serializer options every subsystem reads.
 builder.Services.AddElarion(builder.Configuration);
 
-// JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
-var serializerOptions = CreateSerializerOptions(builder.Configuration);
-builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
+// JSON-RPC: methods gated per module. Serialization comes from the canonical IElarionJsonSerialization
+// (module contexts from AddElarion + the JSON-RPC envelope context); customize it via ConfigureElarionJson.
+builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
 
 // MCP: an equally gated transport adapter over the same shared handler registry (the named bus).
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
-    serializerOptions,
     ElarionBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
 
@@ -158,14 +154,3 @@ app.MapElarionJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
 app.Run();
-
-static JsonSerializerOptions CreateSerializerOptions(IConfiguration configuration) {
-    var moduleResolvers = configuration.GetAllJsonTypeInfoResolvers();
-    return new JsonSerializerOptions {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        TypeInfoResolver = JsonTypeInfoResolver.Combine(
-            [JsonRpcJsonContext.Default, .. moduleResolvers, new DefaultJsonTypeInfoResolver()]),
-    };
-}

@@ -338,6 +338,22 @@ public sealed class InMemoryScheduler(
         }
     }
 
+    /// <summary>
+    /// Enqueues each recurring job's first occurrence and subscribes to variable changes <b>synchronously</b>, so the
+    /// scheduler is fully initialized — jobs queued and the live-reschedule subscription active — the moment
+    /// <see cref="StartAsync"/> returns, before the dispatch loop spawns. Invalid startup configuration therefore
+    /// fails host startup deterministically rather than faulting the background loop.
+    /// </summary>
+    public override Task StartAsync(CancellationToken cancellationToken) {
+        if (options.Enabled) {
+            // Note 32: Startup enqueues only the next occurrence for each recurring job; future occurrences are chained as runs dispatch or complete.
+            EnqueueRecurringJobs();
+            SubscribeToVariableChanges();
+        }
+
+        return base.StartAsync(cancellationToken);
+    }
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         if (!options.Enabled) {
@@ -345,9 +361,7 @@ public sealed class InMemoryScheduler(
             return;
         }
 
-        // Note 32: Startup enqueues only the next occurrence for each recurring job; future occurrences are chained as runs dispatch or complete.
-        EnqueueRecurringJobs();
-        SubscribeToVariableChanges();
+        // Recurring jobs and the variable-change subscription were set up synchronously in StartAsync.
         logger.LogInformation("In-memory scheduler started with {JobCount} descriptor(s).", _descriptors.Count);
 
         try {

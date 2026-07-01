@@ -127,7 +127,7 @@ public sealed class ElarionMcpTests {
     public void AddElarionJsonRpcDispatcher_RegistersFrozenUsableDispatcher() {
         var services = new ServiceCollection();
         services.AddElarionJsonRpcDispatcher(
-            Options, d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"));
+            d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"));
 
         using var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<JsonRpcDispatcher>();
@@ -142,7 +142,6 @@ public sealed class ElarionMcpTests {
 
         var builder = services.AddElarionMcp(
             BuildMetadata(),
-            Options,
             d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"),
             o => o.ServerName = "MyApp");
 
@@ -158,7 +157,7 @@ public sealed class ElarionMcpTests {
 
     [Fact]
     public void AddElarionMcp_Throws_WhenServerNameMissing() {
-        var act = () => new ServiceCollection().AddElarionMcp(BuildMetadata(), Options, d => d, _ => { });
+        var act = () => new ServiceCollection().AddElarionMcp(BuildMetadata(), d => d, _ => { });
 
         act.Should().Throw<InvalidOperationException>();
     }

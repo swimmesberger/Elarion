@@ -156,3 +156,27 @@ Complementary to the per-handler `[Idempotent(RetentionHours = …)]`, which set
 retained; `PollingInterval` sets how often the worker sweeps out keys past that retention.
 
 See [Idempotency](/docs/concepts/idempotency).
+
+## JSON serialization (options, not config)
+
+Every subsystem shares one canonical `JsonSerializerOptions`, configured in code (not `appsettings`) via
+`ConfigureElarionJson(Action<ElarionJsonOptions>)`. `AddElarion(configuration)` already contributes every
+enabled module's source-generated context, so most hosts configure nothing:
+
+```csharp
+builder.Services.ConfigureElarionJson(o => {
+    o.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;   // default: CamelCase
+    o.TypeInfoResolvers.Add(SomeExtraContext.Default);          // an extra source-gen context
+});
+```
+
+| Option | Default |
+| --- | --- |
+| `PropertyNamingPolicy` | `JsonNamingPolicy.CamelCase` |
+| `PropertyNameCaseInsensitive` | `true` |
+| `DefaultIgnoreCondition` | `WhenWritingNull` |
+| `EnableReflectionFallback` | `false` (AOT-strict; a type missing from every source-gen context throws) |
+| `TypeInfoResolvers` | Transport envelope + module contexts, composed first-match-wins |
+| `PostConfigure` | none (escape hatch for converters/encoder) |
+
+See [Serialization](/docs/capabilities/serialization).
