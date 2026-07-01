@@ -48,6 +48,51 @@ public sealed class ResourceGrantStoreTransactionTests(ResourceGrantSharingFixtu
     }
 
     [Fact]
+    public async Task GrantAsync_DuplicateIsIdempotent_NoSecondRow() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var resourceId = Guid.NewGuid().ToString();
+
+        await using var provider = BuildProvider(fixture);
+        await using var scope = provider.CreateAsyncScope();
+        var grantStore = scope.ServiceProvider.GetRequiredService<IResourceGrantStore>();
+
+        await grantStore.GrantAsync(ReadGrant(resourceId), Ct);
+        await grantStore.GrantAsync(ReadGrant(resourceId), Ct);
+
+        (await grantStore.GetGrantsAsync("Contact", resourceId, Ct)).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task GrantAsync_DuplicateInAmbientTransaction_DoesNotPoisonTransaction() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var resourceId = Guid.NewGuid().ToString();
+
+        await using var provider = BuildProvider(fixture);
+        await using var scope = provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ContactsDbContext>();
+        var grantStore = scope.ServiceProvider.GetRequiredService<IResourceGrantStore>();
+
+        // The grant already exists.
+        await grantStore.GrantAsync(ReadGrant(resourceId), Ct);
+
+        // A duplicate grant issued inside the caller's ambient transaction (alongside a business write) must be a
+        // no-op via ON CONFLICT DO NOTHING — never a 23505 unique violation that would abort/poison the whole
+        // transaction and fail the later commit of the business row.
+        var contact = new Contact {
+            Id = Guid.NewGuid(), OwnerId = Guid.NewGuid(), Name = "Committed alongside a duplicate grant",
+        };
+        await using (var transaction = await db.Database.BeginTransactionAsync(Ct)) {
+            db.Contacts.Add(contact);
+            await db.SaveChangesAsync(Ct);
+            await grantStore.GrantAsync(ReadGrant(resourceId), Ct);
+            await transaction.CommitAsync(Ct);
+        }
+
+        (await db.Contacts.AsNoTracking().AnyAsync(c => c.Id == contact.Id, Ct)).Should().BeTrue();
+        (await grantStore.GetGrantsAsync("Contact", resourceId, Ct)).Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task RevokeAsync_RolledBackWithCallerTransaction_KeepsGrant() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var resourceId = Guid.NewGuid().ToString();

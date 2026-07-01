@@ -60,7 +60,8 @@ public sealed partial class HandlerRegistrationGenerator {
     private sealed record ResourceBindingInfo(
         string ResourceTypeFqn,
         string Operation,
-        string IdPath
+        string IdPath,
+        string? ResourceTypeName
     );
 
     private sealed record DecoratorInfo(
