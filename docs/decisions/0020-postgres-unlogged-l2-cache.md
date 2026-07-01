@@ -46,7 +46,7 @@ A new opt-in sibling package `Elarion.Caching.PostgreSql` — analogous to `Elar
 - A connection-string overload (the recommended one-liner) and a full `Action<PostgresCacheOptions>`
   overload for complete control.
 - Elarion defaults that make the cache table an auto-created `UNLOGGED` table: `UseWAL = false`,
-  `CreateIfNotExists = true`, `SchemaName = "public"`, `TableName = "elarion_handler_cache"`. The caller's
+  `CreateIfNotExists = true`, `SchemaName = "public"`, `TableName = "elarion_cache"`. The caller's
   delegate runs **last**, so any default (including opting back into a WAL-logged, replicated table) is
   overridable.
 - The method registers the official `Microsoft.Extensions.Caching.Postgres` distributed cache as the L2,

@@ -34,7 +34,7 @@ public sealed class PostgreSqlHandlerCacheRegistrationTests {
         var options = provider.GetRequiredService<IOptions<PostgresCacheOptions>>().Value;
         options.ConnectionString.Should().Be(ConnectionString);
         options.SchemaName.Should().Be("public");
-        options.TableName.Should().Be("elarion_handler_cache");
+        options.TableName.Should().Be("elarion_cache");
         options.CreateIfNotExists.Should().BeTrue();
         // UseWAL = false is what makes the cache table UNLOGGED.
         options.UseWAL.Should().BeFalse();
@@ -68,7 +68,7 @@ public sealed class PostgreSqlHandlerCacheRegistrationTests {
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptions<PostgresCacheOptions>>().Value;
         options.ConnectionString.Should().Be(ConnectionString);
-        options.TableName.Should().Be("elarion_handler_cache");
+        options.TableName.Should().Be("elarion_cache");
         options.UseWAL.Should().BeFalse();
     }
 }

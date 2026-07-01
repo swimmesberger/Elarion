@@ -60,7 +60,7 @@ public sealed class PostgreSqlHandlerCacheIntegrationTests : IAsyncLifetime {
         (await cache.GetStringAsync("greeting", ct)).Should().Be("hello");
 
         // The headline guarantee: the cache table is UNLOGGED (relpersistence 'u'), proving UseWAL = false.
-        (await GetRelpersistenceAsync("elarion_handler_cache", ct)).Should().Be('u');
+        (await GetRelpersistenceAsync("elarion_cache", ct)).Should().Be('u');
     }
 
     private async Task<char> GetRelpersistenceAsync(string tableName, CancellationToken ct) {

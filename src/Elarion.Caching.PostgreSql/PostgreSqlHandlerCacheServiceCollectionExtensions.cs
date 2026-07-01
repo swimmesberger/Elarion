@@ -36,7 +36,7 @@ namespace Elarion.Caching.PostgreSql;
 /// </remarks>
 public static class PostgreSqlHandlerCacheServiceCollectionExtensions {
     private const string DefaultSchemaName = "public";
-    private const string DefaultTableName = "elarion_handler_cache";
+    private const string DefaultTableName = "elarion_cache";
 
     /// <summary>
     /// Backs Elarion handler caching with a PostgreSQL L2 distributed cache using the supplied

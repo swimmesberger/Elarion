@@ -148,7 +148,7 @@ builder.Services.AddElarionPostgreSqlHandlerCaching(
 ```
 
 That registers the official `Microsoft.Extensions.Caching.Postgres` distributed cache as the L2 — an
-auto-created `UNLOGGED` table named `elarion_handler_cache` in the `public` schema — and calls
+auto-created `UNLOGGED` table named `elarion_cache` in the `public` schema — and calls
 `AddElarionHandlerCaching()` for you, so `HybridCache` picks the table up automatically. The optional
 `configure` delegate overrides any default (it runs last, so it always wins):
 
