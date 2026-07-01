@@ -11,6 +11,13 @@ Use blob storage for files that should be addressed by reference from your domai
 documents, uploads, exports, attachments, and other binary content. Store the returned `BlobRef.Value`
 on your own entities rather than embedding file bytes in handler responses or domain rows.
 
+<Callout type="info">
+To **accept uploads from a browser** — pre-upload a file, reference it when creating an entity, and
+reclaim it automatically if the entity is never created — see [Blob
+uploads](/docs/capabilities/blob-uploads), which adds the pending/commit/TTL lifecycle and the tus and
+direct-upload HTTP transports on top of this storage contract.
+</Callout>
+
 ## Package split
 
 | Package | Use it in | Contains |

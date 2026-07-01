@@ -1,3 +1,5 @@
+using Elarion.Blobs;
+
 namespace Elarion.Blobs.PostgreSql;
 
 /// <summary>
@@ -33,4 +35,16 @@ public sealed class StoredBlob {
     /// Gets or sets the UTC timestamp when the blob was stored.
     /// </summary>
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the lifecycle state. Defaults to <see cref="BlobLifecycleState.Committed"/> so a
+    /// plain save produces a permanent blob.
+    /// </summary>
+    public BlobLifecycleState State { get; set; } = BlobLifecycleState.Committed;
+
+    /// <summary>
+    /// Gets or sets the instant after which a <see cref="BlobLifecycleState.Pending"/> blob may be
+    /// garbage collected, or <c>null</c> when the blob does not expire.
+    /// </summary>
+    public DateTimeOffset? ExpiresAt { get; set; }
 }

@@ -15,6 +15,7 @@
     "entity-framework",
     "pagination",
     "blob-storage",
+    "blob-uploads",
     "telemetry"
   ]
 }

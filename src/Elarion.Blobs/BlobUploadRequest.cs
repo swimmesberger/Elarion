@@ -35,4 +35,26 @@ public sealed record BlobUploadRequest {
     /// mirroring how S3/Azure/GCS derive the length rather than demand it.
     /// </remarks>
     public long? ContentLength { get; init; }
+
+    /// <summary>
+    /// Gets the lifecycle state the blob is created in. Defaults to
+    /// <see cref="BlobLifecycleState.Committed"/> so a plain save produces a permanent blob.
+    /// </summary>
+    /// <remarks>
+    /// Upload transports that pre-upload a file before it is referenced set this to
+    /// <see cref="BlobLifecycleState.Pending"/> together with <see cref="ExpiresAt"/>, so the blob is
+    /// reclaimed by garbage collection unless an application commits it via
+    /// <see cref="IBlobLifecycle.CommitAsync"/>.
+    /// </remarks>
+    public BlobLifecycleState InitialState { get; init; } = BlobLifecycleState.Committed;
+
+    /// <summary>
+    /// Gets the instant after which a <see cref="BlobLifecycleState.Pending"/> blob may be garbage
+    /// collected, or <c>null</c> for no expiry.
+    /// </summary>
+    /// <remarks>
+    /// Meaningful only when <see cref="InitialState"/> is <see cref="BlobLifecycleState.Pending"/>;
+    /// stores clear it when the blob is committed.
+    /// </remarks>
+    public DateTimeOffset? ExpiresAt { get; init; }
 }

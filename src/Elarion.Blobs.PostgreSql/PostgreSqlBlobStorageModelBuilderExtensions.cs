@@ -19,6 +19,13 @@ public static class PostgreSqlBlobStorageModelBuilderExtensions {
             builder.HasKey(e => e.Id);
             builder.HasIndex(e => new { e.Container, e.Name }).IsUnique();
 
+            // Partial index over pending, expiring rows only: the garbage collector's "oldest expiry
+            // first" scan stays a tiny indexed probe regardless of how many committed blobs exist.
+            // State is stored as its int value, so Pending is 0. Filtered indexes are supported by
+            // PostgreSQL (and SQL Server/SQLite); on a provider without them, drop the filter.
+            builder.HasIndex(e => e.ExpiresAt)
+                .HasFilter("state = 0 AND expires_at IS NOT NULL");
+
             builder.Property(e => e.Id)
                 .HasColumnName("id")
                 .ValueGeneratedNever();
@@ -40,6 +47,13 @@ public static class PostgreSqlBlobStorageModelBuilderExtensions {
 
             builder.Property(e => e.CreatedAt)
                 .HasColumnName("created_at");
+
+            builder.Property(e => e.State)
+                .HasColumnName("state")
+                .HasConversion<int>();
+
+            builder.Property(e => e.ExpiresAt)
+                .HasColumnName("expires_at");
         });
 
         modelBuilder.Entity<BlobContentRow>(builder => {
