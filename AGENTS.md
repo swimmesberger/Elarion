@@ -378,12 +378,14 @@ class-level `[ConsumeEvent]` on a non-handler is reported (`ELEVT005`).
 Because the domain plane dispatches **inline in the publisher's scope**, a domain-event handler's
 decorator pipeline runs **nested within the command's** (same scope, `DbContext`, and transaction), so
 a domain consumer must not open its own transaction or resilience scope. The recommended way is a
-transaction decorator that declares a `static bool AppliesTo(Type request)` predicate matching only
-`ICommand`/`IIntegrationEvent` (see [ADR-0003](docs/decisions/0003-decorator-attachment-predicates.md)
-and [decorator pipelines](docs/concepts/decorator-pipelines.mdx)): the generator then never attaches it
+transaction decorator that declares a `static bool AppliesTo(HandlerMetadata handler)` predicate matching only
+`ICommand`/`IIntegrationEvent` requests (see [ADR-0003](docs/decisions/0003-decorator-attachment-predicates.md)
+and [decorator pipelines](docs/concepts/decorator-pipelines.mdx)): the predicate then never attaches it
 to a domain-event handler, while integration consumers run on a **fresh post-commit scope** and
 correctly take the transaction (their request is an `IIntegrationEvent`). Generic `where` constraints
-and the `AppliesTo` predicate are both evaluated at compile time by `HandlerRegistrationGenerator`.
+are evaluated at compile time by `HandlerRegistrationGenerator`; the `AppliesTo` predicate is a **runtime
+call** the generated registration evaluates once per closed handler type (cached in a generated
+`static readonly bool`), never per request.
 
 The **method form** is a lightweight alternative for a small side effect on an existing
 `[Service]`: the consumer is an instance method on a `[Service]` class (no decorator pipeline);

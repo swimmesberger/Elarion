@@ -75,6 +75,15 @@ Either way, a row the caller neither owns nor was granted is never returned — 
   counts, and leaks how many rows exist. `WhereAuthorized` exists precisely so you don't.
 </Callout>
 
+<Callout type="warn">
+  **`WhereAuthorized` is convention-only — nothing attaches it for you.** Unlike `[RequirePermission]` or
+  `[RequireResource]`, which the generator auto-attaches as decorators, the list filter runs only where a
+  handler composes it into the query. A list handler that forgets `WhereAuthorized` (or applies it after a
+  `.Select()` projection that discards the entity) returns **every** row — the classic BOLA/IDOR shape.
+  Treat "every list query over an access-controlled entity starts with `WhereAuthorized`" as a review
+  checklist item, and cover each list handler with a test asserting an unshared row is absent.
+</Callout>
+
 For a rule beyond the conventional ones, write the `IQueryAuthorizer<T>` by hand — the logic is ordinary,
 testable C#, not a string expression.
 
