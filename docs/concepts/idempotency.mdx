@@ -77,7 +77,10 @@ key comes from. The key is captured at the boundary into the dispatch-scope rail
 
 - **HTTP** — the `Idempotency-Key` header (or legacy `X-Idempotency-Key`), via `app.UseElarionIdempotencyKey()`.
 - **JSON-RPC / MCP** — `params._meta["dev.wimmesberger.elarion/idempotencyKey"]` (a per-call key, batch-correct);
-  the HTTP header is accepted as single-call sugar.
+  the HTTP header is accepted as single-call sugar **only for a single (non-batch) request**. The header applies
+  to the whole HTTP request, so it cannot key a batch's distinct operations — a JSON-RPC batch that carries an
+  `Idempotency-Key` header is rejected with `400` and a JSON-RPC `Invalid Request` (`-32600`) error; each batch
+  item must carry its own key at `params._meta` instead.
 - **In-band** — a request implementing `IIdempotentRequest` carries its own key (AIP-155 style) — the natural
   source for event consumers.
 
