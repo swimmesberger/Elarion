@@ -107,6 +107,28 @@ explicit goal.
 - **Storing the raw HTTP response.** We store the serialized typed `Result<T>` instead, because the observable
   response is a deterministic function of it — so replay reproduces an identical response on every transport.
 
+### Key retention and cleanup
+
+Completed keys are **self-expiring**: on completion the store stamps `ExpiresOnUtc = CompletedOnUtc + retention`,
+where retention is the handler's `[Idempotent(RetentionHours = …)]` (default 24h). `AddElarionIdempotencyEntityFrameworkCore`
+registers `IdempotencyKeyPurgeService`, a hosted worker that every `IdempotencyPurgeOptions.PollingInterval`
+(default 1 hour) runs one `ExecuteDelete` of `completed AND expires_on_utc < now`, served by the
+`(completed, expires_on_utc)` index so it stays an indexed probe. **No pending-row reaper is needed** — the
+single-transaction model never commits a pending claim (a crash rolls it back), so only completed rows exist and
+they self-expire; this is the cleanup payoff of single-transaction over the Stripe separate-transaction model,
+which requires a stale-`pending` sweeper.
+
+Two deliberate limitations of the purge, acceptable for typical (single-writer / modest-scale) deployments and
+left as optional hardening:
+
+- **The purge runs on every application instance** — unlike the outbox, it does not lease its work, so on N
+  instances the delete runs N times per interval. This is *safe* (the delete is idempotent; concurrent deletes
+  of the same expired rows no-op) but redundant. A lease/leader gate (as the outbox uses) would remove the
+  redundancy.
+- **The delete is unbatched** — it removes all expired rows in a single statement. In steady state that set is
+  small, but a large backlog (e.g. after a long worker outage) would be one big delete / long-held lock; a
+  batched `DELETE … LIMIT n` loop would be gentler at scale.
+
 ## Consequences
 
 - Exactly-once command execution against DB-state operations, atomic and crash-safe, with no reaper for the
@@ -114,5 +136,8 @@ explicit goal.
 - The durable store targets PostgreSQL (the `ON CONFLICT` claim); other providers degrade to wait-then-replay.
 - Foreign side effects require the outbox plus a **cooperative recipient** for end-to-end exactly-once; this is
   documented, not silently guaranteed.
-- Follow-ups: the inbox for `[ConsumeEvent]` consumers, an outbox-derived external idempotency key, and gRPC key
-  capture.
+- Follow-ups: the inbox for `[ConsumeEvent]` integration-event consumers (dedup at-least-once deliveries by the
+  event message id + consumer identity — the consuming half of outbox+inbox, designed in
+  [ADR-0022](0022-inbox-idempotent-event-consumers.md)), an outbox-derived external idempotency key, gRPC key
+  capture, and purge hardening (a lease so only one instance purges, and batched deletes) — see *Key retention
+  and cleanup*.
