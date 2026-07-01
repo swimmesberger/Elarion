@@ -41,16 +41,17 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
             options.TypeInfoResolverChain.Add(resolver);
         }
 
+        // The framework's own types that no app/module context would register (e.g. the ValidationErrorData behind
+        // AppError.Data's polymorphic object slot) must always be resolvable, so a failed Result serializes its
+        // typed error data under source generation even when the host contributed no context for them. Appended
+        // last so any host/module context still wins first-match for an overlapping type; reflection-free, so it
+        // keeps core AOT-strict. It also guarantees the chain is never empty, so MakeReadOnly always has a
+        // resolver to freeze.
+        options.TypeInfoResolverChain.Add(ElarionFrameworkJsonContext.Default);
+
         // AOT-strict by default: only append the reflection fallback when explicitly opted in.
         if (config.EnableReflectionFallback) {
             options.TypeInfoResolverChain.Add(CreateReflectionFallbackResolver());
-        }
-
-        if (options.TypeInfoResolverChain.Count == 0) {
-            // Nothing has contributed a context yet and there is no reflection fallback. MakeReadOnly requires a
-            // resolver, so attach an empty one: freezing still succeeds, and any type request fails loudly
-            // (AOT-strict), surfacing a missing source-generated context rather than silently reflecting.
-            options.TypeInfoResolverChain.Add(EmptyJsonTypeInfoResolver.Instance);
         }
 
         config.PostConfigure?.Invoke(options);
@@ -65,10 +66,4 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
         Justification = "The reflection fallback is an explicit, documented opt-in via ElarionJsonOptions.EnableReflectionFallback; " +
                         "AOT/trimmed hosts leave it off and rely on source-generated contexts.")]
     private static IJsonTypeInfoResolver CreateReflectionFallbackResolver() => new DefaultJsonTypeInfoResolver();
-
-    private sealed class EmptyJsonTypeInfoResolver : IJsonTypeInfoResolver {
-        public static readonly EmptyJsonTypeInfoResolver Instance = new();
-
-        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) => null;
-    }
 }

@@ -49,6 +49,30 @@ The options are **composed** from contributions, in order (first-match-wins):
 2. **Module DTO contexts** — the generated `AddElarion(configuration)` contributes every enabled module's
    `GetJsonTypeInfoResolver()` automatically (gated by `Modules:{Name}:Enabled`).
 3. **Host extras** — anything you add via `ConfigureElarionJson`.
+4. **The framework context** — `ElarionFrameworkJsonContext`, always seeded last (see below).
+
+<Callout type="info">
+  The transport serializes with these composed options — **not** with any `JsonSerializerOptions` a host
+  hands to ASP.NET Core / MVC. So a JSON-RPC error is written under the resolver chain above (`JsonRpcJsonContext`
+  envelope + the module contexts + the framework error context), independent of the host's own JSON setup.
+  Register your DTO/error-data types through `ConfigureElarionJson` (or a module context), not on a host-built
+  `JsonSerializerOptions`.
+</Callout>
+
+### Framework types (`ElarionFrameworkJsonContext`)
+
+Some framework-owned types must be serializable but are **not statically reachable** from your
+`[JsonSerializable]` roots, so no module/host context would ever register them. The canonical case is a payload
+behind a polymorphic `object` slot: `AppError.Data` is typed `object`, so when a failed `Result` is serialized
+(for example the JSON-RPC error object) `System.Text.Json` dispatches on the runtime type and needs a
+`JsonTypeInfo` for each concrete payload — which the source generator never pulls into a module context because
+the `object` breaks static reachability.
+
+`ElarionFrameworkJsonContext` holds these types (currently `ValidationErrorData`, produced by
+`AppError.Validation(message, errors)`) and is **seeded into the canonical resolver chain automatically** — so a
+validation failure serializes under source generation with **no per-app registration** and no reflection, even on
+an AOT-strict host. Payloads you attach yourself (via `AppError.Validation(message, data)` /
+`AppError.BusinessRule(...)`) are your own types, so they still belong in your module/host context.
 
 So a typical host composes nothing by hand:
 

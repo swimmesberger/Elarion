@@ -62,10 +62,24 @@ per-layer contributions, exposed through a dedicated accessor — never a bare `
 
 5. **AOT-strict by default.** No reflection tail is added unless `EnableReflectionFallback` is set. A type missing
    from every source-generated context throws at runtime (surfacing a missing `[JsonSerializable]`) instead of
-   silently reflecting — matching the repo-wide `JsonSerializerIsReflectionEnabledByDefault=false`. When the
-   composed chain is otherwise empty, an empty sentinel resolver is attached purely so the options can be frozen;
-   type requests still fail loudly. The reflection fallback isolates its `DefaultJsonTypeInfoResolver` in a
-   suppressed helper (documented non-AOT-safety), so core stays `IsAotCompatible`.
+   silently reflecting — matching the repo-wide `JsonSerializerIsReflectionEnabledByDefault=false`. The reflection
+   fallback isolates its `DefaultJsonTypeInfoResolver` in a suppressed helper (documented non-AOT-safety), so core
+   stays `IsAotCompatible`.
+
+6. **The framework's own context is always seeded.** `ElarionFrameworkJsonContext` — a source-generated context
+   for the framework's own types that are **not statically reachable** from an app's `[JsonSerializable]` roots
+   (so no module/host context would register them) — is appended to the resolver chain by the accessor. The
+   canonical case is a payload behind a polymorphic `object` slot: `AppError.Data` is typed `object`, so a
+   transport serializing a failed `Result` (e.g. the JSON-RPC error object) dispatches on the runtime type and
+   needs a `JsonTypeInfo` for each concrete payload — which the STJ source generator never pulls into a module
+   context because the `object` breaks static reachability. The context holds those types (currently
+   `ValidationErrorData`). It is appended **last**, so any host/module context still wins first-match for an
+   overlapping type, and reflection-free, so it keeps core AOT-strict. This means a validation failure serializes
+   under source generation with no per-app registration, closing a gap where an AOT-strict host got a
+   `NotSupportedException` (→ HTTP 500) on any validation error instead of the intended `-32602`. It also
+   guarantees the chain is never empty, so the options can always be frozen (no empty sentinel resolver is
+   needed). The context is named for the *category*, not "errors", so when the framework introduces another such
+   type its `[JsonSerializable]` goes here and neither the seeding logic nor the type's name changes.
 
 ### Consuming-side migration (the shape follow-ups implement)
 
@@ -103,6 +117,8 @@ tests). Wiring the subsystems is deferred but fixed in shape:
 ## Implementation
 
 - `src/Elarion.Abstractions/Serialization/`: `ElarionJsonOptions`, `IElarionJsonSerialization`,
-  `ElarionJsonSerialization` (materialize + freeze), the internal `ElarionJsonConfigurator` contribution, and
-  `ElarionJsonServiceCollectionExtensions` (`AddElarionJson`/`ConfigureElarionJson`).
-- Tests: `tests/Elarion.Tests/Serialization/ElarionJsonSerializationTests.cs`.
+  `ElarionJsonSerialization` (materialize + freeze, seeding `ElarionFrameworkJsonContext`),
+  `ElarionFrameworkJsonContext` (the framework's always-seeded context), the internal `ElarionJsonConfigurator`
+  contribution, and `ElarionJsonServiceCollectionExtensions` (`AddElarionJson`/`ConfigureElarionJson`).
+- Tests: `tests/Elarion.Tests/Serialization/ElarionJsonSerializationTests.cs` and
+  `tests/Elarion.Tests/JsonRpc/RpcDispatcherHandlerTests.cs` (the error-payload serialization regression).
