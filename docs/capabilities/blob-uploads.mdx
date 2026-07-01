@@ -27,7 +27,7 @@ protocol lives only at the HTTP layer.
 | Package | Use it in | Contains |
 | --- | --- | --- |
 | `Elarion.Blobs` | Application | `BlobLifecycleState`, `IBlobLifecycle` (`CommitAsync`/`DeleteExpiredPendingAsync`), and the additive `BlobUploadRequest.InitialState`/`ExpiresAt`. |
-| `Elarion.Blobs.PostgreSql` | Infrastructure / host | The lifecycle on the PostgreSQL store, `state`/`expires_at` columns with a partial index, the `BlobGarbageCollector` sweeper, and `AddPostgreSqlBlobLifecycle`. |
+| `Elarion.Blobs.PostgreSql` | Infrastructure / host | The lifecycle on the PostgreSQL store, `state`/`expires_at` columns with a partial index, the `BlobGarbageCollector` sweeper, and `AddElarionPostgreSqlBlobLifecycle`. |
 | `Elarion.Blobs.Tus` | Host | The tus 1.0 resumable transport (`MapElarionTus`, `AddElarionTus`) and the `ITusUploadStore` seam with an in-memory default. |
 | `Elarion.Blobs.Tus.PostgreSql` | Infrastructure / host | Durable PostgreSQL tus staging (`UseElarionTusStorage`, `AddElarionTusPostgreSql`) so in-progress uploads survive restarts. |
 | `Elarion.Blobs.AspNetCore` | Host | The minimal direct-upload endpoint (`MapElarionBlobUploads`, `AddElarionBlobUploads`). |
@@ -56,9 +56,9 @@ operations:
 Register the PostgreSQL lifecycle and its background collector:
 
 ```csharp
-services.AddPostgreSqlBlobLifecycle<AppDbContext>(); // store + lifecycle + GC sweeper
+services.AddElarionPostgreSqlBlobLifecycle<AppDbContext>(); // store + lifecycle + GC sweeper
 // in OnModelCreating:
-modelBuilder.UsePostgreSqlBlobStorage();
+modelBuilder.UseElarionBlobStorage();
 ```
 
 This adds `state` and `expires_at` columns plus a partial index over pending rows; create a migration
@@ -123,14 +123,22 @@ past a retention window:
 ```csharp
 services.AddElarionTus();
 services.AddElarionTusPostgreSql<AppDbContext>();
-modelBuilder.UsePostgreSqlBlobStorage(); // blob tables, in OnModelCreating
+modelBuilder.UseElarionBlobStorage(); // blob tables, in OnModelCreating
 modelBuilder.UseElarionTusStorage();     // tus staging table, in OnModelCreating
 ```
 
 `AddElarionTusPostgreSql` also wires the PostgreSQL **blob lifecycle** and its `BlobGarbageCollector`
-(idempotently, via `AddPostgreSqlBlobLifecycle`) — a completed tus upload produces a *pending* blob, so
+(idempotently, via `AddElarionPostgreSqlBlobLifecycle`) — a completed tus upload produces a *pending* blob, so
 without that collector an abandoned upload would leak its blob forever. Map the blob tables with
-`UsePostgreSqlBlobStorage()` alongside the staging table. A completed session row is retained for
+`UseElarionBlobStorage()` alongside the staging table. Both wiring methods take optional `tableName`
+(plus `contentTableName` on the blob side) and `schema` parameters and a `snakeCase` toggle (default
+`true`; `false` switches to PascalCase names — `TusUploads`, `StoredBlobs`/`BlobContents`); the stores'
+raw Npgsql SQL (content streaming and the tus conditional append) is built from the EF model, so the
+overrides apply there too. On a `[GenerateDbSets]` context, `[GenerateElarionBlobStorage]` and
+`[GenerateElarionTusStorage]` (each with optional `SnakeCase`/`TableName`/`Schema` — the blob attribute
+also takes `ContentTableName`) replace the hand-written calls: the bundled generators emit the `DbSet`s
+and apply the same configuration through the EF generator's model-config seam (`ELBLB001`/`ELTUS001` if
+`[GenerateDbSets]` is missing). A completed session row is retained for
 `TusGcOptions.CompletedRetention` (default 1 hour) so a client `HEAD` can still fetch the reference, then
 reclaimed; the collector applies a `SafetyMargin` (default 1 minute) to the expiry cutoff, mirroring the
 blob collector.

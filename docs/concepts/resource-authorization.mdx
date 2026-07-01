@@ -100,7 +100,11 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-…or by hand: `modelBuilder.ApplyElarionResourceGrants()`. Then register the backend and manage shares:
+…or by hand: `modelBuilder.ApplyElarionResourceGrants()`. Both forms take the same overrides — the attribute
+accepts optional `TableName` and `Schema` properties alongside `SnakeCase`, and
+`ApplyElarionResourceGrants(tableName, schema, snakeCase)` mirrors them (defaults `elarion_resource_grants`,
+or `ElarionResourceGrants` with `snakeCase: false`; the principal index name is derived from the table name —
+`ix_{table}_principal` / `IX_{table}_Principal`). Then register the backend and manage shares:
 
 ```csharp
 services.AddElarionResourceAuthorization<AppDbContext>();   // grants source, store, and the point-check authorizer

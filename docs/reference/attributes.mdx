@@ -224,8 +224,8 @@ See [Caching](/docs/capabilities/caching).
 <Callout type="warn">
   **Runtime:** the resilience runner was extracted out of Elarion core ([ADR-0017](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0017-dependency-light-core.md)). `[Resilient]`
   handlers and scheduler-deferred retries now **require** the `Elarion.Resilience` package — the host wires the
-  Microsoft/Polly-backed `IResiliencePipelineRunner` with `services.AddMicrosoftResilienceRuntime()`. **Breaking:**
-  `AddInMemoryScheduler` no longer auto-wires the runner, so deferred scheduler retries opt in through this package too.
+  Microsoft/Polly-backed `IResiliencePipelineRunner` with `services.AddElarionResilience()`. **Breaking:**
+  `AddElarionScheduler` no longer auto-wires the runner, so deferred scheduler retries opt in through this package too.
 </Callout>
 
 See [Resilience](/docs/capabilities/resilience).
@@ -456,6 +456,8 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `Schema` | `string?` (init) | `null` | The schema for all seven Identity tables, or `null` for the provider's default schema. |
+| `TablePrefix` | `string?` (init) | `null` | Optional prefix prepended verbatim to every Identity table name (e.g. `"auth_"` → `auth_users`). Because Identity spans seven tables, the prefix is the table-name override — there is no per-table name parameter. |
 
 ### `[GenerateElarionResourceGrants]`
 
@@ -465,6 +467,8 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_resource_grants` / `ElarionResourceGrants` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
 See [Resource authorization](/docs/concepts/resource-authorization) and [Identity](/docs/capabilities/identity).
 
@@ -476,8 +480,63 @@ See [Resource authorization](/docs/concepts/resource-authorization) and [Identit
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_idempotency_keys` / `ElarionIdempotencyKeys` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
 See [Idempotency](/docs/concepts/idempotency).
+
+### `[GenerateElarionOutbox]`
+
+- **Package:** `Elarion.Messaging.Outbox` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<OutboxMessage>` and applies the transactional-outbox model configuration through the EF generator's model-config seam — the table backing the durable `IIntegrationEventBus`. The hand-written equivalent is `modelBuilder.UseElarionOutbox()`. Mirrors `[GenerateElarionIdempotencyKeys]`. Requires `[GenerateDbSets]` (else `ELOBX001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_outbox_messages` / `ElarionOutboxMessages` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Event bus backends](/docs/capabilities/events/backends).
+
+### `[GenerateElarionSettings]`
+
+- **Package:** `Elarion.Settings.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<Setting>` and applies the settings model configuration through the EF generator's model-config seam — the table backing the EF Core `ISettingsStore`. The hand-written equivalent is `modelBuilder.UseElarionSettings()`. Mirrors `[GenerateElarionIdempotencyKeys]`. Requires `[GenerateDbSets]` (else `ELSET001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_settings` / `ElarionSettings` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Settings](/docs/concepts/settings).
+
+### `[GenerateElarionBlobStorage]`
+
+- **Package:** `Elarion.Blobs.PostgreSql` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<StoredBlob>` and applies the blob model configuration — both the metadata table and the content table (the content row type is `internal`: mapped, but no `DbSet`) — through the EF generator's model-config seam. The hand-written equivalent is `modelBuilder.UseElarionBlobStorage()`. Mirrors `[GenerateElarionIdempotencyKeys]`. Requires `[GenerateDbSets]` (else `ELBLB001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The metadata table name, or `null` for the default (`stored_blobs` / `StoredBlobs` depending on `SnakeCase`). |
+| `ContentTableName` | `string?` (init) | `null` | The content table name, or `null` for the default (`blob_contents` / `BlobContents` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Blob storage](/docs/capabilities/blob-storage).
+
+### `[GenerateElarionTusStorage]`
+
+- **Package:** `Elarion.Blobs.Tus.PostgreSql` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<TusUploadRow>` and applies the tus upload-staging model configuration through the EF generator's model-config seam — the table backing the durable `ITusUploadStore`. The hand-written equivalent is `modelBuilder.UseElarionTusStorage()`. Mirrors `[GenerateElarionBlobStorage]`, which maps the blob tables a completed upload is written to. Requires `[GenerateDbSets]` (else `ELTUS001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`tus_uploads` / `TusUploads` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Blob uploads](/docs/capabilities/blob-uploads).
 
 ### `[Keyset<TEntity>]`
 
@@ -566,7 +625,7 @@ See [Entity Framework](/docs/capabilities/entity-framework).
 ## Related references
 
 <Cards>
-  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELIDEMEF/ELCACHE) referenced above.</Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELIDEMEF/ELOBX/ELSET/ELBLB/ELTUS/ELCACHE) referenced above.</Card>
   <Card title="Configuration" href="/docs/reference/configuration">Feature flags (`Modules:{Name}:Enabled`) and other settings keys.</Card>
   <Card title="Conventions" href="/docs/reference/conventions">Module statics, namespace matching, and naming rules.</Card>
   <Card title="Packages" href="/docs/reference/packages">Which package each attribute ships in.</Card>

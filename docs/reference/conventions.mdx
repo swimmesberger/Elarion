@@ -54,6 +54,17 @@ These rules are load-bearing for the generators in `Elarion.Generators`.
 | Validators inherit `AbstractValidator<T>` | Registered as `IValidator<T>` (scoped) into the owning module. | `AbstractValidator<T>` |
 | `IHostedService`/`BackgroundService` use `ServiceScope.Singleton` | A scoped/transient hosted service is rejected with `ELSG001`. | `[Service]` |
 
+### Framework API naming
+
+Framework registration and wiring methods follow a single prefix convention: **DI registration methods are
+named `AddElarionX`** (`AddElarionScheduler`, `AddElarionOutbox<TDbContext>`, `AddElarionResilience`,
+`AddElarionInMemoryEventBus<TContext>`, …), and **EF Core model-wiring methods are `UseElarionX` /
+`ApplyElarionX`** (`UseElarionOutbox`, `UseElarionSettings`, `UseElarionBlobStorage`, `UseElarionTusStorage`,
+`ApplyElarionIdempotencyKeys`, `ApplyElarionResourceGrants`, `ApplyElarionIdentity`). The model-wiring methods
+share the same override shape — optional `tableName` (plus `contentTableName` for blobs; Identity takes a
+`tablePrefix` instead) and `schema` parameters and a `snakeCase` toggle (default `true`) — and each has a
+`[GenerateElarionX]` attribute counterpart for `[GenerateDbSets]` contexts.
+
 ### Module namespace containment (longest prefix)
 
 Every generator that groups registrations by module assigns each type to the `[AppModule]` whose
@@ -185,7 +196,7 @@ configure concrete providers — those belong to the host.
   The same boundary applies to **runtime capability packages**. The `[Cacheable]`/`[CacheInvalidate]`,
   `[Resilient]`, and `[FeatureGate]`/`[FeatureVariant]` attributes live in `Elarion.Abstractions`, so application
   modules declare *intent* with attributes alone. The runtime that backs them ships in separate provider packages —
-  `Elarion.Caching` (`AddElarionHandlerCaching()`), `Elarion.Resilience` (`AddMicrosoftResilienceRuntime()`), and
+  `Elarion.Caching` (`AddElarionHandlerCaching()`), `Elarion.Resilience` (`AddElarionResilience()`), and
   `Elarion.FeatureFlags.OpenFeature` / `Elarion.FeatureFlags.FeatureManagement`
   (`AddElarionOpenFeature()` / `AddElarionFeatureManagement(configuration)`) — which the **host** references and
   wires. The application project stays on Abstractions-only attributes (pay-for-what-you-use,

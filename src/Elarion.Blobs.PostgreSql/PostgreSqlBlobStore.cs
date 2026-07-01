@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
 using System.Data;
 using Elarion.Blobs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -112,7 +115,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var connection = await GetOpenNpgsqlConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = GetCurrentNpgsqlTransaction();
-        command.CommandText = "SELECT data FROM blob_contents WHERE blob_id = $1";
+        command.CommandText = GetContentSql(dbContext).Select;
         command.Parameters.Add(new NpgsqlParameter { Value = blobRef.Value });
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -120,7 +123,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             return null;
         }
 
-        var data = (byte[])reader["data"];
+        var data = (byte[])reader[0];
 
         // Buffered for now: the content is fully materialized, so the MemoryStream owns no
         // backend resources and BlobDownload has nothing extra to dispose. A true streaming read
@@ -341,15 +344,50 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var connection = await GetOpenNpgsqlConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = GetCurrentNpgsqlTransaction();
-        command.CommandText = """
-            INSERT INTO blob_contents (blob_id, data)
-            VALUES ($1, $2)
-            ON CONFLICT (blob_id) DO UPDATE SET data = EXCLUDED.data
-            """;
+        command.CommandText = GetContentSql(dbContext).Upsert;
         command.Parameters.Add(new NpgsqlParameter { Value = blobId });
         command.Parameters.Add(new NpgsqlParameter { Value = content, NpgsqlDbType = NpgsqlDbType.Bytea });
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    // The content SQL is built from the EF model (not hard-coded identifiers) so the UseElarionBlobStorage
+    // table/column overrides and the snake-case toggle apply to the raw Npgsql content path too. Built once
+    // per model and reused.
+    private static readonly ConcurrentDictionary<IModel, ContentSql> ContentSqlCache = new();
+
+    internal sealed record ContentSql(string Select, string Upsert);
+
+    internal static ContentSql GetContentSql(DbContext context) =>
+        ContentSqlCache.GetOrAdd(context.Model, static (_, ctx) => BuildContentSql(ctx), context);
+
+    private static ContentSql BuildContentSql(DbContext context) {
+        var entityType = context.Model.FindEntityType(typeof(BlobContentRow))
+            ?? throw new InvalidOperationException(
+                "The blob content entity is not mapped. Call modelBuilder.UseElarionBlobStorage() in OnModelCreating.");
+        var sqlHelper = context.GetService<ISqlGenerationHelper>();
+
+        var tableName = entityType.GetTableName()
+            ?? throw new InvalidOperationException("The blob content entity is not mapped to a table.");
+        var schema = entityType.GetSchema();
+        var storeObject = StoreObjectIdentifier.Table(tableName, schema);
+
+        string Column(string propertyName) {
+            var property = entityType.FindProperty(propertyName)
+                ?? throw new InvalidOperationException($"The {nameof(BlobContentRow)}.{propertyName} property is not mapped.");
+            var columnName = property.GetColumnName(storeObject)
+                ?? throw new InvalidOperationException($"The {nameof(BlobContentRow)}.{propertyName} property has no column.");
+            return sqlHelper.DelimitIdentifier(columnName);
+        }
+
+        var table = sqlHelper.DelimitIdentifier(tableName, schema);
+        var blobId = Column(nameof(BlobContentRow.BlobId));
+        var data = Column(nameof(BlobContentRow.Data));
+
+        return new ContentSql(
+            Select: $"SELECT {data} FROM {table} WHERE {blobId} = $1",
+            Upsert: $"INSERT INTO {table} ({blobId}, {data}) VALUES ($1, $2) " +
+                $"ON CONFLICT ({blobId}) DO UPDATE SET {data} = EXCLUDED.{data}");
     }
 
     private async Task<NpgsqlConnection> GetOpenNpgsqlConnectionAsync(CancellationToken cancellationToken) {

@@ -166,7 +166,7 @@ inspectable and AOT-friendly. The trade-off is explicit participation: each enti
 <Callout type="info">
   Blob entities are **not** part of `[EntityConfiguration]` / `[GenerateDbSets]`. A provider such as
   `Elarion.Blobs.PostgreSql` configures its tables directly in your `OnModelCreating` (via
-  `UsePostgreSqlBlobStorage()`), so they join your context's model without opting into entity
+  `UseElarionBlobStorage()`), so they join your context's model without opting into entity
   generation — see [Blob storage](/docs/capabilities/blob-storage).
 </Callout>
 

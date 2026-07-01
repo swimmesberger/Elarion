@@ -28,14 +28,14 @@ see [Handling duplicates](/docs/capabilities/events/consuming-events#handling-du
 
 ## In-memory integration bus
 
-Register the in-memory tier with `AddInMemoryEventBus()` from `Elarion.Messaging.InMemory`. This wires the
-domain plane (`AddInMemoryDomainEventBus`) **plus** the in-memory integration plane, whose after-commit
+Register the in-memory tier with `AddElarionInMemoryEventBus()` from `Elarion.Messaging.InMemory`. This wires the
+domain plane (`AddElarionDomainEventBus`) **plus** the in-memory integration plane, whose after-commit
 delivery is commit-gated by the database transaction without a hand-written decorator: the package's EF
 Core interceptors are registered automatically and flush buffered events after the `DbContext` commits and
 discard them on rollback.
 
 ```csharp title="Program.cs"
-builder.Services.AddInMemoryEventBus();   // domain plane + in-memory integration plane (interceptors included)
+builder.Services.AddElarionInMemoryEventBus();   // domain plane + in-memory integration plane (interceptors included)
 ```
 
 `InMemoryIntegrationEventBus.PublishAsync` buffers each event into a per-scope `EventDispatchScope`; the
@@ -48,11 +48,11 @@ A configuration overload reads the `EventBus` section — `EventBus:Enabled` (de
 events) — and throws on a non-boolean/non-integer value:
 
 ```csharp
-builder.Services.AddInMemoryEventBus(builder.Configuration);
+builder.Services.AddElarionInMemoryEventBus(builder.Configuration);
 ```
 
 If you only need the integration tier (the domain plane is already wired elsewhere), call
-`AddInMemoryIntegrationEventBus()` directly; it registers `IIntegrationEventBus`, the scope buffer, the
+`AddElarionInMemoryIntegrationEventBus()` directly; it registers `IIntegrationEventBus`, the scope buffer, the
 pump, and the two interceptors, sharing the same `EventSubscriptionRegistry`.
 
 <Callout type="warn">
@@ -81,8 +81,22 @@ protected override void OnModelCreating(ModelBuilder modelBuilder) {
 }
 ```
 
-`UseElarionOutbox` takes optional `tableName` and `schema` parameters, for example
-`modelBuilder.UseElarionOutbox("app_outbox", "app")`.
+`UseElarionOutbox` takes optional `tableName` and `schema` parameters plus a `snakeCase` toggle
+(default `true`; `false` switches the table/column/index names to PascalCase — the defaults become
+`ElarionOutboxMessages` etc.), for example `modelBuilder.UseElarionOutbox("app_outbox", "app")`.
+
+On a `[GenerateDbSets]` context you can skip the hand-written call entirely: annotate the context with
+`[GenerateElarionOutbox]` (optionally with `SnakeCase`/`TableName`/`Schema`) and the bundled generator
+emits the `DbSet<OutboxMessage>` and applies the same model configuration through the EF generator's
+model-config seam (`ELOBX001` if `[GenerateDbSets]` is missing):
+
+```csharp title="BillingDbContext.cs"
+[GenerateDbSets]
+[GenerateElarionOutbox]
+public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+```
 
 </Step>
 
@@ -117,7 +131,7 @@ in-memory integration bus was registered for the domain plane's sake.
 on its own so only the outbox delivers Plane B:
 
 ```csharp title="Program.cs"
-builder.Services.AddInMemoryDomainEventBus();          // domain plane + registry
+builder.Services.AddElarionDomainEventBus();          // domain plane + registry
 builder.Services.AddElarionOutbox<BillingDbContext>(); // integration plane (durable)
 ```
 
@@ -173,7 +187,8 @@ deserializes to `null`, the message can never be delivered. Rather than silently
 the dispatcher logs at `Error` (with the message id and stored type name) and the worker **parks** it —
 kept pending-but-unclaimable for inspection — so a rename never silently discards in-flight events.
 
-The `UseElarionOutbox` pending index is a **partial (filtered) index** (`processed_on_utc IS NULL`), so the
+The `UseElarionOutbox` pending index is a **partial (filtered) index** (`processed_on_utc IS NULL`, or
+`"ProcessedOnUtc" IS NULL` with `snakeCase: false`), so the
 worker's "oldest undelivered first" scan stays a tiny indexed probe regardless of how many delivered rows
 await retention purge. Filtered indexes are supported on PostgreSQL, SQL Server, and SQLite; on MySQL,
 supply an unfiltered index in your own model.

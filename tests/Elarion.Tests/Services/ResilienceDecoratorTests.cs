@@ -9,9 +9,9 @@ namespace Elarion.Tests.Services;
 
 public sealed class ResilienceDecoratorTests {
     [Fact]
-    public void AddMicrosoftResilienceRuntime_NoPipelines_RegistersPipelineRunnerDependencies() {
+    public void AddElarionResilience_NoPipelines_RegistersPipelineRunnerDependencies() {
         var services = new ServiceCollection();
-        services.AddMicrosoftResilienceRuntime();
+        services.AddElarionResilience();
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions {
             ValidateOnBuild = true,
             ValidateScopes = true
@@ -31,7 +31,7 @@ public sealed class ResilienceDecoratorTests {
                 Backoff = ResilienceBackoffType.Constant
             }
         });
-        services.AddMicrosoftResilienceRuntime();
+        services.AddElarionResilience();
         await using var provider = services.BuildServiceProvider();
         var runner = provider.GetRequiredService<IResiliencePipelineRunner>();
         var attempts = 0;
@@ -62,7 +62,7 @@ public sealed class ResilienceDecoratorTests {
                 Backoff = ResilienceBackoffType.Constant
             }
         });
-        services.AddMicrosoftResilienceRuntime();
+        services.AddElarionResilience();
         await using var provider = services.BuildServiceProvider();
         var inner = new FlakyHandler();
         var decorator = new ResilienceDecorator<Request, int>(
@@ -91,7 +91,7 @@ public sealed class ResilienceDecoratorTests {
                 Backoff = ResilienceBackoffType.Constant
             }
         });
-        services.AddMicrosoftResilienceRuntime();
+        services.AddElarionResilience();
         await using var provider = services.BuildServiceProvider();
         var runner = provider.GetRequiredService<IResiliencePipelineRunner>();
         var attempts = 0;

@@ -48,7 +48,7 @@ public sealed class SchedulerRegistrationGeneratorTests
         generatedSource.Should().NotContain("System.Reflection");
         generatedSource.Should().NotContain("GetCustomAttributes");
         generatedSource.Should().NotContain("InMemoryScheduler");
-        generatedSource.Should().NotContain("AddInMemoryScheduler");
+        generatedSource.Should().NotContain("AddElarionScheduler");
         generatedSource.Should().NotContain("BackgroundService");
         generatedSource.Should().NotContain("IHostedService");
     }

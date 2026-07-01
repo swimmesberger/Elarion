@@ -260,3 +260,37 @@ Idempotency-keys generation for `[GenerateElarionIdempotencyKeys]`. See [Idempot
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELIDEMEF001 | Error | A context is annotated with `[GenerateElarionIdempotencyKeys]` but not `[GenerateDbSets]`, so the idempotency-keys `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionIdempotencyKeys]`. |
+
+## ELOBX — Transactional outbox
+
+Outbox-table generation for `[GenerateElarionOutbox]`. See
+[Event bus backends](/docs/capabilities/events/backends).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELOBX001 | Error | A context is annotated with `[GenerateElarionOutbox]` but not `[GenerateDbSets]`, so the outbox `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionOutbox]`. |
+
+## ELSET — Settings (EF Core)
+
+Settings-table generation for `[GenerateElarionSettings]`. See [Settings](/docs/concepts/settings).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELSET001 | Error | A context is annotated with `[GenerateElarionSettings]` but not `[GenerateDbSets]`, so the settings `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionSettings]`. |
+
+## ELBLB — Blob storage (PostgreSQL)
+
+Blob-table generation for `[GenerateElarionBlobStorage]`. See [Blob storage](/docs/capabilities/blob-storage).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELBLB001 | Error | A context is annotated with `[GenerateElarionBlobStorage]` but not `[GenerateDbSets]`, so the blob `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionBlobStorage]`. |
+
+## ELTUS — tus staging (PostgreSQL)
+
+Tus upload-staging generation for `[GenerateElarionTusStorage]`. See
+[Blob uploads](/docs/capabilities/blob-uploads).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELTUS001 | Error | A context is annotated with `[GenerateElarionTusStorage]` but not `[GenerateDbSets]`, so the tus staging `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionTusStorage]`. |

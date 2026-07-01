@@ -252,7 +252,7 @@ public sealed class PostgreSqlTusFixture : IAsyncLifetime {
 /// <summary>EF Core context mapping both the blob tables and the tus staging table.</summary>
 public sealed class TusBlobDbContext(DbContextOptions<TusBlobDbContext> options) : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
-        modelBuilder.UsePostgreSqlBlobStorage();
+        modelBuilder.UseElarionBlobStorage();
         modelBuilder.UseElarionTusStorage();
     }
 }

@@ -23,13 +23,13 @@ public static class PostgreSqlTusServiceCollectionExtensions {
     /// <para>
     /// Call after <c>AddElarionTus</c> (which registers <c>TusOptions</c> and the in-memory default this
     /// replaces). The completed tus upload is written as a <b>pending</b> blob, so this method also calls
-    /// <see cref="PostgreSqlBlobStoreServiceCollectionExtensions.AddPostgreSqlBlobLifecycle{TDbContext}"/>
+    /// <see cref="PostgreSqlBlobStoreServiceCollectionExtensions.AddElarionPostgreSqlBlobLifecycle{TDbContext}"/>
     /// (idempotent) to register the blob store, the <see cref="IBlobLifecycle"/> commit path, and the
     /// <c>BlobGarbageCollector</c> that reclaims those pending blobs — otherwise an abandoned upload would
     /// leak its pending blob forever, since the tus session collector never touches the produced blob.
     /// </para>
     /// <para>
-    /// The application still maps the tables in <c>OnModelCreating</c>: <c>UsePostgreSqlBlobStorage()</c> for
+    /// The application still maps the tables in <c>OnModelCreating</c>: <c>UseElarionBlobStorage()</c> for
     /// the blob tables and <c>UseElarionTusStorage()</c> for the staging table.
     /// </para>
     /// </remarks>
@@ -52,9 +52,9 @@ public static class PostgreSqlTusServiceCollectionExtensions {
         services.AddHostedService<TusUploadGarbageCollector>();
 
         // A completed tus upload produces a pending blob; without the blob lifecycle and its collector an
-        // abandoned upload would leak that blob forever. AddPostgreSqlBlobLifecycle is TryAdd-based, so this
+        // abandoned upload would leak that blob forever. AddElarionPostgreSqlBlobLifecycle is TryAdd-based, so this
         // is idempotent if the host already wired it.
-        services.AddPostgreSqlBlobLifecycle<TDbContext>(configureBlobGc);
+        services.AddElarionPostgreSqlBlobLifecycle<TDbContext>(configureBlobGc);
 
         return services;
     }

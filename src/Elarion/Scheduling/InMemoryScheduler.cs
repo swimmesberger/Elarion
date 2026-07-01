@@ -385,7 +385,7 @@ public sealed class InMemoryScheduler(
         throw new InvalidOperationException(
             $"Scheduled job(s) [{string.Join(", ", jobsNeedingRunner)}] run their resilience policy inline, but no " +
             $"{nameof(IResiliencePipelineRunner)} is registered. Reference the Elarion.Resilience package and call " +
-            "AddMicrosoftResilienceRuntime() during service registration, or remove the resilience policy from these jobs.");
+            "AddElarionResilience() during service registration, or remove the resilience policy from these jobs.");
     }
 
     /// <inheritdoc />

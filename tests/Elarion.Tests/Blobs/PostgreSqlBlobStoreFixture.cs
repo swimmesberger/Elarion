@@ -57,5 +57,5 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
 /// <summary>EF Core context mapping the PostgreSQL blob tables for integration tests.</summary>
 public sealed class IntegrationBlobDbContext(DbContextOptions<IntegrationBlobDbContext> options) : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) =>
-        modelBuilder.UsePostgreSqlBlobStorage();
+        modelBuilder.UseElarionBlobStorage();
 }

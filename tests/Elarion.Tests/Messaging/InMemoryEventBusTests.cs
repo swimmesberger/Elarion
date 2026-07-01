@@ -174,8 +174,8 @@ public sealed class InMemoryEventBusTests {
         configure(services);
         // These tests drive FlushAsync/Discard by hand (no database), so they use the low-level building blocks
         // rather than the TContext overload that auto-attaches the commit-gating interceptors.
-        services.AddInMemoryDomainEventBus();
-        services.AddInMemoryIntegrationEventBus();
+        services.AddElarionDomainEventBus();
+        services.AddElarionInMemoryIntegrationEventBus();
         return services.BuildServiceProvider();
     }
 

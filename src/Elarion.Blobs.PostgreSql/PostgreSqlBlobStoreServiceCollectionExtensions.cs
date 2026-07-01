@@ -15,7 +15,7 @@ public static class PostgreSqlBlobStoreServiceCollectionExtensions {
     /// <typeparam name="TDbContext">The EF Core context that owns the blob tables.</typeparam>
     /// <param name="services">The service collection to add blob storage to.</param>
     /// <returns>The same service collection for chaining.</returns>
-    public static IServiceCollection AddPostgreSqlBlobStore<TDbContext>(this IServiceCollection services)
+    public static IServiceCollection AddElarionPostgreSqlBlobStore<TDbContext>(this IServiceCollection services)
         where TDbContext : DbContext {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -26,7 +26,7 @@ public static class PostgreSqlBlobStoreServiceCollectionExtensions {
 
     /// <summary>
     /// Registers the blob lifecycle (<see cref="IBlobLifecycle"/>) plus the background garbage collector
-    /// that reclaims expired pending blobs, on top of <see cref="AddPostgreSqlBlobStore{TDbContext}"/>.
+    /// that reclaims expired pending blobs, on top of <see cref="AddElarionPostgreSqlBlobStore{TDbContext}"/>.
     /// </summary>
     /// <typeparam name="TDbContext">The EF Core context that owns the blob tables.</typeparam>
     /// <param name="services">The service collection to add the lifecycle to.</param>
@@ -35,16 +35,16 @@ public static class PostgreSqlBlobStoreServiceCollectionExtensions {
     /// <remarks>
     /// <see cref="IBlobLifecycle"/> is the same scoped <see cref="PostgreSqlBlobStore{TDbContext}"/> as
     /// <see cref="IBlobStore"/>, so it shares the caller's <c>DbContext</c> and a commit participates in
-    /// the caller's transaction. Use this instead of <see cref="AddPostgreSqlBlobStore{TDbContext}"/>
+    /// the caller's transaction. Use this instead of <see cref="AddElarionPostgreSqlBlobStore{TDbContext}"/>
     /// when an upload transport produces pending blobs that must be committed or reclaimed.
     /// </remarks>
-    public static IServiceCollection AddPostgreSqlBlobLifecycle<TDbContext>(
+    public static IServiceCollection AddElarionPostgreSqlBlobLifecycle<TDbContext>(
         this IServiceCollection services,
         Action<BlobGcOptions>? configure = null)
         where TDbContext : DbContext {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddPostgreSqlBlobStore<TDbContext>();
+        services.AddElarionPostgreSqlBlobStore<TDbContext>();
 
         var options = new BlobGcOptions();
         configure?.Invoke(options);

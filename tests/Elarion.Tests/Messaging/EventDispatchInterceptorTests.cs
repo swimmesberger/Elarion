@@ -9,12 +9,12 @@ namespace Elarion.Tests.Messaging;
 public sealed class EventDispatchInterceptorTests
 {
     [Fact]
-    public void AddInMemoryIntegrationEventBus_RegistersBothInterceptorsScoped()
+    public void AddElarionInMemoryIntegrationEventBus_RegistersBothInterceptorsScoped()
     {
         var services = new ServiceCollection();
         services.AddLogging();
 
-        services.AddInMemoryIntegrationEventBus();
+        services.AddElarionInMemoryIntegrationEventBus();
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();

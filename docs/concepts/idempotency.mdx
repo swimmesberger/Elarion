@@ -151,6 +151,12 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
 app.UseElarionIdempotencyKey();
 ```
 
+Both mapping forms take the same overrides: `[GenerateElarionIdempotencyKeys]` accepts optional
+`TableName` and `Schema` properties alongside `SnakeCase`, and
+`modelBuilder.ApplyElarionIdempotencyKeys(tableName, schema, snakeCase)` mirrors them (defaults
+`elarion_idempotency_keys`, or `ElarionIdempotencyKeys` with `snakeCase: false`; the purge index name is
+derived from the table name — `ix_{table}_purge` / `IX_{table}_Purge`).
+
 `PollingInterval` (default `1h`) is how often the retention purge worker sweeps expired keys; it is
 complementary to the per-handler `RetentionHours` (which decides *when* a completed key becomes expired).
 

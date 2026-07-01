@@ -322,15 +322,15 @@ scope.Discard();              // drop buffered Plane B events
 Host chooses the Plane B guarantee without touching the handler:
 
 ```csharp
-builder.Services.AddInMemoryEventBus<AppDbContext>();   // domain + in-memory integration (best-effort)
+builder.Services.AddElarionInMemoryEventBus<AppDbContext>();   // domain + in-memory integration (best-effort)
 // or
-builder.Services.AddInMemoryDomainEventBus()            // domain (Plane A) only
+builder.Services.AddElarionDomainEventBus()            // domain (Plane A) only
     .AddElarionOutbox<AppDbContext>();                  // durable transactional outbox (Plane B)
 ```
 
 > [!WARNING]
 > **The in-memory tier is best-effort: after-commit events can be lost on a process
-> crash.** With `AddInMemoryEventBus<AppDbContext>()` alone, Plane B events are buffered in memory and
+> crash.** With `AddElarionInMemoryEventBus<AppDbContext>()` alone, Plane B events are buffered in memory and
 > flushed after commit, so they never fire on rollback — but if the process crashes
 > between commit and flush (or before the pump drains), the `InvoiceCreated` event and
 > its side effects (e.g. the customer email) are **lost with no retry**. Close this gap

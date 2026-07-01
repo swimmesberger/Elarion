@@ -12,13 +12,13 @@ namespace Elarion.Tests.Blobs;
 
 public sealed class PostgreSqlBlobStoreRegistrationTests {
     [Fact]
-    public void AddPostgreSqlBlobStore_RegistersBlobStore() {
+    public void AddElarionPostgreSqlBlobStore_RegistersBlobStore() {
         var services = new ServiceCollection();
         services.AddScoped(_ => new TestBlobDbContext(new DbContextOptionsBuilder<TestBlobDbContext>().Options));
         services.AddSingleton<ILogger<PostgreSqlBlobStore<TestBlobDbContext>>>(
             NullLogger<PostgreSqlBlobStore<TestBlobDbContext>>.Instance);
 
-        services.AddPostgreSqlBlobStore<TestBlobDbContext>();
+        services.AddElarionPostgreSqlBlobStore<TestBlobDbContext>();
 
         using var provider = services.BuildServiceProvider();
         var blobStore = provider.GetRequiredService<IBlobStore>();
@@ -28,13 +28,13 @@ public sealed class PostgreSqlBlobStoreRegistrationTests {
     }
 
     [Fact]
-    public void AddPostgreSqlBlobLifecycle_RegistersLifecycleAndCollector() {
+    public void AddElarionPostgreSqlBlobLifecycle_RegistersLifecycleAndCollector() {
         var services = new ServiceCollection();
         services.AddScoped(_ => new TestBlobDbContext(new DbContextOptionsBuilder<TestBlobDbContext>().Options));
         services.AddSingleton<ILogger<PostgreSqlBlobStore<TestBlobDbContext>>>(
             NullLogger<PostgreSqlBlobStore<TestBlobDbContext>>.Instance);
 
-        services.AddPostgreSqlBlobLifecycle<TestBlobDbContext>(options => options.BatchSize = 7);
+        services.AddElarionPostgreSqlBlobLifecycle<TestBlobDbContext>(options => options.BatchSize = 7);
 
         services.Should().ContainSingle(descriptor =>
             descriptor.ServiceType == typeof(IHostedService)

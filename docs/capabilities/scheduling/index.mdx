@@ -17,7 +17,7 @@ through an async DI scope, receives a cancellation token, is tracked during shut
 The source-generation surface is implementation-neutral. Application assemblies reference
 `Elarion.Abstractions` plus the generator analyzer to use `[ScheduledJob]`,
 `IScheduledJob<TPayload>`, generated descriptors, and scheduler contracts — without referencing the
-default in-memory scheduler. A host then chooses a runtime by registering `AddInMemoryScheduler(...)`
+default in-memory scheduler. A host then chooses a runtime by registering `AddElarionScheduler(...)`
 or a custom `IJobScheduler` / `IJobSchedulerInspector` that consumes the generated descriptors.
 
 ## Enabling and registering
@@ -34,7 +34,7 @@ Register the generated descriptors and the chosen scheduler runtime in the host:
 
 ```csharp
 builder.Services.AddMyAppApplicationScheduledJobs();   // descriptors only
-builder.Services.AddInMemoryScheduler(builder.Configuration);
+builder.Services.AddElarionScheduler(builder.Configuration);
 ```
 
 <Callout type="info">
@@ -43,7 +43,7 @@ builder.Services.AddInMemoryScheduler(builder.Configuration);
   so a different scheduler runtime can reuse the same generated descriptors.
 </Callout>
 
-`AddInMemoryScheduler(IConfiguration)` reads the `Scheduler` section:
+`AddElarionScheduler(IConfiguration)` reads the `Scheduler` section:
 
 ```json
 {
