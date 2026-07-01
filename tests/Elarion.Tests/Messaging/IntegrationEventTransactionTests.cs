@@ -79,6 +79,44 @@ public sealed class IntegrationEventTransactionTests(IntegrationEventTransaction
         }
     }
 
+    [Fact]
+    public async Task IntegrationEvent_RolledBackToSavepoint_IsNotDeliveredButPreSavepointEventIs() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var recorder = new EventRecorder();
+        await using var provider = BuildProvider(recorder);
+        var pump = provider.GetServices<IHostedService>().Single();
+        await pump.StartAsync(cts.Token);
+
+        try {
+            await using (var scope = provider.CreateAsyncScope()) {
+                var db = scope.ServiceProvider.GetRequiredService<EventTestDbContext>();
+                var bus = scope.ServiceProvider.GetRequiredService<IIntegrationEventBus>();
+                await using var transaction = await db.Database.BeginTransactionAsync(cts.Token);
+
+                // Publish before the savepoint: this event must survive the partial rollback.
+                await bus.PublishAsync(new SampleIntegrationEvent("before-savepoint"), cts.Token);
+
+                // A real EF Core savepoint must fire CreatedSavepoint on the dispatch interceptor.
+                await transaction.CreateSavepointAsync("sp1", cts.Token);
+
+                // Publish after the savepoint: this event is undone by the rollback-to-savepoint and must not
+                // be delivered even though the outer transaction still commits (the idempotency-decorator shape).
+                await bus.PublishAsync(new SampleIntegrationEvent("after-savepoint"), cts.Token);
+
+                await transaction.RollbackToSavepointAsync("sp1", cts.Token);
+                await transaction.CommitAsync(cts.Token);
+            }
+
+            await recorder.WaitForAsync(1, cts.Token);
+            await Task.Delay(200, cts.Token);
+            recorder.Items.Should().Equal("before-savepoint");
+        }
+        finally {
+            await pump.StopAsync(cts.Token);
+        }
+    }
+
     private ServiceProvider BuildProvider(EventRecorder recorder) {
         var services = new ServiceCollection();
         services.AddLogging();

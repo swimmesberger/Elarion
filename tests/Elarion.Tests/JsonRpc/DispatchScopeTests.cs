@@ -89,9 +89,53 @@ public sealed class DispatchScopeTests {
         doc.RootElement.GetProperty("seen").GetString().Should().Be("from-context");
     }
 
+    [Fact]
+    public void CreateDispatchScope_InitializerThrows_PropagatesInitializerException() {
+        var services = new ServiceCollection()
+            .AddSingleton<IDispatchScopeInitializer, ThrowingInitializer>()
+            .BuildServiceProvider();
+
+        var act = () => services.CreateDispatchScope();
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("initializer boom");
+    }
+
+    [Fact]
+    public void CreateDispatchScope_InitializerAndDisposalBothThrow_PreservesInitializerFailure() {
+        // A scoped service resolved during seeding that throws on disposal must not mask the initializer failure
+        // that triggered the disposal in the first place.
+        var services = new ServiceCollection()
+            .AddScoped<ThrowingOnDispose>()
+            .AddSingleton<IDispatchScopeInitializer, ResolveThenThrowInitializer>()
+            .BuildServiceProvider();
+
+        var act = () => services.CreateDispatchScope();
+
+        var aggregate = act.Should().Throw<AggregateException>().Which;
+        aggregate.InnerExceptions.Should().Contain(e => e.Message == "initializer boom");
+        aggregate.InnerExceptions.Should().Contain(e => e.Message == "dispose boom");
+    }
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
+
+    private sealed class ThrowingInitializer : IDispatchScopeInitializer {
+        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) =>
+            throw new InvalidOperationException("initializer boom");
+    }
+
+    private sealed class ThrowingOnDispose : IDisposable {
+        public void Dispose() => throw new InvalidOperationException("dispose boom");
+    }
+
+    private sealed class ResolveThenThrowInitializer : IDispatchScopeInitializer {
+        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
+            // Resolve a scoped disposable so it is tracked and disposed when the failed scope is torn down.
+            callScope.GetRequiredService<ThrowingOnDispose>();
+            throw new InvalidOperationException("initializer boom");
+        }
+    }
 
     private sealed class ProbeState {
         public string? Value { get; set; }

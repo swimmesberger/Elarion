@@ -59,4 +59,18 @@ public sealed class ClaimsPrincipalCurrentUserTests {
         user.Roles.Should().BeEquivalentTo("admin", "user");
         user.IsInRole("admin").Should().BeTrue();
     }
+
+    [Fact]
+    public void UnseededUser_BehavesAsAnonymousInsteadOfThrowing() {
+        // A background delivery scope (integration-event pump, outbox) never seeds a principal. The current
+        // user must fail closed as anonymous so authorization denies (401) rather than crashing the consumer.
+        var user = new ClaimsPrincipalCurrentUser(new ClaimsCurrentUserOptions());
+
+        user.IsAuthenticated.Should().BeFalse();
+        user.Roles.Should().BeEmpty();
+        user.HasClaim("permission", "anything").Should().BeFalse();
+        user.GetClaimValues("permission").Should().BeEmpty();
+        user.IsInRole("admin").Should().BeFalse();
+        user.Email.Should().BeNull();
+    }
 }

@@ -29,7 +29,7 @@ internal sealed class EventDispatchSaveChangesInterceptor(EventDispatchScope sco
     /// <inheritdoc />
     public override int SavedChanges(SaveChangesCompletedEventData eventData, int result) {
         if (eventData.Context?.Database.CurrentTransaction is null) {
-            scope.FlushAsync().AsTask().GetAwaiter().GetResult();
+            scope.FlushSynchronously();
         }
 
         return result;
@@ -54,6 +54,14 @@ internal sealed class EventDispatchSaveChangesInterceptor(EventDispatchScope sco
 /// Pairs with <see cref="EventDispatchSaveChangesInterceptor"/>: together they cover both the autocommit and the
 /// explicit-transaction cases, so buffered integration events are delivered exactly once the unit of work durably
 /// commits and dropped when it does not.
+/// <para>
+/// It is also <b>savepoint-aware</b>: the created/rolled-back-to/released-savepoint callbacks keep the buffer's
+/// high-water marks in sync so a partial rollback to a savepoint (e.g. the idempotency decorator undoing a failed
+/// command's business writes while still committing the outer transaction to persist the failure record) truncates
+/// exactly the events buffered after that savepoint, rather than delivering events for state that never persisted.
+/// The EF Core interceptor callbacks carry no savepoint name, so the marks form a LIFO stack — see
+/// <see cref="EventDispatchScope"/>.
+/// </para>
 /// </remarks>
 internal sealed class EventDispatchTransactionInterceptor(EventDispatchScope scope) : DbTransactionInterceptor {
     /// <inheritdoc />
@@ -65,7 +73,7 @@ internal sealed class EventDispatchTransactionInterceptor(EventDispatchScope sco
 
     /// <inheritdoc />
     public override void TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData) =>
-        scope.FlushAsync().AsTask().GetAwaiter().GetResult();
+        scope.FlushSynchronously();
 
     /// <inheritdoc />
     public override Task TransactionRolledBackAsync(
@@ -79,4 +87,43 @@ internal sealed class EventDispatchTransactionInterceptor(EventDispatchScope sco
     /// <inheritdoc />
     public override void TransactionRolledBack(DbTransaction transaction, TransactionEndEventData eventData) =>
         scope.Discard();
+
+    /// <inheritdoc />
+    public override void CreatedSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+        scope.PushSavepoint();
+
+    /// <inheritdoc />
+    public override Task CreatedSavepointAsync(
+        DbTransaction transaction,
+        TransactionEventData eventData,
+        CancellationToken cancellationToken = default) {
+        scope.PushSavepoint();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public override void RolledBackToSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+        scope.RollbackToSavepoint();
+
+    /// <inheritdoc />
+    public override Task RolledBackToSavepointAsync(
+        DbTransaction transaction,
+        TransactionEventData eventData,
+        CancellationToken cancellationToken = default) {
+        scope.RollbackToSavepoint();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public override void ReleasedSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+        scope.ReleaseSavepoint();
+
+    /// <inheritdoc />
+    public override Task ReleasedSavepointAsync(
+        DbTransaction transaction,
+        TransactionEventData eventData,
+        CancellationToken cancellationToken = default) {
+        scope.ReleaseSavepoint();
+        return Task.CompletedTask;
+    }
 }

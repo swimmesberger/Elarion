@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Elarion.Messaging.InMemory" />
+    <InternalsVisibleTo Include="Elarion.Tests" />
   </ItemGroup>
 
   <!-- Bundle the Elarion source generator's analyzer into this runtime package. NuGet analyzer assets
