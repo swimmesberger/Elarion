@@ -12,14 +12,20 @@ public static class OutboxModelBuilderExtensions
     /// that owns the business entities so the outbox row commits in the same transaction.
     /// </summary>
     /// <param name="modelBuilder">The model builder to configure.</param>
+    /// <param name="tableName">The table name. Defaults to <c>elarion_outbox_messages</c>.</param>
+    /// <param name="schema">The schema, or <see langword="null"/> to use the provider's default schema.</param>
     /// <returns>The same model builder for chaining.</returns>
-    public static ModelBuilder UseElarionOutbox(this ModelBuilder modelBuilder)
+    public static ModelBuilder UseElarionOutbox(
+        this ModelBuilder modelBuilder,
+        string tableName = "elarion_outbox_messages",
+        string? schema = null)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
 
         modelBuilder.Entity<OutboxMessage>(builder =>
         {
-            builder.ToTable("elarion_outbox_messages");
+            builder.ToTable(tableName, schema);
             builder.HasKey(message => message.Id);
 
             // Partial index over pending rows only: the worker's "oldest undelivered first" scan stays a tiny indexed
