@@ -81,14 +81,13 @@ internal sealed class ElarionJsonResult<T>(T value) : IResult, IStatusCodeHttpRe
     public async Task ExecuteAsync(HttpContext httpContext) {
         ArgumentNullException.ThrowIfNull(httpContext);
 
-        var serialization = httpContext.RequestServices.GetService<IElarionJsonSerialization>();
-        if (serialization is null) {
-            // Canonical JSON was not wired (e.g. a host that maps [HttpEndpoint] routes without AddElarionJson).
-            // Fall back to the framework's default OK result so REST still works; it simply uses ASP.NET's own
-            // configured JSON options in that case.
-            await Results.Ok(value).ExecuteAsync(httpContext);
-            return;
-        }
+        // Fail loudly rather than silently serializing through ASP.NET's own JSON options — a quiet fallback
+        // would reintroduce exactly the REST-vs-RPC divergence this result type exists to prevent.
+        var serialization = httpContext.RequestServices.GetService<IElarionJsonSerialization>()
+            ?? throw new InvalidOperationException(
+                "IElarionJsonSerialization is not registered. [HttpEndpoint] responses serialize through the "
+                + "canonical Elarion JSON options; call services.AddElarionJson() — the generated "
+                + "AddElarion(configuration) does this — before mapping Elarion endpoints.");
 
         var typeInfo = (JsonTypeInfo<T>)serialization.GetTypeInfo(typeof(T));
 

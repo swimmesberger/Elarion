@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
@@ -6,6 +7,7 @@ using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Elarion.JsonRpc.Mcp;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Elarion.Tests.JsonRpc;
@@ -106,6 +108,50 @@ public sealed class RpcToolInvokerTests {
             ct: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_HandlerThrows_LogsThroughHostLoggerFactory() {
+        var dispatcher = new JsonRpcDispatcher(Options)
+            .Map<ThrowCommand, EchoResponse>("throw")
+            .Freeze();
+        var provider = new CapturingLoggerProvider();
+        var services = new ServiceCollection()
+            .AddScoped<IHandler<ThrowCommand, Result<EchoResponse>>, ThrowHandler>()
+            .AddLogging(logging => logging.AddProvider(provider))
+            .BuildServiceProvider();
+
+        var result = await RpcToolInvoker.InvokeAsync(
+            dispatcher.Registry, HandlerTransports.All, "throw", Args(new { name = "explode" }), services, Options,
+            ct: TestContext.Current.CancellationToken);
+
+        result.IsError.Should().BeTrue();
+        provider.Errors.Should().ContainSingle().Which.Should().Contain("throw");
+    }
+
+    private sealed class CapturingLoggerProvider : ILoggerProvider {
+        public ConcurrentQueue<string> Errors { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Errors);
+
+        public void Dispose() {
+        }
+
+        private sealed class CapturingLogger(ConcurrentQueue<string> errors) : ILogger {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter) {
+                if (logLevel == LogLevel.Error)
+                    errors.Enqueue(formatter(state, exception));
+            }
+        }
     }
 
     [Fact]

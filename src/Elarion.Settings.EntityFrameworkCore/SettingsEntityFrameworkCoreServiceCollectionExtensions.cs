@@ -45,7 +45,7 @@ public static class SettingsEntityFrameworkCoreServiceCollectionExtensions {
 /// because a settings change on one node is then never observed by another node's watchers or scheduler until
 /// that node restarts. This is a diagnostic only — it never fails startup.
 /// </summary>
-public sealed class MultiInstanceChangeNotificationWarning(
+internal sealed class MultiInstanceChangeNotificationWarning(
     ISettingsChangeSource changeSource,
     ILogger<MultiInstanceChangeNotificationWarning> logger) : IHostedService {
     /// <inheritdoc />

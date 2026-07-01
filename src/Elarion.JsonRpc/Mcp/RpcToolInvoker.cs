@@ -43,7 +43,11 @@ public static class RpcToolInvoker {
     /// <param name="serializerOptions">The options used to (de)serialize arguments and the result.</param>
     /// <param name="context">The values captured at the call boundary (e.g. the authenticated principal), or <see langword="null"/>.</param>
     /// <param name="ct">A cancellation token flowed into the handler.</param>
-    /// <param name="logger">An optional logger for unexpected handler exceptions; when absent, failures are silently mapped.</param>
+    /// <remarks>
+    /// Unexpected handler exceptions are logged through the host's <see cref="ILoggerFactory"/> (resolved from
+    /// <paramref name="rootServices"/>, like the invoker's other collaborators) before being mapped to a JSON-RPC
+    /// internal error — never propagated raw to the transport SDK.
+    /// </remarks>
     public static async Task<RpcToolResult> InvokeAsync(
         HandlerDispatcher dispatcher,
         HandlerTransports transport,
@@ -52,8 +56,7 @@ public static class RpcToolInvoker {
         IServiceProvider rootServices,
         JsonSerializerOptions serializerOptions,
         DispatchScopeContext? context = null,
-        CancellationToken ct = default,
-        ILogger? logger = null) {
+        CancellationToken ct = default) {
         if (!dispatcher.TryGetRoute(methodName, transport, out var route)) {
             return new RpcToolResult { IsError = true, Text = $"Method not found: {methodName}", ErrorCode = -32601 };
         }
@@ -77,6 +80,8 @@ public static class RpcToolInvoker {
         if (route.Idempotent && JsonRpcDispatcher.TryReadMetaIdempotencyKey(arguments, out var idempotencyKey)) {
             scope.ServiceProvider.GetService<Elarion.Abstractions.Idempotency.IIdempotencyKeySeed>()?.Seed(idempotencyKey);
         }
+
+        var logger = rootServices.GetService<ILoggerFactory>()?.CreateLogger(typeof(RpcToolInvoker));
 
         Result<object> result;
         try {
