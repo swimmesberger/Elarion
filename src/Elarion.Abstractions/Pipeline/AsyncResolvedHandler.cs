@@ -22,12 +22,36 @@ public sealed class AsyncResolvedHandler<TRequest, TResponse>(
     IServiceProvider scope,
     Func<IServiceProvider, CancellationToken, ValueTask<IHandler<TRequest, TResponse>>> build
 ) : IHandler<TRequest, TResponse> {
+    private readonly SemaphoreSlim _gate = new(1, 1);
     private IHandler<TRequest, TResponse>? _inner;
 
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        _inner ??= await build(scope, ct).ConfigureAwait(false);
+        var inner = await GetInnerAsync(ct).ConfigureAwait(false);
 
-        return await _inner.HandleAsync(request, ct).ConfigureAwait(false);
+        return await inner.HandleAsync(request, ct).ConfigureAwait(false);
+    }
+
+    // Single-flight build. Two concurrent first calls on the same scoped instance — the framework-endorsed
+    // IHandlerSender fan-out (Task.WhenAll on one command type in one scope) — must build the inner pipeline
+    // exactly once, not race a double build.
+    private async ValueTask<IHandler<TRequest, TResponse>> GetInnerAsync(CancellationToken ct) {
+        var inner = Volatile.Read(ref _inner);
+        if (inner is not null) {
+            return inner;
+        }
+
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try {
+            inner = _inner;
+            if (inner is null) {
+                inner = await build(scope, ct).ConfigureAwait(false);
+                Volatile.Write(ref _inner, inner);
+            }
+        } finally {
+            _gate.Release();
+        }
+
+        return inner;
     }
 }

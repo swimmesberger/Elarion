@@ -104,6 +104,20 @@ public sealed class VariableSubstitutionTests {
     }
 
     [Fact]
+    public void Substitute_RejectsNestedPlaceholder() {
+        var act = () => VariableSubstitution.Substitute("db=${a:${b}}", Source(("a", "x"), ("b", "y")));
+
+        act.Should().Throw<FormatException>().WithMessage("*nested*");
+    }
+
+    [Fact]
+    public void Resolve_RejectsNestedPlaceholder() {
+        var act = () => VariableSubstitution.Resolve("${a:-${b}}", Source(("b", "y")));
+
+        act.Should().Throw<FormatException>().WithMessage("*nested*");
+    }
+
+    [Fact]
     public void ConfigurationVariableSource_ResolvesFromConfiguration() {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Jobs:Interval"] = "30s" })

@@ -193,11 +193,16 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
             var ordered = byContract.OrderBy(static i => i.ImplFqn, StringComparer.Ordinal).ToList();
             var feature = ordered[0].Feature;
 
+            // An error diagnostic for a contract gates its emission: shipping an arbitrary "first-alphabetical
+            // wins" registration for a build the compiler already failed would ship silently-wrong behaviour.
+            var hasError = false;
+
             // ELVAR004: a contract maps to exactly one feature.
             foreach (var impl in ordered) {
                 if (!string.Equals(impl.Feature, feature, StringComparison.Ordinal)) {
                     spc.ReportDiagnostic(DiagnosticInfo.Create(
                         ConflictingFeature, impl.Location, impl.ContractFqn, feature, impl.Feature).ToDiagnostic());
+                    hasError = true;
                 }
             }
 
@@ -208,7 +213,13 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
                     spc.ReportDiagnostic(DiagnosticInfo.Create(
                         DuplicateVariantKey, impl.Location,
                         impl.IsDefault ? "(default)" : impl.VariantKey, impl.ContractFqn).ToDiagnostic());
+                    hasError = true;
                 }
+            }
+
+            if (hasError) {
+                // Suppress emission for this contract; the reported error is the actionable output.
+                continue;
             }
 
             var hasDefault = ordered.Any(static i => i.IsDefault);
