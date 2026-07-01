@@ -2,6 +2,7 @@ using Elarion.Blobs.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 
 namespace Elarion.Blobs.Tus.PostgreSql;
 
@@ -57,5 +58,30 @@ public static class PostgreSqlTusServiceCollectionExtensions {
         services.AddElarionPostgreSqlBlobLifecycle<TDbContext>(configureBlobGc);
 
         return services;
+    }
+
+    /// <summary>
+    /// The <c>connectionString</c> overload of
+    /// <see cref="AddElarionTusPostgreSql{TDbContext}(IServiceCollection, Action{TusGcOptions}?, Action{BlobGcOptions}?)"/>:
+    /// also registers a shared <c>NpgsqlDataSource</c> (via <c>TryAdd</c>) that the blob store's streaming
+    /// reads draw dedicated connections from.
+    /// </summary>
+    /// <typeparam name="TDbContext">The context whose model includes <see cref="TusUploadRow"/> via <c>UseElarionTusStorage</c>.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="connectionString">The connection string of the database the tus and blob tables live in.</param>
+    /// <param name="configure">Optional configuration of <see cref="TusGcOptions"/>.</param>
+    /// <param name="configureBlobGc">Optional configuration of the pending-blob <see cref="BlobGcOptions"/>.</param>
+    /// <returns>The same service collection for chaining.</returns>
+    public static IServiceCollection AddElarionTusPostgreSql<TDbContext>(
+        this IServiceCollection services,
+        string connectionString,
+        Action<TusGcOptions>? configure = null,
+        Action<BlobGcOptions>? configureBlobGc = null)
+        where TDbContext : DbContext {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        services.TryAddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+        return services.AddElarionTusPostgreSql<TDbContext>(configure, configureBlobGc);
     }
 }

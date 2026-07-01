@@ -56,7 +56,8 @@ operations:
 Register the PostgreSQL lifecycle and its background collector:
 
 ```csharp
-services.AddElarionPostgreSqlBlobLifecycle<AppDbContext>(); // store + lifecycle + GC sweeper
+services.AddElarionPostgreSqlBlobLifecycle<AppDbContext>(connectionString); // store + lifecycle + GC sweeper
+// (the connection string / an NpgsqlDataSource backs the store's streaming reads)
 // in OnModelCreating:
 modelBuilder.UseElarionBlobStorage();
 ```
@@ -122,7 +123,7 @@ past a retention window:
 
 ```csharp
 services.AddElarionTus();
-services.AddElarionTusPostgreSql<AppDbContext>();
+services.AddElarionTusPostgreSql<AppDbContext>(connectionString);
 modelBuilder.UseElarionBlobStorage(); // blob tables, in OnModelCreating
 modelBuilder.UseElarionTusStorage();     // tus staging table, in OnModelCreating
 ```

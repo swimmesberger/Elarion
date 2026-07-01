@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Xunit;
 
 namespace Elarion.Tests.Blobs;
@@ -26,7 +27,7 @@ public sealed class PostgreSqlTusRegistrationTests {
             NullLogger<PostgreSqlBlobStore<TestTusDbContext>>.Instance);
         services.AddElarionTus();
 
-        services.AddElarionTusPostgreSql<TestTusDbContext>();
+        services.AddElarionTusPostgreSql<TestTusDbContext>("Host=localhost;Database=elarion;Username=elarion;Password=elarion");
 
         // The tus session collector is registered.
         services.Should().Contain(descriptor =>
