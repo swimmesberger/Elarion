@@ -104,6 +104,13 @@ await grants.GrantAsync(
 The `Shared` filter turns this into an indexed correlated `EXISTS` over the caller's user id **or any of their
 roles** — a small, bounded lookup that scales.
 
+Granting the same `(resource, principal, operation)` twice is **idempotent** — the EF Core backend claims a grant
+with an `INSERT … ON CONFLICT DO NOTHING`, so a concurrent duplicate never raises a unique violation (which would
+otherwise abort, and poison, the caller's ambient transaction). The resource-type discriminator, resource id,
+user ids, and role names are matched **case-sensitively** (`StringComparison.Ordinal`): a casing mismatch between a
+stored grant and the caller's `ICurrentUser` fails closed (denies) — it never grants access. Store principal ids
+and role names in a consistent casing.
+
 Grants are **operation-scoped**, and the `Shared` rule only matches grants for the operation `WhereAuthorized`
 asks about — which **defaults to `Read`**. To list the rows a caller may *edit*, pass the operation explicitly:
 
@@ -130,6 +137,23 @@ public sealed class GetContact : IHandler<GetContact.Query, Result<ContactDto>> 
 
 The decorator resolves the id and asks `IResourceAuthorizer`. The shipped default authorizes from the grants
 table (a share with the caller's user or roles); with no backend registered it **fails closed** (a logged 403).
+
+### The resource-type discriminator
+
+A grant identifies its resource by a **discriminator string**, stored in the `resource_type` column. The point
+check derives that discriminator from `typeof(Contact)` — by default the type's **`FullName`** (e.g.
+`MyApp.Crm.Contact`), so two entities named `Contact` in different modules never share authorization. Every path
+that produces or compares the discriminator agrees on it via
+`Elarion.Abstractions.Authorization.ResourceTypeDiscriminator`:
+
+- what `IResourceGrantStore.GrantAsync` **writes** (the `ResourceGrant.ResourceType` string you pass),
+- the point check in the grants-backed `IResourceAuthorizer`, and
+- the `EXISTS` subquery the `[ResourceFilter(Shared = true)]` generator emits.
+
+When you want a **stable, namespace-independent** discriminator (e.g. the short `"Contact"`), set the same
+override on all three: `[RequireResource(typeof(Contact), ResourceTypeName = "Contact")]`,
+`[ResourceFilter<Contact>(Shared = true, ResourceTypeName = "Contact")]`, and the `ResourceType` string on every
+`ResourceGrant` you write. If they disagree, the grant simply never matches (fail-closed).
 
 ## The escape hatch — validate before a write
 

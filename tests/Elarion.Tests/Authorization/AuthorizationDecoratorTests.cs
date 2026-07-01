@@ -79,6 +79,46 @@ public sealed class AuthorizationDecoratorTests {
     }
 
     [Fact]
+    public async Task RequireResource_PassesFullNameDiscriminatorByDefault() {
+        var resourceAuthorizer = new StubResourceAuthorizer(allow: true);
+        var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
+        var authorizer = new ClaimsAuthorizer(
+            new FakeCurrentUser { IsAuthenticated = true }, [], resourceAuthorizer,
+            new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
+        var decorator = new AuthorizationDecorator<GuardedCommand, Result<string>>(
+            inner,
+            new HandlerMetadata(typeof(NoAttributesHandler), typeof(GuardedCommand), typeof(Result<string>)),
+            authorizer,
+            requireAuthenticatedByDefault: false,
+            resourceBindings: [new ResourceRequirementBinding<GuardedCommand>(
+                typeof(Contact), ResourceOperation.Read, static command => command.Id)]);
+
+        await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
+
+        resourceAuthorizer.Calls[0].ResourceTypeName.Should().Be(typeof(Contact).FullName);
+    }
+
+    [Fact]
+    public async Task RequireResource_PassesExplicitDiscriminatorOverride() {
+        var resourceAuthorizer = new StubResourceAuthorizer(allow: true);
+        var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
+        var authorizer = new ClaimsAuthorizer(
+            new FakeCurrentUser { IsAuthenticated = true }, [], resourceAuthorizer,
+            new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
+        var decorator = new AuthorizationDecorator<GuardedCommand, Result<string>>(
+            inner,
+            new HandlerMetadata(typeof(NoAttributesHandler), typeof(GuardedCommand), typeof(Result<string>)),
+            authorizer,
+            requireAuthenticatedByDefault: false,
+            resourceBindings: [new ResourceRequirementBinding<GuardedCommand>(
+                typeof(Contact), ResourceOperation.Read, static command => command.Id, resourceTypeName: "Contact")]);
+
+        await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
+
+        resourceAuthorizer.Calls[0].ResourceTypeName.Should().Be("Contact");
+    }
+
+    [Fact]
     public async Task ForbidsWhenRequiredPermissionMissing() {
         var user = new FakeCurrentUser { IsAuthenticated = true };
         var decorator = Decorate(typeof(RequirePermissionHandler), user);

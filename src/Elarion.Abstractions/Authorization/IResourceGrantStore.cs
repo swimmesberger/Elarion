@@ -6,9 +6,22 @@ namespace Elarion.Abstractions.Authorization;
 /// <c>EXISTS</c> over the caller's principals) and what the database-backed resource point-check evaluates.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The default backend persists grants in the application's database (the only external system); the contract
 /// is storage-neutral so an alternative backend could implement it. Granting the same
-/// (resource, principal, operation) twice is idempotent.
+/// (resource, principal, operation) twice is idempotent — the default EF Core backend claims it with an
+/// <c>INSERT … ON CONFLICT DO NOTHING</c>, so a concurrent duplicate never raises a unique violation that would
+/// poison the caller's ambient transaction.
+/// </para>
+/// <para>
+/// <b>Matching is case-sensitive (<see cref="System.StringComparison.Ordinal"/>).</b> The
+/// <see cref="ResourceGrant.ResourceType"/> discriminator, <see cref="ResourceGrant.ResourceId"/>, and the
+/// principal's kind/id (a user id or a role name) are compared exactly as stored against the point check's
+/// discriminator (the resource type's <see cref="System.Type.FullName"/> by default) and the caller's
+/// <c>ICurrentUser</c> user id/role names. A casing mismatch fails closed (denies); it never grants access. Store
+/// the discriminator consistently with the matching <c>[ResourceFilter].ResourceTypeName</c> /
+/// <c>[RequireResource].ResourceTypeName</c>.
+/// </para>
 /// </remarks>
 public interface IResourceGrantStore {
     /// <summary>Shares the resource with the principal for the operation (idempotent).</summary>

@@ -6,6 +6,14 @@ namespace Elarion.Abstractions.Authorization;
 /// <paramref name="ResourceId"/> (read from the request). Evaluated by an <see cref="IResourceAuthorizer"/>.
 /// </summary>
 /// <param name="ResourceType">The resource type being accessed.</param>
+/// <param name="ResourceTypeName">
+/// The resource-type discriminator matched against the grants table (the explicit override, or the default
+/// derived from <paramref name="ResourceType"/> via <see cref="ResourceTypeDiscriminator"/>).
+/// </param>
 /// <param name="Operation">The operation requested.</param>
 /// <param name="ResourceId">The resource id resolved from the request, or <see langword="null"/> if absent.</param>
-public sealed record ResourceRequirement(Type ResourceType, ResourceOperation Operation, object? ResourceId);
+public sealed record ResourceRequirement(
+    Type ResourceType,
+    string ResourceTypeName,
+    ResourceOperation Operation,
+    object? ResourceId);

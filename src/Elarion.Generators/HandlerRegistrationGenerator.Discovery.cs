@@ -284,11 +284,14 @@ public sealed partial class HandlerRegistrationGenerator {
 
             var operation = "read";
             var idPath = "Id";
+            string? resourceTypeName = null;
             foreach (var named in attribute.NamedArguments) {
                 if (named.Key == "Operation" && named.Value.Value is string op && op.Length > 0)
                     operation = op;
                 else if (named.Key == "Id" && named.Value.Value is string id && id.Length > 0)
                     idPath = id;
+                else if (named.Key == "ResourceTypeName" && named.Value.Value is string typeName && typeName.Length > 0)
+                    resourceTypeName = typeName;
             }
 
             if (!ResourcePathResolves(requestType, idPath)) {
@@ -301,7 +304,7 @@ public sealed partial class HandlerRegistrationGenerator {
                 continue;
             }
 
-            builder.Add(new ResourceBindingInfo(resourceType.ToDisplayString(fmt), operation, idPath));
+            builder.Add(new ResourceBindingInfo(resourceType.ToDisplayString(fmt), operation, idPath, resourceTypeName));
         }
 
         return builder.ToImmutable();

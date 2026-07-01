@@ -321,8 +321,11 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"        new {bindingType}[]");
         sb.AppendLine("        {");
         foreach (var binding in handler.ResourceBindings.AsImmutableArray) {
+            var resourceTypeNameArg = binding.ResourceTypeName is null
+                ? string.Empty
+                : $", {FormatStringLiteral(binding.ResourceTypeName)}";
             sb.AppendLine(
-                $"            new(typeof({binding.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({FormatStringLiteral(binding.Operation)}), static __r => __r.{binding.IdPath}),");
+                $"            new(typeof({binding.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({FormatStringLiteral(binding.Operation)}), static __r => __r.{binding.IdPath}{resourceTypeNameArg}),");
         }
 
         sb.AppendLine("        };");

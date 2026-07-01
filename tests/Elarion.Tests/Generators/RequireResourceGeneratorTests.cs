@@ -49,6 +49,21 @@ public sealed class RequireResourceGeneratorTests
     }
 
     [Fact]
+    public void RequireResource_EmitsExplicitResourceTypeNameOverride()
+    {
+        var overridden = Source.Replace(
+            "[RequireResource(typeof(Contact), Operation = \"read\", Id = nameof(GetContact.Query.Id))]",
+            "[RequireResource(typeof(Contact), Operation = \"read\", Id = nameof(GetContact.Query.Id), ResourceTypeName = \"Crm.Contact\")]");
+        var result = Run(overridden);
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        var source = GetGenerated(result, "Sample_App_GetContact.g.cs");
+
+        source.Should().Contain(
+            "new(typeof(global::Sample.App.Contact), new global::Elarion.Abstractions.Authorization.ResourceOperation(\"read\"), static __r => __r.Id, \"Crm.Contact\"),");
+    }
+
+    [Fact]
     public void RequireResource_UnresolvablePath_ReportsElauth002()
     {
         var result = Run(Source.Replace("Id = nameof(GetContact.Query.Id)", "Id = \"Missing\""));
