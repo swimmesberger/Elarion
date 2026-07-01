@@ -121,6 +121,9 @@ with optimistic concurrency via a `version` column. Generate and apply an EF mig
 `elarion_settings` table; the framework ships no migrations. Change notification still uses the in-process
 source (single-instance) until a cross-instance source is added.
 
+`UseElarionSettings` takes optional `tableName` and `schema` parameters to rename the table or place it in
+a non-default schema: `modelBuilder.UseElarionSettings("app_settings", "app")`.
+
 ## Consuming as IConfiguration / IOptionsMonitor
 
 If you prefer the standard .NET abstractions, `Elarion.Settings.Configuration` surfaces the **global**

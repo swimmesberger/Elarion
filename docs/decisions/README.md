@@ -40,3 +40,4 @@ designs that are not yet implemented.
 - [ADR-0017: Elarion core is dependency-light; provider defaults are opt-in packages](0017-dependency-light-core.md)
 - [ADR-0018: Generated infrastructure is framework-named, not user-declared](0018-generated-infrastructure-is-framework-named.md)
 - [ADR-0019: Variant service injection (transparent, via an opt-in async-resolving handler proxy)](0019-variant-service-injection.md)
+- [ADR-0020: PostgreSQL `UNLOGGED` table is the recommended L2 distributed cache](0020-postgres-unlogged-l2-cache.md)
