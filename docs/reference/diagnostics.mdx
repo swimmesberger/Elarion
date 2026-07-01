@@ -270,6 +270,15 @@ Outbox-table generation for `[GenerateElarionOutbox]`. See
 | --- | --- | --- | --- |
 | ELOBX001 | Error | A context is annotated with `[GenerateElarionOutbox]` but not `[GenerateDbSets]`, so the outbox `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionOutbox]`. |
 
+## ELSCH — Scheduler claims (EF Core)
+
+Scheduler-claims generation for `[GenerateElarionSchedulerClaims]`. See
+[Scheduling](/docs/capabilities/scheduling).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELSCH001 | Error | A context is annotated with `[GenerateElarionSchedulerClaims]` but not `[GenerateDbSets]`, so the scheduler-claims `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionSchedulerClaims]`. |
+
 ## ELSET — Settings (EF Core)
 
 Settings-table generation for `[GenerateElarionSettings]`. See [Settings](/docs/concepts/settings).

@@ -30,6 +30,8 @@
     <Project Path="src/Elarion.Messaging.Outbox.Generators/Elarion.Messaging.Outbox.Generators.csproj" />
     <Project Path="src/Elarion.Paging/Elarion.Paging.csproj" />
     <Project Path="src/Elarion.Resilience/Elarion.Resilience.csproj" />
+    <Project Path="src/Elarion.Scheduling.EntityFrameworkCore/Elarion.Scheduling.EntityFrameworkCore.csproj" />
+    <Project Path="src/Elarion.Scheduling.EntityFrameworkCore.Generators/Elarion.Scheduling.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.Settings/Elarion.Settings.csproj" />
     <Project Path="src/Elarion.Settings.EntityFrameworkCore/Elarion.Settings.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Settings.EntityFrameworkCore.Generators/Elarion.Settings.EntityFrameworkCore.Generators.csproj" />

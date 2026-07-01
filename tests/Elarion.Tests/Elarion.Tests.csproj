@@ -55,6 +55,8 @@
     <ProjectReference Include="../../src/Elarion.Caching/Elarion.Caching.csproj" />
     <ProjectReference Include="../../src/Elarion.Caching.PostgreSql/Elarion.Caching.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Resilience/Elarion.Resilience.csproj" />
+    <ProjectReference Include="../../src/Elarion.Scheduling.EntityFrameworkCore/Elarion.Scheduling.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.Scheduling.EntityFrameworkCore.Generators/Elarion.Scheduling.EntityFrameworkCore.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity.Generators/Elarion.EntityFrameworkCore.Identity.Generators.csproj" />

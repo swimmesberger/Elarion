@@ -33,6 +33,11 @@ public static class SchedulerServiceCollectionExtensions {
         services.AddElarionVariableSubstitution();
         services.TryAddSingleton(options);
         services.TryAddSingleton(TimeProvider.System);
+
+        // Single-node default: every occurrence is claimed locally. The EF Core/PostgreSQL coordinator
+        // replaces this so a multi-node deployment executes each recurring occurrence on exactly one node.
+        services.TryAddSingleton<IScheduledOccurrenceCoordinator, LocalScheduledOccurrenceCoordinator>();
+
         services.TryAddSingleton<InMemoryScheduler>();
         services.TryAddSingleton<IJobScheduler>(sp => sp.GetRequiredService<InMemoryScheduler>());
         services.TryAddSingleton<IJobSchedulerInspector>(sp => sp.GetRequiredService<InMemoryScheduler>());

@@ -25,6 +25,7 @@ public sealed class InMemoryScheduler(
     TimeProvider timeProvider,
     SchedulerOptions options,
     IResiliencePolicyCatalog resiliencePolicies,
+    IScheduledOccurrenceCoordinator occurrenceCoordinator,
     ILogger<InMemoryScheduler> logger
 ) : BackgroundService, IJobScheduler, IJobSchedulerInspector {
     /// <summary>Upper bound for a single wait so very long schedules stay within timer limits.</summary>
@@ -783,6 +784,20 @@ public sealed class InMemoryScheduler(
                 return;
             }
 
+            if (!await TryClaimOccurrenceAsync(item, runCancellation.Token)) {
+                // Another node won this occurrence (or the claim could not be made — fail closed, since
+                // running anyway would reintroduce the duplication coordination prevents). Recorded like an
+                // overlap skip; the finally block still schedules the fixed-delay successor.
+                RecordSkipped(item, "claimed-elsewhere");
+                RecordOutcome(
+                    item,
+                    null,
+                    timeProvider.GetUtcNow(),
+                    ScheduledJobRunStatus.Skipped,
+                    "claimed-elsewhere");
+                return;
+            }
+
             if (!TryBeginRun(item, timeProvider.GetUtcNow(), runCancellation, out var skipReason)) {
                 // Note 37: Overlap and job-local concurrency decisions are recorded as skipped outcomes, not silent drops.
                 RecordSkipped(item, skipReason);
@@ -845,6 +860,58 @@ public sealed class InMemoryScheduler(
             // Fixed-delay chains advance only after the run finishes (success, failure,
             // disabled, or skipped alike) so the delay is measured from completion.
             RescheduleFixedDelayOccurrence(item, stoppingToken);
+        }
+    }
+
+    /// <summary>
+    /// Claims a recurring occurrence cluster-wide right before the overlap gate, so on a multi-node
+    /// deployment exactly one node executes it (ADR-0025). Runtime one-off jobs and one-time startup
+    /// schedules are never coordinated; cron occurrences claim their exact (wall-clock deterministic) slot,
+    /// while interval schedules — whose due times are anchored per node — dedupe by a one-interval window.
+    /// The local default coordinator always claims, keeping single-node semantics unchanged.
+    /// </summary>
+    private async ValueTask<bool> TryClaimOccurrenceAsync(ScheduledJobWorkItem item, CancellationToken ct) {
+        if (item.IsRuntimeScheduled ||
+            item.Descriptor.Schedule is not { } schedule ||
+            schedule.Kind == ScheduledJobScheduleKind.OneTime) {
+            return true;
+        }
+
+        TimeSpan? dedupeWindow = null;
+        if (schedule.Kind is ScheduledJobScheduleKind.FixedRate or ScheduledJobScheduleKind.FixedDelay) {
+            try {
+                dedupeWindow = ResolveScheduleSafely(item.Descriptor).Interval;
+            }
+            catch (Exception exception) {
+                logger.LogError(
+                    exception,
+                    "Failed to resolve the schedule of {JobName} while claiming its occurrence; skipping it on this node.",
+                    item.Descriptor.Name);
+                return false;
+            }
+        }
+
+        try {
+            return await occurrenceCoordinator.TryClaimAsync(
+                new ScheduledOccurrence {
+                    JobName = item.Descriptor.Name,
+                    DueTimeUtc = item.DueTimeUtc,
+                    DedupeWindow = dedupeWindow
+                },
+                ct);
+        }
+        catch (OperationCanceledException) {
+            throw;
+        }
+        catch (Exception exception) {
+            // Fail closed: running anyway would reintroduce the N-times duplication that coordination
+            // exists to prevent; the next occurrence retries naturally.
+            logger.LogError(
+                exception,
+                "Claiming occurrence {DueTimeUtc:O} of {JobName} failed; skipping it on this node.",
+                item.DueTimeUtc,
+                item.Descriptor.Name);
+            return false;
         }
     }
 

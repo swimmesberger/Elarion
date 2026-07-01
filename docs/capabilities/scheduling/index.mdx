@@ -83,8 +83,9 @@ public sealed class RecurringBillingJob(
 
 ## Operational characteristics
 
-- The scheduler is **in-memory only**. Queued runtime jobs and due recurring state are lost when the
-  process stops.
+- The scheduler runtime is **in-memory**. Queued runtime jobs and due recurring state are lost when
+  the process stops; recurring jobs re-derive their schedules at the next start. Cross-instance
+  coordination of recurring jobs is an opt-in database backend (below).
 - Fixed-rate and cron schedules **skip missed in-process slots** instead of replaying a burst (tunable
   with [misfire policy](/docs/capabilities/scheduling/overlap-and-misfire)).
 - There is **no global polling loop**. The runtime waits until the nearest due item and wakes early
@@ -94,9 +95,37 @@ public sealed class RecurringBillingJob(
 - Scheduling, enqueue, cancel, and execution all emit [telemetry](/docs/capabilities/telemetry).
 
 <Callout type="warn">
-  If you need durable queues, distributed coordination, or retry history that survives restarts, use
-  dedicated job infrastructure. Elarion's scheduler is deliberately in-process and lightweight.
+  If you need durable queues or retry history that survives restarts, use dedicated job
+  infrastructure. Elarion's scheduler runtime is deliberately in-process and lightweight; what it
+  does offer for clusters is the recurring-job coordination below.
 </Callout>
+
+## Running on more than one node
+
+Every node runs the same source-generated job set, so without coordination each recurring job fires
+once **per node**. `Elarion.Scheduling.EntityFrameworkCore` closes that with per-occurrence claim
+rows over PostgreSQL ([ADR-0025](/docs/decisions)): right before executing a recurring occurrence, a
+node claims it in the `elarion_scheduler_claims` table, and exactly one node wins — the others record
+the occurrence as skipped (`claimed-elsewhere`) and continue.
+
+```csharp
+// In Program.cs, next to AddElarionScheduler (either order):
+builder.Services.AddElarionScheduler(builder.Configuration);
+builder.Services.AddElarionSchedulerEntityFrameworkCore<AppDbContext>();
+
+// In OnModelCreating (or [GenerateElarionSchedulerClaims] on a [GenerateDbSets] context):
+modelBuilder.UseElarionSchedulerClaims();
+```
+
+How the claim dedupes depends on the schedule kind: **cron** occurrences are wall-clock deterministic
+on every node, so they claim their exact `(job, occurrence)` slot; **fixed-rate/fixed-delay** due
+times are anchored per node, so they dedupe by a one-interval window (at most one run per interval
+cluster-wide); **one-time** startup schedules are never coordinated (startup work is per node by
+design). If a claim cannot be made — say the database is briefly unreachable — the node fails
+**closed** and skips the occurrence rather than risking a duplicate; the next occurrence retries.
+A claim-retention purge worker keeps the table small (`SchedulerClaimsOptions`, default 7 days).
+Runtime one-shot jobs (`IJobScheduler`) remain in-memory; durable one-shot scheduling is a planned
+follow-up phase of ADR-0025.
 
 ## In this section
 

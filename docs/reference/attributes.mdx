@@ -498,6 +498,19 @@ See [Idempotency](/docs/concepts/idempotency).
 
 See [Event bus backends](/docs/capabilities/events/backends).
 
+### `[GenerateElarionSchedulerClaims]`
+
+- **Package:** `Elarion.Scheduling.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<SchedulerClaimEntity>` and applies the scheduler-claims model configuration through the EF generator's model-config seam — the table that makes each recurring occurrence execute on exactly one node (ADR-0025). The hand-written equivalent is `modelBuilder.UseElarionSchedulerClaims()`. Mirrors `[GenerateElarionIdempotencyKeys]`. Requires `[GenerateDbSets]` (else `ELSCH001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_scheduler_claims` / `ElarionSchedulerClaims` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Scheduling](/docs/capabilities/scheduling).
+
 ### `[GenerateElarionSettings]`
 
 - **Package:** `Elarion.Settings.EntityFrameworkCore` · **Applies to:** class
