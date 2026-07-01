@@ -1,15 +1,19 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Elarion.Generators;
 
 public sealed partial class HandlerRegistrationGenerator {
     private static CacheableInfo? ParseCacheable(
+        ClassDeclarationSyntax classDecl,
         INamedTypeSymbol classSymbol,
         ITypeSymbol requestType,
         ITypeSymbol responseType,
         Compilation compilation,
-        SymbolDisplayFormat fmt) {
+        SymbolDisplayFormat fmt,
+        bool isEventConsumer,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         var cacheableAttrSymbol = compilation.GetTypeByMetadataName(CacheableAttributeMetadataName);
         if (cacheableAttrSymbol is null)
             return null;
@@ -18,6 +22,18 @@ public sealed partial class HandlerRegistrationGenerator {
             .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, cacheableAttrSymbol));
         if (attr is null)
             return null;
+
+        // An event consumer is a fan-out subscriber returning Result<Unit>: caching it would cache the fan-out
+        // result so a legitimate re-delivery silently skips the side effect. Report ELCACHE005 and do not attach.
+        // ([CacheInvalidate] on a consumer is legitimate — reacting to an event by evicting caches — so it stays.)
+        if (isEventConsumer) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                CacheableOnEventConsumerDescriptor,
+                classDecl.Identifier.GetLocation(),
+                classSymbol.ToDisplayString(fmt),
+                requestType.ToDisplayString(fmt)));
+            return null;
+        }
 
         var tags = attr.ConstructorArguments.Length > 0
             ? ParseStringArray(attr.ConstructorArguments[0])
@@ -40,7 +56,8 @@ public sealed partial class HandlerRegistrationGenerator {
             }
         }
 
-        var keyProperties = ResolveCacheKeyProperties(requestType, requestedKeyProperties);
+        var keyProperties = ResolveCacheKeyProperties(
+            classDecl, classSymbol, requestType, requestedKeyProperties, fmt, diagnostics);
         var resultValueFqn = TryGetResultValueFqn(responseType, fmt);
         return new CacheableInfo(tags, durationSeconds, scopeValue, keyProperties, resultValueFqn);
     }
@@ -60,7 +77,10 @@ public sealed partial class HandlerRegistrationGenerator {
         var tags = attr.ConstructorArguments.Length > 0
             ? ParseStringArray(attr.ConstructorArguments[0])
             : ImmutableArray<string>.Empty;
-        var scopeValue = 0;
+        // Mirror CacheInvalidateAttribute.Scope's default of HandlerCacheScope.Global (= 1): the mutating caller is
+        // usually not the user whose cached read must be evicted, so over-invalidation is the safe default. (The
+        // generator cannot reference the Abstractions enum, hence the literal. Cacheable stays CurrentUser = 0.)
+        var scopeValue = 1;
 
         foreach (var namedArg in attr.NamedArguments) {
             if (namedArg.Key == "Scope" && namedArg.Value.Value is int value)
@@ -137,8 +157,12 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     private static ImmutableArray<CacheKeyPropertyInfo> ResolveCacheKeyProperties(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol classSymbol,
         ITypeSymbol requestType,
-        ImmutableArray<string> requestedKeyProperties) {
+        ImmutableArray<string> requestedKeyProperties,
+        SymbolDisplayFormat fmt,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         var publicProperties = requestType.GetMembers()
             .OfType<IPropertySymbol>()
             .Where(p => p is { IsStatic: false, DeclaredAccessibility: Accessibility.Public } &&
@@ -146,20 +170,99 @@ public sealed partial class HandlerRegistrationGenerator {
                         p.Parameters.Length == 0)
             .ToDictionary(p => p.Name, StringComparer.Ordinal);
 
+        var location = classDecl.Identifier.GetLocation();
+        var handlerName = classSymbol.ToDisplayString(fmt);
+
+        // Every property that participates in the key must have a stable, injective formatting in HandlerCacheKey;
+        // otherwise it falls back to object.ToString() (e.g. "System.Int32[]" for an array), so two distinct
+        // requests share a key — a cross-request cache leak. Reject an unsupported key property type (ELCACHE006).
+        var builder = ImmutableArray.CreateBuilder<CacheKeyPropertyInfo>();
+
         if (requestedKeyProperties.IsDefaultOrEmpty) {
-            return publicProperties.Values
-                .OrderBy(p => p.Name, StringComparer.Ordinal)
-                .Select(p => new CacheKeyPropertyInfo(p.Name))
-                .ToImmutableArray();
+            foreach (var property in publicProperties.Values.OrderBy(p => p.Name, StringComparer.Ordinal)) {
+                if (IsSupportedCacheKeyType(property.Type)) {
+                    builder.Add(new CacheKeyPropertyInfo(property.Name));
+                    continue;
+                }
+
+                diagnostics.Add(DiagnosticInfo.Create(
+                    UnsupportedCacheKeyPropertyTypeDescriptor,
+                    location,
+                    handlerName,
+                    property.Name,
+                    property.Type.ToDisplayString(fmt)));
+            }
+
+            return builder.ToImmutable();
         }
 
-        var builder = ImmutableArray.CreateBuilder<CacheKeyPropertyInfo>();
         foreach (var propertyName in requestedKeyProperties) {
-            if (publicProperties.ContainsKey(propertyName))
+            // ELCACHE007: a KeyProperties name with no matching request property would be silently dropped.
+            if (!publicProperties.TryGetValue(propertyName, out var property)) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    CacheKeyPropertyNotFoundDescriptor,
+                    location,
+                    handlerName,
+                    propertyName,
+                    requestType.ToDisplayString(fmt)));
+                continue;
+            }
+
+            if (IsSupportedCacheKeyType(property.Type)) {
                 builder.Add(new CacheKeyPropertyInfo(propertyName));
+                continue;
+            }
+
+            diagnostics.Add(DiagnosticInfo.Create(
+                UnsupportedCacheKeyPropertyTypeDescriptor,
+                location,
+                handlerName,
+                propertyName,
+                property.Type.ToDisplayString(fmt)));
         }
 
         return builder.ToImmutable();
+    }
+
+    // The sound cache-key whitelist: scalar types that HandlerCacheKey.Part formats stably and injectively.
+    // Nullable<T> unwraps to its underlying type; everything else (collections, arrays, custom classes/records)
+    // is rejected so it never silently ToString()-collides.
+    private static bool IsSupportedCacheKeyType(ITypeSymbol type) {
+        if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable &&
+            nullable.TypeArguments.Length == 1) {
+            return IsSupportedCacheKeyType(nullable.TypeArguments[0]);
+        }
+
+        if (type.TypeKind == TypeKind.Enum)
+            return true;
+
+        switch (type.SpecialType) {
+            case SpecialType.System_Boolean:
+            case SpecialType.System_Char:
+            case SpecialType.System_SByte:
+            case SpecialType.System_Byte:
+            case SpecialType.System_Int16:
+            case SpecialType.System_UInt16:
+            case SpecialType.System_Int32:
+            case SpecialType.System_UInt32:
+            case SpecialType.System_Int64:
+            case SpecialType.System_UInt64:
+            case SpecialType.System_Decimal:
+            case SpecialType.System_Single:
+            case SpecialType.System_Double:
+            case SpecialType.System_String:
+                return true;
+        }
+
+        return type.ToDisplayString() switch {
+            "System.Guid" => true,
+            "System.DateTime" => true,
+            "System.DateTimeOffset" => true,
+            "System.DateOnly" => true,
+            "System.TimeOnly" => true,
+            "System.TimeSpan" => true,
+            _ => false,
+        };
     }
 
     private static string? TryGetResultValueFqn(ITypeSymbol responseType, SymbolDisplayFormat fmt) {

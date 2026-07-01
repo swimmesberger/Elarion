@@ -112,6 +112,44 @@ public sealed class ElarionJsonSerializationTests {
     }
 
     [Fact]
+    public void StoredIdempotencyResult_RoundTrips_UnderSourceGeneration_ReflectionOff() {
+        // The idempotency replay envelope must serialize AOT-strict: the framework context registers the
+        // non-generic StoredResult (and AppError), while the success value goes through the module context's
+        // GetTypeInfo(typeof(T)). No closed StoredResult<T> and no reflection fallback are ever needed (C2).
+        var services = new ServiceCollection();
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SampleJsonContext.Default)); // reflection off
+
+        var accessor = Resolve(services);
+        var options = accessor.Options;
+
+        // Success path — mirrors the generated policy's Serialize(Result<SampleDto>).
+        var value = new SampleDto { Name = "receipt", Count = 7 };
+        var stored = new Elarion.Abstractions.Idempotency.StoredResult {
+            Ok = true,
+            Value = JsonSerializer.SerializeToElement(value, options.GetTypeInfo(typeof(SampleDto))),
+        };
+        var payload = JsonSerializer.Serialize(stored, ElarionFrameworkJsonContext.Default.StoredResult);
+
+        var back = JsonSerializer.Deserialize(payload, ElarionFrameworkJsonContext.Default.StoredResult)!;
+        back.Ok.Should().BeTrue();
+        var roundTripped = JsonSerializer.Deserialize(
+            back.Value!.Value, (JsonTypeInfo<SampleDto>)options.GetTypeInfo(typeof(SampleDto)))!;
+        roundTripped.Should().Be(value);
+
+        // Failure path — the AppError must resolve through the framework context, reflection off.
+        var failure = new Elarion.Abstractions.Idempotency.StoredResult {
+            Ok = false,
+            Error = AppError.BusinessRule("declined"),
+        };
+        var failurePayload = JsonSerializer.Serialize(failure, ElarionFrameworkJsonContext.Default.StoredResult);
+        var failureBack = JsonSerializer.Deserialize(
+            failurePayload, ElarionFrameworkJsonContext.Default.StoredResult)!;
+        failureBack.Ok.Should().BeFalse();
+        failureBack.Error!.Kind.Should().Be(ErrorKind.BusinessRule);
+        failureBack.Error.Message.Should().Be("declined");
+    }
+
+    [Fact]
     public void GetTypeInfo_ReflectionFallback_ResolvesUnmappedType() {
         var services = new ServiceCollection();
         services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
