@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Serialization;
 using Elarion.JsonRpc;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -112,5 +113,24 @@ public sealed class RpcDispatcherHandlerTests {
         error.Code.Should().Be(-32602);
         error.Message.Should().Be("name is required");
         error.Data.Should().BeSameAs(data);
+    }
+
+    [Fact]
+    public void ErrorResponse_WithValidationData_SerializesUnderCanonicalOptions_WithoutReflection() {
+        // Mirror the JSON-RPC host: the canonical options with the envelope context inserted first and reflection
+        // OFF (the AOT-honest default). The framework's ValidationErrorData payload has no app-registered context
+        // here, so before it was seeded into the canonical chain this threw NotSupportedException => HTTP 500
+        // instead of the -32602 it should return.
+        var services = new ServiceCollection();
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Insert(0, JsonRpcJsonContext.Default));
+        var options = services.BuildServiceProvider().GetRequiredService<IElarionJsonSerialization>().Options;
+
+        var response = JsonRpcResponse.FromError(
+            "1", AppErrorMapper.ToRpcError(AppError.Validation("invalid", (IReadOnlyList<string>)["name is required"])));
+
+        var json = JsonSerializer.Serialize(response, options.GetTypeInfo(typeof(JsonRpcResponse)));
+
+        json.Should().Contain("\"code\":-32602");
+        json.Should().Contain("\"errors\":[\"name is required\"]");
     }
 }

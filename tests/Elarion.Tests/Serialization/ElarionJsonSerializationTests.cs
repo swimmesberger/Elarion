@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
+using Elarion.Abstractions;
 using Elarion.Abstractions.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -62,7 +63,8 @@ public sealed class ElarionJsonSerializationTests {
         var options = Resolve(services).Options;
 
         // The source-gen context is first in the chain, so it wins — the throwing resolver is never consulted.
-        options.TypeInfoResolverChain.Should().HaveCount(2);
+        // The chain also carries the always-seeded framework context (appended last), hence three.
+        options.TypeInfoResolverChain.Should().HaveCount(3);
         var info = options.GetTypeInfo(typeof(SampleDto));
         info.Should().NotBeNull();
     }
@@ -91,6 +93,22 @@ public sealed class ElarionJsonSerializationTests {
         // No source-gen context, no reflection fallback => an unmapped type cannot be resolved.
         var act = () => accessor.GetTypeInfo<SampleDto>();
         act.Should().Throw<Exception>();
+    }
+
+    [Fact]
+    public void FrameworkErrorPayload_ResolvesUnderSourceGeneration_ByDefault() {
+        var services = new ServiceCollection();
+        services.AddElarionJson(); // no contributed context, reflection off (AOT-strict default)
+
+        var accessor = Resolve(services);
+
+        // The framework seeds its own context (ElarionFrameworkJsonContext), so ValidationErrorData resolves
+        // without a per-app [JsonSerializable] and without the reflection fallback — the fix for the reflection-off 500.
+        var info = accessor.GetTypeInfo<ValidationErrorData>();
+        info.Type.Should().Be(typeof(ValidationErrorData));
+
+        var json = JsonSerializer.Serialize(new ValidationErrorData { Errors = ["name is required"] }, info);
+        json.Should().Be("{\"errors\":[\"name is required\"]}");
     }
 
     [Fact]
