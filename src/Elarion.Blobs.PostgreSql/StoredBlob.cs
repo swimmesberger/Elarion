@@ -47,4 +47,11 @@ public sealed class StoredBlob {
     /// garbage collected, or <c>null</c> when the blob does not expire.
     /// </summary>
     public DateTimeOffset? ExpiresAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the id of the principal that owns the blob, or <c>null</c> when the blob is unowned.
+    /// Recorded from <see cref="BlobUploadRequest.OwnerId"/> and surfaced as
+    /// <see cref="BlobMetadata.OwnerId"/>.
+    /// </summary>
+    public string? OwnerId { get; set; }
 }

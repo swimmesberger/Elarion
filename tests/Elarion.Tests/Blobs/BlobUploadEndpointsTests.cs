@@ -151,6 +151,62 @@ public sealed class BlobUploadEndpointsTests {
     }
 
     [Fact]
+    public async Task Cancel_SeparatorForgingUser_CannotCancelPrefixMatchedBlob_Returns404() {
+        // Regression: ownership is compared against the recorded owner id exactly, not by a "starts with
+        // {ownerId}/" test over the storage name. A user "a" must not be able to cancel a blob owned by
+        // "a/b" just because the name "a/b/…" begins with "a/".
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct, user: new FakeCurrentUser("a", isAuthenticated: true));
+        host.Store.Seed(new BlobMetadata {
+            Id = "victim",
+            Container = "uploads",
+            Name = "a/b/abc/secret.bin",
+            ContentType = "application/octet-stream",
+            Size = 3,
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            OwnerId = "a/b"
+        });
+
+        var response = await host.Client.DeleteAsync("/_elarion/blobs/victim", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        host.Store.Deleted.Should().NotContain("victim");
+    }
+
+    [Fact]
+    public async Task Cancel_BlobWithNoOwner_Returns404() {
+        // Fail closed: an unowned blob is not cancellable by anyone.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+        host.Store.Seed(new BlobMetadata {
+            Id = "unowned",
+            Container = "uploads",
+            Name = "user-1/abc/file.bin",
+            ContentType = "application/octet-stream",
+            Size = 1,
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            OwnerId = null
+        });
+
+        var response = await host.Client.DeleteAsync("/_elarion/blobs/unowned", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        host.Store.Deleted.Should().NotContain("unowned");
+    }
+
+    [Fact]
+    public async Task Upload_RecordsOwnerIdInMetadata() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var content = new ByteArrayContent([1, 2, 3]);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        await host.Client.PostAsync("/_elarion/blobs?fileName=a.bin", content, ct);
+
+        host.Store.LastRequest!.OwnerId.Should().Be("user-1");
+    }
+
+    [Fact]
     public async Task Cancel_OtherUsersBlob_Returns404() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);
@@ -229,7 +285,8 @@ public sealed class BlobUploadEndpointsTests {
                     Name = request.Name,
                     ContentType = request.ContentType,
                     Size = buffer.Length,
-                    CreatedAt = DateTimeOffset.UnixEpoch
+                    CreatedAt = DateTimeOffset.UnixEpoch,
+                    OwnerId = request.OwnerId
                 },
                 buffer.ToArray());
             return new BlobRef { Value = id };

@@ -123,7 +123,14 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var data = (byte[])reader["data"];
 
         // Buffered for now: the content is fully materialized, so the MemoryStream owns no
-        // backend resources and BlobDownload has nothing extra to dispose.
+        // backend resources and BlobDownload has nothing extra to dispose. A true streaming read
+        // (CommandBehavior.SequentialAccess + NpgsqlDataReader.GetStream) needs a connection whose lifetime
+        // outlives this method and is owned by the returned BlobDownload; the DbContext's shared connection
+        // cannot be that owner (it is disposed with the scope, and a live reader would block other context
+        // work), and a freshly opened connection cannot be either because Npgsql strips the password from an
+        // opened connection's string, so it cannot be cloned from the context's connection. Implementing it
+        // safely requires threading the NpgsqlDataSource (or the raw connection string) into the store — a
+        // deliberate future change, tracked rather than half-done here.
         return new BlobDownload(ToMetadata(metadata), new MemoryStream(data, writable: false));
     }
 
@@ -170,9 +177,6 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     public async Task<bool> CommitAsync(BlobRef blobRef, CancellationToken cancellationToken) {
         ValidateBlobRef(blobRef);
 
-        // Load the row tracked and mutate it: the change is persisted by the caller's next
-        // SaveChangesAsync, so the commit and the entity insert that references this blob are atomic
-        // within the caller's transaction. We deliberately do not save here.
         var blob = await dbContext.Set<StoredBlob>()
             .FirstOrDefaultAsync(storedBlob => storedBlob.Id == blobRef.Value, cancellationToken);
 
@@ -184,10 +188,36 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             return true;
         }
 
+        logger.LogDebug("Committing blob {BlobId}", blobRef.Value);
+
+        // Within the caller's transaction, flip the pending row to committed immediately with a guarded
+        // ExecuteUpdate rather than only mutating the tracked entity. This does two things the deferred
+        // tracked mutation could not: it participates in the caller's transaction (so the promote and the
+        // entity insert still commit atomically), and it takes the row's write lock for the rest of that
+        // transaction — so the garbage collector's set-based delete (which re-checks State == Pending)
+        // cannot reclaim the still-Pending row in the window between commit and the caller's
+        // SaveChangesAsync. The guard keeps it idempotent (a concurrent commit that already flipped the row
+        // affects zero rows, and we still report success). Keep the tracked entity in sync so a subsequent
+        // read on this context sees the committed state.
+        if (dbContext.Database.CurrentTransaction is not null) {
+            await dbContext.Set<StoredBlob>()
+                .Where(storedBlob => storedBlob.Id == blobRef.Value && storedBlob.State == BlobLifecycleState.Pending)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(storedBlob => storedBlob.State, BlobLifecycleState.Committed)
+                        .SetProperty(storedBlob => storedBlob.ExpiresAt, (DateTimeOffset?)null),
+                    cancellationToken);
+
+            blob.State = BlobLifecycleState.Committed;
+            blob.ExpiresAt = null;
+            dbContext.Entry(blob).State = EntityState.Unchanged;
+            return true;
+        }
+
+        // No ambient transaction: mutate the tracked entity so the change is persisted by the caller's next
+        // SaveChangesAsync (its own implicit transaction), keeping the promote atomic with the entity insert.
         blob.State = BlobLifecycleState.Committed;
         blob.ExpiresAt = null;
-
-        logger.LogDebug("Committing blob {BlobId}", blobRef.Value);
 
         return true;
     }
@@ -273,6 +303,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             existing.CreatedAt = createdAt;
             existing.State = state;
             existing.ExpiresAt = expiresAt;
+            existing.OwnerId = request.OwnerId;
 
             logger.LogDebug(
                 "Updating existing blob {BlobId} ({Container}/{Name})",
@@ -294,6 +325,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             CreatedAt = createdAt,
             State = state,
             ExpiresAt = expiresAt,
+            OwnerId = request.OwnerId,
         });
 
         logger.LogDebug("Creating new blob {BlobId} ({Container}/{Name})", blobId, request.Container, request.Name);
@@ -353,7 +385,8 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             Name = blob.Name,
             ContentType = blob.ContentType,
             Size = blob.Size,
-            CreatedAt = blob.CreatedAt
+            CreatedAt = blob.CreatedAt,
+            OwnerId = blob.OwnerId
         };
 
     private static void ValidateUploadRequest(BlobUploadRequest request) {

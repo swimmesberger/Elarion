@@ -49,7 +49,7 @@ public interface ITusUploadStore {
     /// Thrown when <paramref name="offset"/> does not match the session's current offset, or the session
     /// does not exist.
     /// </exception>
-    Task<TusUpload> AppendAsync(string uploadId, long offset, Stream chunk, long? chunkLength, CancellationToken cancellationToken);
+    Task<TusUpload> AppendAsync(string uploadId, long offset, Stream chunk, CancellationToken cancellationToken);
 
     /// <summary>Deletes an upload session and any staged bytes.</summary>
     Task DeleteAsync(string uploadId, CancellationToken cancellationToken);
