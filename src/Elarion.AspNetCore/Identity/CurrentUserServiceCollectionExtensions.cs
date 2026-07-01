@@ -1,6 +1,5 @@
+using Elarion.Identity;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Elarion.Abstractions.Identity;
 
 namespace Elarion.AspNetCore.Identity;
 
@@ -9,20 +8,16 @@ namespace Elarion.AspNetCore.Identity;
 /// </summary>
 public static class CurrentUserServiceCollectionExtensions {
     /// <summary>
-    /// Registers the default claims-backed <see cref="ICurrentUser"/> implementation.
+    /// Registers the default claims-backed <see cref="Abstractions.Identity.ICurrentUser"/> implementation.
+    /// This is the ASP.NET-host-facing alias for the transport-neutral
+    /// <see cref="ClaimsCurrentUserServiceCollectionExtensions.AddElarionClaimsCurrentUser"/>; pair it with
+    /// <c>UseElarionCurrentUser()</c> so the authenticated request principal is captured into the request scope.
     /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Optional claim-type mapping configuration.</param>
+    /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddElarionCurrentUser(
         this IServiceCollection services,
-        Action<AspNetCoreCurrentUserOptions>? configure = null) {
-        if (configure is not null) {
-            services.Configure(configure);
-        } else {
-            services.AddOptions<AspNetCoreCurrentUserOptions>();
-        }
-
-        services.TryAddScoped<CurrentUserSnapshot>();
-        services.TryAddScoped<ICurrentUser>(sp => sp.GetRequiredService<CurrentUserSnapshot>());
-
-        return services;
-    }
+        Action<ClaimsCurrentUserOptions>? configure = null) =>
+        services.AddElarionClaimsCurrentUser(configure);
 }

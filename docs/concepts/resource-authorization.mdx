@@ -1,0 +1,161 @@
+---
+title: Resource authorization
+description: Per-resource (read/write) access control and efficient database-level filtering — owner, tenant, and role-based sharing — composed from one declarative source.
+---
+
+[Handler authorization](./authorization) decides on the *whole operation* ("may this user call this handler?").
+**Resource authorization** decides on *specific resources* ("may this user read *this* contact?", "*which*
+contacts may they list?"). These are two different problems, and Elarion solves them with two complementary,
+opt-in legs driven from one declarative source — never by filtering rows in memory after the query (which
+breaks pagination and leaks data).
+
+<Callout type="info">
+  Resource authorization is transport-neutral and depends only on `ICurrentUser` (user id + roles). The
+  database is the only external system — there is no relationship/policy-engine dependency.
+</Callout>
+
+## Two questions, two legs
+
+| Question | Leg | Mechanism |
+|---|---|---|
+| "Which resources may I read?" (lists/search) | **List filter** | `[ResourceFilter<T>]` → a predicate pushed into SQL **before** paging |
+| "May I read/write *this* resource?" (get-one/write) | **Point check** | `[RequireResource(...)]` → the `IResourceAuthorizer` seam |
+
+## Leg B — list filtering (push the rule into SQL)
+
+Declare a filter for an entity on a dedicated partial class (the entity stays clean, like `[Keyset<T>]`):
+
+```csharp
+[ResourceFilter<Contact>(
+    OwnerProperty = nameof(Contact.OwnerId),     // a grant: the row's owner
+    TenantProperty = nameof(Contact.TenantId),   // a scope: must match the caller's tenant claim
+    Shared = true, ResourceTypeName = "Contact")] // a grant: shared via the grants table (user or role)
+public sealed partial class ContactAccess;
+```
+
+The generator completes the class as an `IQueryAuthorizer<Contact>` and auto-registers it. Inject it into the
+handler and compose it into the query **before** paging:
+
+```csharp
+public sealed class ListContacts(AppDbContext db, ICurrentUser user, IQueryAuthorizer<Contact> access)
+    : IHandler<ListContacts.Query, Result<Page<ContactDto>>> {
+
+    public async ValueTask<Result<Page<ContactDto>>> HandleAsync(Query request, CancellationToken ct) =>
+        await db.Contacts
+            .WhereAuthorized(access, user)                           // owner OR shared-with-user OR shared-with-role
+            .Where(c => c.Category == request.Category)             // your business filters
+            .ToKeysetPageAsync(request, RecentContacts.Definition, c => new ContactDto(c.Id), ct);
+}
+```
+
+The predicate is part of the single SQL statement, so the database filters the rows — pagination and total
+counts are correct, and unauthorized rows are never returned. The rules compose as **`AND(scopes) AND
+OR(grants)`**: a row is visible when it satisfies every scope (tenant) and at least one grant (owner, or a share).
+
+In plain terms, the `Shared` flag decides **how wide the list is**:
+
+- **`Shared = false`** (owner/tenant rules only) — the caller sees **only the rows they own**, within their tenant.
+- **`Shared = true`** — the caller *also* sees **rows explicitly shared with them**, either directly or with a
+  role they belong to, recorded in the [grants table](#sharing-with-users-and-roles).
+
+Either way, a row the caller neither owns nor was granted is never returned — and never counted.
+
+<Callout type="info">
+  **Inject the authorizer; the static `Specification` is a shortcut for field-only filters.** A filter that uses
+  `Shared` consults the grants table, so it is a **scoped service** — you must inject `IQueryAuthorizer<Contact>`
+  (as above), and there is no static accessor. A filter with only field rules
+  (`OwnerProperty`/`TenantProperty`) is stateless, so the generator *also* exposes a static
+  `ContactAccess.Specification` singleton you can hand to `WhereAuthorized` without DI. Both forms are
+  auto-registered as `IQueryAuthorizer<Contact>` by the host bootstrapper (module-feature-gated), so injection
+  works for either.
+</Callout>
+
+<Callout type="warn">
+  Never filter a list in memory after the query (the `@PostFilter` shape). It returns short pages, wrong
+  counts, and leaks how many rows exist. `WhereAuthorized` exists precisely so you don't.
+</Callout>
+
+For a rule beyond the conventional ones, write the `IQueryAuthorizer<T>` by hand — the logic is ordinary,
+testable C#, not a string expression.
+
+## Sharing with users and roles
+
+Shares live in a DB-native grants table. Map it on your context — either with the attribute (emits the `DbSet`
+and the table mapping, like `[GenerateElarionIdentity]`):
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionResourceGrants]
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+```
+
+…or by hand: `modelBuilder.ApplyElarionResourceGrants()`. Then register the backend and manage shares:
+
+```csharp
+services.AddElarionResourceAuthorization<AppDbContext>();   // grants source, store, and the point-check authorizer
+
+// Share one contact with the "Hausmeister" role for read — every user in that role can now see it.
+await grants.GrantAsync(
+    new ResourceGrant("Contact", contactId.ToString(), ResourcePrincipal.Role("Hausmeister"), ResourceOperation.Read), ct);
+```
+
+The `Shared` filter turns this into an indexed correlated `EXISTS` over the caller's user id **or any of their
+roles** — a small, bounded lookup that scales.
+
+Grants are **operation-scoped**, and the `Shared` rule only matches grants for the operation `WhereAuthorized`
+asks about — which **defaults to `Read`**. To list the rows a caller may *edit*, pass the operation explicitly:
+
+```csharp
+db.Contacts.WhereAuthorized(access, user, ResourceOperation.Update)   // EXISTS matches "update" grants
+```
+
+The operation narrows only the **grant** (`Shared`) lookup; the `OwnerProperty`/`TenantProperty` rules are
+operation-independent, so an owner still sees their own rows under any operation.
+
+## Leg A — the per-resource point check
+
+For a get-one or write handler, declare which request property names the resource. The id is a **compile-checked
+path** (per [ADR-0012](../decisions/0012-dynamic-variable-references.md)), not a string expression — the
+generator validates it against the request and emits a zero-reflection accessor:
+
+```csharp
+[RequireResource(typeof(Contact), Operation = "read", Id = nameof(GetContact.Query.Id))]
+public sealed class GetContact : IHandler<GetContact.Query, Result<ContactDto>> {
+    public sealed record Query : IQuery { public Guid Id { get; init; } }
+    // ...
+}
+```
+
+The decorator resolves the id and asks `IResourceAuthorizer`. The shipped default authorizes from the grants
+table (a share with the caller's user or roles); with no backend registered it **fails closed** (a logged 403).
+
+## The escape hatch — validate before a write
+
+Inject `IResourceAuthorizer` (or use the in-memory `IQueryAuthorizer<T>.Matches` for owner/field rules) to run
+your own check in a handler before writing — this is the deliberate alternative to a hidden write interceptor:
+
+```csharp
+// grant-aware check by id (an EXISTS — no full load)
+if (!await resourceAuth.AuthorizeResourceAsync(
+        new ResourceAuthorizationContext(currentUser, typeof(Contact), ResourceOperation.Update, request.Id), ct))
+    return Result.Failure(AppError.Forbidden("Not allowed to update this contact."));
+
+// or, for owner/tenant rules, in memory after loading
+var contact = await db.Contacts.FindAsync([request.Id], ct);
+if (contact is null || !ContactAccess.Specification.Matches(contact, currentUser, ResourceOperation.Update))
+    return Result.Failure(AppError.Forbidden("Not allowed to update this contact."));
+```
+
+<Callout type="info">
+  `[ResourceFilter]` predicates are a **read** filter; they do not stop a wrong-owner *write*. Enforce writes
+  with `[RequireResource]` or the escape hatch above. Raw SQL (`FromSqlRaw`) and `IgnoreQueryFilters` bypass the
+  in-app predicate — there is no Postgres RLS backstop, so keep enforcement in your handlers.
+</Callout>
+
+## See also
+
+- [ADR-0013: Resource-based and data-level authorization](../decisions/0013-resource-and-data-level-authorization.md)
+- [ADR-0012: Referencing dynamic variables in attributes](../decisions/0012-dynamic-variable-references.md)
+- [Authorization](./authorization) — the operation-level gate this builds on.

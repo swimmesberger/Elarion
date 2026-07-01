@@ -32,19 +32,4 @@ public interface IDomainEventBus {
     /// </remarks>
     ValueTask PublishAsync<TEvent>(TEvent @event, CancellationToken ct = default)
         where TEvent : IDomainEvent;
-
-    /// <summary>
-    /// Dispatches <paramref name="request"/> to its single registered responder and returns the
-    /// responder's <see cref="Result{TResponse}"/>.
-    /// </summary>
-    /// <typeparam name="TRequest">The request type (a domain message).</typeparam>
-    /// <typeparam name="TResponse">The response payload type.</typeparam>
-    /// <param name="request">The request instance.</param>
-    /// <param name="ct">A cancellation token observed by the responder.</param>
-    /// <remarks>
-    /// Exactly one responder must be registered for <typeparamref name="TRequest"/>; the generator
-    /// rejects zero or many at compile time. Use <see cref="PublishAsync"/> for fan-out with no reply.
-    /// </remarks>
-    ValueTask<Result<TResponse>> RequestAsync<TRequest, TResponse>(TRequest request, CancellationToken ct = default)
-        where TRequest : IDomainEvent;
 }

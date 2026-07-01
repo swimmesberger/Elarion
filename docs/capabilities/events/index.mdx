@@ -33,9 +33,12 @@ public sealed record InvoiceLineAdded(Guid InvoiceId, decimal Amount) : IDomainE
 ```
 
 `[ConsumeEvent]` is the **single, unified way to subscribe** — you never pick a bus or a plane on the
-consumer. The event type's marker decides the plane, and the consumer's return type decides the role, so
-a consumer reads identically whether it runs inline or after commit. See
-[Consuming events](/docs/capabilities/events/consuming-events) for the consumer model.
+consumer. The event type's marker decides the plane, and every consumer is a **fan-out subscriber**, so a
+consumer reads identically whether it runs inline or after commit. The event bus is **pub/sub-only**: it
+broadcasts notifications and never returns a value to the publisher. See
+[Consuming events](/docs/capabilities/events/consuming-events) for the consumer model. For request/reply
+(one typed response), call the target handler directly instead — see
+[calling a handler from other code](/docs/concepts/handlers#calling-a-handler-from-other-code).
 
 ## Plane A — domain events (inline)
 
@@ -48,16 +51,15 @@ synchronous side effects that must be part of the same unit of work.
 // Inside a command handler, within the unit of work — RecalculateTotals runs now,
 // same scope, same transaction, and commits together with the line:
 await domainEvents.PublishAsync(new InvoiceLineAdded(c.InvoiceId, c.Amount), ct);
-
-// Request/response is the other domain role — exactly one responder answers:
-var price = await domainEvents.RequestAsync<PriceQuote, Money>(new PriceQuote(sku), ct);
 ```
 
 `PublishAsync<TEvent> where TEvent : IDomainEvent` fans out to every consumer in ascending
 `[ConsumeEvent(Order = …)]`, awaiting each in turn; if one or more consumers throw, the rest still run
-and the exceptions are aggregated and rethrown. `RequestAsync<TRequest, TResponse>` dispatches to a
-single responder and returns its `Result<TResponse>`. Domain events are **never broker-portable** — they
-are an in-process, in-transaction mechanism by definition.
+and the exceptions are aggregated and rethrown. The bus is **pub/sub-only** — `PublishAsync` returns no
+value, so when you need a single typed response from another handler, call that handler directly rather
+than going through the bus (see
+[calling a handler from other code](/docs/concepts/handlers#calling-a-handler-from-other-code)). Domain
+events are **never broker-portable** — they are an in-process, in-transaction mechanism by definition.
 
 <Callout type="warn">
   **A domain-event handler runs nested in the command's pipeline.** Because the domain plane dispatches

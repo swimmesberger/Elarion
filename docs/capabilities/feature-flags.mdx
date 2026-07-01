@@ -1,0 +1,110 @@
+---
+title: Feature flags
+description: Wire a feature-flag backend into the host so [FeatureGate] handlers and variant services evaluate against the provider of your choice.
+---
+
+Feature flags gate a **handler** behind one or more flags with `[FeatureGate]`, and can swap a service
+implementation per user with `[FeatureVariant]`. The attributes, the `IFeatureFlagService` seam, and the
+generated decorators ship in `Elarion.Abstractions` and carry **no** feature-management dependency — so
+gating is free to declare and the host picks the backend. This page covers the host wiring; for the gate
+semantics, multiple-flag forms, and variant injection in depth see
+[Feature flags (concept)](/docs/concepts/feature-flags).
+
+## Choose a provider
+
+The gate evaluates against `IFeatureFlagService`, whose default implementation targets
+[OpenFeature](https://openfeature.dev) — the CNCF vendor-neutral standard. Two opt-in packages provide a
+backend; both go through the same seam, so switching one for the other never touches a `[FeatureGate]`.
+
+<Cards>
+  <Card title="Batteries-included: FeatureManagement">
+    `Elarion.FeatureFlags.FeatureManagement` wires the OpenFeature Microsoft.FeatureManagement provider
+    so `[FeatureGate]` reads config-driven flags out of the box. Best for getting started.
+  </Card>
+  <Card title="Bring your own provider: OpenFeature">
+    `Elarion.FeatureFlags.OpenFeature` registers the seam over any OpenFeature provider you configure
+    (LaunchDarkly, ConfigCat, flagd, Flagsmith, …). Best when a flag platform is already in play.
+  </Card>
+</Cards>
+
+### Config-driven flags (FeatureManagement)
+
+One call wires the provider and reads flags from the conventional `FeatureManagement` configuration
+section:
+
+```csharp
+builder.Services.AddElarionFeatureManagement(builder.Configuration);
+```
+
+```json title="appsettings.json"
+{
+  "FeatureManagement": {
+    "new-export": true,
+    "new-dashboard": false
+  }
+}
+```
+
+### Any OpenFeature provider
+
+Register your provider with `AddOpenFeature(...)`, then wire the Elarion seam over it:
+
+```csharp
+builder.Services.AddOpenFeature(b => b.AddProvider(/* LaunchDarkly, ConfigCat, flagd, ... */));
+builder.Services.AddElarionOpenFeature();
+```
+
+`AddElarionFeatureManagement` is just sugar over `AddOpenFeature(...) + AddElarionOpenFeature()`. To
+replace the backend wholesale (a custom store, a test double), register your own `IFeatureFlagService` —
+the gate and every imperative check follow.
+
+<Callout type="info">
+  Targeting is **ambient**: the default provider derives the OpenFeature evaluation context from the
+  current [`ICurrentUser`](/docs/capabilities/current-user) — the user id becomes the targeting key (plus
+  `UserId`/`Groups` attributes) — so percentage and targeting rollouts work off-HTTP the same as on, with
+  no `HttpContext`.
+</Callout>
+
+## Gate a handler
+
+Once a backend is wired, annotate the handler. The generated `FeatureGateDecorator` evaluates the flag
+**just inside the authorization gate**, before caching, validation, and the handler body:
+
+```csharp
+[Handler("billing.export")]
+[FeatureGate("new-export")]
+public sealed class ExportInvoices(AppDbContext db)
+    : IHandler<ExportInvoices.Command, Result<ExportInvoices.Response>> { /* ... */ }
+```
+
+A closed gate short-circuits to `AppError.NotFound` (404), identically under JSON-RPC, MCP, and HTTP — a
+gated-off operation is indistinguishable from one that doesn't exist. See the concept page for the
+`All`/`Any` requirement forms, `Negate`, and the `ELFEAT001`/`ELFEAT002` diagnostics.
+
+## Swap an implementation per variant
+
+Beyond on/off gating, a flag can allocate a **variant** per user and resolve a different `[Service]`
+implementation for it. Mark each implementation of a contract with `[FeatureVariant]` (a modifier on
+`[Service]`); consumers inject the plain contract and stay unaware:
+
+```csharp
+[Service]
+[FeatureVariant("ForecastAlgorithm")]                 // the default (no Variant)
+public sealed class LinearForecast : IForecastAlgorithm { /* ... */ }
+
+[Service]
+[FeatureVariant("ForecastAlgorithm", Variant = "neural")]
+public sealed class NeuralForecast : IForecastAlgorithm { /* ... */ }
+```
+
+The generator wires variant resolution automatically; outside a handler constructor, inject
+`IVariantServiceProvider<IForecastAlgorithm>`. See
+[Variant service injection](/docs/concepts/feature-flags#variant-service-injection) for how the
+async-resolving proxy keeps contracts synchronous, and the provider requirement for surfacing variant
+names.
+
+<Cards>
+  <Card title="Feature flags in depth" href="/docs/concepts/feature-flags">
+    Gate forms, the runtime `IFeatureFlagService`, variant injection, and the design rationale.
+  </Card>
+</Cards>

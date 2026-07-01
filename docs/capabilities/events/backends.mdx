@@ -81,6 +81,9 @@ protected override void OnModelCreating(ModelBuilder modelBuilder) {
 }
 ```
 
+`UseElarionOutbox` takes optional `tableName` and `schema` parameters, for example
+`modelBuilder.UseElarionOutbox("app_outbox", "app")`.
+
 </Step>
 
 <Step>

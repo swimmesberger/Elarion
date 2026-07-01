@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Elarion.JsonRpc.Mcp;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,12 +29,12 @@ public sealed class RpcToolInvokerTests {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
 
-    private static (JsonRpcDispatcher Dispatcher, IServiceProvider Services) Build() {
-        var dispatcher = new JsonRpcDispatcher(Options).MapHandler<EchoCommand, EchoResponse>("echo").Freeze();
+    private static (HandlerDispatcher Dispatcher, IServiceProvider Services) Build() {
+        var dispatcher = new JsonRpcDispatcher(Options).Map<EchoCommand, EchoResponse>("echo").Freeze();
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
             .BuildServiceProvider();
-        return (dispatcher, services);
+        return (dispatcher.Registry, services);
     }
 
     private static JsonElement Args(object value) => JsonSerializer.SerializeToElement(value, Options);
@@ -44,7 +45,8 @@ public sealed class RpcToolInvokerTests {
 
         // Pass the root provider; the invoker creates its own per-call scope to resolve the scoped handler.
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, "echo", Args(new { name = "World" }), services, TestContext.Current.CancellationToken);
+            dispatcher, HandlerTransports.All, "echo", Args(new { name = "World" }), services, Options,
+            ct: TestContext.Current.CancellationToken);
 
         result.IsError.Should().BeFalse();
         using var doc = JsonDocument.Parse(result.Text);
@@ -56,7 +58,8 @@ public sealed class RpcToolInvokerTests {
         var (dispatcher, services) = Build();
 
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, "echo", Args(new { name = "missing" }), services, TestContext.Current.CancellationToken);
+            dispatcher, HandlerTransports.All, "echo", Args(new { name = "missing" }), services, Options,
+            ct: TestContext.Current.CancellationToken);
 
         result.IsError.Should().BeTrue();
         result.Text.Should().Be("client not found");
@@ -68,7 +71,8 @@ public sealed class RpcToolInvokerTests {
         var (dispatcher, services) = Build();
 
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, "does.not.exist", null, services, TestContext.Current.CancellationToken);
+            dispatcher, HandlerTransports.All, "does.not.exist", null, services, Options,
+            ct: TestContext.Current.CancellationToken);
 
         result.IsError.Should().BeTrue();
         result.ErrorCode.Should().Be(-32601);

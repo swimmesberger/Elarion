@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using Elarion.Abstractions.Scheduling;
 using Elarion.Resilience;
+using Elarion.Substitution;
 
 namespace Elarion.Scheduling;
 
@@ -22,7 +23,14 @@ public static class SchedulerServiceCollectionExtensions {
         this IServiceCollection services,
         SchedulerOptions? options = null) {
         options ??= new SchedulerOptions();
-        services.AddMicrosoftResilienceRuntime();
+        // The scheduler needs the (dependency-light) policy catalog to resolve job retry policies. The Polly-backed
+        // pipeline runner that actually executes deferred retries is opt-in via the Elarion.Resilience package's
+        // AddMicrosoftResilienceRuntime() — kept out of core so scheduling does not force Microsoft.Extensions.Resilience.
+        services.AddElarionResiliencePolicyCatalog();
+        // The scheduler resolves ${...} schedule variables through IVariableSource; default to the
+        // config-backed source (observable, so reloads drive live reschedule). Register a different
+        // IVariableSource first to override.
+        services.AddElarionVariableSubstitution();
         services.TryAddSingleton(options);
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<InMemoryScheduler>();

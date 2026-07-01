@@ -11,14 +11,17 @@ namespace Elarion.Abstractions.Authorization;
 /// <param name="Roles">Required roles.</param>
 /// <param name="Claims">Required claims.</param>
 /// <param name="Policies">Required named policy names.</param>
+/// <param name="Resources">Resolved per-resource requirements (the resource id read from the request).</param>
 public readonly record struct AuthorizationRequirements(
     bool AllowAnonymous,
     bool RequireAuthenticated,
     IReadOnlyList<string> Permissions,
     IReadOnlyList<string> Roles,
     IReadOnlyList<RequireClaimAttribute> Claims,
-    IReadOnlyList<string> Policies) {
+    IReadOnlyList<string> Policies,
+    IReadOnlyList<ResourceRequirement> Resources) {
     /// <summary>Whether any requirement beyond "anonymous" is present.</summary>
     public bool HasAny =>
-        RequireAuthenticated || Permissions.Count > 0 || Roles.Count > 0 || Claims.Count > 0 || Policies.Count > 0;
+        RequireAuthenticated || Permissions.Count > 0 || Roles.Count > 0 || Claims.Count > 0
+        || Policies.Count > 0 || Resources.Count > 0;
 }

@@ -193,9 +193,11 @@ internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
   mapping onto `google.rpc.Code`. **Prefer `Result`; only drop it when a concrete need calls for it.**
 </Callout>
 
-## Why not `IDomainEventBus.RequestAsync`?
+## Why not just call the handler (`IHandlerSender`/`IHandler`)?
 
-`RequestAsync` is a mediator-style in-process request/response, but Plane A is **in-process by nature**
-and not an extraction path (see [events](/docs/capabilities/events)). A `[ModuleContract]` is the stable seam that
-survives extraction: to split a module out of process later, keep the interface and swap the in-process
-implementation for a generated client — consumers never change.
+A typed in-process call to another module's handler ([by type](/docs/concepts/handlers#calling-a-handler-from-other-code))
+couples you to that module's request/response types — which the boundary analyzer flags (`ELMOD002`) when they
+are module-internal — and it does not survive extraction. A `[ModuleContract]` is the stable seam that does: to
+split a module out of process later, keep the interface and swap the in-process implementation for a generated
+client — consumers never change. (The event bus is no help here either: it is pub/sub-only, see
+[events](/docs/capabilities/events).)

@@ -45,13 +45,18 @@ public sealed partial class HandlerRegistrationGenerator {
         // initializer (which references __handlerMetadata) sees it initialized — static initializers run in order.
         AppendHandlerMetadataField(sb, handler);
         AppendAppliesToFields(sb, handler);
+        AppendResourceBindingsField(sb, handler);
         AppendRegistrationMethod(sb, handler);
+        AppendBuildPipelineMethods(sb, handler);
 
         if (handler.Cacheable is not null)
             AppendCachePolicy(sb, handler);
 
         if (handler.CacheInvalidation is not null)
             AppendCacheInvalidationPolicy(sb, handler);
+
+        if (handler.Idempotent is not null)
+            AppendIdempotencyPolicy(sb, handler);
 
         sb.AppendLine("}");
 
@@ -78,7 +83,7 @@ public sealed partial class HandlerRegistrationGenerator {
         // authorization decorator needs it). It captures the concrete handler type so an attribute-reading
         // decorator sees the true handler regardless of its position in the chain (the inner.GetType() approach
         // only works when innermost — a fail-open footgun).
-        var wantsMetadata = handler.HasAuthorization;
+        var wantsMetadata = handler.HasAuthorization || handler.HasFeatureGates;
         foreach (var dec in handler.Decorators) {
             // An `AppliesTo(HandlerMetadata)` predicate or a constructor HandlerMetadata dependency both need it.
             if (dec.HasAppliesTo) {
@@ -123,16 +128,44 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"        services.Add(new ServiceDescriptor(typeof({handler.HandlerFqn}), typeof({handler.HandlerFqn}), lifetime));");
         sb.AppendLine("        services.Add(new ServiceDescriptor(");
         sb.AppendLine($"            typeof(global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}>),");
-        sb.AppendLine("            sp =>");
-        sb.AppendLine("            {");
-        // Note 57: The generated factory builds the decorator chain once per DI resolution, preserving normal scoped lifetimes.
-        sb.AppendLine($"                global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}> handler =");
+
+        if (handler.VariantContractDeps.IsEmpty) {
+            // Normal case: the synchronous pipeline factory builds the decorator chain per resolution.
+            sb.AppendLine("            sp => BuildPipeline(sp),");
+        } else {
+            // The handler depends on a feature-flag variant, which is resolved asynchronously (per user). Register
+            // the async-resolving proxy that awaits the variant builder on first dispatch instead of building
+            // synchronously; everything else stays the same shared pipeline factory.
+            sb.AppendLine(
+                $"            sp => new global::Elarion.Abstractions.Pipeline.AsyncResolvedHandler<{handler.RequestFqn}, {handler.ResponseFqn}>(sp, BuildPipelineAsync),");
+        }
+
+        sb.AppendLine("            lifetime));");
+    }
+
+    // The shared pipeline factory: builds the decorator chain once per resolution, preserving normal scoped
+    // lifetimes (Note 57). The normal registration calls it synchronously; a variant handler's async builder calls
+    // the same method after awaiting its variant dependencies, so the chain is defined exactly once.
+    private static void AppendBuildPipelineMethods(StringBuilder sb, HandlerInfo handler) {
+        var ifaceFqn = $"global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}>";
+
+        sb.AppendLine($"    private static {ifaceFqn} BuildPipeline(global::System.IServiceProvider sp)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"                {ifaceFqn} handler =");
         sb.AppendLine($"                    sp.GetRequiredService<{handler.HandlerFqn}>();");
 
         AppendCacheDecorator(sb, handler);
         AppendPipelineDecorators(sb, handler.Decorators);
+        // Idempotency owns the unit-of-work transaction for [Idempotent] commands, so it wraps the handler and
+        // the inner custom decorators — inside resilience/cache-invalidation/feature-gate/authorization (a
+        // denied/gated/replayed request never claims a key) and outside the handler's own work.
+        AppendIdempotencyDecorator(sb, handler);
         AppendResilienceDecorator(sb, handler);
         AppendCacheInvalidationDecorator(sb, handler);
+        // The feature gate sits just inside authorization: a disabled feature never touches caching, the pipeline,
+        // or the handler, but authorization still runs first so an unauthenticated caller is never told whether a
+        // gated feature exists.
+        AppendFeatureGateDecorator(sb, handler);
         // Authorization is the outermost functional gate (just inside tracing): a denied request never touches
         // caching, the pipeline (validation/transaction), or the handler, yet the denial is still traced.
         AppendAuthorizationDecorator(sb, handler);
@@ -141,8 +174,25 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendTracingDecorator(sb, handler);
 
         sb.AppendLine("                return handler;");
-        sb.AppendLine("            },");
-        sb.AppendLine("            lifetime));");
+        sb.AppendLine("    }");
+
+        if (handler.VariantContractDeps.IsEmpty)
+            return;
+
+        // The asynchronous builder: await-resolve each variant the handler depends on into the scoped cache (so the
+        // transparent unkeyed registration reads the right implementation), then build the same pipeline.
+        sb.AppendLine($"    private static async global::System.Threading.Tasks.ValueTask<{ifaceFqn}> BuildPipelineAsync(");
+        sb.AppendLine("        global::System.IServiceProvider sp,");
+        sb.AppendLine("        global::System.Threading.CancellationToken ct)");
+        sb.AppendLine("    {");
+        sb.AppendLine(
+            "        var __variantCache = sp.GetRequiredService<global::Elarion.Abstractions.Features.VariantResolutionCache>();");
+        foreach (var contractFqn in handler.VariantContractDeps.AsImmutableArray) {
+            sb.AppendLine($"        await __variantCache.WarmAsync<{contractFqn}>(sp, ct).ConfigureAwait(false);");
+        }
+
+        sb.AppendLine("        return BuildPipeline(sp);");
+        sb.AppendLine("    }");
     }
 
     private static void AppendCacheDecorator(StringBuilder sb, HandlerInfo handler) {
@@ -186,6 +236,98 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"                    new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference {{ Name = {FormatStringLiteral(handler.ResiliencePolicyName)} }});");
     }
 
+    private static void AppendIdempotencyDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (handler.Idempotent is null)
+            return;
+
+        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Idempotency.IdempotencyDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Pipeline.IUnitOfWork>(),");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>(),");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyKeyAccessor>(),");
+        sb.AppendLine($"                    new {handler.HandlerName}IdempotencyPolicy(),");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Identity.ICurrentUser>(),");
+        sb.AppendLine("                    sp.GetRequiredService<global::System.Text.Json.JsonSerializerOptions>());");
+    }
+
+    private static void AppendIdempotencyPolicy(StringBuilder sb, HandlerInfo handler) {
+        var info = handler.Idempotent!;
+
+        sb.AppendLine();
+        sb.AppendLine($"    private sealed class {handler.HandlerName}IdempotencyPolicy");
+        sb.AppendLine($"        : global::Elarion.Abstractions.Idempotency.IIdempotencyPayloadPolicy<{handler.RequestFqn}, {handler.ResponseFqn}>");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        public global::Elarion.Abstractions.Idempotency.IdempotencyScope Scope => (global::Elarion.Abstractions.Idempotency.IdempotencyScope){info.ScopeValue};");
+        sb.AppendLine($"        public bool KeyRequired => {(info.KeyRequired ? "true" : "false")};");
+        sb.AppendLine($"        public bool Fingerprint => {(info.Fingerprint ? "true" : "false")};");
+        sb.AppendLine($"        public global::Elarion.Abstractions.Idempotency.IdempotencyConflictBehavior ConflictBehavior => (global::Elarion.Abstractions.Idempotency.IdempotencyConflictBehavior){info.ConflictBehaviorValue};");
+        sb.AppendLine($"        public global::Elarion.Abstractions.Idempotency.IdempotencyFailureStorage StoreFailures => (global::Elarion.Abstractions.Idempotency.IdempotencyFailureStorage){info.StoreFailuresValue};");
+        sb.AppendLine($"        public global::System.TimeSpan Retention => global::System.TimeSpan.FromHours({info.RetentionHours});");
+        sb.AppendLine();
+        AppendIdempotencyPayloadMethods(sb, handler, info);
+        sb.AppendLine("    }");
+    }
+
+    private static void AppendIdempotencyPayloadMethods(StringBuilder sb, HandlerInfo handler, IdempotentInfo info) {
+        if (info.ResultValueFqn is not null) {
+            // Result<T>: store the success value, or (when storing failures) the AppError, so replay reconstructs
+            // the exact Result<T>.
+            var storedType = $"global::Elarion.Abstractions.Idempotency.StoredResult<{info.ResultValueFqn}>";
+            sb.AppendLine($"        public string Serialize({handler.ResponseFqn} response, global::System.Text.Json.JsonSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var stored = response.IsSuccess");
+            sb.AppendLine($"                ? new {storedType} {{ Ok = true, Value = response.Value }}");
+            sb.AppendLine($"                : new {storedType} {{ Ok = false, Error = response.Error }};");
+            sb.AppendLine("            return global::System.Text.Json.JsonSerializer.Serialize(stored, options);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine($"        public {handler.ResponseFqn} Deserialize(string payload, global::System.Text.Json.JsonSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize<{storedType}>(payload, options)!;");
+            sb.AppendLine("            return stored.Ok");
+            sb.AppendLine($"                ? global::Elarion.Abstractions.Result<{info.ResultValueFqn}>.Success(stored.Value!)");
+            sb.AppendLine($"                : global::Elarion.Abstractions.Result<{info.ResultValueFqn}>.Failure(stored.Error ?? global::Elarion.Abstractions.AppError.InternalError);");
+            sb.AppendLine("        }");
+            return;
+        }
+
+        // Non-generic Result response: no value, only success/failure.
+        const string nonGenericStored = "global::Elarion.Abstractions.Idempotency.StoredResult";
+        sb.AppendLine($"        public string Serialize({handler.ResponseFqn} response, global::System.Text.Json.JsonSerializerOptions options)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var stored = response.IsSuccess");
+        sb.AppendLine($"                ? new {nonGenericStored} {{ Ok = true }}");
+        sb.AppendLine($"                : new {nonGenericStored} {{ Ok = false, Error = response.Error }};");
+        sb.AppendLine("            return global::System.Text.Json.JsonSerializer.Serialize(stored, options);");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine($"        public {handler.ResponseFqn} Deserialize(string payload, global::System.Text.Json.JsonSerializerOptions options)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize<{nonGenericStored}>(payload, options)!;");
+        sb.AppendLine("            return stored.Ok");
+        sb.AppendLine("                ? global::Elarion.Abstractions.Result.Success()");
+        sb.AppendLine("                : global::Elarion.Abstractions.Result.Failure(stored.Error ?? global::Elarion.Abstractions.AppError.InternalError);");
+        sb.AppendLine("        }");
+    }
+
+    private static void AppendResourceBindingsField(StringBuilder sb, HandlerInfo handler) {
+        if (handler.ResourceBindings.IsEmpty)
+            return;
+
+        // ADR-0012 Tier 1: each [RequireResource] id path is bound as a generated typed accessor (r => r.Id) —
+        // no reflection on the request at run time.
+        var bindingType = $"global::Elarion.Abstractions.Authorization.ResourceRequirementBinding<{handler.RequestFqn}>";
+        sb.AppendLine($"    private static readonly global::System.Collections.Generic.IReadOnlyList<{bindingType}> __resourceBindings =");
+        sb.AppendLine($"        new {bindingType}[]");
+        sb.AppendLine("        {");
+        foreach (var binding in handler.ResourceBindings.AsImmutableArray) {
+            sb.AppendLine(
+                $"            new(typeof({binding.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({FormatStringLiteral(binding.Operation)}), static __r => __r.{binding.IdPath}),");
+        }
+
+        sb.AppendLine("        };");
+    }
+
     private static void AppendAuthorizationDecorator(StringBuilder sb, HandlerInfo handler) {
         if (!handler.HasAuthorization)
             return;
@@ -193,12 +335,30 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"                handler = new global::Elarion.Abstractions.Authorization.AuthorizationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    __handlerMetadata,");
+        sb.Append("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>()");
         if (handler.RequireAuthenticatedByDefault) {
-            sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>(),");
-            sb.AppendLine("                    requireAuthenticatedByDefault: true);");
-        } else {
-            sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>());");
+            sb.Append(",");
+            sb.AppendLine();
+            sb.Append("                    requireAuthenticatedByDefault: true");
         }
+
+        if (!handler.ResourceBindings.IsEmpty) {
+            sb.Append(",");
+            sb.AppendLine();
+            sb.Append("                    resourceBindings: __resourceBindings");
+        }
+
+        sb.AppendLine(");");
+    }
+
+    private static void AppendFeatureGateDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (!handler.HasFeatureGates)
+            return;
+
+        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Features.FeatureGateDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine("                    __handlerMetadata,");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Features.IFeatureFlagService>());");
     }
 
     private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {

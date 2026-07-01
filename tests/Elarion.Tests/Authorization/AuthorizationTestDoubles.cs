@@ -21,6 +21,16 @@ internal sealed class FakeCurrentUser : ICurrentUser {
         Claims.Where(claim => claim.Type == type).Select(claim => claim.Value);
 }
 
+/// <summary>A configurable <see cref="IResourceAuthorizer"/> that records its calls.</summary>
+internal sealed class StubResourceAuthorizer(bool allow = true) : IResourceAuthorizer {
+    public List<ResourceAuthorizationContext> Calls { get; } = [];
+
+    public ValueTask<bool> AuthorizeResourceAsync(ResourceAuthorizationContext context, CancellationToken ct) {
+        Calls.Add(context);
+        return ValueTask.FromResult(allow);
+    }
+}
+
 /// <summary>A pass-through inner handler that records whether it ran and returns a fixed response.</summary>
 internal sealed class StubInnerHandler<TRequest, TResponse>(TResponse response) : IHandler<TRequest, TResponse> {
     public bool WasInvoked { get; private set; }
@@ -47,14 +57,14 @@ internal sealed class AtLeast21Policy : IAuthorizationPolicy {
 // Handlers whose class-level attributes the decorator reads through HandlerMetadata.
 internal sealed record GuardedCommand(int Id);
 
-[RequirePermission("tenants.write")]
+[RequirePermission("tenants", "write")]
 internal sealed class RequirePermissionHandler;
 
 [RequireRole("Admin")]
 internal sealed class RequireRoleHandler;
 
-[RequirePermission("a")]
-[RequirePermission("b")]
+[RequirePermission("a", "read")]
+[RequirePermission("b", "read")]
 internal sealed class RequireBothPermissionsHandler;
 
 [RequireClaim("scope", "read", "write")]
@@ -64,7 +74,7 @@ internal sealed class RequireClaimOrHandler;
 [RequireRole("Admin")]
 internal sealed class PolicyAndRoleHandler;
 
-[RequirePermission("tenants.write")]
+[RequirePermission("tenants", "write")]
 [AllowAnonymous]
 internal sealed class AnonymousWinsHandler;
 

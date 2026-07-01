@@ -2,7 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using Billing.Api.Hosting;
+using Billing.Api;
 using Billing.Application;
 using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
@@ -12,7 +12,10 @@ using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
+using Elarion.Authorization;
 using Elarion.Caching;
+using Elarion.Caching.PostgreSql;
+using Elarion.EntityFrameworkCore.UnitOfWork;
 using Elarion.JsonRpc;
 using Elarion.Messaging.Outbox;
 using Elarion.Resilience;
@@ -31,8 +34,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 // *registration* is the host's job — the connection string is injected by the Aspire AppHost ("billing").
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
-// The transaction decorator depends on the base DbContext, so expose BillingDbContext under it too.
-builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+// The framework transaction decorator commits over the EF Core unit of work on the billing context; features
+// like idempotency compose on the same boundary.
+builder.Services.AddElarionUnitOfWork<BillingDbContext>();
 
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
 builder.Services.AddElarionOutbox<BillingDbContext>();
@@ -49,11 +53,18 @@ builder.Services.AddInMemoryScheduler(builder.Configuration);
 builder.Services.AddBilling_ApplicationResiliencePolicies();
 builder.Services.AddMicrosoftResilienceRuntime();
 
-// Per-user handler caching, backed by HybridCache.
-builder.Services.AddElarionHandlerCaching();
+// Per-user handler caching, backed by HybridCache with a PostgreSQL L2 — the recommended L2 for most apps
+// already on Postgres: it reuses the "billing" database (an auto-created UNLOGGED cache table) instead of
+// operating a separate Redis. HybridCache's in-process L1 still carries the hot path.
+builder.Services.AddElarionPostgreSqlHandlerCaching(builder.Configuration.GetConnectionString("billing")!);
 
 // Transport-neutral current user, filled from the authenticated principal.
 builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");
+
+// Declarative authorization: the [RequirePermission]/[RequireRole]/… attributes on handlers are enforced by
+// a generated decorator before the handler runs — the same check under JSON-RPC, MCP, and HTTP, evaluated
+// against ICurrentUser's claims with no HttpContext dependency. Registers the default ClaimsAuthorizer.
+builder.Services.AddElarionAuthorization();
 
 // Authentication: a JWT bearer issuer of your choice (Entra, Auth0, Keycloak, …). Locally, the
 // Development-only middleware below stamps a dev principal so the sample runs without an issuer.
@@ -77,13 +88,13 @@ builder.Services.AddElarion(builder.Configuration);
 // JSON-RPC: one serializer for runtime dispatch and schema export; methods gated per module.
 var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
 
-// MCP: an independent, equally gated transport with its own dispatcher.
+// MCP: an equally gated transport adapter over the same shared handler registry (the named bus).
 builder.Services.AddElarionMcp(
-    ModuleBootstrapper.GetMcpMetadata(builder.Configuration),
+    builder.Configuration.GetMcpMetadata(),
     serializerOptions,
-    ModuleBootstrapper.RegisterMcpMethods,
+    ElarionBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
 
 // Telemetry: register the Elarion sources/meters; the Aspire dashboard collects them over OTLP.
@@ -118,12 +129,22 @@ using (var scope = app.Services.CreateScope()) {
 app.UseCors(DevCorsPolicy);
 app.UseAuthentication();
 
-// Development-only: stamp a stable dev principal so ICurrentUser resolves without an external issuer.
+// Development-only: stamp a stable dev principal so ICurrentUser resolves without an external issuer. It
+// carries the permission claims the handlers require ([RequirePermission("clients", Verbs.Read)], …) so the
+// authorization checks pass locally; a real issuer would mint these from the user's roles/scopes.
 if (app.Environment.IsDevelopment()) {
     app.Use(async (context, next) => {
         if (context.User.Identity?.IsAuthenticated != true) {
             context.User = new ClaimsPrincipal(
-                new ClaimsIdentity([new Claim("sub", "dev-user")], "Development"));
+                new ClaimsIdentity(
+                    [
+                        new Claim("sub", "dev-user"),
+                        new Claim("permission", "clients.read"),
+                        new Claim("permission", "clients.write"),
+                        new Claim("permission", "invoices.read"),
+                        new Claim("permission", "invoices.write"),
+                    ],
+                    "Development"));
         }
         await next();
     });

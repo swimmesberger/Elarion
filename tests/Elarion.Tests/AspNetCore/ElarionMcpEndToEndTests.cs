@@ -3,6 +3,7 @@ using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Dispatch;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Mcp;
 using Elarion.JsonRpc;
@@ -51,7 +52,10 @@ public sealed class ElarionMcpEndToEndTests {
         builder.Logging.ClearProviders();
 
         builder.Services.AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>();
-        builder.Services.AddElarionJsonRpc(Options, d => d.MapHandler<EchoCommand, EchoResponse>("echo"));
+        // Both transports must share ONE registration delegate — the bus is a single shared singleton.
+        static HandlerDispatcher RegisterHandlers(HandlerDispatcher dispatcher) =>
+            dispatcher.Map<EchoCommand, EchoResponse>("echo");
+        builder.Services.AddElarionJsonRpc(Options, RegisterHandlers);
         builder.Services.AddElarionMcp(
             new RpcMcpMetadataSource([
                 new RpcMcpMethodMetadata {
@@ -61,7 +65,7 @@ public sealed class ElarionMcpEndToEndTests {
                 },
             ]),
             Options,
-            d => d.MapHandler<EchoCommand, EchoResponse>("echo"),
+            RegisterHandlers,
             o => o.ServerName = "Test");
 
         await using var app = builder.Build();

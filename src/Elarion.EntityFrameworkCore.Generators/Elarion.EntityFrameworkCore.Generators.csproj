@@ -28,6 +28,7 @@
     <Compile Include="..\Elarion.Generators\EquatableArray.cs" Link="EquatableArray.cs" />
     <Compile Include="..\Elarion.Generators\AssemblyMetadataReader.cs" Link="AssemblyMetadataReader.cs" />
     <Compile Include="..\Elarion.Generators\SourceModels.cs" Link="SourceModels.cs" />
+    <Compile Include="..\Elarion.Generators\ElarionGeneratorConventions.cs" Link="ElarionGeneratorConventions.cs" />
   </ItemGroup>
 
   <ItemGroup>

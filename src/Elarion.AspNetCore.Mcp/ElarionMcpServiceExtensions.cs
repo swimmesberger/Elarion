@@ -1,31 +1,32 @@
 using System.Text.Json;
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Elarion.JsonRpc.Mcp;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace Elarion.AspNetCore.Mcp;
 
 /// <summary>
-/// Extension methods that expose Elarion <c>[RpcMethod]</c> handlers as an MCP server.
+/// Extension methods that expose Elarion <c>[Handler]</c> operations as an MCP server.
 /// </summary>
 /// <remarks>
-/// The MCP surface is independent of the JSON-RPC HTTP endpoint: it owns a dedicated
-/// <see cref="McpDispatcher"/> (a separate <see cref="JsonRpcDispatcher"/> instance) built from the methods whose
-/// <c>[RpcMethod(Transports = ...)]</c> includes <c>Mcp</c>. This lets a handler be MCP-only (dispatchable here but
-/// absent from <c>/rpc</c> and the JSON-RPC schema) or JSON-RPC-only, while a handler on both surfaces is
-/// registered in both dispatchers. <c>MapElarionJsonRpc</c> is never required.
+/// MCP is an adapter over the shared <see cref="HandlerDispatcher"/> (the named bus): its
+/// <see cref="McpDispatcher"/> serves only the operations whose <c>[Handler(Transports = ...)]</c> includes
+/// <c>Mcp</c>. This lets a handler be MCP-only (dispatchable here but absent from <c>/rpc</c> and the JSON-RPC
+/// schema) or JSON-RPC-only, while a "both" handler is reachable from either surface — all from one registry.
+/// <c>MapElarionJsonRpc</c> is never required.
 /// </remarks>
 public static class ElarionMcpServiceExtensions {
     /// <summary>
-    /// Registers an MCP server (Streamable HTTP) whose tools are the MCP-exposed methods in the generated
-    /// <paramref name="metadata"/> table, backed by a dedicated <see cref="McpDispatcher"/> built from
-    /// <paramref name="registerMcp"/> (e.g. <c>ModuleBootstrapper.RegisterMcpMethods</c>).
+    /// Registers an MCP server (Streamable HTTP) whose tools are the MCP-exposed operations in the generated
+    /// <paramref name="metadata"/> table, backed by an <see cref="McpDispatcher"/> over the shared
+    /// <see cref="HandlerDispatcher"/> built from <paramref name="registerHandlers"/>
+    /// (e.g. <c>ElarionBootstrapper.RegisterHandlers</c>).
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="metadata">The generated MCP metadata table (e.g. <c>configuration.GetMcpMetadata()</c>).</param>
@@ -33,9 +34,10 @@ public static class ElarionMcpServiceExtensions {
     /// The same serializer options the dispatcher uses; used here to build tool input schemas and by the MCP
     /// dispatcher for params/result handling.
     /// </param>
-    /// <param name="registerMcp">
-    /// The generated MCP registration delegate that maps the MCP-exposed handlers onto the dispatcher and returns it
-    /// (e.g. <c>ModuleBootstrapper.RegisterMcpMethods</c>).
+    /// <param name="registerHandlers">
+    /// The generated registration delegate that maps the operations onto the shared registry and returns it
+    /// (e.g. <c>ElarionBootstrapper.RegisterHandlers</c>). Pass the same delegate to <c>AddElarionJsonRpc</c> to
+    /// share one registry.
     /// </param>
     /// <param name="configure">Configures the server identity and behavior. <see cref="ElarionMcpOptions.ServerName"/> is required.</param>
     /// <returns>The underlying <see cref="IMcpServerBuilder"/> for further composition (e.g. auth filters).</returns>
@@ -43,57 +45,45 @@ public static class ElarionMcpServiceExtensions {
         this IServiceCollection services,
         IRpcMcpMetadataSource metadata,
         JsonSerializerOptions serializerOptions,
-        Func<JsonRpcDispatcher, JsonRpcDispatcher> registerMcp,
+        Func<HandlerDispatcher, HandlerDispatcher> registerHandlers,
         Action<ElarionMcpOptions> configure) {
         ArgumentNullException.ThrowIfNull(serializerOptions);
-        ArgumentNullException.ThrowIfNull(registerMcp);
+        ArgumentNullException.ThrowIfNull(registerHandlers);
 
-        return services.AddElarionMcpCore(
-            metadata,
-            serializerOptions,
-            sp => new McpDispatcher(
-                registerMcp(new JsonRpcDispatcher(serializerOptions, sp.GetService<ILogger<JsonRpcDispatcher>>()))
-                    .Freeze()),
-            configure);
+        services.AddElarionHandlerDispatcher(registerHandlers);
+        return services.AddElarionMcpCore(metadata, serializerOptions, configure);
     }
 
     /// <summary>
-    /// Registers an MCP server using a <paramref name="registerMcp"/> delegate that also receives the application
-    /// <see cref="IConfiguration"/> — the setup for a module-based host, where
-    /// <c>ModuleBootstrapper.RegisterMcpMethods</c> maps only the MCP-exposed methods of enabled modules. Pair it
-    /// with <c>configuration.GetMcpMetadata()</c> for the gated tool table.
+    /// Registers an MCP server using a <paramref name="registerHandlers"/> delegate that also receives the
+    /// application <see cref="IConfiguration"/> — the setup for a module-based host, where
+    /// <c>ElarionBootstrapper.RegisterHandlers</c> maps only the operations of enabled modules. Pair it with
+    /// <c>configuration.GetMcpMetadata()</c> for the gated tool table.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="metadata">The (already gated) MCP metadata table, e.g. <c>builder.Configuration.GetMcpMetadata()</c>.</param>
     /// <param name="serializerOptions">The serializer options used for tool input schemas and the MCP dispatcher.</param>
-    /// <param name="registerMcp">The registration delegate (e.g. <c>ModuleBootstrapper.RegisterMcpMethods</c>).</param>
+    /// <param name="registerHandlers">The registration delegate (e.g. <c>ElarionBootstrapper.RegisterHandlers</c>).</param>
     /// <param name="configure">Configures the server identity and behavior. <see cref="ElarionMcpOptions.ServerName"/> is required.</param>
     /// <returns>The underlying <see cref="IMcpServerBuilder"/> for further composition (e.g. auth filters).</returns>
     public static IMcpServerBuilder AddElarionMcp(
         this IServiceCollection services,
         IRpcMcpMetadataSource metadata,
         JsonSerializerOptions serializerOptions,
-        Func<JsonRpcDispatcher, IConfiguration, JsonRpcDispatcher> registerMcp,
+        Func<HandlerDispatcher, IConfiguration, HandlerDispatcher> registerHandlers,
         Action<ElarionMcpOptions> configure) {
         ArgumentNullException.ThrowIfNull(serializerOptions);
-        ArgumentNullException.ThrowIfNull(registerMcp);
+        ArgumentNullException.ThrowIfNull(registerHandlers);
 
-        return services.AddElarionMcpCore(
-            metadata,
-            serializerOptions,
-            sp => new McpDispatcher(
-                registerMcp(
-                        new JsonRpcDispatcher(serializerOptions, sp.GetService<ILogger<JsonRpcDispatcher>>()),
-                        sp.GetRequiredService<IConfiguration>())
-                    .Freeze()),
-            configure);
+        services.AddElarionHandlerDispatcher(
+            (dispatcher, sp) => registerHandlers(dispatcher, sp.GetRequiredService<IConfiguration>()));
+        return services.AddElarionMcpCore(metadata, serializerOptions, configure);
     }
 
     private static IMcpServerBuilder AddElarionMcpCore(
         this IServiceCollection services,
         IRpcMcpMetadataSource metadata,
         JsonSerializerOptions serializerOptions,
-        Func<IServiceProvider, McpDispatcher> dispatcherFactory,
         Action<ElarionMcpOptions> configure) {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(serializerOptions);
@@ -107,7 +97,7 @@ public static class ElarionMcpServiceExtensions {
         }
 
         services.AddSingleton(options);
-        services.AddSingleton(dispatcherFactory);
+        services.AddSingleton(sp => new McpDispatcher(sp.GetRequiredService<HandlerDispatcher>(), serializerOptions));
 
         var tools = BuildTools(metadata, serializerOptions, options);
 
@@ -146,7 +136,7 @@ public static class ElarionMcpServiceExtensions {
             if (!toolNamesSeen.TryAdd(toolName, method.MethodName)) {
                 throw new InvalidOperationException(
                     $"MCP tool name '{toolName}' is produced by both '{toolNamesSeen[toolName]}' and '{method.MethodName}'. " +
-                    $"Disambiguate via [McpMethod(ToolName = ...)] or {nameof(ElarionMcpOptions)}.{nameof(ElarionMcpOptions.ToolNameTransform)}.");
+                    $"Disambiguate via [McpHandler(ToolName = ...)] or {nameof(ElarionMcpOptions)}.{nameof(ElarionMcpOptions.ToolNameTransform)}.");
             }
 
             var inputSchema = RpcMcpInputSchema.Build(method.RequestType, serializerOptions, method.Parameters);

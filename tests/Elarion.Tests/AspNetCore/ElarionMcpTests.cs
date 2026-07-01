@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion;
+using Elarion.Abstractions;
 using Elarion.AspNetCore.Mcp;
 using Elarion.JsonRpc;
 using Elarion.JsonRpc.Mcp;
@@ -126,7 +127,7 @@ public sealed class ElarionMcpTests {
     public void AddElarionJsonRpcDispatcher_RegistersFrozenUsableDispatcher() {
         var services = new ServiceCollection();
         services.AddElarionJsonRpcDispatcher(
-            Options, d => d.MapHandler<CreateClientCommand, CreateClientResponse>("clients.create"));
+            Options, d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"));
 
         using var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<JsonRpcDispatcher>();
@@ -142,7 +143,7 @@ public sealed class ElarionMcpTests {
         var builder = services.AddElarionMcp(
             BuildMetadata(),
             Options,
-            d => d.MapHandler<CreateClientCommand, CreateClientResponse>("clients.create"),
+            d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"),
             o => o.ServerName = "MyApp");
 
         builder.Should().NotBeNull();
@@ -150,7 +151,8 @@ public sealed class ElarionMcpTests {
         // No AddJsonRpc / AddElarionJsonRpcDispatcher anywhere: MCP owns a dedicated dispatcher and never registers
         // the unkeyed /rpc JsonRpcDispatcher.
         provider.GetRequiredService<ElarionMcpOptions>().ServerName.Should().Be("MyApp");
-        provider.GetRequiredService<McpDispatcher>().Inner.MethodNames.Should().Contain("clients.create");
+        provider.GetRequiredService<McpDispatcher>().Inner
+            .RoutesFor(HandlerTransports.Mcp).Select(r => r.Name).Should().Contain("clients.create");
         provider.GetService<JsonRpcDispatcher>().Should().BeNull();
     }
 

@@ -10,7 +10,14 @@
     "validators",
     "decorator-pipelines",
     "authorization",
+    "resource-authorization",
+    "feature-flags",
+    "idempotency",
+    "settings",
+    "persistence-and-transactions",
+    "variable-substitution",
     "cross-module-communication",
+    "transports",
     "solution-structure"
   ]
 }

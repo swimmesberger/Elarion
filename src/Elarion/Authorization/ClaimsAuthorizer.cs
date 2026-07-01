@@ -15,6 +15,7 @@ namespace Elarion.Authorization;
 public sealed class ClaimsAuthorizer(
     ICurrentUser user,
     IEnumerable<NamedAuthorizationPolicy> policies,
+    IResourceAuthorizer resourceAuthorizer,
     AuthorizationOptions options,
     ILogger<ClaimsAuthorizer> logger
 ) : IAuthorizer {
@@ -59,6 +60,14 @@ public sealed class ClaimsAuthorizer(
 
             if (!await policy.EvaluateAsync(new AuthorizationContext(user, resource), ct).ConfigureAwait(false)) {
                 return Forbidden(policyName);
+            }
+        }
+
+        foreach (var resourceRequirement in requirements.Resources) {
+            var context = new ResourceAuthorizationContext(
+                user, resourceRequirement.ResourceType, resourceRequirement.Operation, resourceRequirement.ResourceId);
+            if (!await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false)) {
+                return Forbidden(resourceRequirement.ResourceType.Name);
             }
         }
 

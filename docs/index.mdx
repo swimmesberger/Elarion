@@ -10,12 +10,12 @@ Framework Core source generation**.
 
 The central idea is simple: your application assemblies define modules and handlers; your host
 assembly only wires infrastructure, transport, and deployment concerns. Everything that can be
-discovered from your code — handlers, validators, services, scheduled jobs, RPC methods, EF Core
+discovered from your code — handlers, validators, services, scheduled jobs, handler operations, EF Core
 `DbSet`s — is emitted by source generators at compile time instead of scanned by reflection at
 startup.
 
 ```csharp
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
@@ -55,17 +55,22 @@ registration list.
     JSON-RPC, HTTP, or any other protocol.
   </Card>
   <Card title="End-to-end JSON-RPC" href="/docs/capabilities/transports/json-rpc">
-    Mark a handler with `[RpcMethod]`, export a schema at build time, and generate a typed
+    Mark a handler with `[Handler]`, export a schema at build time, and generate a typed
     TypeScript + Zod client — without hand-writing DTOs.
   </Card>
   <Card title="AI-native, no extra code" href="/docs/capabilities/transports/mcp">
-    Expose the same `[RpcMethod]` handlers to AI agents as an MCP server. Tool names, descriptions,
+    Expose the same `[Handler]` handlers to AI agents as an MCP server. Tool names, descriptions,
     and input schemas are generated from your handlers and `[Description]` attributes at compile
     time — no separate tool layer, no duplicated schemas.
   </Card>
   <Card title="In-process scheduling" href="/docs/capabilities/scheduling">
     Source-generated scheduled jobs share one scheduler with explicit overlap, misfire, and
     resilience policies — and full OpenTelemetry instrumentation.
+  </Card>
+  <Card title="Declarative feature flags" href="/docs/concepts/feature-flags">
+    Gate any handler behind a flag with `[FeatureGate]` — runtime rollouts, kill switches, and
+    per-variant service injection over OpenFeature. Transport-neutral and provider-agnostic, a closed
+    gate returns 404 so the feature name never leaks.
   </Card>
   <Card title="Blob storage" href="/docs/capabilities/blob-storage">
     Depend on provider-neutral blob contracts in application code and choose PostgreSQL-backed

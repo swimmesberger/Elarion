@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Results;
+using Elarion.Messaging;
 using Elarion.Messaging.InMemory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -72,65 +73,6 @@ public sealed class InMemoryEventBusTests {
         await bus.PublishAsync(new SampleDomainEvent("payload"), cts.Token);
 
         provider.GetRequiredService<ScopeProbe>().Captured.Should().BeSameAs(expected);
-    }
-
-    [Fact]
-    public async Task RequestAsync_ReturnsResponderResult() {
-        using var cts = new CancellationTokenSource(WaitTimeout);
-        await using var provider = BuildProvider(Responder(typeof(SampleRequest), typeof(int)));
-
-        using var scope = provider.CreateScope();
-        var bus = scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
-
-        var result = await bus.RequestAsync<SampleRequest, int>(new SampleRequest(21), cts.Token);
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value.Should().Be(42);
-    }
-
-    [Fact]
-    public async Task RequestAsync_WithoutResponder_Throws() {
-        using var cts = new CancellationTokenSource(WaitTimeout);
-        await using var provider = BuildProvider();
-
-        using var scope = provider.CreateScope();
-        var bus = scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
-
-        var act = async () => await bus.RequestAsync<SampleRequest, int>(new SampleRequest(1), cts.Token);
-
-        await act.Should().ThrowAsync<InvalidOperationException>();
-    }
-
-    [Fact]
-    public async Task RequestAsync_DispatchesToHandlerResponder_ReturnsTypedResult() {
-        using var cts = new CancellationTokenSource(WaitTimeout);
-        await using var provider = BuildProvider(
-            services => services.AddScoped<IHandler<SampleRequest, Result<int>>, DoublingHandler>(),
-            HandlerResponder());
-
-        using var scope = provider.CreateScope();
-        var bus = scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
-
-        var result = await bus.RequestAsync<SampleRequest, int>(new SampleRequest(21), cts.Token);
-
-        result.IsSuccess.Should().BeTrue();
-        result.Value.Should().Be(42);
-    }
-
-    [Fact]
-    public async Task RequestAsync_HandlerResponderFailure_ReturnsFailureResult() {
-        using var cts = new CancellationTokenSource(WaitTimeout);
-        await using var provider = BuildProvider(
-            services => services.AddScoped<IHandler<SampleRequest, Result<int>>, FailingResponder>(),
-            HandlerResponder());
-
-        using var scope = provider.CreateScope();
-        var bus = scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
-
-        var result = await bus.RequestAsync<SampleRequest, int>(new SampleRequest(-1), cts.Token);
-
-        result.IsSuccess.Should().BeFalse();
-        result.Error.Kind.Should().Be(ErrorKind.Validation);
     }
 
     [Fact]
@@ -214,19 +156,6 @@ public sealed class InMemoryEventBusTests {
         ex.Error.Kind.Should().Be(ErrorKind.Conflict);
     }
 
-    [Fact]
-    public void Registry_RejectsDuplicateResponder() {
-        var provider = BuildProvider(
-            Responder(typeof(SampleRequest), typeof(int)),
-            Responder(typeof(SampleRequest), typeof(int)));
-
-        using var scope = provider.CreateScope();
-        var act = () => scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
-
-        act.Should().Throw<InvalidOperationException>();
-        provider.Dispose();
-    }
-
     private static ServiceProvider BuildProvider(params EventSubscriptionDescriptor[] descriptors) =>
         BuildProvider(static _ => { }, descriptors);
 
@@ -243,7 +172,10 @@ public sealed class InMemoryEventBusTests {
         }
 
         configure(services);
-        services.AddInMemoryEventBus();
+        // These tests drive FlushAsync/Discard by hand (no database), so they use the low-level building blocks
+        // rather than the TContext overload that auto-attaches the commit-gating interceptors.
+        services.AddInMemoryDomainEventBus();
+        services.AddInMemoryIntegrationEventBus();
         return services.BuildServiceProvider();
     }
 
@@ -299,33 +231,6 @@ public sealed class InMemoryEventBusTests {
             }
         };
 
-    // Mirrors the descriptor emitted by EventConsumerRegistrationGenerator for a handler-form
-    // responder: resolve the decorated IHandler<,> interface and hand its typed Result<T> back to
-    // the RequestAsync caller (no failure-to-exception conversion).
-    private static EventSubscriptionDescriptor HandlerResponder() =>
-        new() {
-            EventType = typeof(SampleRequest),
-            Plane = EventPlane.Domain,
-            ServiceType = typeof(IHandler<SampleRequest, Result<int>>),
-            ResponseType = typeof(int),
-            InvokeRequestAsync = static async (sp, request, _, ct) => {
-                var handler = sp.GetRequiredService<IHandler<SampleRequest, Result<int>>>();
-                return (object)await handler.HandleAsync((SampleRequest)request, ct).ConfigureAwait(false);
-            }
-        };
-
-    private static EventSubscriptionDescriptor Responder(Type requestType, Type responseType) =>
-        new() {
-            EventType = requestType,
-            Plane = EventPlane.Domain,
-            ServiceType = typeof(EventRecorder),
-            ResponseType = responseType,
-            InvokeRequestAsync = (_, req, _, _) => {
-                var request = (SampleRequest)req;
-                return ValueTask.FromResult<object>(Result<int>.Success(request.Value * 2));
-            }
-        };
-
     private static string Payload(object evt) => evt switch {
         SampleDomainEvent domain => domain.Value,
         SampleIntegrationEvent integration => integration.Value,
@@ -335,8 +240,6 @@ public sealed class InMemoryEventBusTests {
     private sealed record SampleDomainEvent(string Value) : IDomainEvent;
 
     private sealed record SampleIntegrationEvent(string Value) : IIntegrationEvent;
-
-    private sealed record SampleRequest(int Value) : IDomainEvent;
 
     // Implements the IHandler<T> sugar, so it is resolvable as IHandler<T, Result<Unit>> via the
     // default interface method that bridges Result -> Result<Unit>.
@@ -350,16 +253,6 @@ public sealed class InMemoryEventBusTests {
     private sealed class FailingHandler : IHandler<SampleDomainEvent> {
         public ValueTask<Result> HandleAsync(SampleDomainEvent request, CancellationToken ct) =>
             ValueTask.FromResult(Result.Failure(AppError.Conflict("nope")));
-    }
-
-    private sealed class DoublingHandler : IHandler<SampleRequest, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(SampleRequest request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<int>.Success(request.Value * 2));
-    }
-
-    private sealed class FailingResponder : IHandler<SampleRequest, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(SampleRequest request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<int>.Failure(AppError.Validation("bad")));
     }
 
     private sealed class ScopeMarker;

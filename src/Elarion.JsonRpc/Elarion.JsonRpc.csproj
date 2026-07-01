@@ -3,7 +3,17 @@
   <PropertyGroup>
     <Description>Transport-neutral JSON-RPC dispatcher, envelopes, result types, schema export, telemetry, and source-generation triggers for Elarion.</Description>
     <PackageTags>elarion;json-rpc;schema;dotnet</PackageTags>
+    <!-- Enables the trim + Native AOT analyzers. The runtime dispatch/serialization paths are AOT-clean (they
+         resolve JsonTypeInfo through the configured source-gen resolver); the build-time JSON Schema export is
+         annotated [RequiresDynamicCode]/[RequiresUnreferencedCode] so its requirement flows to callers. -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Abstractions: the JSON-RPC/MCP adapters serve the shared HandlerDispatcher bus, map Result/AppError to the
+         wire (AppErrorMapper), and use the dispatch-scope rail. -->
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- DI.Abstractions: RpcToolInvoker owns the per-call service scope (CreateAsyncScope). -->

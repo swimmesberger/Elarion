@@ -1,9 +1,15 @@
 # ADR-0001: Event dispatch timing and transactional delivery
 
-- Status: Accepted
+- Status: Accepted (amended by [ADR-0010](0010-event-bus-is-pub-sub-only.md))
 - Date: 2026-06-20
 - Related: the in-memory event bus plan (`IDomainEventBus`/`IIntegrationEventBus`,
   `[ConsumeEvent]`), [decorator pipelines](../concepts/decorator-pipelines.mdx)
+
+> **Amendment (ADR-0010):** this ADR originally gave Plane A a request/reply method
+> (`IDomainEventBus.RequestAsync`) alongside `PublishAsync`. That was later removed — the event bus is now
+> **pub/sub-only**, and request/reply is served by typed dispatch (`IHandlerSender`/`IHandler`). The
+> two-plane, transaction-phase decision below stands unchanged; only the `RequestAsync` mentions are
+> historical.
 
 ## Context
 
@@ -276,7 +282,7 @@ delivery timing — that is the bus + host configuration. The injected interface
 guarantee.
 
 ```csharp
-[RpcMethod("invoices.create")]
+[Handler("invoices.create")]
 public sealed class CreateInvoice(
     AppDbContext db,
     IDomainEventBus domainEvents,
@@ -316,7 +322,7 @@ scope.Discard();              // drop buffered Plane B events
 Host chooses the Plane B guarantee without touching the handler:
 
 ```csharp
-builder.Services.AddInMemoryEventBus();                 // domain + in-memory integration (best-effort)
+builder.Services.AddInMemoryEventBus<AppDbContext>();   // domain + in-memory integration (best-effort)
 // or
 builder.Services.AddInMemoryDomainEventBus()            // domain (Plane A) only
     .AddElarionOutbox<AppDbContext>();                  // durable transactional outbox (Plane B)
@@ -324,7 +330,7 @@ builder.Services.AddInMemoryDomainEventBus()            // domain (Plane A) only
 
 > [!WARNING]
 > **The in-memory tier is best-effort: after-commit events can be lost on a process
-> crash.** With `AddInMemoryEventBus()` alone, Plane B events are buffered in memory and
+> crash.** With `AddInMemoryEventBus<AppDbContext>()` alone, Plane B events are buffered in memory and
 > flushed after commit, so they never fire on rollback — but if the process crashes
 > between commit and flush (or before the pump drains), the `InvoiceCreated` event and
 > its side effects (e.g. the customer email) are **lost with no retry**. Close this gap

@@ -17,7 +17,6 @@ ELSG010 | Elarion.Generators | Warning | Scheduled job is not in any module
 ELEVT001 | Elarion.Generators | Error | Event consumer must be declared on a [Service] class
 ELEVT002 | Elarion.Generators | Error | Invalid event consumer signature
 ELEVT003 | Elarion.Generators | Warning | Event consumer is not in any module
-ELEVT004 | Elarion.Generators | Error | Duplicate request responder
 ELEVT005 | Elarion.Generators | Error | Invalid handler-form event consumer
 ELMCP003 | Elarion.Mcp | Warning | MCP customization is ignored when the handler excludes MCP
 ELHTTP001 | Elarion.Http | Warning | HTTP endpoint handler has no resolvable request/response shape
@@ -32,6 +31,7 @@ ELAPI003 | Elarion.Modules | Warning | Module API interface is not in any module
 ELAPI004 | Elarion.Modules | Error | Duplicate module API method
 ELRPC001 | Elarion.JsonRpc | Warning | RPC method handler is not in any module
 ELRPC002 | Elarion.JsonRpc | Warning | RPC handler has no resolvable request/response shape
+ELRPC003 | Elarion.JsonRpc | Warning | Duplicate operation name across the handler bus
 ELRES001 | Elarion.Abstractions.Resilience | Error | Invalid resilience policy
 ELRES002 | Elarion.Abstractions.Resilience | Error | Duplicate resilience policy name
 ELCACHE001 | Elarion.Abstractions.Caching | Error | Handler cannot be both cacheable and cache-invalidating
@@ -39,5 +39,20 @@ ELCACHE002 | Elarion.Abstractions.Caching | Error | Handler cache tags are requi
 ELCACHE003 | Elarion.Abstractions.Caching | Error | Handler cache tag is invalid
 ELCACHE004 | Elarion.Abstractions.Caching | Error | Handler cache duration is invalid
 ELAUTH001 | Elarion.Abstractions.Authorization | Error | Authorized handler response cannot represent failure
+ELAUTH002 | Elarion.Abstractions.Authorization | Error | RequireResource id path does not resolve
 ELPOL001 | Elarion.Abstractions.Authorization | Error | [AuthorizationPolicy] must be on an IAuthorizationPolicy
 ELPOL002 | Elarion.Abstractions.Authorization | Warning | Authorization policy is not in any module
+ELPERM001 | Elarion.Abstractions.Authorization | Warning | Authorization requirement is not in any module
+ELPERM002 | Elarion.Abstractions.Authorization | Warning | Permission produces a duplicate typed accessor
+ELFEAT001 | Elarion.Abstractions.Features | Error | Feature-gated handler response cannot represent failure
+ELFEAT002 | Elarion.Abstractions.Features | Warning | FeatureGate declares no feature name
+ELVAR001 | Elarion.Abstractions.Features | Error | Duplicate variant key
+ELVAR003 | Elarion.Abstractions.Features | Warning | Variant contract has no default implementation
+ELVAR004 | Elarion.Abstractions.Features | Error | Conflicting variant feature
+ELVAR005 | Elarion.Abstractions.Features | Warning | Variant service declares a blank feature
+ELVAR006 | Elarion.Abstractions.Features | Error | Generic variant implementation is not supported
+ELVAR007 | Elarion.Abstractions.Features | Error | Variant implementation must also be a [Service]
+ELIDEM001 | Elarion.Abstractions.Idempotency | Error | Idempotent handler response cannot represent failure
+ELIDEM002 | Elarion.Abstractions.Idempotency | Warning | [Idempotent] handler is not a command
+ELIDEM003 | Elarion.Abstractions.Idempotency | Error | [Idempotent] retention is invalid
+ELIDEM004 | Elarion.Abstractions.Idempotency | Warning | Handler cannot be both idempotent and cacheable

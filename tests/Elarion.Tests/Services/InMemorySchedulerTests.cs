@@ -1112,6 +1112,9 @@ public sealed class InMemorySchedulerTests
         }
 
         services.AddInMemoryScheduler(options);
+        // The scheduler registers the (core) policy catalog; the Polly-backed runner that executes deferred/inline
+        // retries is opt-in via the Elarion.Resilience package, so wire it explicitly for resilience-exercising tests.
+        services.AddMicrosoftResilienceRuntime();
 
         return services.BuildServiceProvider();
     }

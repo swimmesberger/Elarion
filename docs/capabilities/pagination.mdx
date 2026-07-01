@@ -78,7 +78,7 @@ implements `IKeysetPageRequest`, so its `After`/`Before`/`Size` fields stay flat
 binding (`KeysetPageRequest` is a ready-made implementation for handlers that need no extra filters):
 
 ```csharp
-[RpcMethod("clients.list")]
+[Handler("clients.list")]
 [HttpEndpoint("clients")]
 public sealed class ListClients(AppDbContext db, ICurrentUser user)
     : IHandler<ListClients.Query, Result<Page<ListClients.Item>>> {

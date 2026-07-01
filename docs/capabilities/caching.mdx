@@ -21,7 +21,7 @@ using Elarion.Abstractions.Caching;
 using Microsoft.EntityFrameworkCore;
 
 [Cacheable("clients", DurationSeconds = 120)]
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
@@ -80,7 +80,7 @@ so the writer does not need to know the concrete keys produced by read handlers:
 
 ```csharp
 [CacheInvalidate("clients")]
-[RpcMethod("clients.update")]
+[Handler("clients.update")]
 public sealed class UpdateClient(AppDbContext db)
     : IHandler<UpdateClient.Command, Result<UpdateClient.Response>> {
     public sealed record Command(Guid Id, string Name);
@@ -116,8 +116,9 @@ builder.Services.AddElarionHandlerCaching();
 This registers `HybridCache` and the default `IHandlerCache` (`HybridHandlerCache`). There are three
 ways to change the backing store, from least to most invasive:
 
-- **Configure `HybridCache` with a distributed cache** (for example Redis) as you normally would — the
-  default two-tier behavior, just with an L2 added.
+- **Add an L2 distributed cache** so entries survive restarts and are shared across instances — see
+  [Adding an L2 distributed cache](#adding-an-l2-distributed-cache) below. The recommended default for
+  most applications is a PostgreSQL `UNLOGGED` table; Redis, SQL Server, and others work too.
 - **Swap the `HybridCache` implementation itself.** `HybridCache` is the abstraction, and
   `HybridHandlerCache` simply resolves whatever `HybridCache` is in the container. Register your own
   `HybridCache` *before* `AddElarionHandlerCaching()` — its `AddHybridCache()` call uses
@@ -125,6 +126,56 @@ ways to change the backing store, from least to most invasive:
   implementation wins.
 - **Replace `IHandlerCache` entirely** when you want to bypass `HybridCache` and own the whole caching
   contract.
+
+## Adding an L2 distributed cache
+
+`HybridCache` is two-tier. The **L1** is an in-process `MemoryCache` that absorbs the hot path and is
+lost on restart; the **L2** is an optional `IDistributedCache` that `HybridCache` auto-discovers from DI
+and uses for cross-instance coherence, warm-restart survival, and stampede coordination. With no L2
+registered, caching is L1-only — fine for a single instance, but each instance keeps its own copy and a
+restart starts cold.
+
+For most applications the recommended L2 is **a PostgreSQL `UNLOGGED` table** — reuse the database you
+already run instead of standing up a separate Redis tier. `Elarion.Caching.PostgreSql` wires it in one
+call:
+
+```csharp
+// dotnet add package Elarion.Caching.PostgreSql
+using Elarion.Caching.PostgreSql;
+
+builder.Services.AddElarionPostgreSqlHandlerCaching(
+    builder.Configuration.GetConnectionString("CacheDb")!);
+```
+
+That registers the official `Microsoft.Extensions.Caching.Postgres` distributed cache as the L2 — an
+auto-created `UNLOGGED` table named `elarion_cache` in the `public` schema — and calls
+`AddElarionHandlerCaching()` for you, so `HybridCache` picks the table up automatically. The optional
+`configure` delegate overrides any default (it runs last, so it always wins):
+
+```csharp
+builder.Services.AddElarionPostgreSqlHandlerCaching(
+    builder.Configuration.GetConnectionString("CacheDb")!,
+    options => {
+        options.SchemaName = "cache";
+        options.TableName = "handler_cache";
+    });
+```
+
+<Callout type="info">
+  An `UNLOGGED` table skips the write-ahead log, so cache writes are cheap and produce no WAL or
+  replication traffic (this is the package's `UseWAL = false`, which Elarion defaults on). The tradeoff —
+  the table is **truncated on a crash or unclean shutdown** and is **not present on physical standby
+  replicas** — is exactly right for a cache: its contents are always reconstructible from the source of
+  truth, so the worst case is a cold repopulate, never data loss.
+</Callout>
+
+Why this fits most apps: `HybridCache`'s in-process L1 carries the high-frequency reads, so the L2 mostly
+handles cross-instance coherence and warm restarts — a load Postgres serves comfortably. Reach for a
+dedicated tier such as Redis when the cache itself must be a very high-throughput, independently scaled,
+or multi-region store, where routing all cache traffic through your primary Postgres (and the
+"not on replicas" limitation of `UNLOGGED`) would make the database the bottleneck. Any `IDistributedCache`
+works as the L2: register Redis (`AddStackExchangeRedisCache`), SQL Server, or another provider before
+`AddElarionHandlerCaching()` and `HybridCache` uses it just the same.
 
 ## How it composes
 

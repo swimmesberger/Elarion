@@ -22,6 +22,8 @@ public interface ICurrentUser {
     IReadOnlyList<string> Roles { get; }
     bool IsAuthenticated { get; }
     bool IsInRole(string role);
+    bool HasClaim(string type, string value);
+    IEnumerable<string> GetClaimValues(string type);
 }
 ```
 
@@ -55,6 +57,42 @@ app.UseAuthorization();
 `UseElarionCurrentUser()` copies claim values into a scoped `CurrentUserSnapshot` once per request.
 Application handlers then read the snapshot, so they never touch `HttpContext` and stay testable —
 in a unit test you simply register a fake `ICurrentUser`.
+
+## Works across every transport
+
+`ICurrentUser` resolves identically under plain HTTP endpoints, JSON-RPC (single and batch), and MCP —
+no extra wiring. This matters because the JSON-RPC and MCP dispatchers run each call in a **fresh DI
+child scope** for isolation, and a child scope does not inherit the request scope's scoped instances. So
+the snapshot the request middleware initialized is not the one a JSON-RPC/MCP handler would otherwise
+resolve.
+
+Elarion bridges that gap explicitly (no `IHttpContextAccessor`, no `AsyncLocal`) with one uniform path:
+each transport captures the authenticated principal at its boundary into a `DispatchScopeContext`, and a
+single initializer seeds the per-call snapshot from it. JSON-RPC captures `HttpContext.User`; MCP captures
+the per-message `RequestContext.User` (its per-call scope is rooted at the session/app root, so it can't
+reach the HTTP request scope anyway). HTTP `[HttpEndpoint]` handlers run in the request scope and read the
+snapshot the middleware seeds — the same `Initialize(principal)` operation. The snapshot **materializes
+claims lazily**, so seeding it per call costs nothing until a handler reads a claim, and each snapshot
+parses at most once — no duplicate work. Authorization rides the same path, since the authorizer reads
+`ICurrentUser`.
+
+### Carrying your own scoped state
+
+The same rail is the extension point for other per-call state (tenant, correlation id, …). Capture it at
+the boundary and seed it with an `IDispatchScopeInitializer`, registered with `TryAddEnumerable`:
+
+```csharp
+internal sealed class TenantScopeInitializer : IDispatchScopeInitializer {
+    public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
+        if (context.TryGet<ClaimsPrincipal>(out var user) && user is not null) {
+            callScope.GetRequiredService<TenantContext>().TenantId = user.FindFirstValue("tenant");
+        }
+    }
+}
+
+// services.TryAddEnumerable(
+//     ServiceDescriptor.Singleton<IDispatchScopeInitializer, TenantScopeInitializer>());
+```
 
 ## Mapping claims
 

@@ -31,7 +31,7 @@ requirements and asks an `IAuthorizer` to evaluate them against that snapshot.
 Annotate the handler class:
 
 ```csharp
-[RpcMethod("tenants.create")]
+[Handler("tenants.create")]
 [RequirePermission("tenants.write")]
 public sealed class CreateTenant(AppDbContext db)
     : IHandler<CreateTenant.Command, Result<CreateTenant.Response>> { /* ... */ }
@@ -133,8 +133,10 @@ authentication provider. Two setups, identical handlers:
 
 ### ASP.NET Core Identity
 
-The optional `Elarion.AspNetCore.Identity` package wires Identity onto a **plain** `DbContext` (no
-`IdentityDbContext` inheritance) and maps the current user to the Identity claim types:
+The optional Identity packages wire Identity onto a **plain** `DbContext` (no `IdentityDbContext`
+inheritance) and map the current user to the Identity claim types — `[GenerateElarionIdentity]` (the
+web-free model, in `Elarion.EntityFrameworkCore.Identity`) on the context, `AddElarionIdentity` (the host
+wiring, in `Elarion.AspNetCore.Identity`) in `Program.cs`:
 
 ```csharp
 [GenerateDbSets]
@@ -169,8 +171,64 @@ The very same `[RequireRole("Admin")]` / `[RequirePolicy("AtLeast21")]` handlers
 Entra's token claims — and would behave identically over JSON-RPC or MCP. That independence is the point:
 authentication is a host concern, authorization is a handler concern, and they meet only at `ICurrentUser`.
 
+## Permission catalog
+
+A handler declares the permission it needs as a **(resource, verb)** pair — the Kubernetes-RBAC shape —
+`[RequirePermission("properties", Verbs.Read)]`, enforced as the composed claim `properties.read`. No central
+registry to edit. But the **set of all permissions** is still needed: to **seed** permission claims onto roles,
+and to drive role→permission policy. Hand-maintaining that `All`/`ReadOnly` list is the one file that grows per
+feature — the "edit-for-every-module" smell the generators otherwise eliminate.
+
+The generator removes it. It discovers every `[RequirePermission(resource, verb)]`/`[RequireRole]` and emits two
+surfaces, both keyed on the two Kubernetes axes — **resource** and **verb**.
+
+### `ElarionPermissions` — compile-time
+
+A static class in your assembly's **root namespace** (above every `[AppModule]`, so referencing it never trips
+the `ELMOD002` module-boundary analyzer), aggregated **cross-assembly** from the Elarion manifest. Reference it
+from static role policy, which then reads like Kubernetes role rules:
+
+```csharp
+// Roles.cs — no All/ReadOnly list to maintain
+[Admin]         = ElarionPermissions.All,
+[PropertyAdmin] = ElarionPermissions.ByResource["properties"],  // every verb on properties
+[Viewer]        = ElarionPermissions.ByVerb["read"],            // read-only across everything
+```
+
+- `All` / `Roles` — the deduplicated, ordinally sorted universe.
+- `ByResource["properties"]` — Kubernetes "all verbs on a resource".
+- `ByVerb["read"]` — Kubernetes "this verb across all resources".
+- `ByModule["Properties"]` — the per-`[AppModule]` view.
+- typed accessors — `ElarionPermissions.Properties.Read` (resource → nested class, verb → const member).
+
+The verb vocabulary is **open** (Kubernetes allows custom verbs too): use the `Verbs` constants
+(`Read`/`Write`/`List`/`Create`/`Update`/`Delete`/`Manage`) or any string. The enforced claim is composed as
+`{resource}.{verb}`, so your identity provider issues `properties.read` claims.
+
+### `IPermissionCatalog` — runtime
+
+For code that enumerates permissions dynamically (a permissions admin screen), inject the DI catalog:
+
+```csharp
+public sealed class IdentitySeeder(IPermissionCatalog catalog, RoleManager<AppRole> roles) {
+    public async Task SeedAdminAsync(AppRole admin) {
+        foreach (var permission in catalog.Permissions)          // every permission across all modules
+            await roles.AddClaimAsync(admin, new Claim("permission", permission));
+    }
+}
+```
+
+It exposes the same `Permissions`/`Roles`/`ByResource`/`ByVerb`, plus a per-module `Modules` breakdown, populated
+the same way services and validators are — each module contributes through its generated `ConfigureDefaultServices`,
+**gated by module enablement**, so a disabled module's permissions never appear and a referenced module library's
+are included automatically. `AddElarionAuthorization` registers it.
+
+Generation is on under `[assembly: UseElarion]` (or the narrower `[assembly: GeneratePermissionCatalog]`); a
+guarded handler under no module is reported (`ELPERM001`).
+
 ## See also
 
+- [Resource authorization](/docs/concepts/resource-authorization) — per-resource (read/write) checks and efficient database-level filtering.
 - [Decorator pipelines](/docs/concepts/decorator-pipelines) — where the authorization decorator sits.
 - [Results & errors](/docs/concepts/results-and-errors) — how `Unauthorized`/`Forbidden` map per transport.
 - [Why Elarion → Composition over inheritance](/docs/why-elarion#composition-over-inheritance).

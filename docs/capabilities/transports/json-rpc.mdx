@@ -1,6 +1,6 @@
 ---
 title: JSON-RPC
-description: JSON-RPC is a first-class optional transport — mark a handler with [RpcMethod] and Elarion takes it from dispatcher to typed TypeScript client.
+description: JSON-RPC is a first-class optional transport — mark a handler with [Handler] and Elarion takes it from dispatcher to typed TypeScript client.
 ---
 
 JSON-RPC is a first-class, optional transport in Elarion. It lives outside the core framework package
@@ -40,12 +40,12 @@ const client = await rpc.clients.get({ id })
 
 ```csharp
 // Backend — the handler the call above resolves to
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> { /* ... */ }
 ```
 
-The iteration loop is short: add a handler, mark it `[RpcMethod]`, regenerate the client, and call it
+The iteration loop is short: add a handler, mark it `[Handler]`, regenerate the client, and call it
 as a typed method. There is no route to design, no DTO to duplicate on the client, and no transport
 plumbing to write.
 
@@ -61,11 +61,27 @@ too: JSON-RPC is optional and outside the core package, and modules can expose o
 [Minimal API endpoints](/docs/concepts/modules#endpoints-in-modules) alongside — or instead of —
 JSON-RPC methods. You are not locked into one transport.
 
+## One bus, thin adapters
+
+JSON-RPC is not a self-contained dispatcher. The transport-neutral core is a single **named
+request/reply bus** — `HandlerDispatcher` (in `Elarion.Abstractions`, namespace
+`Elarion.Abstractions.Dispatch`) — that maps an operation name to a handler and invokes it through the
+full decorator pipeline. It owns no serialization or wire format.
+
+`JsonRpcDispatcher` (in `Elarion.JsonRpc`) is the **JSON-RPC adapter** over that bus: it adds the
+JSON-RPC envelope and serialization and serves only the operations flagged
+`HandlerTransports.JsonRpc`. MCP is a second adapter over the *same* bus. The generator builds one
+registry of handlers (`RegisterHandlers`) and both adapters resolve it — so a handler is *define once,
+choose surfaces via the `Transports` flag*, never registered separately per transport.
+
 ## The end-to-end pipeline
 
-1. Application handlers declare `[RpcMethod("module.action")]`.
-2. `AppModuleDiscoveryGenerator` (via `[GenerateModuleBootstrapper]`) emits the gated dispatcher registration map.
-3. The host configures a `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime.
+1. Application handlers declare `[Handler("module.action")]` (the operation name is optional — see
+   [name inference](#marking-a-handler)).
+2. `AppModuleDiscoveryGenerator` (via `[GenerateModuleBootstrapper]`) emits the gated handler
+   registration map (`RegisterHandlers`).
+3. The host configures a `JsonRpcDispatcher` with the same `JsonSerializerOptions` used at runtime; it
+   adapts the shared `HandlerDispatcher` registry to the JSON-RPC wire format.
 4. `JsonRpcSchemaExporter` (or the [build-time package](/docs/capabilities/transports/schema-generation)) exports
    `rpc-schema.json` from the registered dispatcher.
 5. [`elarion-jsonrpc-client-generator`](/docs/capabilities/transports/typescript-client) converts that schema into
@@ -74,7 +90,8 @@ JSON-RPC methods. You are not locked into one transport.
 
 Each stage has a single owner, which keeps the reusable contract small:
 
-- `Elarion.JsonRpc` owns runtime dispatch, telemetry, and schema export.
+- `Elarion.Abstractions` owns the transport-neutral `HandlerDispatcher` bus.
+- `Elarion.JsonRpc` owns the JSON-RPC adapter, runtime dispatch, telemetry, and schema export.
 - `Elarion.AspNetCore` owns HTTP endpoint mapping and ASP.NET Core transport behavior.
 - `Elarion.AspNetCore.SchemaGeneration` owns build-time schema export.
 - `elarion-jsonrpc-client-generator` owns schema-to-TypeScript generation.
@@ -82,10 +99,10 @@ Each stage has a single owner, which keeps the reusable contract small:
 
 ## Marking a handler
 
-Add `[RpcMethod]` to a handler that follows the conventional shape:
+Add `[Handler]` to a handler that follows the conventional shape:
 
 ```csharp
-[RpcMethod("clients.create")]
+[Handler("clients.create")]
 public sealed class CreateClient
     : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
     public sealed record Command(string Name);
@@ -97,16 +114,43 @@ public sealed class CreateClient
 }
 ```
 
-The RPC generator expects:
+The handler generator expects:
 
 - a nested request type named `Command` or `Query`,
 - a nested response type named `Response`,
 - an `IHandler<TRequest, Result<TResponse>>` implementation.
 
-The generated map emits typed dispatcher calls:
+### The operation name is optional
+
+The operation name is **optional** — `[Handler]` alone is valid. When omitted, the name is inferred by
+convention as `{module}.{operation}`, where `operation` is the handler type name with a trailing
+`Handler`/`Command`/`Query`/`Request` suffix removed, then camelCased. So in a `Clients` module,
+`CreateClient` becomes `clients.createClient`:
 
 ```csharp
-dispatcher.MapHandler<CreateClient.Command, CreateClient.Response>("clients.create");
+[Handler]   // inferred: clients.createClient
+public sealed class CreateClient
+    : IHandler<CreateClient.Command, Result<CreateClient.Response>> { /* ... */ }
+```
+
+An explicit name is **recommended for stable public or wire contracts**, since a type rename would
+otherwise change the operation name. Use the inferred name for internal handlers where the convenience
+is worth more than name stability.
+
+The generated map registers each operation on the shared `HandlerDispatcher` registry with its
+transport flags:
+
+```csharp
+registry.Map<CreateClient.Command, CreateClient.Response>("clients.create", HandlerTransports.JsonRpc);
+```
+
+In hand-written or test code you map directly onto a `HandlerDispatcher` with the convenience overloads
+— `dispatcher.Map<TRequest, TResponse>("name")` resolves the handler from DI, while
+`dispatcher.MapDelegate<TRequest, TResponse>("name", fn)` maps an inline delegate:
+
+```csharp
+dispatcher.Map<CreateClient.Command, CreateClient.Response>("clients.create");
+dispatcher.MapDelegate<Ping.Request, Ping.Response>("diagnostics.ping", (req, ct) => /* ... */);
 ```
 
 ## Errors are mapped by the host

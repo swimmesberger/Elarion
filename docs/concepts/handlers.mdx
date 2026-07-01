@@ -44,7 +44,7 @@ use case: input (`Query`), work (the EF Core query), output (`Result<Response>`)
 using Elarion.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
-[RpcMethod("clients.get")]
+[Handler("clients.get")]
 public sealed class GetClient(AppDbContext db)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id);
@@ -88,6 +88,13 @@ The generators discover and wire handlers from their shape and location:
   response types are read from the `IHandler<,>` interface itself, so they may be declared anywhere —
   nesting them (as `Command`/`Query`/`Response`) is an organizational convention, **not** a
   requirement. See [JSON-RPC usage](/docs/capabilities/transports/json-rpc).
+
+A handler exposes itself over the dispatcher transports with `[Handler]`. The operation name is
+**optional**: with `[Handler("clients.get")]` you name it explicitly; with a bare `[Handler]` the name
+is inferred by convention as `{module}.{operation}`, where `operation` is the handler type name with a
+trailing `Handler`/`Command`/`Query`/`Request` suffix removed and the rest camelCased — so a
+`CreateClient` handler in the `Clients` module becomes `clients.createClient`. Prefer an explicit name
+for stable public or wire-facing contracts.
 
 The handler registration generator emits an `Add{HandlerName}()` method and aggregates them into the
 module's `Add{Module}Handlers()` method. You never register a handler by hand.
@@ -149,3 +156,48 @@ A handler should not know whether it was invoked over JSON-RPC, HTTP, a schedule
 returns a `Result<T>`; the host decides how to map success and `AppError` failures onto the wire.
 Cross-cutting behavior — logging, validation, transactions, caching, resilience — belongs in
 [decorators](/docs/concepts/decorator-pipelines), not inside the handler body.
+
+## Calling a handler from other code
+
+In-process, **call handlers typed-directly** — you keep compile-time safety, cross no serialization
+boundary, and still run the full decorator pipeline. Typed paths, in rough order of preference:
+
+- **Inject `IHandler<TRequest, Result<TResponse>>`** straight into another handler, a `[Service]`, or a
+  test and call `HandleAsync`. The handler resolves fully decorated from DI.
+- **`IHandlerSender.SendAsync<TRequest, TResponse>(request, ct)`** — a typed *mediator send*: it resolves
+  the handler **by type** from the ambient scope (your transaction), so one injection dispatches several
+  handlers without naming each `IHandler<,>`. Register it with `AddElarionHandlerSender()`. This is the
+  in-process, in-transaction request/reply primitive (the typed replacement for the removed
+  `IDomainEventBus.RequestAsync`).
+- **`HandlerInvoker.InvokeAsync<TRequest, TResponse>(provider, request, …)`** when you only hold the root
+  `IServiceProvider` — a custom transport, a gRPC/CLI adapter, a background job. It creates a seeded
+  per-call scope, resolves the decorated handler, invokes it, and disposes the scope.
+- **`[GenerateModuleApi]`** for calling *another module* — a generated, typed facade over that module's
+  handlers that a `[ModuleContract]` implementation invokes by method (still typed, still the full
+  pipeline, no wire). This is the sanctioned cross-module path; see
+  [Cross-module communication](/docs/concepts/cross-module-communication).
+
+Prefer these everywhere in application code. The whole point is that a rename or a signature change is a
+**compile error**, not a runtime surprise — the opposite of dispatching by string.
+
+### The named bus is for transports, not application code
+
+`HandlerDispatcher` — the [named request/reply bus](/docs/capabilities/transports) — maps an operation
+**name** (a string) to a handler. It exists so that **name-keyed transports** (JSON-RPC and MCP, whose
+wire carries a method/tool name) can reach a handler without referencing its type. HTTP does *not* use it:
+a `[HttpEndpoint]` route resolves its handler typed-directly (`[FromServices] IHandler<…>`), because the
+route already pins the type at generation time.
+
+The bus is a registered singleton, so you *can* inject it and call `DispatchAsync(name, request, scope, ct)`
+— but it takes the request as `object` and returns `Result<object>` (the value boxed, no compile-time
+response type), so you trade away type safety and the schema. Reach for it from application code only in
+the rare case where you must dispatch by a **dynamic or string-supplied name** and genuinely cannot
+reference the handler's type — the niche the classic *mediator* fills. To decouple one module from
+another's internals, use a `[ModuleContract]` (typed) instead: same "don't reference the handler" benefit,
+without losing compile-time safety.
+
+<Callout type="info">
+  The [event bus](/docs/capabilities/events) is **pub/sub-only** (ADR-0010): `PublishAsync` for fan-out
+  notifications, never request/reply. For a typed in-process reply (what `IDomainEventBus.RequestAsync`
+  used to do) use `IHandlerSender`/`IHandler` above — not the event bus, and not the named bus.
+</Callout>

@@ -15,7 +15,7 @@ public sealed class ElarionMcpOptions {
     public string EndpointPath { get; set; } = "/mcp";
 
     /// <summary>
-    /// Derives the MCP tool name from a JSON-RPC method name when no <c>[McpMethod(ToolName = ...)]</c> override
+    /// Derives the MCP tool name from an operation name when no <c>[McpHandler(ToolName = ...)]</c> override
     /// is present. Defaults to replacing dots with underscores (e.g. <c>"clients.create"</c> → <c>"clients_create"</c>).
     /// </summary>
     public Func<string, string> ToolNameTransform { get; set; } = static methodName => methodName.Replace('.', '_');

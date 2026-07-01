@@ -16,8 +16,12 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string RequirePermissionAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
     private const string RequireRoleAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireRoleAttribute";
     private const string RequirePolicyAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePolicyAttribute";
+    private const string RequireResourceAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireResourceAttribute";
     private const string AllowAnonymousAttributeMetadataName = "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
     private const string AuthorizationDefaultsAttributeMetadataName = "Elarion.Abstractions.Authorization.ElarionAuthorizationDefaultsAttribute";
+    private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
+    private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
+    private const string IdempotentAttributeMetadataName = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
 
     private sealed record HandlerInfo(
@@ -32,7 +36,29 @@ public sealed partial class HandlerRegistrationGenerator {
         CacheInvalidationInfo? CacheInvalidation,
         bool HasAuthorization,
         bool RequireAuthenticatedByDefault,
+        EquatableArray<ResourceBindingInfo> ResourceBindings,
+        bool HasFeatureGates,
+        IdempotentInfo? Idempotent,
+        EquatableArray<string> VariantContractDeps,
         EquatableArray<DiagnosticInfo> Diagnostics
+    );
+
+    private sealed record IdempotentInfo(
+        int RetentionHours,
+        bool KeyRequired,
+        int ScopeValue,
+        bool Fingerprint,
+        int ConflictBehaviorValue,
+        int StoreFailuresValue,
+        string? ResultValueFqn
+    );
+
+    // A [RequireResource] binding: the resource type, the operation, and the compile-checked request path the
+    // generator validated and emits as a typed accessor (ADR-0012, Tier 1).
+    private sealed record ResourceBindingInfo(
+        string ResourceTypeFqn,
+        string Operation,
+        string IdPath
     );
 
     private sealed record DecoratorInfo(
@@ -104,5 +130,68 @@ public sealed partial class HandlerRegistrationGenerator {
         + "skipped; return Result<T> or Result",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ResourceIdPathNotFound = new(
+        "ELAUTH002",
+        "RequireResource id path does not resolve",
+        "Handler '{0}' declares [RequireResource] with Id path '{1}', which does not resolve to a property on "
+        + "request type '{2}'; use nameof(Request.Id) or a dotted path of existing properties",
+        "Elarion.Abstractions.Authorization",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor FeatureGateResponseNotFailureCapable = new(
+        "ELFEAT001",
+        "Feature-gated handler response cannot represent failure",
+        "Handler '{0}' declares a [FeatureGate] but its response type '{1}' does not implement "
+        + "IResultFailureFactory<T>, so the gate cannot short-circuit and would be silently skipped; "
+        + "return Result<T> or Result",
+        "Elarion.Abstractions.Features",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor EmptyFeatureGateDescriptor = new(
+        "ELFEAT002",
+        "FeatureGate declares no feature name",
+        "Handler '{0}' declares a [FeatureGate] with no feature name (or a blank one); the gate has no effect",
+        "Elarion.Abstractions.Features",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor IdempotentResponseNotFailureCapable = new(
+        "ELIDEM001",
+        "Idempotent handler response cannot represent failure",
+        "Handler '{0}' declares [Idempotent] but its response type '{1}' does not implement "
+        + "IResultFailureFactory<T>, so the idempotency decorator cannot synthesize the 400/409/422/replay "
+        + "outcomes and would be silently skipped; return Result<T> or Result",
+        "Elarion.Abstractions.Idempotency",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor IdempotentOnNonCommandDescriptor = new(
+        "ELIDEM002",
+        "[Idempotent] handler is not a command",
+        "Handler '{0}' declares [Idempotent] but its request type '{1}' is not an ICommand; idempotency only "
+        + "applies to state-changing commands, so the attribute has no effect",
+        "Elarion.Abstractions.Idempotency",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor InvalidIdempotentRetentionDescriptor = new(
+        "ELIDEM003",
+        "[Idempotent] retention is invalid",
+        "Handler '{0}' must declare a positive RetentionHours on [Idempotent]",
+        "Elarion.Abstractions.Idempotency",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor IdempotentAndCacheableDescriptor = new(
+        "ELIDEM004",
+        "Handler cannot be both idempotent and cacheable",
+        "Handler '{0}' cannot use both [Idempotent] and [Cacheable]; caching is for queries, idempotency for "
+        + "commands",
+        "Elarion.Abstractions.Idempotency",
+        DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 }

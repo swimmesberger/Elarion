@@ -21,7 +21,7 @@ namespace Elarion.EntityFrameworkCore.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class DbContextGenerator : IIncrementalGenerator
 {
-    private const string GenerateDbSetsAttributeName = "Elarion.EntityFrameworkCore.GenerateDbSetsAttribute";
+    private const string GenerateDbSetsAttributeName = ElarionGeneratorConventions.GenerateDbSetsAttribute;
     private const string DbContextName = "Microsoft.EntityFrameworkCore.DbContext";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -113,7 +113,24 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             classSymbol.Name,
             classSymbol.ContainingNamespace.ToDisplayString(),
             classSymbol.ToDisplayString(),
-            EntityConfigurationDiscovery.GetScopes(ctx.Attributes));
+            EntityConfigurationDiscovery.GetScopes(ctx.Attributes),
+            DiscoverModelHooks(classSymbol));
+    }
+
+    // Each optional Elarion feature that ships its own table (Identity, resource grants, …) opts in with a
+    // [GenerateElarion{Feature}] attribute on the context and implements a per-feature model-configuration seam
+    // named "OnEntitiesConfigured_{Feature}". Discovering them by convention (not by name) lets any number of
+    // features compose onto one context without this generator knowing any of them, and without colliding on the
+    // single legacy OnEntitiesConfigured seam.
+    private static ImmutableArray<string> DiscoverModelHooks(INamedTypeSymbol classSymbol)
+    {
+        return classSymbol.GetAttributes()
+            .Select(attribute => attribute.AttributeClass?.Name)
+            .Where(ElarionGeneratorConventions.IsModelConfigurationFeatureAttribute)
+            .Select(name => ElarionGeneratorConventions.ModelConfigurationSeamName(name!))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToImmutableArray();
     }
 
     private static ReferencedData ReadManifest(MetadataReference reference, CancellationToken ct)
@@ -291,9 +308,17 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         }
 
         sb.AppendLine();
-        sb.AppendLine("        // Extensibility seam: other Elarion generators (e.g. Identity) contribute model");
-        sb.AppendLine("        // configuration by implementing this partial method. Unimplemented, the call is a no-op.");
+        sb.AppendLine("        // Extensibility seam: hand-written model configuration can implement this partial method.");
+        sb.AppendLine("        // Unimplemented, the call is a no-op.");
         sb.AppendLine("        OnEntitiesConfigured(modelBuilder);");
+
+        // One seam per discovered [GenerateElarion{Feature}] attribute, so multiple optional features (Identity,
+        // resource grants, …) compose onto one context without colliding on the single legacy seam above.
+        foreach (var hook in target.ModelHooks.AsImmutableArray)
+        {
+            sb.AppendLine(string.Format("        {0}(modelBuilder);", hook));
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    /// <summary>");
@@ -301,6 +326,12 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         sb.AppendLine("    /// generators can append model configuration. Elides to a no-op when unimplemented.");
         sb.AppendLine("    /// </summary>");
         sb.AppendLine("    partial void OnEntitiesConfigured(ModelBuilder modelBuilder);");
+
+        foreach (var hook in target.ModelHooks.AsImmutableArray)
+        {
+            sb.AppendLine(string.Format("    partial void {0}(ModelBuilder modelBuilder);", hook));
+        }
+
         sb.AppendLine("}");
 
         context.AddSource(
@@ -353,7 +384,8 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         string Name,
         string Namespace,
         string FullName,
-        EquatableArray<string> Scopes);
+        EquatableArray<string> Scopes,
+        EquatableArray<string> ModelHooks);
 
     private readonly record struct EntityInfo(
         string Name,

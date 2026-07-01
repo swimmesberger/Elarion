@@ -15,23 +15,13 @@ public delegate ValueTask EventSubscriberInvokeDelegate(
     CancellationToken ct);
 
 /// <summary>
-/// Invokes a generated responder delegate without runtime reflection, returning the boxed
-/// <see cref="Result{TResponse}"/> produced by the responder.
-/// </summary>
-public delegate ValueTask<object> EventResponderInvokeDelegate(
-    IServiceProvider serviceProvider,
-    object request,
-    IEventContext context,
-    CancellationToken ct);
-
-/// <summary>
-/// Immutable source-generated metadata and invocation logic for one event consumer.
+/// Immutable source-generated metadata and invocation logic for one event consumer (a fan-out subscriber).
 /// </summary>
 /// <remarks>
 /// Application code normally does not construct descriptors directly; they are emitted by the event
-/// consumer source generator. Manual descriptors are useful in tests or advanced host wiring. A
-/// descriptor is either a fan-out subscriber (<see cref="InvokeAsync"/> set, <see cref="ResponseType"/>
-/// null) or a responder (<see cref="InvokeRequestAsync"/> set, <see cref="ResponseType"/> non-null).
+/// consumer source generator. Manual descriptors are useful in tests or advanced host wiring. Every
+/// consumer is a fan-out subscriber — the event bus is pub/sub-only (see ADR-0010); request/reply is served
+/// by typed dispatch (<c>IHandlerSender</c>/<c>IHandler</c>) or the named <c>HandlerDispatcher</c>.
 /// </remarks>
 public sealed record EventSubscriptionDescriptor {
     /// <summary>The message type this consumer handles (the dispatch address).</summary>
@@ -43,12 +33,7 @@ public sealed record EventSubscriptionDescriptor {
     /// <summary>The <c>[Service]</c> type that declares the consumer method.</summary>
     public required Type ServiceType { get; init; }
 
-    /// <summary>
-    /// The response payload type for a responder, or <c>null</c> for a fan-out subscriber.
-    /// </summary>
-    public Type? ResponseType { get; init; }
-
-    /// <summary>Ascending fan-out invocation order; ignored for responders.</summary>
+    /// <summary>Ascending fan-out invocation order.</summary>
     public int Order { get; init; }
 
     /// <summary>
@@ -57,12 +42,6 @@ public sealed record EventSubscriptionDescriptor {
     /// </summary>
     public string? Module { get; init; }
 
-    /// <summary>The fan-out subscriber delegate. Set when <see cref="ResponseType"/> is <c>null</c>.</summary>
+    /// <summary>The fan-out subscriber delegate.</summary>
     public EventSubscriberInvokeDelegate? InvokeAsync { get; init; }
-
-    /// <summary>The responder delegate. Set when <see cref="ResponseType"/> is non-<c>null</c>.</summary>
-    public EventResponderInvokeDelegate? InvokeRequestAsync { get; init; }
-
-    /// <summary>True when this descriptor responds to an <see cref="IDomainEventBus.RequestAsync{TRequest,TResponse}"/> call.</summary>
-    public bool IsResponder => ResponseType is not null;
 }

@@ -121,13 +121,15 @@ internal sealed class JsonRpcResponseConverter : JsonConverter<JsonRpcResponse> 
 
         if (value.Error is not null) {
             writer.WritePropertyName("error");
-            JsonSerializer.Serialize(writer, value.Error, options);
+            JsonSerializer.Serialize(writer, value.Error, options.GetTypeInfo(typeof(RpcErrorResponse)));
         } else {
             writer.WritePropertyName("result");
             if (value.Result is null) {
                 writer.WriteNullValue();
             } else {
-                JsonSerializer.Serialize(writer, value.Result, value.Result.GetType(), options);
+                // Serialize by the runtime result type, but resolve its contract through the configured
+                // (source-gen) resolver so this stays reflection-free and Native-AOT-safe.
+                JsonSerializer.Serialize(writer, value.Result, options.GetTypeInfo(value.Result.GetType()));
             }
         }
 

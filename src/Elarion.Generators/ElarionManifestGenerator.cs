@@ -14,9 +14,10 @@ namespace Elarion.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class ElarionManifestGenerator : IIncrementalGenerator
 {
-    private const string AppModuleAttributeMetadataName = "Elarion.Abstractions.Modules.AppModuleAttribute";
-    private const string McpMethodAttributeMetadataName = "Elarion.Abstractions.McpMethodAttribute";
+    private const string AppModuleAttributeMetadataName = ElarionGeneratorConventions.AppModuleAttribute;
+    private const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
+    private const string ResourceFilterAttributeMetadataName = ElarionGeneratorConventions.ResourceFilterAttribute;
 
     private sealed record ManifestItem<T>(T? Model, ImmutableArray<Diagnostic> Diagnostics);
 
@@ -42,18 +43,73 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
 
         var rpcMethods = context.SyntaxProvider
             .ForAttributeWithMetadataName(
-                RpcMethodEmission.RpcMethodAttributeMetadataName,
+                RpcMethodEmission.HandlerAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
                 static (ctx, ct) => CreateRpcMethod(ctx, ct))
             .Where(static item => item.Model is not null || item.Diagnostics.Length > 0)
             .Collect();
 
-        var combined = modules.Combine(httpEndpoints).Combine(rpcMethods);
+        var resourceFilters = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ResourceFilterAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => CreateResourceFilter(ctx))
+            .Where(static filter => filter is not null)
+            .Select(static (filter, _) => filter!)
+            .Collect();
+
+        var permissions = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                PermissionDiscovery.RequirePermissionAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => PermissionDiscovery.ReadPermissions(ctx))
+            .Where(static guard => guard is not null)
+            .Select(static (guard, _) => guard!)
+            .Collect();
+
+        var roles = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                PermissionDiscovery.RequireRoleAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => PermissionDiscovery.ReadRoles(ctx))
+            .Where(static guard => guard is not null)
+            .Select(static (guard, _) => guard!)
+            .Collect();
+
+        var combined = modules.Combine(httpEndpoints).Combine(rpcMethods).Combine(resourceFilters)
+            .Combine(permissions).Combine(roles);
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var ((moduleEntries, httpEndpointEntries), rpcMethodEntries) = source;
-            EmitManifest(spc, moduleEntries, httpEndpointEntries, rpcMethodEntries);
+            var (((((moduleEntries, httpEndpointEntries), rpcMethodEntries), resourceFilterEntries), permissionGuards), roleGuards) = source;
+            EmitManifest(
+                spc, moduleEntries, httpEndpointEntries, rpcMethodEntries, resourceFilterEntries, permissionGuards, roleGuards);
         });
+    }
+
+    private static ElarionManifest.ResourceFilter? CreateResourceFilter(GeneratorAttributeSyntaxContext ctx)
+    {
+        if (ctx.TargetSymbol is not INamedTypeSymbol specType)
+            return null;
+
+        if (ctx.Attributes.Length == 0 ||
+            ctx.Attributes[0].AttributeClass is not { TypeArguments.Length: 1 } attributeClass ||
+            attributeClass.TypeArguments[0] is not INamedTypeSymbol entity)
+        {
+            return null;
+        }
+
+        var shared = false;
+        foreach (var named in ctx.Attributes[0].NamedArguments)
+        {
+            if (named.Key == "Shared" && named.Value.Value is true)
+                shared = true;
+        }
+
+        return new ElarionManifest.ResourceFilter(
+            specType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            entity.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            specType.ContainingNamespace?.ToDisplayString() ?? string.Empty,
+            shared);
     }
 
     private static ElarionManifest.Module? CreateModule(GeneratorAttributeSyntaxContext ctx)
@@ -127,7 +183,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             return new ManifestItem<RpcMethodEmission.Model>(null, diagnostics.ToImmutable());
 
         var compilation = ctx.SemanticModel.Compilation;
-        var mcpMethodType = compilation.GetTypeByMetadataName(McpMethodAttributeMetadataName);
+        var mcpMethodType = compilation.GetTypeByMetadataName(McpHandlerAttributeMetadataName);
         var descriptionType = compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
         foreach (var attr in ctx.Attributes)
         {
@@ -152,7 +208,10 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         SourceProductionContext spc,
         ImmutableArray<ElarionManifest.Module> modules,
         ImmutableArray<ManifestItem<HttpEndpointEmission.Model>> httpEndpointItems,
-        ImmutableArray<ManifestItem<RpcMethodEmission.Model>> rpcMethodItems)
+        ImmutableArray<ManifestItem<RpcMethodEmission.Model>> rpcMethodItems,
+        ImmutableArray<ElarionManifest.ResourceFilter> resourceFilters,
+        ImmutableArray<PermissionDiscovery.PermissionGuard> permissionGuards,
+        ImmutableArray<PermissionDiscovery.RoleGuard> roleGuards)
     {
         foreach (var item in httpEndpointItems)
         {
@@ -175,7 +234,27 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             .Select(static item => item.Model!)
             .ToArray();
 
-        if (modules.Length == 0 && httpEndpoints.Length == 0 && rpcMethods.Length == 0)
+        var permissionSet = new HashSet<ElarionManifest.Permission>();
+        foreach (var guard in permissionGuards)
+        foreach (var value in guard.Values)
+            permissionSet.Add(new ElarionManifest.Permission(guard.Namespace, value.Resource, value.Verb));
+        var permissions = permissionSet
+            .OrderBy(static p => p.Resource, StringComparer.Ordinal)
+            .ThenBy(static p => p.Verb, StringComparer.Ordinal)
+            .ThenBy(static p => p.Namespace, StringComparer.Ordinal)
+            .ToArray();
+
+        var roleSet = new HashSet<ElarionManifest.Role>();
+        foreach (var guard in roleGuards)
+        foreach (var value in guard.Values)
+            roleSet.Add(new ElarionManifest.Role(guard.Namespace, value));
+        var roles = roleSet
+            .OrderBy(static r => r.Value, StringComparer.Ordinal)
+            .ThenBy(static r => r.Namespace, StringComparer.Ordinal)
+            .ToArray();
+
+        if (modules.Length == 0 && httpEndpoints.Length == 0 && rpcMethods.Length == 0 && resourceFilters.Length == 0
+            && permissions.Length == 0 && roles.Length == 0)
             return;
 
         var sb = new StringBuilder();
@@ -203,6 +282,21 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
                      .ThenBy(static m => m.RequestTypeFqn, StringComparer.Ordinal))
         {
             AppendAssemblyMetadata(sb, ElarionManifest.RpcMethodKey, ElarionManifest.EncodeRpcMethod(method));
+        }
+
+        foreach (var filter in resourceFilters.OrderBy(static f => f.SpecFqn, StringComparer.Ordinal))
+        {
+            AppendAssemblyMetadata(sb, ElarionManifest.ResourceFilterKey, ElarionManifest.EncodeResourceFilter(filter));
+        }
+
+        foreach (var permission in permissions)
+        {
+            AppendAssemblyMetadata(sb, ElarionManifest.PermissionKey, ElarionManifest.EncodePermission(permission));
+        }
+
+        foreach (var role in roles)
+        {
+            AppendAssemblyMetadata(sb, ElarionManifest.RoleKey, ElarionManifest.EncodeRole(role));
         }
 
         spc.AddSource("ElarionManifest.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));

@@ -1,98 +1,71 @@
-using System.Collections.Frozen;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Dispatch;
+using Elarion.Abstractions.Idempotency;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Elarion.JsonRpc;
 
 /// <summary>
-/// Dispatches incoming JSON-RPC 2.0 requests to registered method handlers.
-/// Methods are registered via <see cref="Map{TRequest,TResponse}"/> with a delegate — fully
-/// handler-framework agnostic and AOT-compatible.
-/// Each dispatch creates an OpenTelemetry span following the
-/// <see href="https://opentelemetry.io/docs/specs/semconv/rpc/json-rpc/">JSON-RPC semantic conventions</see>.
+/// The JSON-RPC 2.0 <b>transport adapter</b> over the transport-neutral <see cref="HandlerDispatcher"/> (the named
+/// bus). It owns the JSON-RPC concerns — envelope validation, JSON param deserialization, <see cref="Result{T}"/> →
+/// <see cref="RpcError"/> mapping, and OpenTelemetry spans (per the
+/// <see href="https://opentelemetry.io/docs/specs/semconv/rpc/json-rpc/">JSON-RPC semantic conventions</see>) —
+/// and serves only the operations flagged <see cref="HandlerTransports.JsonRpc"/>. Routing and handler invocation
+/// (the full decorator pipeline) live in the shared registry, so MCP and other transports reuse the same routes.
 /// </summary>
-/// <remarks>
-/// The registration pattern mirrors the approach used by the MCP C# SDK's internal
-/// <c>RequestHandlers</c>: a dictionary of method name → typed delegate, with STJ
-/// deserialization/serialization handled at the boundary.
-/// </remarks>
 public sealed class JsonRpcDispatcher {
+    private readonly HandlerDispatcher _registry;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<JsonRpcDispatcher>? _logger;
-    private readonly Dictionary<string, RpcMethodEntry> _building;
-    private FrozenDictionary<string, RpcMethodEntry>? _frozen;
 
-    /// <summary>Initializes the dispatcher with the JSON serializer options used for param deserialization.</summary>
-    public JsonRpcDispatcher(JsonSerializerOptions jsonOptions, ILogger<JsonRpcDispatcher>? logger = null) {
-        _jsonOptions = jsonOptions;
-        // Mutable during registration; replaced with a FrozenDictionary by Freeze().
-        _building = new Dictionary<string, RpcMethodEntry>(StringComparer.OrdinalIgnoreCase);
-        _logger = logger;
+    /// <summary>
+    /// Initializes a dispatcher over its own fresh <see cref="HandlerDispatcher"/> — for manual wiring or tests.
+    /// Register operations with <see cref="MapDelegate{TRequest,TResponse}"/> or <see cref="Map{TRequest,TResponse}"/>.
+    /// </summary>
+    public JsonRpcDispatcher(JsonSerializerOptions jsonOptions, ILogger<JsonRpcDispatcher>? logger = null)
+        : this(new HandlerDispatcher(), jsonOptions, logger) {
     }
 
-    public JsonRpcDispatcher(JsonRpcDispatcher other, ILogger<JsonRpcDispatcher>? logger = null) {
-        _jsonOptions = other._jsonOptions;
-        if (other._frozen is not null) {
-            _frozen = other._frozen;
-            _building = new Dictionary<string, RpcMethodEntry>(StringComparer.OrdinalIgnoreCase);
-        } else {
-            _building = new Dictionary<string, RpcMethodEntry>(other._building, StringComparer.OrdinalIgnoreCase);
-        }
-        _logger = logger ?? other._logger;
+    /// <summary>Initializes a dispatcher over a shared <see cref="HandlerDispatcher"/> (the host path).</summary>
+    public JsonRpcDispatcher(
+        HandlerDispatcher registry, JsonSerializerOptions jsonOptions, ILogger<JsonRpcDispatcher>? logger = null) {
+        ArgumentNullException.ThrowIfNull(registry);
+        _registry = registry;
+        _jsonOptions = jsonOptions;
+        _logger = logger;
     }
 
     /// <summary>The serializer options this dispatcher uses for request deserialization and response serialization.</summary>
     public JsonSerializerOptions JsonOptions => _jsonOptions;
 
-    private FrozenDictionary<string, RpcMethodEntry> Methods =>
-        _frozen ?? throw new InvalidOperationException("Call Freeze() after registering all methods.");
+    /// <summary>The underlying transport-neutral registry (shared with other transports).</summary>
+    public HandlerDispatcher Registry => _registry;
 
-    /// <summary>
-    /// Registers a handler for the given JSON-RPC method name.
-    /// The handler receives the deserialized request, a scoped <see cref="IServiceProvider"/>,
-    /// and a <see cref="CancellationToken"/>, and returns a typed <see cref="RpcResult{T}"/>.
-    /// The response type <typeparamref name="TResponse"/> is captured for schema export — no
-    /// manual <c>responseType</c> parameter needed (mirrors ASP.NET Core TypedResults pattern).
-    /// </summary>
-    /// <typeparam name="TRequest">The request type deserialized from JSON-RPC params.</typeparam>
-    /// <typeparam name="TResponse">The handler's success value type, captured for schema generation.</typeparam>
-    /// <param name="methodName">The JSON-RPC method name (e.g., <c>"clients.create"</c>).</param>
-    /// <param name="handler">The async handler delegate returning a typed result.</param>
-    /// <returns>This dispatcher for fluent chaining.</returns>
+    /// <summary>Registers a DI-resolved handler on the underlying registry (convenience forwarder).</summary>
     public JsonRpcDispatcher Map<TRequest, TResponse>(
+        string methodName, HandlerTransports transports = HandlerTransports.All, bool idempotent = false)
+        where TRequest : class {
+        _registry.Map<TRequest, TResponse>(methodName, transports, idempotent);
+        return this;
+    }
+
+    /// <summary>Registers a delegate-backed handler on the underlying registry (convenience forwarder, for tests/manual wiring).</summary>
+    public JsonRpcDispatcher MapDelegate<TRequest, TResponse>(
         string methodName,
-        Func<TRequest, IServiceProvider, CancellationToken, Task<RpcResult<TResponse>>> handler
-    ) where TRequest : class {
-        if (_frozen is not null) {
-            throw new InvalidOperationException("Cannot register new methods after Freeze() has been called.");
-        }
-        _building[methodName] = new RpcMethodEntry(
-            methodName,
-            typeof(TRequest),
-            typeof(TResponse),
-            async (jsonParams, sp, ct) => {
-                TRequest? request;
-                if (jsonParams.HasValue && jsonParams.Value.ValueKind != JsonValueKind.Undefined) {
-                    request = jsonParams.Value.Deserialize<TRequest>(_jsonOptions);
-                } else {
-                    request = Activator.CreateInstance<TRequest>();
-                }
-
-                if (request is null) {
-                    return RpcResult.Failure(RpcError.InvalidParams("Could not construct request params"));
-                }
-
-                var typedResult = await handler(request, sp, ct);
-                return typedResult.ToUntyped();
-            }
-        );
-
+        Func<TRequest, IServiceProvider, CancellationToken, ValueTask<Result<TResponse>>> handler,
+        HandlerTransports transports = HandlerTransports.All,
+        bool idempotent = false)
+        where TRequest : class {
+        _registry.MapDelegate(methodName, handler, transports, idempotent);
         return this;
     }
 
     /// <summary>
-    /// Dispatches a single JSON-RPC request to the matching handler.
+    /// Dispatches a single JSON-RPC request to the matching JSON-RPC-flagged route.
     /// Creates a <c>SERVER</c> span with OTel JSON-RPC semantic convention attributes.
     /// </summary>
     public async Task<JsonRpcResponse> DispatchAsync(
@@ -119,19 +92,39 @@ public sealed class JsonRpcDispatcher {
             return JsonRpcResponse.InvalidRequest(request);
         }
 
-        if (!Methods.TryGetValue(request.Method, out var entry)) {
+        if (!_registry.TryGetRoute(request.Method, HandlerTransports.JsonRpc, out var route)) {
             using var unregisteredMethodActivity = StartRequestActivity(request, "_unregistered");
             RecordError(unregisteredMethodActivity, "_unregistered", "-32601", "Method not found", "method-not-found", startTimestamp);
             return JsonRpcResponse.MethodNotFound(request);
         }
 
-        var method = entry.MethodName;
+        var method = route.Name;
         using var activity = StartRequestActivity(request, method);
 
         _logger?.LogDebug("Dispatching JSON-RPC method {Method} (id={Id})", request.Method, request.Id);
 
         try {
-            var result = await entry.InvokeAsync(request.Params, scopeProvider, ct);
+            object? requestObject;
+            if (request.Params is { ValueKind: not JsonValueKind.Undefined } paramsElement) {
+                // Resolve the contract through the configured (source-gen) resolver so deserialization stays
+                // reflection-free and Native-AOT-safe instead of using the RequiresDynamicCode Type overload.
+                requestObject = paramsElement.Deserialize(_jsonOptions.GetTypeInfo(route.RequestType));
+            } else {
+                requestObject = Activator.CreateInstance(route.RequestType);
+            }
+
+            if (requestObject is null) {
+                RecordError(activity, method, "-32602", "Invalid params", "invalid-params", startTimestamp);
+                return JsonRpcResponse.FromError(request, RpcError.InvalidParams("Could not construct request params"));
+            }
+
+            // Per-call idempotency key: an idempotent operation carries its key at params._meta (batch-correct);
+            // seed the scope directly (overriding any transport-boundary key) before dispatch.
+            if (route.Idempotent && TryReadMetaIdempotencyKey(request.Params, out var idempotencyKey)) {
+                scopeProvider.GetService<IIdempotencyKeySeed>()?.Seed(idempotencyKey);
+            }
+
+            var result = await route.InvokeAsync(requestObject, scopeProvider, ct).ConfigureAwait(false);
 
             if (result.IsSuccess) {
                 _logger?.LogDebug("JSON-RPC {Method} succeeded", request.Method);
@@ -139,12 +132,14 @@ public sealed class JsonRpcDispatcher {
                 return JsonRpcResponse.Success(request, result.Value);
             }
 
-            var errorCode = result.Error.Code.ToString();
+            var translator = scopeProvider.GetService<IAppErrorTranslator<RpcError>>() ?? JsonRpcAppErrorTranslator.Default;
+            var rpcError = translator.Translate(result.Error);
+            var errorCode = rpcError.Code.ToString();
             _logger?.LogWarning(
                 "JSON-RPC {Method} returned application error {Code}: {Message}",
-                request.Method, result.Error.Code, result.Error.Message);
-            RecordError(activity, method, errorCode, result.Error.Message, "application-error", startTimestamp);
-            return JsonRpcResponse.FromError(request, result.Error);
+                request.Method, rpcError.Code, rpcError.Message);
+            RecordError(activity, method, errorCode, rpcError.Message, "application-error", startTimestamp);
+            return JsonRpcResponse.FromError(request, rpcError);
         } catch (JsonException ex) {
             _logger?.LogWarning(ex, "JSON-RPC {Method} — invalid params (deserialization failed)", request.Method);
             RecordError(activity, method, "-32602", "Invalid params", "invalid-params", startTimestamp);
@@ -173,32 +168,48 @@ public sealed class JsonRpcDispatcher {
     }
 
     /// <summary>
-    /// Seals the method registry into a <see cref="FrozenDictionary{TKey,TValue}"/> for
-    /// faster lookups at dispatch time. Must be called once after all <see cref="Map{TRequest,TResponse}"/>
-    /// registrations are complete, before the dispatcher handles any requests.
+    /// Reads the idempotency key from a request's <c>params._meta</c> (the framework-owned
+    /// <see cref="IdempotencyKeyNames.MetaKey"/>), the batch-correct per-call location.
     /// </summary>
+    internal static bool TryReadMetaIdempotencyKey(JsonElement? paramsElement, [NotNullWhen(true)] out string? key) {
+        key = null;
+        if (paramsElement is not { ValueKind: JsonValueKind.Object } parameters ||
+            !parameters.TryGetProperty("_meta", out var meta) || meta.ValueKind != JsonValueKind.Object ||
+            !meta.TryGetProperty(IdempotencyKeyNames.MetaKey, out var value) || value.ValueKind != JsonValueKind.String) {
+            return false;
+        }
+
+        var candidate = value.GetString();
+        if (string.IsNullOrWhiteSpace(candidate)) {
+            return false;
+        }
+
+        key = candidate;
+        return true;
+    }
+
+    /// <summary>Freezes the underlying registry; must be called once after all registrations and before dispatch.</summary>
     public JsonRpcDispatcher Freeze() {
-        _frozen = _building.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
-        _building.Clear(); // free memory, prevent further registrations
-        _building.TrimExcess();
+        _registry.Freeze();
         return this;
     }
 
-    /// <summary>Returns the set of registered RPC method names (for diagnostics/schema export).</summary>
-    public IReadOnlyCollection<string> MethodNames => Methods.Keys;
+    /// <summary>Returns the JSON-RPC-exposed method names (for diagnostics/schema export).</summary>
+    public IReadOnlyCollection<string> MethodNames =>
+        _registry.RoutesFor(HandlerTransports.JsonRpc).Select(static route => route.Name).ToArray();
 
-    /// <summary>Returns the request type for a given RPC method name (for schema export).</summary>
+    /// <summary>Returns the request type for a given JSON-RPC method name (for schema export).</summary>
     public Type? GetRequestType(string methodName) =>
-        Methods.TryGetValue(methodName, out var entry) ? entry.RequestType : null;
+        _registry.TryGetRoute(methodName, HandlerTransports.JsonRpc, out var route) ? route.RequestType : null;
 
     /// <summary>
-    /// Returns all registered RPC methods with their request and response types.
+    /// Returns all JSON-RPC-exposed methods with their request and response types.
     /// Used by schema export to ensure the same methods as the runtime dispatcher.
     /// </summary>
-    public IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType)> GetRegisteredMethods() =>
-        Methods
-            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => (kv.Key, kv.Value.RequestType, kv.Value.ResponseType))
+    public IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)> GetRegisteredMethods() =>
+        _registry.RoutesFor(HandlerTransports.JsonRpc)
+            .OrderBy(static route => route.Name, StringComparer.Ordinal)
+            .Select(static route => (route.Name, route.RequestType, route.ResponseType, route.Idempotent))
             .ToList();
 
     internal static void RecordEndpointError(Activity? activity, string method, string statusCode, string description, string phase, long startTimestamp) =>
@@ -267,11 +278,4 @@ public sealed class JsonRpcDispatcher {
         var elapsed = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
         JsonRpcTelemetry.RecordRequest(method, statusCode, elapsed);
     }
-
-    /// <summary>Encapsulates the typed invocation logic for a single RPC method.</summary>
-    private sealed record RpcMethodEntry(
-        string MethodName,
-        Type RequestType,
-        Type ResponseType,
-        Func<JsonElement?, IServiceProvider, CancellationToken, Task<RpcResult>> InvokeAsync);
 }

@@ -6,6 +6,11 @@
   [module default services](../../AGENTS.md#module-default-services),
   [decorator pipelines](../concepts/decorator-pipelines.mdx)
 
+> **Note (ADR-0010):** candidate 2 below, `IDomainEventBus.RequestAsync`, has since been **removed** — the event
+> bus is pub/sub-only. The typed in-process equivalent today is `IHandlerSender`/`IHandler`; the conclusion is
+> unchanged (it is still not a cross-module extraction path — a `[ModuleContract]` is). It is kept below as the
+> historical comparison.
+
 ## Context
 
 Elarion positions itself as a modular-monolith alternative to microservices. For
@@ -227,8 +232,8 @@ the seam stays "own the convention and the analyzer," not "generate adapters."
 
 ## Deferred follow-ups
 
-- **Renaming `[RpcMethod]`.** It already drives both JSON-RPC and MCP, and the in-process API is
-  deliberately *not* tied to it (it keys off handler discovery, not `[RpcMethod]`). A
+- **Renaming `[Handler]`.** It already drives both JSON-RPC and MCP, and the in-process API is
+  deliberately *not* tied to it (it keys off handler discovery, not `[Handler]`). A
   transport-neutral rename (e.g. `[Operation]` with an exposure-surface flags enum) is a coherent
   but broad breaking change, intentionally out of scope here.
 - **A generated gRPC/HTTP client backend** for `[ModuleContract]`, for when a module is extracted

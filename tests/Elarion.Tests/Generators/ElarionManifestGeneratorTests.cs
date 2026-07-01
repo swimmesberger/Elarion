@@ -22,7 +22,7 @@ public sealed class ElarionManifestGeneratorTests {
             public static class ManifestModule { }
 
             [HttpEndpoint("manifest")]
-            [RpcMethod("manifest.get")]
+            [Handler("manifest.get")]
             public sealed class GetManifest : IHandler<GetManifest.Query, Result<GetManifest.Response>> {
                 public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
                 public sealed record Response(string Name);
@@ -43,7 +43,7 @@ public sealed class ElarionManifestGeneratorTests {
     }
 
     [Fact]
-    public void Manifest_WarnsWhenMcpMethodIsAppliedToJsonRpcOnlyHandler() {
+    public void Manifest_WarnsWhenMcpHandlerIsAppliedToJsonRpcOnlyHandler() {
         const string source =
             """
             using System.Threading;
@@ -52,8 +52,8 @@ public sealed class ElarionManifestGeneratorTests {
 
             namespace Sample.Manifest;
 
-            [RpcMethod("manifest.get", Transports = RpcTransports.JsonRpc)]
-            [McpMethod(ToolName = "manifest_get")]
+            [Handler("manifest.get", Transports = HandlerTransports.JsonRpc)]
+            [McpHandler(ToolName = "manifest_get")]
             public sealed class GetManifest : IHandler<GetManifest.Query, Result<GetManifest.Response>> {
                 public sealed record Query;
                 public sealed record Response;
@@ -100,7 +100,7 @@ public sealed class ElarionManifestGeneratorTests {
             public sealed record GetThingQuery(int Id) : IQuery;
             public sealed record GetThingResponse(string Name);
 
-            [RpcMethod("things.get")]
+            [Handler("things.get")]
             [HttpEndpoint("things/{id}")]
             public sealed class GetThing : IHandler<GetThingQuery, Result<GetThingResponse>> {
                 public ValueTask<Result<GetThingResponse>> HandleAsync(GetThingQuery request, CancellationToken ct) =>
@@ -181,7 +181,7 @@ public sealed class ElarionManifestGeneratorTests {
 
             public sealed record AskQuery(int Id) : IQuery;
 
-            [RpcMethod("ask.now")]
+            [Handler("ask.now")]
             public sealed class Ask : IHandler<AskQuery, AskQuery> {
                 public ValueTask<AskQuery> HandleAsync(AskQuery request, CancellationToken ct) =>
                     ValueTask.FromResult(request);

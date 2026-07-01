@@ -1,6 +1,6 @@
 ---
 title: Hosting
-description: Wire the module bootstrapper, RPC method map, and JSON-RPC endpoint into an ASP.NET Core host.
+description: Wire the module bootstrapper, handler registry, and JSON-RPC endpoint into an ASP.NET Core host.
 ---
 
 The host turns generated registration code into a running JSON-RPC endpoint. It owns composition and
@@ -26,24 +26,21 @@ A single partial class tells the generator to emit the cross-module wiring in th
 ```csharp
 using Elarion.AspNetCore;
 
-namespace MyApp.Api.Hosting;
-
-[GenerateModuleBootstrapper]
-public static partial class ModuleBootstrapper;
+[assembly: GenerateModuleBootstrapper]
 ```
 
-`ModuleBootstrapper` gains **extension methods on their natural receivers** so the host wires modules
+`ElarionBootstrapper` gains **extension methods on their natural receivers** so the host wires modules
 fluently: `services.AddElarion(configuration)`, `endpoints.MapElarionEndpoints(configuration)`,
-`dispatcher.RegisterRpcMethods(configuration)`, `dispatcher.RegisterMcpMethods(configuration)`,
-`configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, and
-`configuration.IsModuleEnabled(name)` — plus the parameterless `ModuleBootstrapper.GetAllModuleNames()`
-and per-module transport extension methods (`Map{Module}Http`, `Add{Module}JsonRpc`, `Add{Module}Mcp`)
-and the parameterless `Get{Module}McpMetadata` for every module that owns `[HttpEndpoint]` / `[RpcMethod]`
+`registry.RegisterHandlers(configuration)`, `configuration.GetMcpMetadata()`,
+`configuration.GetAllJsonTypeInfoResolvers()`, and
+`configuration.IsModuleEnabled(name)` — plus the parameterless `ElarionBootstrapper.GetAllModuleNames()`
+and per-module transport extension methods (`Map{Module}Http`, `Add{Module}Handlers`)
+and the parameterless `Get{Module}McpMetadata` for every module that owns `[HttpEndpoint]` / `[Handler]`
 handlers.
 
 All transports are **module-scoped and feature-flag-gated** through the bootstrapper: a module disabled
 with `Modules:{Name}:Enabled = false` has its services, validators, `MapEndpoints`, `[HttpEndpoint]` routes,
-`[RpcMethod]` JSON-RPC methods, **and** MCP tools all left unmapped, so a disabled module disappears across
+`[Handler]` JSON-RPC methods, **and** MCP tools all left unmapped, so a disabled module disappears across
 every surface. Core modules are always mapped.
 
 ## Composing the host
@@ -64,7 +61,7 @@ var serializerOptions = CreateSerializerOptions(builder.Configuration);
 builder.Services.AddSingleton(serializerOptions);
 
 // Registers JSON-RPC options and the frozen JsonRpcDispatcher singleton, gated per module.
-builder.Services.AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods);
+builder.Services.AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers);
 
 var app = builder.Build();
 
@@ -76,12 +73,13 @@ app.Run();
 
 See [Serialization](/docs/capabilities/serialization) for `CreateSerializerOptions`.
 
-`AddElarionJsonRpc(serializerOptions, ModuleBootstrapper.RegisterRpcMethods)` is the **config-aware** overload: it
+`AddElarionJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers)` is the **config-aware** overload: it
 resolves `IConfiguration` when the dispatcher singleton is built and registers only the enabled modules'
-JSON-RPC-surfaced `[RpcMethod]` handlers. `MapElarionEndpoints` does the same gating for module `MapEndpoints`
-and generated `[HttpEndpoint]` routes. To expose the same handlers over MCP (an independent, equally gated
-transport), pair `builder.Configuration.GetMcpMetadata()` with
-`ModuleBootstrapper.RegisterMcpMethods` via `AddElarionMcp` — see [MCP server](/docs/capabilities/transports/mcp).
+handlers. The JSON-RPC adapter then serves only the operations flagged `HandlerTransports.JsonRpc`.
+`MapElarionEndpoints` does the same gating for module `MapEndpoints`
+and generated `[HttpEndpoint]` routes. To expose the same handlers over MCP (a thin adapter over the same
+handler bus, equally gated), pair `builder.Configuration.GetMcpMetadata()` with the same
+`ElarionBootstrapper.RegisterHandlers` registry via `AddElarionMcp` — see [MCP server](/docs/capabilities/transports/mcp).
 
 <Callout type="info">
   The dispatcher is **frozen** after registration. Freezing produces an immutable, thread-safe map
@@ -102,7 +100,7 @@ Every transport — services, validators, HTTP, JSON-RPC, and MCP — is wired t
 ungated map: a host that conceptually has "no modules" simply declares a single **core** `[AppModule]`
 (core modules map unconditionally), which gives the same always-on behavior while keeping one consistent
 path. Handlers whose namespace falls under no module are reported (`ELHTTP003`/`ELRPC001`) so they are
-never silently dropped.
+never silently dropped. The `ELRPC001` message now refers to `[Handler]`.
 
 ## What the host still owns
 

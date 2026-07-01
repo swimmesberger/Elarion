@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
+using Elarion.Abstractions;
 using Elarion.AspNetCore;
 using Elarion.JsonRpc;
 using Microsoft.AspNetCore.Http;
@@ -18,11 +19,11 @@ public sealed class JsonRpcTelemetryTests {
         using var meters = new MeterCollector(JsonRpcTelemetry.MeterName);
         var jsonOptions = CreateJsonOptions();
         var dispatcher = new JsonRpcDispatcher(jsonOptions)
-            .Map<TestRequest, TestResponse>(
+            .MapDelegate<TestRequest, TestResponse>(
                 "test.echo",
-                static (request, _, _) => Task.FromResult(RpcResult<TestResponse>.Success(new TestResponse {
+                static (request, _, _) => ValueTask.FromResult<Result<TestResponse>>(new TestResponse {
                     Value = request.Value
-                })))
+                }))
             .Freeze();
         await using var provider = CreateProvider(dispatcher, jsonOptions);
         var body = """
@@ -99,11 +100,11 @@ public sealed class JsonRpcTelemetryTests {
     public async Task HandleRpc_NumericId_EchoesNumericResponseId() {
         var jsonOptions = CreateJsonOptions();
         var dispatcher = new JsonRpcDispatcher(jsonOptions)
-            .Map<TestRequest, TestResponse>(
+            .MapDelegate<TestRequest, TestResponse>(
                 "test.echo",
-                static (request, _, _) => Task.FromResult(RpcResult<TestResponse>.Success(new TestResponse {
+                static (request, _, _) => ValueTask.FromResult<Result<TestResponse>>(new TestResponse {
                     Value = request.Value
-                })))
+                }))
             .Freeze();
         await using var provider = CreateProvider(dispatcher, jsonOptions);
         var context = CreateContext(provider, """{ "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "ok" }, "id": 42 }""");
@@ -124,11 +125,11 @@ public sealed class JsonRpcTelemetryTests {
         using var activities = new ActivityCollector(JsonRpcTelemetry.ActivitySourceName);
         var jsonOptions = CreateJsonOptions();
         var dispatcher = new JsonRpcDispatcher(jsonOptions)
-            .Map<TestRequest, TestResponse>(
+            .MapDelegate<TestRequest, TestResponse>(
                 "test.echo",
-                static (request, _, _) => Task.FromResult(RpcResult<TestResponse>.Success(new TestResponse {
+                static (request, _, _) => ValueTask.FromResult<Result<TestResponse>>(new TestResponse {
                     Value = request.Value
-                })))
+                }))
             .Freeze();
         await using var provider = CreateProvider(dispatcher, jsonOptions);
         var context = CreateContext(provider, """
@@ -152,11 +153,11 @@ public sealed class JsonRpcTelemetryTests {
         using var activities = new ActivityCollector(JsonRpcTelemetry.ActivitySourceName);
         var jsonOptions = CreateJsonOptions();
         var dispatcher = new JsonRpcDispatcher(jsonOptions)
-            .Map<TestRequest, TestResponse>(
+            .MapDelegate<TestRequest, TestResponse>(
                 "test.echo",
-                static (request, _, _) => Task.FromResult(RpcResult<TestResponse>.Success(new TestResponse {
+                static (request, _, _) => ValueTask.FromResult<Result<TestResponse>>(new TestResponse {
                     Value = request.Value
-                })))
+                }))
             .Freeze();
         await using var provider = CreateProvider(dispatcher, jsonOptions);
         var context = CreateContext(provider, """{ "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "notify" } }""");

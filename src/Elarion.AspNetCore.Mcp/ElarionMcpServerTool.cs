@@ -1,6 +1,8 @@
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Elarion.JsonRpc;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc.Mcp;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
@@ -9,8 +11,8 @@ using ModelContextProtocol.Server;
 namespace Elarion.AspNetCore.Mcp;
 
 /// <summary>
-/// An <see cref="McpServerTool"/> that proxies a single registered JSON-RPC method through the live
-/// <see cref="JsonRpcDispatcher"/> via <see cref="RpcToolInvoker"/>.
+/// An <see cref="McpServerTool"/> that proxies a single registered operation through the shared
+/// <see cref="HandlerDispatcher"/> (filtered to <see cref="HandlerTransports.Mcp"/>) via <see cref="RpcToolInvoker"/>.
 /// </summary>
 /// <remarks>
 /// The dispatcher is resolved from DI at invocation time so the configured singleton (with logging) is used.
@@ -38,11 +40,15 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
     public override async ValueTask<CallToolResult> InvokeAsync(
         RequestContext<CallToolRequestParams> request,
         CancellationToken cancellationToken = default) {
-        // request.Services is the application root provider (not request-scoped); RpcToolInvoker scopes per call.
+        // request.Services is the SDK's per-call scope (McpServerOptions.ScopeRequests defaults to true),
+        // derived from the session/app-root provider — NOT the HTTP request scope, so the request-scope
+        // current-user snapshot is unreachable here. RpcToolInvoker scopes again so isolation holds even if a
+        // host disabled ScopeRequests; either way the per-message principal (below) is the current-user source.
         var services = request.Services
             ?? throw new InvalidOperationException("MCP request has no service provider.");
-        var dispatcher = services.GetRequiredService<McpDispatcher>().Inner;
-        var jsonOptions = dispatcher.JsonOptions;
+        var mcp = services.GetRequiredService<McpDispatcher>();
+        var dispatcher = mcp.Inner;
+        var jsonOptions = mcp.SerializerOptions;
 
         // Convert the MCP argument dictionary into a JSON object for the dispatcher. The document is kept alive
         // for the whole dispatch call (deserialization happens during DispatchAsync), then disposed.
@@ -51,8 +57,17 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
             ? JsonSerializer.SerializeToDocument(arguments, jsonOptions)
             : null;
 
+        // Capture the per-message principal (RequestContext.User, stamped by the Streamable-HTTP transport on
+        // each message) so the per-call scope's ICurrentUser resolves. This is the correct source for MCP in
+        // both stateful and stateless modes — the call scope can't reach the HTTP request-scope snapshot.
+        var context = new DispatchScopeContext();
+        if (request.User is { } user) {
+            context.Set<ClaimsPrincipal>(user);
+        }
+
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, _methodName, argumentsDocument?.RootElement, services, cancellationToken);
+            dispatcher, HandlerTransports.Mcp, _methodName, argumentsDocument?.RootElement, services, jsonOptions,
+            context, cancellationToken);
 
         return ToCallToolResult(result, jsonOptions);
     }

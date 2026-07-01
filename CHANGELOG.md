@@ -25,6 +25,194 @@ minor releases may include breaking changes.
   minimal direct-upload endpoint (`MapElarionBlobUploads`) for FilePond and plain `fetch`/`<form>` clients. The S3
   wire protocol (SigV4/`aws-chunked`/XML) is a deliberate non-goal. See
   [`docs/capabilities/blob-uploads`](docs/capabilities/blob-uploads.mdx).
+- **Idempotency (`[Idempotent]`).** A transport-neutral, declarative way to make a command handler safe to
+  retry: a generated decorator owns a unit-of-work transaction, writes the idempotency key **atomically with
+  the handler's business writes**, lets a database unique constraint reject duplicates, and replays the stored
+  `Result<T>`. Single-transaction and success-only by default (a failure rolls back → the key stays retryable;
+  opt-in `StoreFailures = Definitive` stores definitive failures via a savepoint); a concurrent in-flight
+  duplicate fast-fails with `409` (Postgres `lock_timeout`, configurable `WaitThenReplay`); reuse with a
+  different body is `422`; missing key is `400`. Concurrent duplicates serialize across nodes on the database
+  unique constraint — **no external distributed lock**. The `[Idempotent]` attribute, the
+  `IIdempotencyStore`/`IIdempotencyKeyAccessor`/`IUnitOfWork` seams, the `IdempotencyDecorator`, and a
+  framework-owned `TransactionDecorator` live in `Elarion.Abstractions`; the in-memory default store and
+  `AddElarionIdempotency` in `Elarion`; the durable EF Core store, `[GenerateElarionIdempotencyKeys]`
+  generator, and retention purge in the new **`Elarion.Idempotency.EntityFrameworkCore`**; the EF unit of work
+  in the new **`Elarion.EntityFrameworkCore.UnitOfWork`**; and the `Idempotency-Key` HTTP header capture
+  (`UseElarionIdempotencyKey`) in `Elarion.AspNetCore`. New diagnostics `ELIDEM001`–`ELIDEM004` and
+  `ELIDEMEF001`. See [ADR-0021](docs/decisions/0021-idempotency.md) and
+  [the idempotency concept doc](docs/concepts/idempotency.mdx).
+- **Idempotency across the wire.** The JSON-RPC schema export now marks each `[Idempotent]` operation with
+  `"idempotent": true`, the server reads a per-call key at `params._meta` (batch-correct, JSON-RPC and MCP), and
+  the generated TypeScript client **attaches an idempotency key by default** (a `crypto.randomUUID()` at
+  `params._meta`) to those operations — configurable via `idempotency` on the client and a per-call
+  `idempotencyKey` override. Retry stays a higher-layer concern (e.g. TanStack Query); the client only attaches
+  the key.
+
+### Changed
+- **The module bootstrapper is auto-generated as the fixed-name `ElarionBootstrapper` (breaking).**
+  `[GenerateModuleBootstrapper]` becomes an **assembly** attribute (`[assembly: GenerateModuleBootstrapper]`)
+  and `AppModuleDiscoveryGenerator` emits the host wiring (`AddElarion`, `MapElarionEndpoints`,
+  `RegisterHandlers`, `GetMcpMetadata`, …) as a framework-named `ElarionBootstrapper` static in the host's root
+  namespace — you no longer declare a `partial class`. Framework-owned names give every Elarion host the same
+  composition root (see [ADR-0018](docs/decisions/0018-generated-infrastructure-is-framework-named.md)).
+  **Migration:** delete your `[GenerateModuleBootstrapper]` partial class, add
+  `[assembly: GenerateModuleBootstrapper]`, and reference `ElarionBootstrapper.RegisterHandlers` (etc.) instead of
+  your old type name.
+- **Split the web-free Identity model into `Elarion.EntityFrameworkCore.Identity` (breaking).** The
+  `[GenerateElarionIdentity]` marker, its bundled source generator, and the `ApplyElarionIdentity` model
+  helper moved out of `Elarion.AspNetCore.Identity` into a new `Elarion.EntityFrameworkCore.Identity` package
+  that depends only on EF Core + `Microsoft.AspNetCore.Identity.EntityFrameworkCore` (no
+  `Microsoft.AspNetCore.App` `FrameworkReference`). A persistence/application layer that owns the `DbContext`
+  can now compose the snake_case Identity model **without** pulling in the ASP.NET shared framework — the same
+  EF-only ↔ web split as `Elarion.EntityFrameworkCore` ↔ `Elarion.AspNetCore`. The host wiring
+  (`AddElarionIdentity`, the `ICurrentUser` mapping, the authorizer) stays in `Elarion.AspNetCore.Identity`.
+  **Migration:** reference `Elarion.EntityFrameworkCore.Identity` from the project that declares
+  `[GenerateElarionIdentity]` / calls `ApplyElarionIdentity`, and change its `using Elarion.AspNetCore.Identity;`
+  to `using Elarion.EntityFrameworkCore.Identity;`. See [`docs/capabilities/identity`](docs/capabilities/identity.mdx).
+
+### Fixed
+- **`ICurrentUser` now resolves inside JSON-RPC and MCP handlers (and so does authorization).** The
+  dispatchers run each call in a fresh DI child scope, which does not inherit the request scope's scoped
+  `CurrentUserSnapshot`, so a handler injecting `ICurrentUser` — or the `AuthorizationDecorator`, which
+  reads it — threw `"Current user has not been initialized"`. Now every dispatcher-based transport seeds the
+  per-call snapshot the same way: it captures the authenticated principal at its boundary (`HttpContext.User`
+  for JSON-RPC, `RequestContext.User` for MCP) into a `DispatchScopeContext`, and one initializer applies it —
+  no `IHttpContextAccessor`, no `AsyncLocal`. Plain HTTP endpoints were unaffected. See
+  [`docs/capabilities/current-user`](docs/capabilities/current-user.mdx).
+
+### Added
+- **Source-generated permission catalog (`ElarionPermissions` + `IPermissionCatalog`), Kubernetes-RBAC style.**
+  `[RequirePermission]` now takes a **`(resource, verb)`** pair (`[RequirePermission("properties", Verbs.Read)]`,
+  enforced as the composed claim `properties.read`; verb vocabulary open via the new `Verbs` constants or any
+  string). A new `PermissionCatalogGenerator` discovers every `[RequirePermission(resource, verb)]`/`[RequireRole]`
+  and emits two surfaces, so seeding and role→permission policy enumerate the full set instead of a hand-kept
+  `Permissions.All`/`ReadOnly` list — zero central edits per guarded handler. The **compile-time**
+  `ElarionPermissions` static (in the assembly's root namespace) exposes `All`/`Roles`/`ByModule`/`ByResource`/
+  `ByVerb` and typed accessors (`ElarionPermissions.Properties.Read`), aggregated cross-assembly from the Elarion
+  manifest — so static role policy reads like K8s rules (`ByResource["properties"]`, `ByVerb["read"]`). The
+  **runtime** `IPermissionCatalog` (`Elarion.Abstractions.Authorization`, registered by `AddElarionAuthorization`)
+  exposes the same data for dynamic enumeration, aggregating one `PermissionCatalogModule` per module via the
+  module's gated `ConfigureDefaultServices` (cross-assembly; a disabled module contributes nothing). Generation is
+  on under `[assembly: UseElarion]` or `[assembly: GeneratePermissionCatalog]`; diagnostics `ELPERM001` (handler
+  under no module) and `ELPERM002` (colliding typed accessor). See
+  [`docs/concepts/authorization`](docs/concepts/authorization.mdx#permission-catalog).
+- **Per-call dispatch-scope seeding (`Elarion.JsonRpc`).** `IDispatchScopeInitializer` +
+  `DispatchScopeContext` + the `IServiceProvider.CreateDispatchScope(context)` / `SeedScope(context)` helpers
+  carry request-boundary state into the fresh per-call child scope dispatcher-based transports (JSON-RPC, MCP)
+  create. Current-user is one registered consumer; hosts add their own (tenant, correlation, …) via
+  `TryAddEnumerable`.
+- **Off-HTTP `ICurrentUser` (`Elarion` core).** `AddElarionClaimsCurrentUser` + `ClaimsPrincipalCurrentUser` +
+  `ClaimsCurrentUserOptions` provide the claims-based `ICurrentUser` with **no ASP.NET dependency**, so gRPC,
+  console, or any custom transport gets identity + `[Require*]` authorization by referencing only `Elarion`.
+- **`HandlerInvoker.InvokeAsync<TRequest,TResponse>` (`Elarion` core).** The typed-direct transport entry
+  point: creates a seeded dispatch scope, resolves the decorated handler, invokes it, and disposes the scope —
+  the sibling of the JSON-RPC/MCP name-based dispatch path for transports that know the static handler type.
+- **`IAppErrorTranslator<TError>` (`Elarion.Abstractions`).** A seam for mapping `AppError` to a transport's
+  wire error type. The JSON-RPC bridge resolves `IAppErrorTranslator<RpcError>` (defaulting to the
+  `AppErrorMapper` codes), so a host can override JSON-RPC error codes by registering its own.
+- **Runtime-changeable, database-backed settings (`Elarion.Settings` + `Elarion.Settings.EntityFrameworkCore` + `Elarion.Settings.Configuration`).**
+  Key/value settings with **swappable abstractions on both sides**. The sink side is `ISettingsStore` plus the
+  listen seam `ISettingsChangeSource`/`ISettingsChangePublisher`, keyed by an extensible `(Kind, Owner)`
+  `SettingsScope` (`Global` and `User(ownerId)` ship) and hierarchical, virtual `:`-separated keys, with
+  optimistic-concurrency `SettingWriteResult`. The shipped in-process backend (single-instance notify) and an
+  EF Core backend (`EfCoreSettingsStore<TDbContext>`, change-tracker-free immediate writes, `UseElarionSettings`)
+  both implement it. The consuming side is the AOT-clean scoped `ISettingsManager` (typed access via source-gen
+  `JsonTypeInfo<T>`, per-user scope resolved from `ICurrentUser`, failing closed when unauthenticated), plus an
+  `IConfiguration`/`IOptionsMonitor` adapter (`AddElarionSettingsConfiguration`) with `IChangeToken` reload.
+  See [`docs/concepts/settings`](docs/concepts/settings.mdx) and [ADR-0011](docs/decisions/0011-runtime-settings-subsystem.md).
+- **Reusable variable substitution (`Elarion.Abstractions.Substitution`).** Spring-style `${key:-default}`
+  placeholders resolved from a pluggable `IVariableSource` (and change-observable `IObservableVariableSource`):
+  `VariableSubstitution` supports both whole-value and embedded substitution, `ConfigurationVariableSource`
+  bridges to `IConfiguration` (and its reload token), and `AddElarionVariableSubstitution` registers a default
+  source. A general building block, not tied to any one subsystem. See
+  [`docs/concepts/variable-substitution`](docs/concepts/variable-substitution.mdx).
+- **Scheduler live reschedule on variable change.** The in-memory scheduler resolves `${...}` schedule
+  variables through `IVariableSource`; when the source is observable, a watched-variable change **reschedules
+  affected recurring jobs immediately** (signature-based change detection; supersede + re-enqueue; mid-run
+  fixed-delay chains reschedule themselves), beyond per-occurrence next-fire pickup.
+- **Resource-based & data-level authorization (`Elarion.Abstractions` + `Elarion.Paging` + new `Elarion.Authorization.EntityFrameworkCore`).**
+  Per-resource read/write checks **and** efficient database-level filtering, as two opt-in legs driven from one
+  declarative source. *List filtering:* `[ResourceFilter<TEntity>]` generates a reflection-free `IQueryAuthorizer<T>`
+  predicate composed into `IQueryable` via `.WhereAuthorized(spec, user)` **before** paging — the database filters,
+  with correct counts/pagination (never in-memory `@PostFilter`); rules are `OwnerProperty`/`TenantProperty` plus a
+  `Shared` rule that becomes a correlated `EXISTS` over the grants table for the caller's user **or any of their
+  roles**. *Point check:* `[RequireResource(typeof(T), Operation = "read", Id = nameof(Req.Id))]` extends the
+  `AuthorizationDecorator` with an `IResourceAuthorizer` seam — the resource id is a compile-checked request path, not
+  an `#id` string ([ADR-0012](docs/decisions/0012-dynamic-variable-references.md)) — and `IResourceAuthorizer` doubles
+  as the escape hatch for handler-owned pre-write validation. *Sharing:* the auth-provider-neutral
+  `Elarion.Authorization.EntityFrameworkCore` package ships a DB-native `ResourceGrant` table (user/role shares),
+  `IResourceGrantStore`, the grants-backed authorizer, and the Identity-consistent `[GenerateElarionResourceGrants]`
+  DbSet generator — composes with, but does not depend on, ASP.NET Identity. Generated filter specs are
+  auto-registered and module-feature-gated by the host bootstrapper via the assembly manifest. See
+  [`docs/concepts/resource-authorization`](docs/concepts/resource-authorization.mdx) and
+  [ADR-0013](docs/decisions/0013-resource-and-data-level-authorization.md).
+
+### Changed
+- **The event bus is now pub/sub-only; request/reply is unified under typed dispatch (breaking).** See
+  [ADR-0010](docs/decisions/0010-event-bus-is-pub-sub-only.md). `IDomainEventBus.RequestAsync` and the single-
+  **responder** role of `[ConsumeEvent]` are removed — `[ConsumeEvent]` now means exactly one thing, a fan-out
+  subscriber (handler form returns `Result<Unit>`/`IHandler<TEvent>`; method form returns `void`/`Task`/`ValueTask`
+  or the non-generic `Result`/`Task<Result>`/`ValueTask<Result>` for a failure channel), and a `Result<T>` *with a
+  value* is rejected (`ELEVT005` handler-form, `ELEVT002` method-form; the
+  duplicate-responder `ELEVT004` is retired). For an in-process, in-transaction typed request/reply, inject the new
+  **`IHandlerSender`** and call `SendAsync<TRequest, TResponse>(request, ct)` (auto-registered by the generated
+  bootstrapper, or `AddElarionHandlerSender()` manually), or inject `IHandler<TRequest, Result<TResponse>>` directly. To upgrade a former
+  responder: drop `[ConsumeEvent]` and the `IDomainEvent` marker on the request, and replace
+  `bus.RequestAsync<R, T>(r, ct)` with `sender.SendAsync<R, T>(r, ct)`.
+- **Named handler dispatch is now transport-agnostic (breaking — source + generated host wiring).** A handler
+  is mapped onto a single transport-neutral request/reply bus, `HandlerDispatcher`
+  (`Elarion.Abstractions.Dispatch`), which owns no serialization or wire format; **JSON-RPC and MCP are now
+  thin adapters over that one shared bus** (each serving only the operations flagged for its surface) rather
+  than two separate dispatcher instances. `[RpcMethod]` is renamed to **`[Handler]`** and its name is now
+  **optional** — when omitted the operation name is inferred by convention as `{module}.{operation}` (the
+  handler type name minus a `Handler`/`Command`/`Query`/`Request` suffix, camelCased; an explicit name is
+  recommended for stable public/wire contracts). `RpcTransports` is renamed to **`HandlerTransports`**
+  (`JsonRpc`/`Mcp`/`All` unchanged) and `[McpMethod]` to **`[McpHandler]`**. The generated host wiring's two
+  methods `RegisterRpcMethods`/`RegisterMcpMethods` (and the per-module `Add{Module}JsonRpc`/`Add{Module}Mcp`)
+  are replaced by a single **`RegisterHandlers`** (per-module `Add{Module}Handlers`) that both adapters
+  resolve, and the JSON-RPC `MapHandler` bridge is removed in favor of mapping onto the `HandlerDispatcher`
+  (`dispatcher.Map<Req,Resp>("x")` / `dispatcher.MapDelegate<Req,Resp>("x", fn)`). To upgrade: rename the
+  attributes/enum, and change host calls to pass `ModuleBootstrapper.RegisterHandlers` to
+  `AddElarionJsonRpc(serializerOptions, …)` and `AddElarionMcp(metadata, serializerOptions, …, configure)`. Pass
+  the **same** `RegisterHandlers` delegate to both transports — the shared bus is built once (first registration
+  wins). MCP tool calls now dispatch directly through the bus and no longer emit the JSON-RPC transport-level OTel
+  span/metric (handler-level tracing is unchanged); operation names must be unique across the bus, and a collision
+  is reported at compile time (`ELRPC003`) and rejected at registration.
+- **`Elarion` core is now transport-agnostic — it no longer references `Elarion.JsonRpc`.** The
+  transport-neutral dispatch-scope rail (`DispatchScopeContext` / `IDispatchScopeInitializer` /
+  `CreateDispatchScope` / `SeedScope`) moved to `Elarion.Abstractions` (namespace
+  `Elarion.Abstractions.Dispatch`), and the JSON-RPC handler bridge (`MapHandler` / `AppErrorMapper` /
+  `JsonRpcAppErrorTranslator`) moved from core into `Elarion.JsonRpc` (which now references
+  `Elarion.Abstractions`). JSON-RPC is genuinely package-optional: reference `Elarion.JsonRpc` only when using
+  the dispatcher. **Breaking namespaces (pre-1.0):** the rail types are now under `Elarion.Abstractions.Dispatch`;
+  `MapHandler` / `AppErrorMapper` are now under `Elarion.JsonRpc`.
+- **`ClaimsPrincipalCurrentUser` materializes claims lazily** (on first access, cached) instead of eagerly on
+  `Initialize`, so seeding a fresh snapshot per dispatch call costs nothing until a claim is read and no
+  claims are parsed twice — making per-call seeding uniform across transports without copying.
+- **Identity re-layered into core (breaking for direct users of the ASP.NET types).** The claims snapshot,
+  options, and current-user initializer moved from `Elarion.AspNetCore` to `Elarion` core
+  (`ClaimsPrincipalCurrentUser` / `ClaimsCurrentUserOptions`); `CurrentUserSnapshot` and
+  `AspNetCoreCurrentUserOptions` are removed. `AddElarionCurrentUser` (ASP.NET) now delegates to
+  `AddElarionClaimsCurrentUser` and takes `ClaimsCurrentUserOptions`; the middleware seeds the request scope
+  via `SeedScope`. Behavior is unchanged for HTTP hosts.
+- **Breaking (custom batch strategies):** `IBatchExecutionStrategy.ExecuteAsync` takes a
+  `DispatchScopeContext context`; strategies create each per-item scope via
+  `CreateDispatchScope(context)` so scoped state (current user, …) is seeded per item.
+- The in-memory scheduler now resolves `${...}` schedule variables through the general `IVariableSource` seam
+  (config-backed by default via `AddElarionVariableSubstitution`) instead of taking `IConfiguration` directly,
+  so the variable source is swappable. `ScheduledJobSchedule.Resolve(IConfiguration)` is unchanged and gains a
+  `Resolve(IVariableSource)` overload.
+
+### Removed
+- **Breaking:** `ConfigPlaceholder` (`Elarion.Abstractions.Scheduling`) is removed in favor of the general
+  `VariableSubstitution`. The common surface — `ScheduledJobSchedule.Resolve(IConfiguration)` — is unchanged;
+  only direct callers of the low-level helper need to switch (same `${key:-default}` semantics).
+
+### Documentation
+- Tutorial `features.mdx` now shows the no-reflection `IResultFailureFactory<TResponse>` /
+  `TResponse.Failure(...)` pattern for validation decorators instead of a reflection-based helper.
+- New [`docs/concepts/transports`](docs/concepts/transports.mdx): authoring a new transport (gRPC, console, …)
+  — the seams, the scope rail, off-HTTP `ICurrentUser`, the two invoke paths, and `ErrorKind` mapping.
 
 ## [0.2.2] - 2026-06-27
 

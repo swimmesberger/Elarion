@@ -17,6 +17,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="OpenFeature.Hosting" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
@@ -31,12 +32,25 @@
     <ProjectReference Include="../../src/Elarion.Blobs.Tus.PostgreSql/Elarion.Blobs.Tus.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj" />
+    <ProjectReference Include="../../src/Elarion.Settings/Elarion.Settings.csproj" />
+    <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore/Elarion.Settings.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj" />
     <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />
     <ProjectReference Include="../../src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
+    <ProjectReference Include="../../src/Elarion.Authorization.EntityFrameworkCore/Elarion.Authorization.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.Authorization.EntityFrameworkCore.Generators/Elarion.Authorization.EntityFrameworkCore.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.Generators/Elarion.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj" />
+    <ProjectReference Include="../../src/Elarion.Idempotency.EntityFrameworkCore/Elarion.Idempotency.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.FeatureFlags.OpenFeature/Elarion.FeatureFlags.OpenFeature.csproj" />
+    <ProjectReference Include="../../src/Elarion.FeatureFlags.FeatureManagement/Elarion.FeatureFlags.FeatureManagement.csproj" />
+    <ProjectReference Include="../../src/Elarion.Caching/Elarion.Caching.csproj" />
+    <ProjectReference Include="../../src/Elarion.Caching.PostgreSql/Elarion.Caching.PostgreSql.csproj" />
+    <ProjectReference Include="../../src/Elarion.Resilience/Elarion.Resilience.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj" />
-    <ProjectReference Include="../../src/Elarion.AspNetCore.Identity.Generators/Elarion.AspNetCore.Identity.Generators.csproj" />
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj" />
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity.Generators/Elarion.EntityFrameworkCore.Identity.Generators.csproj" />
   </ItemGroup>
 </Project>

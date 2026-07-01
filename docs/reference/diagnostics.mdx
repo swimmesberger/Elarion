@@ -16,13 +16,14 @@ it, grouped by prefix and sorted by id.
 
 ## ELRPC — JSON-RPC method generation
 
-JSON-RPC method emission for `[RpcMethod]` handlers. See
+JSON-RPC method emission for `[Handler]` handlers. See
 [JSON-RPC](/docs/capabilities/transports/json-rpc).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELRPC001 | Warning | An `[RpcMethod]` handler's namespace is not under any `[AppModule]`; it is registered unconditionally (not gated by a module feature flag). MCP reuses this id since it is built on `[RpcMethod]`. | Move the handler under a module's namespace so its RPC/MCP registration is module-scoped and feature-gated. |
-| ELRPC002 | Warning | An `[RpcMethod]` handler does not implement `IHandler<TRequest, TResponse>` with a `Result<T>` response, so no RPC method can be generated. | Make the handler implement `IHandler<TRequest, Result<TResponse>>` (or the `IHandler<T>` sugar) so the request/response shape is resolvable. |
+| ELRPC001 | Warning | A `[Handler]` handler's namespace is not under any `[AppModule]`; it is registered unconditionally (not gated by a module feature flag). MCP reuses this id since it is built on `[Handler]`. | Move the handler under a module's namespace so its RPC/MCP registration is module-scoped and feature-gated. |
+| ELRPC002 | Warning | A `[Handler]` handler does not implement `IHandler<TRequest, TResponse>` with a `Result<T>` response, so no RPC method can be generated. | Make the handler implement `IHandler<TRequest, Result<TResponse>>` (or the `IHandler<T>` sugar) so the request/response shape is resolvable. |
+| ELRPC003 | Warning | Two handlers resolve to the same operation name on the shared bus (e.g. an inferred name colliding with another inferred or explicit one); one would silently win at runtime. | Give one handler an explicit `[Handler("...")]` name so every operation name is unique across the bus. |
 
 ## ELHTTP — HTTP endpoint generation
 
@@ -38,11 +39,11 @@ Minimal-API endpoint emission for `[HttpEndpoint]` handlers. See
 
 ## ELMCP — MCP customization
 
-MCP tool customization for `[McpMethod]`. See [MCP](/docs/capabilities/transports/mcp).
+MCP tool customization for `[McpHandler]`. See [MCP](/docs/capabilities/transports/mcp).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELMCP003 | Warning | A handler carries `[McpMethod]` (tool-name customization) but its `[RpcMethod]` `Transports` flag does not include `RpcTransports.Mcp`, so the customization has no effect. | Remove `[McpMethod]`, or include `RpcTransports.Mcp` in the handler's `[RpcMethod]` `Transports`. |
+| ELMCP003 | Warning | A handler carries `[McpHandler]` (tool-name customization) but its `[Handler]` `Transports` flag does not include `HandlerTransports.Mcp`, so the customization has no effect. | Remove `[McpHandler]`, or include `HandlerTransports.Mcp` in the handler's `[Handler]` `Transports`. |
 
 ## ELEVT — Event consumers
 
@@ -51,10 +52,9 @@ Event-consumer discovery for `[ConsumeEvent]`. See [Consuming events](/docs/capa
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELEVT001 | Error | A method-form `[ConsumeEvent]` consumer method is declared on a class that is not annotated with `[Service]`. | Declare the consumer method on a `[Service]` class, or use the handler-form consumer instead. |
-| ELEVT002 | Error | A method-form `[ConsumeEvent]` consumer has an unsupported signature. It must be an accessible, non-generic, non-static instance method accepting exactly one `IDomainEvent`/`IIntegrationEvent` parameter (optionally `IEventContext` and/or `CancellationToken`) and returning `void`/`Task`/`ValueTask` (subscriber) or `Result<T>` (domain responder). | Take one event parameter (optionally `IEventContext` and/or `CancellationToken`), return `void`/`Task`/`ValueTask` for a subscriber or `Result<T>` for a domain responder, and make it an accessible, non-generic, non-static instance method. |
+| ELEVT002 | Error | A method-form `[ConsumeEvent]` consumer has an unsupported signature. Event consumers are fan-out subscribers, so it must be an accessible, non-generic, non-static instance method accepting exactly one `IDomainEvent`/`IIntegrationEvent` parameter (optionally `IEventContext` and/or `CancellationToken`) and returning `void`/`Task`/`ValueTask` or the non-generic `Result`/`Task<Result>`/`ValueTask<Result>`. | Return `void`/`Task`/`ValueTask` or the non-generic `Result` (a fan-out subscriber); a `Result<T>` with a value is request/reply — call a handler by type with `IHandlerSender`/`IHandler` instead. |
 | ELEVT003 | Warning | A `[ConsumeEvent]` consumer's namespace is not under any `[AppModule]`, so it will not be registered. | Move the consumer under a module's namespace so it is wired by that module. |
-| ELEVT004 | Error | More than one responder is declared for the same request type (`RequestAsync` requires exactly one responder per request type). | Keep exactly one responder for the request type; remove or convert the duplicates. |
-| ELEVT005 | Error | A class-level `[ConsumeEvent]` is on a type that does not implement exactly one `IHandler<TEvent, Result<TResponse>>` (or `IHandler<TEvent>`) whose request is an `IDomainEvent`/`IIntegrationEvent`; or an integration-event handler returns a non-`Unit` `Result<T>` (integration events are fan-out only); or the marker is on a non-handler. | Implement exactly one `IHandler<TEvent, Result<TResponse>>` (or `IHandler<TEvent>`) whose request is an `IDomainEvent`/`IIntegrationEvent`; for integration events return `Result<Unit>` (or use `IHandler<TEvent>`) since they are fan-out only. |
+| ELEVT005 | Error | A class-level `[ConsumeEvent]` is on a type that does not implement exactly one `IHandler<TEvent>` (or `IHandler<TEvent, Result<Unit>>`) whose request is an `IDomainEvent`/`IIntegrationEvent`; or it returns a non-`Unit` `Result<T>` (event consumers are fan-out subscribers); or the marker is on a non-handler. | Implement exactly one `IHandler<TEvent>` (response `Result<Unit>`) whose request is an `IDomainEvent`/`IIntegrationEvent`; for a typed reply use `IHandlerSender`/`IHandler` instead of the event bus. |
 
 ## ELMOD — Module boundaries
 
@@ -65,6 +65,33 @@ App-module discovery and the `ModuleBoundaryAnalyzer`. See
 | --- | --- | --- | --- |
 | ELMOD001 | Warning | Two `[AppModule]` types share the same namespace; generated transport handlers in that namespace are associated with the alphabetically first matching module (ambiguous ownership). | Give each module a distinct namespace so handler-to-module association is unambiguous. |
 | ELMOD002 | Warning | Location-based: a type in one `[AppModule]` depends (via constructor parameter, field, or property) on a type **inside** another module — an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]` — that is not a published `[ModuleContract]`. Everything **outside** every module (the shared kernel and platform ports) is shareable; a shared-kernel entity is exempt because of *where it lives*, not because entities are special. | Reach the other module through its `[ModuleContract]` (used sparingly), a platform-capability port outside the modules, or move shared data/value types to the shared kernel. |
+
+## ELAUTH — Authorization
+
+Authorization-decorator attachment for `[RequirePermission]`/`[RequireRole]`/`[RequireClaim]`/`[RequirePolicy]`/`[RequireResource]`. See [Authorization](/docs/concepts/authorization).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELAUTH001 | Error | A handler declares an authorization requirement but its response type does not implement `IResultFailureFactory<T>`, so the authorization check cannot short-circuit and would be silently skipped. | Return `Result<T>` or `Result` from the authorized handler so the check can short-circuit to `Unauthorized`/`Forbidden`. |
+| ELAUTH002 | Error | A handler declares `[RequireResource]` with an `Id` path that does not resolve to a property on the request type. | Point `[RequireResource]` `Id` at an existing property path on the request, e.g. `nameof(Request.Id)` or a dotted path of existing properties. |
+
+## ELPOL — Authorization policies
+
+Named-policy registration for `[AuthorizationPolicy]`. See [Authorization](/docs/concepts/authorization).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELPOL001 | Error | `[AuthorizationPolicy]` is applied to a type that does not implement `IAuthorizationPolicy`. | Apply `[AuthorizationPolicy("name")]` only to a class implementing `IAuthorizationPolicy`. |
+| ELPOL002 | Warning | An `[AuthorizationPolicy]` class's namespace is not under any `[AppModule]`, so it is not auto-registered. | Move the `[AuthorizationPolicy]` class under an `[AppModule]` namespace so it is auto-registered. |
+
+## ELPERM — Permission catalog
+
+Permission-catalog generation for `[GeneratePermissionCatalog]`. See [Authorization](/docs/concepts/authorization).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELPERM001 | Warning | A handler declares authorization requirements but is not under any `[AppModule]` namespace, so they are not added to the runtime permission catalog. | Move the handler under an `[AppModule]` namespace so its `[RequirePermission]`/`[RequireRole]` enter the generated permission catalog. |
+| ELPERM002 | Warning | Two permissions map to the same generated `ElarionPermissions` typed accessor; the second is omitted from the typed accessors (both remain in `ElarionPermissions.All`). | Rename one permission so the generated typed accessors do not collide. |
 
 ## ELAPI — Module API facades
 
@@ -126,22 +153,85 @@ Decorator attachment in handler registration. See [Decorator pipelines](/docs/co
 | ELPIPE001 | Error | A decorator declares an `AppliesTo` attachment-predicate method that is not public, so the generated registration cannot call it to decide attachment. | Declare the predicate as `public static bool AppliesTo(HandlerMetadata handler)`. |
 | ELPIPE002 | Error | A decorator declares an `AppliesTo` method with an unsupported signature (e.g. the older `AppliesTo(System.Type request)`). | Use the one supported form, `public static bool AppliesTo(HandlerMetadata handler)`; for request-based checks use `handler.RequestType`. |
 
-## WFRE — Resilience policies
+## ELRES — Resilience policies
 
 Resilience-policy registration for `[ResiliencePolicy]`. See [Resilience](/docs/capabilities/resilience).
 
-| Id | Severity | Meaning | Fix |
-| --- | --- | --- | --- |
-| WFRE001 | Error | A `[ResiliencePolicy]` is invalid (the message includes the specific reason, for example bad option values). | Correct the resilience policy configuration per the reason in the diagnostic message. |
-| WFRE002 | Error | Two or more resilience policies declare the same policy name. | Give each resilience policy a unique name. |
+<Callout type="warn">
+  The `ELRES001`/`ELRES002` ids are shared by two unrelated analyzers — the resilience-policy
+  analyzer here (category `Elarion.Abstractions.Resilience`) and the EF Core
+  [`[ResourceFilter]` family](#elres--resource-filter-ef-core) below (category
+  `Elarion.EntityFrameworkCore`). Disambiguate by the diagnostic's **category**: only one of the two
+  ever fires for a given declaration.
+</Callout>
 
-## WIMCACHE — Handler caching
+| Id | Severity | Category | Meaning | Fix |
+| --- | --- | --- | --- | --- |
+| ELRES001 | Error | `Elarion.Abstractions.Resilience` | A `[ResiliencePolicy]` is invalid (the message includes the specific reason, for example bad retry/timeout option values). | Correct the resilience policy configuration per the reason in the diagnostic message. |
+| ELRES002 | Error | `Elarion.Abstractions.Resilience` | Two or more resilience policies declare the same policy name. | Give each resilience policy a unique name. |
+
+## ELRES — Resource filter (EF Core)
+
+Data-level authorization list-filter generation for `[ResourceFilter<TEntity>]`. See
+[Resource authorization](/docs/concepts/resource-authorization). These EF Core ids share the
+`ELRES001`/`ELRES002` numbers with the resilience analyzer above but use a distinct category
+(`Elarion.EntityFrameworkCore`).
+
+| Id | Severity | Category | Meaning | Fix |
+| --- | --- | --- | --- | --- |
+| ELRES001 | Error | `Elarion.EntityFrameworkCore` | A `[ResourceFilter]` rule references a property name that does not match any property on the target entity. | Reference an existing entity property in the `[ResourceFilter]` rule. |
+| ELRES002 | Error | `Elarion.EntityFrameworkCore` | A `[ResourceFilter]` rule references a property whose type is not supported for the generated predicate. | Use a supported property type in the `[ResourceFilter]` rule. |
+| ELRES003 | Error | `Elarion.EntityFrameworkCore` | A `[ResourceFilter<TEntity>]`-annotated class is nested or non-partial. | Declare the `[ResourceFilter<T>]` class as a top-level `partial` class. |
+| ELRES004 | Error | `Elarion.EntityFrameworkCore` | A `[ResourceFilter]` declares no rules, so no authorization predicate can be generated. | Add at least one rule (`OwnerProperty`/`TenantProperty`/`Shared`) to the `[ResourceFilter]`. |
+| ELRES005 | Error | `Elarion.EntityFrameworkCore` | A `[ResourceFilter]` `Shared` rule omits `ResourceTypeName`, which the grants `EXISTS` subquery requires. | Set `ResourceTypeName` on the `[ResourceFilter]` `Shared` rule. |
+
+## ELCACHE — Handler caching
 
 Handler caching configuration for `[Cacheable]` / `[CacheInvalidate]`. See [Caching](/docs/capabilities/caching).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| WIMCACHE001 | Error | A handler is annotated with both `[Cacheable]` and `[CacheInvalidate]`; these are mutually exclusive. | Apply only one of `[Cacheable]` or `[CacheInvalidate]` to the handler. |
-| WIMCACHE002 | Error | A handler's cache configuration defines no non-empty cache tag (at least one is required). | Define at least one non-empty cache tag on the handler's caching attribute. |
-| WIMCACHE003 | Error | A handler declares a cache tag that fails validation (invalid format/value). | Replace the invalid cache tag with a valid tag value. |
-| WIMCACHE004 | Error | A cacheable handler's cache duration is not positive (must define a positive duration). | Set a positive cache duration on the handler's `[Cacheable]` configuration. |
+| ELCACHE001 | Error | A handler is annotated with both `[Cacheable]` and `[CacheInvalidate]`; these are mutually exclusive. | Apply only one of `[Cacheable]` or `[CacheInvalidate]` to the handler. |
+| ELCACHE002 | Error | A handler's cache configuration defines no non-empty cache tag (at least one is required). | Define at least one non-empty cache tag on the handler's caching attribute. |
+| ELCACHE003 | Error | A handler declares a cache tag that fails validation (invalid format/value). | Replace the invalid cache tag with a valid tag value. |
+| ELCACHE004 | Error | A cacheable handler's cache duration is not positive (must define a positive duration). | Set a positive cache duration on the handler's `[Cacheable]` configuration. |
+
+## ELFEAT — Feature gates
+
+Feature-gate decorator attachment for `[FeatureGate]`. See [Feature flags](/docs/concepts/feature-flags).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELFEAT001 | Error | A handler declares a `[FeatureGate]` but its response type does not implement `IResultFailureFactory<T>`, so the gate cannot short-circuit and would be silently skipped. | Return `Result<T>` or `Result` from the gated handler so the gate can short-circuit to `AppError.NotFound`. |
+| ELFEAT002 | Warning | A handler declares a `[FeatureGate]` with no feature name (or a blank one); the gate has no effect. | Pass at least one non-blank feature name to `[FeatureGate]`, or remove it. |
+
+## ELVAR — Feature variant services
+
+Variant-service registration for `[FeatureVariant]`. See [Feature flags](/docs/concepts/feature-flags).
+(`ELVAR002` is intentionally unused.)
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELVAR001 | Error | A variant key is declared more than once for the same contract. | Give each `[FeatureVariant]` implementation of a contract a distinct `Variant` name (one default plus unique named variants). |
+| ELVAR003 | Warning | A contract has no default `[FeatureVariant]` implementation (one declared without a `Variant`), so resolution for an unallocated user will fail. | Add one `[FeatureVariant]` implementation with no `Variant` set as the default. |
+| ELVAR004 | Error | A contract is bound to more than one feature; a contract maps to exactly one feature. | Use a single feature name across all `[FeatureVariant]` implementations of a contract. |
+| ELVAR005 | Warning | A variant service declares a blank feature name. | Pass a non-blank feature name to `[FeatureVariant]`. |
+| ELVAR006 | Error | A generic variant-service implementation is not supported. | Make the `[FeatureVariant]` `[Service]` implementation non-generic (concrete). |
+| ELVAR007 | Error | A variant service is not also annotated with `[Service]`; `[FeatureVariant]` is a modifier on a service registration (the `[Service]` declares the service and its lifetime). | Add `[Service]` alongside `[FeatureVariant]` on the implementation class. |
+
+## ELRG — Resource grants
+
+Resource-grants generation for `[GenerateElarionResourceGrants]`. See
+[Resource authorization](/docs/concepts/resource-authorization).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELRG001 | Error | A context is annotated with `[GenerateElarionResourceGrants]` but not `[GenerateDbSets]`, so the resource-grants `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionResourceGrants]`. |
+
+## ELIDN — Identity model generation
+
+Identity-model generation for `[GenerateElarionIdentity]`. See [Identity](/docs/capabilities/identity).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELIDN001 | Error | A context is annotated with `[GenerateElarionIdentity]` but not `[GenerateDbSets]`, so the Identity `DbSet`s and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionIdentity]`. |

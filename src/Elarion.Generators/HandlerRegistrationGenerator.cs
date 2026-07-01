@@ -17,13 +17,26 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
         // two places instead: the module [DecoratorList] map is built ONCE per pass (not rescanned per handler,
         // the old O(handlers x all-trees) cost), and the result is a value-equatable array so an edit that does
         // not change any handler model does not re-emit.
+        // The set of variant contracts ([FeatureVariant<TContract>] targets) in the compilation. A handler whose
+        // constructor depends on one is registered behind the async-resolving proxy, so the contract's variant can
+        // be awaited per user. Collected via the attribute syntax provider so it stays incremental.
+        var variantContracts = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                FeatureVariantAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => GetVariantContractFqns(ctx))
+            .Collect()
+            .Select(static (groups, _) => FlattenSortedDistinct(groups))
+            .WithTrackingName("VariantContracts");
+
         var handlerProvider = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
                 transform: static (ctx, _) => (ClassDeclarationSyntax)ctx.Node)
             .Collect()
             .Combine(context.CompilationProvider)
-            .Select(static (source, ct) => ResolveHandlers(source.Left, source.Right, ct))
+            .Combine(variantContracts)
+            .Select(static (source, ct) => ResolveHandlers(source.Left.Left, source.Left.Right, source.Right, ct))
             .WithTrackingName("Handlers");
 
         context.RegisterSourceOutput(handlerProvider, static (spc, handlers) => {

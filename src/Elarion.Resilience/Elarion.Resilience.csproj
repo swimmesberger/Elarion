@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Microsoft/Polly-backed default IResiliencePipelineRunner for Elarion ([Resilient] handlers and deferred scheduler retries). Opt-in via AddMicrosoftResilienceRuntime; referencing this package is what pulls Microsoft.Extensions.Resilience, keeping Elarion core dependency-light (the resilience seam, the decorator, and the lightweight policy catalog live in Elarion.Abstractions and Elarion core).</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion\Elarion.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Resilience" />
+  </ItemGroup>
+
+</Project>

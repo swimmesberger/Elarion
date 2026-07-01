@@ -12,6 +12,6 @@ namespace Billing.Application.Pipeline;
 [DecoratorList(
     typeof(LoggingDecorator<,>),
     typeof(ValidationDecorator<,>),
-    typeof(TransactionDecorator<,>))]
+    typeof(Elarion.Abstractions.Pipeline.TransactionDecorator<,>))]
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
 public sealed class DefaultPipelineAttribute : Attribute;

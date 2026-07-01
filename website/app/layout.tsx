@@ -41,6 +41,9 @@ export const metadata: Metadata = {
     'Model Context Protocol',
     'Entity Framework Core',
     'modular monolith',
+    'feature flags',
+    'OpenFeature',
+    'permission catalog',
     'AOT',
   ],
   openGraph: {

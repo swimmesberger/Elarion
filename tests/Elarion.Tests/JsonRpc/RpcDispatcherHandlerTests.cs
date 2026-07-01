@@ -9,8 +9,9 @@ using Xunit;
 namespace Elarion.Tests.JsonRpc;
 
 /// <summary>
-/// Runtime tests for the <c>Elarion</c>-core handler bridge (<see cref="RpcDispatcherExtensions.MapHandler{TRequest,TResponse}"/>)
-/// and <see cref="AppErrorMapper"/>. These exercise the glue the generated <c>RegisterRpcMethods</c> map depends on.
+/// Runtime tests for the JSON-RPC adapter over the handler bus (<see cref="JsonRpcDispatcher"/> resolving an
+/// <see cref="IHandler{TRequest,TResponse}"/> from the registry) and <see cref="AppErrorMapper"/>. These exercise
+/// the glue the generated <c>RegisterHandlers</c> map depends on.
 /// </summary>
 public sealed class RpcDispatcherHandlerTests {
     private sealed record EchoCommand {
@@ -36,7 +37,7 @@ public sealed class RpcDispatcherHandlerTests {
 
     private static (JsonRpcDispatcher Dispatcher, IServiceProvider Services) Build() {
         var dispatcher = new JsonRpcDispatcher(Options)
-            .MapHandler<EchoCommand, EchoResponse>("echo")
+            .Map<EchoCommand, EchoResponse>("echo")
             .Freeze();
 
         var services = new ServiceCollection()
@@ -55,7 +56,7 @@ public sealed class RpcDispatcherHandlerTests {
         };
 
     [Fact]
-    public async Task MapHandler_SuccessfulHandler_ReturnsResponseValue() {
+    public async Task Dispatch_SuccessfulHandler_ReturnsResponseValue() {
         var (dispatcher, services) = Build();
         await using var scope = services.CreateAsyncScope();
 
@@ -70,7 +71,7 @@ public sealed class RpcDispatcherHandlerTests {
     [Theory]
     [InlineData("missing", -32001)] // ErrorKind.NotFound
     [InlineData("dup", -32002)]     // ErrorKind.Conflict
-    public async Task MapHandler_HandlerReturnsAppError_MapsToJsonRpcErrorCode(string name, int expectedCode) {
+    public async Task Dispatch_HandlerReturnsAppError_MapsToJsonRpcErrorCode(string name, int expectedCode) {
         var (dispatcher, services) = Build();
         await using var scope = services.CreateAsyncScope();
 
@@ -80,6 +81,27 @@ public sealed class RpcDispatcherHandlerTests {
         response.Result.Should().BeNull();
         response.Error.Should().NotBeNull();
         response.Error!.Code.Should().Be(expectedCode);
+    }
+
+    private sealed class FixedCodeErrorTranslator : IAppErrorTranslator<RpcError> {
+        public RpcError Translate(AppError error) => new() { Code = -40404, Message = $"custom: {error.Message}" };
+    }
+
+    [Fact]
+    public async Task Dispatch_RegisteredErrorTranslator_OverridesErrorCode() {
+        var dispatcher = new JsonRpcDispatcher(Options).Map<EchoCommand, EchoResponse>("echo").Freeze();
+        var services = new ServiceCollection()
+            .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
+            .AddSingleton<IAppErrorTranslator<RpcError>, FixedCodeErrorTranslator>()
+            .BuildServiceProvider();
+        await using var scope = services.CreateAsyncScope();
+
+        var response = await dispatcher.DispatchAsync(
+            Request(new { name = "missing" }), scope.ServiceProvider, TestContext.Current.CancellationToken);
+
+        response.Error.Should().NotBeNull();
+        response.Error!.Code.Should().Be(-40404);
+        response.Error.Message.Should().StartWith("custom:");
     }
 
     [Fact]
