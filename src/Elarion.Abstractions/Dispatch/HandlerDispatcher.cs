@@ -25,7 +25,7 @@ public sealed class HandlerDispatcher {
     /// <typeparam name="TRequest">The handler request type.</typeparam>
     /// <typeparam name="TResponse">The handler success value type.</typeparam>
     public HandlerDispatcher Map<TRequest, TResponse>(
-        string name, HandlerTransports transports = HandlerTransports.All)
+        string name, HandlerTransports transports = HandlerTransports.All, bool idempotent = false)
         where TRequest : class {
         if (_frozen is not null) {
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
@@ -46,7 +46,8 @@ public sealed class HandlerDispatcher {
                 return result.IsSuccess
                     ? Result<object>.Success(result.Value!)
                     : Result<object>.Failure(result.Error);
-            });
+            },
+            idempotent);
 
         return this;
     }
@@ -59,7 +60,8 @@ public sealed class HandlerDispatcher {
     public HandlerDispatcher MapDelegate<TRequest, TResponse>(
         string name,
         Func<TRequest, IServiceProvider, CancellationToken, ValueTask<Result<TResponse>>> handler,
-        HandlerTransports transports = HandlerTransports.All)
+        HandlerTransports transports = HandlerTransports.All,
+        bool idempotent = false)
         where TRequest : class {
         if (_frozen is not null) {
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
@@ -79,7 +81,8 @@ public sealed class HandlerDispatcher {
                 return result.IsSuccess
                     ? Result<object>.Success(result.Value!)
                     : Result<object>.Failure(result.Error);
-            });
+            },
+            idempotent);
 
         return this;
     }

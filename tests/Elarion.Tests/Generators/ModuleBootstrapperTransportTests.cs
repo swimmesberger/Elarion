@@ -514,6 +514,7 @@ public sealed class ModuleBootstrapperTransportTests {
             "1",
             null,
             string.Empty,
+            "0",
             "0");
 
         return $$"""

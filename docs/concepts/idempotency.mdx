@@ -79,6 +79,37 @@ key comes from. The key is captured at the boundary into the dispatch-scope rail
 - **In-band** — a request implementing `IIdempotentRequest` carries its own key (AIP-155 style) — the natural
   source for event consumers.
 
+## Generated TypeScript client
+
+The JSON-RPC schema export marks each `[Idempotent]` operation with `"idempotent": true`, and the generated
+TypeScript client **attaches an idempotency key by default** to exactly those operations — a
+`crypto.randomUUID()` at `params._meta`, so a retry is deduplicated server-side. It only keys operations the
+server actually honors (queries never get a key), and it is fully overridable:
+
+```ts
+createRpcApi({
+  fetch,
+  idempotency: { enabled: true, generateKey: () => crypto.randomUUID() }, // on by default
+})
+
+rpc.clients.create(params)                              // auto key on an idempotent op
+rpc.clients.create(params, { idempotencyKey: 'k-1' })  // supply your own (see retry note)
+rpc.clients.create(params, { idempotencyKey: false })  // opt this call out
+```
+
+**Retry lives above the client, and the retry layer owns key stability.** The generated client attaches keys but
+does **not** retry — that belongs to your data layer (TanStack Query's `retry`, a fetch middleware, …). For an
+idempotent retry to work, every attempt must reuse the *same* key, so generate it once at the operation boundary
+and pass it in (a key auto-generated per `call()` would change on each retry and defeat the purpose):
+
+```ts
+const key = crypto.randomUUID()
+useMutation({
+  retry: 3,                                             // TanStack owns retry
+  mutationFn: (vars) => rpc.clients.create(vars, { idempotencyKey: key }),
+})
+```
+
 ## Multi-node concurrency — no distributed lock
 
 When two application nodes process the same key at once, they contend on the **same PostgreSQL row**, so the

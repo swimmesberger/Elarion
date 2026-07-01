@@ -493,6 +493,60 @@ describe('JSON-RPC client generator', () => {
     expect(results[1]).toMatchObject({ ok: false, error: { code: -32601 } })
     expect(events).toEqual(['start:true:2', 'end'])
   })
+
+  it('attaches an idempotency key to idempotent operations by default, and honors overrides', async () => {
+    const metaKey = 'dev.wimmesberger.elarion/idempotencyKey'
+    const schema = rpcClientTestSchema()
+    schema.methods['math.add'].idempotent = true
+
+    const generated = generateRpcClientFiles(schema)
+    expect(generated.clientSource).toContain('rpcIdempotentMethods')
+    expect(generated.clientSource).toContain(metaKey)
+
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+    const bodies: Array<{ method: string; params: Record<string, unknown> }> = []
+    const fetchImpl: FetchLike = async (_input, init) => {
+      const request = JSON.parse(String(init?.body))
+      const items = Array.isArray(request) ? request : [request]
+      for (const item of items) bodies.push(item)
+      const respond = (item: { id: string; method: string }) =>
+        ({ jsonrpc: '2.0', id: item.id, result: item.method === 'math.add' ? 3 : { id: 'u', name: 'n' } })
+      return jsonResponse(Array.isArray(request) ? request.map(respond) : respond(request))
+    }
+
+    const meta = (index: number) => bodies[index].params._meta as Record<string, string> | undefined
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rpc = clientModule.createRpcApi({ url: 'https://example.test/rpc', fetch: fetchImpl }) as any
+
+    await rpc.math.add({ left: 1, right: 2 })
+    expect(meta(0)?.[metaKey]).toEqual(expect.any(String))
+    expect((meta(0)?.[metaKey] ?? '').length).toBeGreaterThan(0)
+
+    // A non-idempotent operation never gets a key.
+    await rpc.user.get({ id: 'x' })
+    expect(meta(1)).toBeUndefined()
+
+    // A caller-supplied key (stable across a retry layer's retries) is used verbatim.
+    await rpc.math.add({ left: 1, right: 2 }, { idempotencyKey: 'fixed-key' })
+    expect(meta(2)?.[metaKey]).toBe('fixed-key')
+
+    // `false` disables the key for a single call.
+    await rpc.math.add({ left: 1, right: 2 }, { idempotencyKey: false })
+    expect(meta(3)).toBeUndefined()
+
+    // Each batch item gets its own key (batch-correct, per-call granularity).
+    await rpc.$batch([rpc.$request.math.add({ left: 1, right: 2 }), rpc.$request.math.add({ left: 3, right: 4 })] as const)
+    expect(meta(4)?.[metaKey]).toEqual(expect.any(String))
+    expect(meta(5)?.[metaKey]).toEqual(expect.any(String))
+    expect(meta(4)?.[metaKey]).not.toBe(meta(5)?.[metaKey])
+
+    // Globally disabling opts every operation out.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const off = clientModule.createRpcApi({ url: 'https://example.test/rpc', fetch: fetchImpl, idempotency: { enabled: false } }) as any
+    await off.math.add({ left: 1, right: 2 })
+    expect(meta(6)).toBeUndefined()
+  })
 })
 
 function rpcClientTestSchema(): RpcSchema {

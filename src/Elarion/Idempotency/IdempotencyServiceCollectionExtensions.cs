@@ -20,6 +20,7 @@ public static class IdempotencyServiceCollectionExtensions {
 
         services.TryAddScoped<ScopedIdempotencyKeyAccessor>();
         services.TryAddScoped<IIdempotencyKeyAccessor>(sp => sp.GetRequiredService<ScopedIdempotencyKeyAccessor>());
+        services.TryAddScoped<IIdempotencyKeySeed>(sp => sp.GetRequiredService<ScopedIdempotencyKeyAccessor>());
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IDispatchScopeInitializer, IdempotencyKeyScopeInitializer>());
 

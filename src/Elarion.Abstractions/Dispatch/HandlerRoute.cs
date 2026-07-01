@@ -22,4 +22,7 @@ public sealed record HandlerRoute(
     Type RequestType,
     Type ResponseType,
     HandlerTransports Transports,
-    Func<object, IServiceProvider, CancellationToken, ValueTask<Result<object>>> InvokeAsync);
+    Func<object, IServiceProvider, CancellationToken, ValueTask<Result<object>>> InvokeAsync,
+    // Whether the handler is [Idempotent] — carried as route metadata (like Transports) so the exported schema
+    // can advertise it and a generated client can attach an idempotency key by default. Not used for routing.
+    bool Idempotent = false);

@@ -25,6 +25,12 @@ minor releases may include breaking changes.
   (`UseElarionIdempotencyKey`) in `Elarion.AspNetCore`. New diagnostics `ELIDEM001`–`ELIDEM004` and
   `ELIDEMEF001`. See [ADR-0020](docs/decisions/0020-idempotency.md) and
   [the idempotency concept doc](docs/concepts/idempotency.mdx).
+- **Idempotency across the wire.** The JSON-RPC schema export now marks each `[Idempotent]` operation with
+  `"idempotent": true`, the server reads a per-call key at `params._meta` (batch-correct, JSON-RPC and MCP), and
+  the generated TypeScript client **attaches an idempotency key by default** (a `crypto.randomUUID()` at
+  `params._meta`) to those operations — configurable via `idempotency` on the client and a per-call
+  `idempotencyKey` override. Retry stays a higher-layer concern (e.g. TanStack Query); the client only attaches
+  the key.
 
 ### Changed
 - **The module bootstrapper is auto-generated as the fixed-name `ElarionBootstrapper` (breaking).**

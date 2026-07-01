@@ -15,6 +15,9 @@ export interface JsonSchema {
 export interface RpcMethodSchema {
   params: JsonSchema
   result: JsonSchema
+  // Set by the server exporter for [Idempotent] handlers; the generated client attaches an idempotency key
+  // (params._meta) to these operations by default.
+  idempotent?: boolean
 }
 
 export interface RpcSchema {

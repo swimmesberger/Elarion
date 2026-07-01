@@ -71,17 +71,22 @@ internal static class RpcMethodEmission
         bool OnMcp,
         string? Description,
         EquatableArray<ParameterDescription> Parameters,
-        bool IsNameInferred
+        bool IsNameInferred,
+        bool IsIdempotent
     );
 
     /// <summary>
     /// Emits one statement-style <c>Map</c> registration onto the neutral <paramref name="registryVar"/>
     /// (<c>HandlerDispatcher</c>) using the entry's (already module-resolved) operation name and transport flags.
+    /// A handler carrying <c>[Idempotent]</c> is registered with <c>idempotent: true</c> so the exported schema
+    /// advertises it and the generated TypeScript client attaches an idempotency key by default.
     /// </summary>
     public static void AppendMapHandler(StringBuilder sb, Model entry, string indent, string registryVar) =>
         sb.AppendLine(
             $"{indent}{registryVar}.Map<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>("
-            + $"{Literal(entry.MethodName)}, {TransportsExpression(entry)});");
+            + $"{Literal(entry.MethodName)}, {TransportsExpression(entry)}"
+            + (entry.IsIdempotent ? ", idempotent: true" : "")
+            + ");");
 
     /// <summary>The fully-qualified <c>HandlerTransports</c> flag expression for an entry's surfaces.</summary>
     public static string TransportsExpression(Model entry)
@@ -146,8 +151,20 @@ internal static class RpcMethodEmission
             onMcp,
             description,
             parameters,
-            isNameInferred);
+            isNameInferred,
+            HasIdempotentAttribute(type));
         return true;
+    }
+
+    private static bool HasIdempotentAttribute(INamedTypeSymbol type)
+    {
+        foreach (var attr in type.GetAttributes())
+        {
+            if (attr.AttributeClass?.ToDisplayString() == "Elarion.Abstractions.Idempotency.IdempotentAttribute")
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
