@@ -123,7 +123,7 @@ Keyset-definition generation for `[Keyset<TEntity>]`. See [Pagination](/docs/cap
 | ELKEY001 | Error | A `[Keyset]` declares a column name that does not match any property on the target entity; no keyset is generated. | Correct the keyset column name to match an existing entity property. |
 | ELKEY002 | Error | A `[Keyset]` column maps to a property whose type is not supported for keyset pagination; no keyset is generated. | Use a supported (comparable) column type for keyset ordering, or remove that column from the keyset. |
 | ELKEY003 | Error | A `[Keyset]` column maps to a nullable property; keyset columns must be non-nullable for deterministic ordering. No keyset is generated. | Make the keyset column non-nullable, or choose a different non-nullable column for the ordering. |
-| ELKEY004 | Warning | The target entity has an `Id` property that is not part of its `[Keyset]`, so paging order may not be deterministic (no unique tiebreaker). | Append a unique column (such as the key/`Id`) to the keyset so ordering is deterministic. |
+| ELKEY004 | Warning | The target entity has a primary-key property (a `[Key]`-annotated property, or the conventional `Id`/`{EntityType}Id`) that is not part of its `[Keyset]`, so paging order may not be deterministic (no unique tiebreaker). | Append the key (or another unique column) to the keyset so ordering is deterministic and cannot skip or repeat rows. |
 | ELKEY005 | Error | A `[Keyset<TEntity>]`-annotated class is nested or non-partial; the generator emits the `IKeysetDefinition` implementation into it and requires a non-nested partial class. | Declare the keyset class as a top-level (non-nested) `partial` class. |
 
 ## ELSG — Services, scheduled jobs

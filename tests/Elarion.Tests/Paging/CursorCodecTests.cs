@@ -6,6 +6,8 @@ namespace Elarion.Tests.Paging;
 
 public sealed class CursorCodecTests
 {
+    private const uint Tag = 0x1234ABCDu;
+
     [Fact]
     public void RoundTrip_MixedColumns_PreservesValuesAndConsumesBuffer()
     {
@@ -14,14 +16,14 @@ public sealed class CursorCodecTests
         const long sequence = 9_223_372_036_854L;
         const string name = "ünïcödé café";
 
-        var writer = new CursorWriter();
+        var writer = new CursorWriter(Tag);
         writer.WriteDateTime(createdAt);
         writer.WriteGuid(id);
         writer.WriteInt64(sequence);
         writer.WriteString(name);
         var cursor = writer.ToCursor();
 
-        CursorReader.TryCreate(cursor, out var reader).Should().BeTrue();
+        CursorReader.TryCreate(cursor, Tag, out var reader).Should().BeTrue();
         reader.TryReadDateTime(out var readCreatedAt).Should().BeTrue();
         reader.TryReadGuid(out var readId).Should().BeTrue();
         reader.TryReadInt64(out var readSequence).Should().BeTrue();
@@ -37,7 +39,7 @@ public sealed class CursorCodecTests
     [Fact]
     public void RoundTrip_NumericTypes_PreservesValues()
     {
-        var writer = new CursorWriter();
+        var writer = new CursorWriter(Tag);
         writer.WriteInt32(int.MinValue);
         writer.WriteDouble(3.141592653589793);
         writer.WriteSingle(2.5f);
@@ -46,7 +48,7 @@ public sealed class CursorCodecTests
         writer.WriteTimeOnly(new TimeOnly(8, 30, 15));
         writer.WriteDateTimeOffset(new DateTimeOffset(2026, 6, 19, 8, 30, 15, TimeSpan.FromHours(2)));
 
-        CursorReader.TryCreate(writer.ToCursor(), out var reader).Should().BeTrue();
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
         reader.TryReadInt32(out var i).Should().BeTrue();
         reader.TryReadDouble(out var d).Should().BeTrue();
         reader.TryReadSingle(out var f).Should().BeTrue();
@@ -67,17 +69,30 @@ public sealed class CursorCodecTests
     [Fact]
     public void TryCreate_MalformedCursor_ReturnsFalse()
     {
-        CursorReader.TryCreate("not a real cursor!!", out _).Should().BeFalse();
-        CursorReader.TryCreate("", out _).Should().BeFalse();
-        CursorReader.TryCreate(null, out _).Should().BeFalse();
+        CursorReader.TryCreate("not a real cursor!!", Tag, out _).Should().BeFalse();
+        CursorReader.TryCreate("", Tag, out _).Should().BeFalse();
+        CursorReader.TryCreate(null, Tag, out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryCreate_WrongKeysetTag_ReturnsFalse()
+    {
+        var writer = new CursorWriter(Tag);
+        writer.WriteInt32(42);
+        var cursor = writer.ToCursor();
+
+        // A cursor minted by one keyset (Tag) must not decode against a different keyset's tag,
+        // otherwise its bytes would be reinterpreted as a garbage seek position.
+        CursorReader.TryCreate(cursor, Tag, out _).Should().BeTrue();
+        CursorReader.TryCreate(cursor, Tag + 1, out _).Should().BeFalse();
     }
 
     [Fact]
     public void TryRead_TruncatedBuffer_ReturnsFalse()
     {
-        var writer = new CursorWriter();
+        var writer = new CursorWriter(Tag);
         writer.WriteInt32(42);
-        CursorReader.TryCreate(writer.ToCursor(), out var reader).Should().BeTrue();
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
 
         reader.TryReadInt32(out _).Should().BeTrue();
         reader.TryReadInt32(out _).Should().BeFalse();
