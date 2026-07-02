@@ -103,7 +103,7 @@ public sealed class InMemorySchedulerTests
         await Task.Delay(100, cts.Token);
         recorder.HasObserved.Should().BeFalse();
 
-        time.Advance(TimeSpan.FromSeconds(5));
+        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(5), () => recorder.HasObserved);
         var observed = await recorder.WaitAsync(cts.Token);
         await hostedService.StopAsync(cts.Token);
 
@@ -194,13 +194,14 @@ public sealed class InMemorySchedulerTests
         var descriptor = CreateCountingDescriptor("test.milliseconds", ScheduledJobSchedule.FixedRate("50ms"));
         await using var provider = CreateProvider(time, descriptor);
         var hostedService = provider.GetRequiredService<IHostedService>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
         var counter = provider.GetRequiredService<RunCounter>();
 
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => counter.Count >= 1);
 
         for (var expected = 2; expected <= 4; expected++) {
-            time.Advance(Interval);
+            await AdvanceUntilDispatchedAsync(time, inspector, "test.milliseconds", Interval);
             await WaitUntilAsync(() => counter.Count >= expected);
         }
 
@@ -216,13 +217,16 @@ public sealed class InMemorySchedulerTests
         var descriptor = CreateCountingDescriptor("test.catchUp", ScheduledJobSchedule.FixedRate("50ms"));
         await using var provider = CreateProvider(time, descriptor);
         var hostedService = provider.GetRequiredService<IHostedService>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
         var counter = provider.GetRequiredService<RunCounter>();
 
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => counter.Count >= 1);
 
-        // Jump 10 seconds (200 missed 50ms slots): exactly one occurrence may run.
-        time.Advance(TimeSpan.FromSeconds(10));
+        // Jump 10 seconds (200 missed 50ms slots): the fire-once policy coalesces them into a
+        // single overdue occurrence that resyncs the chain to the future. Stopping at dispatch
+        // (see AdvanceUntilDispatchedAsync) guarantees the resynced successor is never crossed.
+        await AdvanceUntilDispatchedAsync(time, inspector, "test.catchUp", TimeSpan.FromSeconds(10));
         await WaitUntilAsync(() => counter.Count >= 2);
         await Task.Delay(250, cts.Token);
 
@@ -247,8 +251,9 @@ public sealed class InMemorySchedulerTests
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => counter.Count >= 1);
 
-        time.Advance(TimeSpan.FromSeconds(10));
-        await WaitUntilAsync(() => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
+        // Keyed on the misfire outcome (recorded synchronously at dispatch); an over-advance can
+        // only produce further skips, so the single-run assertion below stays policy-protected.
+        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(10), () => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
             outcome.JobName == "test.skipMisfire" &&
             outcome.Status == ScheduledJobRunStatus.Skipped &&
             outcome.Message == "misfire"));
@@ -274,8 +279,7 @@ public sealed class InMemorySchedulerTests
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => provider.GetRequiredService<RunCounter>().Count >= 1);
 
-        time.Advance(TimeSpan.FromSeconds(10));
-        await WaitUntilAsync(() => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
+        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(10), () => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
             outcome.JobName == "test.traceSkipMisfire" &&
             outcome.Status == ScheduledJobRunStatus.Skipped &&
             outcome.Message == "misfire"));
@@ -303,12 +307,16 @@ public sealed class InMemorySchedulerTests
         };
         await using var provider = CreateProvider(time, options, descriptor);
         var hostedService = provider.GetRequiredService<IHostedService>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
         var counter = provider.GetRequiredService<RunCounter>();
 
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => counter.Count >= 1);
 
-        time.Advance(TimeSpan.FromSeconds(10));
+        // Stopping at the first overdue dispatch is enough: with the clock already 10s ahead, the
+        // bounded catch-up chain (successors due milliseconds after the epoch) unrolls without any
+        // further advancing, and the coalesced successor resyncs beyond the frozen clock.
+        await AdvanceUntilDispatchedAsync(time, inspector, "test.catchUpMisfire", TimeSpan.FromSeconds(10));
         await WaitUntilAsync(() => counter.Count >= 4);
         await Task.Delay(100, cts.Token);
 
@@ -346,8 +354,9 @@ public sealed class InMemorySchedulerTests
         await Task.Delay(150, cts.Token);
         probe.StartedCount.Should().Be(1);
 
-        time.Advance(Interval);
-        await WaitUntilAsync(() => probe.StartedCount >= 2);
+        // Counter-keyed advancing is safe for fixed-delay: the successor is only enqueued after a
+        // run completes, so there is never a queued occurrence an extra advance could over-fire.
+        await AdvanceUntilAsync(time, Interval, () => probe.StartedCount >= 2);
         await hostedService.StopAsync(cts.Token);
     }
 
@@ -373,8 +382,7 @@ public sealed class InMemorySchedulerTests
         counter.Count.Should().Be(0);
 
         configuration["Jobs:Enabled"] = "true";
-        time.Advance(Interval);
-        await WaitUntilAsync(() => counter.Count >= 1);
+        await AdvanceUntilAsync(time, Interval, () => counter.Count >= 1);
 
         await hostedService.StopAsync(cts.Token);
     }
@@ -665,8 +673,9 @@ public sealed class InMemorySchedulerTests
         await AdvanceUntilAsync(time, TimeSpan.FromSeconds(30), () => counter.Count >= 1);
 
         configuration["Jobs:Cron"] = "-";
-        time.Advance(TimeSpan.FromSeconds(30));
-        await WaitUntilAsync(() => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
+        // Every occurrence crossed while the sentinel is set skips, so over-advancing keeps the
+        // single-run assertion below intact.
+        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(30), () => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
             outcome.JobName == "test.cronToggle" &&
             outcome.Status == ScheduledJobRunStatus.Skipped));
         await hostedService.StopAsync(cts.Token);
@@ -781,7 +790,7 @@ public sealed class InMemorySchedulerTests
         waiting.LastError.Should().Contain("transient");
         waiting.NextAttemptDueTimeUtc.Should().NotBeNull();
 
-        time.Advance(Interval);
+        await AdvanceUntilAsync(time, Interval, () => recorder.HasObserved);
         var observed = await recorder.WaitAsync(cts.Token);
         await WaitUntilAsync(() =>
             inspector.GetJob(handle.JobId)?.Status == ScheduledJobLifecycleStatus.Succeeded);
@@ -860,7 +869,14 @@ public sealed class InMemorySchedulerTests
                 break;
             }
 
-            time.Advance(state.NextAttemptDueTimeUtc!.Value - time.GetUtcNow());
+            // Advance until this waiting attempt actually dispatches (a single exact-to-due advance
+            // can lose the tick, after which "due - now" is zero and the loop would spin forever).
+            // The retry item is a one-shot, so over-advancing past the due time is harmless.
+            var attempt = state.Attempt;
+            await AdvanceUntilAsync(time, Interval, () =>
+                inspector.GetJob(handle.JobId) is not { } current ||
+                current.Status != ScheduledJobLifecycleStatus.WaitingRetry ||
+                current.Attempt > attempt);
         }
 
         await hostedService.StopAsync(cts.Token);
@@ -1003,6 +1019,28 @@ public sealed class InMemorySchedulerTests
             time.Advance(step);
             await Task.Delay(10);
         }
+    }
+
+    // Advances the fake clock in steps until the job's queued occurrence dispatches, observed as its
+    // NextDueTimeUtc leaving the captured pre-advance value (momentarily absent between dequeue and
+    // successor enqueue, or moved to the successor's due time). A single time.Advance can beat the
+    // scheduler's registration of its next-occurrence wait timer on the fake clock and lose the tick
+    // (the timer arms relative to the already-advanced clock and never fires), so callers must
+    // re-advance until the dispatch is observed. The stop condition is deliberately this
+    // dispatch-synchronous signal (captured under the scheduler lock) rather than a run counter
+    // incremented later in the async job body: stopping the clock the instant the occurrence fires
+    // means an exact-count test can never advance across the rescheduled successor and over-fire it.
+    private static async Task AdvanceUntilDispatchedAsync(
+        FakeTimeProvider time,
+        IJobSchedulerInspector inspector,
+        string jobName,
+        TimeSpan step)
+    {
+        DateTimeOffset? NextDue() => inspector.GetSnapshot().Jobs
+            .Single(job => job.Name == jobName).NextDueTimeUtc;
+
+        var before = NextDue();
+        await AdvanceUntilAsync(time, step, () => NextDue() != before);
     }
 
     private static ServiceProvider CreateProvider(
