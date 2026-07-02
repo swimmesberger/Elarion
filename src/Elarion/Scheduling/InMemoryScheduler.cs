@@ -868,12 +868,15 @@ public sealed class InMemoryScheduler(
     /// deployment exactly one node executes it (ADR-0025). Runtime one-off jobs and one-time startup
     /// schedules are never coordinated; cron occurrences claim their exact (wall-clock deterministic) slot,
     /// while interval schedules — whose due times are anchored per node — dedupe by a one-interval window.
-    /// The local default coordinator always claims, keeping single-node semantics unchanged.
+    /// The local default coordinator always claims, keeping single-node semantics unchanged. Jobs declared
+    /// <see cref="JobPlacement.EveryNode"/> are likewise never coordinated — they maintain process-local
+    /// state, so every node must run them.
     /// </summary>
     private async ValueTask<bool> TryClaimOccurrenceAsync(ScheduledJobWorkItem item, CancellationToken ct) {
         if (item.IsRuntimeScheduled ||
             item.Descriptor.Schedule is not { } schedule ||
-            schedule.Kind == ScheduledJobScheduleKind.OneTime) {
+            schedule.Kind == ScheduledJobScheduleKind.OneTime ||
+            item.Descriptor.Placement == JobPlacement.EveryNode) {
             return true;
         }
 

@@ -137,6 +137,7 @@ See [Hosting](/docs/capabilities/hosting).
 | `MisfirePolicy` | `ScheduledJobMisfirePolicy` (init) | `FireOnce` | How fixed-rate/cron schedules handle missed in-process occurrences. |
 | `MaxConcurrentRuns` | `int` (init) | `0` | Max concurrently executing occurrences when `Overlap = AllowConcurrent`. `0` means no job-local cap (global scheduler limit still applies); negative is rejected by the generator. |
 | `Enabled` | `string?` (init) | `null` (always enabled) | `"true"`, `"false"`, or a placeholder, evaluated per occurrence. An unconfigured placeholder without inline default means enabled; an unparseable value means disabled. |
+| `Placement` | `JobPlacement` (init) | `Cluster` | Multi-node execution: `Cluster` = exactly one node per occurrence when a cross-instance coordinator is registered; `EveryNode` = every node runs every occurrence (for jobs maintaining process-local in-memory state). Identical on a single node. |
 
 **`ScheduledJobOverlap`:** `Skip`, `Queue`, `AllowConcurrent`.
 

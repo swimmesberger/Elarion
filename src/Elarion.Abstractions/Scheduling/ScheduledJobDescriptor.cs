@@ -59,6 +59,13 @@ public sealed record ScheduledJobDescriptor {
     public string? Enabled { get; init; }
 
     /// <summary>
+    /// Where occurrences execute on a multi-node deployment: once per occurrence cluster-wide
+    /// (<see cref="JobPlacement.Cluster"/>, the default) or on every node
+    /// (<see cref="JobPlacement.EveryNode"/>, for jobs maintaining process-local state).
+    /// </summary>
+    public JobPlacement Placement { get; init; } = JobPlacement.Cluster;
+
+    /// <summary>
     /// Optional resilience policy used to wrap this job invocation inline.
     /// </summary>
     /// <remarks>

@@ -117,6 +117,12 @@ that respect:
   local initialization) is usually meant to run on every node. Cluster-wide "exactly once ever" work
   belongs behind an [`[Idempotent]` handler](/docs/concepts/idempotency).
 
+A recurring job can also opt out of coordination entirely with
+`[ScheduledJob(..., Placement = JobPlacement.EveryNode)]` — for jobs that maintain **process-local
+state** (an in-memory lookup table, a per-node cache), where suppressing the run on the losing nodes
+would leave them silently stale. The rule of thumb and the full decision matrix live in
+[Execution semantics & positioning](/docs/capabilities/scheduling/semantics).
+
 ## What you gain in practice
 
 **Scale out without auditing your jobs.** Going from one replica to three no longer means every

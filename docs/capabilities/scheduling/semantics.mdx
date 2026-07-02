@@ -22,6 +22,7 @@ instead of discovering the semantics in production.
 | --- | --- | --- | --- | --- | --- |
 | Recurring **cron** | `[ScheduledJob]` + `Cron(...)` | Whichever node wins the occurrence claim | Yes — the chain is re-derived at start | Future occurrences yes; occurrences due **during** the downtime are not fired on restart | Exactly one node per occurrence ([exact-slot claim](/docs/capabilities/scheduling/multi-node)); at-most-once if the winner crashes mid-run |
 | Recurring **fixed-rate / fixed-delay** | `[ScheduledJob]` + `FixedRate/FixedDelay` | Whichever node wins the window claim | Yes — chain restarts with the process | Same as cron | At most one run per interval cluster-wide (window claim) |
+| Recurring, **`Placement = EveryNode`** | `[ScheduledJob(..., Placement = JobPlacement.EveryNode)]` | **Every node**, uncoordinated | Yes — chain restarts with the process | Same as cron | None, by design (process-local state must update everywhere) |
 | **One-time startup** | `Once(...)` | **Every node**, at process start | Runs again on each start — that is its contract | n/a | None, by design (per-node startup work) |
 | **Runtime one-off** | `IJobScheduler.EnqueueAsync` / `ScheduleAsync` | **The node that accepted the call** — no other node knows the job exists | **No — lost** | No — lost | Trivially at-most-once (only one node holds it) |
 | Durable "run this later" today | Outbox [integration event](/docs/capabilities/events/backends) | Whichever node's delivery worker claims the lease | **Yes** | **Yes** | At-least-once — consumer must be idempotent |
@@ -40,6 +41,13 @@ Three consequences worth internalizing:
   loss-tolerable background work anchored to the current process ("resize this image", "send this
   email now-ish"). For anything that must survive until later, publish an **outbox event** — it is
   the durable, cluster-executed primitive that exists today.
+- **Jobs that maintain process-local state must opt out of coordination.** A "refresh the in-memory
+  lookup table every 5 minutes" job under cluster coordination means one node refreshes and the rest
+  serve stale data — silently. Declare it `Placement = JobPlacement.EveryNode` and every node runs
+  every occurrence, coordinator or not. Rule of thumb: *if the job's output lives in process memory,
+  it is `EveryNode`; if it lives in shared state, it is `Cluster` (the default).* And when the
+  in-memory thing mirrors shared changing state that has a change feed, prefer push over polling —
+  watch it (the settings `IChangeToken` pattern) instead of scheduling a per-node refresh.
 - **One-time startup jobs multiplying per node is a feature**, not a missing coordination case:
   cache warm-up and local initialization are meant to run everywhere. Cluster-wide "once ever" work
   belongs behind an [`[Idempotent]` handler](/docs/concepts/idempotency).

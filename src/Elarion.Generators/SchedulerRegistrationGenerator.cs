@@ -115,6 +115,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         string? Group,
         string Overlap,
         string MisfirePolicy,
+        string Placement,
         int MaxConcurrentRuns,
         string? Enabled,
         string? ResiliencePolicyName);
@@ -391,6 +392,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             Group: GetStringNamedArgument(attribute, "Group"),
             Overlap: GetOverlapNamedArgument(attribute),
             MisfirePolicy: GetMisfirePolicyNamedArgument(attribute),
+            Placement: GetPlacementNamedArgument(attribute),
             MaxConcurrentRuns: maxConcurrentRuns,
             Enabled: GetStringNamedArgument(attribute, "Enabled"),
             ResiliencePolicyName: GetResiliencePolicyName(method) ?? GetResiliencePolicyName(type));
@@ -475,6 +477,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             Group: GetStringNamedArgument(attribute, "Group"),
             Overlap: GetOverlapNamedArgument(attribute),
             MisfirePolicy: GetMisfirePolicyNamedArgument(attribute),
+            Placement: GetPlacementNamedArgument(attribute),
             MaxConcurrentRuns: maxConcurrentRuns,
             Enabled: GetStringNamedArgument(attribute, "Enabled"),
             ResiliencePolicyName: GetResiliencePolicyName(type));
@@ -676,6 +679,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             : $"            Group = \"{EscapeString(job.Group)}\",");
         sb.AppendLine($"            Overlap = global::Elarion.Abstractions.Scheduling.ScheduledJobOverlap.{job.Overlap},");
         sb.AppendLine($"            MisfirePolicy = global::Elarion.Abstractions.Scheduling.ScheduledJobMisfirePolicy.{job.MisfirePolicy},");
+        sb.AppendLine($"            Placement = global::Elarion.Abstractions.Scheduling.JobPlacement.{job.Placement},");
         sb.AppendLine($"            MaxConcurrentRuns = {job.MaxConcurrentRuns},");
         sb.AppendLine(job.Enabled is null
             ? "            Enabled = null,"
@@ -859,6 +863,25 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         }
 
         return "FireOnce";
+    }
+
+    private static string GetPlacementNamedArgument(AttributeData attribute)
+    {
+        foreach (var argument in attribute.NamedArguments)
+        {
+            if (argument.Key != "Placement" || argument.Value.Value is not int value)
+            {
+                continue;
+            }
+
+            return value switch
+            {
+                1 => "EveryNode",
+                _ => "Cluster"
+            };
+        }
+
+        return "Cluster";
     }
 
     private static bool IsSupportedReturnType(

@@ -74,6 +74,16 @@ contend. Exact-slot claims need no lock; the primary key is the fence.
   (transport- and provider-neutral, mirroring `IAuthorizer`/`IFeatureFlagService`).
 - `Elarion` core ships `LocalScheduledOccurrenceCoordinator` (always claims — single-node semantics are
   byte-for-byte unchanged), registered by `AddElarionScheduler` via `TryAdd`.
+- **Placement is a property of the job, not of the seam.** `[ScheduledJob(Placement = …)]`
+  (`JobPlacement.Cluster` default / `EveryNode`) lets a job that maintains process-local state — an
+  in-memory lookup table, a per-node cache — opt out of coordination: under a cluster coordinator, a
+  coordinated refresh job would run on one node and leave the other nodes silently stale, which is worse
+  than the N× duplication coordination fixes. The scheduler simply never consults the coordinator for
+  `EveryNode` jobs (exactly like `OneTime` schedules and runtime one-offs), so every coordinator
+  implementation — including future external-engine adapters — stays a dumb "may I run this occurrence?"
+  oracle. A third `SingleNodeSticky` value (node affinity for state) was considered and rejected: it is
+  leader election through the back door, and at the target tier "state needing node affinity" belongs in
+  the database.
 - `InMemoryScheduler` claims **at the fire point** (after the local chain has already advanced, right before
   the overlap/concurrency gate), so a lost claim behaves exactly like the existing overlap skip: the
   occurrence is recorded as `Skipped`, fixed-delay successors are still scheduled, and the inspector shows

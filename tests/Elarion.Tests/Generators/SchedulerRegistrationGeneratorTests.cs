@@ -41,6 +41,7 @@ public sealed class SchedulerRegistrationGeneratorTests
         generatedSource.Should().Contain("MisfirePolicy = global::Elarion.Abstractions.Scheduling.ScheduledJobMisfirePolicy.CatchUp");
         generatedSource.Should().Contain("MaxConcurrentRuns = 2");
         generatedSource.Should().Contain("Enabled = \"${Modules:Billing:Enabled}\"");
+        generatedSource.Should().Contain("Placement = global::Elarion.Abstractions.Scheduling.JobPlacement.Cluster");
         generatedSource.Should().Contain("SchedulerRegistrationGeneratorTestsScheduledJobRegistrationJobReferences");
         generatedSource.Should().Contain("BillingDaily { get; } = new() { Name = \"billing.daily\" };");
         generatedSource.Should().Contain("GetRequiredService<global::Sample.Jobs.BillingJobs>()");
@@ -51,6 +52,32 @@ public sealed class SchedulerRegistrationGeneratorTests
         generatedSource.Should().NotContain("AddElarionScheduler");
         generatedSource.Should().NotContain("BackgroundService");
         generatedSource.Should().NotContain("IHostedService");
+    }
+
+    [Fact]
+    public void GenerateScheduledJobs_EveryNodePlacement_EmitsPlacement()
+    {
+        var source = CreateSource(
+            """
+            namespace Sample.Jobs {
+                public sealed class CacheJobs {
+                    [Elarion.Abstractions.Scheduling.ScheduledJob(
+                        "cache.refresh",
+                        FixedRate = "5m",
+                        Placement = Elarion.Abstractions.Scheduling.JobPlacement.EveryNode)]
+                    public System.Threading.Tasks.ValueTask RunAsync(
+                        Elarion.Abstractions.Scheduling.IScheduledJobContext context,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generatedSource = AllGenerated(result);
+
+        generatedSource.Should().Contain("Name = \"cache.refresh\"");
+        generatedSource.Should().Contain("Placement = global::Elarion.Abstractions.Scheduling.JobPlacement.EveryNode");
     }
 
     [Fact]
@@ -591,6 +618,11 @@ public sealed class SchedulerRegistrationGeneratorTests
                 CatchUp
             }
 
+            public enum JobPlacement {
+                Cluster,
+                EveryNode
+            }
+
             [System.AttributeUsage(System.AttributeTargets.Method | System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
             public sealed class ScheduledJobAttribute : System.Attribute {
                 public ScheduledJobAttribute(string name) {
@@ -609,6 +641,7 @@ public sealed class SchedulerRegistrationGeneratorTests
                 public ScheduledJobMisfirePolicy MisfirePolicy { get; init; } = ScheduledJobMisfirePolicy.FireOnce;
                 public int MaxConcurrentRuns { get; init; }
                 public string? Enabled { get; init; }
+                public JobPlacement Placement { get; init; } = JobPlacement.Cluster;
             }
 
             public interface IScheduledJobContext;
@@ -640,6 +673,7 @@ public sealed class SchedulerRegistrationGeneratorTests
                 public ScheduledJobMisfirePolicy MisfirePolicy { get; init; } = ScheduledJobMisfirePolicy.FireOnce;
                 public int MaxConcurrentRuns { get; init; }
                 public string? Enabled { get; init; }
+                public JobPlacement Placement { get; init; } = JobPlacement.Cluster;
                 public Elarion.Abstractions.Resilience.ResiliencePolicyReference? ResiliencePolicy { get; init; }
                 public required ScheduledJobInvokeDelegate InvokeAsync { get; init; }
             }
