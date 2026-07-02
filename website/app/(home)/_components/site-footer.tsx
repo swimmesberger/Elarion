@@ -89,7 +89,15 @@ export function SiteFooter() {
       <div className="border-t border-(--line-soft)">
         <div className="mx-auto flex w-full max-w-[80rem] flex-col items-start justify-between gap-2 px-5 py-5 font-mono text-xs text-fd-muted-foreground sm:flex-row sm:items-center sm:px-8 lg:px-12">
           <span>Open source under the Apache-2.0 License</span>
-          <span>© {new Date().getFullYear()} Simon Wimmesberger</span>
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <Link href="/impressum" className="transition-colors hover:text-fd-foreground">
+              Impressum
+            </Link>
+            <Link href="/datenschutz" className="transition-colors hover:text-fd-foreground">
+              Datenschutz
+            </Link>
+            <span>© {new Date().getFullYear()} Simon Wimmesberger</span>
+          </span>
         </div>
       </div>
     </footer>
