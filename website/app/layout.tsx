@@ -76,13 +76,6 @@ export default function Layout({ children }: LayoutProps<'/'>) {
       suppressHydrationWarning
     >
       <body className="flex flex-col min-h-screen font-sans antialiased">
-        {/* Progressive enhancement: tag the document before paint so scroll-reveal
-            sections only start hidden when JS can animate them back in. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: "document.documentElement.classList.add('js')",
-          }}
-        />
         <Provider>{children}</Provider>
       </body>
     </html>
