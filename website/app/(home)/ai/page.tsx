@@ -44,7 +44,7 @@ function PointList({ points }: { points: { title: string; body: ReactNode }[] })
       {points.map((point) => (
         <div key={point.title} className="border-t border-(--line) pt-4">
           <h3 className="font-medium text-fd-foreground">{point.title}</h3>
-          <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{point.body}</p>
+          <p className="mt-2 text-sm leading-relaxed text-(--body)">{point.body}</p>
         </div>
       ))}
     </div>
@@ -59,7 +59,9 @@ function Hero() {
       <Ticks />
       <div className={`grid grid-cols-1 items-center gap-12 py-16 *:min-w-0 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14 lg:py-24 ${PAD}`}>
         <div className="min-w-0">
-          <p className="eyebrow">/// Elarion, explained for decision-makers</p>
+          <p className="eyebrow">
+            <span className="text-(--accent-brand)">///</span> Elarion, explained for decision-makers
+          </p>
 
           <h1 className="mt-6 font-display text-[2.4rem] font-semibold leading-[1.08] tracking-[-0.03em] text-fd-foreground sm:text-5xl">
             “Why a framework?
@@ -67,11 +69,12 @@ function Hero() {
             The AI writes the code.”
           </h1>
 
-          <p className="mt-6 max-w-xl text-lg leading-relaxed text-fd-muted-foreground">
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-(--body)">
             Fair question — here is the straight answer. AI didn&apos;t make foundations obsolete;
             it changed what they are for. Less about typing speed. More about keeping machine-speed
-            work safe, affordable, and connected to everything — including the AI itself. Four
-            arguments. No jargon. Each one checkable.
+            work{' '}
+            <span className="font-medium text-fd-foreground">safe, affordable, and connected</span>{' '}
+            to everything — including the AI itself. Four arguments. No jargon. Each one checkable.
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -110,7 +113,7 @@ function StatPanel() {
           <dt className="max-w-[15rem] text-sm leading-snug text-fd-muted-foreground">
             Lines the machinery adds by itself, on every build
           </dt>
-          <dd className="font-display text-4xl font-semibold tracking-[-0.02em] text-fd-primary">
+          <dd className="font-display text-4xl font-semibold tracking-[-0.02em] text-(--accent-gen)">
             ≈3,500
           </dd>
         </div>
@@ -129,7 +132,9 @@ function PathBand() {
   return (
     <section className="border-b border-(--line)">
       <div className={`py-10 ${PAD}`}>
-        <p className="eyebrow">/// the same guarded path, every time</p>
+        <p className="eyebrow">
+          <span className="text-(--accent-brand)">///</span> the same guarded path, every time
+        </p>
         <div className="mt-6 overflow-x-auto">
           <div className="min-w-[640px]">
             <RequestPath />
@@ -169,7 +174,7 @@ function ReachSection() {
               <AudienceDiagram />
             </div>
           </div>
-          <p className="mx-auto mt-6 max-w-2xl text-center text-sm leading-relaxed text-fd-muted-foreground">
+          <p className="mx-auto mt-6 max-w-2xl text-center text-sm leading-relaxed text-(--body)">
             Every path runs through the same checkpoint. An AI assistant obeys exactly the
             permissions a person would — being a machine opens no doors.
           </p>
@@ -178,7 +183,7 @@ function ReachSection() {
         <div className="vt-rise mt-12 grid gap-8 md:grid-cols-3">
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">No parallel project</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               Most companies bolt AI onto their product as a separate initiative, with its own
               budget, its own timeline, and its own bugs. Here it is the same feature, reaching two
               more audiences at no extra cost.
@@ -186,7 +191,7 @@ function ReachSection() {
           </div>
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">Same locks on every door</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               Who may do what is decided in one place, beneath all three audiences. Change a rule
               once and the website, your partners, and every AI assistant obey it — instantly and
               identically.
@@ -194,7 +199,7 @@ function ReachSection() {
           </div>
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">A standard, not a gamble</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               MCP is backed across the industry — Anthropic, OpenAI, Microsoft. You are plugging
               into a standard, not marrying a vendor&apos;s platform.
             </p>
@@ -261,7 +266,7 @@ function EconomicsSection() {
           ].map((point) => (
             <div key={point.title} className="border-t border-(--line) pt-4">
               <h3 className="font-medium text-fd-foreground">{point.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{point.body}</p>
+              <p className="mt-2 text-sm leading-relaxed text-(--body)">{point.body}</p>
             </div>
           ))}
         </div>
@@ -302,7 +307,7 @@ function GateSection() {
         <div className="vt-rise mt-10 grid gap-8 md:grid-cols-2">
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">Security that cannot rot</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               The rule is not &ldquo;remember to lock the door.&rdquo; Doors are locked unless
               someone deliberately opens one — so &ldquo;the AI forgot&rdquo; is not a failure mode
               your company can have.
@@ -310,7 +315,7 @@ function GateSection() {
           </div>
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">Architecture that survives speed</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               The structure your architects designed is enforced by the gate itself. It holds on
               the hundredth AI-written change, at two in the morning, with nobody watching.
             </p>
@@ -426,8 +431,8 @@ function SeatSection() {
         <div className="vt-rise mt-10 grid gap-5 md:grid-cols-3">
           {seats.map((seat) => (
             <div key={seat.role} className="rounded-[4px] border border-(--line) p-6">
-              <p className="eyebrow text-fd-primary">{seat.role}</p>
-              <p className="mt-3 text-sm leading-relaxed text-fd-muted-foreground">{seat.body}</p>
+              <p className="eyebrow text-(--accent-brand)">{seat.role}</p>
+              <p className="mt-3 text-sm leading-relaxed text-(--body)">{seat.body}</p>
             </div>
           ))}
         </div>
@@ -473,7 +478,7 @@ function BetSection() {
           {betRows.map((row) => (
             <div key={row.title} className="border-t border-(--line) pt-4">
               <h3 className="font-medium text-fd-foreground">{row.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{row.body}</p>
+              <p className="mt-2 text-sm leading-relaxed text-(--body)">{row.body}</p>
             </div>
           ))}
         </div>
@@ -493,7 +498,7 @@ function ClosingCta() {
           <h2 className="font-display text-3xl font-semibold tracking-[-0.02em] text-fd-foreground sm:text-4xl">
             Forward this to your tech lead.
           </h2>
-          <p className="mt-4 leading-relaxed text-fd-muted-foreground">
+          <p className="mt-4 leading-relaxed text-(--body)">
             They&apos;ll want the version with the code — it&apos;s one page away. And because
             Elarion&apos;s documentation is also published in a format AI assistants read natively,
             your own AI can evaluate it exactly the way your engineers will.

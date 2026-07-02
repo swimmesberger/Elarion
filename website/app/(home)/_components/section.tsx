@@ -34,7 +34,7 @@ export function Section({
       <Ticks />
       <div className={`flex items-baseline justify-between gap-4 border-b border-(--line-soft) py-3 ${PAD}`}>
         <span className="eyebrow">
-          {n} / {label}
+          <span className="text-(--accent-brand)">{n} /</span> {label}
         </span>
         {aside ? <span className="eyebrow hidden text-right sm:block">{aside}</span> : null}
       </div>
@@ -49,7 +49,7 @@ export function SectionTitle({ title, lead }: { title: ReactNode; lead?: ReactNo
       <h2 className="font-display text-3xl font-semibold tracking-[-0.02em] text-fd-foreground sm:text-4xl">
         {title}
       </h2>
-      {lead ? <p className="mt-4 leading-relaxed text-fd-muted-foreground">{lead}</p> : null}
+      {lead ? <p className="mt-4 text-[1.0625rem] leading-relaxed text-(--body)">{lead}</p> : null}
     </div>
   );
 }

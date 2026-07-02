@@ -26,7 +26,7 @@ export function GeneratedRing() {
             cy={120}
             r={r}
             fill="none"
-            stroke="var(--color-fd-primary)"
+            stroke="var(--accent-gen)"
             strokeWidth={13}
             strokeLinecap="round"
             strokeDasharray={c}
@@ -46,8 +46,8 @@ export function GeneratedRing() {
       <div className="min-w-0">
         <div className="space-y-4">
           <div className="flex items-start gap-3">
-            <span aria-hidden className="mt-1.5 size-2.5 shrink-0 rounded-full bg-fd-primary" />
-            <p className="text-sm leading-relaxed text-fd-muted-foreground">
+            <span aria-hidden className="mt-1.5 size-2.5 shrink-0 rounded-full bg-(--accent-gen)" />
+            <p className="text-sm leading-relaxed text-(--body)">
               <span className="font-medium text-fd-foreground">≈3,500 lines produced by the build</span>
               {' '}— the wiring, security plumbing, and connections. Nobody writes them, nobody
               reviews them, and no AI ever bills you for reading them.
@@ -55,7 +55,7 @@ export function GeneratedRing() {
           </div>
           <div className="flex items-start gap-3">
             <span aria-hidden className="mt-1.5 size-2.5 shrink-0 rounded-full border border-fd-muted-foreground/60" />
-            <p className="text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="text-sm leading-relaxed text-(--body)">
               <span className="font-medium text-fd-foreground">≈1,000 lines written by people and their AI</span>
               {' '}— the business decisions. The only part that costs money to create, review, and
               read back.

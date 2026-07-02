@@ -37,13 +37,15 @@ function Hero() {
     <section className="relative border-b border-(--line)">
       <Ticks />
       <div className={`flex flex-col items-center py-16 text-center lg:py-24 ${PAD}`}>
-        <p className="eyebrow">/// the philosophy, for engineers</p>
+        <p className="eyebrow">
+          <span className="text-(--accent-brand)">///</span> the philosophy, for engineers
+        </p>
 
         <h1 className="mt-7 max-w-4xl font-display text-[2.4rem] font-semibold leading-[1.12] tracking-[-0.03em] text-fd-foreground sm:text-5xl">
           “Auto-detect application patterns, explicitly wire platform capabilities.”
         </h1>
 
-        <p className="mt-7 max-w-2xl text-lg leading-relaxed text-fd-muted-foreground">
+        <p className="mt-7 max-w-2xl text-lg leading-relaxed text-(--body)">
           One sentence drives every API in the framework. This page unpacks it: the mental model,
           the feedback loop it buys, the pipeline it produces, the batteries it ships — and the
           opinions underneath, every one of them written down and arguable.
@@ -165,7 +167,7 @@ function PipelineSection() {
             <PipelineDiagram />
           </div>
         </div>
-        <p className="vt-rise mx-auto mt-4 max-w-2xl text-center text-sm leading-relaxed text-fd-muted-foreground">
+        <p className="vt-rise mx-auto mt-4 max-w-2xl text-center text-sm leading-relaxed text-(--body)">
           Each stage attaches only when the handler asks for it — a bare handler compiles to a
           bare call. And because it&apos;s all generated source, you can read the exact chain in
           your build output.
@@ -289,7 +291,7 @@ function OpinionsSection() {
                   {opinion.ref} →
                 </a>
               </div>
-              <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{opinion.why}</p>
+              <p className="mt-2 text-sm leading-relaxed text-(--body)">{opinion.why}</p>
             </div>
           ))}
         </div>
@@ -309,7 +311,7 @@ function ClosingCta() {
           <h2 className="font-display text-3xl font-semibold tracking-[-0.02em] text-fd-foreground sm:text-4xl">
             Now see it in code.
           </h2>
-          <p className="mt-4 leading-relaxed text-fd-muted-foreground">
+          <p className="mt-4 leading-relaxed text-(--body)">
             The front page has the meat — real handlers, the generated output, a five-minute
             quickstart. The docs carry the long-form rationale. And if the people who hold the
             budget need convincing,{' '}

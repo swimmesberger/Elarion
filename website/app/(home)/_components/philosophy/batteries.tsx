@@ -57,7 +57,7 @@ export function Batteries() {
             Elarion + Elarion.Abstractions
           </span>
         </div>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-fd-muted-foreground">
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-(--body)">
           References Microsoft.Extensions <span className="font-mono text-[0.92em] text-fd-foreground">*.Abstractions</span> packages
           and nothing else. Every capability below is a public seam here — the attribute and the
           decorator live in the core; the heavy dependency lives one package out.
@@ -72,7 +72,7 @@ export function Batteries() {
             <h3 className="mt-2 font-display text-base font-semibold tracking-[-0.01em] text-fd-foreground">
               {battery.name}
             </h3>
-            <p className="mt-2 grow text-sm leading-relaxed text-fd-muted-foreground">{battery.body}</p>
+            <p className="mt-2 grow text-sm leading-relaxed text-(--body)">{battery.body}</p>
             <p className="mt-4 border-t border-(--line-soft) pt-3 font-mono text-[0.7rem] text-fd-muted-foreground">
               {battery.packages}
             </p>
@@ -85,7 +85,7 @@ export function Batteries() {
           <h3 className="mt-2 font-display text-base font-semibold tracking-[-0.01em] text-fd-foreground">
             Every seam is public
           </h3>
-          <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+          <p className="mt-2 text-sm leading-relaxed text-(--body)">
             Don&apos;t like a battery? Register your own implementation of the seam — no handler,
             attribute, or generated line changes.
           </p>
