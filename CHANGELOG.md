@@ -62,8 +62,60 @@ minor releases may include breaking changes.
   of silently reflecting; reflection is opt-in via `EnableReflectionFallback`. No bare `JsonSerializerOptions`
   is registered in DI, so Elarion never collides with a host's own registration. See
   [ADR-0023](docs/decisions/0023-canonical-json-serialization.md).
+- **Cross-instance scheduler coordination (recurring jobs run once per cluster).** The in-memory scheduler was
+  the last stateful subsystem without a durable rung: on N nodes every recurring job fired N times. A node now
+  claims each recurring occurrence in a shared database row right before executing it, and exactly one node wins
+  — the others record a `claimed-elsewhere` skip and continue. Cron occurrences claim their exact wall-clock slot
+  (`INSERT … ON CONFLICT DO NOTHING`; the composite PK is the fence); fixed-rate/fixed-delay occurrences — whose
+  due times are node-anchored — dedupe by a one-interval window serialized with a per-job `pg_advisory_xact_lock`;
+  one-time startup schedules stay per-node. The transport-neutral `IScheduledOccurrenceCoordinator` seam and the
+  always-claims `LocalScheduledOccurrenceCoordinator` default live in `Elarion.Abstractions`/`Elarion` (single-node
+  behavior is unchanged, no I/O); the new **`Elarion.Scheduling.EntityFrameworkCore`** ships the claims table
+  (`UseElarionSchedulerClaims` / `[GenerateElarionSchedulerClaims]` with a bundled generator, `ELSCH001`), the
+  `EfCoreScheduledOccurrenceCoordinator`, and a retention purge worker
+  (`AddElarionSchedulerEntityFrameworkCore<TDbContext>`). Coordination fails **closed** (an unreachable claims
+  database skips the occurrence rather than duplicating it); recurring occurrences are at-most-once. Durable
+  runtime one-shot jobs remain the planned phase 2. `[ScheduledJob(Placement = JobPlacement.EveryNode)]` opts a
+  recurring job out of coordination for jobs that maintain process-local in-memory state (which coordination would
+  leave stale on the losing nodes). See [ADR-0025](docs/decisions/0025-distributed-scheduler-coordination.md) and
+  [`docs/capabilities/scheduling/multi-node`](docs/capabilities/scheduling/multi-node.mdx).
+- **Cross-instance settings change notification over PostgreSQL `LISTEN/NOTIFY`.** The EF Core settings store
+  composed with the in-process change source was single-instance: a settings write on one node never reached
+  another node's `IChangeToken` watchers (or the scheduler's `${…}` live rescheduling) until it restarted. The
+  new opt-in **`Elarion.Settings.PostgreSql`** (`AddElarionPostgreSqlSettingsChanges(connectionString | NpgsqlDataSource)`)
+  implements the existing `ISettingsChangeSource`/`ISettingsChangePublisher` seams over `LISTEN/NOTIFY`: a hosted
+  listener per node fires watch tokens on every node in commit order (and fires all watches after a reconnect,
+  since PostgreSQL does not queue for absent listeners). A new `IEfCoreSettingsChangeNotifier` seam lets the store
+  announce writes on its own connection, so a write inside a caller-owned transaction is delivered only on commit
+  and never on rollback. See [ADR-0024](docs/decisions/0024-postgres-listen-notify-settings-changes.md).
+- **Streaming PostgreSQL blob reads.** `PostgreSqlBlobStore.OpenReadAsync` no longer buffers the whole blob into
+  memory: it opens a dedicated connection from an injected `NpgsqlDataSource` and reads via
+  `CommandBehavior.SequentialAccess` + `NpgsqlDataReader.GetStream`, with the reader/command/connection owned by
+  the returned `BlobDownload` (released on disposal, double-dispose safe). A read inside a caller-owned ambient
+  transaction stays buffered so it sees the caller's own uncommitted writes. See
+  [`docs/capabilities/blob-storage`](docs/capabilities/blob-storage.mdx).
+- **EF wiring parity across every EF-backed subsystem.** Each now offers the same three affordances: a model-wiring
+  method with `tableName`/`schema` overrides and a `snakeCase` toggle, a `[GenerateElarionX]` bundled-generator
+  trigger, and case-aware defaults. New bundled generators for the outbox (`[GenerateElarionOutbox]`, `ELOBX001`),
+  settings (`[GenerateElarionSettings]`, `ELSET001`), PostgreSQL blob storage (`[GenerateElarionBlobStorage]`,
+  `ELBLB001`), and tus staging (`[GenerateElarionTusStorage]`, `ELTUS001`); the existing idempotency-keys,
+  resource-grants, and Identity generators gain `TableName`/`Schema` (and Identity `Schema`/`TablePrefix`) knobs.
+  The PostgreSQL blob and tus stores now build their raw SQL from the EF model, so the overrides apply to the
+  Npgsql content path too.
 
 ### Changed
+- **DI registration verbs unified to `AddElarionX`, and blob/tus storage wiring renamed (breaking).**
+  `AddInMemoryScheduler` → `AddElarionScheduler`, `AddInMemoryDomainEventBus` → `AddElarionDomainEventBus`,
+  `AddInMemoryEventBus` → `AddElarionInMemoryEventBus`, `AddInMemoryIntegrationEventBus` →
+  `AddElarionInMemoryIntegrationEventBus`, `AddPostgreSqlBlobStore`/`AddPostgreSqlBlobLifecycle` →
+  `AddElarionPostgreSqlBlobStore`/`AddElarionPostgreSqlBlobLifecycle`, `AddMicrosoftResilienceRuntime` →
+  `AddElarionResilience`, and the blob model-wiring `UsePostgreSqlBlobStorage` → `UseElarionBlobStorage`.
+  **Migration:** rename the calls. The PostgreSQL blob/tus registration methods now require connection info
+  (a connection string overload, or an `NpgsqlDataSource` in DI) for streaming reads. `EfCoreSettingsStore`
+  takes an `IEfCoreSettingsChangeNotifier` instead of an `ISettingsChangePublisher` + logger;
+  `PostgreSqlBlobStore` takes an `NpgsqlDataSource`; `ApplyElarionIdentity`'s signature is now
+  `(schema, tablePrefix, snakeCase)`; the PascalCase default resource-grants table is `ElarionResourceGrants`
+  (was `ResourceGrants`); and the idempotency/grants index names derive from the table name.
 - **Soundness-hardening pass: breaking contract and schema changes (breaking).** A full adversarial audit of the
   framework's concurrency, transaction, authorization, and AOT paths was fixed in one pass; the correctness fixes
   below ride on these breaks. **Migrations:** the idempotency key table gains a leading `operation` PK column
