@@ -154,3 +154,55 @@ standalone validator class layer anymore.
 - **Breaking (pre-1.0):** the FluentValidation generator/attribute are gone; `ValidationErrorData` consumers see
   a new optional `FieldErrors` member; sample pipelines change. Downstream apps migrate rules to attributes or
   re-own a FluentValidation decorator locally.
+
+## Alternatives considered
+
+### Zod-in-C# validators (e.g. ZodSharp)
+
+A recurring suggestion is a C# port of TypeScript's Zod — [ZodSharp](https://github.com/guinhx/ZodSharp) is the
+representative example — on the intuition that "the same Zod on both sides" would unify the client and server
+validation mental models. It was evaluated and does not fit, for a reason that is structural rather than
+incidental: **it solves a different problem than this ADR.**
+
+ZodSharp is a C#-side *runtime validator* (a fluent `Z.Object().Field("email", Z.String().Email())` builder over
+`IZodSchema<TOutput, TInput>`, plus rules, refinements, transforms, and discriminated unions). Its direction is
+*C# schema → validate C# data*; it produces **no wire contract** — there is no JSON Schema exporter and no
+TypeScript emitter anywhere in the project. So it cannot feed the RPC schema / OpenAPI / Zod-client pipeline that
+motivated this ADR, and is neither a substitute for nor a complement to the export side. The only seam it could
+occupy is the enforcement backend (an `IRequestValidator` over ZodSharp instead of `Microsoft.Extensions.Validation`),
+and there it is a worse default:
+
+- **Its fluent schemas re-create the FluentValidation drift this ADR eliminates.** A `Z.String().Email()` schema
+  is imperative and unexportable; refinements are opaque `Func<T, bool>` delegates that cannot serialize to JSON
+  Schema by any means. Authoring rules there puts them right back where the exporter cannot see them. Only its
+  DataAnnotations path is introspectable — and that is the same vocabulary Elarion already reads, behind a
+  less-proven runtime.
+- **Its source generator emits C# validators, not schemas.** The `[ZodSchema]` `IIncrementalGenerator` emits a
+  `{Type}Schema.g.cs` with static `Validate`/`Parse` methods (options `GenerateValidateMethod`/`GenerateParseMethod`/
+  `EnableComposition`) — compile-time *runtime validation*, still no wire output. So even the generated path does
+  not reach the client. Structurally it also carries `INamedTypeSymbol`/`TypeDeclarationSyntax` in its pipeline
+  model, which by this repo's incremental-generator conventions ([ADR-0006](0006-incremental-source-generator-conventions.md))
+  is cache-hostile — not a generator Elarion would reuse or emulate.
+- **AOT/JSON posture clashes.** It integrates via Newtonsoft.Json and compiles validators through
+  `System.Linq.Expressions` (`RequiresDynamicCode`), against Elarion's STJ-canonical
+  ([ADR-0023](0023-canonical-json-serialization.md)), AOT-strict default. It targets `net9.0`/`netstandard2.1`
+  (this repo is `net10.0`). `Microsoft.Extensions.Validation` is trimmable with NativeAOT/trimming test suites.
+- **Maturity is a default-path risk.** v1.0.0, ~15 commits, single maintainer, versus a Microsoft-platform base.
+
+The decisive point is that **the seam already accommodates it without a framework decision.** Because enforcement
+is `IRequestValidator`, an app that specifically wants Zod-style refinements/discriminated-unions validated in C#
+can implement the seam over ZodSharp *locally*, while the export pipeline keeps reading DataAnnotations
+independently. The framework neither blesses nor bundles it. This would only merit revisiting as a framework
+default if such a library gained a JSON-Schema serializer (a C# analog of `zod-to-json-schema`), offering one
+Zod-flavored surface that both validates C# and feeds the client — but opaque refinements still would not
+serialize, so the "cross-field rules cannot cross the wire" boundary would hold regardless.
+
+### Introspecting a retained FluentValidation layer
+
+Keeping FluentValidation and lifting its statically-inspectable rules into the exported schema via
+`IValidatorDescriptor` (the approach older Swashbuckle/MicroElements integrations took) was rejected as the
+foundation: descriptor introspection is heuristic, breaks on conditional (`When`) and cross-field rules, couples
+the exporters to FluentValidation internals, and requires resolving validators from DI at schema-generation
+time. It also inverts the compile-time, declarative, inspectable posture the rest of the framework holds. It
+remains available later as an *additive* enrichment behind the same schema-export seam (auto-lifting a validator's
+`.Length(3)` into the schema), but not as the source of truth.
