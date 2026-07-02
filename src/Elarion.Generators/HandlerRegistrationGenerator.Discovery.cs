@@ -19,6 +19,14 @@ public sealed partial class HandlerRegistrationGenerator {
         if (classSymbol.IsAbstract)
             return null;
 
+        // An open-generic handler (e.g. a generic test double `Handler<TRequest, TResponse> : IHandler<TRequest,
+        // TResponse>`) cannot be registered as a concrete service — emitting its registration would reference the
+        // type's own type parameters as if they were concrete types and fail to compile. Skip it here, the sibling
+        // of the IsAbstract guard. This matters because the bundled analyzer flows transitively into consumer
+        // projects, so a downstream test assembly's generic handler helper would otherwise break its own build.
+        if (classSymbol.IsGenericType)
+            return null;
+
         if (FindHandlerInterface(classSymbol) is null)
             return null;
 
@@ -140,7 +148,7 @@ public sealed partial class HandlerRegistrationGenerator {
 
         // Re-validated against the current compilation: a cached candidate can drift (e.g. its base class in
         // another file stopped implementing IHandler<,>) without its own tree changing.
-        if (classSymbol.IsAbstract)
+        if (classSymbol.IsAbstract || classSymbol.IsGenericType)
             return null;
 
         var handlerInterface = FindHandlerInterface(classSymbol);

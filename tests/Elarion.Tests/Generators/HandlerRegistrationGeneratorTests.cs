@@ -562,6 +562,72 @@ public sealed class HandlerRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateRegistration_OpenGenericHandler_IsSkippedAndEmitsCompilableCode() {
+        // An open-generic handler-shaped type (a common generic test double) cannot be registered as a concrete
+        // service: emitting a registration would reference its own type parameters as concrete types (CS0246).
+        // This bites downstream because the bundled analyzer flows transitively into consumer test projects, so a
+        // generic IHandler<,> helper would otherwise break the *test* build. The generator must skip it entirely.
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            [assembly: UseElarion]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed class ThrowingHandler<TRequest, TResponse>(Exception ex)
+                    : IHandler<TRequest, TResponse> {
+                    public ValueTask<TResponse> HandleAsync(TRequest r, CancellationToken ct) => throw ex;
+                }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+                public sealed class DoThing : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+
+        // The open-generic handler produces no registration file at all, and is never referenced by any generated
+        // output (per-handler file, module aggregator, or default-services filler) — the pre-fix behavior emitted
+        // a `ThrowingHandler<TRequest, TResponse>` registration that failed to compile (CS0246).
+        result.GeneratedTrees.Should().NotContain(tree =>
+            Path.GetFileName(tree.FilePath).Contains("ThrowingHandler", StringComparison.Ordinal));
+        foreach (var tree in result.GeneratedTrees) {
+            tree.GetText(TestContext.Current.CancellationToken).ToString()
+                .Should().NotContain("ThrowingHandler");
+        }
+
+        // ...while the concrete handler is still registered as normal, and its registration compiles cleanly
+        // alongside the source. Only the handler tree is compiled here — the cross-generator module-services
+        // skeleton is emitted by ModuleDefaultServicesGenerator, which does not run in this single-generator test.
+        var doThing = GetGeneratedSource(result, "Sample_App_DoThing.g.cs");
+        doThing.Should().Contain("global::Sample.App.DoThing");
+
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var full = CSharpCompilation.Create(
+            "OpenGenericHandlerCompile",
+            [
+                CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(doThing, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+            ],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        full.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void GenerateRegistration_IrrelevantEdit_ReusesPipeline() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",

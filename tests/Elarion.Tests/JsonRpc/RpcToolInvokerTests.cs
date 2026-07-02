@@ -40,6 +40,18 @@ public sealed class RpcToolInvokerTests {
                 : throw new InvalidOperationException("boom: secret internal detail");
     }
 
+    // An all-optional tool request as a positional record: no public parameterless constructor, so the old
+    // Activator.CreateInstance path threw when a tool was called with no arguments.
+    private sealed record ListQuery(string? Search = null, int Page = 1, int PageSize = 25);
+
+    private sealed record ListResponse(string? Search, int Page, int PageSize);
+
+    private sealed class ListHandler : IHandler<ListQuery, Result<ListResponse>> {
+        public ValueTask<Result<ListResponse>> HandleAsync(ListQuery request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<ListResponse>>(
+                new ListResponse(request.Search, request.Page, request.PageSize));
+    }
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
@@ -48,10 +60,12 @@ public sealed class RpcToolInvokerTests {
         var dispatcher = new JsonRpcDispatcher(Options)
             .Map<EchoCommand, EchoResponse>("echo")
             .Map<ThrowCommand, EchoResponse>("throw")
+            .Map<ListQuery, ListResponse>("list")
             .Freeze();
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
             .AddScoped<IHandler<ThrowCommand, Result<EchoResponse>>, ThrowHandler>()
+            .AddScoped<IHandler<ListQuery, Result<ListResponse>>, ListHandler>()
             .BuildServiceProvider();
         return (dispatcher.Registry, services);
     }
@@ -70,6 +84,22 @@ public sealed class RpcToolInvokerTests {
         result.IsError.Should().BeFalse();
         using var doc = JsonDocument.Parse(result.Text);
         doc.RootElement.GetProperty("greeting").GetString().Should().Be("Hello World");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_NullArguments_AllOptionalPositionalRecord_AppliesConstructorDefaults() {
+        var (dispatcher, services) = Build();
+
+        // A tool called with no arguments: the previous Activator.CreateInstance(RequestType) path threw for a
+        // positional record (no parameterless constructor). Deserializing "{}" applies the ctor defaults instead.
+        var result = await RpcToolInvoker.InvokeAsync(
+            dispatcher, HandlerTransports.All, "list", arguments: null, services, Options,
+            ct: TestContext.Current.CancellationToken);
+
+        result.IsError.Should().BeFalse();
+        using var doc = JsonDocument.Parse(result.Text);
+        doc.RootElement.GetProperty("page").GetInt32().Should().Be(1);
+        doc.RootElement.GetProperty("pageSize").GetInt32().Should().Be(25);
     }
 
     [Fact]

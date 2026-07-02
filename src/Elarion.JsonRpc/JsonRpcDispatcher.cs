@@ -104,14 +104,10 @@ public sealed class JsonRpcDispatcher {
         _logger?.LogDebug("Dispatching JSON-RPC method {Method} (id={Id})", request.Method, request.Id);
 
         try {
-            object? requestObject;
-            if (request.Params is { ValueKind: not JsonValueKind.Undefined } paramsElement) {
-                // Resolve the contract through the configured (source-gen) resolver so deserialization stays
-                // reflection-free and Native-AOT-safe instead of using the RequiresDynamicCode Type overload.
-                requestObject = paramsElement.Deserialize(_jsonOptions.GetTypeInfo(route.RequestType));
-            } else {
-                requestObject = Activator.CreateInstance(route.RequestType);
-            }
+            // Omitted params are treated identically to `params: {}` and deserialized through the configured
+            // (source-gen) resolver — reflection-free / Native-AOT-safe, and applies the request record's
+            // constructor defaults (an all-optional positional record has no parameterless constructor).
+            var requestObject = RpcRequestParams.Deserialize(request.Params, route.RequestType, _jsonOptions);
 
             if (requestObject is null) {
                 RecordError(activity, method, "-32602", "Invalid params", "invalid-params", startTimestamp);

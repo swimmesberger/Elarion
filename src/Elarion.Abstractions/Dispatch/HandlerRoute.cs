@@ -1,5 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
-
 namespace Elarion.Abstractions.Dispatch;
 
 /// <summary>
@@ -15,10 +13,9 @@ namespace Elarion.Abstractions.Dispatch;
 /// </remarks>
 public sealed record HandlerRoute(
     string Name,
-    // A transport constructs an empty request via Activator.CreateInstance(RequestType) when no params are
-    // supplied, so the parameterless constructor must survive trimming. Generated callers pass typeof(TRequest)
-    // literals, which already satisfy this — the annotation only flows the requirement to the API surface.
-    [property: DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
+    // A transport deserializes its wire payload into RequestType through the configured (source-gen) JsonTypeInfo,
+    // treating omitted params as an empty object — so an empty request needs no reflected parameterless
+    // constructor and this type carries no trimming/AOT requirement on RequestType.
     Type RequestType,
     Type ResponseType,
     HandlerTransports Transports,
