@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Serialization;
 using Elarion.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -61,6 +62,10 @@ public sealed class HttpEndpointMappingEndToEndTests {
 
         builder.Services.ConfigureHttpJsonOptions(o =>
             o.SerializerOptions.TypeInfoResolver = new DefaultJsonTypeInfoResolver());
+        // Real hosts get the canonical accessor via the generated AddElarion(configuration); success responses
+        // serialize through it (never ASP.NET's own options). The reflection fallback stands in for the module
+        // JSON context this test host doesn't generate.
+        builder.Services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
         builder.Services.AddProblemDetails();
         builder.Services.AddScoped<IHandler<GetWidgetQuery, Result<WidgetResponse>>, GetWidgetHandler>();
         builder.Services.AddScoped<IHandler<CreateWidgetCommand, Result<CreateWidgetResponse>>, CreateWidgetHandler>();

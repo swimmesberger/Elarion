@@ -12,15 +12,39 @@ namespace Elarion.Paging;
 /// or delimiters — the generated code is the schema — so encoding is reflection-free.
 /// </summary>
 /// <remarks>
+/// <para>
+/// The cursor begins with a two-part header: a <see cref="FormatVersion"/> byte and a 32-bit
+/// <em>keyset-identity tag</em> (see the constructor). The tag lets a reader reject a cursor minted
+/// by a different keyset endpoint instead of silently reinterpreting its bytes as the wrong seek
+/// position, so a cursor is only ever decoded against the definition that produced it.
+/// </para>
+/// <para>
 /// Cursors are opaque to clients but are <b>not</b> a security boundary: they encode the boundary
-/// row's key values and are neither signed nor encrypted. Handlers must still apply their own
-/// authorization filters (e.g. <c>Where(c =&gt; c.OwnerId == user.UserId)</c>).
+/// row's key values and are neither signed nor encrypted. The identity tag is a collision guard, not
+/// a signature — it prevents accidental cross-endpoint reuse, not tampering. Handlers must still apply
+/// their own authorization filters (e.g. <c>Where(c =&gt; c.OwnerId == user.UserId)</c>).
+/// </para>
 /// </remarks>
 public sealed class CursorWriter
 {
-    internal const byte FormatVersion = 1;
+    internal const byte FormatVersion = 2;
 
-    private readonly List<byte> _buffer = new(32) { FormatVersion };
+    private readonly List<byte> _buffer;
+
+    /// <summary>
+    /// Creates a writer whose cursor header carries the given keyset-identity <paramref name="tag"/>.
+    /// Generated keyset definitions pass a compile-time-stable tag derived from the definition's
+    /// fully-qualified name and its ordered column types, so a cursor is bound to the exact keyset that
+    /// produced it and a mismatched cursor is rejected on read rather than silently decoded.
+    /// </summary>
+    /// <param name="tag">The keyset-identity tag embedded after the format-version byte.</param>
+    public CursorWriter(uint tag)
+    {
+        _buffer = new List<byte>(32) { FormatVersion };
+        Span<byte> tagBytes = stackalloc byte[sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(tagBytes, tag);
+        _buffer.AddRange(tagBytes);
+    }
 
     /// <summary>Appends a 32-bit signed integer (also used for narrower integral types).</summary>
     public void WriteInt32(int value)
@@ -117,20 +141,33 @@ public sealed class CursorWriter
 /// </summary>
 public struct CursorReader
 {
+    // Header: [0] format version, [1..5) little-endian keyset-identity tag.
+    private const int HeaderLength = 1 + sizeof(uint);
+
     private readonly byte[] _data;
     private int _position;
 
     private CursorReader(byte[] data)
     {
         _data = data;
-        _position = 1; // skip the format-version byte
+        _position = HeaderLength; // skip the format-version byte and identity tag
     }
 
     /// <summary>Whether every byte in the buffer has been consumed.</summary>
     public readonly bool AtEnd => _position == _data.Length;
 
-    /// <summary>Attempts to decode <paramref name="cursor"/> into a reader positioned after the version byte.</summary>
-    public static bool TryCreate(string? cursor, out CursorReader reader)
+    /// <summary>
+    /// Attempts to decode <paramref name="cursor"/> into a reader positioned after the header, verifying
+    /// that its embedded keyset-identity tag matches <paramref name="expectedTag"/>. Returns
+    /// <c>false</c> when the token is empty, not valid Base64Url, of an unexpected format version, or was
+    /// minted by a different keyset (tag mismatch) — so a cursor is never reinterpreted against the wrong
+    /// definition. Generated decoders surface a <c>false</c> result as a
+    /// <see cref="MalformedCursorException"/>.
+    /// </summary>
+    /// <param name="cursor">The opaque cursor token.</param>
+    /// <param name="expectedTag">The identity tag of the keyset performing the decode.</param>
+    /// <param name="reader">The positioned reader when decoding succeeds.</param>
+    public static bool TryCreate(string? cursor, uint expectedTag, out CursorReader reader)
     {
         reader = default;
         if (string.IsNullOrEmpty(cursor))
@@ -148,7 +185,13 @@ public struct CursorReader
             return false;
         }
 
-        if (data.Length < 1 || data[0] != CursorWriter.FormatVersion)
+        if (data.Length < HeaderLength || data[0] != CursorWriter.FormatVersion)
+        {
+            return false;
+        }
+
+        var tag = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(1, sizeof(uint)));
+        if (tag != expectedTag)
         {
             return false;
         }
@@ -339,5 +382,38 @@ public struct CursorReader
         }
 
         return false;
+    }
+}
+
+/// <summary>
+/// Thrown when a keyset cursor cannot be decoded against the definition it was supplied to: it is not
+/// valid Base64Url, carries an unexpected format version, was truncated, has trailing bytes, or was
+/// minted by a <em>different</em> keyset endpoint (its embedded identity tag does not match). A
+/// malformed cursor is a client error, not a signal to silently restart from the first page — feeding a
+/// cursor from one endpoint to another would otherwise reinterpret its bytes as a garbage seek position.
+/// </summary>
+/// <remarks>
+/// Transports should map this to a validation / <c>400 Bad Request</c>-style response so the client
+/// learns the cursor is invalid rather than receiving a silently-reset first page. The message is safe
+/// to surface: it names no key values.
+/// </remarks>
+public sealed class MalformedCursorException : Exception
+{
+    /// <summary>Creates the exception with the default "malformed or wrong-keyset cursor" message.</summary>
+    public MalformedCursorException()
+        : base("The pagination cursor is malformed or was produced by a different keyset; it cannot be decoded.")
+    {
+    }
+
+    /// <summary>Creates the exception with a custom <paramref name="message"/>.</summary>
+    public MalformedCursorException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates the exception with a custom <paramref name="message"/> and <paramref name="innerException"/>.</summary>
+    public MalformedCursorException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }

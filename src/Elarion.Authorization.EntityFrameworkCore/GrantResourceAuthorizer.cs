@@ -5,10 +5,17 @@ namespace Elarion.Authorization.EntityFrameworkCore;
 
 /// <summary>
 /// The grants-backed <see cref="IResourceAuthorizer"/>: authorizes a point check when the resource-grants table
-/// records a share of that resource (matched by <c>ResourceType.Name</c> and the stringified id) with the
-/// caller's user id or any of their roles, for the operation. Owner-based access is the handler's concern via
-/// the escape hatch, or modeled as a user grant.
+/// records a share of that resource (matched by the resource-type discriminator — the stable
+/// <see cref="ResourceAuthorizationContext.ResourceTypeName"/>, default <see cref="System.Type.FullName"/> — and
+/// the stringified id) with the caller's user id or any of their roles, for the operation. Owner-based access is
+/// the handler's concern via the escape hatch, or modeled as a user grant.
 /// </summary>
+/// <remarks>
+/// The resource-type discriminator, principal ids (user ids), and role names are matched <b>case-sensitively</b>
+/// (<see cref="System.StringComparison.Ordinal"/>, the database's default collation for the equality translated
+/// to SQL): a casing mismatch between a stored grant and <c>ICurrentUser</c> fails closed (denies), it never
+/// grants access.
+/// </remarks>
 internal sealed class GrantResourceAuthorizer(IResourceGrantSource grants) : IResourceAuthorizer {
     public async ValueTask<bool> AuthorizeResourceAsync(ResourceAuthorizationContext context, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(context);
@@ -18,7 +25,7 @@ internal sealed class GrantResourceAuthorizer(IResourceGrantSource grants) : IRe
             return false;
         }
 
-        var resourceType = context.ResourceType.Name;
+        var resourceType = context.ResourceTypeName;
         var resourceId = context.ResourceId.ToString();
         var operation = context.Operation.Name;
         var userId = user.UserId;

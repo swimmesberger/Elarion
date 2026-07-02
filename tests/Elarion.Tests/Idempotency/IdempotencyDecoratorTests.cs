@@ -48,7 +48,8 @@ public sealed class IdempotencyDecoratorTests {
 
     [Fact]
     public async Task Replay_ReturnsStoredResult_WithoutRunningHandler() {
-        var payload = JsonSerializer.Serialize(new StoredResult<string> { Ok = true, Value = "first" }, Json);
+        var payload = JsonSerializer.Serialize(
+            new StoredResult { Ok = true, Value = JsonSerializer.SerializeToElement("first", Json) }, Json);
         var inner = new RecordingHandler(Result<string>.Success("second"));
         var store = new RecordingStore(IdempotencyBeginResult.Replay(payload));
         var uow = new RecordingUnitOfWork();
@@ -193,7 +194,7 @@ public sealed class IdempotencyDecoratorTests {
     [Fact]
     public async Task DefinitiveFailureReplay_ReturnsStoredFailure() {
         var payload = JsonSerializer.Serialize(
-            new StoredResult<string> { Ok = false, Error = AppError.BusinessRule("declined") }, Json);
+            new StoredResult { Ok = false, Error = AppError.BusinessRule("declined") }, Json);
         var store = new RecordingStore(IdempotencyBeginResult.Replay(payload, isFailurePayload: true));
 
         var result = await Decorate(new RecordingHandler(Result<string>.Success("x")), store, new RecordingUnitOfWork(), "k1")
@@ -219,18 +220,39 @@ public sealed class IdempotencyDecoratorTests {
     }
 
     [Fact]
-    public async Task ConflictMode_SetsLockTimeout_WaitMode_DoesNot() {
+    public async Task BothConflictModes_SetALockTimeout_ConflictShorterThanWait() {
         var conflictUow = new RecordingUnitOfWork();
         await Decorate(new RecordingHandler(Result<string>.Success("x")), new RecordingStore(IdempotencyBeginResult.Began()), conflictUow, "k1",
                 new TestPolicy(conflict: IdempotencyConflictBehavior.Conflict))
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
         conflictUow.Scope!.LockTimeout.Should().NotBeNull();
 
+        // WaitThenReplay still bounds the wait (M3): a stuck winner must not pin the duplicate's connection
+        // forever. Its ceiling is longer than the fast-fail conflict timeout but is not unbounded.
         var waitUow = new RecordingUnitOfWork();
         await Decorate(new RecordingHandler(Result<string>.Success("x")), new RecordingStore(IdempotencyBeginResult.Began()), waitUow, "k1",
                 new TestPolicy(conflict: IdempotencyConflictBehavior.WaitThenReplay))
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
-        waitUow.Scope!.LockTimeout.Should().BeNull();
+        waitUow.Scope!.LockTimeout.Should().NotBeNull();
+        waitUow.Scope.LockTimeout.Should().BeGreaterThan(conflictUow.Scope.LockTimeout!.Value);
+    }
+
+    [Fact]
+    public async Task SuccessfulHandler_ThenCancellation_StillCommits() {
+        var inner = new RecordingHandler(Result<string>.Success("done"));
+        var store = new RecordingStore(IdempotencyBeginResult.Began());
+        var uow = new RecordingUnitOfWork();
+        using var cts = new CancellationTokenSource();
+
+        // The handler succeeds, then the request token is cancelled before finalization. The completed command
+        // must still commit (its key finalized) rather than roll back — M8.
+        var handler = new CancelAfterSuccessHandler(cts, Result<string>.Success("done"));
+        var result = await Decorate(handler, store, uow, "k1").HandleAsync(new TestCommand(1), cts.Token);
+
+        result.Value.Should().Be("done");
+        store.CompleteCount.Should().Be(1);
+        uow.Scope!.Commits.Should().Be(1);
+        uow.Scope.Rollbacks.Should().Be(0);
     }
 
     private sealed record TestCommand(int Id, string? IdempotencyKey = null) : ICommand, IIdempotentRequest;
@@ -252,15 +274,16 @@ public sealed class IdempotencyDecoratorTests {
         public string Serialize(Result<string> response, JsonSerializerOptions options) =>
             JsonSerializer.Serialize(
                 response.IsSuccess
-                    ? new StoredResult<string> { Ok = true, Value = response.Value }
-                    : new StoredResult<string> { Ok = false, Error = response.Error },
+                    ? new StoredResult { Ok = true, Value = JsonSerializer.SerializeToElement(response.Value, options) }
+                    : new StoredResult { Ok = false, Error = response.Error },
                 options);
 
         public Result<string> Deserialize(string payload, JsonSerializerOptions options) {
-            var stored = JsonSerializer.Deserialize<StoredResult<string>>(payload, options)!;
-            return stored.Ok
-                ? Result<string>.Success(stored.Value!)
-                : Result<string>.Failure(stored.Error ?? AppError.InternalError);
+            var stored = JsonSerializer.Deserialize<StoredResult>(payload, options)!;
+            if (!stored.Ok)
+                return Result<string>.Failure(stored.Error ?? AppError.InternalError);
+            var value = stored.Value is { } element ? element.Deserialize<string>(options) : null;
+            return Result<string>.Success(value!);
         }
     }
 
@@ -278,6 +301,16 @@ public sealed class IdempotencyDecoratorTests {
             throw new InvalidOperationException("boom");
     }
 
+    private sealed class CancelAfterSuccessHandler(CancellationTokenSource cts, Result<string> response)
+        : IHandler<TestCommand, Result<string>> {
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) {
+            // The handler completes, then the request is cancelled — modeling a cancellation racing in between a
+            // successful result and the finalizing commit.
+            cts.Cancel();
+            return ValueTask.FromResult(response);
+        }
+    }
+
     private sealed class RecordingStore(IdempotencyBeginResult begin) : IIdempotencyStore {
         public int CompleteCount { get; private set; }
         public int AbandonCount { get; private set; }
@@ -291,6 +324,7 @@ public sealed class IdempotencyDecoratorTests {
         }
 
         public ValueTask CompleteAsync(IdempotencyStoreKey key, string payload, bool isFailure, TimeSpan retention, CancellationToken ct) {
+            ct.ThrowIfCancellationRequested();
             CompleteCount++;
             CompletedIsFailure = isFailure;
             return default;
@@ -319,8 +353,8 @@ public sealed class IdempotencyDecoratorTests {
             public int Savepoints { get; private set; }
             public int SavepointRollbacks { get; private set; }
 
-            public ValueTask CommitAsync(CancellationToken ct) { Commits++; return default; }
-            public ValueTask RollbackAsync(CancellationToken ct) { Rollbacks++; return default; }
+            public ValueTask CommitAsync(CancellationToken ct) { ct.ThrowIfCancellationRequested(); Commits++; return default; }
+            public ValueTask RollbackAsync(CancellationToken ct) { ct.ThrowIfCancellationRequested(); Rollbacks++; return default; }
             public ValueTask CreateSavepointAsync(string name, CancellationToken ct) { Savepoints++; return default; }
             public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) { SavepointRollbacks++; return default; }
             public ValueTask DisposeAsync() => default;

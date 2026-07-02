@@ -30,6 +30,22 @@ public sealed class RpcDispatcherHandlerTests {
             };
     }
 
+    private sealed record CancelCommand {
+        public required bool Cooperative { get; init; }
+    }
+
+    private sealed class CancelHandler : IHandler<CancelCommand, Result<EchoResponse>> {
+        public ValueTask<Result<EchoResponse>> HandleAsync(CancelCommand request, CancellationToken ct) {
+            // Cooperative: honor the request token (client disconnect). Non-cooperative: throw an OCE that is not
+            // tied to the request token (a handler-internal cancellation), which must still surface as an error.
+            if (request.Cooperative) {
+                ct.ThrowIfCancellationRequested();
+            }
+
+            throw new OperationCanceledException();
+        }
+    }
+
     // The framework disables reflection-based serialization by default (AOT discipline); opt these
     // test options in explicitly so the dispatcher can (de)serialize the sample request type.
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
@@ -39,10 +55,12 @@ public sealed class RpcDispatcherHandlerTests {
     private static (JsonRpcDispatcher Dispatcher, IServiceProvider Services) Build() {
         var dispatcher = new JsonRpcDispatcher(Options)
             .Map<EchoCommand, EchoResponse>("echo")
+            .Map<CancelCommand, EchoResponse>("cancel")
             .Freeze();
 
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
+            .AddScoped<IHandler<CancelCommand, Result<EchoResponse>>, CancelHandler>()
             .BuildServiceProvider();
 
         return (dispatcher, services);
@@ -55,6 +73,45 @@ public sealed class RpcDispatcherHandlerTests {
             Params = JsonSerializer.SerializeToElement(@params, Options),
             Id = "1",
         };
+
+    [Fact]
+    public async Task Dispatch_CallerCanceled_RethrowsInsteadOfFabricatingInternalError() {
+        var (dispatcher, services) = Build();
+        await using var scope = services.CreateAsyncScope();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var request = new JsonRpcRequest {
+            Jsonrpc = "2.0",
+            Method = "cancel",
+            Params = JsonSerializer.SerializeToElement(new { cooperative = true }, Options),
+            Id = "1",
+        };
+
+        var act = async () => await dispatcher.DispatchAsync(request, scope.ServiceProvider, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task Dispatch_HandlerInternalCancellation_WithLiveToken_SurfacesAsInternalError() {
+        var (dispatcher, services) = Build();
+        await using var scope = services.CreateAsyncScope();
+
+        var request = new JsonRpcRequest {
+            Jsonrpc = "2.0",
+            Method = "cancel",
+            Params = JsonSerializer.SerializeToElement(new { cooperative = false }, Options),
+            Id = "1",
+        };
+
+        // The request token is never canceled, so a handler-internal OCE is a genuine fault, not a client abort.
+        var response = await dispatcher.DispatchAsync(
+            request, scope.ServiceProvider, TestContext.Current.CancellationToken);
+
+        response.Error.Should().NotBeNull();
+        response.Error!.Code.Should().Be(-32603);
+    }
 
     [Fact]
     public async Task Dispatch_SuccessfulHandler_ReturnsResponseValue() {

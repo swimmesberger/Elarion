@@ -65,6 +65,7 @@ App-module discovery and the `ModuleBoundaryAnalyzer`. See
 | --- | --- | --- | --- |
 | ELMOD001 | Warning | Two `[AppModule]` types share the same namespace; generated transport handlers in that namespace are associated with the alphabetically first matching module (ambiguous ownership). | Give each module a distinct namespace so handler-to-module association is unambiguous. |
 | ELMOD002 | Warning | Location-based: a type in one `[AppModule]` depends (via constructor parameter, field, or property) on a type **inside** another module — an entity, DTO, `[Service]`, handler, or `[EntityConfiguration]` — that is not a published `[ModuleContract]`. Everything **outside** every module (the shared kernel and platform ports) is shareable; a shared-kernel entity is exempt because of *where it lives*, not because entities are special. | Reach the other module through its `[ModuleContract]` (used sparingly), a platform-capability port outside the modules, or move shared data/value types to the shared kernel. |
+| ELMOD003 | Warning | A referenced assembly advertises an Elarion manifest whose schema version this generator does not understand; its manifest entries (modules, HTTP/RPC endpoints, permission-catalog entries) are skipped rather than misparsed. | Rebuild the referenced assembly against a matching Elarion version so its manifest schema aligns with the consuming generator. |
 
 ## ELAUTH — Authorization
 
@@ -113,6 +114,7 @@ EF Core entity configuration discovery for `[EntityConfiguration]`. See
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELEFC001 | Warning | An `[EntityConfiguration]` class implements no `IEntityTypeConfiguration<T>`, so no `DbSet` or configuration is generated for it. | Make the class implement at least one `IEntityTypeConfiguration<T>`, or remove the `[EntityConfiguration]` attribute. |
+| ELEFC002 | Warning | Two `[EntityConfiguration]` entities share a short type name across namespaces and map to the same `DbSet` property name; the colliding `DbSet` is skipped (the first entity by name wins) to avoid a `CS0102` duplicate member. | Rename one of the entities, or place it in a differently-scoped context so the two never map onto the same context. |
 
 ## ELKEY — Keyset pagination
 
@@ -123,7 +125,7 @@ Keyset-definition generation for `[Keyset<TEntity>]`. See [Pagination](/docs/cap
 | ELKEY001 | Error | A `[Keyset]` declares a column name that does not match any property on the target entity; no keyset is generated. | Correct the keyset column name to match an existing entity property. |
 | ELKEY002 | Error | A `[Keyset]` column maps to a property whose type is not supported for keyset pagination; no keyset is generated. | Use a supported (comparable) column type for keyset ordering, or remove that column from the keyset. |
 | ELKEY003 | Error | A `[Keyset]` column maps to a nullable property; keyset columns must be non-nullable for deterministic ordering. No keyset is generated. | Make the keyset column non-nullable, or choose a different non-nullable column for the ordering. |
-| ELKEY004 | Warning | The target entity has an `Id` property that is not part of its `[Keyset]`, so paging order may not be deterministic (no unique tiebreaker). | Append a unique column (such as the key/`Id`) to the keyset so ordering is deterministic. |
+| ELKEY004 | Warning | The target entity has a primary-key property (a `[Key]`-annotated property, or the conventional `Id`/`{EntityType}Id`) that is not part of its `[Keyset]`, so paging order may not be deterministic (no unique tiebreaker). | Append the key (or another unique column) to the keyset so ordering is deterministic and cannot skip or repeat rows. |
 | ELKEY005 | Error | A `[Keyset<TEntity>]`-annotated class is nested or non-partial; the generator emits the `IKeysetDefinition` implementation into it and requires a non-nested partial class. | Declare the keyset class as a top-level (non-nested) `partial` class. |
 
 ## ELSG — Services, scheduled jobs
@@ -152,6 +154,7 @@ Decorator attachment in handler registration. See [Decorator pipelines](/docs/co
 | --- | --- | --- | --- |
 | ELPIPE001 | Error | A decorator declares an `AppliesTo` attachment-predicate method that is not public, so the generated registration cannot call it to decide attachment. | Declare the predicate as `public static bool AppliesTo(HandlerMetadata handler)`. |
 | ELPIPE002 | Error | A decorator declares an `AppliesTo` method with an unsupported signature (e.g. the older `AppliesTo(System.Type request)`). | Use the one supported form, `public static bool AppliesTo(HandlerMetadata handler)`; for request-based checks use `handler.RequestType`. |
+| ELPIPE003 | Error | A handler carries `[Resilient]` but consumes a domain event (`request : IDomainEvent`), which is dispatched inline within the publisher's transaction; a Polly retry would re-apply the handler's tracked mutations inside that live transaction. | Remove `[Resilient]` from the domain-event consumer. Integration-event consumers run on a fresh post-commit scope and may be resilient. |
 
 ## ELRES — Resilience policies
 
@@ -195,6 +198,9 @@ Handler caching configuration for `[Cacheable]` / `[CacheInvalidate]`. See [Cach
 | ELCACHE002 | Error | A handler's cache configuration defines no non-empty cache tag (at least one is required). | Define at least one non-empty cache tag on the handler's caching attribute. |
 | ELCACHE003 | Error | A handler declares a cache tag that fails validation (invalid format/value). | Replace the invalid cache tag with a valid tag value. |
 | ELCACHE004 | Error | A cacheable handler's cache duration is not positive (must define a positive duration). | Set a positive cache duration on the handler's `[Cacheable]` configuration. |
+| ELCACHE005 | Error | A handler carries `[Cacheable]` but consumes an event (`request : IDomainEvent`/`IIntegrationEvent`); caching a fan-out consumer's `Result<Unit>` would silently skip the side effect on a legitimate re-delivery. | Remove `[Cacheable]` from the event consumer. (`[CacheInvalidate]` on a consumer is legitimate — reacting to an event by evicting caches — and is left attached.) |
+| ELCACHE006 | Error | A request property participating in the cache key has a type with no stable key formatting (it would fall back to `object.ToString()`, colliding across values and risking a cross-request cache leak). | Use a scalar key property (primitive, `string`, `char`, `bool`, `Guid`, enum, `DateTime`/`DateTimeOffset`/`DateOnly`/`TimeOnly`/`TimeSpan`, `decimal`, or a `Nullable` of those), or restrict the key with `[Cacheable(KeyProperties = ...)]`. |
+| ELCACHE007 | Error | A `[Cacheable(KeyProperties = ...)]` names a property that is not a public instance property on the request type, so it would be silently dropped from the key. | Reference an existing request property, e.g. `nameof(Request.Id)`. |
 
 ## ELFEAT — Feature gates
 

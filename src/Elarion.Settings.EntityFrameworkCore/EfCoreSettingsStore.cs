@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
 
 namespace Elarion.Settings.EntityFrameworkCore;
 
@@ -18,14 +19,27 @@ namespace Elarion.Settings.EntityFrameworkCore;
 /// bulk insert), so a settings write never flushes the caller's unrelated tracked changes. Optimistic
 /// concurrency is enforced explicitly: an update is guarded on the version observed by a prior read (a lost
 /// race affects zero rows and surfaces as <see cref="SettingWriteResult.ConcurrencyConflict"/>), and a
-/// create that loses to a concurrent insert is detected by re-checking existence. After a successful write the
-/// supplied <see cref="ISettingsChangePublisher"/> is signalled — with the in-process source this is
-/// single-instance notification; a cross-instance change source is a drop-in replacement.
+/// create that loses to a concurrent insert is detected by re-checking existence.
+/// <para>
+/// A write with <c>expectedVersion == null</c> is <b>unconditional (last-write-wins)</b>: the update is keyed
+/// only on identity and increments the version in place, so two nodes writing the same key concurrently both
+/// succeed rather than one spuriously conflicting. Pass a non-null <c>expectedVersion</c> to opt into the
+/// optimistic guard, where a lost race returns <see cref="SettingWriteResult.ConcurrencyConflict"/>.
+/// </para>
+/// <para>
+/// After a successful write the supplied <see cref="ISettingsChangePublisher"/> is signalled — but only when
+/// the write did <b>not</b> run inside a caller-owned ambient transaction. A store write enlists in the
+/// context's current transaction, so signalling immediately would fire watchers for a value a later rollback
+/// discards; a transactional write therefore skips the (immediate) notification and logs at Debug until a
+/// commit-hooked change source is added. With the in-process source notification is single-instance in any
+/// case; a cross-instance change source is a drop-in replacement.
+/// </para>
 /// </remarks>
 public sealed class EfCoreSettingsStore<TDbContext>(
     TDbContext dbContext,
     ISettingsChangePublisher changePublisher,
-    TimeProvider timeProvider) : ISettingsStore
+    TimeProvider timeProvider,
+    ILogger<EfCoreSettingsStore<TDbContext>> logger) : ISettingsStore
     where TDbContext : DbContext {
     // The INSERT statement is provider- and schema-specific (delimited identifiers, resolved column names),
     // so it is built once per model and reused.
@@ -83,44 +97,114 @@ public sealed class EfCoreSettingsStore<TDbContext>(
                 return SettingWriteResult.ConcurrencyConflict;
             }
 
+            var raced = false;
             try {
                 await InsertAsync(kind, owner, key, value, now, cancellationToken).ConfigureAwait(false);
             }
             catch (DbException) {
-                // A concurrent writer may have created the same key first; treat that as a conflict, rethrow otherwise.
-                if (await ExistsAsync(kind, owner, key, cancellationToken).ConfigureAwait(false)) {
+                // A concurrent writer may have created the same key first; rethrow if it was some other failure.
+                if (!await ExistsAsync(kind, owner, key, cancellationToken).ConfigureAwait(false)) {
+                    throw;
+                }
+
+                // For an explicit "expected absent" (expectedVersion == 0) the concurrent create is a genuine
+                // conflict; for the unconditional path (expectedVersion == null) fall through to a last-write-wins
+                // update against the row the other writer just created.
+                if (expectedVersion is 0) {
                     return SettingWriteResult.ConcurrencyConflict;
                 }
 
-                throw;
+                raced = true;
             }
 
-            changePublisher.Publish(scope, key);
+            if (!raced) {
+                NotifyIfNotTransactional(scope, key);
+                return SettingWriteResult.Success(1);
+            }
+        }
+
+        if (current is not null && expectedVersion is { } expected) {
+            // Optimistic path: guard the update on the version the caller observed, so a lost race conflicts.
+            var observedVersion = current.Value;
+            if (expected != observedVersion) {
+                return SettingWriteResult.ConcurrencyConflict;
+            }
+
+            var guardedNewVersion = observedVersion + 1;
+            var guardedUpdated = await dbContext.Set<Setting>()
+                .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key
+                    && setting.Version == observedVersion)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(setting => setting.Value, value)
+                    .SetProperty(setting => setting.UpdatedOnUtc, now)
+                    .SetProperty(setting => setting.Version, guardedNewVersion), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (guardedUpdated == 0) {
+                // Lost an optimistic race between the read and the conditional update.
+                return SettingWriteResult.ConcurrencyConflict;
+            }
+
+            NotifyIfNotTransactional(scope, key);
+            return SettingWriteResult.Success(guardedNewVersion);
+        }
+
+        // Unconditional (last-write-wins) path: update keyed only on identity, incrementing Version in place so two
+        // nodes writing concurrently both succeed instead of one spuriously conflicting.
+        var newVersion = await UnconditionalUpdateAsync(kind, owner, key, value, now, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (newVersion is null) {
+            // The row was removed by a concurrent delete between the read and this update; recreate it.
+            try {
+                await InsertAsync(kind, owner, key, value, now, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DbException) {
+                // A concurrent create raced us; if the row now exists, retry the unconditional update once,
+                // otherwise the failure is genuine.
+                if (!await ExistsAsync(kind, owner, key, cancellationToken).ConfigureAwait(false)) {
+                    throw;
+                }
+
+                newVersion = await UnconditionalUpdateAsync(kind, owner, key, value, now, cancellationToken)
+                    .ConfigureAwait(false)
+                    ?? 1;
+                NotifyIfNotTransactional(scope, key);
+                return SettingWriteResult.Success(newVersion.Value);
+            }
+
+            NotifyIfNotTransactional(scope, key);
             return SettingWriteResult.Success(1);
         }
 
-        var observedVersion = current.Value;
-        if (expectedVersion is { } expected && expected != observedVersion) {
-            return SettingWriteResult.ConcurrencyConflict;
-        }
+        NotifyIfNotTransactional(scope, key);
+        return SettingWriteResult.Success(newVersion.Value);
+    }
 
-        var newVersion = observedVersion + 1;
+    /// <summary>
+    /// Applies a last-write-wins update keyed only on <c>(Kind, Owner, Key)</c>, incrementing the version column
+    /// in place. Returns the new version, or <see langword="null"/> when no row matched (a concurrent delete).
+    /// </summary>
+    private async Task<int?> UnconditionalUpdateAsync(
+        string kind, string owner, string key, string? value, DateTimeOffset now, CancellationToken cancellationToken) {
         var updated = await dbContext.Set<Setting>()
-            .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key
-                && setting.Version == observedVersion)
+            .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(setting => setting.Value, value)
                 .SetProperty(setting => setting.UpdatedOnUtc, now)
-                .SetProperty(setting => setting.Version, newVersion), cancellationToken)
+                .SetProperty(setting => setting.Version, setting => setting.Version + 1), cancellationToken)
             .ConfigureAwait(false);
 
         if (updated == 0) {
-            // Lost an optimistic race between the read and the conditional update.
-            return SettingWriteResult.ConcurrencyConflict;
+            return null;
         }
 
-        changePublisher.Publish(scope, key);
-        return SettingWriteResult.Success(newVersion);
+        return await dbContext.Set<Setting>()
+            .AsNoTracking()
+            .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key)
+            .Select(setting => (int?)setting.Version)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -143,8 +227,29 @@ public sealed class EfCoreSettingsStore<TDbContext>(
             return false;
         }
 
-        changePublisher.Publish(scope, key);
+        NotifyIfNotTransactional(scope, key);
         return true;
+    }
+
+    /// <summary>
+    /// Signals the change publisher — but only when the write is <b>not</b> running inside a caller-owned ambient
+    /// transaction. A store write enlists in <see cref="DatabaseFacade.CurrentTransaction"/>, so notifying
+    /// immediately would fire watchers for a value that a subsequent rollback discards (a phantom notification).
+    /// The immediate-write path (no ambient transaction) commits with the statement, so it notifies as before; a
+    /// transactional write skips the signal and logs at Debug, documenting that transaction-commit-hooked
+    /// notification is not yet wired.
+    /// </summary>
+    private void NotifyIfNotTransactional(SettingsScope scope, string key) {
+        if (dbContext.Database.CurrentTransaction is not null) {
+            logger.LogDebug(
+                "Skipping settings change notification for key '{Key}' in scope '{Scope}' because the write is " +
+                "inside a caller-owned transaction; watchers are not signalled until a commit-hooked source is added.",
+                key,
+                scope.Kind);
+            return;
+        }
+
+        changePublisher.Publish(scope, key);
     }
 
     private Task<bool> ExistsAsync(string kind, string owner, string key, CancellationToken cancellationToken) =>

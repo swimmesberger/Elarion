@@ -40,7 +40,8 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
             var resolved = new ResourceRequirement[resourceBindings.Count];
             for (var i = 0; i < resourceBindings.Count; i++) {
                 var binding = resourceBindings[i];
-                resolved[i] = new ResourceRequirement(binding.ResourceType, binding.Operation, binding.IdSelector(request));
+                resolved[i] = new ResourceRequirement(
+                    binding.ResourceType, binding.ResourceTypeName, binding.Operation, binding.IdSelector(request));
             }
 
             requirements = requirements with { Resources = resolved };

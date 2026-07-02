@@ -42,7 +42,7 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
 
         int inserted;
         try {
-            object[] parameters = [scope, key.Owner, key.Key, fingerprint, false, false, now, 1];
+            object[] parameters = [key.Operation, scope, key.Owner, key.Key, fingerprint, false, false, now, 1];
             inserted = await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, ct).ConfigureAwait(false);
         }
         catch (DbException ex) when (ex.SqlState == PostgresLockNotAvailable) {
@@ -58,7 +58,8 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
         // single-transaction model, so an existing row is a completed outcome to replay.
         var existing = await dbContext.Set<IdempotencyKeyEntity>()
             .AsNoTracking()
-            .Where(entity => entity.Scope == scope && entity.Owner == key.Owner && entity.Key == key.Key)
+            .Where(entity => entity.Operation == key.Operation && entity.Scope == scope
+                && entity.Owner == key.Owner && entity.Key == key.Key)
             .Select(entity => new StoredOutcome(entity.Completed, entity.Fingerprint, entity.Payload, entity.IsFailure))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
@@ -87,8 +88,8 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
         var expiresOnUtc = now + retention;
 
         await dbContext.Set<IdempotencyKeyEntity>()
-            .Where(entity => entity.Scope == scope && entity.Owner == key.Owner && entity.Key == key.Key
-                && !entity.Completed)
+            .Where(entity => entity.Operation == key.Operation && entity.Scope == scope
+                && entity.Owner == key.Owner && entity.Key == key.Key && !entity.Completed)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(entity => entity.Completed, true)
                 .SetProperty(entity => entity.Payload, payload)
@@ -138,16 +139,17 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
         }
 
         var table = sqlHelper.DelimitIdentifier(tableName, schema);
+        var operationCol = Column(nameof(IdempotencyKeyEntity.Operation));
         var scopeCol = Column(nameof(IdempotencyKeyEntity.Scope));
         var ownerCol = Column(nameof(IdempotencyKeyEntity.Owner));
         var keyCol = Column(nameof(IdempotencyKeyEntity.Key));
 
         return $"INSERT INTO {table} (" +
-            $"{scopeCol}, {ownerCol}, {keyCol}, {Column(nameof(IdempotencyKeyEntity.Fingerprint))}, " +
+            $"{operationCol}, {scopeCol}, {ownerCol}, {keyCol}, {Column(nameof(IdempotencyKeyEntity.Fingerprint))}, " +
             $"{Column(nameof(IdempotencyKeyEntity.Completed))}, {Column(nameof(IdempotencyKeyEntity.IsFailure))}, " +
             $"{Column(nameof(IdempotencyKeyEntity.CreatedOnUtc))}, {Column(nameof(IdempotencyKeyEntity.Version))}) " +
-            "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}) " +
-            $"ON CONFLICT ({scopeCol}, {ownerCol}, {keyCol}) DO NOTHING";
+            "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}) " +
+            $"ON CONFLICT ({operationCol}, {scopeCol}, {ownerCol}, {keyCol}) DO NOTHING";
     }
 
     private sealed record StoredOutcome(bool Completed, string Fingerprint, string? Payload, bool IsFailure);

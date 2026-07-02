@@ -1,6 +1,9 @@
+using System.Text.Json.Serialization.Metadata;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.AspNetCore;
 
@@ -13,11 +16,17 @@ namespace Elarion.AspNetCore;
 /// These helpers are invoked by the code emitted by <c>Elarion.Generators.AppModuleDiscoveryGenerator</c>; they
 /// are public so the generated endpoint lambdas can call them. Validation failures carrying
 /// <see cref="ValidationErrorData"/> are surfaced through the standard ProblemDetails <c>errors</c> map.
+/// <para>
+/// A successful value is serialized through the canonical <see cref="IElarionJsonSerialization"/> options — the
+/// same options every other Elarion transport (JSON-RPC, MCP) uses — so REST output never diverges from those
+/// surfaces for the same DTO. The accessor is resolved from the request's services at execution time and the
+/// value is written with its source-generated <see cref="JsonTypeInfo"/>, so the path stays AOT-safe.
+/// </para>
 /// </remarks>
 public static class ElarionHttpResults {
     /// <summary>Returns <c>200 OK</c> with <paramref name="result"/>'s value on success, otherwise a ProblemDetails failure.</summary>
     public static IResult ToResult<T>(Result<T> result) =>
-        result.IsSuccess ? Results.Ok(result.Value) : ToProblem(result.Error);
+        result.IsSuccess ? new ElarionJsonResult<T>(result.Value) : ToProblem(result.Error);
 
     /// <summary>Returns <c>204 No Content</c> on success, otherwise a ProblemDetails failure. Used when the response type is empty.</summary>
     public static IResult ToNoContentResult<T>(Result<T> result) =>
@@ -51,4 +60,38 @@ public static class ElarionHttpResults {
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+}
+
+/// <summary>
+/// A <c>200 OK</c> JSON result that serializes its value through the canonical <see cref="IElarionJsonSerialization"/>
+/// options (resolved from the request's services), so REST responses match the JSON-RPC/MCP transports for the same
+/// DTO. Exposes the value and status code so callers can introspect the result without executing it.
+/// </summary>
+internal sealed class ElarionJsonResult<T>(T value) : IResult, IStatusCodeHttpResult, IValueHttpResult, IValueHttpResult<T> {
+    /// <inheritdoc />
+    public int? StatusCode => StatusCodes.Status200OK;
+
+    /// <inheritdoc />
+    public T? Value => value;
+
+    /// <inheritdoc cref="IValueHttpResult.Value" />
+    object? IValueHttpResult.Value => value;
+
+    /// <inheritdoc />
+    public async Task ExecuteAsync(HttpContext httpContext) {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        // Fail loudly rather than silently serializing through ASP.NET's own JSON options — a quiet fallback
+        // would reintroduce exactly the REST-vs-RPC divergence this result type exists to prevent.
+        var serialization = httpContext.RequestServices.GetService<IElarionJsonSerialization>()
+            ?? throw new InvalidOperationException(
+                "IElarionJsonSerialization is not registered. [HttpEndpoint] responses serialize through the "
+                + "canonical Elarion JSON options; call services.AddElarionJson() — the generated "
+                + "AddElarion(configuration) does this — before mapping Elarion endpoints.");
+
+        var typeInfo = (JsonTypeInfo<T>)serialization.GetTypeInfo(typeof(T));
+
+        httpContext.Response.StatusCode = StatusCodes.Status200OK;
+        await httpContext.Response.WriteAsJsonAsync(value, typeInfo, cancellationToken: httpContext.RequestAborted);
+    }
 }

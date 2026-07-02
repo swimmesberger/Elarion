@@ -6,18 +6,19 @@ namespace Elarion.Idempotency.EntityFrameworkCore;
 public static class IdempotencyModelBuilderExtensions {
     /// <summary>
     /// Maps <see cref="IdempotencyKeyEntity"/> to the <c>elarion_idempotency_keys</c> table with the composite
-    /// unique key <c>(scope, owner, key)</c>, snake_case columns, a <c>version</c> concurrency token, and a
-    /// secondary index over completed rows to keep the retention purge an indexed probe. Called for you by the
-    /// <c>[GenerateElarionIdempotencyKeys]</c> generator through the EF model-configuration seam; call it by hand
-    /// in <c>OnModelCreating</c> otherwise (alongside, for example, <c>UseElarionOutbox()</c>).
+    /// unique key <c>(operation, scope, owner, key)</c>, snake_case columns, a <c>version</c> concurrency token,
+    /// and a secondary index over completed rows to keep the retention purge an indexed probe. Called for you by
+    /// the <c>[GenerateElarionIdempotencyKeys]</c> generator through the EF model-configuration seam; call it by
+    /// hand in <c>OnModelCreating</c> otherwise (alongside, for example, <c>UseElarionOutbox()</c>).
     /// </summary>
     public static ModelBuilder ApplyElarionIdempotencyKeys(this ModelBuilder modelBuilder, bool snakeCase = true) {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
         modelBuilder.Entity<IdempotencyKeyEntity>(builder => {
             builder.ToTable(snakeCase ? "elarion_idempotency_keys" : "ElarionIdempotencyKeys");
-            builder.HasKey(entity => new { entity.Scope, entity.Owner, entity.Key });
+            builder.HasKey(entity => new { entity.Operation, entity.Scope, entity.Owner, entity.Key });
 
+            builder.Property(entity => entity.Operation).HasColumnName(snakeCase ? "operation" : "Operation").HasMaxLength(256);
             builder.Property(entity => entity.Scope).HasColumnName(snakeCase ? "scope" : "Scope").HasMaxLength(32);
             builder.Property(entity => entity.Owner).HasColumnName(snakeCase ? "owner" : "Owner").HasMaxLength(128);
             builder.Property(entity => entity.Key).HasColumnName(snakeCase ? "key" : "Key").HasMaxLength(256);

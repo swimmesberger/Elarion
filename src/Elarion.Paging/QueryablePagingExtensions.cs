@@ -22,6 +22,11 @@ public static class QueryablePagingExtensions
     /// server-side via the generated keyset, so only <paramref name="selector"/>'s columns and the key
     /// columns are read and the query is not tracked; boundary cursors are encoded from the key columns.
     /// </summary>
+    /// <exception cref="MalformedCursorException">
+    /// The request's <c>After</c>/<c>Before</c> cursor is malformed or was minted by a different keyset
+    /// (identity-tag mismatch). This is a client error and is surfaced rather than silently paging from
+    /// the first row; map it to a validation / <c>400</c>-style response.
+    /// </exception>
     public static async Task<Page<TDto>> ToKeysetPageAsync<TEntity, TDto>(
         this IQueryable<TEntity> source,
         IKeysetPageRequest request,
@@ -45,15 +50,10 @@ public static class QueryablePagingExtensions
         IQueryable<TEntity> query = keyset.ApplyOrder(source, forward);
         if (pagedFromCursor)
         {
+            // A malformed or wrong-keyset cursor throws MalformedCursorException; it is a client error,
+            // never a silent fallback to the first page (which would return unrelated rows).
             var seek = keyset.BuildSeek(cursor!, forward);
-            if (seek is not null)
-            {
-                query = query.Where(seek);
-            }
-            else
-            {
-                pagedFromCursor = false; // malformed cursor: treat as first/last page
-            }
+            query = query.Where(seek);
         }
 
         // Fetch one extra row to detect a further page in the paging direction.

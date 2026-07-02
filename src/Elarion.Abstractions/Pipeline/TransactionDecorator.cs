@@ -27,14 +27,20 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
         && handler.GetAttribute<IdempotentAttribute>() is null;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Once the handler has returned a successful result the command is logically done, so the commit runs with
+    /// <see cref="CancellationToken.None"/>: a cancellation that arrives in the gap between success and commit
+    /// must not silently roll back completed work (it would be indistinguishable from cancelling the handler).
+    /// The request token still cancels the handler itself; only the finalizing commit is uncancellable.
+    /// </remarks>
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         await using var scope = await unitOfWork.BeginAsync(UnitOfWorkOptions.Default, ct).ConfigureAwait(false);
         var response = await inner.HandleAsync(request, ct).ConfigureAwait(false);
 
         if (response is IResultLike { IsSuccess: true }) {
-            await scope.CommitAsync(ct).ConfigureAwait(false);
+            await scope.CommitAsync(CancellationToken.None).ConfigureAwait(false);
         } else {
-            await scope.RollbackAsync(ct).ConfigureAwait(false);
+            await scope.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
         return response;

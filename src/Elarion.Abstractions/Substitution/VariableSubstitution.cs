@@ -12,7 +12,8 @@ namespace Elarion.Abstractions.Substitution;
 /// <see cref="ResolveRequired"/>) treats a string as either a literal or a single placeholder — useful for
 /// optional, settable attributes (an unresolved placeholder yields <see langword="null"/>). The
 /// <b>embedded</b> model (<see cref="Substitute"/>) replaces every <c>${...}</c> occurrence inside a larger
-/// template string, like a connection string or a path. Nesting (<c>${a:${b}}</c>) is not supported.
+/// template string, like a connection string or a path. Nesting (<c>${a:${b}}</c>) is not supported and is
+/// rejected with a <see cref="FormatException"/> naming the offending expression, rather than mis-parsed.
 /// </remarks>
 public static class VariableSubstitution {
     private const string Open = "${";
@@ -35,7 +36,7 @@ public static class VariableSubstitution {
     /// Resolves a whole-value placeholder against <paramref name="source"/>, or returns a literal unchanged.
     /// Returns <see langword="null"/> when the placeholder's key is unset and it carries no inline default.
     /// </summary>
-    /// <exception cref="FormatException">The placeholder has an empty key.</exception>
+    /// <exception cref="FormatException">The placeholder has an empty key or contains a nested placeholder.</exception>
     public static string? Resolve(string value, IVariableSource source) {
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(source);
@@ -58,7 +59,7 @@ public static class VariableSubstitution {
     /// Replaces every <c>${...}</c> placeholder inside <paramref name="template"/> with its resolved value,
     /// leaving the surrounding text intact. An unterminated <c>${</c> is emitted verbatim.
     /// </summary>
-    /// <exception cref="FormatException">A placeholder has an empty key.</exception>
+    /// <exception cref="FormatException">A placeholder has an empty key or contains a nested placeholder.</exception>
     /// <exception cref="InvalidOperationException">A placeholder's key is unset and it has no inline default.</exception>
     public static string Substitute(string template, IVariableSource source) {
         ArgumentNullException.ThrowIfNull(template);
@@ -100,6 +101,13 @@ public static class VariableSubstitution {
     }
 
     private static (string Key, string? Default) ParseBody(string body, string original) {
+        // Nested placeholders (e.g. "${a:${b}}") are unsupported by design: this is a single-pass, non-recursive
+        // parser, so a nested "${" inside a body is rejected rather than mis-parsed into a garbage lookup.
+        if (body.Contains(Open, StringComparison.Ordinal)) {
+            throw new FormatException(
+                $"Variable placeholder '{original}' contains a nested '{Open}...{Close}' placeholder, which is not supported.");
+        }
+
         var separatorIndex = body.IndexOf(DefaultSeparator, StringComparison.Ordinal);
         var key = separatorIndex >= 0 ? body[..separatorIndex] : body;
         var inlineDefault = separatorIndex >= 0 ? body[(separatorIndex + DefaultSeparator.Length)..] : null;

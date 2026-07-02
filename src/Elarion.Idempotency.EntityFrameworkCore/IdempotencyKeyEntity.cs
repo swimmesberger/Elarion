@@ -1,12 +1,17 @@
 namespace Elarion.Idempotency.EntityFrameworkCore;
 
 /// <summary>
-/// The persisted idempotency record. The composite key <c>(Scope, Owner, Key)</c> is the unique constraint that
-/// serializes concurrent duplicates (including across nodes, since every node contends on the same row). A
-/// non-user scope stores an empty <see cref="Owner"/> because a relational primary key column cannot be
-/// nullable — mirroring the settings <c>Setting</c> entity.
+/// The persisted idempotency record. The composite key <c>(Operation, Scope, Owner, Key)</c> is the unique
+/// constraint that serializes concurrent duplicates (including across nodes, since every node contends on the
+/// same row). <see cref="Operation"/> discriminates the record by handler so two different <c>[Idempotent]</c>
+/// handlers sharing a client-supplied key never collide on one row. A non-user scope stores an empty
+/// <see cref="Owner"/> because a relational primary key column cannot be nullable — mirroring the settings
+/// <c>Setting</c> entity.
 /// </summary>
 public sealed class IdempotencyKeyEntity {
+    /// <summary>The operation identity (the handler's request type name) that discriminates the record by handler.</summary>
+    public required string Operation { get; init; }
+
     /// <summary>The scope discriminator (<c>"user"</c> or <c>"global"</c>).</summary>
     public required string Scope { get; init; }
 

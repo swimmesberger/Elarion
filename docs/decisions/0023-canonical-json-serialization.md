@@ -58,7 +58,11 @@ per-layer contributions, exposed through a dedicated accessor — never a bare `
 
 4. **Resolver order is first-match-wins**, by contribution order: transport envelope contexts insert first
    (`TypeInfoResolvers.Insert(0, …)`), module DTO contexts from `GetAllJsonTypeInfoResolvers()` next, host extras
-   after. This preserves the ordering the host previously composed by hand.
+   after. This preserves the ordering the host previously composed by hand. Because the transports' index-0 insert
+   would otherwise be unbeatable, `OverrideTypeInfoResolvers` provides a host-priority segment composed ahead of
+   every `TypeInfoResolvers` entry — the sanctioned way to override a type an envelope context also registers. The
+   full chain is: overrides → contributed resolvers → the always-seeded framework context → the optional
+   reflection fallback.
 
 5. **AOT-strict by default.** No reflection tail is added unless `EnableReflectionFallback` is set. A type missing
    from every source-generated context throws at runtime (surfacing a missing `[JsonSerializable]`) instead of

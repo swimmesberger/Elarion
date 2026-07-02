@@ -36,7 +36,13 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
             DefaultIgnoreCondition = config.DefaultIgnoreCondition,
         };
 
-        // Ordered, first-match-wins. Transport envelopes contributed first, module/host contexts after.
+        // Ordered, first-match-wins. Host overrides win over everything the framework and transports
+        // contributed; then transport envelopes (contributed first within the ordinary list), then
+        // module/host contexts.
+        foreach (var resolver in config.OverrideTypeInfoResolvers) {
+            options.TypeInfoResolverChain.Add(resolver);
+        }
+
         foreach (var resolver in config.TypeInfoResolvers) {
             options.TypeInfoResolverChain.Add(resolver);
         }

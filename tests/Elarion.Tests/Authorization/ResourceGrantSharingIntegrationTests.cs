@@ -130,9 +130,9 @@ public sealed class ResourceGrantSharingIntegrationTests(ResourceGrantSharingFix
         };
 
         var memberAllowed = await resourceAuthorizer.AuthorizeResourceAsync(
-            new ResourceAuthorizationContext(member, typeof(Contact), ResourceOperation.Read, shared), ct);
+            new ResourceAuthorizationContext(member, typeof(Contact), "Contact", ResourceOperation.Read, shared), ct);
         var outsiderAllowed = await resourceAuthorizer.AuthorizeResourceAsync(
-            new ResourceAuthorizationContext(outsider, typeof(Contact), ResourceOperation.Read, shared), ct);
+            new ResourceAuthorizationContext(outsider, typeof(Contact), "Contact", ResourceOperation.Read, shared), ct);
 
         memberAllowed.Should().BeTrue();
         outsiderAllowed.Should().BeFalse();

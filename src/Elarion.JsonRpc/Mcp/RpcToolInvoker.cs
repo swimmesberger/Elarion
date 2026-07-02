@@ -2,6 +2,7 @@ using System.Text.Json;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Elarion.JsonRpc.Mcp;
 
@@ -42,6 +43,11 @@ public static class RpcToolInvoker {
     /// <param name="serializerOptions">The options used to (de)serialize arguments and the result.</param>
     /// <param name="context">The values captured at the call boundary (e.g. the authenticated principal), or <see langword="null"/>.</param>
     /// <param name="ct">A cancellation token flowed into the handler.</param>
+    /// <remarks>
+    /// Unexpected handler exceptions are logged through the host's <see cref="ILoggerFactory"/> (resolved from
+    /// <paramref name="rootServices"/>, like the invoker's other collaborators) before being mapped to a JSON-RPC
+    /// internal error — never propagated raw to the transport SDK.
+    /// </remarks>
     public static async Task<RpcToolResult> InvokeAsync(
         HandlerDispatcher dispatcher,
         HandlerTransports transport,
@@ -75,7 +81,22 @@ public static class RpcToolInvoker {
             scope.ServiceProvider.GetService<Elarion.Abstractions.Idempotency.IIdempotencyKeySeed>()?.Seed(idempotencyKey);
         }
 
-        var result = await route.InvokeAsync(requestObject, scope.ServiceProvider, ct).ConfigureAwait(false);
+        var logger = rootServices.GetService<ILoggerFactory>()?.CreateLogger(typeof(RpcToolInvoker));
+
+        Result<object> result;
+        try {
+            result = await route.InvokeAsync(requestObject, scope.ServiceProvider, ct).ConfigureAwait(false);
+        } catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+            // Expected cancellation (e.g. the client disconnected). Rethrow so the transport bails quietly; do
+            // not log it as an error or map it to a fabricated internal error.
+            logger?.LogDebug("Tool {Method} canceled by the caller", methodName);
+            throw;
+        } catch (Exception ex) {
+            // An unexpected handler exception must not propagate raw to the MCP SDK. Log it and map it to a
+            // JSON-RPC internal error (-32603), consistent with JsonRpcDispatcher's unexpected-exception path.
+            logger?.LogError(ex, "Unhandled exception invoking tool {Method}", methodName);
+            return new RpcToolResult { IsError = true, Text = "Internal error", ErrorCode = -32603 };
+        }
 
         if (!result.IsSuccess) {
             var translator = scope.ServiceProvider.GetService<IAppErrorTranslator<RpcError>>()

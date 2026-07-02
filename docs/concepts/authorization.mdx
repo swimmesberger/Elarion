@@ -82,6 +82,19 @@ To flip to deny-by-default, declare `[ElarionAuthorizationDefaults]` at assembly
 Now **every** in-scope handler requires an authenticated principal unless it carries `[AllowAnonymous]`.
 A handler with explicit `Require*` attributes keeps those; an unannotated one just requires authentication.
 
+<Callout type="info">
+  Deny-by-default does **not** implicitly attach to **event-consumer handlers** (a handler whose request
+  implements `IDomainEvent`/`IIntegrationEvent`). Consumers are dispatched on a delivery scope with no
+  authenticated user, so an implicit authenticated-by-default gate would fail every consumer. An
+  **explicit** `Require*` on a consumer is a deliberate app choice and still attaches; only the implicit
+  default is skipped.
+</Callout>
+
+Because `Require*`/`[AllowAnonymous]` are `Inherited = true`, a requirement declared on a **base** handler
+class also attaches the decorator to a derived handler (mirroring the runtime `HandlerMetadata`
+`GetCustomAttributes(inherit: true)` path), and an `[AllowAnonymous]` on the derived handler wins over an
+inherited base requirement.
+
 ## The authorizer seam
 
 `IAuthorizer` is the single decision point. The default `ClaimsAuthorizer` (registered by

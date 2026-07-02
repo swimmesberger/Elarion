@@ -71,9 +71,10 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
     }
 
     /// <inheritdoc />
-    public async ValueTask MarkProcessedAsync(Guid id, DateTimeOffset processedOnUtc, CancellationToken ct) =>
-        await dbContext.Set<OutboxMessage>()
-            .Where(message => message.Id == id)
+    public async ValueTask<bool> MarkProcessedAsync(Guid id, Guid lockId, DateTimeOffset processedOnUtc, CancellationToken ct)
+    {
+        var rows = await dbContext.Set<OutboxMessage>()
+            .Where(message => message.Id == id && message.LockId == lockId)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(message => message.ProcessedOnUtc, processedOnUtc)
@@ -83,18 +84,54 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
                 ct)
             .ConfigureAwait(false);
 
+        return rows > 0;
+    }
+
     /// <inheritdoc />
-    public async ValueTask MarkFailedAsync(Guid id, string error, CancellationToken ct) =>
-        await dbContext.Set<OutboxMessage>()
-            .Where(message => message.Id == id)
+    public async ValueTask<bool> MarkFailedAsync(
+        Guid id,
+        Guid lockId,
+        string error,
+        DateTimeOffset retryVisibleAfterUtc,
+        CancellationToken ct)
+    {
+        // Clear the lease owner but keep LockedUntilUtc in the future as a visibility timeout, so the claim guard
+        // (LockedUntilUtc == null || LockedUntilUtc < now) skips this row until the backoff elapses — a poison
+        // message no longer re-enters the front of every batch.
+        var rows = await dbContext.Set<OutboxMessage>()
+            .Where(message => message.Id == id && message.LockId == lockId)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(message => message.Attempts, message => message.Attempts + 1)
                     .SetProperty(message => message.Error, error)
                     .SetProperty(message => message.LockId, (Guid?)null)
+                    .SetProperty(message => message.LockedUntilUtc, retryVisibleAfterUtc),
+                ct)
+            .ConfigureAwait(false);
+
+        return rows > 0;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> MarkPermanentlyFailedAsync(Guid id, Guid lockId, string error, CancellationToken ct)
+    {
+        // Set Attempts to the max so the claim guard's Attempts < maxAttempts filter permanently excludes the row —
+        // the same "left for inspection, no longer retried" mechanism a run of ordinary failures reaches, applied at
+        // once for a failure that can never succeed on retry.
+        var maxAttempts = options.MaxDeliveryAttempts;
+        var rows = await dbContext.Set<OutboxMessage>()
+            .Where(message => message.Id == id && message.LockId == lockId)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(message => message.Attempts, maxAttempts)
+                    .SetProperty(message => message.Error, error)
+                    .SetProperty(message => message.LockId, (Guid?)null)
                     .SetProperty(message => message.LockedUntilUtc, (DateTimeOffset?)null),
                 ct)
             .ConfigureAwait(false);
+
+        return rows > 0;
+    }
 
     /// <inheritdoc />
     public async ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) =>

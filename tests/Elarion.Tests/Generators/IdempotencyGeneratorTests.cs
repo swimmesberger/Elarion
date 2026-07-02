@@ -48,7 +48,11 @@ public sealed class IdempotencyGeneratorTests {
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Pipeline.IUnitOfWork>()");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>()");
         generated.Should().Contain("PayHandlerIdempotencyPolicy");
-        generated.Should().Contain("global::Elarion.Abstractions.Idempotency.StoredResult<");
+        // The AOT-safe non-generic envelope is (de)serialized through the framework context; the value goes
+        // through options.GetTypeInfo(typeof(T)) — never a closed StoredResult<T> that no context registers.
+        generated.Should().NotContain("global::Elarion.Abstractions.Idempotency.StoredResult<");
+        generated.Should().Contain("ElarionFrameworkJsonContext.Default.StoredResult");
+        generated.Should().Contain("SerializeToElement(response.Value, options.GetTypeInfo(typeof(global::Sample.App.PayResponse)))");
 
         AssertCompiles(source, generated);
     }

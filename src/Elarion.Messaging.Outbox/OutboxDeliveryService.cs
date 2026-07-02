@@ -84,19 +84,43 @@ public sealed class OutboxDeliveryService(
         foreach (var message in claimed)
         {
             ct.ThrowIfCancellationRequested();
-            await DeliverAsync(store, message, ct).ConfigureAwait(false);
+            await DeliverAsync(store, lockId, message, ct).ConfigureAwait(false);
         }
 
         return claimed.Count;
     }
 
-    private async Task DeliverAsync(IOutboxStore store, OutboxMessage message, CancellationToken ct)
+    private async Task DeliverAsync(IOutboxStore store, Guid lockId, OutboxMessage message, CancellationToken ct)
     {
         try
         {
-            await using var consumerScope = scopeFactory.CreateAsyncScope();
-            await dispatcher.DispatchAsync(consumerScope.ServiceProvider, message, ct).ConfigureAwait(false);
-            await store.MarkProcessedAsync(message.Id, timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+            OutboxDispatchOutcome outcome;
+            await using (var consumerScope = scopeFactory.CreateAsyncScope())
+            {
+                outcome = await dispatcher.DispatchAsync(consumerScope.ServiceProvider, message, ct).ConfigureAwait(false);
+            }
+
+            if (outcome is OutboxDispatchOutcome.Unresolvable)
+            {
+                // The event type resolves to no consumer or the payload is null — a retry can never succeed, so park
+                // the message for inspection instead of redelivering it every poll (the dispatcher already logged why).
+                var parked = await store.MarkPermanentlyFailedAsync(
+                    message.Id,
+                    lockId,
+                    "Event type unresolvable or payload null; parked for inspection.",
+                    ct).ConfigureAwait(false);
+                if (!parked)
+                {
+                    LogLeaseLost(message);
+                }
+
+                return;
+            }
+
+            if (!await store.MarkProcessedAsync(message.Id, lockId, timeProvider.GetUtcNow(), ct).ConfigureAwait(false))
+            {
+                LogLeaseLost(message);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -111,8 +135,41 @@ public sealed class OutboxDeliveryService(
                 message.Id,
                 message.EventType,
                 message.Attempts + 1);
-            await store.MarkFailedAsync(message.Id, Describe(ex), ct).ConfigureAwait(false);
+            var retryVisibleAfter = timeProvider.GetUtcNow() + ComputeBackoff(message.Attempts + 1);
+            if (!await store.MarkFailedAsync(message.Id, lockId, Describe(ex), retryVisibleAfter, ct).ConfigureAwait(false))
+            {
+                LogLeaseLost(message);
+            }
         }
+    }
+
+    private void LogLeaseLost(OutboxMessage message) =>
+        // Zero rows updated means our lease expired and another worker legitimately reclaimed the message while we
+        // were dispatching. Finalizing anyway would wipe the new owner's active lease and cause overlapping
+        // redelivery, so we skip and let the current owner finalize it.
+        logger.LogWarning(
+            "Outbox message {MessageId} ({EventType}) lease was lost before finalizing; another worker reclaimed it. Skipping finalize.",
+            message.Id,
+            message.EventType);
+
+    /// <summary>Exponential backoff for the next attempt: <c>BaseRetryDelay × 2^(attempt-1)</c>, capped at <see cref="OutboxOptions.MaxRetryDelay"/>.</summary>
+    private TimeSpan ComputeBackoff(int attempt)
+    {
+        if (options.BaseRetryDelay <= TimeSpan.Zero)
+        {
+            return TimeSpan.Zero;
+        }
+
+        // Shift on ticks with a guarded exponent so a large attempt count can never overflow into a negative delay.
+        var exponent = Math.Min(attempt - 1, 30);
+        var scaled = options.BaseRetryDelay.Ticks * (1L << exponent);
+        var capTicks = options.MaxRetryDelay.Ticks;
+        if (scaled <= 0 || scaled > capTicks)
+        {
+            return options.MaxRetryDelay;
+        }
+
+        return TimeSpan.FromTicks(scaled);
     }
 
     private async Task PurgeAsync(CancellationToken ct)

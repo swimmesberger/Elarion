@@ -1,11 +1,14 @@
 namespace Elarion.Abstractions.Idempotency;
 
-/// <summary>The fully-qualified key an idempotency record is stored under: a scope, an owner, and the key value.</summary>
+/// <summary>The fully-qualified key an idempotency record is stored under: an operation, a scope, an owner, and the key value.</summary>
+/// <param name="Operation">The operation identity (the handler's request type name). It discriminates the key so
+/// two different <c>[Idempotent]</c> handlers sharing a client-supplied key never collide on one record — the
+/// second operation must not replay the first's stored response.</param>
 /// <param name="Scope">The logical scope (<see cref="IdempotencyScope"/>).</param>
 /// <param name="Owner">The owner discriminator within the scope — a hashed user id for
 /// <see cref="IdempotencyScope.CurrentUser"/>, empty for <see cref="IdempotencyScope.Global"/>.</param>
 /// <param name="Key">The client-supplied idempotency key value.</param>
-public readonly record struct IdempotencyStoreKey(IdempotencyScope Scope, string Owner, string Key);
+public readonly record struct IdempotencyStoreKey(string Operation, IdempotencyScope Scope, string Owner, string Key);
 
 /// <summary>
 /// The atomic idempotency-record store. Implementations claim, complete, abandon, and purge keys; the durable

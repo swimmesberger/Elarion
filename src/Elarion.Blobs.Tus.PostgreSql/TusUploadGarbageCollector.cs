@@ -48,8 +48,9 @@ public sealed class TusUploadGarbageCollector(
     private async Task<int> SweepAsync(CancellationToken cancellationToken) {
         await using var scope = scopeFactory.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<ITusUploadStore>();
+        var olderThan = timeProvider.GetUtcNow() - options.SafetyMargin;
         return await store
-            .DeleteExpiredAsync(timeProvider.GetUtcNow(), options.BatchSize, cancellationToken)
+            .DeleteExpiredAsync(olderThan, options.BatchSize, cancellationToken)
             .ConfigureAwait(false);
     }
 }

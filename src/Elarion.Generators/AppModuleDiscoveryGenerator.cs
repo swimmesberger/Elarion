@@ -1,6 +1,8 @@
+using System.Collections.Immutable;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 namespace Elarion.Generators;
@@ -110,6 +112,11 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
     private const string BootstrapperTypeName = "ElarionBootstrapper";
 
+    /// <summary>The fully-built bootstrapper output: the final source text plus its diagnostics, both
+    /// value-equatable, so the source-output stage (and the re-parse of the emitted file) is skipped whenever
+    /// no input actually changed.</summary>
+    private sealed record BootstrapperOutput(string? Source, EquatableArray<DiagnosticInfo> Diagnostics);
+
     /// <inheritdoc/>
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -126,28 +133,103 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
                 options.GlobalOptions.TryGetValue("build_property.RootNamespace", out var ns) ? ns : null))
             .Select(static (pair, _) => string.IsNullOrEmpty(pair.Right) ? pair.Left : pair.Right!);
 
-        var combined = manifestProvider.Combine(context.CompilationProvider).Combine(rootNamespace);
+        // Current-compilation [AppModule] declarations, discovered per node (cached per tree, ADR-0006) instead
+        // of a whole-assembly symbol walk on every keystroke. Top-level types only, matching the old walk over
+        // namespace type members.
+        var currentModules = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                AppModuleAttributeMetadataName,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (ctx, _) => CreateModuleEntry(ctx))
+            .Where(static entry => entry is not null)
+            .Select(static (entry, _) => entry!)
+            .Collect()
+            .Select(static (entries, _) => entries
+                .OrderBy(static e => e.TypeFqn, StringComparer.Ordinal)
+                .ToEquatableArray())
+            .WithTrackingName("BootstrapperModules");
 
-        context.RegisterSourceOutput(combined, static (spc, source) =>
+        // Deliberately compilation-fresh, cheap per-keystroke probes (symbol-table lookups only): the assembly
+        // trigger, and which referenced modules' generated ConfigureDefaultServices siblings exist. Both project
+        // to small equatable values, so downstream stays cached when they don't change.
+        var trigger = context.CompilationProvider
+            .Select(static (compilation, _) => HasBootstrapperTrigger(compilation));
+        var referencedSiblings = manifestProvider
+            .Combine(context.CompilationProvider)
+            .Select(static (source, _) => ProbeReferencedSiblings(source.Left, source.Right))
+            .WithTrackingName("BootstrapperSiblings");
+
+        var model = manifestProvider
+            .Combine(currentModules)
+            .Combine(referencedSiblings)
+            .Combine(trigger)
+            .Combine(rootNamespace)
+            .Select(static (source, ct) =>
+            {
+                var ((((manifests, modules), siblings), hasTrigger), rootNs) = source;
+                return BuildBootstrapperOutput(manifests, modules, siblings, hasTrigger, rootNs, ct);
+            })
+            .WithTrackingName("Bootstrapper");
+
+        context.RegisterSourceOutput(model, static (spc, output) =>
         {
-            var ((manifests, compilation), rootNs) = source;
-            if (!HasBootstrapperTrigger(compilation))
-                return;
+            foreach (var diagnostic in output.Diagnostics)
+                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-            var manifest = ElarionManifest.Data.Combine(manifests);
-            var entries = CollectModuleEntries(
-                compilation,
-                manifest.Modules,
-                spc.ReportDiagnostic,
-                spc.CancellationToken);
-            var sorted = TopologicalSort(entries);
-
-            var transport = CollectTransportMaps(manifest, entries, spc);
-
-            var target = new ClassTarget(rootNs.Length == 0 ? null : rootNs, BootstrapperTypeName);
-            var code = BuildSource(target, sorted, transport);
-            spc.AddSource("ElarionBootstrapper.g.cs", SourceText.From(code, Encoding.UTF8));
+            if (output.Source is not null)
+                spc.AddSource("ElarionBootstrapper.g.cs", SourceText.From(output.Source, Encoding.UTF8));
         });
+    }
+
+    private static BootstrapperOutput BuildBootstrapperOutput(
+        ImmutableArray<ManifestReadResult> manifests,
+        EquatableArray<ModuleEntry> currentModules,
+        EquatableArray<string> referencedSiblings,
+        bool hasTrigger,
+        string rootNs,
+        CancellationToken ct)
+    {
+        if (!hasTrigger)
+            return new BootstrapperOutput(null, EquatableArray<DiagnosticInfo>.Empty);
+
+        var diagnostics = new List<DiagnosticInfo>();
+        foreach (var result in manifests)
+        {
+            if (result.Diagnostic is { } manifestDiagnostic)
+                diagnostics.Add(manifestDiagnostic);
+        }
+
+        var manifest = ElarionManifest.Data.Combine(manifests.Select(static r => r.Data));
+        var siblingSet = new HashSet<string>(referencedSiblings.AsImmutableArray, StringComparer.Ordinal);
+        var entries = CollectModuleEntries(currentModules, manifest.Modules, siblingSet, diagnostics);
+        var sorted = TopologicalSort(entries);
+        ct.ThrowIfCancellationRequested();
+
+        var transport = CollectTransportMaps(manifest, entries, diagnostics);
+
+        var target = new ClassTarget(rootNs.Length == 0 ? null : rootNs, BootstrapperTypeName);
+        var code = BuildSource(target, sorted, transport);
+        return new BootstrapperOutput(code, diagnostics.ToEquatableArray());
+    }
+
+    private static EquatableArray<string> ProbeReferencedSiblings(
+        ImmutableArray<ManifestReadResult> manifests,
+        Compilation compilation)
+    {
+        var existing = new List<string>();
+        foreach (var result in manifests)
+        {
+            foreach (var module in result.Data.Modules)
+            {
+                if (SiblingExists(compilation, module.TypeFqn))
+                    existing.Add(module.TypeFqn);
+            }
+        }
+
+        return existing
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(static fqn => fqn, StringComparer.Ordinal)
+            .ToEquatableArray();
     }
 
     private static bool HasBootstrapperTrigger(Compilation compilation)
@@ -164,7 +246,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private static TransportMaps CollectTransportMaps(
         ElarionManifest.Data manifest,
         List<ModuleEntry> modules,
-        SourceProductionContext spc)
+        List<DiagnosticInfo> diagnostics)
     {
         var httpByModule = new Dictionary<string, List<HttpEndpointEmission.Model>>(StringComparer.Ordinal);
         var unmatchedHttp = new List<HttpEndpointEmission.Model>();
@@ -178,15 +260,15 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             var byRoute = string.Compare(a.Route, b.Route, StringComparison.Ordinal);
             return byRoute != 0 ? byRoute : string.Compare(a.EndpointName, b.EndpointName, StringComparison.Ordinal);
         });
-        HttpEndpointEmission.ReportDuplicateRoutes(httpEntries, spc.ReportDiagnostic);
+        HttpEndpointEmission.ReportDuplicateRoutes(httpEntries, diagnostics);
         foreach (var entry in httpEntries)
         {
             var module = FindBestModule(entry.HandlerNamespace, modules);
             if (module is null)
             {
                 unmatchedHttp.Add(entry);
-                spc.ReportDiagnostic(Diagnostic.Create(
-                    HttpEndpointEmission.UnmatchedModule, Location.None, entry.EndpointName));
+                diagnostics.Add(DiagnosticInfo.Create(
+                    HttpEndpointEmission.UnmatchedModule, (Location?)null, entry.EndpointName));
                 continue;
             }
 
@@ -207,8 +289,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             if (module is null)
             {
                 unmatchedRpc.Add(resolved);
-                spc.ReportDiagnostic(Diagnostic.Create(
-                    RpcMethodEmission.UnmatchedModule, Location.None, resolved.MethodName));
+                diagnostics.Add(DiagnosticInfo.Create(
+                    RpcMethodEmission.UnmatchedModule, (Location?)null, resolved.MethodName));
                 continue;
             }
 
@@ -222,7 +304,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         // Operation names key the single shared bus, so a collision (across modules, or an inferred name clashing
         // with an explicit one) would silently drop a handler at runtime — report it at compile time instead.
-        ReportDuplicateOperationNames(rpcByModule, unmatchedRpc, spc.ReportDiagnostic);
+        ReportDuplicateOperationNames(rpcByModule, unmatchedRpc, diagnostics);
 
         var resourceFiltersByModule = new Dictionary<string, List<ElarionManifest.ResourceFilter>>(StringComparer.Ordinal);
         var unmatchedResourceFilters = new List<ElarionManifest.ResourceFilter>();
@@ -245,7 +327,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private static void ReportDuplicateOperationNames(
         Dictionary<string, List<RpcMethodEmission.Model>> rpcByModule,
         List<RpcMethodEmission.Model> unmatchedRpc,
-        Action<Diagnostic> report)
+        List<DiagnosticInfo> diagnostics)
     {
         // The bus keys names case-insensitively, so detect collisions the same way.
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -256,7 +338,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             foreach (var entry in entries)
             {
                 if (!seen.Add(entry.MethodName) && reported.Add(entry.MethodName))
-                    report(Diagnostic.Create(RpcMethodEmission.DuplicateOperationName, Location.None, entry.MethodName));
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        RpcMethodEmission.DuplicateOperationName, (Location?)null, entry.MethodName));
             }
         }
 
@@ -324,33 +407,19 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     }
 
     private static List<ModuleEntry> CollectModuleEntries(
-        Compilation compilation,
+        EquatableArray<ModuleEntry> currentModules,
         IReadOnlyList<ElarionManifest.Module> manifestModules,
-        Action<Diagnostic> report,
-        CancellationToken ct)
+        HashSet<string> referencedSiblings,
+        List<DiagnosticInfo> diagnostics)
     {
+        // Current-compilation modules first: when the same module appears in the manifest too, deduplication
+        // keeps the first entry, so the current-compilation one (EmitDefaultServices: true) wins.
         var entries = new List<ModuleEntry>();
-
-        var attributeType = compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
-        if (attributeType is null)
-        {
-            foreach (var module in manifestModules)
-                entries.Add(ToModuleEntry(module, SiblingExists(compilation, module.TypeFqn)));
-
-            entries = DeduplicateModules(entries);
-            entries.Sort(static (a, b) =>
-                string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal));
-            ReportSharedModuleNamespaces(entries, report);
-            return entries;
-        }
-
-        // Scan the current compilation's assembly first.
-        CollectFromNamespace(
-            compilation.Assembly.GlobalNamespace,
-            attributeType, entries, ct);
+        foreach (var entry in currentModules)
+            entries.Add(entry);
 
         foreach (var module in manifestModules)
-            entries.Add(ToModuleEntry(module, SiblingExists(compilation, module.TypeFqn)));
+            entries.Add(ToModuleEntry(module, referencedSiblings.Contains(module.TypeFqn)));
 
         entries = DeduplicateModules(entries);
 
@@ -358,7 +427,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         entries.Sort(static (a, b) =>
             string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal));
 
-        ReportSharedModuleNamespaces(entries, report);
+        ReportSharedModuleNamespaces(entries, diagnostics);
 
         return entries;
     }
@@ -441,14 +510,15 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return result;
     }
 
-    private static void ReportSharedModuleNamespaces(IEnumerable<ModuleEntry> entries, Action<Diagnostic> report)
+    private static void ReportSharedModuleNamespaces(IEnumerable<ModuleEntry> entries, List<DiagnosticInfo> diagnostics)
     {
         var byNamespace = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
             if (byNamespace.TryGetValue(entry.Namespace, out var existing))
             {
-                report(Diagnostic.Create(SharedModuleNamespace, Location.None, existing, entry.ModuleName, entry.Namespace));
+                diagnostics.Add(DiagnosticInfo.Create(
+                    SharedModuleNamespace, (Location?)null, existing, entry.ModuleName, entry.Namespace));
             }
             else
             {
@@ -457,25 +527,21 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         }
     }
 
-    private static void CollectFromNamespace(
-        INamespaceSymbol ns,
-        INamedTypeSymbol attributeType,
-        List<ModuleEntry> entries,
-        CancellationToken ct)
+    // The per-node [AppModule] transform (cached per tree). Top-level types only, matching the old walk over
+    // namespace type members; everything read here — the attribute arguments and the convention-hook probes —
+    // lives on the module type itself, so a stale cache entry is impossible without editing the module's file.
+    private static ModuleEntry? CreateModuleEntry(GeneratorAttributeSyntaxContext ctx)
     {
-        ct.ThrowIfCancellationRequested();
+        if (ctx.TargetSymbol is not INamedTypeSymbol type || type.ContainingType is not null)
+            return null;
 
-        foreach (var type in ns.GetTypeMembers())
-        foreach (var attr in type.GetAttributes())
+        foreach (var attr in ctx.Attributes)
         {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, attributeType))
+            if (attr.ConstructorArguments.Length == 0 ||
+                attr.ConstructorArguments[0].Value is not string moduleName)
+            {
                 continue;
-            if (attr.ConstructorArguments.Length == 0)
-                continue;
-
-            var moduleName = attr.ConstructorArguments[0].Value as string;
-            if (moduleName is null)
-                continue;
+            }
 
             string? dependsOn = null;
             var isCore = false;
@@ -499,16 +565,15 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             var fqn = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             var moduleNamespace = type.ContainingNamespace?.ToDisplayString() ?? string.Empty;
 
-            entries.Add(new ModuleEntry(
+            return new ModuleEntry(
                 moduleName, moduleNamespace, fqn, dependsOn,
                 isCore,
                 hasConfigureServices, hasMapEndpoints, hasGetJsonTypeInfoResolver, hasConfigureEndpointGroup,
                 // Current-compilation modules: the ConfigureDefaultServices skeleton is generated in the same pass.
-                EmitDefaultServices: true));
+                EmitDefaultServices: true);
         }
 
-        foreach (var sub in ns.GetNamespaceMembers())
-            CollectFromNamespace(sub, attributeType, entries, ct);
+        return null;
     }
 
     private static bool HasStaticMethod(INamedTypeSymbol type, string name, int paramCount)

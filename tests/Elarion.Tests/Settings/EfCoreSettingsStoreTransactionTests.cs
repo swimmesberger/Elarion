@@ -3,6 +3,7 @@ using Elarion.Settings;
 using Elarion.Settings.EntityFrameworkCore;
 using Elarion.Settings.InProcess;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Elarion.Tests.Settings;
@@ -20,7 +21,8 @@ public sealed class EfCoreSettingsStoreTransactionTests(PostgreSqlSettingsStoreF
     private static string UniqueKey() => $"app:{Guid.NewGuid():N}";
 
     private static EfCoreSettingsStore<SettingsIntegrationDbContext> CreateStore(SettingsIntegrationDbContext context) =>
-        new(context, new InProcessSettingsChangeSource(), TimeProvider.System);
+        new(context, new InProcessSettingsChangeSource(), TimeProvider.System,
+            NullLogger<EfCoreSettingsStore<SettingsIntegrationDbContext>>.Instance);
 
     [Fact]
     public async Task SetAsync_Insert_RolledBackWithCallerTransaction_PersistsNothing() {

@@ -77,8 +77,21 @@ Under the hood it composes the EF-free `IUnitOfWork`/`IUnitOfWorkScope` seam
 (`Elarion.Abstractions.Pipeline`). `EfUnitOfWork<TDbContext>` implements it over
 `DbContext.Database.BeginTransactionAsync`, with savepoint support and — on PostgreSQL — a
 `SET LOCAL lock_timeout` derived from `UnitOfWorkOptions.LockTimeout` (a blocked statement
-fast-fails instead of waiting; other providers ignore it). Wire it with
-`AddElarionUnitOfWork<TDbContext>()`, which replaces the default in-memory unit of work:
+fast-fails instead of waiting; other providers ignore it). Two behaviors make the boundary
+forgiving:
+
+- **Commit flushes the change tracker** — the scope calls `SaveChangesAsync` before
+  committing, so a handler that mutated the `DbContext` but forgot to save still persists its
+  writes atomically with the transaction (a no-op when it already saved).
+- **A nested transactional handler joins with a savepoint** — when a transactional command
+  invokes another transactional command through `IHandlerSender` on the same scope, the inner
+  `BeginAsync` sees the ambient transaction and creates a savepoint instead of opening a second
+  physical transaction (which the provider would reject). The inner commit releases the
+  savepoint, the inner rollback discards only the inner writes, and the outer scope still owns
+  the real commit.
+
+Wire it with `AddElarionUnitOfWork<TDbContext>()`, which replaces the default in-memory unit of
+work:
 
 ```csharp
 services.AddElarionUnitOfWork<AppDbContext>();

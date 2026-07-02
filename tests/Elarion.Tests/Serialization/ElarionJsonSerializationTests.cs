@@ -112,6 +112,44 @@ public sealed class ElarionJsonSerializationTests {
     }
 
     [Fact]
+    public void StoredIdempotencyResult_RoundTrips_UnderSourceGeneration_ReflectionOff() {
+        // The idempotency replay envelope must serialize AOT-strict: the framework context registers the
+        // non-generic StoredResult (and AppError), while the success value goes through the module context's
+        // GetTypeInfo(typeof(T)). No closed StoredResult<T> and no reflection fallback are ever needed (C2).
+        var services = new ServiceCollection();
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SampleJsonContext.Default)); // reflection off
+
+        var accessor = Resolve(services);
+        var options = accessor.Options;
+
+        // Success path — mirrors the generated policy's Serialize(Result<SampleDto>).
+        var value = new SampleDto { Name = "receipt", Count = 7 };
+        var stored = new Elarion.Abstractions.Idempotency.StoredResult {
+            Ok = true,
+            Value = JsonSerializer.SerializeToElement(value, options.GetTypeInfo(typeof(SampleDto))),
+        };
+        var payload = JsonSerializer.Serialize(stored, ElarionFrameworkJsonContext.Default.StoredResult);
+
+        var back = JsonSerializer.Deserialize(payload, ElarionFrameworkJsonContext.Default.StoredResult)!;
+        back.Ok.Should().BeTrue();
+        var roundTripped = JsonSerializer.Deserialize(
+            back.Value!.Value, (JsonTypeInfo<SampleDto>)options.GetTypeInfo(typeof(SampleDto)))!;
+        roundTripped.Should().Be(value);
+
+        // Failure path — the AppError must resolve through the framework context, reflection off.
+        var failure = new Elarion.Abstractions.Idempotency.StoredResult {
+            Ok = false,
+            Error = AppError.BusinessRule("declined"),
+        };
+        var failurePayload = JsonSerializer.Serialize(failure, ElarionFrameworkJsonContext.Default.StoredResult);
+        var failureBack = JsonSerializer.Deserialize(
+            failurePayload, ElarionFrameworkJsonContext.Default.StoredResult)!;
+        failureBack.Ok.Should().BeFalse();
+        failureBack.Error!.Kind.Should().Be(ErrorKind.BusinessRule);
+        failureBack.Error.Message.Should().Be("declined");
+    }
+
+    [Fact]
     public void GetTypeInfo_ReflectionFallback_ResolvesUnmappedType() {
         var services = new ServiceCollection();
         services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
@@ -143,6 +181,39 @@ public sealed class ElarionJsonSerializationTests {
     }
 
     [Fact]
+    public void OverrideResolvers_WinOverTransportStyleInsertAtZero() {
+        static string Serialize(bool withOverride) {
+            var services = new ServiceCollection();
+            // Simulates a transport contribution: inserted at index 0 of the ordinary list, the position that
+            // beats every other TypeInfoResolvers entry regardless of registration order.
+            services.ConfigureElarionJson(o => o.TypeInfoResolvers.Insert(0, new TaggingResolver("transport")));
+            if (withOverride) {
+                // The host override is registered later, yet must win first-match for the shared type.
+                services.ConfigureElarionJson(o => o.OverrideTypeInfoResolvers.Add(new TaggingResolver("override")));
+            }
+
+            var accessor = Resolve(services);
+            return JsonSerializer.Serialize(new OverrideProbeDto(), accessor.GetTypeInfo<OverrideProbeDto>());
+        }
+
+        Serialize(withOverride: false).Should().Be("\"transport\"");
+        Serialize(withOverride: true).Should().Be("\"override\"");
+    }
+
+    [Fact]
+    public void OverrideResolvers_ComposeAheadOfEveryContributedResolver() {
+        var overrideResolver = new TaggingResolver("override");
+        var services = new ServiceCollection();
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SampleJsonContext.Default));
+        services.ConfigureElarionJson(o => o.OverrideTypeInfoResolvers.Add(overrideResolver));
+
+        var options = Resolve(services).Options;
+
+        options.TypeInfoResolverChain[0].Should().BeSameAs(overrideResolver);
+        options.TypeInfoResolverChain[1].Should().BeSameAs(SampleJsonContext.Default);
+    }
+
+    [Fact]
     public void AddElarionJson_DoesNotRegisterBareJsonSerializerOptions() {
         var services = new ServiceCollection();
         services.AddElarionJson();
@@ -153,6 +224,23 @@ public sealed class ElarionJsonSerializationTests {
     private sealed class ThrowingResolver : IJsonTypeInfoResolver {
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) =>
             throw new InvalidOperationException("should not be consulted");
+    }
+
+    /// <summary>Resolves <see cref="OverrideProbeDto"/> with a converter that writes a fixed tag, so a test can
+    /// observe which chain segment won first-match resolution for a contested type.</summary>
+    private sealed class TaggingResolver(string tag) : IJsonTypeInfoResolver {
+        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) =>
+            type == typeof(OverrideProbeDto)
+                ? JsonMetadataServices.CreateValueInfo<OverrideProbeDto>(options, new TagConverter(tag))
+                : null;
+
+        private sealed class TagConverter(string tag) : JsonConverter<OverrideProbeDto> {
+            public override OverrideProbeDto Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+                throw new NotSupportedException();
+
+            public override void Write(Utf8JsonWriter writer, OverrideProbeDto value, JsonSerializerOptions options) =>
+                writer.WriteStringValue(tag);
+        }
     }
 
     private sealed class SampleConverter : JsonConverter<SampleDto> {
@@ -171,3 +259,5 @@ internal sealed record SampleDto {
 
 [JsonSerializable(typeof(SampleDto))]
 internal sealed partial class SampleJsonContext : JsonSerializerContext;
+
+internal sealed record OverrideProbeDto;

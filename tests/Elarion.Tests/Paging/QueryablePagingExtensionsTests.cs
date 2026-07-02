@@ -109,6 +109,20 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
+    public async Task ToKeysetPageAsync_MalformedCursor_ThrowsInsteadOfReturningFirstPage()
+    {
+        var data = Items(10).AsAsyncQueryable();
+
+        var act = async () => await data.ToKeysetPageAsync(
+            new KeysetPageRequest { After = "not-a-real-cursor", Size = 3 },
+            TestEntityKeyset.Definition,
+            Project,
+            cancellationToken: Token);
+
+        await act.Should().ThrowAsync<MalformedCursorException>();
+    }
+
+    [Fact]
     public async Task ToOffsetPageAsync_FirstPage_IncludesTotalAndPaging()
     {
         var data = Items(10).AsAsyncQueryable();
@@ -174,6 +188,8 @@ public sealed class QueryablePagingExtensionsTests
     /// <summary>Hand-written mirror of the generator's emission for <c>[Keyset&lt;TestEntity&gt;("CreatedAt", "Id")]</c>.</summary>
     private sealed class TestEntityKeyset : IKeysetDefinition<TestEntity>
     {
+        private const uint CursorTag = 0xABCD1234u;
+
         public static TestEntityKeyset Definition { get; } = new();
 
         public IOrderedQueryable<TestEntity> ApplyOrder(IQueryable<TestEntity> source, bool forward)
@@ -181,11 +197,11 @@ public sealed class QueryablePagingExtensionsTests
                 ? source.OrderBy(e => e.CreatedAt).ThenBy(e => e.Id)
                 : source.OrderByDescending(e => e.CreatedAt).ThenByDescending(e => e.Id);
 
-        public Expression<Func<TestEntity, bool>>? BuildSeek(string cursor, bool forward)
+        public Expression<Func<TestEntity, bool>> BuildSeek(string cursor, bool forward)
         {
             if (!TryDecode(cursor, out var createdAt, out var id))
             {
-                return null;
+                throw new MalformedCursorException();
             }
 
             return forward
@@ -212,7 +228,7 @@ public sealed class QueryablePagingExtensionsTests
             var entries = new KeysetEntry<TDto>[rows.Count];
             for (var i = 0; i < rows.Count; i++)
             {
-                var writer = new CursorWriter();
+                var writer = new CursorWriter(CursorTag);
                 writer.WriteDateTime(rows[i].Key0);
                 writer.WriteGuid(rows[i].Key1);
                 entries[i] = new KeysetEntry<TDto>(rows[i].Item, writer.ToCursor());
@@ -225,7 +241,7 @@ public sealed class QueryablePagingExtensionsTests
         {
             createdAt = default;
             id = default;
-            if (!CursorReader.TryCreate(cursor, out var reader))
+            if (!CursorReader.TryCreate(cursor, CursorTag, out var reader))
             {
                 return false;
             }

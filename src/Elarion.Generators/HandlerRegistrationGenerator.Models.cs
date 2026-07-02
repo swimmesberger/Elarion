@@ -23,6 +23,8 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string IdempotentAttributeMetadataName = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
+    private const string DomainEventMetadataName = "Elarion.Abstractions.Messaging.IDomainEvent";
+    private const string IntegrationEventMetadataName = "Elarion.Abstractions.Messaging.IIntegrationEvent";
 
     private sealed record HandlerInfo(
         string HandlerFqn,
@@ -58,7 +60,8 @@ public sealed partial class HandlerRegistrationGenerator {
     private sealed record ResourceBindingInfo(
         string ResourceTypeFqn,
         string Operation,
-        string IdPath
+        string IdPath,
+        string? ResourceTypeName
     );
 
     private sealed record DecoratorInfo(
@@ -119,6 +122,48 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler cache duration is invalid",
         "Handler '{0}' must define a positive cache duration",
         "Elarion.Abstractions.Caching",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor CacheableOnEventConsumerDescriptor = new(
+        "ELCACHE005",
+        "Event-consumer handler cannot be cacheable",
+        "Handler '{0}' handles event '{1}', so [Cacheable] would cache the fan-out result and silently skip the "
+        + "side effect on a legitimate re-delivery; remove [Cacheable] from the event consumer",
+        "Elarion.Abstractions.Caching",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor UnsupportedCacheKeyPropertyTypeDescriptor = new(
+        "ELCACHE006",
+        "Cache-key property type is not supported",
+        "Handler '{0}' includes request property '{1}' of type '{2}' in its cache key, but that type has no stable "
+        + "key formatting (it would fall back to object.ToString(), colliding across values and risking a "
+        + "cross-request cache leak); use a scalar property type (primitive, string, char, bool, Guid, enum, "
+        + "DateTime/DateTimeOffset/DateOnly/TimeOnly/TimeSpan, decimal, or a Nullable of those), or restrict the "
+        + "cache key with the KeyProperties argument of [Cacheable]",
+        "Elarion.Abstractions.Caching",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor CacheKeyPropertyNotFoundDescriptor = new(
+        "ELCACHE007",
+        "Cache-key property does not exist",
+        "Handler '{0}' declares [Cacheable(KeyProperties = ...)] naming '{1}', which is not a public instance "
+        + "property on request type '{2}'; the name would be silently dropped from the key. Reference an existing "
+        + "property (e.g. nameof(Request.Id)).",
+        "Elarion.Abstractions.Caching",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ResilientOnDomainEventDescriptor = new(
+        "ELPIPE003",
+        "Domain-event consumer cannot be resilient",
+        "Handler '{0}' consumes domain event '{1}', which is dispatched inline within the publisher's "
+        + "transaction; [Resilient] would let Polly retry the handler inside that live transaction, re-applying "
+        + "tracked mutations. Remove [Resilient] (integration-event consumers run on a fresh scope and may be "
+        + "resilient).",
+        "Elarion.Abstractions.Resilience",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 

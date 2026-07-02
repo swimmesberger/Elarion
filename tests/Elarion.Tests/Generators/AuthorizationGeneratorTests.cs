@@ -151,6 +151,140 @@ public sealed class AuthorizationGeneratorTests {
     }
 
     [Fact]
+    public void AttachesAuthorizationFromBaseHandlerClass() {
+        // [RequirePermission] is Inherited = true, so a requirement declared on a BASE handler must attach the
+        // decorator to the derived handler — otherwise the derived handler ships with no enforcement (C5).
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+
+                [RequirePermission("tenants", "write")]
+                public abstract class GuardedBase : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public abstract ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct);
+                }
+
+                public sealed class DerivedHandler : GuardedBase {
+                    public override ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var (result, _) = Run(source);
+        var generated = GetGenerated(result, "Sample_App_DerivedHandler.g.cs");
+
+        generated.Should().Contain("global::Elarion.Abstractions.Authorization.AuthorizationDecorator<");
+        AssertCompiles(source, generated);
+    }
+
+    [Fact]
+    public void AllowAnonymousOnDerivedOverridesBaseRequirement() {
+        // [AllowAnonymous] on the derived handler must win over an inherited base requirement, matching the
+        // runtime HandlerMetadata GetCustomAttribute(inherit: true) semantics.
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record DoThingCommand(int Id) : ICommand;
+                public sealed record DoThingResponse(string Name);
+
+                [RequirePermission("tenants", "write")]
+                public abstract class GuardedBase : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                    public abstract ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct);
+                }
+
+                [AllowAnonymous]
+                public sealed class OpenDerivedHandler : GuardedBase {
+                    public override ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                }
+            }
+            """;
+
+        var (result, _) = Run(source);
+        GetGenerated(result, "Sample_App_OpenDerivedHandler.g.cs").Should().NotContain("AuthorizationDecorator");
+    }
+
+    [Fact]
+    public void DenyByDefaultExcludesEventConsumerHandlers() {
+        // Under [ElarionAuthorizationDefaults] deny-by-default, an event-consumer handler (request : IDomainEvent/
+        // IIntegrationEvent) must NOT get the implicit authorization decorator — its delivery scope has no user, so
+        // it would fail every consumer (H9). Explicit [Require*] on a consumer still attaches (covered elsewhere).
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Messaging;
+            using Elarion.Abstractions.Modules;
+
+            [assembly: UseElarion]
+            [assembly: ElarionAuthorizationDefaults]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record OrderPlaced(int Id) : IIntegrationEvent;
+
+                public sealed class OrderPlacedConsumer : IHandler<OrderPlaced> {
+                    public ValueTask<Result> HandleAsync(OrderPlaced request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result.Success());
+                }
+            }
+            """;
+
+        var (result, _) = Run(source);
+        GetGenerated(result, "Sample_App_OrderPlacedConsumer.g.cs").Should().NotContain("AuthorizationDecorator");
+    }
+
+    [Fact]
+    public void DenyByDefaultStillAttachesToExplicitlyGuardedEventConsumer() {
+        // An EXPLICIT [Require*] on an event consumer is a deliberate app choice and must still attach, even though
+        // the IMPLICIT deny-by-default does not.
+        const string source =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Messaging;
+            using Elarion.Abstractions.Modules;
+
+            [assembly: UseElarion]
+            [assembly: ElarionAuthorizationDefaults]
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record OrderPlaced(int Id) : IIntegrationEvent;
+
+                [RequirePermission("orders", "process")]
+                public sealed class OrderPlacedConsumer : IHandler<OrderPlaced> {
+                    public ValueTask<Result> HandleAsync(OrderPlaced request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result.Success());
+                }
+            }
+            """;
+
+        var (result, _) = Run(source);
+        GetGenerated(result, "Sample_App_OrderPlacedConsumer.g.cs").Should().Contain("AuthorizationDecorator");
+    }
+
+    [Fact]
     public void IrrelevantEditReusesPipeline() {
         const string source = Preamble +
             """

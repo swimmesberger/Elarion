@@ -9,16 +9,21 @@ namespace Elarion.EntityFrameworkCore.Identity.Generators;
 
 /// <summary>
 /// Fills every partial <c>DbContext</c> annotated with <c>[GenerateElarionIdentity&lt;TUser, TRole, TKey&gt;]</c>
-/// with the seven Identity <c>DbSet</c> properties and an implementation of the EF generator's neutral
-/// <c>OnEntitiesConfigured</c> seam that calls <c>ApplyElarionIdentity</c> with the attribute's types baked in.
+/// with the seven Identity <c>DbSet</c> properties and an implementation of the EF generator's per-feature
+/// model-configuration seam that calls <c>ApplyElarionIdentity</c> with the attribute's types baked in.
 /// So the host writes neither the DbSets nor the Identity model configuration, and never inherits
-/// <c>IdentityDbContext</c>.
+/// <c>IdentityDbContext</c> — and the neutral <c>OnEntitiesConfigured</c> seam stays reserved for the host.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
     private const string AttributeMetadataName = "Elarion.EntityFrameworkCore.Identity.GenerateElarionIdentityAttribute`3";
     private const string GenerateDbSetsAttributeName = "Elarion.EntityFrameworkCore.GenerateDbSetsAttribute";
     private const string IdentityNamespace = "global::Microsoft.AspNetCore.Identity";
+
+    // The per-feature seam DbContextGenerator declares for this attribute — both sides derive the name from the
+    // same convention, so they cannot drift, and OnEntitiesConfigured stays the host's own extension point.
+    private static readonly string SeamMethodName =
+        ElarionGeneratorConventions.ModelConfigurationSeamName("GenerateElarionIdentityAttribute");
 
     private static readonly DiagnosticDescriptor MissingGenerateDbSets = new(
         "ELIDN001",
@@ -136,8 +141,10 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         AppendDbSet(sb, $"{IdentityNamespace}.IdentityRoleClaim<{target.KeyFqn}>", "RoleClaims");
         AppendDbSet(sb, $"{IdentityNamespace}.IdentityUserToken<{target.KeyFqn}>", "UserTokens");
         sb.AppendLine();
-        sb.AppendLine("    // Implements the neutral seam the EF DbContext generator calls at the end of ConfigureEntities.");
-        sb.AppendLine("    partial void OnEntitiesConfigured(ModelBuilder modelBuilder) =>");
+        sb.AppendLine("    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
+        sb.AppendLine("    // end of ConfigureEntities, so it composes with other [GenerateElarion*] features on the same");
+        sb.AppendLine("    // context and leaves the neutral OnEntitiesConfigured seam for the host's own configuration.");
+        sb.AppendLine($"    partial void {SeamMethodName}(ModelBuilder modelBuilder) =>");
         sb.AppendLine(
             $"        global::Elarion.EntityFrameworkCore.Identity.IdentityModelBuilderExtensions.ApplyElarionIdentity<{target.UserFqn}, {target.RoleFqn}, {target.KeyFqn}>(");
         sb.AppendLine($"            modelBuilder, snakeCase: {(target.SnakeCase ? "true" : "false")});");

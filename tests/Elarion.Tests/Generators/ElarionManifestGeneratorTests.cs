@@ -194,6 +194,56 @@ public sealed class ElarionManifestGeneratorTests {
             diagnostic.Id == "ELRPC002" && diagnostic.Severity == DiagnosticSeverity.Warning);
     }
 
+    [Fact]
+    public void Manifest_ReferencedAssemblyWithUnsupportedSchema_ReportsElmod003AndSkipsEntries() {
+        // Regression (M18): a referenced assembly advertising an Elarion manifest whose schema version this
+        // generator does not understand must be skipped LOUDLY (ELMOD003) rather than misparsed — silently
+        // dropping its permission entries would weaken authorization.
+        var ct = TestContext.Current.CancellationToken;
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+
+        // A hand-authored referenced manifest at an unknown schema version "999", carrying one permission entry
+        // encoded in the manifest's length-prefixed field format (14:<ns>7:<resource>4:<verb>).
+        const string producerSource =
+            """
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "999")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Permission.v1", "14:Sample.Widgets7:widgets4:read")]
+            """;
+        var producer = CSharpCompilation.Create(
+            "ReferencedManifestProducer",
+            [CSharpSyntaxTree.ParseText(producerSource, parseOptions, cancellationToken: ct)],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        producer.GetDiagnostics(ct)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        const string consumerSource =
+            """
+            [assembly: Elarion.AspNetCore.GenerateModuleBootstrapper]
+
+            namespace Elarion.AspNetCore {
+                [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                public sealed class GenerateModuleBootstrapperAttribute : System.Attribute { }
+            }
+            """;
+        var consumer = CSharpCompilation.Create(
+            "ManifestConsumer",
+            [CSharpSyntaxTree.ParseText(consumerSource, parseOptions, cancellationToken: ct)],
+            [.. CreateMetadataReferences(), producer.ToMetadataReference()],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new AppModuleDiscoveryGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        driver = driver.RunGenerators(consumer, ct);
+
+        var diagnostics = driver.GetRunResult().Diagnostics;
+
+        diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "ELMOD003" && diagnostic.Severity == DiagnosticSeverity.Warning);
+    }
+
     private static string RunGenerator(string source, out IReadOnlyList<Diagnostic> diagnostics) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var tree = CSharpSyntaxTree.ParseText(source, parseOptions);

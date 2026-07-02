@@ -6,37 +6,99 @@ namespace Elarion.Generators;
 
 public sealed partial class HandlerRegistrationGenerator {
     /// <summary>
-    /// Resolves every handler in one pass. The compilation is combined in for correctness (a handler's
-    /// decorator pipeline depends on cross-file [DecoratorList] state), but the module [DecoratorList] map is
-    /// built once here rather than rescanned per handler. The result is value-equatable, so emission is
-    /// skipped when no handler model changed.
+    /// Stage-one discovery, cached per syntax tree: identifies a concrete handler class and returns its CLR
+    /// metadata name, or <see langword="null"/> for every other class. Only the metadata name is carried —
+    /// stage two (<see cref="ResolveHandlers"/>) re-resolves the symbol from the current compilation, so no
+    /// attribute or pipeline state is read against a potentially stale tree here.
+    /// </summary>
+    private static string? IdentifyHandlerCandidate(GeneratorSyntaxContext ctx, CancellationToken ct) {
+        var classDecl = (ClassDeclarationSyntax)ctx.Node;
+        if (ctx.SemanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol classSymbol)
+            return null;
+
+        if (classSymbol.IsAbstract)
+            return null;
+
+        if (FindHandlerInterface(classSymbol) is null)
+            return null;
+
+        if (classSymbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
+            return null;
+
+        return ModuleScanner.BuildMetadataName(classSymbol);
+    }
+
+    private static EquatableArray<string> FlattenSortedDistinctCandidates(ImmutableArray<string?> candidates) {
+        if (candidates.IsDefaultOrEmpty)
+            return EquatableArray<string>.Empty;
+
+        // Distinct also collapses a partial handler class (one candidate per declaration node) into a single
+        // resolution, so a partial handler never emits its registration twice.
+        return candidates
+            .Where(static candidate => candidate is not null)
+            .Select(static candidate => candidate!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(static value => value, StringComparer.Ordinal)
+            .ToImmutableArray();
+    }
+
+    /// <summary>
+    /// Stage-two resolution: binds each cached candidate against the CURRENT compilation (symbol-table lookups
+    /// only, never a tree scan) and parses the full pipeline. The compilation is combined in deliberately — the
+    /// effective [DecoratorList] can come from the handler, its [AppModule], a pipeline-attribute class, or the
+    /// assembly, and [Require*]/[FeatureGate] can sit on base classes in other files, so this state must stay
+    /// fresh. The result is value-equatable, so emission is skipped when no handler model changed.
     /// </summary>
     private static EquatableArray<HandlerInfo> ResolveHandlers(
-        ImmutableArray<ClassDeclarationSyntax> nodes,
-        Compilation compilation,
+        EquatableArray<string> candidates,
+        EquatableArray<ModuleScanner.Module> modules,
         EquatableArray<string> variantContracts,
+        Compilation compilation,
         CancellationToken ct) {
-        if (nodes.IsDefaultOrEmpty)
+        if (candidates.IsEmpty)
             return EquatableArray<HandlerInfo>.Empty;
 
-        var moduleDecoratorLists = BuildModuleDecoratorMap(compilation, ct);
-        var moduleAuthDefaults = BuildModuleAuthorizationDefaultsMap(compilation, ct);
+        var (moduleDecoratorLists, moduleAuthDefaults) = BuildModuleMaps(compilation, modules, ct);
         var assemblyRequireAuthenticated = ResolveAssemblyAuthorizationDefault(compilation);
         var variantContractSet = variantContracts.IsEmpty
             ? null
             : new HashSet<string>(variantContracts.AsImmutableArray, StringComparer.Ordinal);
         var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
-        foreach (var node in nodes) {
+        foreach (var metadataName in candidates) {
             ct.ThrowIfCancellationRequested();
-            var semanticModel = compilation.GetSemanticModel(node.SyntaxTree);
+            // Source-assembly lookup: handlers are declared in this compilation, and the assembly-scoped lookup
+            // cannot be shadowed by a same-named type in a referenced assembly.
+            if (compilation.Assembly.GetTypeByMetadataName(metadataName) is not { } classSymbol)
+                continue;
+
+            var classDecl = FindDeclaration(classSymbol, ct);
+            if (classDecl is null)
+                continue;
+
             var info = GetHandlerInfo(
-                node, semanticModel, moduleDecoratorLists, moduleAuthDefaults, assemblyRequireAuthenticated,
-                variantContractSet, ct);
+                classDecl, classSymbol, compilation, moduleDecoratorLists, moduleAuthDefaults,
+                assemblyRequireAuthenticated, variantContractSet, ct);
             if (info is not null)
                 builder.Add(info);
         }
 
         return builder.ToImmutable();
+    }
+
+    // The declaration used for diagnostic locations. Prefer the declaration that carries the base list (the one
+    // stage one matched), falling back to the first for exotic partial splits.
+    private static ClassDeclarationSyntax? FindDeclaration(INamedTypeSymbol classSymbol, CancellationToken ct) {
+        ClassDeclarationSyntax? first = null;
+        foreach (var reference in classSymbol.DeclaringSyntaxReferences) {
+            if (reference.GetSyntax(ct) is not ClassDeclarationSyntax decl)
+                continue;
+
+            first ??= decl;
+            if (decl.BaseList is not null)
+                return decl;
+        }
+
+        return first;
     }
 
     // The contracts a [FeatureVariant] class is selected for — exactly what its [Service] registers under (shared
@@ -67,25 +129,22 @@ public sealed partial class HandlerRegistrationGenerator {
 
     private static HandlerInfo? GetHandlerInfo(
         ClassDeclarationSyntax classDecl,
-        SemanticModel semanticModel,
+        INamedTypeSymbol classSymbol,
+        Compilation compilation,
         IReadOnlyList<(string Namespace, AttributeData DecoratorList)> moduleDecoratorLists,
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated,
         HashSet<string>? variantContracts,
         CancellationToken ct) {
-        if (semanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol classSymbol)
-            return null;
+        ct.ThrowIfCancellationRequested();
 
-        var compilation = semanticModel.Compilation;
-
+        // Re-validated against the current compilation: a cached candidate can drift (e.g. its base class in
+        // another file stopped implementing IHandler<,>) without its own tree changing.
         if (classSymbol.IsAbstract)
             return null;
 
         var handlerInterface = FindHandlerInterface(classSymbol);
         if (handlerInterface is null)
-            return null;
-
-        if (classSymbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
             return null;
 
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -104,13 +163,16 @@ public sealed partial class HandlerRegistrationGenerator {
             ? ParseDecorators(decoratorListAttr, requestType, responseType, compilation, diagnostics, fmt)
             : ImmutableArray<DecoratorInfo>.Empty;
 
-        var cacheable = ParseCacheable(classSymbol, requestType, responseType, compilation, fmt);
+        var isEventConsumer = IsEventConsumerRequest(requestType, compilation);
+        var cacheable = ParseCacheable(
+            classDecl, classSymbol, requestType, responseType, compilation, fmt, isEventConsumer, diagnostics);
         var cacheInvalidation = ParseCacheInvalidation(classSymbol, compilation);
-        var resiliencePolicyName = ParseResilient(classSymbol);
+        var resiliencePolicyName = ParseResilient(classDecl, classSymbol, requestType, compilation, diagnostics);
         diagnostics.AddRange(ValidateCacheMetadata(classSymbol, cacheable, cacheInvalidation));
 
         var (hasAuthorization, requireAuthenticatedByDefault, resourceBindings) = ParseAuthorization(
-            classDecl, classSymbol, requestType, responseType, compilation, moduleAuthDefaults, assemblyRequireAuthenticated, diagnostics);
+            classDecl, classSymbol, requestType, responseType, compilation, moduleAuthDefaults,
+            assemblyRequireAuthenticated, isEventConsumer, diagnostics);
 
         var hasFeatureGates = ParseFeatureGates(classDecl, classSymbol, responseType, compilation, diagnostics);
 
@@ -179,6 +241,25 @@ public sealed partial class HandlerRegistrationGenerator {
         return best;
     }
 
+    // True when the request implements the named event marker (IDomainEvent/IIntegrationEvent) — i.e. the handler
+    // is an event-consumer handler. Used to keep pipeline pieces that assume a command/query off consumers.
+    private static bool RequestImplementsMarker(ITypeSymbol requestType, Compilation compilation, string markerMetadataName) {
+        var markerSymbol = compilation.GetTypeByMetadataName(markerMetadataName);
+        if (markerSymbol is null)
+            return false;
+
+        foreach (var iface in requestType.AllInterfaces) {
+            if (SymbolEqualityComparer.Default.Equals(iface, markerSymbol))
+                return true;
+        }
+
+        return SymbolEqualityComparer.Default.Equals(requestType, markerSymbol);
+    }
+
+    private static bool IsEventConsumerRequest(ITypeSymbol requestType, Compilation compilation) =>
+        RequestImplementsMarker(requestType, compilation, DomainEventMetadataName) ||
+        RequestImplementsMarker(requestType, compilation, IntegrationEventMetadataName);
+
     private static INamedTypeSymbol? FindHandlerInterface(INamedTypeSymbol classSymbol) {
         foreach (var iface in classSymbol.AllInterfaces) {
             if (iface.OriginalDefinition.ToDisplayString() == "Elarion.Abstractions.IHandler<TRequest, TResponse>") {
@@ -189,7 +270,16 @@ public sealed partial class HandlerRegistrationGenerator {
         return null;
     }
 
-    private static string? ParseResilient(INamedTypeSymbol classSymbol) {
+    // [Resilient] is Inherited = false, so only the directly-declared attribute is read. A domain-event consumer
+    // must never be resilient: its handler runs inline within the publisher's live transaction, so a Polly retry
+    // would re-apply tracked mutations — ELPIPE003, and the policy is dropped so no ResilienceDecorator attaches.
+    // (Integration-event consumers run on a fresh post-commit scope, so they may be resilient.)
+    private static string? ParseResilient(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol classSymbol,
+        ITypeSymbol requestType,
+        Compilation compilation,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         var attribute = classSymbol.GetAttributes()
             .FirstOrDefault(candidate => candidate.AttributeClass?.ToDisplayString() == ResilientAttributeMetadataName);
         if (attribute is null ||
@@ -199,7 +289,30 @@ public sealed partial class HandlerRegistrationGenerator {
             return null;
         }
 
+        if (RequestImplementsMarker(requestType, compilation, DomainEventMetadataName)) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                ResilientOnDomainEventDescriptor,
+                classDecl.Identifier.GetLocation(),
+                classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                requestType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
+            return null;
+        }
+
         return policyName;
+    }
+
+    // Yields every attribute declared on the handler and — because the authorization/feature-gate attributes all
+    // declare Inherited = true — on each of its base types, from most-derived to least. This matches the runtime
+    // HandlerMetadata path, which reads attributes with GetCustomAttributes(inherit: true). Ordering the
+    // most-derived first means an [AllowAnonymous] override on a derived handler is seen before any base
+    // requirement (though presence anywhere still opens the handler). Attributes whose own definition is
+    // Inherited = false (e.g. [Cacheable]/[Idempotent]/[Resilient]) must NOT use this walker — they are read via
+    // classSymbol.GetAttributes() so they stay directly-declared-only, consistent with their declaration.
+    private static IEnumerable<AttributeData> EnumerateInheritedAttributes(INamedTypeSymbol classSymbol) {
+        for (INamedTypeSymbol? current = classSymbol; current is not null; current = current.BaseType) {
+            foreach (var attribute in current.GetAttributes())
+                yield return attribute;
+        }
     }
 
     // Decides whether the authorization decorator attaches to this handler, and whether it enforces an
@@ -215,13 +328,19 @@ public sealed partial class HandlerRegistrationGenerator {
         Compilation compilation,
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated,
+        bool isEventConsumer,
         ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         EquatableArray<ResourceBindingInfo> noBindings = ImmutableArray<ResourceBindingInfo>.Empty;
 
         var isAllowAnonymous = false;
         var hasExplicit = false;
         var resourceAttributes = new List<AttributeData>();
-        foreach (var attribute in classSymbol.GetAttributes()) {
+        // The authorization attributes all declare Inherited = true, so a [Require*]/[AllowAnonymous] on a BASE
+        // handler class must be honored — mirroring the runtime HandlerMetadata path, which reads them via
+        // GetCustomAttributes(inherit: true). Walk the base-type chain; the most-derived [AllowAnonymous]
+        // still wins because presence anywhere in the chain opens the handler (CLR inherit:true semantics for a
+        // single, AllowMultiple=false attribute), and the AllowMultiple=true [Require*] accumulate across it.
+        foreach (var attribute in EnumerateInheritedAttributes(classSymbol)) {
             switch (attribute.AttributeClass?.ToDisplayString()) {
                 case AllowAnonymousAttributeMetadataName:
                     isAllowAnonymous = true;
@@ -243,7 +362,11 @@ public sealed partial class HandlerRegistrationGenerator {
         if (isAllowAnonymous)
             return (false, false, noBindings);
 
-        var defaultRequireAuthenticated =
+        // An event-consumer handler (request : IDomainEvent/IIntegrationEvent) is dispatched on a delivery scope
+        // with no authenticated user, so the IMPLICIT deny-by-default from [ElarionAuthorizationDefaults] must not
+        // attach — it would fail every consumer. An EXPLICIT [Require*] on a consumer still attaches (a deliberate
+        // app choice), so only the default-driven attachment is suppressed here.
+        var defaultRequireAuthenticated = !isEventConsumer &&
             ResolveAuthorizationDefault(classSymbol, moduleAuthDefaults, assemblyRequireAuthenticated);
         if (!hasExplicit && !defaultRequireAuthenticated)
             return (false, false, noBindings);
@@ -284,11 +407,14 @@ public sealed partial class HandlerRegistrationGenerator {
 
             var operation = "read";
             var idPath = "Id";
+            string? resourceTypeName = null;
             foreach (var named in attribute.NamedArguments) {
                 if (named.Key == "Operation" && named.Value.Value is string op && op.Length > 0)
                     operation = op;
                 else if (named.Key == "Id" && named.Value.Value is string id && id.Length > 0)
                     idPath = id;
+                else if (named.Key == "ResourceTypeName" && named.Value.Value is string typeName && typeName.Length > 0)
+                    resourceTypeName = typeName;
             }
 
             if (!ResourcePathResolves(requestType, idPath)) {
@@ -301,7 +427,7 @@ public sealed partial class HandlerRegistrationGenerator {
                 continue;
             }
 
-            builder.Add(new ResourceBindingInfo(resourceType.ToDisplayString(fmt), operation, idPath));
+            builder.Add(new ResourceBindingInfo(resourceType.ToDisplayString(fmt), operation, idPath, resourceTypeName));
         }
 
         return builder.ToImmutable();
@@ -364,43 +490,6 @@ public sealed partial class HandlerRegistrationGenerator {
         return hasModule ? bestValue : assemblyRequireAuthenticated;
     }
 
-    private static List<(string Namespace, bool RequireAuthenticated)> BuildModuleAuthorizationDefaultsMap(
-        Compilation compilation,
-        CancellationToken ct) {
-        var result = new List<(string, bool)>();
-        var defaultsAttr = compilation.GetTypeByMetadataName(AuthorizationDefaultsAttributeMetadataName);
-        var moduleAttrSymbol = compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
-        if (defaultsAttr is null || moduleAttrSymbol is null)
-            return result;
-
-        foreach (var syntaxTree in compilation.SyntaxTrees) {
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-            var root = syntaxTree.GetRoot(ct);
-
-            foreach (var typeDecl in root.DescendantNodes().OfType<TypeDeclarationSyntax>()) {
-                if (semanticModel.GetDeclaredSymbol(typeDecl, ct) is not INamedTypeSymbol typeSymbol)
-                    continue;
-
-                var hasAppModule = typeSymbol.GetAttributes()
-                    .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, moduleAttrSymbol));
-                if (!hasAppModule)
-                    continue;
-
-                var defaults = typeSymbol.GetAttributes()
-                    .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, defaultsAttr));
-                if (defaults is null)
-                    continue;
-
-                var moduleNamespace = typeSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
-                    ? containing.ToDisplayString()
-                    : "";
-                result.Add((moduleNamespace, ReadRequireAuthenticated(defaults)));
-            }
-        }
-
-        return result;
-    }
-
     private static bool ResolveAssemblyAuthorizationDefault(Compilation compilation) {
         var defaultsAttr = compilation.GetTypeByMetadataName(AuthorizationDefaultsAttributeMetadataName);
         if (defaultsAttr is null)
@@ -441,7 +530,9 @@ public sealed partial class HandlerRegistrationGenerator {
         ITypeSymbol responseType,
         Compilation compilation,
         ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
-        var gateAttributes = classSymbol.GetAttributes()
+        // [FeatureGate] declares Inherited = true, so gates on a base handler class apply too — walk the base
+        // chain to match the runtime HandlerMetadata path (GetCustomAttributes(inherit: true)).
+        var gateAttributes = EnumerateInheritedAttributes(classSymbol)
             .Where(candidate => candidate.AttributeClass?.ToDisplayString() == FeatureGateAttributeMetadataName)
             .ToList();
         if (gateAttributes.Count == 0)

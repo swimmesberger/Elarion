@@ -172,9 +172,35 @@ public sealed class VariantServiceGeneratorTests {
             }
             """;
 
-        var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+        var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
         diagnostics.Any(d => d.Id == "ELVAR001" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+        // A reported error gates emission: no arbitrary "first-alphabetical wins" registration is shipped.
+        AllGenerated(result).Should().NotContain("AddElarionVariantService<global::Sample.App.IAlgorithm>");
+    }
+
+    [Fact]
+    public void ReportsElvar004_AndSuppressesEmission_WhenContractBoundToTwoFeatures() {
+        var source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")] public static class AppModule { }
+                public interface IAlgorithm { }
+                [Service]
+                [FeatureVariant("FeatureA")]
+                public sealed class DefaultAlgo : IAlgorithm { }
+                [Service]
+                [FeatureVariant("FeatureB", Variant = "neural")]
+                public sealed class NeuralAlgo : IAlgorithm { }
+            }
+            """;
+
+        var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Any(d => d.Id == "ELVAR004" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+        // The conflicting contract is not emitted with an arbitrarily-picked feature.
+        AllGenerated(result).Should().NotContain("AddElarionVariantService<global::Sample.App.IAlgorithm>");
     }
 
     [Fact]
