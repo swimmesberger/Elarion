@@ -458,24 +458,70 @@ function SeatSection() {
 
 /* -------------------------------------------------------------- 06 · Bet */
 
-const betRows = [
+type BetIconKind = 'plug' | 'key' | 'magnifier' | 'door';
+
+const betRows: { title: string; body: string; icon: BetIconKind }[] = [
   {
     title: 'Open standards end to end',
     body: 'The connections — to AI, to partners, to monitoring — are industry standards, not proprietary sockets. Any vendor on any side can be swapped without rewriting your product.',
+    icon: 'plug',
   },
   {
     title: 'Software you own',
     body: 'Elarion is open source under Apache-2.0, the permissive license trusted across the industry. No hosted platform, no per-seat fee, nothing phoning home.',
+    icon: 'key',
   },
   {
     title: 'Homework you can check',
     body: 'Twenty-three written decision records explain every major choice, and six hundred automated tests guard them. Your architects can audit the reasoning before you commit a single sprint.',
+    icon: 'magnifier',
   },
   {
     title: 'An exit that stays open',
     body: 'If you ever walk away, you keep a conventional, readable .NET codebase your team already understands. Leaving is an afternoon’s decision, not a rewrite.',
+    icon: 'door',
   },
 ];
+
+/** Stroke icons for the bet rows — iris to match the panel's seals. */
+function BetIcon({ kind }: { kind: BetIconKind }) {
+  const common = {
+    fill: 'none' as const,
+    stroke: 'var(--accent-brand)',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  };
+  return (
+    <svg viewBox="0 0 24 24" className="size-[22px] shrink-0" aria-hidden xmlns="http://www.w3.org/2000/svg">
+      {kind === 'plug' && (
+        <>
+          <path d="M9 3.5 v3.5 M15 3.5 v3.5" {...common} />
+          <rect x={6.5} y={7} width={11} height={6.5} rx={2} {...common} />
+          <path d="M12 13.5 v2.5 c0 2.2 -1.8 3.5 -4 3.5" {...common} />
+        </>
+      )}
+      {kind === 'key' && (
+        <>
+          <circle cx={7.5} cy={7.5} r={3.3} {...common} />
+          <path d="M10 10 L20 20 M15.5 15.5 l2.2 -2.2 M18 18 l2.2 -2.2" {...common} />
+        </>
+      )}
+      {kind === 'magnifier' && (
+        <>
+          <circle cx={10.5} cy={10.5} r={5.6} {...common} />
+          <path d="M14.6 14.6 L20.5 20.5 M8.2 10.7 l1.7 1.7 l3.2 -3.6" {...common} />
+        </>
+      )}
+      {kind === 'door' && (
+        <>
+          <path d="M13.5 3.5 H6 a1.5 1.5 0 0 0 -1.5 1.5 v14 a1.5 1.5 0 0 0 1.5 1.5 h7.5" {...common} />
+          <path d="M12.5 12 h8 M17 8.8 L20.5 12 L17 15.2" {...common} />
+        </>
+      )}
+    </svg>
+  );
+}
 
 function BetSection() {
   return (
@@ -498,8 +544,11 @@ function BetSection() {
         <div className="vt-rise mt-10 grid gap-8 md:grid-cols-2">
           {betRows.map((row) => (
             <div key={row.title} className="border-t border-(--line) pt-4">
-              <h3 className="font-medium text-fd-foreground">{row.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-(--body)">{row.body}</p>
+              <div className="flex items-center gap-3">
+                <BetIcon kind={row.icon} />
+                <h3 className="font-medium text-fd-foreground">{row.title}</h3>
+              </div>
+              <p className="mt-2.5 text-sm leading-relaxed text-(--body)">{row.body}</p>
             </div>
           ))}
         </div>

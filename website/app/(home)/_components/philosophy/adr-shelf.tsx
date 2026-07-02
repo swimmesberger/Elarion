@@ -39,7 +39,9 @@ const FEATURED = new Set(['0001', '0007', '0008', '0010', '0017', '0018', '0020'
 export function AdrShelf() {
   return (
     <div>
-      <div className="flex items-end gap-[5px] overflow-x-auto border-b-2 border-(--line) pb-0">
+      {/* pt-2 gives lifted spines headroom — the strip is a scroll container,
+          so paint above its content box would otherwise be clipped on hover */}
+      <div className="flex items-end gap-[5px] overflow-x-auto border-b-2 border-(--line) pt-2 pb-0">
         {ADRS.map((adr) => {
           const featured = FEATURED.has(adr.n);
           return (

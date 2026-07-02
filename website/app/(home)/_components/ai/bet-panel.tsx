@@ -13,10 +13,11 @@ export function BetPanel() {
     { x: 550, name: 'HTTP · JSON-RPC', sub: 'any client' },
   ];
 
+  // Three seals of 192px inside the 640px chassis (x 40..680): 16px margins.
   const seals = [
-    { x: 80, main: 'APACHE-2.0', sub: 'yours to keep' },
-    { x: 292, main: '23 ADRs ON FILE', sub: 'every tradeoff reasoned' },
-    { x: 504, main: '600+ TESTS', sub: 'guarding the promises' },
+    { x: 56, main: 'APACHE-2.0', sub: 'yours to keep' },
+    { x: 264, main: '23 ADRs ON FILE', sub: 'every tradeoff reasoned' },
+    { x: 472, main: '600+ TESTS', sub: 'guarding the promises' },
   ];
 
   return (
