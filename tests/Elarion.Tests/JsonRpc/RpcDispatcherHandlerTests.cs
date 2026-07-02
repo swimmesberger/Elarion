@@ -46,6 +46,19 @@ public sealed class RpcDispatcherHandlerTests {
         }
     }
 
+    // An all-optional query as a positional record: it has NO public parameterless constructor even though every
+    // parameter has a default, so the old Activator.CreateInstance path threw for an omitted `params`. Echoes the
+    // resolved values back so a test can assert the constructor defaults were applied.
+    private sealed record ListQuery(string? Search = null, int Page = 1, int PageSize = 25);
+
+    private sealed record ListResponse(string? Search, int Page, int PageSize);
+
+    private sealed class ListHandler : IHandler<ListQuery, Result<ListResponse>> {
+        public ValueTask<Result<ListResponse>> HandleAsync(ListQuery request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<ListResponse>>(
+                new ListResponse(request.Search, request.Page, request.PageSize));
+    }
+
     // The framework disables reflection-based serialization by default (AOT discipline); opt these
     // test options in explicitly so the dispatcher can (de)serialize the sample request type.
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
@@ -56,11 +69,13 @@ public sealed class RpcDispatcherHandlerTests {
         var dispatcher = new JsonRpcDispatcher(Options)
             .Map<EchoCommand, EchoResponse>("echo")
             .Map<CancelCommand, EchoResponse>("cancel")
+            .Map<ListQuery, ListResponse>("list")
             .Freeze();
 
         var services = new ServiceCollection()
             .AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>()
             .AddScoped<IHandler<CancelCommand, Result<EchoResponse>>, CancelHandler>()
+            .AddScoped<IHandler<ListQuery, Result<ListResponse>>, ListHandler>()
             .BuildServiceProvider();
 
         return (dispatcher, services);
@@ -124,6 +139,89 @@ public sealed class RpcDispatcherHandlerTests {
         response.Error.Should().BeNull();
         response.Result.Should().BeOfType<EchoResponse>()
             .Which.Greeting.Should().Be("Hello World");
+    }
+
+    [Fact]
+    public async Task Dispatch_OmittedParams_AllOptionalPositionalRecord_AppliesConstructorDefaults() {
+        var (dispatcher, services) = Build();
+        await using var scope = services.CreateAsyncScope();
+
+        // The "params" member is omitted entirely. A positional record has no public parameterless constructor,
+        // so the previous Activator.CreateInstance(RequestType) path threw MissingMethodException here and turned
+        // a valid all-optional query into a dispatch error. Deserializing "{}" instead applies the ctor defaults.
+        var request = new JsonRpcRequest { Jsonrpc = "2.0", Method = "list", Id = "1" };
+
+        var response = await dispatcher.DispatchAsync(
+            request, scope.ServiceProvider, TestContext.Current.CancellationToken);
+
+        response.Error.Should().BeNull();
+        var result = response.Result.Should().BeOfType<ListResponse>().Which;
+        result.Search.Should().BeNull();
+        result.Page.Should().Be(1);
+        result.PageSize.Should().Be(25);
+    }
+
+    [Fact]
+    public async Task Dispatch_OmittedParams_ProducesSameObjectAsExplicitEmptyObject() {
+        var (dispatcher, services) = Build();
+        await using var scope = services.CreateAsyncScope();
+
+        var omitted = new JsonRpcRequest { Jsonrpc = "2.0", Method = "list", Id = "1" };
+        var emptyObject = new JsonRpcRequest {
+            Jsonrpc = "2.0",
+            Method = "list",
+            Params = JsonSerializer.SerializeToElement(new { }, Options),
+            Id = "2",
+        };
+
+        var fromOmitted = await dispatcher.DispatchAsync(
+            omitted, scope.ServiceProvider, TestContext.Current.CancellationToken);
+        var fromEmpty = await dispatcher.DispatchAsync(
+            emptyObject, scope.ServiceProvider, TestContext.Current.CancellationToken);
+
+        fromOmitted.Error.Should().BeNull();
+        fromEmpty.Error.Should().BeNull();
+        // Omitted params and an explicit {} are indistinguishable: both apply the request record's defaults.
+        fromOmitted.Result.Should().BeEquivalentTo(fromEmpty.Result);
+    }
+
+    [Fact]
+    public async Task Dispatch_PartialParams_AppliesDefaultsForOmittedMembers() {
+        var (dispatcher, services) = Build();
+        await using var scope = services.CreateAsyncScope();
+
+        var request = new JsonRpcRequest {
+            Jsonrpc = "2.0",
+            Method = "list",
+            Params = JsonSerializer.SerializeToElement(new { page = 3 }, Options),
+            Id = "1",
+        };
+
+        var response = await dispatcher.DispatchAsync(
+            request, scope.ServiceProvider, TestContext.Current.CancellationToken);
+
+        response.Error.Should().BeNull();
+        var result = response.Result.Should().BeOfType<ListResponse>().Which;
+        result.Page.Should().Be(3);
+        result.PageSize.Should().Be(25);
+    }
+
+    [Fact]
+    public async Task Dispatch_OmittedParams_RequiredMemberType_ReturnsInvalidParams() {
+        var (dispatcher, services) = Build();
+        await using var scope = services.CreateAsyncScope();
+
+        // EchoCommand.Name is `required`. Deserializing an omitted params as {} correctly fails the missing
+        // required member as invalid params (-32602) rather than — as the old Activator.CreateInstance path did —
+        // silently constructing an EchoCommand with a null Name and running the handler on invalid input.
+        var request = new JsonRpcRequest { Jsonrpc = "2.0", Method = "echo", Id = "1" };
+
+        var response = await dispatcher.DispatchAsync(
+            request, scope.ServiceProvider, TestContext.Current.CancellationToken);
+
+        response.Result.Should().BeNull();
+        response.Error.Should().NotBeNull();
+        response.Error!.Code.Should().Be(-32602);
     }
 
     [Theory]

@@ -73,9 +73,9 @@ public static class RpcToolInvoker {
 
         object? requestObject;
         try {
-            requestObject = arguments is { ValueKind: not JsonValueKind.Undefined } args
-                ? args.Deserialize(serializerOptions.GetTypeInfo(route.RequestType))
-                : Activator.CreateInstance(route.RequestType);
+            // Omitted arguments are treated identically to `{}` and deserialized through the configured (source-gen)
+            // resolver — reflection-free / Native-AOT-safe, and applies the request record's constructor defaults.
+            requestObject = RpcRequestParams.Deserialize(arguments, route.RequestType, serializerOptions);
         } catch (JsonException ex) {
             RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
             return new RpcToolResult { IsError = true, Text = $"Invalid params: {ex.Message}", ErrorCode = -32602 };
