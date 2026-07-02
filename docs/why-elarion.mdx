@@ -12,8 +12,9 @@ principle links to the page where it is applied.
 
 > Auto-detect application patterns, explicitly wire platform capabilities.
 
-Your code already states its intent: a handler says "I handle this request", a validator says "I
-validate this command", a `[Service]` class says "this is a module service". Repeating those facts in
+Your code already states its intent: a handler says "I handle this request", an annotated request DTO
+says "this is what a valid command looks like", a `[Service]` class says "this is a module service".
+Repeating those facts in
 a separate registration list (`Program.cs`, hand-written `AddXyz()` methods) creates a **parallel
 model that drifts** from the code it describes. Elarion declares intent next to the type and generates
 the wiring. The host stays a thin composition and transport shell.
@@ -78,7 +79,7 @@ behaves correctly behind any transport.
 
 ## Modules own their surface
 
-A module is a namespace plus an `[AppModule]` marker. Adding a handler, validator, service, or JSON
+A module is a namespace plus an `[AppModule]` marker. Adding a handler, service, or JSON
 context under that namespace is enough to publish it.
 
 **Why:** ownership follows structure. Moving a type between modules changes its ownership through
@@ -184,12 +185,13 @@ principles above, viewed against idiomatic ASP.NET Core.
 
 | Topic | Idiomatic ASP.NET Core | Elarion |
 | --- | --- | --- |
-| Registration | Explicit `services.AddScoped<…>()`, endpoint maps, and feature wiring in `Program.cs`. | Source-generated auto-registration from handler, validator, module, and RPC attributes. Explicit registration remains for infrastructure. |
+| Registration | Explicit `services.AddScoped<…>()`, endpoint maps, and feature wiring in `Program.cs`. | Source-generated auto-registration from handler, module, and RPC attributes. Explicit registration remains for infrastructure. |
 | Application shape | Controllers, Minimal API lambdas, or endpoint classes are the use-case boundary. | `IHandler<TRequest, TResponse>` is the use-case boundary; transport adapters call handlers. |
-| Modularity | Folder/project organization plus manually maintained `AddXyz()` methods. | First-class modules with `[AppModule]`: feature flags, ordering, handler/validator aggregation, endpoint hooks, JSON metadata hooks. |
+| Modularity | Folder/project organization plus manually maintained `AddXyz()` methods. | First-class modules with `[AppModule]`: feature flags, ordering, handler/service aggregation, endpoint hooks, JSON metadata hooks. |
 | Cross-cutting behavior | Middleware, endpoint filters, MVC filters, MediatR behaviors, or nested services. | Generated decorator pipelines wrap handlers in a deterministic order chosen by assembly, module, or handler. |
 | Feature gating | MVC `[FeatureGate]` / middleware — HTTP-only, and a closed gate typically 404s only on MVC actions. | `[FeatureGate]` as a generated pipeline decorator — transport-neutral (identical under JSON-RPC/MCP/HTTP), closed gate returns 404 over every transport, any OpenFeature provider behind one seam. |
-| Discovery | Runtime reflection scanning for validators, handlers, controllers, endpoint modules. | Compile-time source generation for deterministic startup, AOT friendliness, and inspectable code. |
+| Validation | `[ApiController]` model validation or a validator library — enforced at HTTP binding, invisible to other transports and to exported contracts. | DataAnnotations on the request DTO, enforced by a generated pipeline decorator under every transport and exported to the JSON-RPC schema, OpenAPI, MCP tool schemas, and the Zod client; business rules in the handler. |
+| Discovery | Runtime reflection scanning for handlers, controllers, endpoint modules. | Compile-time source generation for deterministic startup, AOT friendliness, and inspectable code. |
 | Host responsibilities | The host often knows every feature and registers most feature services. | The host owns platform capabilities, middleware, auth, telemetry, database setup, and transports; modules own composition. |
 | Serialization metadata | Global JSON options plus reflection fallback. | Modules contribute `JsonSerializerContext` resolvers following the module boundary. |
 | EF Core model wiring | Hand-written `DbSet<T>` and `ApplyConfigurationsFromAssembly(…)`. | Optional generator: `[GenerateDbSets]` on the concrete `DbContext`, explicit `[EntityConfiguration]` (single source of truth for DbSet + schema), optional scopes, and direct `ApplyConfiguration<T>` calls. Handlers use the concrete context — no interface. |

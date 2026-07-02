@@ -84,9 +84,11 @@ choose surfaces via the `Transports` flag*, never registered separately per tran
    [`IElarionJsonSerialization`](/docs/capabilities/serialization) options (the same serializer the whole
    app uses) and adapts the shared `HandlerDispatcher` registry to the JSON-RPC wire format.
 4. `JsonRpcSchemaExporter` (or the [build-time package](/docs/capabilities/transports/schema-generation)) exports
-   `rpc-schema.json` from the registered dispatcher.
+   `rpc-schema.json` from the registered dispatcher — including the request DTOs' DataAnnotations
+   constraints as JSON Schema keywords (see [Validation](/docs/concepts/validation)).
 5. [`elarion-jsonrpc-client-generator`](/docs/capabilities/transports/typescript-client) converts that schema into
-   TypeScript types, Zod result schemas, and a typed fetch client.
+   TypeScript types, constraint-aware Zod params/result schemas, and a typed fetch client that
+   pre-validates request params.
 6. The frontend uses the generated client directly or wraps it in framework-specific helpers.
 
 Each stage has a single owner, which keeps the reusable contract small:

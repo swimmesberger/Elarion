@@ -5,7 +5,7 @@ namespace Elarion.Abstractions;
 /// </summary>
 /// <remarks>
 /// This is equivalent to applying <see cref="GenerateModuleHandlersAttribute"/>,
-/// <see cref="GenerateModuleServicesAttribute"/>, <see cref="GenerateModuleValidatorsAttribute"/>,
+/// <see cref="GenerateModuleServicesAttribute"/>,
 /// <see cref="GenerateScheduledJobsAttribute"/>, <see cref="GenerateEventConsumersAttribute"/>,
 /// and <see cref="GenerateResiliencePoliciesAttribute"/>.
 /// Application-owned attributes, such as pipeline defaults, remain explicit because the framework cannot

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using Billing.Application.Domain;
 using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Modules.Invoicing.Events;
@@ -30,10 +31,14 @@ public sealed class CreateInvoice(
     IAuditTrail audit,
     TimeProvider clock
 ) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
+    /// <summary>Tier-1 wire-shape constraints live here as DataAnnotations (ADR-0027); the "due date must be
+    /// set" rule is not a static shape constraint, so it is a tier-2 check inside the handler.</summary>
     public sealed record Command : ICommand {
         public required Guid ClientId { get; init; }
         [Description("Invoice total in minor units, e.g. 1999 = €19.99.")]
+        [Range(1, double.MaxValue)]
         public required long AmountCents { get; init; }
+        [Length(3, 3)]
         public required string Currency { get; init; }
         public required DateOnly DueDate { get; init; }
     }
@@ -41,6 +46,15 @@ public sealed class CreateInvoice(
     public sealed record Response(Guid InvoiceId, string Number, Guid SendJobId);
 
     public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        // Tier-2 rule (ADR-0027): "the due date must be set" is not expressible as a static shape constraint
+        // (a missing DateOnly deserializes to its default), so it lives in the handler, surfaced through the
+        // same field-keyed validation channel the auto-attached decorator uses.
+        if (command.DueDate == default) {
+            return AppError.Validation(
+                "A due date is required.",
+                new Dictionary<string, string[]> { ["dueDate"] = ["A due date is required."] });
+        }
+
         var clientExists = await db.Clients
             .AnyAsync(c => c.OwnerId == user.UserId && c.Id == command.ClientId, ct);
         if (!clientExists) {

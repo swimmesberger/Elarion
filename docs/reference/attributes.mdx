@@ -17,7 +17,7 @@ behavior behind each attribute see the linked capability or concept page.
 ### `[AppModule]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
-- **Triggers:** groups handlers/services/validators/jobs/consumers under a module boundary and emits the `{ModuleType}ElarionModuleServices.ConfigureDefaultServices` sibling plus host bootstrapping; feature modules are gated by `Modules:{Name}:Enabled`.
+- **Triggers:** groups handlers/services/jobs/consumers under a module boundary and emits the `{ModuleType}ElarionModuleServices.ConfigureDefaultServices` sibling plus host bootstrapping; feature modules are gated by `Modules:{Name}:Enabled`.
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -313,6 +313,21 @@ See [Feature flags](/docs/capabilities/feature-flags).
 
 See [Idempotency](/docs/concepts/idempotency).
 
+## Validation
+
+There is **no Elarion validation attribute**. Request validation is declared with the standard
+`System.ComponentModel.DataAnnotations` attributes on the handler's request DTO — `[Range]`,
+`[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`, `[EmailAddress]`,
+`[Url]`, `[Base64String]` — with requiredness from nullability + the `required` modifier (no
+`[Required]` needed). The handler-registration generator auto-attaches the framework
+`ValidationDecorator` (just inside the feature gate) for any handler whose request type graph carries
+validation attributes, and the same attributes are exported to the JSON-RPC schema, MCP tool schemas,
+the OpenAPI document, and the generated Zod client. Reusable custom constraints subclass a mapped
+attribute (e.g. `[Slug] : RegularExpressionAttribute`). Enforcement requires the opt-in
+`Elarion.Validation` package (`AddElarionValidation()`); diagnostics `ELVAL001`/`ELVAL002`.
+
+See [Validation](/docs/concepts/validation).
+
 ## Authorization
 
 Handler requirements are class attributes the handler-registration generator reads to auto-attach the `AuthorizationDecorator` (the outermost functional gate, just inside tracing). Different attribute *kinds* AND together; multiple of one kind AND; OR lives inside a single `[RequireClaim]`. All are transport-neutral (identical under JSON-RPC, MCP, and HTTP) and evaluate against `ICurrentUser` — an unauthenticated caller yields `AppError.Unauthorized` (401), authenticated-but-denied yields `AppError.Forbidden` (403). The gated handler's response must be able to represent failure (`Result<T>`/`Result`) or `ELAUTH001` is reported.
@@ -597,7 +612,7 @@ See [Cross-module communication](/docs/concepts/cross-module-communication).
 ### `[UseElarion]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** enables the core Elarion source-generation features at once — equivalent to applying `[GenerateModuleHandlers]`, `[GenerateModuleServices]`, `[GenerateModuleValidators]`, `[GenerateScheduledJobs]`, `[GenerateEventConsumers]`, and `[GenerateResiliencePolicies]`. It does **not** subsume `[GeneratePermissionCatalog]`, which has its own assembly-level trigger (below). Application-owned attributes such as pipeline defaults also remain explicit. Marker only — no parameters.
+- **Triggers:** enables the core Elarion source-generation features at once — equivalent to applying `[GenerateModuleHandlers]`, `[GenerateModuleServices]`, `[GenerateScheduledJobs]`, `[GenerateEventConsumers]`, and `[GenerateResiliencePolicies]`. It does **not** subsume `[GeneratePermissionCatalog]`, which has its own assembly-level trigger (below). Application-owned attributes such as pipeline defaults also remain explicit. Marker only — no parameters.
 
 ### Individual generation triggers
 
@@ -605,9 +620,8 @@ All are `Elarion.Abstractions`, applied to the assembly, marker-only (no paramet
 
 | Attribute | Triggers |
 | --- | --- |
-| `[GenerateModuleHandlers]` | Per-module handler registration methods. |
+| `[GenerateModuleHandlers]` | Per-module handler registration methods (and, when the compilation references `Elarion.Validation`, the per-module request-validation resolvers). |
 | `[GenerateModuleServices]` | Per-module service registration methods. |
-| `[GenerateModuleValidators]` | Per-module validator registration methods. |
 | `[GenerateScheduledJobs]` | Source-generated scheduler descriptor registration. |
 | `[GenerateEventConsumers]` | Source-generated event-consumer descriptor registration. |
 | `[GenerateResiliencePolicies]` | Source-generated resilience-policy registration. |
@@ -639,7 +653,7 @@ See [Entity Framework](/docs/capabilities/entity-framework).
 ## Related references
 
 <Cards>
-  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELIDEMEF/ELOBX/ELSET/ELBLB/ELTUS/ELCACHE) referenced above.</Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELVAL/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELIDEMEF/ELOBX/ELSET/ELBLB/ELTUS/ELCACHE) referenced above.</Card>
   <Card title="Configuration" href="/docs/reference/configuration">Feature flags (`Modules:{Name}:Enabled`) and other settings keys.</Card>
   <Card title="Conventions" href="/docs/reference/conventions">Module statics, namespace matching, and naming rules.</Card>
   <Card title="Packages" href="/docs/reference/packages">Which package each attribute ships in.</Card>

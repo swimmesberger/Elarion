@@ -236,6 +236,7 @@ the stable `JobId` so the frontend can poll it.
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/CreateInvoice.cs"
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using Billing.Application.Domain;
 using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Modules.Invoicing.Events;
@@ -264,7 +265,9 @@ public sealed class CreateInvoice(
     public sealed record Command : ICommand {
         public required Guid ClientId { get; init; }
         [Description("Invoice total in minor units, e.g. 1999 = €19.99.")]
+        [Range(1, long.MaxValue)]
         public required long AmountCents { get; init; }
+        [Length(3, 3)]
         public required string Currency { get; init; }
         public required DateOnly DueDate { get; init; }
     }
@@ -311,21 +314,10 @@ public sealed class CreateInvoice(
 }
 ```
 
-Add the validator beside it:
-
-```csharp title="src/Billing.Application/Modules/Invoicing/Handlers/CreateInvoiceValidator.cs"
-using FluentValidation;
-
-namespace Billing.Application.Modules.Invoicing.Handlers;
-
-public sealed class CreateInvoiceValidator : AbstractValidator<CreateInvoice.Command> {
-    public CreateInvoiceValidator() {
-        RuleFor(x => x.AmountCents).GreaterThan(0);
-        RuleFor(x => x.Currency).NotEmpty().Length(3);
-        RuleFor(x => x.DueDate).NotEmpty();
-    }
-}
-```
+The `[Range]` and `[Length]` attributes on the `Command` are the input rules — enforced by the
+auto-attached [validation gate](/docs/concepts/validation) before the transaction opens, and exported
+to the JSON-RPC schema and the frontend's Zod client. The existence check on `ClientId` is a database
+question, so it stays in the handler.
 
 </Step>
 

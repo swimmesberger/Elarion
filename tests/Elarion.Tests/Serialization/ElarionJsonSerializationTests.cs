@@ -112,6 +112,23 @@ public sealed class ElarionJsonSerializationTests {
     }
 
     [Fact]
+    public void ValidationFieldErrors_SerializeUnderSourceGeneration_ReflectionOff() {
+        var services = new ServiceCollection();
+        services.AddElarionJson(); // no contributed context, reflection off (AOT-strict default)
+
+        var accessor = Resolve(services);
+        var data = new ValidationErrorData {
+            Errors = ["Street is required"],
+            FieldErrors = new Dictionary<string, string[]> { ["address.street"] = ["Street is required"] },
+        };
+
+        // The field-keyed dictionary member is statically reachable from ValidationErrorData, so the framework
+        // context covers it; keys stay wire-named verbatim (no DictionaryKeyPolicy re-mapping).
+        var json = JsonSerializer.Serialize(data, accessor.GetTypeInfo<ValidationErrorData>());
+        json.Should().Be("{\"errors\":[\"Street is required\"],\"fieldErrors\":{\"address.street\":[\"Street is required\"]}}");
+    }
+
+    [Fact]
     public void StoredIdempotencyResult_RoundTrips_UnderSourceGeneration_ReflectionOff() {
         // The idempotency replay envelope must serialize AOT-strict: the framework context registers the
         // non-generic StoredResult (and AppError), while the success value goes through the module context's

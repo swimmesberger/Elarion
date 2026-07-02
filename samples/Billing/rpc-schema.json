@@ -8,11 +8,15 @@
         "properties": {
           "name": {
             "type": "string",
-            "description": "The client\u0027s display name."
+            "description": "The client\u0027s display name.",
+            "minLength": 1,
+            "maxLength": 200
           },
           "email": {
             "type": "string",
-            "description": "The client\u0027s billing email address."
+            "description": "The client\u0027s billing email address.",
+            "format": "email",
+            "maxLength": 320
           }
         },
         "required": [
@@ -125,10 +129,13 @@
           },
           "amountCents": {
             "type": "integer",
-            "description": "Invoice total in minor units, e.g. 1999 = \u20AC19.99."
+            "description": "Invoice total in minor units, e.g. 1999 = \u20AC19.99.",
+            "minimum": 1
           },
           "currency": {
-            "type": "string"
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
           },
           "dueDate": {
             "type": "string",

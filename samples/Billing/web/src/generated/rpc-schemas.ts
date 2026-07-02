@@ -3,35 +3,58 @@
 
 import { z } from 'zod'
 
+export const rpcParamsSchemas = {
+  "clients.create": z.object({
+    name: z.string().min(1).max(200),
+    email: z.string().max(320).email(),
+  }),
+  "clients.get": z.object({
+    id: z.string().uuid(),
+  }),
+  "clients.list": z.unknown(),
+  "invoices.create": z.object({
+    clientId: z.string().uuid(),
+    amountCents: z.number().int().gte(1),
+    currency: z.string().min(3).max(3),
+    dueDate: z.string(),
+  }),
+  "invoices.list": z.unknown(),
+  "invoices.sendStatus": z.object({
+    jobId: z.string().uuid(),
+  }),
+} as const
+
+export type RpcParamsSchemas = typeof rpcParamsSchemas
+
 export const rpcResultSchemas = {
   "clients.create": z.object({
-    id: z.string(),
+    id: z.string().uuid(),
     number: z.string(),
   }),
   "clients.get": z.object({
-    id: z.string(),
+    id: z.string().uuid(),
     number: z.string(),
     name: z.string(),
     email: z.string(),
   }),
   "clients.list": z.object({
     clients: z.array(z.object({
-      id: z.string(),
+      id: z.string().uuid(),
       number: z.string(),
       name: z.string(),
       email: z.string(),
     })),
   }),
   "invoices.create": z.object({
-    invoiceId: z.string(),
+    invoiceId: z.string().uuid(),
     number: z.string(),
-    sendJobId: z.string(),
+    sendJobId: z.string().uuid(),
   }),
   "invoices.list": z.object({
     invoices: z.array(z.object({
-      id: z.string(),
+      id: z.string().uuid(),
       number: z.string(),
-      amountCents: z.number(),
+      amountCents: z.number().int(),
       currency: z.string(),
       status: z.string(),
       dueDate: z.string(),
@@ -39,8 +62,8 @@ export const rpcResultSchemas = {
   }),
   "invoices.sendStatus": z.object({
     status: z.string(),
-    attempt: z.number(),
-    maxAttempts: z.number(),
+    attempt: z.number().int(),
+    maxAttempts: z.number().int(),
     nextAttemptAt: z.string().nullish(),
     lastError: z.string().nullish(),
   }),

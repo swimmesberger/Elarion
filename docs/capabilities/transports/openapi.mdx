@@ -45,11 +45,17 @@ of that `AddElarionOpenApi()` contributes the parts that make it *Elarion's* con
 - **Canonical JSON, reflection-free.** OpenAPI schema generation (and minimal-API request-body binding) read
   ASP.NET's `Microsoft.AspNetCore.Http.Json` options. `AddElarionOpenApi()` calls
   [`AddElarionHttpJson()`](/docs/capabilities/transports/http-endpoints#json-serialization-with-reflection-off),
-  which mirrors the canonical [`IElarionJsonSerialization`](/docs/concepts/json-serialization) configuration onto
+  which mirrors the canonical [`IElarionJsonSerialization`](/docs/capabilities/serialization) configuration onto
   them — the naming knobs and the **source-generated** `TypeInfoResolverChain` — so body schemas resolve through
   the same contexts every other transport uses, with `JsonSerializerIsReflectionEnabledByDefault=false`. A DTO
   missing from every source-gen context throws (surfacing a missing `[JsonSerializable]`) instead of silently
   reflecting, and the emitted schema matches the JSON-RPC/MCP wire shape for the same type.
+- **Validation constraints, for free.** The DataAnnotations attributes on your request DTOs (see
+  [Validation](/docs/concepts/validation)) appear in the document natively — Microsoft's schema generation maps
+  `[Range]`, `[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`, `[Url]`, and
+  `[Base64String]` onto the JSON Schema keywords, verified to work reflection-off. Elarion adds a small schema
+  transformer for `[EmailAddress]` → `format: "email"` parity, so the OpenAPI document and the JSON-RPC schema
+  never diverge on the same DTO.
 - **Module tags.** Each operation is tagged with its owning `[AppModule]`, so tools group your API by module —
   the REST analog of JSON-RPC's module grouping.
 - **Clean operation ids.** The handler's fully-qualified type name (`Billing.Invoicing.GetInvoice`) is

@@ -22,7 +22,7 @@ A conventional Elarion solution separates intent (the application) from platform
 ```text title="MyApp.sln"
 src/
 ├─ MyApp.Domain/            # entities, value objects — no framework dependency
-├─ MyApp.Application/       # modules, handlers, services, validators  ← Elarion + generators
+├─ MyApp.Application/       # modules, handlers, services  ← Elarion + generators
 ├─ MyApp.Infrastructure/    # concrete database/blob/mail/PDF implementations
 └─ MyApp.Api/               # ASP.NET Core host  ← Elarion.AspNetCore (+ .JsonRpc / .Mcp)
 ```
@@ -35,9 +35,7 @@ ClientsModule.cs            # [AppModule("Clients")] + optional ConfigureService
 ClientsJsonContext.cs       # [JsonSerializable(...)] per request/response type
 Handlers/
 ├─ GetClient.cs             # [Handler] IHandler<GetClientQuery, Result<ClientResponse>>
-└─ CreateClient/
-   ├─ CreateClient.cs       # handler
-   └─ CreateClientValidator.cs
+└─ CreateClient.cs          # handler; its Command carries the DataAnnotations constraints
 Services/
 └─ ClientNumberGenerator.cs # [Service] implementation
 ```
@@ -51,7 +49,7 @@ These rules are load-bearing for the generators in `Elarion.Generators`.
 | A type lives **under a module namespace** | Decides which `[AppModule]` owns it via longest-prefix containment, and therefore which gated registration runs. | `ModuleScanner` |
 | Handlers implement `IHandler<TRequest, TResponse>` | The request type and the `Result<T>`-unwrapped success type are read straight from the interface. | `HandlerShape` |
 | Services are annotated with `[Service]` | Registered with contracts inferred from implemented interfaces and the `Scope` lifetime. | `ServiceAttribute` |
-| Validators inherit `AbstractValidator<T>` | Registered as `IValidator<T>` (scoped) into the owning module. | `AbstractValidator<T>` |
+| Request DTOs carry `DataAnnotations` attributes | The handler generator auto-attaches the `ValidationDecorator`, and the resolver generator emits the module's validation metadata (when `Elarion.Validation` is referenced). | `ValidationAttribute` |
 | `IHostedService`/`BackgroundService` use `ServiceScope.Singleton` | A scoped/transient hosted service is rejected with `ELSG001`. | `[Service]` |
 
 ### Framework API naming
@@ -133,16 +131,17 @@ public sealed class ClientNumberGenerator : IClientNumberGenerator { /* register
 public sealed class SystemClock : IClock { /* explicit contract, singleton */ }
 ```
 
-### Validator grouping
+### Request validation
 
-A class inheriting `FluentValidation.AbstractValidator<T>` is registered as `IValidator<T>` with a **scoped**
-lifetime into its owning module (by namespace containment). Abstract validators are skipped. No attribute is
-required — placement and the base class are the whole convention.
+There is no validator class convention. Shape constraints are `System.ComponentModel.DataAnnotations`
+attributes **on the handler's request DTO**; a per-module validation resolver is generated from them (when
+the compilation references `Elarion.Validation`) and the handler generator auto-attaches the framework
+`ValidationDecorator`. Business rules live in the handler. See [Validation](/docs/concepts/validation).
 
 ## Auto-wiring: `ConfigureDefaultServices`
 
-Under `[GenerateModuleBootstrapper]`, a module's discovered **handlers, services, validators, scheduled
-jobs, and event consumers** are registered automatically — you do **not** hand-write `Add{Module}…()` calls.
+Under `[GenerateModuleBootstrapper]`, a module's discovered **handlers, services, validation metadata,
+scheduled jobs, and event consumers** are registered automatically — you do **not** hand-write `Add{Module}…()` calls.
 
 - `ModuleDefaultServicesGenerator` emits, per `[AppModule]`, a sibling `static partial class
   {ModuleType}ElarionModuleServices` with `ConfigureDefaultServices(IServiceCollection)` that calls one
@@ -155,7 +154,7 @@ jobs, and event consumers** are registered automatically — you do **not** hand
   hand-written `ConfigureServices`.
 
 `ConfigureServices` is therefore reserved for **additional, non-generated** registrations (options binding,
-third-party libraries, manual decorators) — not for re-declaring the module's own handlers/services/validators.
+third-party libraries, manual decorators) — not for re-declaring the module's own handlers/services.
 
 ```csharp title="A module needs no manual Add{Module}… calls"
 [AppModule("Clients")]
@@ -194,13 +193,17 @@ configure concrete providers — those belong to the host.
 
 <Callout type="info">
   The same boundary applies to **runtime capability packages**. The `[Cacheable]`/`[CacheInvalidate]`,
-  `[Resilient]`, and `[FeatureGate]`/`[FeatureVariant]` attributes live in `Elarion.Abstractions`, so application
+  `[Resilient]`, and `[FeatureGate]`/`[FeatureVariant]` attributes live in `Elarion.Abstractions` (and request
+  validation uses standard `DataAnnotations` attributes), so application
   modules declare *intent* with attributes alone. The runtime that backs them ships in separate provider packages —
   `Elarion.Caching` (`AddElarionHandlerCaching()`), `Elarion.Resilience` (`AddElarionResilience()`), and
   `Elarion.FeatureFlags.OpenFeature` / `Elarion.FeatureFlags.FeatureManagement`
   (`AddElarionOpenFeature()` / `AddElarionFeatureManagement(configuration)`) — which the **host** references and
   wires. The application project stays on Abstractions-only attributes (pay-for-what-you-use,
   [ADR-0017](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0017-dependency-light-core.md)).
+  Request validation is the one deliberate exception: the **application** project references
+  `Elarion.Validation` so the per-module validation resolvers are generated (`ELVAL002` warns otherwise), and
+  the host calls `AddElarionValidation()`.
 </Callout>
 
 <Callout type="info">

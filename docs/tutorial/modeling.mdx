@@ -173,7 +173,7 @@ public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> 
 
 A module is a static partial class marked with `[AppModule]` at the root of a namespace. Everything
 under that namespace belongs to the module, and the generators register its handlers, services, and
-validators for you — the host bootstrapper calls a generated `ConfigureDefaultServices`, gated by the
+validation metadata for you — the host bootstrapper calls a generated `ConfigureDefaultServices`, gated by the
 module's feature flag, so there are no `Add{Module}…()` calls to write. A module declares only its JSON
 resolver and any extra, non-generated wiring in `ConfigureServices`. See
 [Conventions](/docs/reference/conventions).
@@ -194,7 +194,7 @@ public static partial class CoreModule {
 ```
 
 **Clients** and **Invoicing** are feature modules — enabled by default, switchable with configuration.
-Each publishes its handlers, services, validators, and JSON metadata.
+Each publishes its handlers, services, validation metadata, and JSON metadata.
 
 ```csharp title="src/Billing.Application/Modules/Clients/ClientsModule.cs"
 using System.Text.Json.Serialization.Metadata;
@@ -283,6 +283,6 @@ that supplies `UseNpgsql(...)` — the runnable sample includes one.
 
 <Cards>
   <Card title="Next: Write the features" href="/docs/tutorial/features">
-    Handlers, validators, the decorator pipeline, current-user, and per-user caching.
+    Handlers, declarative validation, the decorator pipeline, current-user, and per-user caching.
   </Card>
 </Cards>

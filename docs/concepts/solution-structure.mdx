@@ -39,7 +39,7 @@ Everything in an Elarion application is one of two kinds, and this — **not** "
 decides where it lives:
 
 - **A module is *active*.** It is a self-registering unit of *behavior*: the generators discover its
-  handlers, services, validators, scheduled jobs, and event consumers and wire them as a gated unit, and it
+  handlers, services, validation metadata, scheduled jobs, and event consumers and wire them as a gated unit, and it
   can expose transports (JSON-RPC / HTTP / MCP). It contributes DI registrations.
 - **A shared building block is *passive*.** It is referenced or *composed by* modules and the host; it
   never self-registers behavior. Entities, value objects, `[EntityConfiguration]`, the `DbContext`, and
@@ -111,7 +111,7 @@ src/
       AppDbContext.cs          the concrete DbContext (+ design-time factory)
       Migrations/ …            EF Core migrations
     Modules/
-      Clients/               ← vertical slice: handlers, validators, services — behavior only
+      Clients/               ← vertical slice: handlers, services — behavior only
         ClientsModule.cs       [AppModule("Clients")]
         Handlers/ …
       Invoicing/

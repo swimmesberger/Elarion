@@ -211,6 +211,16 @@ Feature-gate decorator attachment for `[FeatureGate]`. See [Feature flags](/docs
 | ELFEAT001 | Error | A handler declares a `[FeatureGate]` but its response type does not implement `IResultFailureFactory<T>`, so the gate cannot short-circuit and would be silently skipped. | Return `Result<T>` or `Result` from the gated handler so the gate can short-circuit to `AppError.NotFound`. |
 | ELFEAT002 | Warning | A handler declares a `[FeatureGate]` with no feature name (or a blank one); the gate has no effect. | Pass at least one non-blank feature name to `[FeatureGate]`, or remove it. |
 
+## ELVAL — Request validation
+
+Validation-decorator attachment for handlers whose request DTO carries DataAnnotations validation
+attributes. See [Validation](/docs/concepts/validation).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELVAL001 | Error | A handler's request type carries validation attributes but its response type does not implement `IResultFailureFactory<T>`, so the validation check cannot short-circuit and would be silently skipped (mirrors `ELAUTH001`). | Return `Result<T>` or `Result` from the handler so the validation decorator can short-circuit to `AppError.Validation`. |
+| ELVAL002 | Warning | A handler's request type carries validation attributes but the compilation does not reference `Elarion.Validation`; the constraints are exported to every schema surface but **not enforced** at runtime. | Reference `Elarion.Validation` and call `AddElarionValidation()` in the host, or remove the validation attributes — the gap must be a visible choice. |
+
 ## ELVAR — Feature variant services
 
 Variant-service registration for `[FeatureVariant]`. See [Feature flags](/docs/concepts/feature-flags).

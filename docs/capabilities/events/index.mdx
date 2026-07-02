@@ -113,7 +113,7 @@ if it should be retried until it succeeds *after* the command is durably committ
 When the host opts into `[GenerateModuleBootstrapper]`, event consumers are associated with their owning
 module and registered through that module's generated `ConfigureDefaultServices`, gated by
 `Modules:{Name}:Enabled`. So **disabling a module also stops its events from being consumed** — no
-separate wiring, consistent with how handlers, services, validators, and scheduled jobs gate. A consumer
+separate wiring, consistent with how handlers, services, and scheduled jobs gate. A consumer
 whose namespace falls under no module is reported (`ELEVT003`, warning) so it is never silently dropped.
 
 ## Where to next

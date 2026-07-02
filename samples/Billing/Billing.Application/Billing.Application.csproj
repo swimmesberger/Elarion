@@ -10,6 +10,10 @@
     <!-- The persistence layer (DbContext, migrations, outbox table config) lives in the application,
          because the database is application logic, not an infrastructure detail. -->
     <ProjectReference Include="..\..\..\src\Elarion.Messaging.Outbox\Elarion.Messaging.Outbox.csproj" />
+    <!-- Declarative request validation (ADR-0027): referencing Elarion.Validation is what activates the
+         resolver generator, which turns the DataAnnotations on handler request DTOs into per-module
+         IValidatableInfoResolvers wired through each module's ConfigureDefaultServices. -->
+    <ProjectReference Include="..\..\..\src\Elarion.Validation\Elarion.Validation.csproj" />
   </ItemGroup>
 
   <!-- Building from source, the generators are referenced as analyzers (consuming Elarion from NuGet
@@ -35,7 +39,6 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="FluentValidation" />
   </ItemGroup>
 
 </Project>

@@ -158,7 +158,7 @@ using Elarion.Authorization;            // AddElarionAuthorization
 using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();
-services.AddElarion(configuration);          // generated module services (handlers, validators, …)
+services.AddElarion(configuration);          // generated module services (handlers, services, …)
 services.AddElarionClaimsCurrentUser();      // ICurrentUser, no ASP.NET
 services.AddElarionAuthorization();          // [Require*] enforcement
 await using var provider = services.BuildServiceProvider();

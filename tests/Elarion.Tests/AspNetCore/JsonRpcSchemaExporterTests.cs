@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using AwesomeAssertions;
 using Elarion.Abstractions;
@@ -64,9 +65,94 @@ public sealed class JsonRpcSchemaExporterTests {
         schema.Should().Contain("Human-readable message.");
     }
 
+    [Fact]
+    public void Generate_InjectsConstraintKeywords_FromDataAnnotations() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<ConstrainedRequest, PingResponse>(
+                "sample.constrained",
+                (_, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse("ok")))
+            .Freeze();
+
+        var schema = JsonRpcSchemaExporter.Generate(dispatcher, options);
+
+        using var doc = JsonDocument.Parse(schema);
+        var properties = doc.RootElement.GetProperty("methods").GetProperty("sample.constrained")
+            .GetProperty("params").GetProperty("properties");
+
+        // [StringLength(100, MinimumLength = 3)] → minLength/maxLength.
+        var name = properties.GetProperty("name");
+        name.GetProperty("minLength").GetInt32().Should().Be(3);
+        name.GetProperty("maxLength").GetInt32().Should().Be(100);
+
+        // [RegularExpression] → pattern.
+        properties.GetProperty("slug").GetProperty("pattern").GetString().Should().Be("^[a-z0-9-]+$");
+
+        // [Range(1, 500)] → inclusive minimum/maximum.
+        var quantity = properties.GetProperty("quantity");
+        quantity.GetProperty("minimum").GetDecimal().Should().Be(1);
+        quantity.GetProperty("maximum").GetDecimal().Should().Be(500);
+
+        // Exclusive [Range] bounds land in exclusiveMinimum/exclusiveMaximum, not the inclusive keywords.
+        var ratio = properties.GetProperty("ratio");
+        ratio.GetProperty("exclusiveMinimum").GetDecimal().Should().Be(0);
+        ratio.GetProperty("exclusiveMaximum").GetDecimal().Should().Be(1);
+        ratio.TryGetProperty("minimum", out _).Should().BeFalse();
+        ratio.TryGetProperty("maximum", out _).Should().BeFalse();
+
+        // The Range(typeof(decimal), "…", "…") string form is parsed invariantly and emitted as JSON numbers.
+        var price = properties.GetProperty("price");
+        price.GetProperty("minimum").ValueKind.Should().Be(JsonValueKind.Number);
+        price.GetProperty("minimum").GetDecimal().Should().Be(0.5m);
+        price.GetProperty("maximum").GetDecimal().Should().Be(99.9m);
+
+        // [EmailAddress] → format: "email".
+        properties.GetProperty("email").GetProperty("format").GetString().Should().Be("email");
+
+        // [MaxLength] on an array schema becomes maxItems, never maxLength.
+        var tags = properties.GetProperty("tags");
+        tags.GetProperty("maxItems").GetInt32().Should().Be(10);
+        tags.TryGetProperty("maxLength", out _).Should().BeFalse();
+
+        // An unannotated property carries no constraint keywords.
+        var untouched = properties.GetProperty("untouched");
+        string[] constraintKeywords = [
+            "minLength", "maxLength", "minItems", "maxItems", "pattern", "format",
+            "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+        ];
+        foreach (var keyword in constraintKeywords) {
+            untouched.TryGetProperty(keyword, out _).Should().BeFalse();
+        }
+    }
+
     private sealed record PingRequest(string Message);
 
     private sealed record PingResponse(string Message);
+
+    private sealed record ConstrainedRequest {
+        [StringLength(100, MinimumLength = 3)]
+        public required string Name { get; init; }
+
+        [RegularExpression("^[a-z0-9-]+$")]
+        public required string Slug { get; init; }
+
+        [Range(1, 500)]
+        public required int Quantity { get; init; }
+
+        [Range(0d, 1d, MinimumIsExclusive = true, MaximumIsExclusive = true)]
+        public required double Ratio { get; init; }
+
+        [Range(typeof(decimal), "0.5", "99.9")]
+        public required decimal Price { get; init; }
+
+        [EmailAddress]
+        public required string Email { get; init; }
+
+        [MaxLength(10)]
+        public required IReadOnlyList<string> Tags { get; init; }
+
+        public required string Untouched { get; init; }
+    }
 
     private sealed record DescribedRequest {
         [System.ComponentModel.Description("Human-readable message.")]

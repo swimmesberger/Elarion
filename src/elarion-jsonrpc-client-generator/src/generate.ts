@@ -58,8 +58,24 @@ export function generateRpcClientFiles(
     '',
     "import { z } from 'zod'",
     '',
-    'export const rpcResultSchemas = {',
+    'export const rpcParamsSchemas = {',
   ]
+
+  for (const method of methods) {
+    const definition = schema.methods[method]
+    const zodSchema = jsonSchemaToZod(
+      stripNullable(definition.params),
+      createContext(definition.params, `methods.${method}.params`),
+      1
+    )
+    schemasLines.push(`  ${JSON.stringify(method)}: ${zodSchema},`)
+  }
+
+  schemasLines.push('} as const')
+  schemasLines.push('')
+  schemasLines.push('export type RpcParamsSchemas = typeof rpcParamsSchemas')
+  schemasLines.push('')
+  schemasLines.push('export const rpcResultSchemas = {')
 
   for (const method of methods) {
     const definition = schema.methods[method]

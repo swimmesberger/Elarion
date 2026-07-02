@@ -112,6 +112,10 @@ builder.Services.AddElarionResilience();
 // Per-user handler caching, backed by HybridCache.
 builder.Services.AddElarionHandlerCaching();
 
+// Request validation: enforces the DataAnnotations on request DTOs through the generated
+// per-module resolvers (the same constraints the schemas and the Zod client export).
+builder.Services.AddElarionValidation();
+
 // Transport-neutral current user, filled from the authenticated principal.
 builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");
 
@@ -123,7 +127,7 @@ builder.Services.AddAuthentication("Bearer")
     });
 builder.Services.AddAuthorization();
 
-// Compose every module's services — handlers, services, validators, scheduled jobs, and event
+// Compose every module's services — handlers, services, validation metadata, scheduled jobs, and event
 // consumers — each gated by Modules:{Name}:Enabled. This also contributes every enabled module's
 // source-generated JSON context to the canonical serializer every subsystem reads.
 builder.Services.AddElarion(builder.Configuration);

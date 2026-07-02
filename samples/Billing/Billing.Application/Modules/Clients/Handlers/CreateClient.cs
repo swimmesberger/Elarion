@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using Billing.Application.Domain;
 using Billing.Application.Modules.Clients.Services;
 using Billing.Application.Modules.Core.Contracts;
@@ -12,9 +13,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Billing.Application.Modules.Clients.Handlers;
 
 /// <summary>Creates a client. <c>[RequirePermission]</c> requires the <c>clients.write</c> permission before
-/// the handler runs. Then it runs the default pipeline (logging → validation → transaction), scopes the row
-/// to the current user, invalidates the clients cache on success, and is exposed over JSON-RPC and as an MCP
-/// tool. The <c>[Description]</c> attributes flow through to the MCP tool surface.</summary>
+/// the handler runs. The DataAnnotations on <see cref="Command"/> auto-attach the framework validation
+/// decorator (ADR-0027) ahead of the default pipeline (logging → transaction), so a bad request never opens a
+/// transaction. The handler scopes the row to the current user, invalidates the clients cache on success, and
+/// is exposed over JSON-RPC and as an MCP tool. The <c>[Description]</c> attributes flow through to the MCP
+/// tool surface.</summary>
 [Handler("clients.create")]
 [HttpEndpoint("clients")]
 [RequirePermission("clients", Verbs.Write)]
@@ -27,11 +30,17 @@ public sealed class CreateClient(
     IAuditTrail audit,
     TimeProvider clock
 ) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
+    /// <summary>Wire-shape constraints are declarative DataAnnotations (ADR-0027): one source feeds the
+    /// auto-attached validation decorator, <c>rpc-schema.json</c>, the OpenAPI document, and the generated
+    /// Zod client. Requiredness comes from <c>required</c>/non-nullability — no <c>[Required]</c>.</summary>
     public sealed record Command : ICommand {
         [Description("The client's display name.")]
+        [StringLength(200, MinimumLength = 1)]
         public required string Name { get; init; }
 
         [Description("The client's billing email address.")]
+        [EmailAddress]
+        [StringLength(320)]
         public required string Email { get; init; }
     }
 

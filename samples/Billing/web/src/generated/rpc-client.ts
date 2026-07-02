@@ -2,7 +2,7 @@
 // Source: Billing sample (rpc-schema.json)
 
 import type { RpcMethods } from './rpc-types.js'
-import { rpcResultSchemas } from './rpc-schemas.js'
+import { rpcParamsSchemas, rpcResultSchemas } from './rpc-schemas.js'
 
 export type RpcMethod = keyof RpcMethods & string
 export type RpcParams<M extends RpcMethod> = RpcMethods[M]['params']
@@ -37,24 +37,44 @@ export interface RpcInstrumentation {
   startSpan(context: RpcRequestContext): RpcClientSpan | undefined
 }
 
+// Automatic idempotency-key attachment. For operations the server marked [Idempotent], the client puts a
+// generated key in `params._meta` so a retry is deduplicated server-side. On by default; note that any
+// retry layer above this client (e.g. TanStack Query) must own key stability — generate the key once at the
+// operation boundary and pass it via `RpcRequestOptions.idempotencyKey`, so all retries reuse the same key.
+export interface RpcIdempotencyOptions {
+  // Attach a key by default to idempotent operations. Defaults to true.
+  readonly enabled?: boolean
+  // Key factory (defaults to crypto.randomUUID with a fallback). Called once per logical call.
+  readonly generateKey?: () => string
+}
+
 export interface RpcClientOptions {
   readonly url: string | URL
   readonly fetch?: RpcFetch
   readonly headers?: RpcHeaders
   readonly idGenerator?: () => string | number
+  // Validate request params against the generated Zod params schemas before sending. Defaults to true;
+  // a failure throws RpcParamsValidationError locally without hitting the wire.
+  readonly validateParams?: boolean
   readonly validateResults?: boolean
   readonly transformResult?: <M extends RpcMethod>(method: M, result: unknown) => unknown
   readonly instrumentation?: RpcInstrumentation
+  readonly idempotency?: RpcIdempotencyOptions
 }
 
 export interface RpcRequestOptions {
   readonly signal?: AbortSignal
   readonly headers?: RpcHeadersInit
+  // Override the idempotency key for this call: a fixed key (reuse across your own retries), or `false` to
+  // send no key. When omitted, an idempotent operation gets an auto-generated key.
+  readonly idempotencyKey?: string | false
 }
 
 export interface BatchItem<M extends RpcMethod = RpcMethod> {
   readonly method: M
   readonly params: RpcParams<M>
+  // Per-item idempotency key override (see RpcRequestOptions.idempotencyKey).
+  readonly idempotencyKey?: string | false
 }
 
 export type BatchItemResult<M extends RpcMethod = RpcMethod> =
@@ -122,6 +142,8 @@ const rpcMethodNames = [
   "invoices.list",
   "invoices.sendStatus",
 ] as const satisfies readonly RpcMethod[]
+
+const rpcIdempotentMethods: ReadonlySet<RpcMethod> = new Set([])
 
 type JsonRpcId = string | number
 
@@ -197,6 +219,19 @@ export class RpcProtocolError extends Error {
   }
 }
 
+// Thrown locally (before the request reaches the wire) when params fail the generated Zod
+// params schema. `cause` carries the underlying Zod error with the structured issues.
+export class RpcParamsValidationError extends Error {
+  readonly method: RpcMethod
+
+  constructor(method: RpcMethod, cause: unknown) {
+    const detail = cause instanceof Error ? `: ${cause.message}` : '.'
+    super(`Invalid params for RPC method ${JSON.stringify(method)}${detail}`, { cause })
+    this.name = 'RpcParamsValidationError'
+    this.method = method
+  }
+}
+
 export function createRpcApi(options: RpcClientOptions): RpcApi {
   const client = createRpcClient(options)
   const calls: Record<string, unknown> = {}
@@ -227,7 +262,19 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
 
   let nextId = 1
   const createId = options.idGenerator ?? (() => globalThis.crypto?.randomUUID?.() ?? String(nextId++))
+  const validateParams = options.validateParams ?? true
   const validateResults = options.validateResults ?? true
+  const idempotencyEnabled = options.idempotency?.enabled ?? true
+  const generateIdempotencyKey = options.idempotency?.generateKey ?? defaultIdempotencyKey
+
+  function resolveIdempotencyKey<M extends RpcMethod>(
+    method: M,
+    override: string | false | undefined
+  ): string | undefined {
+    if (override === false) return undefined
+    if (typeof override === 'string') return override
+    return idempotencyEnabled && rpcIdempotentMethods.has(method) ? generateIdempotencyKey() : undefined
+  }
 
   async function post(
     payload: unknown,
@@ -249,6 +296,22 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
     return response.json()
   }
 
+  // Pre-flight params validation runs on the caller-supplied params, before the idempotency key is
+  // merged into params._meta (the params schema does not know _meta) and before any request is built,
+  // so a failure never reaches the wire. The original params object is sent unchanged — Zod object
+  // parsing strips unknown keys, so the parse output is deliberately discarded.
+  function assertValidParams<M extends RpcMethod>(method: M, params: RpcParams<M>): void {
+    if (!validateParams) {
+      return
+    }
+
+    try {
+      rpcParamsSchemas[method].parse(params)
+    } catch (error) {
+      throw new RpcParamsValidationError(method, error)
+    }
+  }
+
   function parseResult<M extends RpcMethod>(method: M, result: unknown): RpcResult<M> {
     const transformed = options.transformResult?.(method, result) ?? result
     if (!validateResults) {
@@ -264,7 +327,9 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
       params: RpcParams<M>,
       requestOptions?: RpcRequestOptions
     ): Promise<RpcResult<M>> {
-      const request = createRequest(method, params, createId())
+      assertValidParams(method, params)
+      const idempotencyKey = resolveIdempotencyKey(method, requestOptions?.idempotencyKey)
+      const request = createRequest(method, withIdempotencyKey(params, idempotencyKey), createId())
       const context: RpcRequestContext = { methods: [method], batch: false }
       const span = options.instrumentation?.startSpan(context)
       try {
@@ -295,7 +360,18 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
         return [] as unknown as BatchResult<T>
       }
 
-      const requests = items.map((item) => createRequest(item.method, item.params, createId()))
+      // Validate every item before building any request, so an invalid batch never partially sends.
+      for (const item of items) {
+        assertValidParams(item.method, item.params)
+      }
+
+      const requests = items.map((item) =>
+        createRequest(
+          item.method,
+          withIdempotencyKey(item.params, resolveIdempotencyKey(item.method, item.idempotencyKey)),
+          createId()
+        )
+      )
       const context: RpcRequestContext = { methods: items.map((item) => item.method), batch: true }
       const span = options.instrumentation?.startSpan(context)
       try {
@@ -347,10 +423,28 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
 
 function createRequest<M extends RpcMethod>(
   method: M,
-  params: RpcParams<M>,
+  params: unknown,
   id: JsonRpcId
 ): JsonRpcRequestEnvelope<M> {
-  return { jsonrpc: '2.0', method, params, id }
+  return { jsonrpc: '2.0', method, params: params as RpcParams<M>, id }
+}
+
+function defaultIdempotencyKey(): string {
+  const uuid = globalThis.crypto?.randomUUID?.()
+  if (uuid) return uuid
+  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+// Merges the idempotency key into params._meta without mutating the input object; no-op when no key.
+function withIdempotencyKey(params: unknown, key: string | undefined): unknown {
+  if (key === undefined) return params
+  const base = params && typeof params === 'object' && !Array.isArray(params)
+    ? (params as Record<string, unknown>)
+    : {}
+  const existingMeta = base['_meta'] && typeof base['_meta'] === 'object' && !Array.isArray(base['_meta'])
+    ? (base['_meta'] as Record<string, unknown>)
+    : {}
+  return { ...base, _meta: { ...existingMeta, ["dev.wimmesberger.elarion/idempotencyKey"]: key } }
 }
 
 function setApiPath(root: Record<string, unknown>, method: string, value: unknown): void {

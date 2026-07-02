@@ -311,8 +311,11 @@ export function CreateClientDialog() {
 
 <Callout type="info">
   `err.message` carries whatever your host mapped from `AppError` — a duplicate email
-  (`AppError.Conflict`) or a validation failure surfaces as a typed JSON-RPC error the mutation rejects
-  with, so the toast shows a real message without any extra plumbing.
+  (`AppError.Conflict`) or a server-side validation failure surfaces as a typed JSON-RPC error the
+  mutation rejects with, so the toast shows a real message without any extra plumbing. Shape errors
+  usually never reach the server at all: the generated client pre-validates params against the
+  schema's constraints (the DataAnnotations you put on the `Command`) and rejects locally with an
+  `RpcParamsValidationError`.
 </Callout>
 
 </Step>

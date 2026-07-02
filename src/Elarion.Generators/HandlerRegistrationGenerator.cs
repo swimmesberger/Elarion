@@ -36,11 +36,11 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
         var handlerCandidates = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
-                transform: static (ctx, ct) => IdentifyHandlerCandidate(ctx, ct))
+                transform: static (ctx, ct) => HandlerCandidates.Identify(ctx, ct))
             .Where(static candidate => candidate is not null)
             .WithTrackingName("HandlerCandidateNodes")
             .Collect()
-            .Select(static (candidates, _) => FlattenSortedDistinctCandidates(candidates))
+            .Select(static (candidates, _) => HandlerCandidates.FlattenSortedDistinct(candidates))
             .WithTrackingName("HandlerCandidates");
 
         var modules = ModuleProviders.CollectModules(context);

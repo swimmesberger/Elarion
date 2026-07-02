@@ -47,6 +47,9 @@ public static class ElarionOpenApiServiceCollectionExtensions {
             options.AddDocumentTransformer<ElarionOperationIdDocumentTransformer>();
             // Idempotency is per-operation: it reads the generator's endpoint marker off the ApiDescription.
             options.AddOperationTransformer<ElarionIdempotencyOperationTransformer>();
+            // [EmailAddress] parity: Microsoft's DataAnnotations mapping stops short of email, but the JSON-RPC
+            // schema exporter emits format:"email" — keep the two documents in agreement (ADR-0027).
+            options.AddSchemaTransformer<ElarionEmailFormatSchemaTransformer>();
             configureOptions?.Invoke(options);
         });
 

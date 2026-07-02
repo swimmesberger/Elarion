@@ -39,7 +39,7 @@ and the parameterless `Get{Module}McpMetadata` for every module that owns `[Http
 handlers.
 
 All transports are **module-scoped and feature-flag-gated** through the bootstrapper: a module disabled
-with `Modules:{Name}:Enabled = false` has its services, validators, `MapEndpoints`, `[HttpEndpoint]` routes,
+with `Modules:{Name}:Enabled = false` has its services, validation metadata, `MapEndpoints`, `[HttpEndpoint]` routes,
 `[Handler]` JSON-RPC methods, **and** MCP tools all left unmapped, so a disabled module disappears across
 every surface. Core modules are always mapped.
 
@@ -95,7 +95,7 @@ handler bus, equally gated), pair `builder.Configuration.GetMcpMetadata()` with 
 
 ## Modules are the only hosting path
 
-Every transport — services, validators, HTTP, JSON-RPC, and MCP — is wired through
+Every transport — services, HTTP, JSON-RPC, and MCP — is wired through
 `[GenerateModuleBootstrapper]`, so it all stays feature-flag-gated together. There is no flat,
 ungated map: a host that conceptually has "no modules" simply declares a single **core** `[AppModule]`
 (core modules map unconditionally), which gives the same always-on behavior while keeping one consistent

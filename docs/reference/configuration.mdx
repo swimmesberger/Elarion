@@ -181,3 +181,21 @@ builder.Services.ConfigureElarionJson(o => {
 | `PostConfigure` | none (escape hatch for converters/encoder) |
 
 See [Serialization](/docs/capabilities/serialization).
+
+## Request validation (options, not config)
+
+`AddElarionValidation(configure => …)` (from `Elarion.Validation`) registers the default
+`IRequestValidator` over `Microsoft.Extensions.Validation` and takes an optional
+`Action<ValidationOptions>` configured in code rather than `appsettings`. It also calls
+`AddElarionJson()`; the generated per-module validation resolvers register themselves through each
+module's `ConfigureDefaultServices`, so most hosts pass nothing:
+
+```csharp
+builder.Services.AddElarionValidation();
+```
+
+| Option | Default |
+| --- | --- |
+| `MaxDepth` | `32` (cycle protection when walking the request object graph) |
+
+See [Validation](/docs/concepts/validation).

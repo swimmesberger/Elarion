@@ -36,10 +36,12 @@ public static class ElarionHttpResults {
         var statusCode = HttpAppErrorMapper.MapToStatusCode(error.Kind);
 
         if (error is { Kind: ErrorKind.Validation, Data: ValidationErrorData validation }) {
-            return Results.ValidationProblem(
-                new Dictionary<string, string[]> { [string.Empty] = [.. validation.Errors] },
-                detail: error.Message,
-                statusCode: statusCode);
+            // Field-keyed errors surface under their wire-named field paths; a flat message list (no field
+            // structure) falls back to the empty, non-field-specific key.
+            var errors = validation.FieldErrors is { } fieldErrors
+                ? new Dictionary<string, string[]>(fieldErrors)
+                : new Dictionary<string, string[]> { [string.Empty] = [.. validation.Errors] };
+            return Results.ValidationProblem(errors, detail: error.Message, statusCode: statusCode);
         }
 
         // Leave the title null so ASP.NET fills the canonical reason phrase for the status code.

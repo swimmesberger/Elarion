@@ -24,7 +24,7 @@ Declare intent next to your code; let source generators do the wiring. No runtim
 
 Elarion's central idea is simple: **your application assemblies define modules and handlers; your
 host assembly only wires infrastructure, transport, and deployment.** Everything that can be
-discovered from your code — handlers, validators, services, scheduled jobs, RPC methods, EF Core
+discovered from your code — handlers, services, scheduled jobs, RPC methods, validation metadata, EF Core
 `DbSet`s — is emitted by source generators at compile time instead of scanned by reflection at
 startup.
 
@@ -55,7 +55,7 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
 
 ## Why Elarion
 
-- **Compile-time, not reflection** — handlers, services, validators, modules, RPC maps, and
+- **Compile-time, not reflection** — handlers, services, modules, RPC maps, validation metadata, and
   scheduled jobs become ordinary DI code. Startup is deterministic and AOT-friendly; missing wiring
   is a build error, not a runtime surprise.
 - **Modules own their surface** — a module is a namespace plus an `[AppModule]` marker. Add a handler
@@ -68,6 +68,10 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
   flag.
 - **End-to-end JSON-RPC** — mark a handler with `[Handler]`, export a schema at build time, and
   generate a typed TypeScript + Zod client.
+- **Validation that reaches the contract** — DataAnnotations on the request DTO are enforced by a
+  generated pipeline decorator under every transport **and** exported to the JSON-RPC schema, OpenAPI,
+  MCP tool schemas, and the Zod client (which pre-validates requests). One declaration, four surfaces;
+  business rules stay in the handler, inside the transaction (ADR-0027).
 - **AI-native, no extra code** — expose the same `[Handler]` handlers to AI agents as an
   [MCP](https://modelcontextprotocol.io) server. MCP is an adapter over the shared `HandlerDispatcher`, so a
   tool is just a handler flagged `HandlerTransports.Mcp`. Tool names, descriptions, and input schemas are
@@ -110,10 +114,11 @@ JSON-RPC endpoint end to end.
 | Package | Purpose |
 | --- | --- |
 | [`Elarion.Abstractions`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Abstractions) | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
-| [`Elarion`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion) | Runtime primitives: decorators, the in-memory scheduler, current-user access, and the default authorizer. Depends only on `Microsoft.Extensions.*` abstractions (ADR-0017) — caching and resilience moved to their own opt-in packages. Bundles the Elarion source generator (handlers, services, validators, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers). |
+| [`Elarion`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion) | Runtime primitives: decorators, the in-memory scheduler, current-user access, and the default authorizer. Depends only on `Microsoft.Extensions.*` abstractions (ADR-0017) — caching and resilience moved to their own opt-in packages. Bundles the Elarion source generator (handlers, services, modules, RPC/HTTP/MCP maps, validation resolvers, resilience policies, scheduled jobs, event consumers). |
 | [`Elarion.Caching`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Caching) | `HybridCache`-backed default `IHandlerCache` for handler result caching (`AddElarionHandlerCaching()`). Required by `[Cacheable]`/`[CacheInvalidate]` (extracted from core, ADR-0017). |
 | [`Elarion.Caching.PostgreSql`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Caching.PostgreSql) | The recommended L2 distributed cache for most apps: a PostgreSQL `UNLOGGED` table behind `HybridCache` (`AddElarionPostgreSqlHandlerCaching(connectionString)`). Reuse your Postgres instead of operating a separate Redis (Redis still wins for very high-throughput or multi-region caches; ADR-0020). |
 | [`Elarion.Resilience`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Resilience) | Microsoft/Polly-backed default `IResiliencePipelineRunner` (`AddElarionResilience()`). Required by `[Resilient]` handlers and deferred scheduler retries (extracted from core, ADR-0017). |
+| [`Elarion.Validation`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Validation) | `Microsoft.Extensions.Validation`-backed default `IRequestValidator` (`AddElarionValidation()`): enforces the DataAnnotations on request DTOs — the same constraints exported to every schema surface (ADR-0027). |
 | [`Elarion.FeatureFlags.OpenFeature`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.FeatureFlags.OpenFeature) | Default `IFeatureFlagService` over OpenFeature for `[FeatureGate]`/`[FeatureVariant]`; maps `ICurrentUser` into the evaluation context off-HTTP (`AddElarionOpenFeature()`). Bring your own OpenFeature provider. |
 | [`Elarion.FeatureFlags.FeatureManagement`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.FeatureFlags.FeatureManagement) | Batteries-included config-driven flags via the Microsoft.FeatureManagement OpenFeature provider (`AddElarionFeatureManagement(configuration)`). |
 | [`Elarion.Blobs`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Blobs) | Provider-neutral blob storage contracts and DTOs. |
@@ -138,14 +143,14 @@ JSON-RPC endpoint end to end.
 | [`Elarion.Settings`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Settings) | Runtime-changeable key/value settings: the swappable `ISettingsStore` sink (global and per-user scopes, in-process change notification) plus the AOT-clean `ISettingsManager` consumer. |
 | [`Elarion.Settings.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Settings.EntityFrameworkCore) | EF Core database backend for settings: a relational, provider-neutral `ISettingsStore` with optimistic concurrency. |
 | [`Elarion.Settings.Configuration`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Settings.Configuration) | `IConfiguration`/`IOptionsMonitor` adapter over the `Global` settings scope, with `IChangeToken` reload so config consumers pick up runtime changes. |
-| [`@swimmesberger/elarion-jsonrpc-client-generator`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, Zod schemas, and a fetch client. |
+| [`@swimmesberger/elarion-jsonrpc-client-generator`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, constraint-aware Zod params/result schemas, and a params-pre-validating fetch client. |
 
 ## Documentation
 
 Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/docs/) and in [`docs/`](https://github.com/swimmesberger/Elarion/tree/main/docs):
 
 - **[Introduction](https://elarion.wimmesberger.dev/docs/)** · **[Why Elarion](https://elarion.wimmesberger.dev/docs/why-elarion/)** · **[Installation](https://elarion.wimmesberger.dev/docs/getting-started/installation/)** · **[Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/)**
-- **Concepts** — [source generation](https://elarion.wimmesberger.dev/docs/concepts/source-generation/), [handlers](https://elarion.wimmesberger.dev/docs/concepts/handlers/), [results & errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors/), [modules](https://elarion.wimmesberger.dev/docs/concepts/modules/), [services](https://elarion.wimmesberger.dev/docs/concepts/services/), [validators](https://elarion.wimmesberger.dev/docs/concepts/validators/), [pipelines](https://elarion.wimmesberger.dev/docs/concepts/decorator-pipelines/), [cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication/)
+- **Concepts** — [source generation](https://elarion.wimmesberger.dev/docs/concepts/source-generation/), [handlers](https://elarion.wimmesberger.dev/docs/concepts/handlers/), [results & errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors/), [modules](https://elarion.wimmesberger.dev/docs/concepts/modules/), [services](https://elarion.wimmesberger.dev/docs/concepts/services/), [validation](https://elarion.wimmesberger.dev/docs/concepts/validation/), [pipelines](https://elarion.wimmesberger.dev/docs/concepts/decorator-pipelines/), [cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication/)
 - **Capabilities** — [hosting](https://elarion.wimmesberger.dev/docs/capabilities/hosting/), [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints/), [JSON-RPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/json-rpc/), [MCP server](https://elarion.wimmesberger.dev/docs/capabilities/transports/mcp/), [authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization/), [feature flags](https://elarion.wimmesberger.dev/docs/capabilities/feature-flags/), [identity](https://elarion.wimmesberger.dev/docs/capabilities/identity/), [scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling/), [resilience](https://elarion.wimmesberger.dev/docs/capabilities/resilience/), [events & messaging](https://elarion.wimmesberger.dev/docs/capabilities/events/), [EF Core](https://elarion.wimmesberger.dev/docs/capabilities/entity-framework/), [caching](https://elarion.wimmesberger.dev/docs/capabilities/caching/), [current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user/), [blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage/), [telemetry](https://elarion.wimmesberger.dev/docs/capabilities/telemetry/)
 - **Reference** — [packages](https://elarion.wimmesberger.dev/docs/reference/packages/), [configuration](https://elarion.wimmesberger.dev/docs/reference/configuration/), [troubleshooting](https://elarion.wimmesberger.dev/docs/reference/troubleshooting/)
 

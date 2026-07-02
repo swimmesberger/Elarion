@@ -18,6 +18,7 @@ using Elarion.JsonRpc;
 using Elarion.Messaging.Outbox;
 using Elarion.Resilience;
 using Elarion.Scheduling;
+using Elarion.Validation;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -63,6 +64,11 @@ builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub
 // a generated decorator before the handler runs — the same check under JSON-RPC, MCP, and HTTP, evaluated
 // against ICurrentUser's claims with no HttpContext dependency. Registers the default ClaimsAuthorizer.
 builder.Services.AddElarionAuthorization();
+
+// Declarative request validation (ADR-0027): the DataAnnotations on handler request DTOs are enforced by a
+// generated, auto-attached decorator before a request reaches caching, the pipeline, or the transaction —
+// the same constraints exported to rpc-schema.json, the OpenAPI document, and the generated Zod client.
+builder.Services.AddElarionValidation();
 
 // Authentication: a JWT bearer issuer of your choice (Entra, Auth0, Keycloak, …). Locally, the
 // Development-only middleware below stamps a dev principal so the sample runs without an issuer.

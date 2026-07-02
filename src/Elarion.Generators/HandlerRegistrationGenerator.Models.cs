@@ -22,6 +22,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
     private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string IdempotentAttributeMetadataName = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
+    private const string ElarionValidationExtensionsMetadataName = "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
     private const string DomainEventMetadataName = "Elarion.Abstractions.Messaging.IDomainEvent";
     private const string IntegrationEventMetadataName = "Elarion.Abstractions.Messaging.IIntegrationEvent";
@@ -40,6 +41,7 @@ public sealed partial class HandlerRegistrationGenerator {
         bool RequireAuthenticatedByDefault,
         EquatableArray<ResourceBindingInfo> ResourceBindings,
         bool HasFeatureGates,
+        bool HasValidation,
         IdempotentInfo? Idempotent,
         EquatableArray<string> VariantContractDeps,
         EquatableArray<DiagnosticInfo> Diagnostics
@@ -202,6 +204,16 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' declares a [FeatureGate] with no feature name (or a blank one); the gate has no effect",
         "Elarion.Abstractions.Features",
         DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ValidationResponseNotFailureCapable = new(
+        "ELVAL001",
+        "Validated handler response cannot represent failure",
+        "Handler '{0}' has a request type carrying validation constraints but its response type '{1}' does not "
+        + "implement IResultFailureFactory<T>, so the validation check cannot short-circuit and would be "
+        + "silently skipped; return Result<T> or Result",
+        "Elarion.Abstractions.Validation",
+        DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor IdempotentResponseNotFailureCapable = new(
