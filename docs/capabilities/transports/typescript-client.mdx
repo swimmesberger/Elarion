@@ -76,6 +76,51 @@ Result validation runs by default through `rpcResultSchemas`. Use `transformResu
 normalization before validation, or set `validateResults: false` when another layer validates
 responses.
 
+## Tracing with OpenTelemetry
+
+The client stays OpenTelemetry-package-free — it never imports a tracing SDK. To make a call appear in a
+distributed trace, pass an `instrumentation` adapter that starts a span per request/batch and injects the W3C
+`traceparent` header. An ASP.NET Core host running OpenTelemetry with `AddAspNetCoreInstrumentation()` extracts
+that header, so the server request span, the JSON-RPC dispatch, and the handler-pipeline spans all nest **under
+your client span** — one end-to-end trace.
+
+Implement `RpcInstrumentation` over `@opentelemetry/api`:
+
+```ts
+import { context, propagation, trace, SpanKind, SpanStatusCode } from '@opentelemetry/api'
+import { createRpcApi, type RpcInstrumentation } from './generated/rpc-client'
+
+const instrumentation: RpcInstrumentation = {
+  startSpan(ctx) {
+    const span = trace
+      .getTracer('rpc-client')
+      .startSpan(ctx.batch ? 'rpc batch' : `rpc ${ctx.methods[0]}`, { kind: SpanKind.CLIENT })
+
+    // Inject traceparent for this span into the headers the client is about to send.
+    const headers: Record<string, string> = {}
+    propagation.inject(trace.setSpan(context.active(), span), headers)
+
+    return {
+      headers,
+      setError: (error) => {
+        span.recordException(error as Error)
+        span.setStatus({ code: SpanStatusCode.ERROR })
+      },
+      end: () => span.end(),
+    }
+  },
+}
+
+const rpc = createRpcApi({ url: '/rpc', instrumentation })
+```
+
+`RpcRequestContext` gives you `methods` (one per call, several for a `$batch`) and a `batch` flag for span
+naming; the span's `headers` are applied **last**, so trace propagation stays authoritative over your static or
+dynamic `headers`. The adapter above is the only Elarion-specific piece — wire the rest of the browser SDK
+(`WebTracerProvider`, an OTLP exporter, `ZoneContextManager`) as shown for the
+[HTTP client](/docs/capabilities/transports/openapi#trace-client-requests-with-opentelemetry), and see
+[Telemetry & observability](/docs/capabilities/telemetry) for the server side.
+
 ## Design boundaries
 
 The generated runtime stays framework-neutral: it uses standard `fetch`, accepts an injected

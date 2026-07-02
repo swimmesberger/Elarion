@@ -65,9 +65,19 @@ inside it.
 
 ## Client-side telemetry
 
-The TypeScript JSON-RPC client stays OpenTelemetry-package-free and framework-free. It exposes an
-optional `instrumentation` hook (`RpcInstrumentation`) on `createRpcClient`/`createRpcApi`: supply an
-adapter — over `@opentelemetry/api`, or a hand-rolled W3C `traceparent` generator — to start a span
-per request/batch, inject trace-context headers, and record the outcome. The generated client never
-imports a tracing SDK, so client-side tracing stays a host decision. See
-[TypeScript client](/docs/capabilities/transports/typescript-client).
+A frontend call can join the same distributed trace as the server work it triggers. The server side needs
+nothing Elarion-specific: a host running OpenTelemetry with `AddAspNetCoreInstrumentation()` extracts the W3C
+`traceparent` header from the incoming request, so the request span — and the JSON-RPC dispatch, `[HttpEndpoint]`,
+and handler-pipeline spans under it — nest beneath the client's span. The client just has to start that span and
+inject the header:
+
+- **JSON-RPC client** — the generated TypeScript client stays OpenTelemetry-package-free and exposes an optional
+  `instrumentation` hook (`RpcInstrumentation`) on `createRpcClient`/`createRpcApi`: supply an adapter over
+  `@opentelemetry/api` (or a hand-rolled `traceparent` generator) to start a span per request/batch, inject
+  trace-context headers, and record the outcome. See
+  [TypeScript client › Tracing with OpenTelemetry](/docs/capabilities/transports/typescript-client#tracing-with-opentelemetry).
+- **REST / OpenAPI client** — instrument the generated `openapi-fetch` client with
+  `@opentelemetry/instrumentation-fetch` (auto-injects `traceparent` on the global `fetch`) or an `openapi-fetch`
+  middleware. See [OpenAPI › Trace client requests](/docs/capabilities/transports/openapi#trace-client-requests-with-opentelemetry).
+
+Either way the generated client never imports a tracing SDK, so client-side tracing stays a host decision.
