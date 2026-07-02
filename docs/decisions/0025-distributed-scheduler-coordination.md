@@ -138,47 +138,100 @@ independently landed on "the EF Core row is the lock". A Quartz/Hangfire-backed 
 seams remains the supported escape hatch for teams beyond the target tier; teams needing queue-style
 background processing at volume should run Hangfire *beside* Elarion rather than through it.
 
-## Phase 2 (designed, not implemented): durable one-shot jobs and downtime catch-up
+## Phase 2: durable one-shots and downtime catch-up — can the outbox subsume them? (validated 2026-07-02)
 
-Runtime `ScheduleAsync`/`EnqueueAsync` jobs get a `elarion_scheduler_jobs` table: serialized payload
-(canonical JSON via `IElarionJsonSerialization`, typed through the generated descriptor so AOT-safe),
-due time, attempt counters, and outbox-style `lock_id`/`locked_until` lease claims with lease-guarded
-finalize; deferred retries update the row instead of re-queuing in memory, so retries survive restarts, and
-`IJobSchedulerInspector` gains a store-backed view. This is deliberately the outbox delivery shape — the
-code to copy already exists — but it is a separate, larger change and ships separately.
+The original phase-2 sketch was a bespoke `elarion_scheduler_jobs` table copying the outbox's delivery shape.
+Before building that, the question "can the existing transactional outbox provide phase 2 with little or no new
+implementation?" was validated against the actual outbox code. Findings first, direction after — the findings
+stand on their own regardless of the direction chosen.
 
-Decisions already taken for phase 2, and the scenarios that drove them:
+### Finding 1 — immediate durable one-shots: the outbox already provides the hard 80%
 
-- **Placement inverts.** Today a runtime job executes on the node that accepted the call and dies with it
-  (the "schedule for tomorrow, pod recycled tonight" scenario). With the row store, the receiving node only
-  *records* the job; **whichever node claims it at due time executes it** — work survives deploys and
-  migrates off dead nodes, and cancellation/inspection become cluster-wide (the row is the state, not a
-  dictionary on one node).
-- **Durable one-shots are at-least-once**, unlike recurring occurrences (at-most-once). A leased row whose
-  owner crashes is still visible to the other nodes, so an expired lease is reclaimed and the job re-runs —
-  the outbox trade. Durable one-shot jobs must therefore be idempotent (or `[Idempotent]`-guarded); the
-  docs must say so as loudly as the outbox docs do.
-- **Recurring downtime catch-up joins phase 2.** The claims model suppresses duplicates but does not
-  guarantee execution: if the whole cluster is down over 03:00, the 03:00 occurrence never fires (each node
-  re-derives its schedule from *now* at start). This is the one capability worth adopting from Quartz's
-  persistent triggers — and it matters *most* at the 1–10 node tier, where a maintenance window routinely
-  takes down the entire cluster. Design sketch: a durable last-completed-occurrence per recurring job (the
-  claims table nearly is one already); at startup/claim time, a node that finds the last completed
-  occurrence older than the previous grid slot applies the job's existing misfire policy (`FireOnce` /
-  `Skip` / `CatchUp`) against the *durable* record instead of only in-process state.
+Publishing an integration event *is* a durable, cluster-executed, commit-gated one-shot: a row atomic with the
+caller's transaction, claimed under a lease by any node's delivery worker, retried with exponential backoff
+(`BaseRetryDelay 5s × 2ⁿ`, capped 1 h, 10 attempts), and parked for inspection when permanently failing
+(verified: `MarkPermanentlyFailedAsync` sets `Attempts = MaxDeliveryAttempts`, permanently excluding the row
+from claims while keeping it queryable). Placement inverts exactly as phase 2 wants: the receiving node only
+records; whichever node claims executes. At-least-once with mandatory consumer idempotency — the phase-2
+contract already decided above.
 
-Open questions deferred to phase 2 implementation:
+### Finding 2 — but "zero implementation" is false; the savings are the plumbing, not the whole feature
 
-- **Does `EnqueueAsync` (run-now) go through the table?** Current lean: no — the caller's node is
-  demonstrably alive and a database round-trip per fire-and-forget is real overhead; keep the in-memory
-  fast path as the default with durability opt-in via `ScheduledJobOptions` (pay-for-what-you-use).
-- **Payload versioning** — a durable row may be claimed by a node running a newer binary; the canonical
-  JSON pipeline tolerates additive change, but the ADR for phase 2 should state the compatibility contract.
-- **Retention and dead-lettering** for rows that exhaust their attempts (the outbox's `MaxDeliveryAttempts`
-  shape, plus an inspector surface for "why didn't my job run").
-- **Whether the durable store seam subsumes `IScheduledOccurrenceCoordinator`** or composes beside it —
-  a store-backed scheduler could carry claims as a by-product; keep the coordinator seam public either way,
-  since it is also the natural adapter point for external engines.
+Itemizing what phase 2 needs against what the outbox supplies:
+
+| Needed for durable one-shots | Outbox route | Bespoke store route |
+| --- | --- | --- |
+| Durable row, lease claim, retry/backoff, parking, purge | **Exists** | Copy from outbox (~the plumbing) |
+| Future-dated eligibility | New: `DeliverAfterUtc` column + one poll clause | New: `DueTimeUtc` column + clause |
+| Typed payload round-trip (AOT-safe serialize `TPayload`, resolve descriptor, invoke) | **New — identical work** (a job-envelope event + one framework consumer) | **New — identical work** |
+| `IJobScheduler.ScheduleAsync` kept as the API | New: thin adapter → envelope event | New: store write |
+| Cancel a pending job | New (cancel-pending-row API) | New (same) |
+| `JobId`/handle + inspector visibility | New (or dropped) | New (or dropped) |
+| Publish surface for "deliver later" | **Seam question**: `IIntegrationEventBus` is transport-neutral and shared with the in-memory tier, which cannot durably delay — so either an outbox-specific surface or the adapter hides it | None (API is the store's own) |
+
+The genuinely shared, unavoidable work is the payload envelope and dispatch; the outbox route saves the
+lease/delivery/purge machinery and its tests. A real saving — roughly half the feature, not 95% of it.
+
+### Finding 3 — semantic deltas of running jobs through the outbox pipeline (verified in code)
+
+- **Delivery is sequential per node**: `OutboxDeliveryService` iterates its claimed batch one consumer scope at
+  a time. Jobs share that single-file pipeline with business events — a slow job delays event delivery on its
+  node. Worse: the whole claimed batch is stamped with **one** `leaseUntil`, so a job outrunning
+  `LeaseDuration` (2 min default) lets the *other* messages in its batch expire mid-flight and be reclaimed by
+  other nodes — correct under at-least-once, but it converts "one slow job" into elevated duplicate delivery
+  for unrelated events. **Long-running jobs do not belong in the outbox pipeline.**
+- **One global retry policy**: per-message exponential backoff, no per-job `ResiliencePolicy`, no
+  overlap/serialization groups, no `MaxConcurrentRuns`, and the scheduler's capacity limit does not govern
+  outbox consumers.
+- **Scope and gating**: outbox publish rides the caller's `DbContext` scope and is commit-gated — usually an
+  *improvement* (today `ScheduleAsync` fires even if the surrounding transaction rolls back — arguably a bug),
+  but it is a semantic change, and scheduling from a scope-less singleton needs a fresh scope.
+- **Modeling**: a job is an instruction, not a fact; the event bus is pub/sub-only (ADR-0010). A
+  single-consumer job-envelope event is the standard task-queue-over-outbox shape and violates no contract
+  (no reply), but the tension is real and should be documented rather than hidden.
+
+### Finding 4 — full-cluster-downtime catch-up **cannot** ride the outbox
+
+The outbox delivers rows that were already written; if the whole cluster is down over 03:00, no process was
+alive to write the 03:00 row. The one theoretical outbox construction — a **chain of delayed events** (each
+occurrence, when delivered, publishes the next occurrence as a future-dated event, so the 03:00 row exists
+from 02:00 and survives downtime) — was examined and rejected on three verified grounds:
+
+1. **Chain death**: a permanently failing occurrence is parked (`Attempts = max`, never claimed again) — and
+   with it dies the publish of its successor. The recurring job silently stops forever; repairing that needs a
+   watchdog comparing chains against schedules, i.e. durable schedule state anyway.
+2. **Live rescheduling**: a `${…}` variable change must supersede already-written future rows — cancel/update
+   of pending rows keyed by job, new machinery the outbox deliberately lacks (rows are immutable post-write).
+3. **Seeding races**: N nodes starting fresh must not seed N chains — an idempotent per-occurrence insert,
+   which is precisely the claims table again.
+
+Catch-up is a *state* problem, not a *delivery* problem. The claims table **is** the needed state — a durable
+"last fired occurrence per job" written as a by-product of phase 1. Design: at startup (and optionally per
+claim), compare the latest claim against the previous grid slot; if older, enqueue a catch-up occurrence whose
+due time *is* the missed slot, so the ordinary claim fence serializes multi-node catch-up and the existing
+misfire policy (`FireOnce`/`Skip`/`CatchUp`) decides how much to replay. Caveats: the catch-up horizon is
+bounded by `ClaimRetention` (7 d default); **no prior claim ⇒ no catch-up** (a fresh deployment must not fire
+every cron job on first boot); at-most-once is preserved (a claim written by a winner that crashed mid-run is
+not re-fired — consistent with phase 1); `EveryNode`/`OneTime` jobs are out of scope. The real new surface is a
+scheduler integration point: `EnqueueRecurringJobs` today computes `GetFirstDueTime(now)` only and needs a way
+to receive an overdue slot.
+
+### Revised direction
+
+- **Durable one-shots: outbox-first.** Add delayed delivery (`DeliverAfterUtc`) to the outbox, a job-envelope
+  event + framework consumer, and a thin `IJobScheduler` adapter — accepting the Finding-3 constraints, which
+  fit the 1–10-node positioning: durable one-shots there are typically *short, idempotent, modest-volume*
+  ("send this email at 09:00"). The bespoke `elarion_scheduler_jobs` store is **demoted to a fallback**,
+  warranted only if job volume, run duration, or per-job semantics outgrow the shared pipeline — at which
+  point an external engine through the seams deserves equal consideration.
+- **Downtime catch-up: claims-based**, independent of the outbox, as sketched in Finding 4.
+
+Open questions carried into phase 2 implementation: whether `EnqueueAsync` (run-now) keeps its in-memory fast
+path with durability opt-in via `ScheduledJobOptions` (current lean: yes — pay-for-what-you-use); the payload
+compatibility contract when a row is claimed by a newer binary; whether the delay surface lives on an
+outbox-specific API or stays hidden behind the `IJobScheduler` adapter (the transport-neutral
+`IIntegrationEventBus` should not grow a delay the in-memory tier cannot durably honor); and the shape of the
+scheduler's catch-up entry point.
 
 ## Consequences
 
