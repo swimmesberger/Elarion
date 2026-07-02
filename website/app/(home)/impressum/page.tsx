@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { DisclosureRow, LegalSection, LegalShell } from '../_components/legal';
+import { ProtectedEmail } from '../_components/protected-email';
 
 export const metadata: Metadata = {
   title: 'Impressum & Offenlegung',
@@ -20,9 +21,7 @@ export default function ImpressumPage() {
           <DisclosureRow label="Medieninhaber / media owner">Simon Wimmesberger</DisclosureRow>
           <DisclosureRow label="Wohnort / place of residence">Wendling, Österreich</DisclosureRow>
           <DisclosureRow label="Kontakt / contact">
-            <a href="mailto:wimmesberger@gmail.com" className="text-fd-primary hover:underline">
-              wimmesberger@gmail.com
-            </a>
+            <ProtectedEmail />
           </DisclosureRow>
           <DisclosureRow label="Grundlegende Richtung">
             Dokumentation und Information über das Open-Source-.NET-Framework Elarion —

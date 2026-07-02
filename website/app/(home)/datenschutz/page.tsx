@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { DisclosureRow, LegalSection, LegalShell } from '../_components/legal';
+import { ProtectedEmail } from '../_components/protected-email';
 
 export const metadata: Metadata = {
   title: 'Datenschutzerklärung',
@@ -20,9 +21,7 @@ export default function DatenschutzPage() {
           <DisclosureRow label="Verantwortlicher / controller">Simon Wimmesberger</DisclosureRow>
           <DisclosureRow label="Wohnort / place of residence">Wendling, Österreich</DisclosureRow>
           <DisclosureRow label="Kontakt / contact">
-            <a href="mailto:wimmesberger@gmail.com" className="text-fd-primary hover:underline">
-              wimmesberger@gmail.com
-            </a>
+            <ProtectedEmail />
           </DisclosureRow>
         </dl>
         <p>
