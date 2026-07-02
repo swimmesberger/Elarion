@@ -1,5 +1,6 @@
 using Elarion.Blobs.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -19,7 +20,11 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
     /// <summary>Gets the reason the integration tests are skipped when <see cref="IsAvailable"/> is false.</summary>
     public string SkipReason { get; private set; } = "";
 
-    private string ConnectionString { get; set; } = "";
+    /// <summary>Gets the container connection string, for tests that open their own data sources.</summary>
+    public string ConnectionString { get; private set; } = "";
+
+    /// <summary>Gets the shared data source the store draws streaming-read connections from.</summary>
+    public NpgsqlDataSource DataSource { get; private set; } = null!;
 
     public async ValueTask InitializeAsync() {
         PostgreSqlContainer container;
@@ -36,12 +41,17 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
 
         _container = container;
         ConnectionString = container.GetConnectionString();
+        DataSource = NpgsqlDataSource.Create(ConnectionString);
         await using var context = CreateContext();
         await context.Database.EnsureCreatedAsync();
         IsAvailable = true;
     }
 
     public async ValueTask DisposeAsync() {
+        if (DataSource is not null) {
+            await DataSource.DisposeAsync();
+        }
+
         if (_container is not null) {
             await _container.DisposeAsync();
         }
@@ -57,5 +67,5 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
 /// <summary>EF Core context mapping the PostgreSQL blob tables for integration tests.</summary>
 public sealed class IntegrationBlobDbContext(DbContextOptions<IntegrationBlobDbContext> options) : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) =>
-        modelBuilder.UsePostgreSqlBlobStorage();
+        modelBuilder.UseElarionBlobStorage();
 }

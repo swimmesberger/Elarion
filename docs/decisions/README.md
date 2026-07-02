@@ -44,3 +44,5 @@ designs that are not yet implemented.
 - [ADR-0021: Idempotency (`[Idempotent]` over a single-transaction, unique-constrained key store)](0021-idempotency.md)
 - [ADR-0022: Inbox pattern for integration-event consumers (idempotent consumers) — Proposed](0022-inbox-idempotent-event-consumers.md)
 - [ADR-0023: Canonical JSON serialization configuration](0023-canonical-json-serialization.md)
+- [ADR-0024: Cross-instance settings change notification over PostgreSQL LISTEN/NOTIFY](0024-postgres-listen-notify-settings-changes.md)
+- [ADR-0025: Cross-instance scheduler coordination (per-occurrence claims over EF Core/PostgreSQL)](0025-distributed-scheduler-coordination.md)

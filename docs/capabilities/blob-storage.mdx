@@ -116,7 +116,7 @@ using Microsoft.EntityFrameworkCore;
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.UsePostgreSqlBlobStorage();
+        modelBuilder.UseElarionBlobStorage();
     }
 }
 ```
@@ -126,27 +126,44 @@ Then register the store in the host:
 ```csharp
 using Elarion.Blobs.PostgreSql;
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
+var connectionString = builder.Configuration.GetConnectionString("Database")!;
+builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
-builder.Services.AddPostgreSqlBlobStore<AppDbContext>();
+builder.Services.AddElarionPostgreSqlBlobStore<AppDbContext>(connectionString);
 ```
 
-`UsePostgreSqlBlobStorage()` adds two tables to the EF Core model:
+The connection string (or an `NpgsqlDataSource`, if you prefer the parameterless overload and register
+one yourself — a host-registered data source always wins) backs the store's **streaming reads**: each
+`OpenReadAsync` draws a dedicated connection whose lifetime is owned by the returned `BlobDownload`,
+which the scoped `DbContext` connection cannot provide. It must target the same database as the blob
+context.
+
+`UseElarionBlobStorage()` adds two tables to the EF Core model:
 
 | Table | Purpose |
 | --- | --- |
 | `stored_blobs` | Metadata: id, container, name, content type, size, and created timestamp. |
 | `blob_contents` | Content bytes keyed by blob id, with cascade delete from `stored_blobs`. |
 
-The blob entities are plain EF Core types configured by `UsePostgreSqlBlobStorage()`; they are
+`UseElarionBlobStorage` takes optional `tableName` and `contentTableName` parameters to rename either
+table, a `schema`, and a `snakeCase` toggle (default `true`; `false` switches to PascalCase names — the
+defaults become `StoredBlobs`/`BlobContents`), for example
+`modelBuilder.UseElarionBlobStorage("app_blobs", "app_blob_contents", "app")`.
+
+The blob entities are plain EF Core types configured by `UseElarionBlobStorage()`; they are
 **not** part of Elarion's `[EntityConfiguration]` / `[GenerateDbSets]` source generation. Because the
 configuration runs inside your own `OnModelCreating`, the tables become part of your context's model
 and ride along with your normal migrations — there is no separate "blob migration" to manage.
 
+On a `[GenerateDbSets]` context you can skip the hand-written call: annotate the context with
+`[GenerateElarionBlobStorage]` (optionally with `SnakeCase`/`TableName`/`ContentTableName`/`Schema`)
+and the bundled generator emits the `DbSet<StoredBlob>` (the content row type is `internal` — mapped,
+but no `DbSet`) and applies the same model configuration through the EF generator's model-config seam
+(`ELBLB001` if `[GenerateDbSets]` is missing).
+
 ### Schema migration
 
-After adding `UsePostgreSqlBlobStorage()` to your context, create and apply a migration the usual way:
+After adding `UseElarionBlobStorage()` to your context, create and apply a migration the usual way:
 
 ```bash
 dotnet ef migrations add AddBlobStorage
@@ -160,9 +177,16 @@ will evolve.
 
 The store talks to PostgreSQL directly for content bytes (it casts the context's connection to
 `NpgsqlConnection`), so the owning context must be configured with `UseNpgsql` — see the
-registration above. Writes stream a seekable source (a file, an in-memory buffer) straight into the
-`bytea` column without buffering; reads are buffered for now, with a documented
-`NpgsqlDataReader.GetStream` upgrade path for true read streaming.
+registration above. That raw SQL is built from the EF model (`ISqlGenerationHelper` plus the resolved
+table/column names), so table, schema, and naming overrides apply to the raw Npgsql content path too.
+Writes stream a seekable source (a file, an in-memory buffer) straight into the
+`bytea` column without buffering. Reads stream too: `OpenReadAsync` opens a dedicated connection from
+the registered `NpgsqlDataSource` and reads through `CommandBehavior.SequentialAccess` +
+`NpgsqlDataReader.GetStream`, so the content flows from the wire without materializing the blob in
+memory; the reader, command, and connection are owned by the returned `BlobDownload` and released on
+its disposal (double-dispose safe). The one exception is a read inside a caller-owned ambient
+transaction, which must share that transaction's connection to see the caller's own uncommitted
+writes and therefore stays buffered.
 
 ## Reading and deleting
 

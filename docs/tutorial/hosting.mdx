@@ -103,11 +103,11 @@ builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
 // Scheduler runtime. Job descriptors and event consumers are composed per module by the
 // services.AddElarion(...) call below — there is no explicit Add…ScheduledJobs call.
-builder.Services.AddInMemoryScheduler(builder.Configuration);
+builder.Services.AddElarionScheduler(builder.Configuration);
 
 // Resilience: generated policy metadata + the Microsoft/Polly-backed runtime.
 builder.Services.AddBillingApplicationResiliencePolicies();
-builder.Services.AddMicrosoftResilienceRuntime();
+builder.Services.AddElarionResilience();
 
 // Per-user handler caching, backed by HybridCache.
 builder.Services.AddElarionHandlerCaching();

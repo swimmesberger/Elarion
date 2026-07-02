@@ -17,7 +17,7 @@ public static class SettingsConfigurationBuilderExtensions {
     /// The <see cref="SettingsConfigurationRefresher"/> performs its initial load in its
     /// <c>StartAsync</c>, so it completes before subsequently-registered hosted services start. Call this
     /// method <b>before</b> registering any hosted service that reads settings-backed <c>${...}</c>
-    /// configuration at start (for example the scheduler via <c>AddInMemoryScheduler</c>), so those services
+    /// configuration at start (for example the scheduler via <c>AddElarionScheduler</c>), so those services
     /// observe the stored values rather than empty defaults.
     /// </para>
     /// </summary>

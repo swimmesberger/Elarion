@@ -175,10 +175,13 @@ public sealed class VariantServiceRuntimeTests {
     }
 
     private sealed class CountingHandler : IHandler<ForecastCommand, Result<string>> {
-        public int Calls { get; private set; }
+        private int _calls;
+
+        // Incremented from concurrently resumed continuations, so the count must be atomic.
+        public int Calls => Volatile.Read(ref _calls);
 
         public ValueTask<Result<string>> HandleAsync(ForecastCommand request, CancellationToken ct) {
-            Calls++;
+            Interlocked.Increment(ref _calls);
             return new ValueTask<Result<string>>(Result<string>.Success("ok"));
         }
     }

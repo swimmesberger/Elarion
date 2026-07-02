@@ -61,10 +61,10 @@ not build pipelines. The host picks a runtime:
 
 ```csharp
 builder.Services.AddMyAppApplicationResiliencePolicies();
-builder.Services.AddMicrosoftResilienceRuntime();
+builder.Services.AddElarionResilience();
 ```
 
-`AddMicrosoftResilienceRuntime()` consumes the generated metadata and lazily builds executable
+`AddElarionResilience()` consumes the generated metadata and lazily builds executable
 Microsoft/Polly pipelines. A custom runtime can register its own `IResiliencePipelineRunner` and
 `IResiliencePolicyCatalog` while reusing the same attributes and metadata.
 

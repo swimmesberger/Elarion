@@ -11,7 +11,7 @@ public static class ResilienceServiceCollectionExtensions {
     /// <summary>
     /// Adds the dependency-light in-memory resilience policy catalog (<see cref="IResiliencePolicyCatalog"/>).
     /// This carries no third-party runtime dependency and is what the scheduler needs to resolve policy metadata;
-    /// the executable Polly-backed pipeline runner is opt-in via <c>AddMicrosoftResilienceRuntime</c> in the
+    /// the executable Polly-backed pipeline runner is opt-in via <c>AddElarionResilience</c> in the
     /// <c>Elarion.Resilience</c> package.
     /// </summary>
     public static IServiceCollection AddElarionResiliencePolicyCatalog(this IServiceCollection services) {

@@ -15,7 +15,7 @@ public sealed class ApplicationRole : IdentityRole<Guid>;
 public sealed class IdentityModelTests {
     private static IModel BuildModel(bool snakeCase) {
         var modelBuilder = new ModelBuilder(new ConventionSet());
-        modelBuilder.ApplyElarionIdentity<ApplicationUser, ApplicationRole, Guid>(snakeCase);
+        modelBuilder.ApplyElarionIdentity<ApplicationUser, ApplicationRole, Guid>(snakeCase: snakeCase);
         return modelBuilder.FinalizeModel();
     }
 
@@ -64,6 +64,23 @@ public sealed class IdentityModelTests {
         model.FindEntityType(typeof(ApplicationRole))!.GetIndexes()
             .Single(index => index.Properties.Any(property => property.Name == nameof(IdentityRole<Guid>.NormalizedName)))
             .GetDatabaseName().Should().Be("ix_roles_normalized_name");
+    }
+
+    [Fact]
+    public void SchemaAndTablePrefixAreApplied() {
+        var modelBuilder = new ModelBuilder(new ConventionSet());
+        modelBuilder.ApplyElarionIdentity<ApplicationUser, ApplicationRole, Guid>(schema: "auth", tablePrefix: "app_");
+        var model = modelBuilder.FinalizeModel();
+
+        var user = model.FindEntityType(typeof(ApplicationUser))!;
+        user.GetTableName().Should().Be("app_users");
+        user.GetSchema().Should().Be("auth");
+        model.FindEntityType(typeof(IdentityUserToken<Guid>))!.GetTableName().Should().Be("app_user_tokens");
+
+        // Index names incorporate the prefixed table name so two prefixed Identity models never collide.
+        user.GetIndexes()
+            .Single(index => index.Properties.Any(property => property.Name == nameof(IdentityUser<Guid>.NormalizedUserName)))
+            .GetDatabaseName().Should().Be("ix_app_users_normalized_user_name");
     }
 
     [Fact]

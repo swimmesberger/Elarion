@@ -3,6 +3,7 @@ using Elarion.Blobs;
 using Elarion.Blobs.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Xunit;
 
 namespace Elarion.Tests.Blobs;
@@ -209,8 +210,8 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
             .State.Should().Be(BlobLifecycleState.Committed);
     }
 
-    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
+        new(context, fixture.DataSource, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
 
     private static Task<bool> BlobExistsByName(
         IntegrationBlobDbContext context,
@@ -219,6 +220,83 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
         context.Set<StoredBlob>()
             .AsNoTracking()
             .AnyAsync(blob => blob.Container == request.Container && blob.Name == request.Name, cancellationToken);
+
+    [Fact]
+    public async Task OpenReadAsync_LargeBlob_StreamsWithoutBuffering() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var content = Bytes(4 * 1024 * 1024);
+        var blobRef = await store.SaveAsync(NewRequest(), new MemoryStream(content), ct);
+
+        await using var download = await store.OpenReadAsync(blobRef, ct);
+
+        download.Should().NotBeNull();
+        // The streaming path hands out the reader's wire stream, not a materialized buffer.
+        download!.Content.Should().NotBeOfType<MemoryStream>();
+        download.Metadata.Size.Should().Be(content.Length);
+        (await ReadAllAsync(download, ct)).Should().Equal(content);
+    }
+
+    [Fact]
+    public async Task OpenReadAsync_PartialReadThenDispose_ReleasesTheConnection() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+
+        // A single-connection pool with a short exhaustion timeout: if disposing a half-read download
+        // leaked its connection, the next read could not open one and would throw on pool exhaustion.
+        await using var dataSource = NpgsqlDataSource.Create(
+            fixture.ConnectionString + ";Maximum Pool Size=1;Timeout=5");
+        await using var context = fixture.CreateContext();
+        var store = new PostgreSqlBlobStore<IntegrationBlobDbContext>(
+            context, dataSource, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+        var content = Bytes(2 * 1024 * 1024);
+        var blobRef = await store.SaveAsync(NewRequest(), new MemoryStream(content), ct);
+
+        var partial = await store.OpenReadAsync(blobRef, ct);
+        var few = new byte[16];
+        await partial!.Content.ReadExactlyAsync(few, ct);
+        await partial.DisposeAsync();
+
+        await using var second = await store.OpenReadAsync(blobRef, ct);
+        (await ReadAllAsync(second!, ct)).Should().Equal(content);
+    }
+
+    [Fact]
+    public async Task OpenReadAsync_DoubleDispose_IsSafe() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var blobRef = await store.SaveAsync(NewRequest(), new MemoryStream(Bytes(1024)), ct);
+
+        var download = await store.OpenReadAsync(blobRef, ct);
+        await download!.DisposeAsync();
+
+        await download.Invoking(d => d.DisposeAsync().AsTask()).Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task OpenReadAsync_InsideAmbientTransaction_SeesTheUncommittedWrite() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var content = Bytes(1024);
+
+        await using var transaction = await context.Database.BeginTransactionAsync(ct);
+        var blobRef = await store.SaveAsync(NewRequest(), new MemoryStream(content), ct);
+
+        // A dedicated streaming connection could not see the caller's uncommitted rows, so the
+        // transactional path reads (buffered) on the transaction's own connection.
+        await using var download = await store.OpenReadAsync(blobRef, ct);
+        download.Should().NotBeNull();
+        download!.Content.Should().BeOfType<MemoryStream>();
+        (await ReadAllAsync(download, ct)).Should().Equal(content);
+
+        await transaction.RollbackAsync(ct);
+    }
 
     private static BlobUploadRequest NewRequest() =>
         new() {

@@ -17,4 +17,28 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
+  <!-- Bundle the TusStorage source generator's analyzer into this package. NuGet analyzer assets are not
+       transitive, so the generator lives in the package each annotated assembly references directly.
+       ReferenceOutputAssembly=false keeps it off the runtime surface; PrivateAssets=all keeps it from
+       becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Blobs.Tus.PostgreSql.Generators\Elarion.Blobs.Tus.PostgreSql.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="_BundleElarionTusStorageGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.Blobs.Tus.PostgreSql.Generators\Elarion.Blobs.Tus.PostgreSql.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionTusStorageGeneratorAnalyzer" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_ElarionTusStorageGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
 </Project>
+

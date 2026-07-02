@@ -17,7 +17,7 @@ through an async DI scope, receives a cancellation token, is tracked during shut
 The source-generation surface is implementation-neutral. Application assemblies reference
 `Elarion.Abstractions` plus the generator analyzer to use `[ScheduledJob]`,
 `IScheduledJob<TPayload>`, generated descriptors, and scheduler contracts — without referencing the
-default in-memory scheduler. A host then chooses a runtime by registering `AddInMemoryScheduler(...)`
+default in-memory scheduler. A host then chooses a runtime by registering `AddElarionScheduler(...)`
 or a custom `IJobScheduler` / `IJobSchedulerInspector` that consumes the generated descriptors.
 
 ## Enabling and registering
@@ -34,7 +34,7 @@ Register the generated descriptors and the chosen scheduler runtime in the host:
 
 ```csharp
 builder.Services.AddMyAppApplicationScheduledJobs();   // descriptors only
-builder.Services.AddInMemoryScheduler(builder.Configuration);
+builder.Services.AddElarionScheduler(builder.Configuration);
 ```
 
 <Callout type="info">
@@ -43,7 +43,7 @@ builder.Services.AddInMemoryScheduler(builder.Configuration);
   so a different scheduler runtime can reuse the same generated descriptors.
 </Callout>
 
-`AddInMemoryScheduler(IConfiguration)` reads the `Scheduler` section:
+`AddElarionScheduler(IConfiguration)` reads the `Scheduler` section:
 
 ```json
 {
@@ -83,8 +83,9 @@ public sealed class RecurringBillingJob(
 
 ## Operational characteristics
 
-- The scheduler is **in-memory only**. Queued runtime jobs and due recurring state are lost when the
-  process stops.
+- The scheduler runtime is **in-memory**. Queued runtime jobs and due recurring state are lost when
+  the process stops; recurring jobs re-derive their schedules at the next start. Cross-instance
+  coordination of recurring jobs is an opt-in database backend (below).
 - Fixed-rate and cron schedules **skip missed in-process slots** instead of replaying a burst (tunable
   with [misfire policy](/docs/capabilities/scheduling/overlap-and-misfire)).
 - There is **no global polling loop**. The runtime waits until the nearest due item and wakes early
@@ -94,9 +95,39 @@ public sealed class RecurringBillingJob(
 - Scheduling, enqueue, cancel, and execution all emit [telemetry](/docs/capabilities/telemetry).
 
 <Callout type="warn">
-  If you need durable queues, distributed coordination, or retry history that survives restarts, use
-  dedicated job infrastructure. Elarion's scheduler is deliberately in-process and lightweight.
+  If you need durable queues or retry history that survives restarts, use dedicated job
+  infrastructure. Elarion's scheduler runtime is deliberately in-process and lightweight; what it
+  does offer for clusters is the recurring-job coordination below.
 </Callout>
+
+## Running on more than one node
+
+Every node runs the same source-generated job set, so without coordination each recurring job fires
+once **per node**. `Elarion.Scheduling.EntityFrameworkCore` closes that with per-occurrence claim
+rows over PostgreSQL (ADR-0025): right before executing a recurring occurrence, a
+node claims it in the `elarion_scheduler_claims` table, and exactly one node wins — the others record
+the occurrence as skipped (`claimed-elsewhere`) and continue. See
+[Multi-node coordination](/docs/capabilities/scheduling/multi-node) for the architecture, diagrams,
+and practical trade-offs.
+
+```csharp
+// In Program.cs, next to AddElarionScheduler (either order):
+builder.Services.AddElarionScheduler(builder.Configuration);
+builder.Services.AddElarionSchedulerEntityFrameworkCore<AppDbContext>();
+
+// In OnModelCreating (or [GenerateElarionSchedulerClaims] on a [GenerateDbSets] context):
+modelBuilder.UseElarionSchedulerClaims();
+```
+
+How the claim dedupes depends on the schedule kind: **cron** occurrences are wall-clock deterministic
+on every node, so they claim their exact `(job, occurrence)` slot; **fixed-rate/fixed-delay** due
+times are anchored per node, so they dedupe by a one-interval window (at most one run per interval
+cluster-wide); **one-time** startup schedules are never coordinated (startup work is per node by
+design). If a claim cannot be made — say the database is briefly unreachable — the node fails
+**closed** and skips the occurrence rather than risking a duplicate; the next occurrence retries.
+A claim-retention purge worker keeps the table small (`SchedulerClaimsOptions`, default 7 days).
+Runtime one-shot jobs (`IJobScheduler`) remain in-memory; durable one-shot scheduling is a planned
+follow-up phase of ADR-0025.
 
 ## In this section
 
@@ -105,4 +136,6 @@ public sealed class RecurringBillingJob(
   <Card title="Overlap & misfire" href="/docs/capabilities/scheduling/overlap-and-misfire">What happens when runs collide or fall behind.</Card>
   <Card title="Runtime jobs" href="/docs/capabilities/scheduling/runtime-jobs">Typed one-off jobs scheduled at runtime with a payload.</Card>
   <Card title="Inspection" href="/docs/capabilities/scheduling/inspection">Snapshots, next-due times, and cancellation.</Card>
+  <Card title="Execution semantics & positioning" href="/docs/capabilities/scheduling/semantics">Where each kind of work runs, what survives restarts, and when to pick a dedicated job system.</Card>
+  <Card title="Multi-node coordination" href="/docs/capabilities/scheduling/multi-node">How recurring jobs execute exactly once across a cluster, and why it matters.</Card>
 </Cards>

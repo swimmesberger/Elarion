@@ -20,4 +20,13 @@ namespace Elarion.Authorization.EntityFrameworkCore;
 public sealed class GenerateElarionResourceGrantsAttribute : Attribute {
     /// <summary>Whether to use snake_case table/column/index names. Defaults to <c>true</c>.</summary>
     public bool SnakeCase { get; set; } = true;
+
+    /// <summary>
+    /// The table name, or <c>null</c> for the default (<c>elarion_resource_grants</c> /
+    /// <c>ElarionResourceGrants</c> depending on <see cref="SnakeCase"/>).
+    /// </summary>
+    public string? TableName { get; set; }
+
+    /// <summary>The schema, or <c>null</c> for the provider's default schema.</summary>
+    public string? Schema { get; set; }
 }

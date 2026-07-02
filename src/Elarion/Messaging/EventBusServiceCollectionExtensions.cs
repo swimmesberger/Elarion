@@ -17,7 +17,7 @@ public static class EventBusServiceCollectionExtensions {
     /// <c>Elarion.Messaging.InMemory</c> or the EF Core transactional outbox. Generated event consumer
     /// descriptor registration must still be called separately.
     /// </remarks>
-    public static IServiceCollection AddInMemoryDomainEventBus(this IServiceCollection services) {
+    public static IServiceCollection AddElarionDomainEventBus(this IServiceCollection services) {
         services.TryAddSingleton<EventSubscriptionRegistry>();
         services.TryAddScoped<IDomainEventBus, InMemoryDomainEventBus>();
         return services;

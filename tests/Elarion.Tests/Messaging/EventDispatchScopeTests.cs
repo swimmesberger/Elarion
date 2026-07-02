@@ -101,12 +101,12 @@ public sealed class EventDispatchScopeTests {
     }
 
     [Fact]
-    public void AddInMemoryIntegrationEventBus_CalledTwice_RegistersSinglePumpHostedService() {
+    public void AddElarionInMemoryIntegrationEventBus_CalledTwice_RegistersSinglePumpHostedService() {
         var services = new ServiceCollection();
         services.AddLogging();
 
-        services.AddInMemoryIntegrationEventBus();
-        services.AddInMemoryIntegrationEventBus();
+        services.AddElarionInMemoryIntegrationEventBus();
+        services.AddElarionInMemoryIntegrationEventBus();
 
         using var provider = services.BuildServiceProvider();
         var pumps = provider.GetServices<IHostedService>().OfType<EventDispatchPump>().ToList();
@@ -114,12 +114,12 @@ public sealed class EventDispatchScopeTests {
     }
 
     [Fact]
-    public void AddInMemoryIntegrationEventBus_CalledTwice_RegistersEachInterceptorOnce() {
+    public void AddElarionInMemoryIntegrationEventBus_CalledTwice_RegistersEachInterceptorOnce() {
         var services = new ServiceCollection();
         services.AddLogging();
 
-        services.AddInMemoryIntegrationEventBus();
-        services.AddInMemoryIntegrationEventBus();
+        services.AddElarionInMemoryIntegrationEventBus();
+        services.AddElarionInMemoryIntegrationEventBus();
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -203,7 +203,7 @@ public sealed class EventDispatchScopeTests {
             services.AddSingleton(descriptor);
         }
 
-        services.AddInMemoryIntegrationEventBus(options);
+        services.AddElarionInMemoryIntegrationEventBus(options);
         if (pumpLogger is not null) {
             services.AddSingleton(pumpLogger);
         }

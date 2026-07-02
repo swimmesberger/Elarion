@@ -147,7 +147,7 @@ public sealed class SchedulerVariableReschedulingTests {
         await act.Should().ThrowAsync<InvalidOperationException>()
             .Where(ex => ex.Message.Contains("test.resilient")
                 && ex.Message.Contains("IResiliencePipelineRunner")
-                && ex.Message.Contains("AddMicrosoftResilienceRuntime"));
+                && ex.Message.Contains("AddElarionResilience"));
     }
 
     [Fact]
@@ -172,7 +172,7 @@ public sealed class SchedulerVariableReschedulingTests {
         services.AddSingleton<TimeProvider>(time);
         services.AddSingleton(source);
         services.AddSingleton(descriptor);
-        services.AddInMemoryScheduler(new SchedulerOptions { Enabled = true, MaxConcurrentExecutions = 4 });
+        services.AddElarionScheduler(new SchedulerOptions { Enabled = true, MaxConcurrentExecutions = 4 });
         return services.BuildServiceProvider();
     }
 

@@ -25,28 +25,28 @@ public static class EventBusServiceCollectionExtensions {
     /// </summary>
     /// <typeparam name="TContext">The application's EF Core context whose transaction gates Plane B delivery.</typeparam>
     /// <remarks>
-    /// Combines <see cref="AddInMemoryDomainEventBus"/> (from <c>Elarion</c>) with
-    /// <see cref="AddInMemoryIntegrationEventBus{TContext}(IServiceCollection, EventBusOptions?)"/>. Generated event
+    /// Combines <see cref="AddElarionDomainEventBus"/> (from <c>Elarion</c>) with
+    /// <see cref="AddElarionInMemoryIntegrationEventBus{TContext}(IServiceCollection, EventBusOptions?)"/>. Generated event
     /// consumer descriptor registration must still be called separately.
     /// </remarks>
-    public static IServiceCollection AddInMemoryEventBus<TContext>(
+    public static IServiceCollection AddElarionInMemoryEventBus<TContext>(
         this IServiceCollection services,
         EventBusOptions? options = null)
         where TContext : DbContext {
-        services.AddInMemoryDomainEventBus();
-        return services.AddInMemoryIntegrationEventBus<TContext>(options);
+        services.AddElarionDomainEventBus();
+        return services.AddElarionInMemoryIntegrationEventBus<TContext>(options);
     }
 
     /// <summary>
     /// Adds the in-memory domain and integration event buses (interceptors auto-attached to
     /// <typeparamref name="TContext"/>) using values from the <c>EventBus</c> configuration section.
     /// </summary>
-    public static IServiceCollection AddInMemoryEventBus<TContext>(
+    public static IServiceCollection AddElarionInMemoryEventBus<TContext>(
         this IServiceCollection services,
         IConfiguration configuration)
         where TContext : DbContext {
-        services.AddInMemoryDomainEventBus();
-        return services.AddInMemoryIntegrationEventBus<TContext>(configuration);
+        services.AddElarionDomainEventBus();
+        return services.AddElarionInMemoryIntegrationEventBus<TContext>(configuration);
     }
 
     /// <summary>
@@ -55,11 +55,11 @@ public static class EventBusServiceCollectionExtensions {
     /// rollback — no manual <c>AddInterceptors</c> wiring required.
     /// </summary>
     /// <typeparam name="TContext">The application's EF Core context whose transaction gates Plane B delivery.</typeparam>
-    public static IServiceCollection AddInMemoryIntegrationEventBus<TContext>(
+    public static IServiceCollection AddElarionInMemoryIntegrationEventBus<TContext>(
         this IServiceCollection services,
         EventBusOptions? options = null)
         where TContext : DbContext {
-        services.AddInMemoryIntegrationEventBus(options);
+        services.AddElarionInMemoryIntegrationEventBus(options);
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IDbContextOptionsConfiguration<TContext>, EventDispatchOptionsConfiguration<TContext>>());
         return services;
@@ -69,23 +69,23 @@ public static class EventBusServiceCollectionExtensions {
     /// Adds the in-memory integration-event bus (interceptors auto-attached to <typeparamref name="TContext"/>) using
     /// values from the <c>EventBus</c> configuration section.
     /// </summary>
-    public static IServiceCollection AddInMemoryIntegrationEventBus<TContext>(
+    public static IServiceCollection AddElarionInMemoryIntegrationEventBus<TContext>(
         this IServiceCollection services,
         IConfiguration configuration)
         where TContext : DbContext =>
-        services.AddInMemoryIntegrationEventBus<TContext>(ReadOptions(configuration));
+        services.AddElarionInMemoryIntegrationEventBus<TContext>(ReadOptions(configuration));
 
     /// <summary>
     /// Registers the integration-event bus building blocks — the bus, the hosted delivery pump, the per-scope buffer,
     /// and the commit-gating EF Core interceptors — <b>without</b> attaching the interceptors to any context.
     /// </summary>
     /// <remarks>
-    /// This is the low-level primitive. Prefer <see cref="AddInMemoryIntegrationEventBus{TContext}(IServiceCollection, EventBusOptions?)"/>,
+    /// This is the low-level primitive. Prefer <see cref="AddElarionInMemoryIntegrationEventBus{TContext}(IServiceCollection, EventBusOptions?)"/>,
     /// which also auto-attaches the interceptors so delivery is commit-gated out of the box. Use this overload only
     /// when you attach the interceptors yourself (e.g. <c>AddDbContext((sp, o) =&gt; o.AddInterceptors(sp.GetServices&lt;IInterceptor&gt;()))</c>)
     /// or when exercising the bus without a database.
     /// </remarks>
-    public static IServiceCollection AddInMemoryIntegrationEventBus(
+    public static IServiceCollection AddElarionInMemoryIntegrationEventBus(
         this IServiceCollection services,
         EventBusOptions? options = null) {
         options ??= new EventBusOptions();
@@ -94,7 +94,7 @@ public static class EventBusServiceCollectionExtensions {
         services.TryAddSingleton<EventDispatchPump>();
         // TryAddEnumerable keyed on the concrete factory-target keeps a second registration call from adding a
         // second reader to the SingleReader channel (undefined behaviour). Every registration below is idempotent
-        // so AddInMemoryIntegrationEventBus is safe to call more than once (e.g. via AddInMemoryEventBus).
+        // so AddElarionInMemoryIntegrationEventBus is safe to call more than once (e.g. via AddElarionInMemoryEventBus).
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, EventDispatchPump>(
                 sp => sp.GetRequiredService<EventDispatchPump>()));
@@ -110,12 +110,12 @@ public static class EventBusServiceCollectionExtensions {
     /// <summary>
     /// Registers the integration-event bus building blocks (without attaching interceptors) using values from the
     /// <c>EventBus</c> configuration section. Prefer the <typeparamref name="TContext"/> overload; see
-    /// <see cref="AddInMemoryIntegrationEventBus(IServiceCollection, EventBusOptions?)"/>.
+    /// <see cref="AddElarionInMemoryIntegrationEventBus(IServiceCollection, EventBusOptions?)"/>.
     /// </summary>
-    public static IServiceCollection AddInMemoryIntegrationEventBus(
+    public static IServiceCollection AddElarionInMemoryIntegrationEventBus(
         this IServiceCollection services,
         IConfiguration configuration) =>
-        services.AddInMemoryIntegrationEventBus(ReadOptions(configuration));
+        services.AddElarionInMemoryIntegrationEventBus(ReadOptions(configuration));
 
     private static EventBusOptions ReadOptions(IConfiguration configuration) =>
         new() {

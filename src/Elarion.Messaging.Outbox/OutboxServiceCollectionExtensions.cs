@@ -21,7 +21,7 @@ public static class OutboxServiceCollectionExtensions
     /// <returns>The same service collection for chaining.</returns>
     /// <remarks>
     /// This replaces the in-memory integration tier; the domain plane and the generated consumer descriptors are
-    /// registered separately (for example via <c>AddInMemoryDomainEventBus</c> for Plane A and the generated
+    /// registered separately (for example via <c>AddElarionDomainEventBus</c> for Plane A and the generated
     /// <c>Add{Assembly}EventConsumers</c>). Consumers must be idempotent because delivery is at-least-once.
     /// </remarks>
     public static IServiceCollection AddElarionOutbox<TDbContext>(

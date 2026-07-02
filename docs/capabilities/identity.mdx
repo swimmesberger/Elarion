@@ -75,7 +75,14 @@ index** names directly — `users`, `roles`, `user_claims`, `normalized_user_nam
 `ix_users_normalized_user_name`, … — instead of the ASP.NET `AspNet*` PascalCase defaults. It is
 self-contained: no `EFCore.NamingConventions` dependency, and the names match what that convention would
 produce, so an app already using it for domain tables sees a consistent schema. Set `SnakeCase = false` to
-keep the Identity defaults. The underlying primitive, `modelBuilder.ApplyElarionIdentity<TUser, TRole, TKey>(snakeCase)`
+keep the Identity defaults.
+
+Two more knobs place and name the tables: `Schema` puts all seven Identity tables in a non-default schema,
+and `TablePrefix` prepends a verbatim prefix to every Identity table name (e.g. `TablePrefix = "auth_"` →
+`auth_users`, `auth_roles`, …). Because Identity spans seven tables, the prefix *is* the table-name
+override — there are no per-table name parameters — and the snake_case index names incorporate the prefixed
+table name. The underlying primitive,
+`modelBuilder.ApplyElarionIdentity<TUser, TRole, TKey>(schema, tablePrefix, snakeCase)`
 (also in `Elarion.EntityFrameworkCore.Identity`), is public for advanced hosts that prefer to call it directly.
 
 ## What stays in your app

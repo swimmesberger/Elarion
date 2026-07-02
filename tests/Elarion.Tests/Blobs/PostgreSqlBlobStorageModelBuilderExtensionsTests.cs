@@ -8,9 +8,9 @@ namespace Elarion.Tests.Blobs;
 
 public sealed class PostgreSqlBlobStorageModelBuilderExtensionsTests {
     [Fact]
-    public void UsePostgreSqlBlobStorage_ConfiguresBlobTables() {
+    public void UseElarionBlobStorage_ConfiguresBlobTables() {
         var modelBuilder = new ModelBuilder(new ConventionSet());
-        modelBuilder.UsePostgreSqlBlobStorage();
+        modelBuilder.UseElarionBlobStorage();
         var model = modelBuilder.FinalizeModel();
 
         var storedBlob = model.FindEntityType(typeof(StoredBlob));
@@ -33,9 +33,9 @@ public sealed class PostgreSqlBlobStorageModelBuilderExtensionsTests {
     }
 
     [Fact]
-    public void UsePostgreSqlBlobStorage_ConfiguresLifecycleColumnsAndPartialIndex() {
+    public void UseElarionBlobStorage_ConfiguresLifecycleColumnsAndPartialIndex() {
         var modelBuilder = new ModelBuilder(new ConventionSet());
-        modelBuilder.UsePostgreSqlBlobStorage();
+        modelBuilder.UseElarionBlobStorage();
         var model = modelBuilder.FinalizeModel();
 
         var storedBlob = model.FindEntityType(typeof(StoredBlob))!;
@@ -48,4 +48,36 @@ public sealed class PostgreSqlBlobStorageModelBuilderExtensionsTests {
         pendingIndex.GetFilter().Should().Be("state = 0 AND expires_at IS NOT NULL");
     }
 
+    [Fact]
+    public void UseElarionBlobStorage_SnakeCaseFalse_UsesPascalCaseNamesAndQuotedFilter() {
+        var modelBuilder = new ModelBuilder(new ConventionSet());
+        modelBuilder.UseElarionBlobStorage(snakeCase: false);
+        var model = modelBuilder.FinalizeModel();
+
+        var storedBlob = model.FindEntityType(typeof(StoredBlob))!;
+        storedBlob.GetTableName().Should().Be("StoredBlobs");
+        storedBlob.FindProperty(nameof(StoredBlob.ContentType))!.GetColumnName().Should().Be("ContentType");
+
+        var pendingIndex = storedBlob.GetIndexes().Single(index =>
+            index.Properties.Count == 1 && index.Properties[0].Name == nameof(StoredBlob.ExpiresAt));
+        pendingIndex.GetFilter().Should().Be("\"State\" = 0 AND \"ExpiresAt\" IS NOT NULL");
+
+        var blobContentRow = model.GetEntityTypes().Single(entityType => entityType.ClrType.Name == "BlobContentRow");
+        blobContentRow.GetTableName().Should().Be("BlobContents");
+    }
+
+    [Fact]
+    public void UseElarionBlobStorage_CustomTablesAndSchema_AreApplied() {
+        var modelBuilder = new ModelBuilder(new ConventionSet());
+        modelBuilder.UseElarionBlobStorage("my_blobs", "my_blob_contents", "files");
+        var model = modelBuilder.FinalizeModel();
+
+        var storedBlob = model.FindEntityType(typeof(StoredBlob))!;
+        storedBlob.GetTableName().Should().Be("my_blobs");
+        storedBlob.GetSchema().Should().Be("files");
+
+        var blobContentRow = model.GetEntityTypes().Single(entityType => entityType.ClrType.Name == "BlobContentRow");
+        blobContentRow.GetTableName().Should().Be("my_blob_contents");
+        blobContentRow.GetSchema().Should().Be("files");
+    }
 }

@@ -16,7 +16,7 @@ public static class BlobUploadServiceCollectionExtensions {
     /// <returns>The same service collection for chaining.</returns>
     /// <remarks>
     /// The endpoints additionally require an <see cref="IBlobStore"/> (for example
-    /// <c>AddPostgreSqlBlobLifecycle</c>) and an <c>ICurrentUser</c> (for example
+    /// <c>AddElarionPostgreSqlBlobLifecycle</c>) and an <c>ICurrentUser</c> (for example
     /// <c>AddElarionCurrentUser</c> or the optional Identity integration) to be registered by the host.
     /// </remarks>
     public static IServiceCollection AddElarionBlobUploads(

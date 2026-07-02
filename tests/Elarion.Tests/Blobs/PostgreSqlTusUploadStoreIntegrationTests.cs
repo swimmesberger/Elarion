@@ -5,6 +5,7 @@ using Elarion.Blobs.Tus;
 using Elarion.Blobs.Tus.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -183,13 +184,13 @@ public sealed class PostgreSqlTusUploadStoreIntegrationTests(PostgreSqlTusFixtur
         (await blobStore.GetMetadataAsync(completed.BlobRef!.Value, ct))!.OwnerId.Should().Be("user-1");
     }
 
-    private static PostgreSqlTusUploadStore<TusBlobDbContext> CreateStore(
+    private PostgreSqlTusUploadStore<TusBlobDbContext> CreateStore(
         TusBlobDbContext context,
         out PostgreSqlBlobStore<TusBlobDbContext> blobStore,
         Action<TusOptions>? configure = null,
         Action<TusGcOptions>? configureGc = null) {
         blobStore = new PostgreSqlBlobStore<TusBlobDbContext>(
-            context, NullLogger<PostgreSqlBlobStore<TusBlobDbContext>>.Instance, TimeProvider.System);
+            context, fixture.DataSource, NullLogger<PostgreSqlBlobStore<TusBlobDbContext>>.Instance, TimeProvider.System);
         var options = new TusOptions();
         configure?.Invoke(options);
         var gcOptions = new TusGcOptions();
@@ -221,6 +222,9 @@ public sealed class PostgreSqlTusFixture : IAsyncLifetime {
 
     private string ConnectionString { get; set; } = "";
 
+    /// <summary>Gets the shared data source the blob store draws streaming-read connections from.</summary>
+    public NpgsqlDataSource DataSource { get; private set; } = null!;
+
     public async ValueTask InitializeAsync() {
         PostgreSqlContainer container;
         try {
@@ -234,12 +238,17 @@ public sealed class PostgreSqlTusFixture : IAsyncLifetime {
 
         _container = container;
         ConnectionString = container.GetConnectionString();
+        DataSource = NpgsqlDataSource.Create(ConnectionString);
         await using var context = CreateContext();
         await context.Database.EnsureCreatedAsync();
         IsAvailable = true;
     }
 
     public async ValueTask DisposeAsync() {
+        if (DataSource is not null) {
+            await DataSource.DisposeAsync();
+        }
+
         if (_container is not null) {
             await _container.DisposeAsync();
         }
@@ -252,7 +261,7 @@ public sealed class PostgreSqlTusFixture : IAsyncLifetime {
 /// <summary>EF Core context mapping both the blob tables and the tus staging table.</summary>
 public sealed class TusBlobDbContext(DbContextOptions<TusBlobDbContext> options) : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
-        modelBuilder.UsePostgreSqlBlobStorage();
+        modelBuilder.UseElarionBlobStorage();
         modelBuilder.UseElarionTusStorage();
     }
 }

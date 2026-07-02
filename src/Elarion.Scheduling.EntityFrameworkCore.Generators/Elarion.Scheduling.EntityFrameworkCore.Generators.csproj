@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Source generator for Elarion scheduler claims: emits the SchedulerClaimEntity DbSet and model-configuration seam from [GenerateElarionSchedulerClaims].</Description>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <!-- Not a standalone package; the analyzer DLL is bundled into the Elarion.Scheduling.EntityFrameworkCore package. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared incremental-generator helpers, compiled in (no cross-assembly reference). -->
+    <Compile Include="..\Elarion.Generators\Polyfills.cs" Link="Polyfills.cs" />
+    <Compile Include="..\Elarion.Generators\EquatableArray.cs" Link="EquatableArray.cs" />
+    <Compile Include="..\Elarion.Generators\SourceModels.cs" Link="SourceModels.cs" />
+    <Compile Include="..\Elarion.Generators\ElarionGeneratorConventions.cs" Link="ElarionGeneratorConventions.cs" />
+    <Compile Include="..\Elarion.Generators\SourceLiterals.cs" Link="SourceLiterals.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+</Project>

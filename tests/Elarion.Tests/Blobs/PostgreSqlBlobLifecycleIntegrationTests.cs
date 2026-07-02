@@ -195,8 +195,8 @@ public sealed class PostgreSqlBlobLifecycleIntegrationTests(PostgreSqlBlobStoreF
         return await CreateStore(context).SaveAsync(request, new MemoryStream(Bytes(256)), ct);
     }
 
-    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
+        new(context, fixture.DataSource, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
 
     private static Task<StoredBlob?> Row(
         IntegrationBlobDbContext context,
