@@ -69,6 +69,7 @@ using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
 using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
+using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
@@ -145,7 +146,8 @@ builder.Services.AddOpenTelemetry()
             SchedulerTelemetry.ActivitySourceName,
             HandlerCacheTelemetry.ActivitySourceName,
             ResilienceTelemetry.ActivitySourceName,
-            HandlerTelemetry.ActivitySourceName)
+            HandlerTelemetry.ActivitySourceName,
+            EventTelemetry.ActivitySourceName)
         .AddAspNetCoreInstrumentation()
         .AddOtlpExporter())
     .WithMetrics(m => m
@@ -154,7 +156,8 @@ builder.Services.AddOpenTelemetry()
             SchedulerTelemetry.MeterName,
             HandlerCacheTelemetry.MeterName,
             ResilienceTelemetry.MeterName,
-            HandlerTelemetry.MeterName)
+            HandlerTelemetry.MeterName,
+            EventTelemetry.MeterName)
         .AddAspNetCoreInstrumentation()
         .AddOtlpExporter());
 ```

@@ -28,6 +28,12 @@ public sealed class OutboxMessage
     /// <summary>Correlation identifier flowed to consumers via <see cref="Elarion.Abstractions.Messaging.IEventContext.CorrelationId"/>.</summary>
     public required Guid CorrelationId { get; init; }
 
+    /// <summary>
+    /// The publisher's W3C <c>traceparent</c> captured at publish time, or <c>null</c> when no trace was active.
+    /// Delivery parents its consume span on it so the after-commit consumers stay in the publishing operation's trace.
+    /// </summary>
+    public string? TraceParent { get; init; }
+
     /// <summary>The number of delivery attempts made so far.</summary>
     public int Attempts { get; set; }
 

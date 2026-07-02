@@ -52,6 +52,10 @@ public static class OutboxModelBuilderExtensions
             builder.Property(message => message.CorrelationId)
                 .HasColumnName("correlation_id");
 
+            builder.Property(message => message.TraceParent)
+                .HasColumnName("trace_parent")
+                .HasMaxLength(55);
+
             builder.Property(message => message.Attempts)
                 .HasColumnName("attempts");
 

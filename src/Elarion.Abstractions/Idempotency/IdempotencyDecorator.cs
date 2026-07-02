@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Pipeline;
 
@@ -72,13 +74,16 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
         var begin = await store.TryBeginAsync(storeKey, fingerprint, policy.ConflictBehavior, ct).ConfigureAwait(false);
         switch (begin.Status) {
             case IdempotencyBeginStatus.Replay:
+                RecordOutcome("replayed");
                 await scope.RollbackAsync(ct).ConfigureAwait(false);
                 return policy.Deserialize(begin.Payload!, jsonOptions);
             case IdempotencyBeginStatus.InProgress:
+                RecordOutcome("conflict");
                 await scope.RollbackAsync(ct).ConfigureAwait(false);
                 return TResponse.Failure(
                     AppError.Conflict("A request with this idempotency key is already being processed."));
             case IdempotencyBeginStatus.FingerprintMismatch:
+                RecordOutcome("fingerprint_mismatch");
                 await scope.RollbackAsync(ct).ConfigureAwait(false);
                 return TResponse.Failure(
                     AppError.BusinessRule("This idempotency key was already used with a different request."));
@@ -94,12 +99,14 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
         try {
             response = await inner.HandleAsync(request, ct).ConfigureAwait(false);
         } catch {
+            RecordOutcome("abandoned");
             await store.AbandonAsync(storeKey, ct).ConfigureAwait(false);
             await scope.RollbackAsync(ct).ConfigureAwait(false);
             throw;
         }
 
         if (response is IResultLike { IsSuccess: true }) {
+            RecordOutcome("completed");
             // The handler succeeded: finalize the key and commit uncancellably. A cancellation arriving now must
             // not roll back completed work and leave the key claimable again — that would re-run a done command.
             await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), isFailure: false, policy.Retention, CancellationToken.None)
@@ -112,6 +119,7 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
             // Discard the handler's business writes but keep the key row (claimed before the savepoint), then
             // record the definitive failure so a retry replays it — all in the one transaction. The outcome is
             // decided, so finalize uncancellably (see the success path above).
+            RecordOutcome("completed");
             await scope.RollbackToSavepointAsync(SavepointName, CancellationToken.None).ConfigureAwait(false);
             await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), isFailure: true, policy.Retention, CancellationToken.None)
                 .ConfigureAwait(false);
@@ -120,9 +128,19 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
         }
 
         // Transient / non-stored failure — discard the key so the same key stays retryable.
+        RecordOutcome("abandoned");
         await store.AbandonAsync(storeKey, ct).ConfigureAwait(false);
         await scope.RollbackAsync(ct).ConfigureAwait(false);
         return response;
+    }
+
+    /// <summary>
+    /// Surfaces the key resolution on the handler span and the idempotency counter — replays and conflicts are
+    /// otherwise invisible, since the transport sees an ordinary success/409.
+    /// </summary>
+    private static void RecordOutcome(string outcome) {
+        Activity.Current?.SetTag("elarion.idempotency.outcome", outcome);
+        HandlerTelemetry.RecordIdempotency(typeof(TRequest).Name, outcome);
     }
 
     private string? ResolveKey(TRequest request) {

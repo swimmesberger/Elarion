@@ -178,6 +178,15 @@ worker's "oldest undelivered first" scan stays a tiny indexed probe regardless o
 await retention purge. Filtered indexes are supported on PostgreSQL, SQL Server, and SQLite; on MySQL,
 supply an unfiltered index in your own model.
 
+### Tracing across the commit boundary
+
+Each outbox row persists the publisher's W3C `traceparent` (the `trace_parent` column), and delivery
+parents its `consume {event}` span on it — so in your tracing backend the after-commit consumers appear
+inside the trace of the command that published the event, even when delivery happens on another worker
+instance or after a restart. Delivery outcomes are also counted and timed, and failure logs carry the
+message's correlation id. Register `EventTelemetry` to collect the signals — see
+[Telemetry](/docs/capabilities/telemetry).
+
 <Callout type="info">
   **Serializer options.** `OutboxOptions.SerializerOptions` is `null` by default, so event payloads use the
   canonical [`IElarionJsonSerialization`](/docs/capabilities/serialization) — register each event DTO in a

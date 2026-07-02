@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Serialization;
@@ -120,7 +121,22 @@ public sealed class OutboxEventDispatcher
         var context = OutboxEventContext.Create(instance, eventType, message.CorrelationId);
         foreach (var descriptor in consumers)
         {
-            await descriptor.InvokeAsync!(serviceProvider, instance, context, ct).ConfigureAwait(false);
+            var startTimestamp = Stopwatch.GetTimestamp();
+            try
+            {
+                await descriptor.InvokeAsync!(serviceProvider, instance, context, ct).ConfigureAwait(false);
+                EventTelemetry.RecordConsumer(
+                    eventType.Name, descriptor.ServiceType.Name, "ok",
+                    Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The exception still propagates so the worker marks the message failed and retries it.
+                EventTelemetry.RecordConsumer(
+                    eventType.Name, descriptor.ServiceType.Name, "exception",
+                    Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                throw;
+            }
         }
 
         return OutboxDispatchOutcome.Delivered;

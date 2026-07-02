@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Pipeline;
 
 namespace Elarion.Abstractions.Features;
@@ -29,6 +31,10 @@ public sealed class FeatureGateDecorator<TRequest, TResponse>(
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         foreach (var gate in ResolveGates()) {
             if (!await IsSatisfiedAsync(gate, ct).ConfigureAwait(false)) {
+                // The wire response stays an opaque 404, but telemetry is operator-facing, so the
+                // closed gate is tagged on the handler span and counted per handler.
+                Activity.Current?.SetTag("elarion.feature_gate.outcome", "closed");
+                HandlerTelemetry.RecordFeatureGateClosed(metadata.HandlerType.Name);
                 return TResponse.Failure(AppError.NotFound(NotFoundMessage));
             }
         }

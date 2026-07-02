@@ -43,6 +43,7 @@ public sealed class SettingsConfigurationRefresher(
         var store = scope.ServiceProvider.GetRequiredService<ISettingsStore>();
         var entries = await store.GetAllAsync(SettingsScope.Global, cancellationToken).ConfigureAwait(false);
         provider.Apply(entries);
+        logger.LogDebug("Reloaded {Count} global setting(s) into configuration.", entries.Count);
     }
 
     /// <inheritdoc />
