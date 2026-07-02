@@ -104,9 +104,11 @@ public sealed class RecurringBillingJob(
 
 Every node runs the same source-generated job set, so without coordination each recurring job fires
 once **per node**. `Elarion.Scheduling.EntityFrameworkCore` closes that with per-occurrence claim
-rows over PostgreSQL ([ADR-0025](/docs/decisions)): right before executing a recurring occurrence, a
+rows over PostgreSQL (ADR-0025): right before executing a recurring occurrence, a
 node claims it in the `elarion_scheduler_claims` table, and exactly one node wins — the others record
-the occurrence as skipped (`claimed-elsewhere`) and continue.
+the occurrence as skipped (`claimed-elsewhere`) and continue. See
+[Multi-node coordination](/docs/capabilities/scheduling/multi-node) for the architecture, diagrams,
+and practical trade-offs.
 
 ```csharp
 // In Program.cs, next to AddElarionScheduler (either order):
@@ -134,4 +136,5 @@ follow-up phase of ADR-0025.
   <Card title="Overlap & misfire" href="/docs/capabilities/scheduling/overlap-and-misfire">What happens when runs collide or fall behind.</Card>
   <Card title="Runtime jobs" href="/docs/capabilities/scheduling/runtime-jobs">Typed one-off jobs scheduled at runtime with a payload.</Card>
   <Card title="Inspection" href="/docs/capabilities/scheduling/inspection">Snapshots, next-due times, and cancellation.</Card>
+  <Card title="Multi-node coordination" href="/docs/capabilities/scheduling/multi-node">How recurring jobs execute exactly once across a cluster, and why it matters.</Card>
 </Cards>

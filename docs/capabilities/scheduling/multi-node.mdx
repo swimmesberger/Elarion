@@ -1,0 +1,188 @@
+---
+title: Multi-node coordination
+description: How recurring jobs execute exactly once across a cluster — per-occurrence claims, the architecture behind them, and what you gain in practice.
+---
+
+Every node of your application runs the **same source-generated job set** — the scheduler registry is
+compiled into the binary, and all nodes run the same binary. Without coordination, that means every
+recurring job fires once **per node**: three replicas send the daily report three times.
+
+`Elarion.Scheduling.EntityFrameworkCore` fixes this with one idea:
+
+> **Before a node executes a recurring occurrence, it claims that occurrence in a shared database
+> table. Exactly one node wins the claim and runs the job; every other node skips it and moves on.**
+
+There is no leader, no election, no extra broker — the claim row *is* the coordination, using the
+PostgreSQL you already run (the same posture as the [outbox](/docs/capabilities/events/backends) and
+the [idempotency store](/docs/concepts/idempotency)). See
+[ADR-0025](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0025-distributed-scheduler-coordination.md)
+for the full decision record.
+
+## The architecture
+
+Each node keeps its complete local scheduler — timers, queues, overlap rules, telemetry. The only new
+piece is a single question asked at the very last moment before a run starts: *"may I?"*
+
+```text
+        Node A                                Node B
+┌──────────────────────┐             ┌──────────────────────┐
+│  InMemoryScheduler   │             │  InMemoryScheduler   │
+│                      │             │                      │
+│  timer loop          │             │  timer loop          │
+│  occurrence queue    │             │  occurrence queue    │
+│  overlap / misfire   │             │  overlap / misfire   │
+│  telemetry, inspector│             │  telemetry, inspector│
+│          │           │             │          │           │
+│   "may I run this    │             │   "may I run this    │
+│    occurrence?"      │             │    occurrence?"      │
+└──────────┼───────────┘             └──────────┼───────────┘
+           │  TryClaimAsync(job, due)           │  TryClaimAsync(job, due)
+           ▼                                    ▼
+        ┌──────────────────────────────────────────┐
+        │        PostgreSQL (your database)        │
+        │                                          │
+        │   elarion_scheduler_claims               │
+        │   ┌────────────┬────────────────┐        │
+        │   │ job_name   │ occurrence_utc │  ← PK  │
+        │   ├────────────┼────────────────┤        │
+        │   │ report     │ 03:00:00       │        │
+        │   │ cleanup    │ 03:05:00       │        │
+        │   └────────────┴────────────────┘        │
+        │   one row per fired occurrence           │
+        └──────────────────────────────────────────┘
+```
+
+The seam is `IScheduledOccurrenceCoordinator` (in `Elarion.Abstractions.Scheduling`). On a single
+node the default implementation answers "yes" instantly with no I/O, so nothing changes until you opt
+in.
+
+## One occurrence, two nodes
+
+Both nodes' clocks reach 03:00 and both dequeue the same cron occurrence of `report`. Both try to
+insert the same claim row; the table's primary key `(job_name, occurrence_utc)` guarantees only one
+insert succeeds:
+
+```text
+ Node A                    PostgreSQL                     Node B
+   │                           │                            │
+   │ INSERT claim              │                            │
+   │ (report, 03:00)           │              INSERT claim  │
+   ├──────────────────────────►│◄───────────────────────────┤
+   │                           │                            │
+   │        1 row — you win    │    0 rows — already taken  │
+   │◄──────────────────────────┼───────────────────────────►│
+   │                           │                            │
+   ▼                           │                            ▼
+ runs the job                  │                 records the occurrence as
+ (full local pipeline:         │                 Skipped("claimed-elsewhere")
+  scope, overlap, telemetry)   │                 and continues its chain
+```
+
+The losing node is not idle-forever — it simply skips *this* occurrence and keeps its own schedule
+chain running. If node A is later drained during a deploy, node B naturally wins the next claims.
+Work migrates between nodes automatically, one occurrence at a time, with no failover event.
+
+## Why the claim looks different per schedule kind
+
+A claim can only deduplicate what both nodes *agree on naming*. The schedule kinds differ in exactly
+that respect:
+
+```text
+ Cron "0 0 3 * * *" — wall-clock deterministic: every node computes the SAME instants
+ ──────────────────────────────────────────────────────────────────────────────
+ Node A:   03:00:00          04:00:00          05:00:00
+ Node B:   03:00:00          04:00:00          05:00:00
+              │                  │
+              └── identical keys ⇒ claim the EXACT SLOT (job, 03:00:00)
+
+ FixedRate "10m" — the grid is anchored at each node's own start time
+ ──────────────────────────────────────────────────────────────────────────────
+ Node A (started 09:02):   09:12      09:22      09:32
+ Node B (started 09:05):      09:15      09:25      09:35
+                              │◄─ 10m window ─►│
+                              └── keys never match ⇒ claim a WINDOW:
+                                  succeeds only if no claim for this job exists
+                                  within one interval before the due time
+```
+
+- **Cron** → *exact-slot claim*. A plain `INSERT … ON CONFLICT DO NOTHING`; the primary key
+  serializes any number of racers. Result: **exactly one run per cron occurrence, cluster-wide.**
+- **Fixed-rate / fixed-delay** → *window claim*. The due times are node-anchored and never align, so
+  the claim asks "has anyone run this job in the last interval?" A per-job PostgreSQL advisory lock
+  (`pg_advisory_xact_lock`) serializes concurrent claimants — two nodes checking simultaneously would
+  otherwise both see "no recent claim" and both run. Result: **at most one run per interval,
+  cluster-wide** — a 10-minute poller polls every ~10 minutes for the whole cluster instead of every
+  10 minutes *per node*.
+- **One-time startup schedules** are deliberately **not coordinated**: startup work (cache warm-up,
+  local initialization) is usually meant to run on every node. Cluster-wide "exactly once ever" work
+  belongs behind an [`[Idempotent]` handler](/docs/concepts/idempotency).
+
+## What you gain in practice
+
+**Scale out without auditing your jobs.** Going from one replica to three no longer means every
+nightly report, digest email, retention purge, and reconciliation sweep runs three times. You scale
+the web workload; the scheduled workload stays single.
+
+**No new infrastructure and no leader.** The alternative designs both cost more: dedicated job
+infrastructure (Quartz clustering, Hangfire) brings its own schema, dashboard, and operational
+surface; leader election needs lease renewal, failover detection, and has a "the leader just died"
+window where either nothing runs or two nodes think they lead. A claim row per occurrence has neither
+problem — coordination degrades *per occurrence*, never per cluster, and the "election" is one
+`INSERT` on the database your job was about to use anyway.
+
+**Deploys and crashes are non-events.** Because any node may win any occurrence, there is no
+scheduler node to drain, promote, or babysit. Kill a pod mid-deploy and the next occurrence simply
+fires on a surviving node.
+
+**It fails safe, not loud.** If the claims database is briefly unreachable, a node **skips** the
+occurrence instead of running unconfirmed (fail-closed) — duplicate suppression is the whole point,
+and a job that needs the database wouldn't have succeeded anyway. The next occurrence retries
+naturally.
+
+**You can see what happened.** A lost claim is recorded like any other skip — reason
+`claimed-elsewhere` — in the [inspector snapshot](/docs/capabilities/scheduling/inspection) and
+telemetry, so "why didn't this node run the job?" has a queryable answer instead of a mystery.
+
+**Zero cost until you need it.** The seam's local default claims everything synchronously with no
+I/O; single-node behavior is unchanged down to the byte, and no database table exists until you
+register the EF backend.
+
+## Honest limitations
+
+- **At-most-once per occurrence.** If the winning node crashes *mid-run*, that occurrence is not
+  re-executed elsewhere (the other nodes have already moved on). The next occurrence fires normally.
+  Jobs whose single occurrence must never be lost should be idempotent and/or re-derive their work
+  from state (as the framework's own sweepers do).
+- **Interval kinds dedupe by window, not slot** — across a pathological pause, two runs can land
+  closer than one interval (one late, one on time). Use cron for hard "once per calendar slot"
+  semantics.
+- **Runtime one-off jobs (`IJobScheduler`) are not durable yet** — they remain in-memory per node;
+  durable one-shot scheduling is the planned phase 2 of ADR-0025.
+- **PostgreSQL-specific** (`ON CONFLICT`, advisory locks), like the idempotency store.
+
+## Wiring
+
+```csharp
+// Program.cs — next to AddElarionScheduler (either order):
+builder.Services.AddElarionScheduler(builder.Configuration);
+builder.Services.AddElarionSchedulerEntityFrameworkCore<AppDbContext>();
+
+// The claims table, on the context (or hand-written in OnModelCreating):
+[GenerateDbSets]
+[GenerateElarionSchedulerClaims]                     // or: modelBuilder.UseElarionSchedulerClaims();
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+```
+
+`UseElarionSchedulerClaims` takes the usual `tableName`/`schema`/`snakeCase` overrides. A hosted
+purge worker deletes claim rows past `SchedulerClaimsOptions.ClaimRetention` (default 7 days — keep
+it comfortably above your largest fixed-rate/fixed-delay interval, since a purged claim can no longer
+suppress a duplicate inside its window):
+
+```csharp
+builder.Services.AddElarionSchedulerEntityFrameworkCore<AppDbContext>(options => {
+    options.ClaimRetention = TimeSpan.FromDays(3);
+    options.PurgeInterval = TimeSpan.FromMinutes(30);
+});
+```
