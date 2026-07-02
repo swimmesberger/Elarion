@@ -51,6 +51,27 @@ await scheduler.CancelJobAsync(handle.JobId, ct);
 When a handler enqueues background work and needs to return an operation id, return `handle.JobId`.
 That is the id callers pass back to `CancelJobAsync`.
 
+## Which node runs it — and what a restart costs
+
+A runtime job lives entirely on **the node that accepted the `EnqueueAsync`/`ScheduleAsync` call**:
+it is enqueued into that process's in-memory queue, no other node ever learns it exists, and it is
+therefore trivially duplicate-free — but also **lost if that node restarts, deploys, or crashes
+before (or while) it runs**. Two practical consequences:
+
+- `ScheduleAsync(payload, dueTime)` far in the future is fragile in deploy-heavy environments: a
+  pod recycled before the due time silently discards the job.
+- `CancelJobAsync`/`CancelRunAsync` and the [inspector](/docs/capabilities/scheduling/inspection)
+  only know about jobs held by the node answering the call — behind a load balancer, a cancel
+  request landing on a different node returns `false`.
+
+Use runtime jobs for **short-lived, loss-tolerable work anchored to the current process** ("resize
+this image", "send this email now-ish"). For work that must reliably happen later, publish an
+[outbox integration event](/docs/capabilities/events/backends) — durable, cluster-executed,
+at-least-once — or wait for the durable one-shot store planned as ADR-0025 phase 2, which inverts
+the placement model (the receiving node records the job; whichever node claims it at due time
+executes it). See [Execution semantics & positioning](/docs/capabilities/scheduling/semantics) for
+the full decision matrix.
+
 ## JobId vs. RunId
 
 These two identifiers serve different purposes:

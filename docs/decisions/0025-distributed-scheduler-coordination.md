@@ -108,7 +108,27 @@ One claim row per fired occurrence per job accrues (a one-second cron writes ~86
 worker deletes claims older than `ClaimRetention` (default 7 days) in batches; the retention must exceed the
 largest dedupe window in use (enforced by documentation — windows are typically minutes, retention days).
 
-## Phase 2 (designed, not implemented): durable one-shot jobs
+## Scale positioning
+
+Elarion's defaults target **small-to-mid deployments: ~1–10 nodes, vertical-first, on the one PostgreSQL the
+application already runs**. The claim design above is sized for exactly that tier (a one-second cron across
+ten nodes is ten tiny inserts per second) and deliberately does not chase larger tiers — a deployment beyond
+it replaces the strategy through the seams (`IScheduledOccurrenceCoordinator` today, the phase-2 store seam
+later) rather than the default growing configuration surface.
+
+For the same reason, **adopting a dedicated job engine (Quartz.NET, Hangfire, TickerQ) as the framework
+default was evaluated and rejected**: Quartz and Hangfire are built on runtime reflection / serialized type
+names and expression-tree serialization — incompatible with the repo's AOT posture and source-generated
+invocation descriptors — and all three would make every scheduler user inherit their schema, storage
+opinions, and release/license cadence, against ADR-0017. Their coordination models also validate this
+design's shape: Quartz serializes trigger acquisition through database locks (`QRTZ_LOCKS`,
+`SELECT … FOR UPDATE` — locking *the scheduler* where we lock *the occurrence*), Hangfire uses competing
+workers with invisibility timeouts (at-least-once — a different contract than our at-most-once), and TickerQ
+independently landed on "the EF Core row is the lock". A Quartz/Hangfire-backed adapter package behind the
+seams remains the supported escape hatch for teams beyond the target tier; teams needing queue-style
+background processing at volume should run Hangfire *beside* Elarion rather than through it.
+
+## Phase 2 (designed, not implemented): durable one-shot jobs and downtime catch-up
 
 Runtime `ScheduleAsync`/`EnqueueAsync` jobs get a `elarion_scheduler_jobs` table: serialized payload
 (canonical JSON via `IElarionJsonSerialization`, typed through the generated descriptor so AOT-safe),
@@ -116,6 +136,39 @@ due time, attempt counters, and outbox-style `lock_id`/`locked_until` lease clai
 finalize; deferred retries update the row instead of re-queuing in memory, so retries survive restarts, and
 `IJobSchedulerInspector` gains a store-backed view. This is deliberately the outbox delivery shape — the
 code to copy already exists — but it is a separate, larger change and ships separately.
+
+Decisions already taken for phase 2, and the scenarios that drove them:
+
+- **Placement inverts.** Today a runtime job executes on the node that accepted the call and dies with it
+  (the "schedule for tomorrow, pod recycled tonight" scenario). With the row store, the receiving node only
+  *records* the job; **whichever node claims it at due time executes it** — work survives deploys and
+  migrates off dead nodes, and cancellation/inspection become cluster-wide (the row is the state, not a
+  dictionary on one node).
+- **Durable one-shots are at-least-once**, unlike recurring occurrences (at-most-once). A leased row whose
+  owner crashes is still visible to the other nodes, so an expired lease is reclaimed and the job re-runs —
+  the outbox trade. Durable one-shot jobs must therefore be idempotent (or `[Idempotent]`-guarded); the
+  docs must say so as loudly as the outbox docs do.
+- **Recurring downtime catch-up joins phase 2.** The claims model suppresses duplicates but does not
+  guarantee execution: if the whole cluster is down over 03:00, the 03:00 occurrence never fires (each node
+  re-derives its schedule from *now* at start). This is the one capability worth adopting from Quartz's
+  persistent triggers — and it matters *most* at the 1–10 node tier, where a maintenance window routinely
+  takes down the entire cluster. Design sketch: a durable last-completed-occurrence per recurring job (the
+  claims table nearly is one already); at startup/claim time, a node that finds the last completed
+  occurrence older than the previous grid slot applies the job's existing misfire policy (`FireOnce` /
+  `Skip` / `CatchUp`) against the *durable* record instead of only in-process state.
+
+Open questions deferred to phase 2 implementation:
+
+- **Does `EnqueueAsync` (run-now) go through the table?** Current lean: no — the caller's node is
+  demonstrably alive and a database round-trip per fire-and-forget is real overhead; keep the in-memory
+  fast path as the default with durability opt-in via `ScheduledJobOptions` (pay-for-what-you-use).
+- **Payload versioning** — a durable row may be claimed by a node running a newer binary; the canonical
+  JSON pipeline tolerates additive change, but the ADR for phase 2 should state the compatibility contract.
+- **Retention and dead-lettering** for rows that exhaust their attempts (the outbox's `MaxDeliveryAttempts`
+  shape, plus an inspector surface for "why didn't my job run").
+- **Whether the durable store seam subsumes `IScheduledOccurrenceCoordinator`** or composes beside it —
+  a store-backed scheduler could carry claims as a by-product; keep the coordinator seam public either way,
+  since it is also the natural adapter point for external engines.
 
 ## Consequences
 

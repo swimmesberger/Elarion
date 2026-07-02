@@ -5,6 +5,7 @@
     "overlap-and-misfire",
     "runtime-jobs",
     "inspection",
+    "semantics",
     "multi-node"
   ]
 }
