@@ -76,8 +76,9 @@ inject the header:
   `@opentelemetry/api` (or a hand-rolled `traceparent` generator) to start a span per request/batch, inject
   trace-context headers, and record the outcome. See
   [TypeScript client › Tracing with OpenTelemetry](/docs/capabilities/transports/typescript-client#tracing-with-opentelemetry).
-- **REST / OpenAPI client** — instrument the generated `openapi-fetch` client with
-  `@opentelemetry/instrumentation-fetch` (auto-injects `traceparent` on the global `fetch`) or an `openapi-fetch`
-  middleware. See [OpenAPI › Trace client requests](/docs/capabilities/transports/openapi#trace-client-requests-with-opentelemetry).
+- **REST / OpenAPI client** — the recommended [`@hey-api/openapi-ts`](https://heyapi.dev) client is `fetch`-based,
+  so `@opentelemetry/instrumentation-fetch` (browser) or `@opentelemetry/instrumentation-undici` (Node) auto-injects
+  `traceparent`; a request interceptor can also inject it by hand. See
+  [OpenAPI › Trace client requests](/docs/capabilities/transports/openapi#trace-client-requests-with-opentelemetry).
 
 Either way the generated client never imports a tracing SDK, so client-side tracing stays a host decision.

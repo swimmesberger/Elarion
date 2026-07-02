@@ -111,17 +111,19 @@ An OpenAPI document works with the whole client-generation ecosystem, so Elarion
 generator — pick the off-the-shelf tool that fits your stack.
 
 <Callout type="info">
-**Recommended: [`openapi-typescript`](https://openapi-ts.dev) + [`openapi-fetch`](https://openapi-ts.dev/openapi-fetch/).**
-It matches the JSON-RPC client's ethos — portable `fetch`, a ~6&nbsp;kB runtime, and **no generated method code to
-review** (the types come from the document, the client is one tiny library). It type-checks in the browser and
-under NodeNext, exactly like the generated JSON-RPC client.
+**Recommended: [`@hey-api/openapi-ts`](https://heyapi.dev).** It generates a **discoverable SDK grouped by
+module** — you type `sdk.` and IntelliSense walks you to `sdk.clients.getClient(...)`, the same ergonomics as the
+JSON-RPC client. Elarion emits the module as an OpenAPI **tag** and a clean **operationId**, so the grouping lands
+on module → operation with no extra work. It is built on `fetch` (so it runs in the browser and Node, and works
+with OpenTelemetry), takes request interceptors for cross-cutting headers, and has an optional **Zod** plugin —
+mirroring the JSON-RPC client's typed + validated feel.
 </Callout>
 
 | Tool | Emits | Reach for it when |
 | --- | --- | --- |
-| **`openapi-typescript` + `openapi-fetch`** (recommended) | Types only + a ~6&nbsp;kB typed `fetch` wrapper | A TypeScript front end or BFF, minimal dependencies, no generated call code |
-| [`@hey-api/openapi-ts`](https://heyapi.dev) | Types + generated service methods + optional Zod | You want ready-made `createClient().getClient(...)` methods and runtime validation baked in |
-| [Kiota](https://learn.microsoft.com/openapi/kiota/) | A full SDK in C#, TypeScript, Python, Go, Java, … | You need a non-TypeScript client, or a first-party Microsoft-supported generator |
+| **[`@hey-api/openapi-ts`](https://heyapi.dev)** (recommended) | A discoverable SDK grouped by module (`sdk.clients.getClient(...)`), `fetch`-based, optional Zod | You want the JSON-RPC client's `.`-drill-down over REST, in the browser or Node |
+| [`openapi-typescript`](https://openapi-ts.dev) + [`openapi-fetch`](https://openapi-ts.dev/openapi-fetch/) | Types only + a ~6&nbsp;kB typed `fetch` wrapper (`api.GET("/clients/{id}", …)`) | You want the tiniest runtime and no generated method code — the operation is the path string |
+| [Kiota](https://learn.microsoft.com/openapi/kiota/) | A full SDK in C#, TypeScript, Python, Go, Java, … with a single fluent root (`client.clients.byClientId(id).get()`) | You need a non-TypeScript client, or a first-party Microsoft-supported generator |
 
 ### Generate
 
@@ -135,101 +137,119 @@ curl http://localhost:5000/openapi/v1.json -o openapi.json
 ```
 </Step>
 <Step>
-**Install** the generator (dev) and the runtime client:
+**Install** the generator (dev) and the `fetch` runtime client:
 
 ```bash
-npm install -D openapi-typescript
-npm install openapi-fetch
+npm install -D @hey-api/openapi-ts
+npm install @hey-api/client-fetch
 ```
 </Step>
 <Step>
-**Add a script and generate** the types. Re-run it whenever the API changes (wire it into CI next to the JSON-RPC
-`gen:rpc` step):
+**Configure and generate.** Group operations by their tag so the SDK nests by module. Re-run `gen:http` whenever
+the API changes (wire it into CI next to the JSON-RPC `gen:rpc` step):
+
+```ts
+// openapi-ts.config.ts
+import { defineConfig } from "@hey-api/openapi-ts";
+
+export default defineConfig({
+  input: "./openapi.json",
+  output: "./src/generated",
+  plugins: [
+    "@hey-api/client-fetch",
+    "zod", // optional runtime validation, like the JSON-RPC client's Zod schemas
+    {
+      name: "@hey-api/sdk",
+      // Nest by the module tag Elarion emits → sdk.<module>.<operation>.
+      operations: {
+        strategy: "byTags",
+        nesting: (operation) => [operation.tags?.[0] ?? "default", operation.id],
+      },
+    },
+  ],
+});
+```
 
 ```jsonc
 // package.json
-{
-  "scripts": {
-    "gen:http": "openapi-typescript ./openapi.json -o ./src/generated/http-types.ts"
-  }
-}
-```
-
-```bash
-npm run gen:http
+{ "scripts": { "gen:http": "openapi-ts" } }
 ```
 </Step>
 </Steps>
 
+<Callout type="info">
+Hey API's `operations` grouping options move occasionally — treat the config above as a starting point and check
+the [SDK plugin docs](https://heyapi.dev/openapi-ts/plugins/sdk) for the current option names. The exact generated
+export/nesting names come from your `operationId`s and tags.
+</Callout>
+
 ### Use
 
-Create the client once with your base URL, then every call is typed from the path — path/query params, request
-body, and response are all inferred, and errors come back in the result instead of throwing:
+Configure the client's base URL once, then drill in: `sdk.` lists the modules, each module lists its operations,
+and params, body, and response are all typed. Errors come back in the result (`{ data, error }`) instead of
+throwing:
 
 ```ts
-import createClient from "openapi-fetch";
-import type { paths } from "./generated/http-types";
+import { client } from "./generated/client.gen";
+import { sdk } from "./generated/sdk.gen";
 
-const api = createClient<paths>({ baseUrl: "/" });
+client.setConfig({ baseUrl: "/" });
 
-// GET /clients/{id} — path params are required and typed.
-const { data, error } = await api.GET("/clients/{id}", {
-  params: { path: { id } },
-});
+// sdk.clients.getClient — discovered by typing `sdk.clients.`
+const { data, error } = await sdk.clients.getClient({ path: { id } });
 if (error) {
   // `error` is the typed RFC 7807 ProblemDetails body from ProducesElarionErrors().
   console.error(error.title, error.status);
 } else {
-  console.log(data.name); // `data` is the CreateClient response, fully typed.
+  console.log(data.name); // `data` is the response DTO, fully typed.
 }
 
-// POST /clients — the body is typed to the handler's Command.
-const created = await api.POST("/clients", {
-  body: { name: "Acme", email: "billing@acme.test" },
-});
+// A command — the body is typed to the handler's Command.
+const created = await sdk.clients.createClient({ body: { name: "Acme", email: "billing@acme.test" } });
 ```
 
-Because the types are generated from the same document your server produces, a renamed field or a changed route
-is a compile error in the client — the end-to-end typing the JSON-RPC client gives you, over REST.
+The client is built on `fetch`, so the same generated SDK runs in the **browser** and in **Node** (18+, on the
+global `fetch`; pass a custom `fetch` via `client.setConfig({ fetch })` for other runtimes). Because the SDK is
+generated from the same document your server produces, a renamed field or a changed route is a compile error in
+the client — the end-to-end typing the JSON-RPC client gives you, over REST.
+
+<Callout type="info">
+Prefer the tiniest possible runtime and don't mind addressing operations by path string? `openapi-typescript`
++ `openapi-fetch` stays a fine choice — `createClient<paths>({ baseUrl }).GET("/clients/{id}", { params: { path:
+{ id } } })`. It just trades the `sdk.` drill-down for a ~6&nbsp;kB library and no generated method code.
+</Callout>
 
 ### Automatic idempotency keys
 
 The JSON-RPC client auto-attaches an idempotency key for `[Idempotent]` methods. Reproduce that over HTTP with a
-small, reusable `openapi-fetch` middleware that keys off the `x-elarion-idempotent` extension. First emit the set
-of idempotent operations from the document (a ~15-line build step — read each operation, keep the `{method, path}`
-of those whose `x-elarion-idempotent` is `true`), then attach the middleware once:
+request **interceptor** that keys off the `x-elarion-idempotent` extension. First emit the idempotent operations
+from the document (a ~15-line build step — read each operation, keep the `{method, path-template}` of those whose
+`x-elarion-idempotent` is `true`, turning each template into a `RegExp`), then register the interceptor once:
 
 ```ts
 // idempotency.ts
-import type { Middleware } from "openapi-fetch";
+import { client } from "./generated/client.gen";
 
-// { method, path } pairs where the OpenAPI operation carries x-elarion-idempotent: true.
+// [{ method, pattern }] where the OpenAPI operation carries x-elarion-idempotent: true.
 import { idempotentOperations } from "./generated/idempotent-operations";
 
-const isIdempotent = (method: string, path: string) =>
-  idempotentOperations.has(`${method.toUpperCase()} ${path}`);
+const newKey = () => crypto.randomUUID();
 
-export function idempotencyMiddleware(newKey: () => string = () => crypto.randomUUID()): Middleware {
-  return {
-    onRequest({ request, schemaPath }) {
-      // schemaPath is the templated route, e.g. "/clients"; request.method is the verb.
-      if (isIdempotent(request.method, schemaPath) && !request.headers.has("Idempotency-Key")) {
-        request.headers.set("Idempotency-Key", newKey());
-      }
-      return request;
-    },
-  };
-}
+client.interceptors.request.use((request) => {
+  const path = new URL(request.url).pathname;
+  const idempotent = idempotentOperations.some(
+    (op) => op.method === request.method && op.pattern.test(path),
+  );
+  if (idempotent && !request.headers.has("Idempotency-Key")) {
+    request.headers.set("Idempotency-Key", newKey());
+  }
+  return request;
+});
 ```
 
-```ts
-// Attach it once; every idempotent call now carries a key by default.
-api.use(idempotencyMiddleware());
-```
-
-That gives an idempotent HTTP call the same exactly-once-on-retry behavior as the JSON-RPC client — attach a key
-by default, pass your own to reuse across your retries, or skip it per call — with the `Idempotency-Key` header
-that is idiomatic for HTTP rather than JSON-RPC's `params._meta`.
+That gives an idempotent HTTP call the same exactly-once-on-retry behavior as the JSON-RPC client — a key attached
+by default, or pass your own via a per-call header to reuse it across your retries — with the `Idempotency-Key`
+header that is idiomatic for HTTP rather than JSON-RPC's `params._meta`.
 
 ## Trace client requests with OpenTelemetry
 
@@ -239,10 +259,12 @@ the W3C `traceparent` header from the incoming request, so the REST endpoint and
 under whatever client span sent it (see [Telemetry &amp; observability](/docs/capabilities/telemetry)). The
 client's job is to **create that span and inject the header**.
 
-For the `openapi-fetch` client the simplest path is
-[`@opentelemetry/instrumentation-fetch`](https://www.npmjs.com/package/@opentelemetry/instrumentation-fetch),
-which instruments the global `fetch` that `openapi-fetch` uses — every request gets a client span and a
-`traceparent`, with no per-call code:
+Because the hey-api client is built on `fetch`, the simplest path is to instrument `fetch` itself — every request
+gets a client span and a `traceparent`, with no per-call code. In the **browser** use
+[`@opentelemetry/instrumentation-fetch`](https://www.npmjs.com/package/@opentelemetry/instrumentation-fetch); in
+**Node** (18+) the global `fetch` is undici-based, so use
+[`@opentelemetry/instrumentation-undici`](https://www.npmjs.com/package/@opentelemetry/instrumentation-undici)
+instead. The browser setup:
 
 ```ts
 import { WebTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-web";
@@ -266,21 +288,18 @@ registerInstrumentations({
 });
 ```
 
-Prefer to own span creation (or skip the `fetch` auto-instrumentation)? Inject the active context yourself with an
-`openapi-fetch` middleware — it composes with the idempotency middleware above:
+Prefer to own propagation (or skip the `fetch` auto-instrumentation)? Inject the active context yourself with a
+request **interceptor** — it composes with the idempotency interceptor above and works the same in the browser and
+Node:
 
 ```ts
 import { context, propagation } from "@opentelemetry/api";
-import type { Middleware } from "openapi-fetch";
+import { client } from "./generated/client.gen";
 
-const tracingMiddleware: Middleware = {
-  onRequest({ request }) {
-    propagation.inject(context.active(), request.headers, { set: (h, k, v) => h.set(k, v) });
-    return request;
-  },
-};
-
-// api.use(tracingMiddleware);
+client.interceptors.request.use((request) => {
+  propagation.inject(context.active(), request.headers, { set: (h, k, v) => h.set(k, v) });
+  return request;
+});
 ```
 
 The **JSON-RPC client** carries a dedicated `RpcInstrumentation` hook instead of relying on `fetch`
