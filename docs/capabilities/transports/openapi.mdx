@@ -231,6 +231,62 @@ That gives an idempotent HTTP call the same exactly-once-on-retry behavior as th
 by default, pass your own to reuse across your retries, or skip it per call — with the `Idempotency-Key` header
 that is idiomatic for HTTP rather than JSON-RPC's `params._meta`.
 
+## Trace client requests with OpenTelemetry
+
+A generated client call should appear in the same distributed trace as the server work it triggers. The server
+already does its part: an ASP.NET Core host running OpenTelemetry with `AddAspNetCoreInstrumentation()` extracts
+the W3C `traceparent` header from the incoming request, so the REST endpoint and the handler-pipeline spans nest
+under whatever client span sent it (see [Telemetry &amp; observability](/docs/capabilities/telemetry)). The
+client's job is to **create that span and inject the header**.
+
+For the `openapi-fetch` client the simplest path is
+[`@opentelemetry/instrumentation-fetch`](https://www.npmjs.com/package/@opentelemetry/instrumentation-fetch),
+which instruments the global `fetch` that `openapi-fetch` uses — every request gets a client span and a
+`traceparent`, with no per-call code:
+
+```ts
+import { WebTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-web";
+import { ZoneContextManager } from "@opentelemetry/context-zone";
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+
+const provider = new WebTracerProvider({
+  spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url: "/v1/traces" }))],
+});
+provider.register({ contextManager: new ZoneContextManager() });
+
+registerInstrumentations({
+  instrumentations: [
+    new FetchInstrumentation({
+      // Send the trace header to your API origin. Cross-origin also needs the server's CORS to allow it.
+      propagateTraceHeaderCorsUrls: [/./],
+    }),
+  ],
+});
+```
+
+Prefer to own span creation (or skip the `fetch` auto-instrumentation)? Inject the active context yourself with an
+`openapi-fetch` middleware — it composes with the idempotency middleware above:
+
+```ts
+import { context, propagation } from "@opentelemetry/api";
+import type { Middleware } from "openapi-fetch";
+
+const tracingMiddleware: Middleware = {
+  onRequest({ request }) {
+    propagation.inject(context.active(), request.headers, { set: (h, k, v) => h.set(k, v) });
+    return request;
+  },
+};
+
+// api.use(tracingMiddleware);
+```
+
+The **JSON-RPC client** carries a dedicated `RpcInstrumentation` hook instead of relying on `fetch`
+instrumentation — see
+[TypeScript client › Tracing with OpenTelemetry](/docs/capabilities/transports/typescript-client#tracing-with-opentelemetry).
+
 ## HTTP or JSON-RPC?
 
 Both remain first-class — the choice is [per-handler](/docs/capabilities/transports/http-endpoints#http-or-json-rpc),
