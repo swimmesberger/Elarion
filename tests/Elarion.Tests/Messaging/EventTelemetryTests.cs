@@ -212,8 +212,8 @@ public sealed class EventTelemetryTests {
             services.AddSingleton(descriptor);
         }
 
-        services.AddInMemoryDomainEventBus();
-        services.AddInMemoryIntegrationEventBus();
+        services.AddElarionDomainEventBus();
+        services.AddElarionInMemoryIntegrationEventBus();
         return services.BuildServiceProvider();
     }
 
