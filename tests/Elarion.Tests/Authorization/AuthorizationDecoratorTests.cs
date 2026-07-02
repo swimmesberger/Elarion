@@ -1,9 +1,12 @@
+using System.Diagnostics;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Authorization;
+using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Pipeline;
 using Elarion.Authorization;
+using Elarion.Tests.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -148,6 +151,36 @@ public sealed class AuthorizationDecoratorTests {
         var result = await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Denial_TagsHandlerSpanAndRecordsDeniedMetric() {
+        using var meters = new MeterCollector(HandlerTelemetry.MeterName);
+        using var handlerActivity = new Activity("handle").Start();
+        var user = new FakeCurrentUser { IsAuthenticated = true };
+        var decorator = Decorate(typeof(RequirePermissionHandler), user);
+
+        var result = await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
+
+        result.Error.Kind.Should().Be(ErrorKind.Forbidden);
+        handlerActivity.GetTagItem("elarion.authorization.outcome").Should().Be("forbidden");
+        meters.Measurements.Should().Contain(m =>
+            m.InstrumentName == "handler.authorization.denied.count" &&
+            m.HasTag("elarion.handler", nameof(RequirePermissionHandler)) &&
+            m.HasTag("elarion.authorization.outcome", "forbidden"));
+    }
+
+    [Fact]
+    public async Task UnauthenticatedDenial_RecordsUnauthorizedOutcome() {
+        using var meters = new MeterCollector(HandlerTelemetry.MeterName);
+        var decorator = Decorate(typeof(RequirePermissionHandler), new FakeCurrentUser { IsAuthenticated = false });
+
+        await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
+
+        meters.Measurements.Should().Contain(m =>
+            m.InstrumentName == "handler.authorization.denied.count" &&
+            m.HasTag("elarion.handler", nameof(RequirePermissionHandler)) &&
+            m.HasTag("elarion.authorization.outcome", "unauthorized"));
     }
 
     [Fact]

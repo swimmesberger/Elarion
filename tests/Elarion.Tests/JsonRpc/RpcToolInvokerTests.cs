@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
@@ -6,6 +7,7 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Elarion.JsonRpc.Mcp;
+using Elarion.Tests.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -164,5 +166,64 @@ public sealed class RpcToolInvokerTests {
 
         result.IsError.Should().BeTrue();
         result.ErrorCode.Should().Be(-32601);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_Success_EmitsMcpSpanAndMetrics() {
+        using var activities = new ActivityCollector(JsonRpcTelemetry.ActivitySourceName);
+        using var meters = new MeterCollector(JsonRpcTelemetry.MeterName);
+        var (dispatcher, services) = Build();
+
+        await RpcToolInvoker.InvokeAsync(
+            dispatcher, HandlerTransports.All, "echo", Args(new { name = "World" }), services, Options,
+            ct: TestContext.Current.CancellationToken);
+
+        var activity = activities.Activities.Should()
+            .ContainSingle(a => a.OperationName == "mcp echo").Subject;
+        activity.GetTag("rpc.system.name").Should().Be("mcp");
+        activity.GetTag("rpc.method").Should().Be("echo");
+        activity.GetTag("rpc.response.status_code").Should().Be("OK");
+
+        meters.Measurements.Should().Contain(m =>
+            m.InstrumentName == "rpc.server.request.count" &&
+            m.HasTag("rpc.system.name", "mcp") &&
+            m.HasTag("rpc.method", "echo") &&
+            m.HasTag("rpc.response.status_code", "OK"));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_HandlerError_EmitsErroredSpanWithCode() {
+        using var activities = new ActivityCollector(JsonRpcTelemetry.ActivitySourceName);
+        var (dispatcher, services) = Build();
+
+        await RpcToolInvoker.InvokeAsync(
+            dispatcher, HandlerTransports.All, "echo", Args(new { name = "missing" }), services, Options,
+            ct: TestContext.Current.CancellationToken);
+
+        var activity = activities.Activities.Should()
+            .ContainSingle(a => a.OperationName == "mcp echo" && a.Status == ActivityStatusCode.Error).Subject;
+        activity.GetTag("rpc.response.status_code").Should().Be("-32001");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_UnknownMethod_EmitsBoundedSentinelTelemetry() {
+        using var activities = new ActivityCollector(JsonRpcTelemetry.ActivitySourceName);
+        using var meters = new MeterCollector(JsonRpcTelemetry.MeterName);
+        var (dispatcher, services) = Build();
+
+        await RpcToolInvoker.InvokeAsync(
+            dispatcher, HandlerTransports.All, "does.not.exist", null, services, Options,
+            ct: TestContext.Current.CancellationToken);
+
+        var activity = activities.Activities.Should()
+            .ContainSingle(a => a.OperationName == "mcp _unregistered").Subject;
+        activity.GetTag("rpc.response.status_code").Should().Be("-32601");
+        activity.Status.Should().Be(ActivityStatusCode.Error);
+
+        meters.Measurements.Should().Contain(m =>
+            m.InstrumentName == "rpc.server.request.count" &&
+            m.HasTag("rpc.system.name", "mcp") &&
+            m.HasTag("rpc.method", "_unregistered") &&
+            m.HasTag("rpc.response.status_code", "-32601"));
     }
 }

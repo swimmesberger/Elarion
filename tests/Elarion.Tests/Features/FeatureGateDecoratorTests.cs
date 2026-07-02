@@ -1,7 +1,10 @@
+using System.Diagnostics;
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Pipeline;
+using Elarion.Tests.Services;
 using Xunit;
 
 namespace Elarion.Tests.Features;
@@ -99,6 +102,21 @@ public sealed class FeatureGateDecoratorTests {
 
         result.IsSuccess.Should().BeTrue();
         flags.Queried.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClosedGate_TagsHandlerSpanAndRecordsClosedMetric() {
+        using var meters = new MeterCollector(HandlerTelemetry.MeterName);
+        using var handlerActivity = new Activity("handle").Start();
+        var decorator = Decorate(typeof(SingleGateHandler), new FakeFeatureFlags(("new-billing", false)));
+
+        var result = await decorator.HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
+
+        result.Error.Kind.Should().Be(ErrorKind.NotFound);
+        handlerActivity.GetTagItem("elarion.feature_gate.outcome").Should().Be("closed");
+        meters.Measurements.Should().Contain(m =>
+            m.InstrumentName == "handler.feature_gate.closed.count" &&
+            m.HasTag("elarion.handler", nameof(SingleGateHandler)));
     }
 
     [Fact]

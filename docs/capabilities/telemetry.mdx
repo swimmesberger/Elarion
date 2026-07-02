@@ -13,6 +13,7 @@ framework lightweight while making every framework-owned boundary observable.
 ```csharp
 using Elarion.AspNetCore;
 using Elarion.Abstractions.Diagnostics;
+using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Scheduling;
 using Elarion.Caching;
 using Elarion.Resilience;
@@ -25,7 +26,8 @@ builder.Services
             SchedulerTelemetry.ActivitySourceName,
             HandlerCacheTelemetry.ActivitySourceName,
             ResilienceTelemetry.ActivitySourceName,
-            HandlerTelemetry.ActivitySourceName)
+            HandlerTelemetry.ActivitySourceName,
+            EventTelemetry.ActivitySourceName)
         /* add exporters */)
     .WithMetrics(metrics => metrics
         .AddMeter(
@@ -33,7 +35,8 @@ builder.Services
             SchedulerTelemetry.MeterName,
             HandlerCacheTelemetry.MeterName,
             ResilienceTelemetry.MeterName,
-            HandlerTelemetry.MeterName)
+            HandlerTelemetry.MeterName,
+            EventTelemetry.MeterName)
         /* add exporters */);
 ```
 
@@ -42,10 +45,12 @@ builder.Services
 | Surface | Source / meter | Coverage |
 | --- | --- | --- |
 | JSON-RPC | `JsonRpcTelemetry` (`JsonRpc`) | Every request dispatch creates a span: single calls, notifications, batch items, invalid versions, unknown methods, invalid params, application errors, unhandled exceptions, invalid envelopes, parse errors, and batch-level failures. Registered methods use their canonical name; invalid/unregistered ones use bounded sentinels to avoid unbounded metric cardinality. Tags are bounded: method, response/error code, version, and batch index/size. |
+| MCP | `JsonRpcTelemetry` (`JsonRpc`) | MCP tool calls share the JSON-RPC source/meter — one registration covers both adapters over the shared handler bus. Every tool invocation creates a span (`mcp {method}`) and request count/duration metrics distinguished by `rpc.system.name: "mcp"`, covering success, unknown tools (bounded `_unregistered` sentinel), invalid params, application errors, and unhandled exceptions. |
+| Messaging | `EventTelemetry` (`Elarion.Messaging`) | Both event planes and every delivery tier. Domain publishes create a span that parents the inline consumers; integration events capture the publisher's trace context at publish time — in the in-memory envelope or as a persisted `traceparent` on the outbox row — so the after-commit consume span stays in the publishing operation's trace, across restarts and worker instances for the outbox. Metrics: publish counts by event type/plane, consumer invocation count/duration by consumer and outcome, and outbox delivery count/duration by outcome. Failure logs carry the correlation id. |
 | Scheduler | `SchedulerTelemetry` (`Elarion.Scheduling`) | Schedule/enqueue/cancel operations and job executions create spans. Runtime-scheduled jobs preserve scheduling trace context into the later execution span when possible. Fixed-rate, fixed-delay, cron, skipped, misfired/coalesced, retry, cancellation, and failure outcomes are trace-visible. |
 | Handler cache | `HandlerCacheTelemetry` (`Elarion.Caching`) | Cache get/create spans expose the precise outcome — `miss-factory-executed`, `miss-non-cacheable`, or `cached-or-coalesced`. Factory execution events, payload policy errors, and invalidation spans are trace-visible. Tags avoid full keys, raw user ids, and request values. |
 | Resilience | `ResilienceTelemetry` (`Elarion.Resilience`) | Named policy execution spans expose final outcome and duration. Retry and timeout callbacks add span events under the default Microsoft/Polly-backed runtime. |
-| Handler | `HandlerTelemetry` (`Elarion.Handlers`) | Every generated handler is wrapped in a `TracingDecorator` as the outermost decorator, emitting one `Internal` span per invocation that parents any cache/resilience/pipeline child spans, plus execution count/duration metrics. Bounded tags only: handler name, request type name, and `ok`/`error`/`exception` outcome — never request or response payloads. |
+| Handler | `HandlerTelemetry` (`Elarion.Handlers`) | Every generated handler is wrapped in a `TracingDecorator` as the outermost decorator, emitting one `Internal` span per invocation that parents any cache/resilience/pipeline child spans, plus execution count/duration metrics. The pipeline gates surface their decisions on the same handler span and meter: authorization denials tag `elarion.authorization.outcome` (`unauthorized`/`forbidden`) and count denials per handler, a closed feature gate tags `elarion.feature_gate.outcome` and counts per handler (the wire response stays an opaque 404), and idempotent handlers tag `elarion.idempotency.outcome` (`completed`/`replayed`/`conflict`/`fingerprint_mismatch`/`abandoned`) and count outcomes per request type. Bounded tags only: handler name, request type name, and outcome — never request or response payloads. |
 
 ## Handler tracing
 

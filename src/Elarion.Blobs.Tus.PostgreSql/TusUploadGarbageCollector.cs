@@ -49,8 +49,13 @@ public sealed class TusUploadGarbageCollector(
         await using var scope = scopeFactory.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<ITusUploadStore>();
         var olderThan = timeProvider.GetUtcNow() - options.SafetyMargin;
-        return await store
+        var deleted = await store
             .DeleteExpiredAsync(olderThan, options.BatchSize, cancellationToken)
             .ConfigureAwait(false);
+        if (deleted > 0) {
+            logger.LogInformation("tus session garbage collection deleted {Count} expired incomplete session(s).", deleted);
+        }
+
+        return deleted;
     }
 }

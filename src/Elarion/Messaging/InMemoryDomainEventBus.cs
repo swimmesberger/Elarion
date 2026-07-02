@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Elarion.Abstractions.Messaging;
 
 namespace Elarion.Messaging;
@@ -28,6 +29,9 @@ internal sealed class InMemoryDomainEventBus(
         where TEvent : IDomainEvent {
         ArgumentNullException.ThrowIfNull(@event);
 
+        var eventName = typeof(TEvent).Name;
+        EventTelemetry.RecordPublish(eventName, EventPlane.Domain);
+
         var subscribers = registry.GetDomainSubscribers(typeof(TEvent));
         if (subscribers.Length == 0) {
             return;
@@ -44,19 +48,40 @@ internal sealed class InMemoryDomainEventBus(
 
         PublishDepth.Value = depth;
         try {
+            // The publish span parents each inline consumer's own handler span (same scope, same trace).
+            using var activity = EventTelemetry.Source.StartActivity($"publish {eventName}", ActivityKind.Internal);
+            if (activity is not null) {
+                activity.SetTag("messaging.event.type", eventName);
+                activity.SetTag("messaging.event.plane", "domain");
+                activity.SetTag("messaging.subscriber.count", subscribers.Length);
+            }
+
             var context = new EventContext<TEvent>(@event, Guid.NewGuid(), EventPlane.Domain);
             List<Exception>? failures = null;
             foreach (var descriptor in subscribers) {
+                var startTimestamp = Stopwatch.GetTimestamp();
                 try {
                     await descriptor.InvokeAsync!(serviceProvider, @event, context, ct).ConfigureAwait(false);
+                    EventTelemetry.RecordConsumer(
+                        eventName, descriptor.ServiceType.Name, "ok",
+                        Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) {
                     // Run every subscriber, then surface all failures so one publish fails atomically.
                     (failures ??= []).Add(ex);
+                    EventTelemetry.RecordConsumer(
+                        eventName, descriptor.ServiceType.Name, "exception",
+                        Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                    activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
+                        { "exception.type", ex.GetType().FullName },
+                        { "exception.message", ex.Message },
+                        { "messaging.consumer", descriptor.ServiceType.Name }
+                    }));
                 }
             }
 
             if (failures is not null) {
+                activity?.SetStatus(ActivityStatusCode.Error, "One or more domain event consumers failed.");
                 throw failures.Count == 1 ? failures[0] : new AggregateException(failures);
             }
         }

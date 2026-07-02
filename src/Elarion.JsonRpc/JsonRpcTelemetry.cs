@@ -44,9 +44,17 @@ public static class JsonRpcTelemetry {
             description: "Duration of JSON-RPC request handling");
 
     /// <summary>Records the common request count and duration metrics for one JSON-RPC outcome.</summary>
-    public static void RecordRequest(string method, string statusCode, double elapsedMilliseconds) {
+    public static void RecordRequest(string method, string statusCode, double elapsedMilliseconds) =>
+        RecordRequest(method, statusCode, elapsedMilliseconds, system: "jsonrpc");
+
+    /// <summary>
+    /// Records the common request count and duration metrics for one RPC outcome, tagged with the given
+    /// <c>rpc.system.name</c>. MCP tool calls share this meter with <c>system: "mcp"</c> so both adapters over the
+    /// shared handler bus are collected under one registration.
+    /// </summary>
+    public static void RecordRequest(string method, string statusCode, double elapsedMilliseconds, string system) {
         var tags = new TagList {
-            { "rpc.system.name", "jsonrpc" },
+            { "rpc.system.name", system },
             { "rpc.method", NormalizeMethod(method) },
             { "rpc.response.status_code", statusCode }
         };

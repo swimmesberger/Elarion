@@ -58,8 +58,13 @@ public sealed class BlobGarbageCollector(
         await using var scope = scopeFactory.CreateAsyncScope();
         var lifecycle = scope.ServiceProvider.GetRequiredService<IBlobLifecycle>();
         var olderThan = timeProvider.GetUtcNow() - options.SafetyMargin;
-        return await lifecycle
+        var deleted = await lifecycle
             .DeleteExpiredPendingAsync(olderThan, options.BatchSize, cancellationToken)
             .ConfigureAwait(false);
+        if (deleted > 0) {
+            logger.LogInformation("Blob garbage collection deleted {Count} expired pending blob(s).", deleted);
+        }
+
+        return deleted;
     }
 }

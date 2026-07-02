@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Serialization;
@@ -27,6 +28,8 @@ public sealed class OutboxIntegrationEventBus(
     {
         ArgumentNullException.ThrowIfNull(@event);
 
+        EventTelemetry.RecordPublish(typeof(TEvent).Name, EventPlane.Integration);
+
         var payload = JsonSerializer.Serialize(@event, options.SerializerOptions ?? jsonSerialization.Options);
         store.Append(new OutboxMessage
         {
@@ -35,7 +38,10 @@ public sealed class OutboxIntegrationEventBus(
             EventType = typeof(TEvent).FullName
                 ?? throw new InvalidOperationException($"Integration event '{typeof(TEvent)}' has no full name and cannot be persisted."),
             Payload = payload,
-            CorrelationId = Guid.NewGuid()
+            CorrelationId = Guid.NewGuid(),
+            // Activity.Id is the W3C traceparent; persisting it keeps the after-commit delivery span
+            // in the publishing operation's trace even across a restart or another worker instance.
+            TraceParent = Activity.Current?.Id
         });
 
         return ValueTask.CompletedTask;

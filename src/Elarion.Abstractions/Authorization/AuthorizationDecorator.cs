@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Pipeline;
 
 namespace Elarion.Abstractions.Authorization;
@@ -48,9 +50,16 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
         }
 
         var error = await authorizer.AuthorizeAsync(requirements, request, ct).ConfigureAwait(false);
-        return error is not null
-            ? TResponse.Failure(error)
-            : await inner.HandleAsync(request, ct).ConfigureAwait(false);
+        if (error is not null) {
+            // Denials are a security-relevant signal: tag the handler span and count by outcome so
+            // 401/403 rates are observable per handler without logging caller identity.
+            var outcome = error.Kind == ErrorKind.Unauthorized ? "unauthorized" : "forbidden";
+            Activity.Current?.SetTag("elarion.authorization.outcome", outcome);
+            HandlerTelemetry.RecordAuthorizationDenied(metadata.HandlerType.Name, outcome);
+            return TResponse.Failure(error);
+        }
+
+        return await inner.HandleAsync(request, ct).ConfigureAwait(false);
     }
 
     private AuthorizationRequirements ResolveRequirements() {

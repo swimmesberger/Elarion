@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Elarion.Abstractions.Messaging;
 using Elarion.Messaging;
 
@@ -12,8 +13,12 @@ internal sealed class InMemoryIntegrationEventBus(EventDispatchScope scope) : II
         where TEvent : IIntegrationEvent {
         ArgumentNullException.ThrowIfNull(@event);
 
+        EventTelemetry.RecordPublish(typeof(TEvent).Name, EventPlane.Integration);
+
         var context = new EventContext<TEvent>(@event, Guid.NewGuid(), EventPlane.Integration);
-        scope.Add(new EventEnvelope(@event, typeof(TEvent), context));
+        // Capture the publisher's trace context now — delivery happens after commit on a pump thread
+        // where Activity.Current is long gone.
+        scope.Add(new EventEnvelope(@event, typeof(TEvent), context, Activity.Current?.Context ?? default));
         return ValueTask.CompletedTask;
     }
 }

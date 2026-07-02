@@ -37,6 +37,24 @@ public static class HandlerTelemetry {
             unit: "ms",
             description: "Duration of traced handler executions");
 
+    /// <summary>Counts authorization denials by handler and outcome (<c>unauthorized</c>/<c>forbidden</c>).</summary>
+    public static readonly Counter<long> AuthorizationDeniedCount =
+        MeterInstance.CreateCounter<long>(
+            "handler.authorization.denied.count",
+            description: "Total number of handler executions denied by the authorization gate");
+
+    /// <summary>Counts handler executions short-circuited by a closed feature gate.</summary>
+    public static readonly Counter<long> FeatureGateClosedCount =
+        MeterInstance.CreateCounter<long>(
+            "handler.feature_gate.closed.count",
+            description: "Total number of handler executions short-circuited by a closed feature gate");
+
+    /// <summary>Counts idempotency-key resolutions by request type and outcome.</summary>
+    public static readonly Counter<long> IdempotencyCount =
+        MeterInstance.CreateCounter<long>(
+            "handler.idempotency.count",
+            description: "Total number of idempotent handler executions by key outcome");
+
     /// <summary>Records a traced handler execution metric tagged with bounded handler name and outcome.</summary>
     public static void RecordExecution(string handler, string outcome, double elapsedMilliseconds) {
         var tags = new TagList {
@@ -46,4 +64,22 @@ public static class HandlerTelemetry {
         ExecutionCount.Add(1, tags);
         ExecutionDuration.Record(elapsedMilliseconds, tags);
     }
+
+    /// <summary>Records one authorization denial tagged with the bounded handler name and outcome.</summary>
+    public static void RecordAuthorizationDenied(string handler, string outcome) =>
+        AuthorizationDeniedCount.Add(1, new TagList {
+            { "elarion.handler", handler },
+            { "elarion.authorization.outcome", outcome }
+        });
+
+    /// <summary>Records one feature-gate short-circuit tagged with the bounded handler name.</summary>
+    public static void RecordFeatureGateClosed(string handler) =>
+        FeatureGateClosedCount.Add(1, new TagList { { "elarion.handler", handler } });
+
+    /// <summary>Records one idempotency-key resolution tagged with the bounded request type name and outcome.</summary>
+    public static void RecordIdempotency(string requestType, string outcome) =>
+        IdempotencyCount.Add(1, new TagList {
+            { "elarion.handler.request_type", requestType },
+            { "elarion.idempotency.outcome", outcome }
+        });
 }
