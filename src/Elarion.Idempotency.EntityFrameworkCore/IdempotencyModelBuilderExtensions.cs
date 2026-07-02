@@ -5,17 +5,31 @@ namespace Elarion.Idempotency.EntityFrameworkCore;
 /// <summary>Registers the Elarion idempotency-keys table on a <see cref="ModelBuilder"/>.</summary>
 public static class IdempotencyModelBuilderExtensions {
     /// <summary>
-    /// Maps <see cref="IdempotencyKeyEntity"/> to the <c>elarion_idempotency_keys</c> table with the composite
-    /// unique key <c>(operation, scope, owner, key)</c>, snake_case columns, a <c>version</c> concurrency token,
-    /// and a secondary index over completed rows to keep the retention purge an indexed probe. Called for you by
+    /// Maps <see cref="IdempotencyKeyEntity"/> to the <c>elarion_idempotency_keys</c> table (by default) with the
+    /// composite unique key <c>(operation, scope, owner, key)</c>, a <c>version</c> concurrency token, and a
+    /// secondary index over completed rows to keep the retention purge an indexed probe. Called for you by
     /// the <c>[GenerateElarionIdempotencyKeys]</c> generator through the EF model-configuration seam; call it by
     /// hand in <c>OnModelCreating</c> otherwise (alongside, for example, <c>UseElarionOutbox()</c>).
     /// </summary>
-    public static ModelBuilder ApplyElarionIdempotencyKeys(this ModelBuilder modelBuilder, bool snakeCase = true) {
+    /// <param name="modelBuilder">The model builder to configure.</param>
+    /// <param name="tableName">
+    /// The table name, or <see langword="null"/> for the default (<c>elarion_idempotency_keys</c> /
+    /// <c>ElarionIdempotencyKeys</c> depending on <paramref name="snakeCase"/>).
+    /// </param>
+    /// <param name="schema">The schema, or <see langword="null"/> to use the provider's default schema.</param>
+    /// <param name="snakeCase">Whether to use snake_case table/column/index names. Defaults to <see langword="true"/>.</param>
+    public static ModelBuilder ApplyElarionIdempotencyKeys(
+        this ModelBuilder modelBuilder,
+        string? tableName = null,
+        string? schema = null,
+        bool snakeCase = true) {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
+        var table = tableName ?? (snakeCase ? "elarion_idempotency_keys" : "ElarionIdempotencyKeys");
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+
         modelBuilder.Entity<IdempotencyKeyEntity>(builder => {
-            builder.ToTable(snakeCase ? "elarion_idempotency_keys" : "ElarionIdempotencyKeys");
+            builder.ToTable(table, schema);
             builder.HasKey(entity => new { entity.Operation, entity.Scope, entity.Owner, entity.Key });
 
             builder.Property(entity => entity.Operation).HasColumnName(snakeCase ? "operation" : "Operation").HasMaxLength(256);
@@ -33,7 +47,7 @@ public static class IdempotencyModelBuilderExtensions {
             builder.Property(entity => entity.Version).HasColumnName(snakeCase ? "version" : "Version").IsConcurrencyToken();
 
             builder.HasIndex(entity => new { entity.Completed, entity.ExpiresOnUtc })
-                .HasDatabaseName(snakeCase ? "ix_elarion_idempotency_keys_purge" : "IX_ElarionIdempotencyKeys_Purge");
+                .HasDatabaseName(snakeCase ? $"ix_{table}_purge" : $"IX_{table}_Purge");
         });
 
         return modelBuilder;

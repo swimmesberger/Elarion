@@ -35,7 +35,7 @@ dependency lives in its own opt-in package, so the dependency is pulled only whe
 | Package | Provides | Heavy dependency |
 | --- | --- | --- |
 | `Elarion.Caching` | `HybridHandlerCache` + `AddElarionHandlerCaching` | `Microsoft.Extensions.Caching.Hybrid` |
-| `Elarion.Resilience` | `MicrosoftResiliencePipelineRunner` + `AddMicrosoftResilienceRuntime` | `Microsoft.Extensions.Resilience` |
+| `Elarion.Resilience` | `MicrosoftResiliencePipelineRunner` + `AddElarionResilience` | `Microsoft.Extensions.Resilience` |
 | `Elarion.FeatureFlags.OpenFeature` / `Elarion.FeatureFlags.FeatureManagement` | `IFeatureFlagService` backends | OpenFeature / Microsoft.FeatureManagement |
 
 The moved files keep their original namespaces (`Elarion.Caching`, `Elarion.Resilience`), so consuming code
@@ -49,11 +49,11 @@ resilience subsystem. The split follows the dependency weight:
 - **Stays in core (dependency-light):** the `IResiliencePolicyCatalog` in-memory catalog and policy *metadata*
   registration (`AddElarionResiliencePolicyCatalog`, `AddElarionResiliencePolicyMetadata`). The scheduler needs
   the catalog to resolve a job's retry policy; it carries no Polly dependency.
-- **Moves to `Elarion.Resilience` (heavy):** the Polly-backed pipeline *runner* and `AddMicrosoftResilienceRuntime`.
+- **Moves to `Elarion.Resilience` (heavy):** the Polly-backed pipeline *runner* and `AddElarionResilience`.
 
-`AddInMemoryScheduler` therefore registers the catalog, not the runner. The runner is resolved lazily and only
+`AddElarionScheduler` therefore registers the catalog, not the runner. The runner is resolved lazily and only
 on the deferred/inline-retry path, so basic scheduling works without `Elarion.Resilience`; resilient execution
-(and `[Resilient]` handlers) opts in by referencing the package and calling `AddMicrosoftResilienceRuntime()`.
+(and `[Resilient]` handlers) opts in by referencing the package and calling `AddElarionResilience()`.
 
 ## Consequences
 
@@ -68,12 +68,12 @@ on the deferred/inline-retry path, so basic scheduling works without `Elarion.Re
 - **Breaking package layout (pre-1.0, acceptable):** an app that uses handler caching now references
   `Elarion.Caching`; one that uses `[Resilient]` handlers or deferred scheduler retries references
   `Elarion.Resilience`. The registration calls and namespaces are unchanged.
-- `AddInMemoryScheduler` no longer auto-wires the Polly runner. A host that relies on deferred-retry scheduling
-  must add `Elarion.Resilience` + `AddMicrosoftResilienceRuntime()` (the Billing sample already does).
+- `AddElarionScheduler` no longer auto-wires the Polly runner. A host that relies on deferred-retry scheduling
+  must add `Elarion.Resilience` + `AddElarionResilience()` (the Billing sample already does).
 
 ## Implementation
 
 - `Elarion.csproj` drops `Microsoft.Extensions.Caching.Hybrid` and `Microsoft.Extensions.Resilience`.
 - `src/Elarion.Caching/` and `src/Elarion.Resilience/` hold the moved defaults; `InMemoryResiliencePolicyCatalog`
   and the catalog/metadata registration stay in `src/Elarion/Resilience/`.
-- `SchedulerServiceCollectionExtensions.AddInMemoryScheduler` calls `AddElarionResiliencePolicyCatalog()`.
+- `SchedulerServiceCollectionExtensions.AddElarionScheduler` calls `AddElarionResiliencePolicyCatalog()`.

@@ -23,16 +23,16 @@ export function CopyCommand({ command, className }: { command: string; className
       onClick={copy}
       aria-label="Copy command"
       className={cn(
-        'group flex w-full items-center justify-between gap-4 rounded-xl border border-fd-border bg-fd-card/60 px-4 py-3 text-left font-mono text-sm transition-colors hover:border-azure/50',
+        'group flex w-full items-center justify-between gap-3 rounded-[4px] border border-(--line) bg-fd-card px-4 py-3 text-left font-mono text-[0.82rem] transition-colors hover:border-fd-primary/50',
         className,
       )}
     >
-      <span className="flex items-center gap-2.5 overflow-x-auto">
-        <span className="select-none text-aqua">$</span>
+      <span className="flex items-center gap-2.5 overflow-x-auto whitespace-nowrap">
+        <span className="select-none text-fd-primary">$</span>
         <span className="text-fd-foreground">{command}</span>
       </span>
       <span className="shrink-0 text-fd-muted-foreground transition-colors group-hover:text-fd-foreground">
-        {copied ? <Check className="size-4 text-aqua" /> : <Copy className="size-4" />}
+        {copied ? <Check className="size-4 text-fd-primary" /> : <Copy className="size-4" />}
       </span>
     </button>
   );

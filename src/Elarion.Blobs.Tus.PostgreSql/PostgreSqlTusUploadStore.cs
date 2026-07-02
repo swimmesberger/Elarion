@@ -1,4 +1,8 @@
+using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Elarion.Blobs.Tus.PostgreSql;
 
@@ -74,12 +78,10 @@ public sealed class PostgreSqlTusUploadStore<TDbContext>(
 
         // Conditional append: only advances a row still at the expected offset and not yet finalized, so a
         // concurrent or replayed PATCH affects zero rows and is reported as an offset conflict.
-        var affected = await dbContext.Database.ExecuteSqlInterpolatedAsync(
-            $"""
-            UPDATE tus_uploads
-            SET data = data || {bytes}, upload_offset = upload_offset + {length}
-            WHERE id = {uploadId} AND upload_offset = {offset} AND blob_id IS NULL
-            """,
+        var sql = AppendSqlCache.GetOrAdd(dbContext.Model, static (_, ctx) => BuildAppendSql(ctx), dbContext);
+        var affected = await dbContext.Database.ExecuteSqlRawAsync(
+            sql,
+            [bytes, length, uploadId, offset],
             cancellationToken);
 
         if (affected == 0) {
@@ -181,6 +183,40 @@ public sealed class PostgreSqlTusUploadStore<TDbContext>(
                 await transaction.DisposeAsync();
             }
         }
+    }
+
+    // The append SQL is built from the EF model (not hard-coded identifiers) so the UseElarionTusStorage
+    // table/schema overrides and the snake-case toggle apply to the raw conditional-append path too. Built
+    // once per model and reused.
+    private static readonly ConcurrentDictionary<IModel, string> AppendSqlCache = new();
+
+    private static string BuildAppendSql(DbContext context) {
+        var entityType = context.Model.FindEntityType(typeof(TusUploadRow))
+            ?? throw new InvalidOperationException(
+                "The tus upload entity is not mapped. Call modelBuilder.UseElarionTusStorage() in OnModelCreating.");
+        var sqlHelper = context.GetService<ISqlGenerationHelper>();
+
+        var tableName = entityType.GetTableName()
+            ?? throw new InvalidOperationException("The tus upload entity is not mapped to a table.");
+        var schema = entityType.GetSchema();
+        var storeObject = StoreObjectIdentifier.Table(tableName, schema);
+
+        string Column(string propertyName) {
+            var property = entityType.FindProperty(propertyName)
+                ?? throw new InvalidOperationException($"The {nameof(TusUploadRow)}.{propertyName} property is not mapped.");
+            var columnName = property.GetColumnName(storeObject)
+                ?? throw new InvalidOperationException($"The {nameof(TusUploadRow)}.{propertyName} property has no column.");
+            return sqlHelper.DelimitIdentifier(columnName);
+        }
+
+        var table = sqlHelper.DelimitIdentifier(tableName, schema);
+        var data = Column(nameof(TusUploadRow.Data));
+        var uploadOffset = Column(nameof(TusUploadRow.UploadOffset));
+        var id = Column(nameof(TusUploadRow.Id));
+        var blobId = Column(nameof(TusUploadRow.BlobId));
+
+        return $"UPDATE {table} SET {data} = {data} || {{0}}, {uploadOffset} = {uploadOffset} + {{1}} " +
+            $"WHERE {id} = {{2}} AND {uploadOffset} = {{3}} AND {blobId} IS NULL";
     }
 
     private static TusUpload Map(TusUploadRow row, long offset, string? blobId) =>

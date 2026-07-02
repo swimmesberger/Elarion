@@ -40,6 +40,9 @@ public sealed class IdempotencyKeyPurgeService(
     private async Task PurgeAsync(CancellationToken ct) {
         await using var scope = scopeFactory.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IIdempotencyStore>();
-        await store.PurgeCompletedAsync(timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        var purged = await store.PurgeCompletedAsync(timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        if (purged > 0) {
+            logger.LogInformation("Idempotency-key retention purge deleted {Count} expired record(s).", purged);
+        }
     }
 }

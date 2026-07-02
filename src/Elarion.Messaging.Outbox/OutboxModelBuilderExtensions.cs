@@ -9,63 +9,76 @@ public static class OutboxModelBuilderExtensions
 {
     /// <summary>
     /// Adds the <see cref="OutboxMessage"/> table to the EF Core model. Call from <c>OnModelCreating</c> on the context
-    /// that owns the business entities so the outbox row commits in the same transaction.
+    /// that owns the business entities so the outbox row commits in the same transaction — or annotate the context with
+    /// <c>[GenerateElarionOutbox]</c> and let the bundled generator call this for you.
     /// </summary>
     /// <param name="modelBuilder">The model builder to configure.</param>
-    /// <param name="tableName">The table name. Defaults to <c>elarion_outbox_messages</c>.</param>
+    /// <param name="tableName">
+    /// The table name, or <see langword="null"/> for the default (<c>elarion_outbox_messages</c> /
+    /// <c>ElarionOutboxMessages</c> depending on <paramref name="snakeCase"/>).
+    /// </param>
     /// <param name="schema">The schema, or <see langword="null"/> to use the provider's default schema.</param>
+    /// <param name="snakeCase">Whether to use snake_case table/column names. Defaults to <see langword="true"/>.</param>
     /// <returns>The same model builder for chaining.</returns>
     public static ModelBuilder UseElarionOutbox(
         this ModelBuilder modelBuilder,
-        string tableName = "elarion_outbox_messages",
-        string? schema = null)
+        string? tableName = null,
+        string? schema = null,
+        bool snakeCase = true)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+
+        var table = tableName ?? (snakeCase ? "elarion_outbox_messages" : "ElarionOutboxMessages");
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
 
         modelBuilder.Entity<OutboxMessage>(builder =>
         {
-            builder.ToTable(tableName, schema);
+            builder.ToTable(table, schema);
             builder.HasKey(message => message.Id);
 
             // Partial index over pending rows only: the worker's "oldest undelivered first" scan stays a tiny indexed
             // probe regardless of how many delivered rows await retention purge. Filtered indexes are supported by
             // PostgreSQL, SQL Server, and SQLite; on MySQL, replace this with an unfiltered index in your own model.
+            // The PascalCase filter quotes the identifier because unquoted identifiers fold to lower case on PostgreSQL.
             builder.HasIndex(message => message.OccurredOnUtc)
-                .HasFilter("processed_on_utc IS NULL");
+                .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
 
             builder.Property(message => message.Id)
-                .HasColumnName("id")
+                .HasColumnName(snakeCase ? "id" : "Id")
                 .ValueGeneratedNever();
 
             builder.Property(message => message.OccurredOnUtc)
-                .HasColumnName("occurred_on_utc");
+                .HasColumnName(snakeCase ? "occurred_on_utc" : "OccurredOnUtc");
 
             builder.Property(message => message.EventType)
-                .HasColumnName("event_type")
+                .HasColumnName(snakeCase ? "event_type" : "EventType")
                 .IsRequired();
 
             builder.Property(message => message.Payload)
-                .HasColumnName("payload")
+                .HasColumnName(snakeCase ? "payload" : "Payload")
                 .IsRequired();
 
             builder.Property(message => message.CorrelationId)
-                .HasColumnName("correlation_id");
+                .HasColumnName(snakeCase ? "correlation_id" : "CorrelationId");
+
+            builder.Property(message => message.TraceParent)
+                .HasColumnName("trace_parent")
+                .HasMaxLength(55);
 
             builder.Property(message => message.Attempts)
-                .HasColumnName("attempts");
+                .HasColumnName(snakeCase ? "attempts" : "Attempts");
 
             builder.Property(message => message.ProcessedOnUtc)
-                .HasColumnName("processed_on_utc");
+                .HasColumnName(snakeCase ? "processed_on_utc" : "ProcessedOnUtc");
 
             builder.Property(message => message.LockId)
-                .HasColumnName("lock_id");
+                .HasColumnName(snakeCase ? "lock_id" : "LockId");
 
             builder.Property(message => message.LockedUntilUtc)
-                .HasColumnName("locked_until_utc");
+                .HasColumnName(snakeCase ? "locked_until_utc" : "LockedUntilUtc");
 
             builder.Property(message => message.Error)
-                .HasColumnName("error");
+                .HasColumnName(snakeCase ? "error" : "Error");
         });
 
         return modelBuilder;

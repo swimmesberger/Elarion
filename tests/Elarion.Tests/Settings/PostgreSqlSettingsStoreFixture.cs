@@ -19,7 +19,8 @@ public sealed class PostgreSqlSettingsStoreFixture : IAsyncLifetime {
     /// <summary>Gets the reason the integration tests are skipped when <see cref="IsAvailable"/> is false.</summary>
     public string SkipReason { get; private set; } = "";
 
-    private string ConnectionString { get; set; } = "";
+    /// <summary>Gets the container connection string, for tests that open their own connections.</summary>
+    public string ConnectionString { get; private set; } = "";
 
     public async ValueTask InitializeAsync() {
         PostgreSqlContainer container;

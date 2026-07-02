@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using Elarion.Abstractions.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -92,6 +94,20 @@ public sealed class OutboxDeliveryService(
 
     private async Task DeliverAsync(IOutboxStore store, Guid lockId, OutboxMessage message, CancellationToken ct)
     {
+        // Parent the consume span on the traceparent persisted at publish time, so delivery stays in the
+        // publishing operation's trace even on another worker instance or after a restart.
+        ActivityContext.TryParse(message.TraceParent, null, isRemote: true, out var traceParent);
+        using var activity = EventTelemetry.Source.StartActivity(
+            $"consume {message.EventType}", ActivityKind.Internal, traceParent);
+        if (activity is not null)
+        {
+            activity.SetTag("messaging.event.type", message.EventType);
+            activity.SetTag("messaging.event.plane", "integration");
+            activity.SetTag("messaging.correlation_id", message.CorrelationId);
+            activity.SetTag("messaging.outbox.attempt", message.Attempts + 1);
+        }
+
+        var startTimestamp = Stopwatch.GetTimestamp();
         try
         {
             OutboxDispatchOutcome outcome;
@@ -114,6 +130,8 @@ public sealed class OutboxDeliveryService(
                     LogLeaseLost(message);
                 }
 
+                EventTelemetry.RecordDelivery(
+                    message.EventType, "unresolvable", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
                 return;
             }
 
@@ -121,6 +139,9 @@ public sealed class OutboxDeliveryService(
             {
                 LogLeaseLost(message);
             }
+
+            EventTelemetry.RecordDelivery(
+                message.EventType, "delivered", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -129,11 +150,19 @@ public sealed class OutboxDeliveryService(
         }
         catch (Exception ex)
         {
+            activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
+                { "exception.type", ex.GetType().FullName },
+                { "exception.message", ex.Message },
+            }));
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            EventTelemetry.RecordDelivery(
+                message.EventType, "failed", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
             logger.LogError(
                 ex,
-                "Delivery of outbox message {MessageId} ({EventType}) failed on attempt {Attempt}.",
+                "Delivery of outbox message {MessageId} ({EventType}, correlation {CorrelationId}) failed on attempt {Attempt}.",
                 message.Id,
                 message.EventType,
+                message.CorrelationId,
                 message.Attempts + 1);
             var retryVisibleAfter = timeProvider.GetUtcNow() + ComputeBackoff(message.Attempts + 1);
             if (!await store.MarkFailedAsync(message.Id, lockId, Describe(ex), retryVisibleAfter, ct).ConfigureAwait(false))
@@ -181,7 +210,11 @@ public sealed class OutboxDeliveryService(
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
-        await store.PurgeProcessedAsync(timeProvider.GetUtcNow() - retention, ct).ConfigureAwait(false);
+        var purged = await store.PurgeProcessedAsync(timeProvider.GetUtcNow() - retention, ct).ConfigureAwait(false);
+        if (purged > 0)
+        {
+            logger.LogInformation("Outbox retention purge deleted {Count} processed message(s).", purged);
+        }
     }
 
     private static string Describe(Exception ex)

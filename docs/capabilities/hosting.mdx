@@ -53,7 +53,7 @@ builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<AppDbContext>(
 
 builder.Services.AddMyAppApplicationScheduledJobs();
 builder.Services.AddMyAppApplicationResiliencePolicies();
-builder.Services.AddInMemoryScheduler(builder.Configuration);
+builder.Services.AddElarionScheduler(builder.Configuration);
 builder.AddMyAppPlatformCapabilities();
 // Also contributes every enabled module's source-generated JSON context to the canonical serializer.
 builder.Services.AddElarion(builder.Configuration);

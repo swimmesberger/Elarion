@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
@@ -57,9 +58,16 @@ public static class RpcToolInvoker {
         JsonSerializerOptions serializerOptions,
         DispatchScopeContext? context = null,
         CancellationToken ct = default) {
+        var startTimestamp = Stopwatch.GetTimestamp();
+
         if (!dispatcher.TryGetRoute(methodName, transport, out var route)) {
+            // Unregistered names are unbounded caller input, so metrics use the same sentinel as JSON-RPC.
+            using var unregisteredActivity = StartToolActivity("_unregistered");
+            RecordError(unregisteredActivity, "_unregistered", "-32601", "Method not found", startTimestamp);
             return new RpcToolResult { IsError = true, Text = $"Method not found: {methodName}", ErrorCode = -32601 };
         }
+
+        using var activity = StartToolActivity(route.Name);
 
         await using var scope = rootServices.CreateDispatchScope(context);
 
@@ -69,10 +77,12 @@ public static class RpcToolInvoker {
                 ? args.Deserialize(serializerOptions.GetTypeInfo(route.RequestType))
                 : Activator.CreateInstance(route.RequestType);
         } catch (JsonException ex) {
+            RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
             return new RpcToolResult { IsError = true, Text = $"Invalid params: {ex.Message}", ErrorCode = -32602 };
         }
 
         if (requestObject is null) {
+            RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
             return new RpcToolResult { IsError = true, Text = "Could not construct request params", ErrorCode = -32602 };
         }
 
@@ -92,9 +102,14 @@ public static class RpcToolInvoker {
             logger?.LogDebug("Tool {Method} canceled by the caller", methodName);
             throw;
         } catch (Exception ex) {
-            // An unexpected handler exception must not propagate raw to the MCP SDK. Log it and map it to a
-            // JSON-RPC internal error (-32603), consistent with JsonRpcDispatcher's unexpected-exception path.
+            // An unexpected handler exception must not propagate raw to the MCP SDK. Log it, record it on the
+            // span, and map it to a JSON-RPC internal error (-32603), consistent with JsonRpcDispatcher.
             logger?.LogError(ex, "Unhandled exception invoking tool {Method}", methodName);
+            activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
+                { "exception.type", ex.GetType().FullName },
+                { "exception.message", ex.Message },
+            }));
+            RecordError(activity, route.Name, "-32603", ex.Message, startTimestamp);
             return new RpcToolResult { IsError = true, Text = "Internal error", ErrorCode = -32603 };
         }
 
@@ -102,6 +117,7 @@ public static class RpcToolInvoker {
             var translator = scope.ServiceProvider.GetService<IAppErrorTranslator<RpcError>>()
                 ?? JsonRpcAppErrorTranslator.Default;
             var rpcError = translator.Translate(result.Error);
+            RecordError(activity, route.Name, rpcError.Code.ToString(), rpcError.Message, startTimestamp);
             return new RpcToolResult {
                 IsError = true,
                 Text = rpcError.Message,
@@ -116,6 +132,33 @@ public static class RpcToolInvoker {
             ? JsonSerializer.Serialize(value, serializerOptions.GetTypeInfo(value.GetType()))
             : "{}";
 
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("rpc.response.status_code", "OK");
+        }
+
+        JsonRpcTelemetry.RecordRequest(
+            route.Name, "OK", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds, system: "mcp");
         return new RpcToolResult { IsError = false, Text = text };
+    }
+
+    private static Activity? StartToolActivity(string method) {
+        var activity = JsonRpcTelemetry.Source.StartActivity($"mcp {method}", ActivityKind.Server);
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("rpc.system.name", "mcp");
+            activity.SetTag("rpc.method", method);
+        }
+
+        return activity;
+    }
+
+    private static void RecordError(Activity? activity, string method, string statusCode, string description, long startTimestamp) {
+        if (activity?.IsAllDataRequested == true) {
+            activity.SetTag("rpc.response.status_code", statusCode);
+            activity.SetTag("error.type", statusCode);
+            activity.SetStatus(ActivityStatusCode.Error, description);
+        }
+
+        JsonRpcTelemetry.RecordRequest(
+            method, statusCode, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds, system: "mcp");
     }
 }

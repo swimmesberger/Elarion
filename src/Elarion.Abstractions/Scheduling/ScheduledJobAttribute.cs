@@ -111,4 +111,13 @@ public sealed class ScheduledJobAttribute(string name) : Attribute {
     /// disabled. Omit for always enabled.
     /// </summary>
     public string? Enabled { get; init; }
+
+    /// <summary>
+    /// Where occurrences execute on a multi-node deployment: <see cref="JobPlacement.Cluster"/> (default —
+    /// exactly one node per occurrence when a cross-instance coordinator is registered) or
+    /// <see cref="JobPlacement.EveryNode"/> (every node runs every occurrence — for jobs that maintain
+    /// process-local in-memory state, which coordination would leave stale on the losing nodes).
+    /// Single-node behavior is identical for both values.
+    /// </summary>
+    public JobPlacement Placement { get; init; } = JobPlacement.Cluster;
 }

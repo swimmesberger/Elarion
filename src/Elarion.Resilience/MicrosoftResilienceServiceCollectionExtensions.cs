@@ -12,7 +12,7 @@ namespace Elarion.Resilience;
 /// </summary>
 public static class MicrosoftResilienceServiceCollectionExtensions {
     /// <summary>Adds the default Microsoft/Polly-backed resilience runtime (policy catalog + pipeline runner).</summary>
-    public static IServiceCollection AddMicrosoftResilienceRuntime(this IServiceCollection services) {
+    public static IServiceCollection AddElarionResilience(this IServiceCollection services) {
         // The lightweight policy catalog lives in core; ensure it is present, then add the Polly-backed runner.
         services.AddElarionResiliencePolicyCatalog();
         services.TryAddSingleton<IResiliencePipelineRunner, MicrosoftResiliencePipelineRunner>();

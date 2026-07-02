@@ -1,0 +1,117 @@
+---
+title: Execution semantics & positioning
+description: Where each kind of scheduled work runs, what survives a restart, what the guarantees are — and when to choose a dedicated job system instead.
+---
+
+This page is the decision guide: what the Elarion scheduler guarantees today, what it deliberately
+does not, and how it compares to dedicated job systems — so you can pick the right tool per workload
+instead of discovering the semantics in production.
+
+<Callout type="info">
+  **Positioning.** Elarion's defaults target small-to-mid deployments — roughly **1–10 nodes,
+  vertical-first, on the one PostgreSQL the application already runs**. Within that tier the shipped
+  defaults are designed to just work. Beyond it, the scheduler's seams
+  (`IScheduledOccurrenceCoordinator` today, the durable job store planned in ADR-0025 phase 2) are
+  the supported path to a different strategy — including a dedicated job engine — without changing
+  your job code. The defaults will not grow configuration surface to chase larger tiers.
+</Callout>
+
+## Where runs what — and what survives
+
+| Work type | Declared via | Executes on | Survives node restart | Survives full-cluster restart | Duplicate protection |
+| --- | --- | --- | --- | --- | --- |
+| Recurring **cron** | `[ScheduledJob]` + `Cron(...)` | Whichever node wins the occurrence claim | Yes — the chain is re-derived at start | Future occurrences yes; occurrences due **during** the downtime are not fired on restart | Exactly one node per occurrence ([exact-slot claim](/docs/capabilities/scheduling/multi-node)); at-most-once if the winner crashes mid-run |
+| Recurring **fixed-rate / fixed-delay** | `[ScheduledJob]` + `FixedRate/FixedDelay` | Whichever node wins the window claim | Yes — chain restarts with the process | Same as cron | At most one run per interval cluster-wide (window claim) |
+| Recurring, **`Placement = EveryNode`** | `[ScheduledJob(..., Placement = JobPlacement.EveryNode)]` | **Every node**, uncoordinated | Yes — chain restarts with the process | Same as cron | None, by design (process-local state must update everywhere) |
+| **One-time startup** | `Once(...)` | **Every node**, at process start | Runs again on each start — that is its contract | n/a | None, by design (per-node startup work) |
+| **Runtime one-off** | `IJobScheduler.EnqueueAsync` / `ScheduleAsync` | **The node that accepted the call** — no other node knows the job exists | **No — lost** | No — lost | Trivially at-most-once (only one node holds it) |
+| Durable "run this later" today | Outbox [integration event](/docs/capabilities/events/backends) | Whichever node's delivery worker claims the lease | **Yes** | **Yes** | At-least-once — consumer must be idempotent |
+
+Three consequences worth internalizing:
+
+- **Recurring jobs are a *suppression* model, not a *guarantee* model.** Coordination ensures an
+  occurrence never runs twice; it does not ensure it runs at all. A winner that crashes mid-run is
+  not re-executed elsewhere (the other nodes have already moved past that occurrence), and a full
+  cluster outage over 03:00 means the 03:00 job simply did not happen. Jobs whose work must not be
+  lost should re-derive it from state (as the framework's own sweepers do — a purge that missed a
+  pass simply purges more next pass) or be `[Idempotent]`-guarded and re-triggerable.
+- **Runtime one-offs are node-affine and volatile.** `ScheduleAsync(payload, tomorrow)` enqueues into
+  the accepting process's memory: a deploy tonight silently discards it, and `CancelJobAsync` /
+  inspection only answer on the node that holds the job. Use runtime one-offs for short-lived,
+  loss-tolerable background work anchored to the current process ("resize this image", "send this
+  email now-ish"). For anything that must survive until later, publish an **outbox event** — it is
+  the durable, cluster-executed primitive that exists today.
+- **Jobs that maintain process-local state must opt out of coordination.** A "refresh the in-memory
+  lookup table every 5 minutes" job under cluster coordination means one node refreshes and the rest
+  serve stale data — silently. Declare it `Placement = JobPlacement.EveryNode` and every node runs
+  every occurrence, coordinator or not. Rule of thumb: *if the job's output lives in process memory,
+  it is `EveryNode`; if it lives in shared state, it is `Cluster` (the default).* And when the
+  in-memory thing mirrors shared changing state that has a change feed, prefer push over polling —
+  watch it (the settings `IChangeToken` pattern) instead of scheduling a per-node refresh.
+- **One-time startup jobs multiplying per node is a feature**, not a missing coordination case:
+  cache warm-up and local initialization are meant to run everywhere. Cluster-wide "once ever" work
+  belongs behind an [`[Idempotent]` handler](/docs/concepts/idempotency).
+
+## Scenario walkthroughs
+
+**A deploy replaces node A while the 03:00 cron is due.** Node B (still up) computes 03:00 itself,
+wins the claim, runs the job. Nothing to fail over; work migrates per occurrence.
+
+**The winner crashes halfway through the job.** The occurrence is spent (at-most-once). The 04:00
+occurrence fires normally on any node. If half-done work is unacceptable, make the job idempotent and
+derive its work from state so the next occurrence completes it.
+
+**The claims database is unreachable at fire time.** The node **fails closed**: it skips the
+occurrence (recorded as `claimed-elsewhere`-style skip with an error log) rather than running
+unconfirmed — running anyway would reintroduce the duplication coordination exists to prevent, and a
+job that needs the database would fail anyway. The next occurrence retries.
+
+**The whole cluster is down 02:50–03:10.** The 03:00 occurrence is not fired on restart — each node
+re-derives its schedule from *now*. This is the most significant gap versus Quartz's persistent
+triggers; closing it (a durable last-completed-occurrence per job, enabling catch-up on restart) is
+part of ADR-0025 phase 2.
+
+**A handler schedules `ScheduleAsync(payload, +2h)` and its pod is recycled at +1h.** The job is
+gone, silently. This is documented behavior today and the core motivation for phase 2's durable
+one-shots (below). Until then: outbox event.
+
+## What phase 2 adds (and changes)
+
+[ADR-0025](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0025-distributed-scheduler-coordination.md)
+phase 2 — designed, not yet implemented — turns runtime one-offs into rows: `ScheduleAsync` records
+the serialized payload + due time, and every node's scheduler claims due rows with an outbox-style
+lease. That **inverts the placement model**: the receiving node merely records the job, and
+*whichever node claims it at due time executes it*. Jobs survive restarts and deploys, retries
+persist across processes, cancellation and inspection become cluster-wide — and semantics shift from
+at-most-once to **at-least-once** (an expired lease is reclaimed), so durable one-offs should be
+idempotent. Immediate `EnqueueAsync` work is expected to stay in-memory by default (the caller's node
+is demonstrably alive; a database round-trip per fire-and-forget is real overhead), with durability
+as an opt-in.
+
+## Versus dedicated job systems
+
+| | Elarion scheduler | Quartz.NET (clustered) | Hangfire | TickerQ |
+| --- | --- | --- | --- | --- |
+| Coordination | Per-occurrence claim rows (PK fence + advisory lock) | Cluster-wide DB locks (`QRTZ_LOCKS`, `SELECT … FOR UPDATE`) | Competing workers over shared storage; distributed locks for recurring | Per-job owner row (EF Core row locks), optional Redis heartbeats |
+| Recurring semantics | Exactly one node per occurrence; at-most-once on crash | Near exactly-once; **recovers occurrences missed during full downtime** | At-least-once (invisibility timeout re-runs) | Lease per job, retry on failure |
+| Durable one-offs | Not yet (phase 2); use the outbox | Yes (persistent triggers) | Yes (its core competency) | Yes |
+| Retry history / dashboard | Inspector snapshot + telemetry | Minimal built-in | Rich dashboard | Dashboard (commercial hub emerging) |
+| Reflection / AOT | Source-generated invocation, AOT-clean | Reflection + serialized type names | Expression-tree serialization | Source-generated, reflection-free |
+| Extra moving parts | None — your Postgres | `QRTZ_*` schema to operate | Storage + server/worker topology | EF Core schema (+ optional Redis) |
+
+When a **dedicated system is the right call** — reach for it without guilt, beside or beneath
+Elarion:
+
+- You need **queue-style background processing at volume** (thousands of enqueued jobs, competing
+  consumers, per-job retry dashboards): that is Hangfire's home turf; run it *beside* Elarion rather
+  than through it.
+- You need **missed-occurrence recovery after full downtime today** (regulatory "must run once per
+  calendar day, even if we were down at the scheduled time"): Quartz's persistent triggers do this
+  now; Elarion plans it for phase 2.
+- You are **beyond the 1–10 node tier** or need cross-region scheduling: replace the coordination
+  through the seams instead of stretching the default.
+
+When the **Elarion default is the right call**: your jobs are the application's own recurring
+housekeeping and business rhythms (reports, digests, purges, reconciliations, pollers) on a
+small-to-mid cluster, you want them AOT-safe and typed with zero extra infrastructure, and duplicate
+suppression plus fail-closed behavior matches how you already write idempotent, state-derived jobs.

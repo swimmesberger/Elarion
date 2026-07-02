@@ -62,6 +62,8 @@ public sealed class ElarionIdempotencyKeysGenerator : IIncrementalGenerator {
         string ContextName,
         string HintName,
         bool SnakeCase,
+        string? TableName,
+        string? Schema,
         bool Emit,
         EquatableArray<DiagnosticInfo> Diagnostics);
 
@@ -71,10 +73,20 @@ public sealed class ElarionIdempotencyKeysGenerator : IIncrementalGenerator {
         }
 
         var snakeCase = true;
+        string? tableName = null;
+        string? schema = null;
         if (ctx.Attributes.Length > 0) {
             foreach (var namedArgument in ctx.Attributes[0].NamedArguments) {
-                if (namedArgument.Key == "SnakeCase" && namedArgument.Value.Value is bool value) {
-                    snakeCase = value;
+                switch (namedArgument.Key) {
+                    case "SnakeCase" when namedArgument.Value.Value is bool value:
+                        snakeCase = value;
+                        break;
+                    case "TableName" when namedArgument.Value.Value is string table:
+                        tableName = table;
+                        break;
+                    case "Schema" when namedArgument.Value.Value is string schemaValue:
+                        schema = schemaValue;
+                        break;
                 }
             }
         }
@@ -100,6 +112,8 @@ public sealed class ElarionIdempotencyKeysGenerator : IIncrementalGenerator {
             contextName,
             hintName,
             snakeCase,
+            tableName,
+            schema,
             Emit: hasGenerateDbSets,
             diagnostics.ToImmutable());
     }
@@ -125,7 +139,9 @@ public sealed class ElarionIdempotencyKeysGenerator : IIncrementalGenerator {
         sb.AppendLine("    // end of ConfigureEntities, so it composes with [GenerateElarionIdentity]/[GenerateElarionResourceGrants].");
         sb.AppendLine($"    partial void {SeamMethodName}(ModelBuilder modelBuilder) =>");
         sb.AppendLine($"        {IdempotencyNamespace}.IdempotencyModelBuilderExtensions.ApplyElarionIdempotencyKeys(");
-        sb.AppendLine($"            modelBuilder, snakeCase: {(target.SnakeCase ? "true" : "false")});");
+        sb.AppendLine(
+            $"            modelBuilder, tableName: {SourceLiterals.String(target.TableName)}, " +
+            $"schema: {SourceLiterals.String(target.Schema)}, snakeCase: {(target.SnakeCase ? "true" : "false")});");
         sb.AppendLine("}");
 
         spc.AddSource($"{target.HintName}.ElarionIdempotencyKeys.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));

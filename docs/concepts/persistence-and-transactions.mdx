@@ -131,11 +131,11 @@ Two things intentionally run **after** your transaction commits rather than insi
 
 <Callout type="info">
   The **in-memory** integration tier is commit-gated by EF Core interceptors that
-  `AddInMemoryEventBus<TContext>()` attaches to your context automatically — so a plain
+  `AddElarionInMemoryEventBus<TContext>()` attaches to your context automatically — so a plain
   `AddDbContext<TContext>()` is all you write:
 
   ```csharp
-  services.AddInMemoryEventBus<AppDbContext>();
+  services.AddElarionInMemoryEventBus<AppDbContext>();
   services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
   ```
 

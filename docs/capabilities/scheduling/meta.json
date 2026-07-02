@@ -1,4 +1,11 @@
 {
   "title": "Scheduling",
-  "pages": ["schedules", "overlap-and-misfire", "runtime-jobs", "inspection"]
+  "pages": [
+    "schedules",
+    "overlap-and-misfire",
+    "runtime-jobs",
+    "inspection",
+    "semantics",
+    "multi-node"
+  ]
 }

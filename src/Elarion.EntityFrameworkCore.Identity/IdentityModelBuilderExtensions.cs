@@ -20,34 +20,41 @@ namespace Elarion.EntityFrameworkCore.Identity;
 public static class IdentityModelBuilderExtensions {
     /// <summary>Applies the Identity entity model to <paramref name="modelBuilder"/>.</summary>
     /// <param name="modelBuilder">The model builder, typically from <c>OnModelCreating</c>.</param>
+    /// <param name="schema">The schema for all seven Identity tables, or <see langword="null"/> for the provider's default schema.</param>
+    /// <param name="tablePrefix">
+    /// An optional prefix prepended verbatim to every Identity table name (for example <c>"auth_"</c> →
+    /// <c>auth_users</c>), or <see langword="null"/> for none. Because Identity spans seven tables, the prefix is
+    /// the table-name override — there is no per-table name parameter.
+    /// </param>
     /// <param name="snakeCase">
     /// When <see langword="true"/> (default), uses snake_case table/column/index names (<c>users</c>,
     /// <c>normalized_user_name</c>, …); when <see langword="false"/>, the ASP.NET <c>AspNet*</c> defaults.
     /// </param>
     public static ModelBuilder ApplyElarionIdentity<TUser, TRole, TKey>(
-        this ModelBuilder modelBuilder, bool snakeCase = true)
+        this ModelBuilder modelBuilder, string? schema = null, string? tablePrefix = null, bool snakeCase = true)
         where TUser : IdentityUser<TKey>
         where TRole : IdentityRole<TKey>
         where TKey : IEquatable<TKey> {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
-        var userTable = snakeCase ? "users" : "AspNetUsers";
-        var roleTable = snakeCase ? "roles" : "AspNetRoles";
-        var userClaimsTable = snakeCase ? "user_claims" : "AspNetUserClaims";
-        var userRolesTable = snakeCase ? "user_roles" : "AspNetUserRoles";
-        var userLoginsTable = snakeCase ? "user_logins" : "AspNetUserLogins";
-        var roleClaimsTable = snakeCase ? "role_claims" : "AspNetRoleClaims";
-        var userTokensTable = snakeCase ? "user_tokens" : "AspNetUserTokens";
+        var prefix = tablePrefix ?? string.Empty;
+        var userTable = prefix + (snakeCase ? "users" : "AspNetUsers");
+        var roleTable = prefix + (snakeCase ? "roles" : "AspNetRoles");
+        var userClaimsTable = prefix + (snakeCase ? "user_claims" : "AspNetUserClaims");
+        var userRolesTable = prefix + (snakeCase ? "user_roles" : "AspNetUserRoles");
+        var userLoginsTable = prefix + (snakeCase ? "user_logins" : "AspNetUserLogins");
+        var roleClaimsTable = prefix + (snakeCase ? "role_claims" : "AspNetRoleClaims");
+        var userTokensTable = prefix + (snakeCase ? "user_tokens" : "AspNetUserTokens");
 
-        var userNameIndex = snakeCase ? "ix_users_normalized_user_name" : "UserNameIndex";
-        var emailIndex = snakeCase ? "ix_users_normalized_email" : "EmailIndex";
-        var roleNameIndex = snakeCase ? "ix_roles_normalized_name" : "RoleNameIndex";
+        var userNameIndex = snakeCase ? $"ix_{userTable}_normalized_user_name" : "UserNameIndex";
+        var emailIndex = snakeCase ? $"ix_{userTable}_normalized_email" : "EmailIndex";
+        var roleNameIndex = snakeCase ? $"ix_{roleTable}_normalized_name" : "RoleNameIndex";
 
         modelBuilder.Entity<TUser>(b => {
             b.HasKey(user => user.Id);
             b.HasIndex(user => user.NormalizedUserName).HasDatabaseName(userNameIndex).IsUnique();
             b.HasIndex(user => user.NormalizedEmail).HasDatabaseName(emailIndex);
-            b.ToTable(userTable);
+            b.ToTable(userTable, schema);
             b.Property(user => user.ConcurrencyStamp).IsConcurrencyToken();
             b.Property(user => user.UserName).HasMaxLength(256);
             b.Property(user => user.NormalizedUserName).HasMaxLength(256);
@@ -64,26 +71,26 @@ public static class IdentityModelBuilderExtensions {
 
         modelBuilder.Entity<IdentityUserClaim<TKey>>(b => {
             b.HasKey(claim => claim.Id);
-            b.ToTable(userClaimsTable);
+            b.ToTable(userClaimsTable, schema);
             ApplyColumns(b, snakeCase, UserClaimColumns);
         });
 
         modelBuilder.Entity<IdentityUserLogin<TKey>>(b => {
             b.HasKey(login => new { login.LoginProvider, login.ProviderKey });
-            b.ToTable(userLoginsTable);
+            b.ToTable(userLoginsTable, schema);
             ApplyColumns(b, snakeCase, UserLoginColumns);
         });
 
         modelBuilder.Entity<IdentityUserToken<TKey>>(b => {
             b.HasKey(token => new { token.UserId, token.LoginProvider, token.Name });
-            b.ToTable(userTokensTable);
+            b.ToTable(userTokensTable, schema);
             ApplyColumns(b, snakeCase, UserTokenColumns);
         });
 
         modelBuilder.Entity<TRole>(b => {
             b.HasKey(role => role.Id);
             b.HasIndex(role => role.NormalizedName).HasDatabaseName(roleNameIndex).IsUnique();
-            b.ToTable(roleTable);
+            b.ToTable(roleTable, schema);
             b.Property(role => role.ConcurrencyStamp).IsConcurrencyToken();
             b.Property(role => role.Name).HasMaxLength(256);
             b.Property(role => role.NormalizedName).HasMaxLength(256);
@@ -96,13 +103,13 @@ public static class IdentityModelBuilderExtensions {
 
         modelBuilder.Entity<IdentityRoleClaim<TKey>>(b => {
             b.HasKey(claim => claim.Id);
-            b.ToTable(roleClaimsTable);
+            b.ToTable(roleClaimsTable, schema);
             ApplyColumns(b, snakeCase, RoleClaimColumns);
         });
 
         modelBuilder.Entity<IdentityUserRole<TKey>>(b => {
             b.HasKey(userRole => new { userRole.UserId, userRole.RoleId });
-            b.ToTable(userRolesTable);
+            b.ToTable(userRolesTable, schema);
             ApplyColumns(b, snakeCase, UserRoleColumns);
         });
 

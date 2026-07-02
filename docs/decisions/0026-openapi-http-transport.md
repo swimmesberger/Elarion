@@ -1,4 +1,4 @@
-# ADR-0024: OpenAPI for the HTTP transport
+# ADR-0026: OpenAPI for the HTTP transport
 
 - Status: Accepted
 - Date: 2026-07-02

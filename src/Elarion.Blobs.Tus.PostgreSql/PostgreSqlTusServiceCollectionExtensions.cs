@@ -2,6 +2,7 @@ using Elarion.Blobs.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 
 namespace Elarion.Blobs.Tus.PostgreSql;
 
@@ -23,13 +24,13 @@ public static class PostgreSqlTusServiceCollectionExtensions {
     /// <para>
     /// Call after <c>AddElarionTus</c> (which registers <c>TusOptions</c> and the in-memory default this
     /// replaces). The completed tus upload is written as a <b>pending</b> blob, so this method also calls
-    /// <see cref="PostgreSqlBlobStoreServiceCollectionExtensions.AddPostgreSqlBlobLifecycle{TDbContext}"/>
+    /// <see cref="PostgreSqlBlobStoreServiceCollectionExtensions.AddElarionPostgreSqlBlobLifecycle{TDbContext}"/>
     /// (idempotent) to register the blob store, the <see cref="IBlobLifecycle"/> commit path, and the
     /// <c>BlobGarbageCollector</c> that reclaims those pending blobs — otherwise an abandoned upload would
     /// leak its pending blob forever, since the tus session collector never touches the produced blob.
     /// </para>
     /// <para>
-    /// The application still maps the tables in <c>OnModelCreating</c>: <c>UsePostgreSqlBlobStorage()</c> for
+    /// The application still maps the tables in <c>OnModelCreating</c>: <c>UseElarionBlobStorage()</c> for
     /// the blob tables and <c>UseElarionTusStorage()</c> for the staging table.
     /// </para>
     /// </remarks>
@@ -52,10 +53,35 @@ public static class PostgreSqlTusServiceCollectionExtensions {
         services.AddHostedService<TusUploadGarbageCollector>();
 
         // A completed tus upload produces a pending blob; without the blob lifecycle and its collector an
-        // abandoned upload would leak that blob forever. AddPostgreSqlBlobLifecycle is TryAdd-based, so this
+        // abandoned upload would leak that blob forever. AddElarionPostgreSqlBlobLifecycle is TryAdd-based, so this
         // is idempotent if the host already wired it.
-        services.AddPostgreSqlBlobLifecycle<TDbContext>(configureBlobGc);
+        services.AddElarionPostgreSqlBlobLifecycle<TDbContext>(configureBlobGc);
 
         return services;
+    }
+
+    /// <summary>
+    /// The <c>connectionString</c> overload of
+    /// <see cref="AddElarionTusPostgreSql{TDbContext}(IServiceCollection, Action{TusGcOptions}?, Action{BlobGcOptions}?)"/>:
+    /// also registers a shared <c>NpgsqlDataSource</c> (via <c>TryAdd</c>) that the blob store's streaming
+    /// reads draw dedicated connections from.
+    /// </summary>
+    /// <typeparam name="TDbContext">The context whose model includes <see cref="TusUploadRow"/> via <c>UseElarionTusStorage</c>.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="connectionString">The connection string of the database the tus and blob tables live in.</param>
+    /// <param name="configure">Optional configuration of <see cref="TusGcOptions"/>.</param>
+    /// <param name="configureBlobGc">Optional configuration of the pending-blob <see cref="BlobGcOptions"/>.</param>
+    /// <returns>The same service collection for chaining.</returns>
+    public static IServiceCollection AddElarionTusPostgreSql<TDbContext>(
+        this IServiceCollection services,
+        string connectionString,
+        Action<TusGcOptions>? configure = null,
+        Action<BlobGcOptions>? configureBlobGc = null)
+        where TDbContext : DbContext {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        services.TryAddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+        return services.AddElarionTusPostgreSql<TDbContext>(configure, configureBlobGc);
     }
 }

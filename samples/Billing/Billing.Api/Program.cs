@@ -45,11 +45,11 @@ builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
 // Scheduler runtime. Job descriptors and event consumers are composed per module by
 // AddElarion below — there is no explicit Add…ScheduledJobs call.
-builder.Services.AddInMemoryScheduler(builder.Configuration);
+builder.Services.AddElarionScheduler(builder.Configuration);
 
 // Resilience: generated policy metadata + the Microsoft/Polly-backed runtime.
 builder.Services.AddBilling_ApplicationResiliencePolicies();
-builder.Services.AddMicrosoftResilienceRuntime();
+builder.Services.AddElarionResilience();
 
 // Per-user handler caching, backed by HybridCache with a PostgreSQL L2 — the recommended L2 for most apps
 // already on Postgres: it reuses the "billing" database (an auto-created UNLOGGED cache table) instead of

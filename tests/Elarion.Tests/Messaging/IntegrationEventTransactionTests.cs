@@ -124,7 +124,7 @@ public sealed class IntegrationEventTransactionTests(IntegrationEventTransaction
         services.AddSingleton(RecordingSubscriber());
         // The generic overload auto-attaches the commit-gating interceptors to EventTestDbContext via
         // IDbContextOptionsConfiguration, so a plain AddDbContext is all the host needs.
-        services.AddInMemoryEventBus<EventTestDbContext>();
+        services.AddElarionInMemoryEventBus<EventTestDbContext>();
         services.AddDbContext<EventTestDbContext>(options => options.UseNpgsql(fixture.ConnectionString));
         return services.BuildServiceProvider();
     }

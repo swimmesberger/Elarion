@@ -21,8 +21,11 @@ public sealed class EfCoreSettingsStoreTransactionTests(PostgreSqlSettingsStoreF
     private static string UniqueKey() => $"app:{Guid.NewGuid():N}";
 
     private static EfCoreSettingsStore<SettingsIntegrationDbContext> CreateStore(SettingsIntegrationDbContext context) =>
-        new(context, new InProcessSettingsChangeSource(), TimeProvider.System,
-            NullLogger<EfCoreSettingsStore<SettingsIntegrationDbContext>>.Instance);
+        new(
+            context,
+            new ChangePublisherSettingsChangeNotifier(
+                new InProcessSettingsChangeSource(), NullLogger<ChangePublisherSettingsChangeNotifier>.Instance),
+            TimeProvider.System);
 
     [Fact]
     public async Task SetAsync_Insert_RolledBackWithCallerTransaction_PersistsNothing() {

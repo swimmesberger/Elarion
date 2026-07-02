@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
-using Microsoft.Extensions.Logging;
 
 namespace Elarion.Settings.EntityFrameworkCore;
 
@@ -27,19 +26,18 @@ namespace Elarion.Settings.EntityFrameworkCore;
 /// optimistic guard, where a lost race returns <see cref="SettingWriteResult.ConcurrencyConflict"/>.
 /// </para>
 /// <para>
-/// After a successful write the supplied <see cref="ISettingsChangePublisher"/> is signalled — but only when
-/// the write did <b>not</b> run inside a caller-owned ambient transaction. A store write enlists in the
-/// context's current transaction, so signalling immediately would fire watchers for a value a later rollback
-/// discards; a transactional write therefore skips the (immediate) notification and logs at Debug until a
-/// commit-hooked change source is added. With the in-process source notification is single-instance in any
-/// case; a cross-instance change source is a drop-in replacement.
+/// After a successful write the <see cref="IEfCoreSettingsChangeNotifier"/> is signalled with the store's
+/// <see cref="DbContext"/>. The default notifier publishes through the in-process
+/// <see cref="ISettingsChangePublisher"/> for a non-transactional write and skips a write running inside a
+/// caller-owned ambient transaction (a phantom notification would fire watchers for a value a rollback
+/// discards); a backend-aware notifier (the PostgreSQL <c>LISTEN/NOTIFY</c> source) publishes on the store's
+/// own connection so the database commit-gates delivery — including for transactional writes.
 /// </para>
 /// </remarks>
 public sealed class EfCoreSettingsStore<TDbContext>(
     TDbContext dbContext,
-    ISettingsChangePublisher changePublisher,
-    TimeProvider timeProvider,
-    ILogger<EfCoreSettingsStore<TDbContext>> logger) : ISettingsStore
+    IEfCoreSettingsChangeNotifier changeNotifier,
+    TimeProvider timeProvider) : ISettingsStore
     where TDbContext : DbContext {
     // The INSERT statement is provider- and schema-specific (delimited identifiers, resolved column names),
     // so it is built once per model and reused.
@@ -118,7 +116,7 @@ public sealed class EfCoreSettingsStore<TDbContext>(
             }
 
             if (!raced) {
-                NotifyIfNotTransactional(scope, key);
+                await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
                 return SettingWriteResult.Success(1);
             }
         }
@@ -145,7 +143,7 @@ public sealed class EfCoreSettingsStore<TDbContext>(
                 return SettingWriteResult.ConcurrencyConflict;
             }
 
-            NotifyIfNotTransactional(scope, key);
+            await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
             return SettingWriteResult.Success(guardedNewVersion);
         }
 
@@ -169,15 +167,15 @@ public sealed class EfCoreSettingsStore<TDbContext>(
                 newVersion = await UnconditionalUpdateAsync(kind, owner, key, value, now, cancellationToken)
                     .ConfigureAwait(false)
                     ?? 1;
-                NotifyIfNotTransactional(scope, key);
+                await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
                 return SettingWriteResult.Success(newVersion.Value);
             }
 
-            NotifyIfNotTransactional(scope, key);
+            await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
             return SettingWriteResult.Success(1);
         }
 
-        NotifyIfNotTransactional(scope, key);
+        await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
         return SettingWriteResult.Success(newVersion.Value);
     }
 
@@ -227,29 +225,8 @@ public sealed class EfCoreSettingsStore<TDbContext>(
             return false;
         }
 
-        NotifyIfNotTransactional(scope, key);
+        await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
         return true;
-    }
-
-    /// <summary>
-    /// Signals the change publisher — but only when the write is <b>not</b> running inside a caller-owned ambient
-    /// transaction. A store write enlists in <see cref="DatabaseFacade.CurrentTransaction"/>, so notifying
-    /// immediately would fire watchers for a value that a subsequent rollback discards (a phantom notification).
-    /// The immediate-write path (no ambient transaction) commits with the statement, so it notifies as before; a
-    /// transactional write skips the signal and logs at Debug, documenting that transaction-commit-hooked
-    /// notification is not yet wired.
-    /// </summary>
-    private void NotifyIfNotTransactional(SettingsScope scope, string key) {
-        if (dbContext.Database.CurrentTransaction is not null) {
-            logger.LogDebug(
-                "Skipping settings change notification for key '{Key}' in scope '{Scope}' because the write is " +
-                "inside a caller-owned transaction; watchers are not signalled until a commit-hooked source is added.",
-                key,
-                scope.Kind);
-            return;
-        }
-
-        changePublisher.Publish(scope, key);
     }
 
     private Task<bool> ExistsAsync(string kind, string owner, string key, CancellationToken cancellationToken) =>

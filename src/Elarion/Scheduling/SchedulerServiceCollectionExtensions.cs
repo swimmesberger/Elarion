@@ -19,13 +19,13 @@ public static class SchedulerServiceCollectionExtensions {
     /// <see cref="TimeProvider"/> when absent, and the hosted scheduler loop. Generated
     /// scheduled job descriptor registration must still be called separately.
     /// </remarks>
-    public static IServiceCollection AddInMemoryScheduler(
+    public static IServiceCollection AddElarionScheduler(
         this IServiceCollection services,
         SchedulerOptions? options = null) {
         options ??= new SchedulerOptions();
         // The scheduler needs the (dependency-light) policy catalog to resolve job retry policies. The Polly-backed
         // pipeline runner that actually executes deferred retries is opt-in via the Elarion.Resilience package's
-        // AddMicrosoftResilienceRuntime() — kept out of core so scheduling does not force Microsoft.Extensions.Resilience.
+        // AddElarionResilience() — kept out of core so scheduling does not force Microsoft.Extensions.Resilience.
         services.AddElarionResiliencePolicyCatalog();
         // The scheduler resolves ${...} schedule variables through IVariableSource; default to the
         // config-backed source (observable, so reloads drive live reschedule). Register a different
@@ -33,6 +33,11 @@ public static class SchedulerServiceCollectionExtensions {
         services.AddElarionVariableSubstitution();
         services.TryAddSingleton(options);
         services.TryAddSingleton(TimeProvider.System);
+
+        // Single-node default: every occurrence is claimed locally. The EF Core/PostgreSQL coordinator
+        // replaces this so a multi-node deployment executes each recurring occurrence on exactly one node.
+        services.TryAddSingleton<IScheduledOccurrenceCoordinator, LocalScheduledOccurrenceCoordinator>();
+
         services.TryAddSingleton<InMemoryScheduler>();
         services.TryAddSingleton<IJobScheduler>(sp => sp.GetRequiredService<InMemoryScheduler>());
         services.TryAddSingleton<IJobSchedulerInspector>(sp => sp.GetRequiredService<InMemoryScheduler>());
@@ -49,7 +54,7 @@ public static class SchedulerServiceCollectionExtensions {
     /// <c>Scheduler:MaxMisfireCatchUpRuns</c>. Invalid boolean or integer values throw during
     /// service registration.
     /// </remarks>
-    public static IServiceCollection AddInMemoryScheduler(
+    public static IServiceCollection AddElarionScheduler(
         this IServiceCollection services,
         IConfiguration configuration) {
         var options = new SchedulerOptions {
@@ -68,7 +73,7 @@ public static class SchedulerServiceCollectionExtensions {
                 32))
         };
 
-        return services.AddInMemoryScheduler(options);
+        return services.AddElarionScheduler(options);
     }
 
     private static bool ReadBool(IConfiguration configuration, string key, bool defaultValue) {

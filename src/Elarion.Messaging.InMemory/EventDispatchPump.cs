@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Threading.Channels;
+using Elarion.Abstractions.Messaging;
 using Elarion.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -130,21 +132,46 @@ internal sealed class EventDispatchPump : BackgroundService {
             return;
         }
 
+        // Parent the consume span on the trace context captured at publish time, so the after-commit
+        // consumers stay in the publishing operation's trace despite running on the pump's thread.
+        var eventName = envelope.EventType.Name;
+        using var activity = EventTelemetry.Source.StartActivity(
+            $"consume {eventName}", ActivityKind.Internal, envelope.TraceParent);
+        if (activity is not null) {
+            activity.SetTag("messaging.event.type", eventName);
+            activity.SetTag("messaging.event.plane", "integration");
+            activity.SetTag("messaging.correlation_id", envelope.Context.CorrelationId);
+        }
+
         await using var scope = _scopeFactory.CreateAsyncScope();
         foreach (var descriptor in subscribers) {
+            var startTimestamp = Stopwatch.GetTimestamp();
             try {
                 await descriptor.InvokeAsync!(scope.ServiceProvider, envelope.Event, envelope.Context, ct)
                     .ConfigureAwait(false);
+                EventTelemetry.RecordConsumer(
+                    eventName, descriptor.ServiceType.Name, "ok",
+                    Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) {
                 throw;
             }
             catch (Exception ex) {
+                EventTelemetry.RecordConsumer(
+                    eventName, descriptor.ServiceType.Name, "exception",
+                    Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
+                    { "exception.type", ex.GetType().FullName },
+                    { "exception.message", ex.Message },
+                    { "messaging.consumer", descriptor.ServiceType.Name }
+                }));
+                activity?.SetStatus(ActivityStatusCode.Error, "One or more integration event consumers failed.");
                 _logger.LogError(
                     ex,
-                    "Integration event consumer '{Consumer}' failed for event '{Event}'.",
+                    "Integration event consumer '{Consumer}' failed for event '{Event}' (correlation {CorrelationId}).",
                     descriptor.ServiceType,
-                    envelope.EventType);
+                    envelope.EventType,
+                    envelope.Context.CorrelationId);
             }
         }
     }

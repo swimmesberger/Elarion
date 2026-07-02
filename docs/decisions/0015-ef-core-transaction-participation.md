@@ -58,18 +58,18 @@ Two deliberate exceptions, both correct:
 
 The commit-gating interceptors are scoped services, and EF Core does **not** auto-discover
 application-DI `IInterceptor` services, so they must be added to the context's options.
-`AddInMemoryEventBus<TContext>()` / `AddInMemoryIntegrationEventBus<TContext>()` do this
+`AddElarionInMemoryEventBus<TContext>()` / `AddElarionInMemoryIntegrationEventBus<TContext>()` do this
 automatically: they register an `IDbContextOptionsConfiguration<TContext>` that calls
 `AddInterceptors(sp.GetServices<IInterceptor>())` from the context's own scope (so the
 interceptors share the same `EventDispatchScope` the bus buffers into). A plain
 `AddDbContext<TContext>()` is then all the host writes:
 
 ```csharp
-services.AddInMemoryEventBus<AppDbContext>();
+services.AddElarionInMemoryEventBus<AppDbContext>();
 services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
 ```
 
-A low-level non-generic `AddInMemoryIntegrationEventBus()` registers the building blocks
+A low-level non-generic `AddElarionInMemoryIntegrationEventBus()` registers the building blocks
 without attaching the interceptors, for hosts that attach them by hand (or exercise the
 bus without a database). The durable outbox tier does not use these interceptors — it
 commit-gates through its own `SaveChanges` interceptor and the database transaction.
@@ -91,5 +91,5 @@ commit-gates through its own `SaveChanges` interceptor and the database transact
 - The raw-Npgsql blob path requires an Npgsql connection/transaction; it throws a clear
   error against a non-PostgreSQL provider rather than silently running unenlisted.
 - The in-memory integration tier's commit-gating depends on the interceptors being
-  attached to the context; the `AddInMemoryEventBus<TContext>()` overload does this
+  attached to the context; the `AddElarionInMemoryEventBus<TContext>()` overload does this
   automatically, so the host only registers the context normally.

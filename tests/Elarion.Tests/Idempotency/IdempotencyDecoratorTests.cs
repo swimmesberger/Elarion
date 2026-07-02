@@ -1,11 +1,14 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Idempotency;
 using Elarion.Abstractions.Pipeline;
+using Elarion.Tests.Services;
 using Xunit;
 
 namespace Elarion.Tests.Idempotency;
@@ -86,6 +89,24 @@ public sealed class IdempotencyDecoratorTests {
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.BusinessRule);
+    }
+
+    [Fact]
+    public async Task Replay_TagsHandlerSpanAndRecordsOutcomeMetric() {
+        using var meters = new MeterCollector(HandlerTelemetry.MeterName);
+        using var handlerActivity = new Activity("handle").Start();
+        var payload = JsonSerializer.Serialize(
+            new StoredResult { Ok = true, Value = JsonSerializer.SerializeToElement("first", Json) }, Json);
+        var store = new RecordingStore(IdempotencyBeginResult.Replay(payload));
+
+        await Decorate(new RecordingHandler(Result<string>.Success("second")), store, new RecordingUnitOfWork(), "k1")
+            .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
+
+        handlerActivity.GetTagItem("elarion.idempotency.outcome").Should().Be("replayed");
+        meters.Measurements.Should().Contain(m =>
+            m.InstrumentName == "handler.idempotency.count" &&
+            m.HasTag("elarion.handler.request_type", nameof(TestCommand)) &&
+            m.HasTag("elarion.idempotency.outcome", "replayed"));
     }
 
     [Fact]

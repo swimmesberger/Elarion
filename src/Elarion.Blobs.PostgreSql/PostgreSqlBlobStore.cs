@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
 using System.Data;
 using Elarion.Blobs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -17,15 +20,19 @@ namespace Elarion.Blobs.PostgreSql;
 /// Npgsql binary protocol without buffering. A non-seekable source streams without buffering too when
 /// the caller supplies a <see cref="BlobUploadRequest.ContentLength"/> hint (the protocol requires the
 /// length up front; the actual bytes are verified against the hint so the recorded size stays
-/// truthful); without a hint it is buffered first only to learn its length. Reads are buffered into
-/// memory for now; the
-/// streaming upgrade path is <see cref="CommandBehavior.SequentialAccess"/> plus
-/// <c>NpgsqlDataReader.GetStream("data")</c> on a dedicated connection, attached to the returned
-/// <see cref="BlobDownload"/> as its owned resource so the reader and connection live exactly as
-/// long as the caller reads.
+/// truthful); without a hint it is buffered first only to learn its length. Reads <b>stream</b> as
+/// well: <see cref="OpenReadAsync"/> opens a dedicated connection from the injected
+/// <see cref="NpgsqlDataSource"/> and reads through <see cref="CommandBehavior.SequentialAccess"/> +
+/// <c>NpgsqlDataReader.GetStream</c>, with the reader, command, and connection owned by the returned
+/// <see cref="BlobDownload"/> so they live exactly as long as the caller reads. The scoped context's
+/// shared connection cannot host such a reader (it would outlive the call and block other context
+/// work), which is why the store takes its own data source. The one exception is a read inside a
+/// caller-owned ambient transaction: it must share that transaction's connection to see the caller's
+/// own uncommitted writes, so it stays buffered.
 /// </remarks>
 public sealed class PostgreSqlBlobStore<TDbContext>(
     TDbContext dbContext,
+    NpgsqlDataSource dataSource,
     ILogger<PostgreSqlBlobStore<TDbContext>> logger,
     TimeProvider timeProvider) : IBlobStore, IBlobLifecycle
     where TDbContext : DbContext {
@@ -109,10 +116,60 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             return null;
         }
 
+        // A read inside a caller-owned ambient transaction must share that transaction's connection to see
+        // the caller's own uncommitted writes — and the scoped connection cannot host a reader that outlives
+        // this call — so the transactional path stays buffered.
+        if (dbContext.Database.CurrentTransaction is not null) {
+            return await OpenBufferedReadAsync(metadata, blobRef, cancellationToken);
+        }
+
+        // Streaming path: a dedicated connection whose lifetime is owned by the returned BlobDownload, so
+        // the content flows straight from the wire without materializing the blob in memory.
+        var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        NpgsqlCommand? command = null;
+        NpgsqlDataReader? reader = null;
+        var transferred = false;
+        try {
+            command = connection.CreateCommand();
+            command.CommandText = GetContentSql(dbContext).Select;
+            command.Parameters.Add(new NpgsqlParameter { Value = blobRef.Value });
+
+            reader = await command.ExecuteReaderAsync(
+                CommandBehavior.SequentialAccess | CommandBehavior.SingleRow, cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)) {
+                return null;
+            }
+
+            var content = reader.GetStream(0);
+            var download = new BlobDownload(
+                ToMetadata(metadata), content, new StreamingReadResources(connection, command, reader));
+            transferred = true;
+
+            return download;
+        }
+        finally {
+            if (!transferred) {
+                if (reader is not null) {
+                    await reader.DisposeAsync();
+                }
+
+                if (command is not null) {
+                    await command.DisposeAsync();
+                }
+
+                await connection.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task<BlobDownload?> OpenBufferedReadAsync(
+        StoredBlob metadata,
+        BlobRef blobRef,
+        CancellationToken cancellationToken) {
         var connection = await GetOpenNpgsqlConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = GetCurrentNpgsqlTransaction();
-        command.CommandText = "SELECT data FROM blob_contents WHERE blob_id = $1";
+        command.CommandText = GetContentSql(dbContext).Select;
         command.Parameters.Add(new NpgsqlParameter { Value = blobRef.Value });
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -120,18 +177,29 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             return null;
         }
 
-        var data = (byte[])reader["data"];
-
-        // Buffered for now: the content is fully materialized, so the MemoryStream owns no
-        // backend resources and BlobDownload has nothing extra to dispose. A true streaming read
-        // (CommandBehavior.SequentialAccess + NpgsqlDataReader.GetStream) needs a connection whose lifetime
-        // outlives this method and is owned by the returned BlobDownload; the DbContext's shared connection
-        // cannot be that owner (it is disposed with the scope, and a live reader would block other context
-        // work), and a freshly opened connection cannot be either because Npgsql strips the password from an
-        // opened connection's string, so it cannot be cloned from the context's connection. Implementing it
-        // safely requires threading the NpgsqlDataSource (or the raw connection string) into the store — a
-        // deliberate future change, tracked rather than half-done here.
+        var data = (byte[])reader[0];
         return new BlobDownload(ToMetadata(metadata), new MemoryStream(data, writable: false));
+    }
+
+    /// <summary>
+    /// The backend resources behind a streaming read, disposed by <see cref="BlobDownload"/> after the
+    /// content stream. Idempotent so a double-disposed download stays safe.
+    /// </summary>
+    private sealed class StreamingReadResources(
+        NpgsqlConnection connection,
+        NpgsqlCommand command,
+        NpgsqlDataReader reader) : IAsyncDisposable {
+        private int _disposed;
+
+        public async ValueTask DisposeAsync() {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) {
+                return;
+            }
+
+            await reader.DisposeAsync().ConfigureAwait(false);
+            await command.DisposeAsync().ConfigureAwait(false);
+            await connection.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     /// <inheritdoc />
@@ -341,15 +409,50 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var connection = await GetOpenNpgsqlConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = GetCurrentNpgsqlTransaction();
-        command.CommandText = """
-            INSERT INTO blob_contents (blob_id, data)
-            VALUES ($1, $2)
-            ON CONFLICT (blob_id) DO UPDATE SET data = EXCLUDED.data
-            """;
+        command.CommandText = GetContentSql(dbContext).Upsert;
         command.Parameters.Add(new NpgsqlParameter { Value = blobId });
         command.Parameters.Add(new NpgsqlParameter { Value = content, NpgsqlDbType = NpgsqlDbType.Bytea });
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    // The content SQL is built from the EF model (not hard-coded identifiers) so the UseElarionBlobStorage
+    // table/column overrides and the snake-case toggle apply to the raw Npgsql content path too. Built once
+    // per model and reused.
+    private static readonly ConcurrentDictionary<IModel, ContentSql> ContentSqlCache = new();
+
+    internal sealed record ContentSql(string Select, string Upsert);
+
+    internal static ContentSql GetContentSql(DbContext context) =>
+        ContentSqlCache.GetOrAdd(context.Model, static (_, ctx) => BuildContentSql(ctx), context);
+
+    private static ContentSql BuildContentSql(DbContext context) {
+        var entityType = context.Model.FindEntityType(typeof(BlobContentRow))
+            ?? throw new InvalidOperationException(
+                "The blob content entity is not mapped. Call modelBuilder.UseElarionBlobStorage() in OnModelCreating.");
+        var sqlHelper = context.GetService<ISqlGenerationHelper>();
+
+        var tableName = entityType.GetTableName()
+            ?? throw new InvalidOperationException("The blob content entity is not mapped to a table.");
+        var schema = entityType.GetSchema();
+        var storeObject = StoreObjectIdentifier.Table(tableName, schema);
+
+        string Column(string propertyName) {
+            var property = entityType.FindProperty(propertyName)
+                ?? throw new InvalidOperationException($"The {nameof(BlobContentRow)}.{propertyName} property is not mapped.");
+            var columnName = property.GetColumnName(storeObject)
+                ?? throw new InvalidOperationException($"The {nameof(BlobContentRow)}.{propertyName} property has no column.");
+            return sqlHelper.DelimitIdentifier(columnName);
+        }
+
+        var table = sqlHelper.DelimitIdentifier(tableName, schema);
+        var blobId = Column(nameof(BlobContentRow.BlobId));
+        var data = Column(nameof(BlobContentRow.Data));
+
+        return new ContentSql(
+            Select: $"SELECT {data} FROM {table} WHERE {blobId} = $1",
+            Upsert: $"INSERT INTO {table} ({blobId}, {data}) VALUES ($1, $2) " +
+                $"ON CONFLICT ({blobId}) DO UPDATE SET {data} = EXCLUDED.{data}");
     }
 
     private async Task<NpgsqlConnection> GetOpenNpgsqlConnectionAsync(CancellationToken cancellationToken) {

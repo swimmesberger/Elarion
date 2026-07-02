@@ -10,10 +10,10 @@ so each can evolve independently — see [ADR-0011](../decisions/0011-runtime-se
 
 <Callout type="info">
   Two backends ship: an **in-process** store (the zero-dependency default) and an **EF Core database**
-  store (`Elarion.Settings.EntityFrameworkCore`). Both notify **only within the current process**.
+  store (`Elarion.Settings.EntityFrameworkCore`). Change notification is in-process by default; add
+  `Elarion.Settings.PostgreSql` (PostgreSQL `LISTEN/NOTIFY`) to propagate changes across all nodes.
   Consume settings natively (below), or as `IConfiguration`/`IOptionsMonitor<T>` via the
-  `Elarion.Settings.Configuration` adapter. Cross-instance change sources (Postgres `LISTEN/NOTIFY`, Redis)
-  are planned providers over the same contracts. The EF Core store writes on your injected `DbContext`, so a
+  `Elarion.Settings.Configuration` adapter. The EF Core store writes on your injected `DbContext`, so a
   `SetAsync`/`RemoveAsync` made inside a transaction commits or rolls back with it — see
   [persistence & transactions](persistence-and-transactions.mdx).
 </Callout>
@@ -128,18 +128,59 @@ with a `version` column backing optimistic concurrency. Generate and apply an EF
 `elarion_settings` table; the framework ships no migrations.
 
 **Change notification and transactions.** A store write enlists in the context's ambient transaction when one
-is open. To avoid firing watchers for a value a later rollback discards, a write made *inside* a caller-owned
-transaction skips the immediate notification (and logs at Debug); the normal immediate-write path (no ambient
-transaction) notifies as before. A transaction-commit-hooked source is a planned follow-up.
+is open. With the default in-process notifier, a write made *inside* a caller-owned transaction skips the
+immediate notification (and logs at Debug) — firing immediately would announce a value a later rollback
+discards. The PostgreSQL change source below removes this gap: its notifier rides the store's own connection,
+so the database itself delivers the notification on commit and drops it on rollback.
 
-**Single-instance notification.** Change notification still uses the in-process source, so a settings change on
-one node is not observed by another node's watchers or scheduler until that node restarts. When the EF Core
-store is paired with the in-process source, `AddElarionSettingsEntityFrameworkCore` registers a startup service
-that logs a **Warning** making this limitation visible at runtime. A cross-instance source (Postgres
-`LISTEN/NOTIFY`, Redis) is a drop-in replacement that removes both limitations.
+**Single-instance notification.** With only the shipped in-process source, a settings change on one node is
+not observed by another node's watchers or scheduler until that node restarts. When the EF Core store is
+paired with the in-process source, `AddElarionSettingsEntityFrameworkCore` registers a startup service that
+logs a **Warning** making this limitation visible at runtime; registering the PostgreSQL source below silences
+it.
+
+## Multi-node change notification (PostgreSQL LISTEN/NOTIFY)
+
+`Elarion.Settings.PostgreSql` makes change notification cross-instance over the database the settings already
+live in — no extra infrastructure:
+
+```csharp
+// In Program.cs, next to the EF Core store (either order):
+builder.Services.AddElarionSettingsEntityFrameworkCore<AppDbContext>();
+builder.Services.AddElarionPostgreSqlSettingsChanges(connectionString);
+// or, if the host already manages an NpgsqlDataSource:
+builder.Services.AddElarionPostgreSqlSettingsChanges(dataSource);
+```
+
+A write on any node now fires `IChangeToken` watchers on **every** node — `ISettingsManager.Watch`, the
+settings `IConfiguration` provider, `IOptionsMonitor<T>`, and the scheduler's `${...}` live rescheduling all
+follow. How it works:
+
+- A hosted listener holds one dedicated `LISTEN` connection per node and fires the matching watch tokens for
+  each received notification, reconnecting with exponential backoff if the connection drops. PostgreSQL does
+  not queue notifications for absent listeners, so after a reconnect the listener fires **all** watches — a
+  spurious re-read is cheap and always converges.
+- Watch tokens fire **only** from the notification loop: a local write loops back through the database like a
+  remote one, so every node — including the writer — observes changes in commit order through one path.
+- The EF Core store's writes are announced with `pg_notify` **on the store's own connection**, which
+  PostgreSQL makes transactional: a write inside a caller-owned transaction is announced only when that
+  transaction commits, and never on rollback. Transactional writes are therefore fully notified with this
+  backend.
+- The channel (`elarion_settings_changed` by default) and the reconnect backoff are configurable via
+  `PostgreSqlSettingsChangeOptions`; two applications sharing one database should use distinct channels.
+
+The store's `DbContext` must target the same PostgreSQL database as the connection string / data source given
+to `AddElarionPostgreSqlSettingsChanges`. See
+[ADR-0024](../decisions/0024-postgres-listen-notify-settings-changes.md) for the design and alternatives.
 
 `UseElarionSettings` takes optional `tableName` and `schema` parameters to rename the table or place it in
-a non-default schema: `modelBuilder.UseElarionSettings("app_settings", "app")`.
+a non-default schema, plus a `snakeCase` toggle (default `true`; `false` switches to PascalCase names — the
+default table becomes `ElarionSettings`): `modelBuilder.UseElarionSettings("app_settings", "app")`.
+
+On a `[GenerateDbSets]` context you can skip the hand-written call: annotate the context with
+`[GenerateElarionSettings]` (optionally with `SnakeCase`/`TableName`/`Schema`) and the bundled generator
+emits the `DbSet<Setting>` and applies the same model configuration through the EF generator's model-config
+seam (`ELSET001` if `[GenerateDbSets]` is missing).
 
 ## Consuming as IConfiguration / IOptionsMonitor
 
@@ -171,7 +212,8 @@ Settings flow into the scheduler through [variable substitution](variable-substi
 
 ## Roadmap
 
-The foundation, the EF Core database store, the `IConfiguration`/`IOptionsMonitor` adapter, and the
-scheduler integration ship today. Built as fast-follows over the same contracts: cross-instance change
-sources (Postgres `LISTEN/NOTIFY`, Redis) so a change on one node propagates to others. See
-[ADR-0011](../decisions/0011-runtime-settings-subsystem.md) for the full design and phasing.
+The foundation, the EF Core database store, the `IConfiguration`/`IOptionsMonitor` adapter, the scheduler
+integration, and the cross-instance PostgreSQL `LISTEN/NOTIFY` change source ship today. A Redis pub/sub
+change source is a possible future provider over the same contracts. See
+[ADR-0011](../decisions/0011-runtime-settings-subsystem.md) for the full design and phasing and
+[ADR-0024](../decisions/0024-postgres-listen-notify-settings-changes.md) for the multi-node backend.

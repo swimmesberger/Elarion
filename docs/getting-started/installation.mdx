@@ -20,7 +20,7 @@ client generation. You only install the pieces you use.
 | `Elarion.Abstractions` | Application | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
 | `Elarion` | Application / host | Runtime primitives: decorators, the in-memory scheduler, current-user abstraction, and the default authorizer. Depends only on `Microsoft.Extensions.*` abstractions (ADR-0017). **Bundles the Elarion source generator** (handlers, services, validators, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers). |
 | `Elarion.Caching` | Application / host | `HybridCache`-backed default `IHandlerCache` for handler result caching — `services.AddElarionHandlerCaching()`. **Required by `[Cacheable]`/`[CacheInvalidate]`** (extracted from core, ADR-0017). |
-| `Elarion.Resilience` | Application / host | Microsoft/Polly-backed default `IResiliencePipelineRunner` — `services.AddMicrosoftResilienceRuntime()`. **Required by `[Resilient]` handlers and deferred scheduler retries** (extracted from core, ADR-0017). |
+| `Elarion.Resilience` | Application / host | Microsoft/Polly-backed default `IResiliencePipelineRunner` — `services.AddElarionResilience()`. **Required by `[Resilient]` handlers and deferred scheduler retries** (extracted from core, ADR-0017). |
 | `Elarion.FeatureFlags.OpenFeature` | Application / host | Default `IFeatureFlagService` over OpenFeature for `[FeatureGate]`/`[FeatureVariant]` — `services.AddElarionOpenFeature()`. Bring your own OpenFeature provider. |
 | `Elarion.FeatureFlags.FeatureManagement` | Application / host | Batteries-included config-driven flags via the Microsoft.FeatureManagement OpenFeature provider — `services.AddElarionFeatureManagement(configuration)`. |
 | `Elarion.Blobs` | Application | Provider-neutral blob storage contracts and DTOs. |
@@ -46,8 +46,8 @@ client generation. You only install the pieces you use.
   handler cache moved to `Elarion.Caching` and the Polly-backed resilience runner to
   `Elarion.Resilience` — neither ships in `Elarion` core anymore. If you use `[Cacheable]`/`[CacheInvalidate]`,
   add `Elarion.Caching` and call `services.AddElarionHandlerCaching()`. If you use `[Resilient]` handlers
-  **or deferred scheduler retries**, add `Elarion.Resilience` and call `services.AddMicrosoftResilienceRuntime()` —
-  `AddInMemoryScheduler` no longer auto-wires the resilience runner, so a copy-paste upgrade that drops these
+  **or deferred scheduler retries**, add `Elarion.Resilience` and call `services.AddElarionResilience()` —
+  `AddElarionScheduler` no longer auto-wires the resilience runner, so a copy-paste upgrade that drops these
   references silently loses caching and resilience.
 </Callout>
 

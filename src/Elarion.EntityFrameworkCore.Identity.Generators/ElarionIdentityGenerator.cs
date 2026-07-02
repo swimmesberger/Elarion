@@ -66,6 +66,8 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         string RoleFqn,
         string KeyFqn,
         bool SnakeCase,
+        string? Schema,
+        string? TablePrefix,
         bool Emit,
         EquatableArray<DiagnosticInfo> Diagnostics);
 
@@ -85,9 +87,19 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         var keyFqn = attributeClass.TypeArguments[2].ToDisplayString(fmt);
 
         var snakeCase = true;
+        string? schema = null;
+        string? tablePrefix = null;
         foreach (var namedArgument in ctx.Attributes[0].NamedArguments) {
-            if (namedArgument.Key == "SnakeCase" && namedArgument.Value.Value is bool value) {
-                snakeCase = value;
+            switch (namedArgument.Key) {
+                case "SnakeCase" when namedArgument.Value.Value is bool value:
+                    snakeCase = value;
+                    break;
+                case "Schema" when namedArgument.Value.Value is string schemaValue:
+                    schema = schemaValue;
+                    break;
+                case "TablePrefix" when namedArgument.Value.Value is string prefix:
+                    tablePrefix = prefix;
+                    break;
             }
         }
 
@@ -114,6 +126,8 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
             roleFqn,
             keyFqn,
             snakeCase,
+            schema,
+            tablePrefix,
             Emit: hasGenerateDbSets,
             diagnostics.ToImmutable());
     }
@@ -147,7 +161,9 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         sb.AppendLine($"    partial void {SeamMethodName}(ModelBuilder modelBuilder) =>");
         sb.AppendLine(
             $"        global::Elarion.EntityFrameworkCore.Identity.IdentityModelBuilderExtensions.ApplyElarionIdentity<{target.UserFqn}, {target.RoleFqn}, {target.KeyFqn}>(");
-        sb.AppendLine($"            modelBuilder, snakeCase: {(target.SnakeCase ? "true" : "false")});");
+        sb.AppendLine(
+            $"            modelBuilder, schema: {SourceLiterals.String(target.Schema)}, " +
+            $"tablePrefix: {SourceLiterals.String(target.TablePrefix)}, snakeCase: {(target.SnakeCase ? "true" : "false")});");
         sb.AppendLine("}");
 
         spc.AddSource($"{target.HintName}.ElarionIdentity.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));

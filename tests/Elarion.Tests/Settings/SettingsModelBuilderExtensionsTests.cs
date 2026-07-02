@@ -30,4 +30,16 @@ public sealed class SettingsModelBuilderExtensionsTests {
         setting!.GetTableName().Should().Be("app_settings");
         setting.GetSchema().Should().Be("cache");
     }
+
+    [Fact]
+    public void UseElarionSettings_SnakeCaseFalse_UsesPascalCaseNames() {
+        var modelBuilder = new ModelBuilder(new ConventionSet());
+        modelBuilder.UseElarionSettings(snakeCase: false);
+        var model = modelBuilder.FinalizeModel();
+
+        var setting = model.FindEntityType(typeof(Setting))!;
+        setting.GetTableName().Should().Be("ElarionSettings");
+        setting.FindProperty(nameof(Setting.UpdatedOnUtc))!.GetColumnName().Should().Be("UpdatedOnUtc");
+        setting.FindProperty(nameof(Setting.Version))!.GetColumnName().Should().Be("Version");
+    }
 }
