@@ -231,6 +231,19 @@ function EconomicsSection() {
           <GeneratedRing />
         </div>
 
+        <div className="vt-rise mx-auto mt-12 max-w-3xl rounded-[4px] border border-(--line) p-6">
+          <p className="eyebrow text-fd-primary">Field report — a real migration, not the sample</p>
+          <p className="mt-3 text-sm leading-relaxed text-fd-muted-foreground">
+            The production application Elarion was extracted from replaced its home-grown
+            foundation with the released packages in a single pull request:{' '}
+            <span className="font-medium text-fd-foreground">
+              391 lines added, 16,223 removed
+            </span>
+            . Sixteen thousand lines that team no longer maintains, reviews — or pays an AI to
+            read — ever again.
+          </p>
+        </div>
+
         <div className="vt-rise mt-12 grid gap-8 md:grid-cols-3">
           {[
             {
