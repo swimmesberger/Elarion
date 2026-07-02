@@ -216,13 +216,29 @@ public sealed class InMemorySchedulerTests
         var descriptor = CreateCountingDescriptor("test.catchUp", ScheduledJobSchedule.FixedRate("50ms"));
         await using var provider = CreateProvider(time, descriptor);
         var hostedService = provider.GetRequiredService<IHostedService>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
         var counter = provider.GetRequiredService<RunCounter>();
 
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => counter.Count >= 1);
 
-        // Jump 10 seconds (200 missed 50ms slots): exactly one occurrence may run.
-        time.Advance(TimeSpan.FromSeconds(10));
+        // Jump 10 seconds (200 missed 50ms slots): the fire-once policy coalesces them into a
+        // single overdue occurrence that resyncs the chain to the future.
+        //
+        // A single time.Advance can beat the scheduler's registration of its next-occurrence wait
+        // timer on the fake clock and lose the tick (the same race #21 fixed for the overlap tests),
+        // so recover it with AdvanceUntilAsync. But the stop condition must flip *at dispatch*, not on
+        // the run counter: the counter is incremented later in the async job body, so a second Advance
+        // could land in that gap and cross the already-resynced successor, firing it too. The queued
+        // occurrence's due time (captured synchronously under the scheduler lock) is the dispatch-precise
+        // signal — the overdue occurrence has fired once its successor has left the near-future queue,
+        // observed either as momentarily absent (the dequeue/re-enqueue window) or resynced far ahead.
+        var baseline = time.GetUtcNow();
+        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(10), () => {
+            var nextDue = inspector.GetSnapshot().Jobs
+                .Single(job => job.Name == "test.catchUp").NextDueTimeUtc;
+            return nextDue is null || nextDue > baseline + TimeSpan.FromSeconds(5);
+        });
         await WaitUntilAsync(() => counter.Count >= 2);
         await Task.Delay(250, cts.Token);
 
