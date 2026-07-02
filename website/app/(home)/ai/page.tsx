@@ -3,6 +3,7 @@ import { ArrowRight } from 'lucide-react';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { AudienceDiagram } from '../_components/ai/audience-diagram';
+import { BetPanel } from '../_components/ai/bet-panel';
 import { FloorPlan } from '../_components/ai/floor-plan';
 import { GateDiagram } from '../_components/ai/gate-diagram';
 import { GeneratedRing } from '../_components/ai/generated-ring';
@@ -486,6 +487,12 @@ function BetSection() {
             lead="Adopting any foundation is a commitment — so this one is engineered to be a small
               one, and a reversible one."
           />
+        </div>
+
+        <div className="vt-rise mt-12 overflow-x-auto">
+          <div className="mx-auto min-w-[720px] max-w-4xl">
+            <BetPanel />
+          </div>
         </div>
 
         <div className="vt-rise mt-10 grid gap-8 md:grid-cols-2">

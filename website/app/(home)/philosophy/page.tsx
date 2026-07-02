@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import type { Metadata } from 'next';
+import { AdrShelf } from '../_components/philosophy/adr-shelf';
 import { Batteries } from '../_components/philosophy/batteries';
 import { FeedbackTimeline } from '../_components/philosophy/feedback-timeline';
 import { MaximSplit } from '../_components/philosophy/maxim-split';
@@ -294,20 +295,28 @@ function OpinionsSection() {
           />
         </div>
 
-        <div className="vt-rise mt-10 grid gap-x-10 gap-y-8 md:grid-cols-2">
+        <div className="vt-rise mt-10">
+          <AdrShelf />
+        </div>
+
+        <div className="vt-rise mt-10 grid gap-5 md:grid-cols-2">
           {opinions.map((opinion) => (
-            <div key={opinion.stance} className="border-t border-(--line) pt-4">
-              <div className="flex items-baseline justify-between gap-4">
-                <h3 className="font-medium text-fd-foreground">{opinion.stance}</h3>
+            <div key={opinion.stance} className="flex flex-col rounded-[4px] border border-(--line) bg-fd-card p-5">
+              <div className="flex items-center justify-between gap-4 border-b border-(--line-soft) pb-3">
                 <a
                   href={opinion.href}
                   target={opinion.href.startsWith('http') ? '_blank' : undefined}
                   rel={opinion.href.startsWith('http') ? 'noreferrer' : undefined}
-                  className="shrink-0 font-mono text-xs text-fd-primary hover:underline"
+                  className="rounded-[3px] border px-2 py-0.5 font-mono text-xs text-(--accent-brand) transition-colors hover:bg-fd-accent/60"
+                  style={{ borderColor: 'color-mix(in oklab, var(--accent-brand) 45%, transparent)' }}
                 >
                   {opinion.ref} →
                 </a>
+                <span className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-fd-muted-foreground">
+                  decided · on file
+                </span>
               </div>
+              <h3 className="mt-3.5 font-medium text-fd-foreground">{opinion.stance}</h3>
               <p className="mt-2 text-sm leading-relaxed text-(--body)">{opinion.why}</p>
             </div>
           ))}
