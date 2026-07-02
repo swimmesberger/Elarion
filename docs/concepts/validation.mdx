@@ -1,0 +1,238 @@
+---
+title: Validation
+description: Two-tier request validation — DataAnnotations on the request DTO enforced at runtime and exported to every contract surface, business rules in the handler.
+---
+
+Validation in Elarion is **two-tier**, and the dividing line is not "simple vs. complex" but **what a
+wire contract can express**. JSON Schema — and therefore the JSON-RPC schema, the OpenAPI document,
+MCP tool schemas, and the Zod client generated from them — can carry exactly one category of rule:
+static, single-property shape constraints (lengths, ranges, patterns, formats, requiredness).
+Everything else is server-side by nature.
+
+- **Tier 1 — shape constraints** are declared on the request DTO as standard
+  `System.ComponentModel.DataAnnotations` attributes. One declaration feeds **four surfaces**: the
+  runtime validator, `rpc-schema.json` (and MCP tool schemas), the OpenAPI document, and the generated
+  Zod client.
+- **Tier 2 — business rules** — cross-field comparisons, conditional rules, and every async or
+  database-backed check — live in the handler (or a domain [`[Service]`](/docs/concepts/services) it
+  calls), returning `AppError.Validation`/`AppError.Conflict` through the normal `Result<T>` channel,
+  **inside the transaction** where those checks are actually sound.
+
+There is no standalone validator class layer: an exportable rule has exactly one legal home (the DTO),
+so what the client pre-validates is by construction what the server enforces.
+
+## Tier 1 — declare shape constraints on the request
+
+Annotate the request's properties. Requiredness needs no attribute at all — it comes from nullability
+plus the `required` modifier, which the schemas already export:
+
+```csharp title="src/Billing.Application/Modules/Clients/Handlers/CreateClient.cs"
+using System.ComponentModel.DataAnnotations;
+
+[Handler("clients.create")]
+public sealed class CreateClient(BillingDbContext db, ICurrentUser user)
+    : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
+    public sealed record Command : ICommand {
+        [StringLength(200, MinimumLength = 1)]
+        public required string Name { get; init; }
+
+        [EmailAddress, MaxLength(320)]
+        public required string Email { get; init; }
+
+        [Range(0, 365)]
+        public int PaymentTermDays { get; init; } = 30;
+    }
+    // ...
+}
+```
+
+The validator walks the whole request graph, so constraints on nested objects and collection elements
+are enforced (and reported) too. The supported vocabulary is the set every schema surface can carry:
+
+| Attribute | Enforced as | Exported as (JSON Schema) |
+| --- | --- | --- |
+| `required` + non-nullable | member must be present | `required` |
+| `[Range(min, max)]` | numeric bounds | `minimum` / `maximum` (`exclusiveMinimum`/`exclusiveMaximum` for exclusive bounds) |
+| `[MinLength]` / `[MaxLength]` / `[Length]` / `[StringLength]` | string/collection length | `minLength` / `maxLength` (`minItems`/`maxItems` on arrays) |
+| `[RegularExpression]` | pattern match | `pattern` |
+| `[EmailAddress]` | email shape | `format: "email"` |
+| `[Url]` | absolute URL | `format: "uri"` |
+| `[Base64String]` | base64 content | `format: "byte"` |
+
+### Custom constraints
+
+A reusable rule subclasses one of the mapped attributes, so it gets runtime enforcement *and* every
+schema surface for free — no registration, no exporter extension:
+
+```csharp title="src/Billing.Application/Validation/SlugAttribute.cs"
+using System.ComponentModel.DataAnnotations;
+
+/// <summary>Lowercase words separated by single hyphens, e.g. "spring-sale".</summary>
+public sealed class SlugAttribute() : RegularExpressionAttribute("^[a-z0-9]+(-[a-z0-9]+)*$");
+```
+
+```csharp
+public sealed record Command : ICommand {
+    [Slug, MaxLength(64)]
+    public required string Slug { get; init; }
+}
+```
+
+Because `[Slug]` *is* a `RegularExpressionAttribute`, the runtime validator enforces it and every
+schema exports it as a `pattern` — the subclass changes nothing about the plumbing.
+
+## Enforcement
+
+Reference the opt-in **`Elarion.Validation`** package and register it once in the host:
+
+```csharp title="src/Billing.Api/Program.cs"
+builder.Services.AddElarionValidation();
+```
+
+`AddElarionValidation([configure])` wires the `Microsoft.Extensions.Validation`-backed default behind
+the Elarion-owned `IRequestValidator` seam (`Elarion.Abstractions.Validation`) and also calls
+`AddElarionJson()`. Everything else is generated: a per-module resolver contributes each request
+type's validation metadata as **constant-constructed attribute arrays** (no runtime attribute
+reflection), registered through the module's gated `ConfigureDefaultServices` — a
+[disabled module](/docs/concepts/modules) contributes no validation metadata.
+
+The framework-owned `ValidationDecorator<TRequest, TResponse>` (`Elarion.Abstractions.Pipeline`) is
+auto-attached by the handler generator **just inside the feature gate** — the pipeline runs
+tracing → authorization → feature gate → **validation** → your `[DefaultPipeline]` decorators →
+handler — for any handler whose request type graph carries validation attributes. Two consequences:
+
+- **Validation runs pre-transaction.** A bad request is rejected before caching, your pipeline, or a
+  unit of work is ever touched.
+- **Unannotated requests cost nothing.** No decorator is attached, no resolver entry exists, no lookup
+  happens.
+
+<Callout type="info">
+  Attaching is opt-in by construction, exactly like [authorization](/docs/concepts/authorization) and
+  [feature gates](/docs/concepts/feature-flags): the attributes on your DTO are the switch. There is
+  nothing to add to a `[DecoratorList]`.
+</Callout>
+
+## Field-keyed errors
+
+A violation fails with `AppError.Validation` carrying `FieldErrors` — messages keyed by **wire-named
+field path** using the [canonical JSON naming policy](/docs/capabilities/serialization), so error keys
+match the property names the client actually sent: `"address.street"`, with collection indexers
+preserved as `"deliveries[1].street"`. The empty-string key carries messages not specific to a single
+field.
+
+Over HTTP the mapper surfaces them as the standard RFC 7807 `errors` extension (the
+`HttpValidationProblemDetails` shape):
+
+```json
+{
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "detail": "Name is required",
+  "errors": {
+    "name": ["The Name field is required."],
+    "deliveries[1].street": ["The Street field is required."]
+  }
+}
+```
+
+Over JSON-RPC the same structure rides in `error.data` (code `-32602`, the spec's "Invalid params"):
+
+```json
+{
+  "error": {
+    "code": -32602,
+    "message": "The Name field is required.",
+    "data": {
+      "errors": ["The Name field is required.", "The Street field is required."],
+      "fieldErrors": {
+        "name": ["The Name field is required."],
+        "deliveries[1].street": ["The Street field is required."]
+      }
+    }
+  }
+}
+```
+
+Because a client-side Zod pre-flight failure and a server 400 key violations by the same wire paths, a
+form binds either one to the same input field.
+
+## One attribute, four surfaces
+
+The point of tier 1 is that a constraint **cannot drift from the contract** — every surface reads the
+same declaration:
+
+| Surface | How the constraint gets there |
+| --- | --- |
+| Runtime enforcement | The generated per-module resolver + the auto-attached `ValidationDecorator`. |
+| [JSON-RPC schema](/docs/capabilities/transports/schema-generation) & [MCP tools](/docs/capabilities/transports/mcp) | `JsonRpcSchemaExporter` injects the JSON Schema keywords; MCP tool input schemas share the same builder. |
+| [OpenAPI document](/docs/capabilities/transports/openapi) | `Microsoft.AspNetCore.OpenApi` maps DataAnnotations natively (reflection-off); `Elarion.AspNetCore.OpenApi` adds `format: "email"` parity. |
+| [Generated Zod client](/docs/capabilities/transports/typescript-client) | The Zod emitter maps the keywords (`.min()`, `.max()`, `.regex()`, `.gte()`, `.email()`, …) and the client pre-validates params before the wire. |
+
+## Tier 2 — business rules in the handler
+
+Cross-field comparisons, conditional rules, and anything that touches the database belong in the
+handler, where they run **inside the transaction**. An async pre-handler check would be unsound
+anyway: the validation decorator runs before the transaction opens, so a pre-flight uniqueness query
+is a time-of-check/time-of-use race — the database constraint is the real fence, and the handler must
+handle the conflict regardless.
+
+```csharp
+public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+    // Cross-field rule: field-keyed so the client can bind it to the input.
+    if (command.ValidFrom > command.ValidTo) {
+        return AppError.Validation("Invalid validity range.", new Dictionary<string, string[]> {
+            ["validTo"] = ["Must be on or after validFrom."],
+        });
+    }
+
+    // Database-backed rule: checked inside the transaction, backed by a unique constraint.
+    var exists = await db.Clients.AnyAsync(c => c.OwnerId == user.UserId && c.Email == command.Email, ct);
+    if (exists) {
+        return AppError.Conflict($"A client with email {command.Email} already exists.");
+    }
+
+    // ...
+}
+```
+
+The `AppError.Validation(message, fieldErrors)` overload produces the same field-keyed error shape as
+tier 1, so tier-2 failures render identically on every transport. A rule shared by several handlers
+moves to a domain [`[Service]`](/docs/concepts/services) those handlers call — not to a validator
+layer.
+
+### What stays server-only
+
+Be honest about the boundary: the client pre-validates *shape*, never *truth*. These never reach a
+schema, by design:
+
+- **Uniqueness and existence checks** — only the database knows, and only inside the transaction.
+- **Cross-field rules** — the schema subset the surfaces share cannot express "ValidTo ≥ ValidFrom";
+  the client discovers them as field-keyed 400s.
+- **Conditional requiredness** — "B is required when A is set" is a tier-2 branch.
+- **Anything reading `ICurrentUser`, settings, or feature flags** — ambient state is not contract.
+
+Nothing pretends a uniqueness check can run in a browser; the contract simply guarantees that what
+*can* be expressed is expressed everywhere.
+
+## Diagnostics
+
+| Id | Severity | Meaning |
+| --- | --- | --- |
+| `ELVAL001` | Error | A handler's request carries validation attributes but the response type cannot represent failure (no `IResultFailureFactory<T>`, i.e. not `Result<T>`/`Result`) — the decorator could not short-circuit and would be silently skipped. Mirrors `ELAUTH001`. |
+| `ELVAL002` | Warning | A request carries validation attributes but the compilation does not reference `Elarion.Validation` — the constraints are documented in every schema but **unenforced** at runtime. Reference the package and call `AddElarionValidation()`, or remove the attributes; the gap must be a visible choice, never a silent one. |
+
+## Coming from FluentValidation
+
+Elarion's earlier FluentValidation integration (`[GenerateModuleValidators]` and per-module
+`IValidator<T>` registration) is removed: imperative rule lambdas are invisible to every contract
+surface, which guaranteed exportable rules hiding in unexportable places. Migrate shape rules to
+attributes and business rules into the handler. If you want FluentValidation for its combinator style,
+wire it as an app-owned [decorator](/docs/concepts/decorator-pipelines) — which is all it ever was.
+
+## See also
+
+- [ADR-0027: Declarative request validation](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0027-declarative-request-validation.md) — the full rationale, including why Microsoft's bundled validation generator is not used.
+- [Results & errors](/docs/concepts/results-and-errors) — the `Result<T>`/`AppError` channel tier-2 rules report through.
+- [Decorator pipelines](/docs/concepts/decorator-pipelines) — where the validation gate sits and how decorators compose.
+- [TypeScript client](/docs/capabilities/transports/typescript-client) — constraint-aware Zod schemas and params pre-validation.
+- [OpenAPI](/docs/capabilities/transports/openapi) — the same constraints in the REST contract.

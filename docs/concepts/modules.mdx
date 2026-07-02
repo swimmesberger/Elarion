@@ -1,10 +1,10 @@
 ---
 title: Modules
-description: A module is an application boundary marked with [AppModule]. Its handlers, services, validators, scheduled jobs, and event consumers are discovered and registered automatically, and feature-gated as one unit.
+description: A module is an application boundary marked with [AppModule]. Its handlers, services, validation metadata, scheduled jobs, and event consumers are discovered and registered automatically, and feature-gated as one unit.
 ---
 
 A module is an application boundary: a static partial class marked with `[AppModule]`, sitting at the
-root of a namespace that contains the module's handlers, services, validators, scheduled jobs, and
+root of a namespace that contains the module's handlers, services, scheduled jobs, and
 event consumers. The module decides what it exposes; the host only composes modules.
 
 You do **not** wire a module's own building blocks by hand. Everything a module declares is discovered
@@ -48,7 +48,7 @@ extra manifest metadata.
 | --- | --- |
 | `AddHandlers` | The module's [handlers](/docs/concepts/handlers) (and their decorator pipeline). |
 | `AddServices` | The module's `[Service]` registrations — see [services](/docs/concepts/services). |
-| `AddValidators` | The module's [validators](/docs/concepts/validators). |
+| `AddValidators` | The module's generated [request-validation](/docs/concepts/validation) resolver — the DataAnnotations metadata for its handlers' request types. |
 | `AddScheduledJobs` | The module's [scheduled jobs](/docs/capabilities/scheduling). |
 | `AddEventConsumers` | The module's [event consumers](/docs/capabilities/events/consuming-events). |
 | `AddModuleApi` | The module's generated [module API](/docs/concepts/cross-module-communication) facades. |
@@ -60,7 +60,7 @@ skeleton is emitted unconditionally for every module, so the host call always co
 
 <Callout type="info">
   There is no hand-written `ConfigureServices` that calls `AddClientsHandlers()` /
-  `AddClientsServices()` / `AddClientsValidators()` anymore. Those per-module methods still exist, but
+  `AddClientsServices()` anymore. Those per-module methods still exist, but
   the generated `ConfigureDefaultServices` is what calls them — you should not.
 </Callout>
 
@@ -101,8 +101,8 @@ The generated bootstrapper resolves this through a single `IsModuleEnabled(confi
 predicate that reads `Modules:{Name}:Enabled`, defaulting to `true`. Every surface is gated by that one
 predicate, so a disabled feature module disappears completely and consistently:
 
-- its generated default services (handlers, `[Service]` registrations, validators, scheduled jobs,
-  event consumers, module API) are never registered;
+- its generated default services (handlers, `[Service]` registrations, validation metadata, scheduled
+  jobs, event consumers, module API) are never registered;
 - its hand-written `ConfigureServices` is never called;
 - its `MapEndpoints` routes and its generated `[HttpEndpoint]` routes are never mapped;
 - its `[Handler]` JSON-RPC operations are never registered;

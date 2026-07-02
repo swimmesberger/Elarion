@@ -232,7 +232,7 @@ public sealed class IdentitySeeder(IPermissionCatalog catalog, RoleManager<AppRo
 ```
 
 It exposes the same `Permissions`/`Roles`/`ByResource`/`ByVerb`, plus a per-module `Modules` breakdown, populated
-the same way services and validators are — each module contributes through its generated `ConfigureDefaultServices`,
+the same way services and event consumers are — each module contributes through its generated `ConfigureDefaultServices`,
 **gated by module enablement**, so a disabled module's permissions never appear and a referenced module library's
 are included automatically. `AddElarionAuthorization` registers it.
 

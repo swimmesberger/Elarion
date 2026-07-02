@@ -1,6 +1,6 @@
 # @swimmesberger/elarion-jsonrpc-client-generator
 
-Generate TypeScript RPC method contracts, Zod result schemas, and a portable fetch-based JSON-RPC client from an Elarion `rpc-schema.json` export.
+Generate TypeScript RPC method contracts, Zod params/result schemas, and a portable fetch-based JSON-RPC client from an Elarion `rpc-schema.json` export.
 
 ```bash
 npm install --save-dev @swimmesberger/elarion-jsonrpc-client-generator
@@ -12,8 +12,8 @@ The generated files are:
 | File | Purpose |
 | --- | --- |
 | `rpc-types.ts` | `RpcMethods` interface mapping method names to params/result types. |
-| `rpc-schemas.ts` | `rpcResultSchemas` Zod map for runtime result validation. |
-| `rpc-client.ts` | Browser/Node.js fetch client with typed single calls, batching, headers, `AbortSignal`, JSON-RPC errors, and Zod-backed result validation. |
+| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation. |
+| `rpc-client.ts` | Browser/Node.js fetch client with typed single calls, batching, headers, `AbortSignal`, JSON-RPC errors, and Zod-backed params/result validation. |
 
 The generated schema and client files import `zod`, so consuming applications should install `zod` as a runtime dependency.
 
@@ -56,6 +56,8 @@ const [clientResult, projectsResult] = await rpc.$batch([
 ```
 
 Result validation is enabled by default through `rpcResultSchemas`. Use `transformResult` for app-specific normalization before validation, or set `validateResults: false` when another layer validates responses.
+
+Params validation is also enabled by default through `rpcParamsSchemas`: single calls and batch items are checked against the exported schema's constraints (lengths, ranges, patterns, formats) before the request is sent, and a failure throws `RpcParamsValidationError` locally — naming the method, with the underlying Zod error as `cause` — so tier-1 contract violations never reach the wire. Set `validateParams: false` to opt out.
 
 ## Client-side tracing
 

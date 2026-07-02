@@ -12,10 +12,11 @@ infrastructure stay in consuming projects.
 | Package | Purpose | Expected dependencies |
 | --- | --- | --- |
 | `Elarion.Abstractions` | Implementation-neutral attributes, handler contracts, result types, module metadata, scheduling contracts, the canonical JSON-serialization accessor (`IElarionJsonSerialization` / `ElarionJsonOptions` / `AddElarionJson` / `ConfigureElarionJson`), and source-generation triggers. | Application-level abstractions without provider-specific dependencies. |
-| `Elarion` | Runtime primitives: decorators, modules, current-user access, the default authorizer, and the in-memory scheduler. The caching and resilience **seams and decorators** live here, but their implementations moved to opt-in packages (ADR-0017), so core depends only on `Microsoft.Extensions.*` abstractions. Bundles the Elarion source generator (handlers, validators, services, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers) as an analyzer. | `Elarion.Abstractions` and `Microsoft.Extensions.*` abstractions only; avoids ASP.NET Core, EF Core, and transport concerns. |
+| `Elarion` | Runtime primitives: decorators, modules, current-user access, the default authorizer, and the in-memory scheduler. The caching and resilience **seams and decorators** live here, but their implementations moved to opt-in packages (ADR-0017), so core depends only on `Microsoft.Extensions.*` abstractions. Bundles the Elarion source generator (handlers, services, modules, RPC/HTTP/MCP maps, validation resolvers, resilience policies, scheduled jobs, event consumers) as an analyzer. | `Elarion.Abstractions` and `Microsoft.Extensions.*` abstractions only; avoids ASP.NET Core, EF Core, and transport concerns. |
 | `Elarion.Caching` | `HybridCache`-backed default `IHandlerCache` for handler result caching (`AddElarionHandlerCaching()`). **Required by `[Cacheable]`/`[CacheInvalidate]`** — the `HybridHandlerCache` was extracted out of `Elarion` core (ADR-0017). | `Elarion.Abstractions`; pulls `Microsoft.Extensions.Caching.Hybrid`. |
 | `Elarion.Caching.PostgreSql` | The **recommended L2 distributed cache** for most apps: a PostgreSQL `UNLOGGED` table behind `HybridCache` (`AddElarionPostgreSqlHandlerCaching(connectionString)`), reusing your Postgres instead of operating Redis (`UseWAL = false` ⇒ an auto-created `UNLOGGED` table; ADR-0020). Redis stays the better L2 for very high-throughput, independently-scaled, or multi-region caches. | `Elarion.Caching`; pulls the official `Microsoft.Extensions.Caching.Postgres` (and Npgsql). |
 | `Elarion.Resilience` | Microsoft/Polly-backed default `IResiliencePipelineRunner` (`AddElarionResilience()`). **Required by `[Resilient]` handlers and deferred scheduler retries** — the runner was extracted out of `Elarion` core, so `AddElarionScheduler` no longer auto-wires it (ADR-0017, breaking). | `Elarion`; pulls `Microsoft.Extensions.Resilience`. |
+| `Elarion.Validation` | `Microsoft.Extensions.Validation`-backed default `IRequestValidator` for [declarative request validation](/docs/concepts/validation) (`AddElarionValidation()`): DataAnnotations on request DTOs, enforced by the framework `ValidationDecorator` and exported to every schema surface (ADR-0027). **Required to enforce validation attributes at runtime** — without it they are schema-documented but unenforced (`ELVAL002`). The `IRequestValidator` seam and the decorator stay in `Elarion.Abstractions`. | `Elarion.Abstractions`; pulls `Microsoft.Extensions.Validation` (runtime base only — Microsoft's bundled validation generator is excluded). |
 | `Elarion.Scheduling.EntityFrameworkCore` | Cross-instance scheduler coordination over EF Core/PostgreSQL: per-occurrence claim rows make each recurring job occurrence execute on exactly one node (exact slots for cron, one-interval dedupe windows for fixed-rate/fixed-delay), plus a claim-retention purge worker — `AddElarionSchedulerEntityFrameworkCore<TDbContext>()`; `UseElarionSchedulerClaims(modelBuilder)` / `[GenerateElarionSchedulerClaims]` map the table. Bundles its generator. Targets PostgreSQL. | `Elarion.Abstractions` and EF Core relational APIs. |
 | `Elarion.FeatureFlags.OpenFeature` | Default `IFeatureFlagService` over OpenFeature's `IFeatureClient` for `[FeatureGate]`/`[FeatureVariant]`; maps `ICurrentUser` into the OpenFeature `EvaluationContext` (targeting key + `UserId`/`Groups`) off-HTTP, so gating works with any OpenFeature provider (`AddElarionOpenFeature()`). | `Elarion.Abstractions` and `OpenFeature`; bring your own OpenFeature provider via `services.AddOpenFeature(...)`. |
 | `Elarion.FeatureFlags.FeatureManagement` | Batteries-included, config-driven flags: wires the OpenFeature Microsoft.FeatureManagement provider behind the OpenFeature-backed `IFeatureFlagService` (`AddElarionFeatureManagement(configuration)`). | `Elarion.FeatureFlags.OpenFeature`, `OpenFeature.Hosting`, and `OpenFeature.Contrib.Provider.FeatureManagement` (a prerelease — NU5104 suppressed deliberately, ADR-0016). |
@@ -47,7 +48,7 @@ infrastructure stay in consuming projects.
 
 | Package | Purpose |
 | --- | --- |
-| `@swimmesberger/elarion-jsonrpc-client-generator` | TypeScript CLI/library that converts an exported `rpc-schema.json` into method contracts, Zod result schemas, and a portable fetch client. |
+| `@swimmesberger/elarion-jsonrpc-client-generator` | TypeScript CLI/library that converts an exported `rpc-schema.json` into method contracts, constraint-aware Zod params/result schemas, and a portable fetch client that pre-validates request params. |
 
 ## Architecture boundaries
 
@@ -67,6 +68,10 @@ The package split enforces clean dependencies:
   transport-neutral MCP tool model and dispatch shim live in `Elarion.JsonRpc`.
 - `Elarion.AspNetCore.OpenApi` is the only package that references `Microsoft.AspNetCore.OpenApi`; the base
   HTTP transport stays OpenAPI-free, and the generator's tags/idempotent marker are inert without it.
+- Validation follows the same seam/impl split: the `IRequestValidator` seam, `RequestValidationErrors`, and
+  the `ValidationDecorator` live in `Elarion.Abstractions`; the `Microsoft.Extensions.Validation`-backed
+  default lives in the opt-in `Elarion.Validation`. The constraint vocabulary is standard
+  `System.ComponentModel.DataAnnotations` — no FluentValidation dependency anywhere in the framework.
 - EF Core packages own only EF-specific markers and generation.
 - Generators emit deterministic, inspectable code and fail with diagnostics for unsupported patterns,
   rather than scanning at runtime.
@@ -75,7 +80,7 @@ The package split enforces clean dependencies:
 
 | Project | References |
 | --- | --- |
-| Application library | `Elarion` (bundles the generator); optionally `Elarion.Blobs`, `Elarion.EntityFrameworkCore` (bundles the EF Core generator). |
+| Application library | `Elarion` (bundles the generator); optionally `Elarion.Validation` (enforces the request DTOs' DataAnnotations and triggers the validation-resolver generation), `Elarion.Blobs`, `Elarion.EntityFrameworkCore` (bundles the EF Core generator). |
 | Domain / entity library (if separate) | None — entities are plain classes with no marker. `[EntityConfiguration]` configurations live with the modules in the application library; the project holding the concrete `DbContext` references `Elarion.EntityFrameworkCore` so its generator reads the per-assembly configuration manifest and fills the context. |
 | ASP.NET Core host | `Elarion` (for the generator), `Elarion.JsonRpc`, `Elarion.AspNetCore`; optionally `Elarion.Blobs.PostgreSql`, blob-upload transports (`Elarion.Blobs.Tus` + `Elarion.Blobs.Tus.PostgreSql`, or `Elarion.Blobs.AspNetCore`), `Elarion.AspNetCore.SchemaGeneration` (build tooling), `Elarion.AspNetCore.OpenApi` (OpenAPI for `[HttpEndpoint]`), and `Elarion.AspNetCore.Mcp` (MCP server). |
 | Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`. |

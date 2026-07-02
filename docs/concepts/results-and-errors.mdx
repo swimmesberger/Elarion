@@ -63,6 +63,9 @@ Each kind has a factory; validation supports an optional structured payload:
 ```csharp
 AppError.Validation("Name is required.");
 AppError.Validation("Invalid command.", new[] { "Name is required.", "Email is invalid." });
+AppError.Validation("Invalid command.", new Dictionary<string, string[]> {   // field-keyed: renders as
+    ["name"] = ["Name is required."],                                        // RFC 7807 `errors` over HTTP
+});
 AppError.NotFound($"Client {id} was not found.");
 AppError.Conflict("Invoice number is already reserved.");
 AppError.Forbidden("You cannot modify this resource.");

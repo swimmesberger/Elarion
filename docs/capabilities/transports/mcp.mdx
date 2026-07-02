@@ -88,6 +88,11 @@ public sealed class CreateClient(AppDbContext db)
 The generator records the .NET property name; the JSON name is resolved at startup from your serializer's
 `PropertyNamingPolicy`, so descriptions attach correctly under any naming policy.
 
+Tool **input schemas** also carry the request DTO's DataAnnotations constraints (`[Range]`, the length
+attributes, `[RegularExpression]`, `[EmailAddress]`, `[Url]`, `[Base64String]`) as JSON Schema keywords —
+they share the JSON-RPC schema builder, so an agent sees the same shape contract the server enforces. See
+[Validation](/docs/concepts/validation).
+
 ## Choosing which transports expose a handler
 
 A handler declares its operation once with `[Handler]` (the name is optional — see

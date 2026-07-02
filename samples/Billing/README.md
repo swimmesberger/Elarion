@@ -11,7 +11,7 @@ real PostgreSQL database.
 
 | Project | Role |
 | --- | --- |
-| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice`/`AuditEntry` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox), the design-time factory, and the EF migrations; the `Core`, `Clients`, and `Invoicing` modules with their handlers, validators, services, jobs, events, and resilience policy — including the Core module's `IAuditTrail` `[ModuleContract]` (a domain capability `Clients`/`Invoicing` record through, backed by the `AuditEntry` entity); the decorator pipeline; and the `[GenerateDbSets]`-annotated `BillingDbContext` (handlers inject it directly — no context interface). |
+| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice`/`AuditEntry` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox), the design-time factory, and the EF migrations; the `Core`, `Clients`, and `Invoicing` modules with their handlers, services, jobs, events, and resilience policy — including the Core module's `IAuditTrail` `[ModuleContract]` (a domain capability `Clients`/`Invoicing` record through, backed by the `AuditEntry` entity); the decorator pipeline; and the `[GenerateDbSets]`-annotated `BillingDbContext` (handlers inject it directly — no context interface). |
 | `Billing.Infrastructure` | Intent-only mechanism adapters only: the SMTP email sender behind the module's port. The database is **not** here — it is application logic and lives in `Billing.Application.Persistence`. |
 | `Billing.Api` | The ASP.NET Core host: `[GenerateModuleBootstrapper]`, JSON-RPC + MCP transports, the scheduler/resilience/cache runtimes, current-user, and OpenTelemetry. |
 | `Billing.AppHost` | The .NET Aspire app host: provisions PostgreSQL, runs the API and the web frontend, and wires them together. |
@@ -32,9 +32,11 @@ for when each would graduate to its own assembly.
   and there is no separate entity marker).
 - **Vertical-slice modules** — `Core` (always-on, `ICurrentUser` audit trail), `Clients`, and `Invoicing`,
   each auto-registered and feature-gated; no hand-written `Add{Module}…()` calls.
-- **The full cross-cutting machinery** — a one-line decorator pipeline (logging → validation →
-  transaction, attached by compile-time predicate), per-user caching with tag invalidation, a durable
-  integration-event outbox, deferred-retry background jobs with a resilience policy, and a nightly cron.
+- **The full cross-cutting machinery** — a one-line decorator pipeline (logging → transaction, attached
+  by compile-time predicate) with declarative request validation auto-attached from the DataAnnotations
+  on request DTOs (ADR-0027 — the same constraints flow into `rpc-schema.json`, OpenAPI, and the Zod
+  client), per-user caching with tag invalidation, a durable integration-event outbox, deferred-retry
+  background jobs with a resilience policy, and a nightly cron.
 - **Every transport from one definition** — `[Handler]` handlers map onto one shared `HandlerDispatcher`,
   with JSON-RPC **and** MCP as thin adapters over it (each surface chosen via the handler's `Transports` flag).
 - **Real persistence** — PostgreSQL via EF Core, migrations applied on startup, all provisioned by Aspire.

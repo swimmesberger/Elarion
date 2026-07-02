@@ -19,10 +19,18 @@ It emits three files:
 | File | Purpose |
 | --- | --- |
 | `rpc-types.ts` | `RpcMethods` interface mapping method names to params/result types. |
-| `rpc-schemas.ts` | `rpcResultSchemas` Zod map for runtime result validation. |
+| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation. |
 | `rpc-client.ts` | Typed fetch client for single calls and batches. |
 
-The schema and client files import `zod`, so install it as a runtime dependency in the consuming app.
+The schema and client files import `zod` (v3 and v4 are both supported), so install it as a runtime
+dependency in the consuming app.
+
+The emitted Zod schemas are **constraint-aware**: the DataAnnotations attributes on the server's
+request DTOs flow through the exported schema into the client (see
+[Validation](/docs/concepts/validation)) — `minLength`/`maxLength` become `.min()`/`.max()`,
+`pattern` becomes `.regex(new RegExp(...))`, `minimum`/`maximum` become `.gte()`/`.lte()` (exclusive
+bounds `.gt()`/`.lt()`), `minItems`/`maxItems` become array `.min()`/`.max()`, integers get `.int()`,
+and the `uuid`/`email`/`uri` formats become `.uuid()`/`.email()`/`.url()`.
 
 ## Calling methods
 
@@ -69,6 +77,16 @@ const rpc = createRpcApi({
   transformResult: normalizeRpcResultForSchema,
 })
 ```
+
+## Params validation
+
+The client **pre-validates request params by default** through `rpcParamsSchemas`, before anything
+touches the wire. A tier-1 violation — a too-long name, a malformed email — throws a local
+`RpcParamsValidationError` (carrying the method name and the underlying Zod error) instead of costing
+a round trip; batch items are validated the same way. Because the schemas are generated from the same
+attributes the server enforces, a request that passes the pre-flight can only fail server-side on
+business rules (which come back as field-keyed validation errors using the same wire-named paths).
+Set `validateParams: false` to opt out when another layer owns input validation.
 
 ## Result validation
 

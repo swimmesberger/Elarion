@@ -17,7 +17,7 @@ projects: an application library (`MyApp.Application`) and an ASP.NET Core host 
 ### Turn on the generators
 
 In the application project, opt in once. This enables generation for module handlers, services,
-validators, and scheduled jobs across the assembly.
+and scheduled jobs across the assembly.
 
 ```csharp title="MyApp.Application/ElarionAssembly.cs"
 using Elarion.Abstractions;
@@ -47,7 +47,7 @@ public static partial class ClientsModule {
 }
 ```
 
-That is the whole module declaration. You don't register its handlers, services, or validators by hand —
+That is the whole module declaration. You don't register its handlers or services by hand —
 under `[GenerateModuleBootstrapper]` (added below) the generators emit a `ConfigureDefaultServices` that
 the host bootstrapper calls for you, gated by `Modules:Clients:Enabled`. The optional `ConfigureServices`
 hook is reserved for additional, non-generated wiring (options binding, third-party libraries). See
@@ -281,7 +281,7 @@ mapped from `AppError.NotFound`.
     The conventions generators rely on, and how to lay out a real application.
   </Card>
   <Card title="Core concepts" href="/docs/concepts">
-    Handlers, results, modules, services, validators, and pipelines in depth.
+    Handlers, results, modules, services, validation, and pipelines in depth.
   </Card>
   <Card title="TypeScript client" href="/docs/capabilities/transports/typescript-client">
     Export a schema and generate a typed frontend client for `clients.get`.

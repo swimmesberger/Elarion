@@ -10,6 +10,16 @@ export interface JsonSchema {
   oneOf?: unknown[]
   anyOf?: unknown[]
   allOf?: unknown[]
+  // Constraint keywords (JSON Schema 2020-12). exclusiveMinimum/exclusiveMaximum are numbers, not booleans.
+  minLength?: number
+  maxLength?: number
+  pattern?: string
+  minimum?: number
+  maximum?: number
+  exclusiveMinimum?: number
+  exclusiveMaximum?: number
+  minItems?: number
+  maxItems?: number
 }
 
 export interface RpcMethodSchema {

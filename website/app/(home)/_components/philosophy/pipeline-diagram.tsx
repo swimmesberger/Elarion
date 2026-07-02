@@ -9,9 +9,9 @@ export function PipelineDiagram() {
     { label: 'tracing', tag: 'always on', tagRow: 0 },
     { label: 'authorization', tag: '[RequirePermission]', tagRow: 1 },
     { label: 'feature gate', tag: '[FeatureGate]', tagRow: 0 },
-    { label: 'resilience', tag: '[Resilient]', tagRow: 1 },
-    { label: 'transaction', tag: 'ICommand → auto', tagRow: 0 },
-    { label: 'validation', tag: 'validator → auto', tagRow: 1 },
+    { label: 'validation', tag: 'DTO attrs → auto', tagRow: 1 },
+    { label: 'resilience', tag: '[Resilient]', tagRow: 0 },
+    { label: 'transaction', tag: 'ICommand → auto', tagRow: 1 },
     { label: 'caching', tag: '[Cacheable]', tagRow: 0 },
   ];
 
@@ -25,7 +25,7 @@ export function PipelineDiagram() {
       viewBox="0 0 960 330"
       className="h-auto w-full"
       role="img"
-      aria-label="Every transport — JSON-RPC, REST, MCP, scheduled jobs, and events — enters one pipeline: tracing, authorization, feature gate, resilience, transaction, validation, caching, then your handler. After the handler, domain events dispatch inline in the same transaction and integration events deliver after commit. Each stage attaches only when the handler asks for it."
+      aria-label="Every transport — JSON-RPC, REST, MCP, scheduled jobs, and events — enters one pipeline: tracing, authorization, feature gate, validation, resilience, transaction, caching, then your handler. After the handler, domain events dispatch inline in the same transaction and integration events deliver after commit. Each stage attaches only when the handler asks for it."
       xmlns="http://www.w3.org/2000/svg"
     >
       {/* the transports enter as one arrow */}

@@ -46,6 +46,7 @@ interface GeneratedClientModule {
     fetch?: FetchLike
     headers?: HeadersInit | ((context: { methods: readonly string[]; batch: boolean }) => HeadersInit | Promise<HeadersInit>)
     idGenerator?: () => string | number
+    validateParams?: boolean
     validateResults?: boolean
     transformResult?: (method: string, result: unknown) => unknown
     instrumentation?: TestInstrumentation
@@ -55,6 +56,7 @@ interface GeneratedClientModule {
     fetch?: FetchLike
     headers?: HeadersInit | ((context: { methods: readonly string[]; batch: boolean }) => HeadersInit | Promise<HeadersInit>)
     idGenerator?: () => string | number
+    validateParams?: boolean
     validateResults?: boolean
     transformResult?: (method: string, result: unknown) => unknown
     instrumentation?: TestInstrumentation
@@ -62,6 +64,7 @@ interface GeneratedClientModule {
   RpcError: new (code: number, message: string, data?: unknown) => Error & { code: number; data?: unknown }
   RpcTransportError: new (status: number, statusText: string, body: string) => Error
   RpcProtocolError: new (message: string) => Error
+  RpcParamsValidationError: new (method: string, cause: unknown) => Error & { method: string; cause?: unknown }
 }
 
 interface RpcApiForTests {
@@ -149,8 +152,15 @@ describe('JSON-RPC client generator', () => {
     expect(generated.typesSource).toContain('status: ("Open" | "Closed") | null | undefined')
     expect(generated.schemasSource).toContain('maybe: z.number().nullish(),')
     expect(generated.schemasSource).toContain('state: z.enum(["Open", "Closed"]).nullish(),')
+    expect(generated.schemasSource).toContain('export const rpcParamsSchemas = {')
+    expect(generated.schemasSource).toContain('export type RpcParamsSchemas = typeof rpcParamsSchemas')
+    expect(generated.schemasSource).toContain('id: z.string().uuid(),')
+    expect(generated.schemasSource).toContain('nickname: z.string().nullish(),')
+    expect(generated.schemasSource.indexOf('export const rpcParamsSchemas')).toBeLessThan(
+      generated.schemasSource.indexOf('export const rpcResultSchemas')
+    )
     expect(generated.clientSource).toContain("import type { RpcMethods } from './rpc-types.js'")
-    expect(generated.clientSource).toContain("import { rpcResultSchemas } from './rpc-schemas.js'")
+    expect(generated.clientSource).toContain("import { rpcParamsSchemas, rpcResultSchemas } from './rpc-schemas.js'")
     expect(generated.clientSource).toContain('export interface RpcApi')
     expect(generated.clientSource).toContain('readonly "a": {')
     expect(generated.clientSource).toContain('readonly "first": RpcEndpoint<"a.first">')
@@ -182,6 +192,56 @@ describe('JSON-RPC client generator', () => {
     expect(generated.typesSource).toContain('result: number')
     expect(generated.typesSource).not.toContain('result: number | null | undefined')
     expect(generated.schemasSource).toContain('"nullable.topLevel": z.number(),')
+    expect(generated.schemasSource).toContain('"nullable.topLevel": z.object({')
+  })
+
+  it('maps constraint keywords onto deterministic Zod modifiers', () => {
+    const schema = {
+      methods: {
+        'constraints.check': {
+          params: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', minLength: 3, maxLength: 100 },
+              slug: { type: 'string', pattern: '^[a-z0-9-]+$' },
+              path: { type: 'string', pattern: '^/api/v\\d+/users/' },
+              email: { type: 'string', format: 'email' },
+              website: { type: 'string', format: 'uri' },
+              age: { type: 'integer', minimum: 0, maximum: 150 },
+              score: { type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 1 },
+              tags: {
+                type: 'array',
+                items: { type: 'string', minLength: 1 },
+                minItems: 1,
+                maxItems: 10,
+              },
+              note: { type: ['string', 'null'], minLength: 1, maxLength: 20 },
+            },
+            required: ['name', 'slug', 'path', 'email', 'website', 'age', 'score', 'tags', 'note'],
+          },
+          result: { type: 'integer', minimum: 1 },
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    expect(generated.schemasSource).toContain('name: z.string().min(3).max(100),')
+    expect(generated.schemasSource).toContain('slug: z.string().regex(new RegExp("^[a-z0-9-]+$")),')
+    // A slash-containing pattern survives verbatim through the JSON-stringified RegExp constructor form.
+    expect(generated.schemasSource).toContain('path: z.string().regex(new RegExp("^/api/v\\\\d+/users/")),')
+    expect(generated.schemasSource).toContain('email: z.string().email(),')
+    expect(generated.schemasSource).toContain('website: z.string().url(),')
+    expect(generated.schemasSource).toContain('age: z.number().int().gte(0).lte(150),')
+    expect(generated.schemasSource).toContain('score: z.number().gt(0).lt(1),')
+    expect(generated.schemasSource).toContain('tags: z.array(z.string().min(1)).min(1).max(10),')
+    // Constraints apply to the inner type; .nullish() stays the outermost wrapper.
+    expect(generated.schemasSource).toContain('note: z.string().min(1).max(20).nullish(),')
+    expect(generated.schemasSource).toContain('"constraints.check": z.number().int().gte(1),')
+    // The plain TypeScript types are intentionally unchanged by constraints.
+    expect(generated.typesSource).toContain('name: string')
+    expect(generated.typesSource).toContain('age: number')
+    expect(generated.typesSource).toContain('tags: string[]')
   })
 
   it('resolves local JSON pointer references inside a method schema', () => {
@@ -547,6 +607,50 @@ describe('JSON-RPC client generator', () => {
     await off.math.add({ left: 1, right: 2 })
     expect(meta(6)).toBeUndefined()
   })
+
+  it('pre-validates request params against the generated params schemas', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+    let fetchCalls = 0
+
+    const fetchImpl: FetchLike = async (_input, init) => {
+      fetchCalls += 1
+      const request = JSON.parse(String(init?.body)) as { id: string }
+      return jsonResponse({ jsonrpc: '2.0', id: request.id, result: 3 })
+    }
+
+    const rpc = clientModule.createRpcApi({ url: 'https://example.test/rpc', fetch: fetchImpl })
+
+    await expect(rpc.math.add({ left: 1, right: 2 })).resolves.toBe(3)
+    expect(fetchCalls).toBe(1)
+
+    // Invalid params fail locally with a descriptive error and never reach the wire.
+    await expect(rpc.math.add({ left: 'one', right: 2 })).rejects.toMatchObject({
+      name: 'RpcParamsValidationError',
+      method: 'math.add',
+      message: expect.stringContaining('math.add'),
+    })
+    expect(fetchCalls).toBe(1)
+
+    // An invalid batch item fails the whole batch locally before anything is sent.
+    await expect(rpc.$batch([
+      rpc.$request.math.add({ left: 1, right: 2 }),
+      rpc.$request.math.add({ left: 'oops', right: 4 }),
+    ] as const)).rejects.toMatchObject({
+      name: 'RpcParamsValidationError',
+      method: 'math.add',
+    })
+    expect(fetchCalls).toBe(1)
+
+    // validateParams: false opts out of pre-flight validation entirely.
+    const unchecked = clientModule.createRpcApi({
+      url: 'https://example.test/rpc',
+      fetch: fetchImpl,
+      validateParams: false,
+    })
+    await expect(unchecked.math.add({ left: 'one', right: 2 })).resolves.toBe(3)
+    expect(fetchCalls).toBe(2)
+  })
 })
 
 function rpcClientTestSchema(): RpcSchema {
@@ -611,6 +715,30 @@ async function loadGeneratedClient(clientSource: string): Promise<GeneratedClien
     '      return value',
     '    }',
     '  }',
+    '}',
+    '',
+    'function mathAddParamsSchema() {',
+    '  return {',
+    '    parse(value) {',
+    "      if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('Expected params object')",
+    "      if (typeof value.left !== 'number' || typeof value.right !== 'number') throw new Error('Expected numeric left and right')",
+    '      return value',
+    '    }',
+    '  }',
+    '}',
+    '',
+    'function userGetParamsSchema() {',
+    '  return {',
+    '    parse(value) {',
+    "      if (typeof value !== 'object' || value === null || typeof value.id !== 'string') throw new Error('Expected string id')",
+    '      return value',
+    '    }',
+    '  }',
+    '}',
+    '',
+    'export const rpcParamsSchemas = {',
+    "  'math.add': mathAddParamsSchema(),",
+    "  'user.get': userGetParamsSchema(),",
     '}',
     '',
     'export const rpcResultSchemas = {',

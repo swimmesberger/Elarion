@@ -54,15 +54,13 @@ MyApp.Application/Modules/Clients/
 ├─ ClientsJsonContext.cs       # [JsonSerializable(...)] per request/response type
 ├─ Handlers/
 │  ├─ GetClient.cs             # [Handler] IHandler<Query, Result<Response>>
-│  └─ CreateClient/
-│     ├─ CreateClient.cs       # handler
-│     └─ CreateClientValidator.cs
+│  └─ CreateClient.cs          # handler; its Command carries the DataAnnotations constraints
 └─ Services/
    └─ ClientNumberGenerator.cs # [Service] implementation
 ```
 
 For each `[AppModule]`, the generators emit a `{Module}ElarionModuleServices.ConfigureDefaultServices(IServiceCollection)`
-method that auto-wires the module's handlers, services, validators, scheduled jobs, and event
+method that auto-wires the module's handlers, services, validation metadata, scheduled jobs, and event
 consumers. The host bootstrapper calls it for every enabled module — you do not hand-write any
 `Add{Module}…()` calls. The optional `ConfigureServices` method on the module is reserved for
 non-generated registrations. See [Modules](/docs/concepts/modules) for the full model.
@@ -77,7 +75,7 @@ load-bearing:
 | Types live **under a module namespace** | Namespace containment decides which module owns a type and which generated `Add{Module}…()` method registers it. |
 | Handlers implement `IHandler<TRequest, TResponse>` | The handler generator matches on this interface, and reads the request/response shape from it — the types may be nested in the handler or top-level. |
 | Services are annotated with `[Service]` | Marks the type for registration and contract resolution. |
-| Validators inherit `AbstractValidator<T>` | The validator generator matches FluentValidation validators. |
+| Request DTOs carry `DataAnnotations` attributes | The generators attach the validation decorator and emit the module's validation metadata from them — see [Validation](/docs/concepts/validation). |
 | Hosted services use singleton scope | The generator rejects scoped/transient `IHostedService` with a diagnostic. |
 
 If a type is in the wrong namespace or breaks a convention, the result is a **build-time diagnostic
@@ -123,8 +121,8 @@ concrete infrastructure classes, or deployment-specific packages.
 2. Add `[AppModule("Billing")]` to a static partial `BillingModule` class.
 3. Add a source-generated `BillingJsonContext`.
 4. Add services under the namespace and annotate them with `[Service]`.
-5. Add handlers implementing `IHandler<TRequest, Result<TResponse>>`.
-6. Add validators in the same namespace.
-7. Mark handlers for a transport, e.g. `[Handler("billing.someAction")]` or `[HttpEndpoint("billing")]`.
-8. Build. The generators emit the module's `ConfigureDefaultServices`, which the host bootstrapper
+5. Add handlers implementing `IHandler<TRequest, Result<TResponse>>`, with DataAnnotations
+   constraints on their request DTOs where the input has a shape to enforce.
+6. Mark handlers for a transport, e.g. `[Handler("billing.someAction")]` or `[HttpEndpoint("billing")]`.
+7. Build. The generators emit the module's `ConfigureDefaultServices`, which the host bootstrapper
    calls automatically — there is no registration list to maintain.

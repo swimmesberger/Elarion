@@ -9,7 +9,7 @@ connect them. Understanding this split makes every other concept fall into place
 ## The three responsibilities
 
 1. **Application module composition** lives beside the feature code. A module decides which handlers,
-   validators, JSON metadata, and module-owned services it exposes.
+   JSON metadata, and module-owned services it exposes.
 2. **Compile-time discovery** replaces reflection-heavy startup scanning. Generators emit
    deterministic registration methods from attributes and conventions.
 3. **Platform wiring** stays in the host. The host owns `WebApplication`, authentication, middleware,
@@ -22,15 +22,16 @@ directly, so ASP.NET Core endpoint conventions and source generation still work.
 ## Why auto-detection is the default
 
 Elarion prefers **declaring application intent near the type** over maintaining a second registration
-list elsewhere. A handler already says "I handle this request"; a validator already says "I validate
-this command"; a `[Service]` class already says "this is a module service". Repeating those facts in
+list elsewhere. A handler already says "I handle this request"; an annotated request DTO already says
+"this is what a valid command looks like"; a `[Service]` class already says "this is a module
+service". Repeating those facts in
 `Program.cs` or hand-written `AddXyz()` methods creates a parallel model that drifts from the code it
 describes.
 
 This buys practical advantages:
 
-- **The module owns its application surface.** Adding a handler, validator, JSON context, or service
-  under a module namespace is enough to publish it through generated `Add{Module}…()` methods.
+- **The module owns its application surface.** Adding a handler, JSON context, or service under a
+  module namespace is enough to publish it through generated `Add{Module}…()` methods.
 - **Registration drift becomes a compile-time problem.** Missing trigger attributes, invalid service
   contracts, wrong hosted-service lifetimes, and unsupported generic services produce generator
   diagnostics instead of startup surprises.
@@ -71,7 +72,7 @@ The pages in this section cover each building block:
   <Card title="Results & errors" href="/docs/concepts/results-and-errors">`Result<T>` and transport-agnostic `AppError`.</Card>
   <Card title="Modules" href="/docs/concepts/modules">Application boundaries and their lifecycle.</Card>
   <Card title="Services" href="/docs/concepts/services">`[Service]` registration and hosted services.</Card>
-  <Card title="Validators" href="/docs/concepts/validators">FluentValidation grouped by module.</Card>
+  <Card title="Validation" href="/docs/concepts/validation">Two-tier: DataAnnotations exported to every schema, business rules in the handler.</Card>
   <Card title="Decorator pipelines" href="/docs/concepts/decorator-pipelines">Ordered cross-cutting behavior around handlers.</Card>
   <Card title="Authorization" href="/docs/concepts/authorization">Declarative, transport-neutral handler authorization.</Card>
   <Card title="Resource authorization" href="/docs/concepts/resource-authorization">Per-resource point checks and data-level list filtering.</Card>

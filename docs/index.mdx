@@ -10,7 +10,8 @@ Framework Core source generation**.
 
 The central idea is simple: your application assemblies define modules and handlers; your host
 assembly only wires infrastructure, transport, and deployment concerns. Everything that can be
-discovered from your code — handlers, validators, services, scheduled jobs, handler operations, EF Core
+discovered from your code — handlers, services, scheduled jobs, handler operations, validation
+metadata, EF Core
 `DbSet`s — is emitted by source generators at compile time instead of scanned by reflection at
 startup.
 
@@ -42,7 +43,7 @@ registration list.
 
 <Cards>
   <Card title="Compile-time, not reflection" href="/docs/concepts/source-generation">
-    Handlers, services, validators, modules, RPC maps, and scheduled jobs are generated as
+    Handlers, services, modules, RPC maps, validation metadata, and scheduled jobs are generated as
     ordinary DI code. Startup is deterministic and AOT-friendly; missing wiring is a build error,
     not a runtime surprise.
   </Card>
@@ -96,8 +97,9 @@ registration list.
 
 > Auto-detect application patterns, explicitly wire platform capabilities.
 
-Repeating what your code already states — "I handle this request", "I validate this command",
-"this is a module service" — in a separate registration list creates a parallel model that drifts.
+Repeating what your code already states — "I handle this request", "this is what a valid command
+looks like", "this is a module service" — in a separate registration list creates a parallel model
+that drifts.
 Elarion declares intent *next to the type* and generates the wiring. The host stays a thin
 composition and transport shell that owns authentication, middleware, database providers, telemetry
 exporters, and deployment.
@@ -134,7 +136,7 @@ full trade-off table.
     Build your first module, handler, and JSON-RPC endpoint end to end.
   </Card>
   <Card title="Core concepts" href="/docs/concepts">
-    Handlers, results, modules, services, validators, pipelines, and caching.
+    Handlers, results, modules, services, validation, pipelines, and caching.
   </Card>
   <Card title="Package reference" href="/docs/reference/packages">
     What each Elarion package contains and when you need it.

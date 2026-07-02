@@ -33,7 +33,7 @@ using MyApp.Application.Pipeline;
 ```
 
 `[assembly: UseElarion]` enables the framework-owned assembly-level generators for module handlers,
-module services, module validators, scheduled jobs, event consumers, and resilience policies. It
+module services, scheduled jobs, event consumers, and resilience policies. It
 intentionally does **not** replace application-owned policy attributes such as `[DefaultPipeline]`, nor
 the dedicated triggers `[assembly: GenerateModuleBootstrapper]` (the host) or `[GenerateDbSets]` (the
 application's `DbContext`).
@@ -45,7 +45,6 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 ```csharp
 [assembly: GenerateModuleHandlers]
 [assembly: GenerateModuleServices]
-[assembly: GenerateModuleValidators]
 [assembly: GenerateScheduledJobs]
 [assembly: GenerateEventConsumers]
 [assembly: GenerateResiliencePolicies]
@@ -57,7 +56,7 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 | --- | --- | --- |
 | `HandlerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleHandlers]` | `Add{HandlerName}()` and `Add{ModuleName}Handlers()` extension methods. |
 | `ModuleServiceRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleServices]` | `Add{ServiceName}Service()` and `Add{ModuleName}Services()` extension methods. |
-| `ModuleValidatorRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleValidators]` | `Add{ModuleName}Validators()` extension methods. |
+| `ValidationResolverGenerator` | Handler discovery (`[assembly: UseElarion]` or `[assembly: GenerateModuleHandlers]`) when the compilation references `Elarion.Validation` | A per-module `IValidatableInfoResolver` for the module handlers' annotated request types (constant-constructed attribute arrays — no runtime attribute reflection), registered through the module's gated `ConfigureDefaultServices`. See [Validation](/docs/concepts/validation). |
 | `SchedulerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateScheduledJobs]` | `Add{AssemblyName}ScheduledJobs()` registering descriptors and job types. |
 | `EventConsumerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateEventConsumers]` | Per-module `Add{Module}EventConsumers()` registering each `[ConsumeEvent]` consumer (handler or `[Service]` method) plus its `EventSubscriptionDescriptor`. See [Events](/docs/capabilities/events). |
 | `ResiliencePolicyGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |

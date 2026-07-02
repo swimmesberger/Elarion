@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -39,9 +40,24 @@ public sealed partial class ElarionOpenApiEndToEndTests {
 
     private sealed record GetPaymentResponse(Guid Id, string Amount);
 
+    private sealed record RegisterCustomerCommand {
+        [EmailAddress]
+        public required string Email { get; init; }
+
+        [StringLength(100, MinimumLength = 3)]
+        public required string DisplayName { get; init; }
+
+        [Range(1, 120)]
+        public required int Age { get; init; }
+    }
+
+    private sealed record RegisterCustomerResponse(Guid Id);
+
     [JsonSerializable(typeof(CreatePaymentCommand))]
     [JsonSerializable(typeof(CreatePaymentResponse))]
     [JsonSerializable(typeof(GetPaymentResponse))]
+    [JsonSerializable(typeof(RegisterCustomerCommand))]
+    [JsonSerializable(typeof(RegisterCustomerResponse))]
     private sealed partial class OpenApiTestJsonContext : JsonSerializerContext;
 
     private sealed class CreatePaymentHandler : IHandler<CreatePaymentCommand, Result<CreatePaymentResponse>> {
@@ -52,6 +68,11 @@ public sealed partial class ElarionOpenApiEndToEndTests {
     private sealed class GetPaymentHandler : IHandler<GetPaymentQuery, Result<GetPaymentResponse>> {
         public ValueTask<Result<GetPaymentResponse>> HandleAsync(GetPaymentQuery request, CancellationToken ct) =>
             ValueTask.FromResult<Result<GetPaymentResponse>>(new GetPaymentResponse(request.Id, "10.00"));
+    }
+
+    private sealed class RegisterCustomerHandler : IHandler<RegisterCustomerCommand, Result<RegisterCustomerResponse>> {
+        public ValueTask<Result<RegisterCustomerResponse>> HandleAsync(RegisterCustomerCommand request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<RegisterCustomerResponse>>(new RegisterCustomerResponse(Guid.NewGuid()));
     }
 
     [Fact]
@@ -136,6 +157,68 @@ public sealed partial class ElarionOpenApiEndToEndTests {
             // …while the plain GET advertises neither.
             HasHeaderParameter(get, "Idempotency-Key").Should().BeFalse();
             get.TryGetProperty(ElarionOpenApiExtensionNames.Idempotent, out _).Should().BeFalse();
+        } finally {
+            await app.StopAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task DataAnnotationConstraints_FlowIntoServedOpenApiDocument() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+
+        // Reflection stays OFF: the annotated DTO resolves only through the source-gen context, so the constraint
+        // keywords asserted below prove the DataAnnotations→schema mapping works without runtime reflection.
+        builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(OpenApiTestJsonContext.Default));
+        builder.Services.AddProblemDetails();
+        builder.Services.AddElarionOpenApi();
+        builder.Services.AddScoped<IHandler<RegisterCustomerCommand, Result<RegisterCustomerResponse>>, RegisterCustomerHandler>();
+
+        await using var app = builder.Build();
+
+        app.MapPost("/customers", static async (
+                RegisterCustomerCommand request,
+                [FromServices] IHandler<RegisterCustomerCommand, Result<RegisterCustomerResponse>> handler,
+                CancellationToken token) => ElarionHttpResults.ToResult(await handler.HandleAsync(request, token)))
+            .WithName("Sample.Customers.RegisterCustomer")
+            .WithTags("Customers")
+            .Produces<RegisterCustomerResponse>(200)
+            .ProducesElarionErrors();
+
+        app.MapOpenApi();
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var response = await client.GetAsync("/openapi/v1.json", ct);
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+            var properties = doc.RootElement.GetProperty("components").GetProperty("schemas")
+                .GetProperty(nameof(RegisterCustomerCommand)).GetProperty("properties");
+
+            // Elarion's transformer: Microsoft's built-in mapping omits [EmailAddress]; format: "email" keeps the
+            // OpenAPI document in agreement with the JSON-RPC schema exporter (ADR-0027).
+            properties.GetProperty("email").GetProperty("format").GetString().Should().Be("email");
+
+            // Microsoft's built-in DataAnnotations mapping under the repo's reflection-off source-gen JSON setup —
+            // load-bearing: [StringLength] and [Range] reach the document with no Elarion transformer involved.
+            var displayName = properties.GetProperty("displayName");
+            displayName.GetProperty("minLength").GetInt32().Should().Be(3);
+            displayName.GetProperty("maxLength").GetInt32().Should().Be(100);
+
+            var age = properties.GetProperty("age");
+            age.GetProperty("minimum").GetDecimal().Should().Be(1);
+            age.GetProperty("maximum").GetDecimal().Should().Be(120);
         } finally {
             await app.StopAsync(ct);
         }

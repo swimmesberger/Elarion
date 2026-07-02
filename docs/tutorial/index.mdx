@@ -15,8 +15,8 @@ on just to demo an attribute.
 
 <Cards>
   <Card title="A typed backend">
-    Two feature modules and a core module, handlers exposed over JSON-RPC, FluentValidation, a
-    transactional decorator pipeline, and per-user result caching.
+    Two feature modules and a core module, handlers exposed over JSON-RPC, declarative request
+    validation, a transactional decorator pipeline, and per-user result caching.
   </Card>
   <Card title="Reliable background work">
     Invoice emails sent through a resilient, retrying background job, plus a nightly cron job that
@@ -41,7 +41,7 @@ Every Elarion capability shows up exactly where it pulls its weight in a real bi
 | Feature boundaries (`Clients`, `Invoicing`) and a shared foundation | [Modules](/docs/concepts/modules) (feature + core) | [Model the domain](/docs/tutorial/modeling) |
 | Reads and writes as named use cases | [Handlers](/docs/concepts/handlers) + [Results](/docs/concepts/results-and-errors) | [Write the features](/docs/tutorial/features) |
 | Data access without a repository layer | [EF Core `BillingDbContext`](/docs/capabilities/entity-framework) | [Model the domain](/docs/tutorial/modeling) |
-| Rejecting bad input | [Validators](/docs/concepts/validators) | [Write the features](/docs/tutorial/features) |
+| Rejecting bad input | [Validation](/docs/concepts/validation) | [Write the features](/docs/tutorial/features) |
 | Transactions + logging around every command | [Decorator pipelines](/docs/concepts/decorator-pipelines) | [Write the features](/docs/tutorial/features) |
 | "Who is calling?" for scoping and audit | [Current user](/docs/capabilities/current-user) | [Write the features](/docs/tutorial/features) |
 | Fast, per-user reads that stay fresh on writes | [Caching](/docs/capabilities/caching) | [Write the features](/docs/tutorial/features) |
@@ -64,7 +64,7 @@ concerns.
 billing/
 ├─ Billing.sln
 ├─ src/
-│  ├─ Billing.Application/      # modules (behavior), handlers, services, validators, jobs, policies  ← Elarion + generators
+│  ├─ Billing.Application/      # modules (behavior), handlers, services, jobs, policies  ← Elarion + generators
 │  │  ├─ Domain/                # shared-kernel entities + enums (plain classes, under no [AppModule])
 │  │  └─ Persistence/           # the database is app logic: [EntityConfiguration], BillingDbContext, migrations
 │  ├─ Billing.Infrastructure/   # intent-only mechanism adapters: the SMTP email sender
@@ -136,14 +136,15 @@ install or mark `PrivateAssets="all"`. Because NuGet analyzer assets are not tra
 that needs a generator references its package directly.
 
 The **application** project holds your modules, entities, and the `[GenerateDbSets]` concrete
-`BillingDbContext`. It uses EF Core for data access and FluentValidation for input rules:
+`BillingDbContext`. It uses EF Core for data access and `Elarion.Validation` so the DataAnnotations
+input rules on request DTOs are enforced (and the per-module validation resolvers generated):
 
 ```bash
 cd src/Billing.Application
 dotnet add package Elarion
+dotnet add package Elarion.Validation
 dotnet add package Elarion.EntityFrameworkCore
 dotnet add package Microsoft.EntityFrameworkCore
-dotnet add package FluentValidation
 cd ../..
 ```
 
@@ -191,7 +192,7 @@ using Elarion.Abstractions;
 [assembly: UseElarion]
 ```
 
-`[assembly: UseElarion]` enables generation for module handlers, services, validators, scheduled
+`[assembly: UseElarion]` enables generation for module handlers, services, scheduled
 jobs, and resilience policies across the assembly.
 
 </Step>

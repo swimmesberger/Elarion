@@ -6,51 +6,6 @@ namespace Elarion.Generators;
 
 public sealed partial class HandlerRegistrationGenerator {
     /// <summary>
-    /// Stage-one discovery, cached per syntax tree: identifies a concrete handler class and returns its CLR
-    /// metadata name, or <see langword="null"/> for every other class. Only the metadata name is carried —
-    /// stage two (<see cref="ResolveHandlers"/>) re-resolves the symbol from the current compilation, so no
-    /// attribute or pipeline state is read against a potentially stale tree here.
-    /// </summary>
-    private static string? IdentifyHandlerCandidate(GeneratorSyntaxContext ctx, CancellationToken ct) {
-        var classDecl = (ClassDeclarationSyntax)ctx.Node;
-        if (ctx.SemanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol classSymbol)
-            return null;
-
-        if (classSymbol.IsAbstract)
-            return null;
-
-        // An open-generic handler (e.g. a generic test double `Handler<TRequest, TResponse> : IHandler<TRequest,
-        // TResponse>`) cannot be registered as a concrete service — emitting its registration would reference the
-        // type's own type parameters as if they were concrete types and fail to compile. Skip it here, the sibling
-        // of the IsAbstract guard. This matters because the bundled analyzer flows transitively into consumer
-        // projects, so a downstream test assembly's generic handler helper would otherwise break its own build.
-        if (classSymbol.IsGenericType)
-            return null;
-
-        if (FindHandlerInterface(classSymbol) is null)
-            return null;
-
-        if (classSymbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
-            return null;
-
-        return ModuleScanner.BuildMetadataName(classSymbol);
-    }
-
-    private static EquatableArray<string> FlattenSortedDistinctCandidates(ImmutableArray<string?> candidates) {
-        if (candidates.IsDefaultOrEmpty)
-            return EquatableArray<string>.Empty;
-
-        // Distinct also collapses a partial handler class (one candidate per declaration node) into a single
-        // resolution, so a partial handler never emits its registration twice.
-        return candidates
-            .Where(static candidate => candidate is not null)
-            .Select(static candidate => candidate!)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(static value => value, StringComparer.Ordinal)
-            .ToImmutableArray();
-    }
-
-    /// <summary>
     /// Stage-two resolution: binds each cached candidate against the CURRENT compilation (symbol-table lookups
     /// only, never a tree scan) and parses the full pipeline. The compilation is combined in deliberately — the
     /// effective [DecoratorList] can come from the handler, its [AppModule], a pipeline-attribute class, or the
@@ -71,6 +26,13 @@ public sealed partial class HandlerRegistrationGenerator {
         var variantContractSet = variantContracts.IsEmpty
             ? null
             : new HashSet<string>(variantContracts.AsImmutableArray, StringComparer.Ordinal);
+        // ValidationDecorator auto-attach is conditional on the compilation referencing Elarion.Validation (the
+        // enforcement package). Without it, no decorator attaches — the ValidationResolverGenerator reports
+        // ELVAL002 so the unenforced attributes are a visible choice. The walk context memoizes the validatable
+        // graph across all handlers of this pass.
+        var validationWalk = compilation.GetTypeByMetadataName(ElarionValidationExtensionsMetadataName) is null
+            ? null
+            : new ValidatableTypeWalker.Context(compilation.Assembly);
         var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
         foreach (var metadataName in candidates) {
             ct.ThrowIfCancellationRequested();
@@ -85,7 +47,7 @@ public sealed partial class HandlerRegistrationGenerator {
 
             var info = GetHandlerInfo(
                 classDecl, classSymbol, compilation, moduleDecoratorLists, moduleAuthDefaults,
-                assemblyRequireAuthenticated, variantContractSet, ct);
+                assemblyRequireAuthenticated, variantContractSet, validationWalk, ct);
             if (info is not null)
                 builder.Add(info);
         }
@@ -143,6 +105,7 @@ public sealed partial class HandlerRegistrationGenerator {
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated,
         HashSet<string>? variantContracts,
+        ValidatableTypeWalker.Context? validationWalk,
         CancellationToken ct) {
         ct.ThrowIfCancellationRequested();
 
@@ -184,6 +147,9 @@ public sealed partial class HandlerRegistrationGenerator {
 
         var hasFeatureGates = ParseFeatureGates(classDecl, classSymbol, responseType, compilation, diagnostics);
 
+        var hasValidation = ParseValidation(
+            classDecl, classSymbol, requestType, responseType, compilation, validationWalk, diagnostics);
+
         var idempotent = ParseIdempotent(
             classDecl, classSymbol, requestType, responseType, compilation, fmt, cacheable, diagnostics);
 
@@ -203,9 +169,43 @@ public sealed partial class HandlerRegistrationGenerator {
             requireAuthenticatedByDefault,
             resourceBindings,
             hasFeatureGates,
+            hasValidation,
             idempotent,
             variantContractDeps,
             diagnostics.ToImmutable());
+    }
+
+    // Decides whether the framework ValidationDecorator attaches to this handler (ADR-0027). Attachment is a
+    // compile-time presence decision like authorization/feature gating: the request type's graph carries
+    // DataAnnotations validation metadata (the shared ValidatableTypeWalker computation, identical to what the
+    // ValidationResolverGenerator registers) and the compilation references Elarion.Validation. A validation
+    // failure returns TResponse.Failure(AppError.Validation(...)), so the response must implement
+    // IResultFailureFactory<TResponse> — otherwise ELVAL001, mirroring ELAUTH001.
+    private static bool ParseValidation(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol classSymbol,
+        ITypeSymbol requestType,
+        ITypeSymbol responseType,
+        Compilation compilation,
+        ValidatableTypeWalker.Context? validationWalk,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        // No Elarion.Validation reference => no attach; the resolver generator's ELVAL002 already warns.
+        if (validationWalk is null)
+            return false;
+
+        if (!ValidatableTypeWalker.IsValidatable(requestType, validationWalk))
+            return false;
+
+        if (!ResponseSupportsFailure(responseType, compilation)) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                ValidationResponseNotFailureCapable,
+                classDecl.Identifier.GetLocation(),
+                classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                responseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
+            return false;
+        }
+
+        return true;
     }
 
     // A handler whose constructor injects a variant contract is registered behind the async-resolving proxy so the

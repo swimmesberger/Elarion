@@ -9,7 +9,8 @@ namespace Elarion.JsonRpc.Mcp;
 
 /// <summary>
 /// Builds the JSON Schema for an MCP tool's input from a JSON-RPC request type, reusing the JSON-RPC schema
-/// exporter's numeric normalization and injecting compile-time parameter descriptions.
+/// exporter's numeric normalization and DataAnnotations constraint injection, and injecting compile-time
+/// parameter descriptions.
 /// </summary>
 public static class RpcMcpInputSchema {
     /// <summary>
@@ -41,7 +42,14 @@ public static class RpcMcpInputSchema {
             injectDescriptions = (ctx, schema) => InjectDescription(ctx, schema, descriptionsByPropertyName);
         }
 
-        var schemaNode = JsonRpcSchemaExporter.BuildSchemaNode(requestType, options, injectDescriptions);
+        // MCP tool input schemas share the JSON-RPC schema builder and inherit the DataAnnotations constraint
+        // keywords (ADR-0027), so a tool's declared shape matches what the server enforces; descriptor
+        // descriptions compose on top when present.
+        Func<JsonSchemaExporterContext, JsonNode, JsonNode> transform = injectDescriptions is null
+            ? JsonRpcSchemaExporter.InjectReflectedConstraints
+            : (ctx, schema) => injectDescriptions(ctx, JsonRpcSchemaExporter.InjectReflectedConstraints(ctx, schema));
+
+        var schemaNode = JsonRpcSchemaExporter.BuildSchemaNode(requestType, options, transform);
 
         // Parse + clone so the returned element owns its memory independently of the transient JsonNode.
         using var document = JsonDocument.Parse(schemaNode.ToJsonString());

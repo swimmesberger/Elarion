@@ -157,11 +157,15 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendCacheDecorator(sb, handler);
         AppendPipelineDecorators(sb, handler.Decorators);
         // Idempotency owns the unit-of-work transaction for [Idempotent] commands, so it wraps the handler and
-        // the inner custom decorators — inside resilience/cache-invalidation/feature-gate/authorization (a
-        // denied/gated/replayed request never claims a key) and outside the handler's own work.
+        // the inner custom decorators — inside validation/resilience/cache-invalidation/feature-gate/authorization
+        // (a denied/gated/invalid/replayed request never claims a key) and outside the handler's own work.
         AppendIdempotencyDecorator(sb, handler);
         AppendResilienceDecorator(sb, handler);
         AppendCacheInvalidationDecorator(sb, handler);
+        // Validation sits just inside the feature gate (ADR-0027): an invalid request fails fast with its
+        // field-keyed violations before it can touch caching, the pipeline (transaction), or the handler — but a
+        // denied or feature-gated handler is never revealed through a validation error.
+        AppendValidationDecorator(sb, handler);
         // The feature gate sits just inside authorization: a disabled feature never touches caching, the pipeline,
         // or the handler, but authorization still runs first so an unauthenticated caller is never told whether a
         // gated feature exists.
@@ -360,6 +364,15 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         sb.AppendLine(");");
+    }
+
+    private static void AppendValidationDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (!handler.HasValidation)
+            return;
+
+        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Pipeline.ValidationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Validation.IRequestValidator>());");
     }
 
     private static void AppendFeatureGateDecorator(StringBuilder sb, HandlerInfo handler) {

@@ -3,8 +3,8 @@ title: Services
 description: Annotate a class with [Service] and the generator registers it in DI — with conventional contract and lifetime resolution — through the module's ConfigureDefaultServices.
 ---
 
-A service is any module-owned class you want in DI that is not a [handler](/docs/concepts/handlers),
-[validator](/docs/concepts/validators), or scheduled job. `[Service]` is an auto-detected application
+A service is any module-owned class you want in DI that is not a [handler](/docs/concepts/handlers)
+or scheduled job. `[Service]` is an auto-detected application
 pattern: annotate the class and Elarion emits its registration and wires it into the owning module
 automatically — you never hand-write an `Add…()` call or touch a service collection.
 
@@ -35,10 +35,10 @@ aggregating `Add{Module}Services()` per module (longest-prefix namespace match p
 its module). You never call these directly: the generator also contributes the `AddServices` filler
 to the module's generated `ConfigureDefaultServices(IServiceCollection)`, which the host bootstrapper
 invokes — gated by `IsModuleEnabled` — for every `[AppModule]`. So a `[Service]` in a disabled feature
-module disappears alongside its handlers, validators, jobs, and consumers.
+module disappears alongside its handlers, jobs, and consumers.
 
 `ConfigureDefaultServices` aggregates all of a module's discovered registrations (handlers, services,
-validators, scheduled jobs, event consumers, module API); a module's hand-written `ConfigureServices`
+validation metadata, scheduled jobs, event consumers, module API); a module's hand-written `ConfigureServices`
 is reserved for the non-generated registrations only. See
 [Modules](/docs/concepts/modules) and [Source generation](/docs/concepts/source-generation).
 

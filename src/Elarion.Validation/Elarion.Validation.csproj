@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Microsoft.Extensions.Validation-backed default IRequestValidator for Elarion declarative request validation (DataAnnotations on request DTOs, ADR-0027). Opt-in via AddElarionValidation; referencing this package is what pulls Microsoft.Extensions.Validation, keeping Elarion core dependency-light (the IRequestValidator seam and the ValidationDecorator live in Elarion.Abstractions).</Description>
+    <!-- The M.E.Validation base is trimmable with NativeAOT test coverage; this package adds nothing dynamic. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- The whole Microsoft.Extensions.Validation extensibility surface is [Experimental] (ASP0029); this
+         package is its deliberate, contained consumer — the Elarion-owned IRequestValidator seam isolates
+         the rest of the framework from that surface (ADR-0027). -->
+    <NoWarn>$(NoWarn);ASP0029</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Runtime base only: Microsoft's bundled ValidationsGenerator never runs (Elarion's resolver generator
+         supplies the validation metadata instead, ADR-0027). -->
+    <PackageReference Include="Microsoft.Extensions.Validation" ExcludeAssets="analyzers" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+</Project>

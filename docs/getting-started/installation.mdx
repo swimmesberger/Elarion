@@ -18,9 +18,10 @@ client generation. You only install the pieces you use.
 | Package | Install in | Purpose |
 | --- | --- | --- |
 | `Elarion.Abstractions` | Application | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
-| `Elarion` | Application / host | Runtime primitives: decorators, the in-memory scheduler, current-user abstraction, and the default authorizer. Depends only on `Microsoft.Extensions.*` abstractions (ADR-0017). **Bundles the Elarion source generator** (handlers, services, validators, modules, RPC/HTTP/MCP maps, resilience policies, scheduled jobs, event consumers). |
+| `Elarion` | Application / host | Runtime primitives: decorators, the in-memory scheduler, current-user abstraction, and the default authorizer. Depends only on `Microsoft.Extensions.*` abstractions (ADR-0017). **Bundles the Elarion source generator** (handlers, services, modules, RPC/HTTP/MCP maps, validation resolvers, resilience policies, scheduled jobs, event consumers). |
 | `Elarion.Caching` | Application / host | `HybridCache`-backed default `IHandlerCache` for handler result caching — `services.AddElarionHandlerCaching()`. **Required by `[Cacheable]`/`[CacheInvalidate]`** (extracted from core, ADR-0017). |
 | `Elarion.Resilience` | Application / host | Microsoft/Polly-backed default `IResiliencePipelineRunner` — `services.AddElarionResilience()`. **Required by `[Resilient]` handlers and deferred scheduler retries** (extracted from core, ADR-0017). |
+| `Elarion.Validation` | Application (+ `services.AddElarionValidation()` in the host) | `Microsoft.Extensions.Validation`-backed default `IRequestValidator` — **required to enforce the DataAnnotations validation attributes on request DTOs** (otherwise they are schema-documented but unenforced, `ELVAL002`). See [Validation](/docs/concepts/validation). |
 | `Elarion.FeatureFlags.OpenFeature` | Application / host | Default `IFeatureFlagService` over OpenFeature for `[FeatureGate]`/`[FeatureVariant]` — `services.AddElarionOpenFeature()`. Bring your own OpenFeature provider. |
 | `Elarion.FeatureFlags.FeatureManagement` | Application / host | Batteries-included config-driven flags via the Microsoft.FeatureManagement OpenFeature provider — `services.AddElarionFeatureManagement(configuration)`. |
 | `Elarion.Blobs` | Application | Provider-neutral blob storage contracts and DTOs. |
@@ -29,7 +30,7 @@ client generation. You only install the pieces you use.
 | `Elarion.AspNetCore` | Host | ASP.NET Core JSON-RPC endpoint mapping, batch execution, and current-user middleware. |
 | `Elarion.AspNetCore.SchemaGeneration` | Host (build tooling) | MSBuild target that exports `rpc-schema.json` during `dotnet build`. |
 | `Elarion.EntityFrameworkCore` | Application | Marker attributes for generated `DbSet`s and entity inclusion. **Bundles the EF Core source generator** (`DbSet` properties, entity configuration, keyset pagination). |
-| `@swimmesberger/elarion-jsonrpc-client-generator` | Frontend (npm) | Generates TypeScript method contracts, Zod schemas, and a fetch client from a schema export. |
+| `@swimmesberger/elarion-jsonrpc-client-generator` | Frontend (npm) | Generates TypeScript method contracts, constraint-aware Zod params/result schemas, and a params-pre-validating fetch client from a schema export. |
 
 <Callout type="info">
   The source generators ship **inside** their runtime packages — the Elarion generator in `Elarion`
@@ -53,7 +54,7 @@ client generation. You only install the pieces you use.
 
 ## Application project
 
-An application (class library) holds your modules, handlers, services, and validators. Add the
+An application (class library) holds your modules, handlers, and services. Add the
 runtime package — the source generator ships inside it:
 
 ```xml
@@ -71,7 +72,7 @@ using Elarion.Abstractions;
 [assembly: UseElarion]
 ```
 
-`[assembly: UseElarion]` turns on generation for module handlers, services, validators, and
+`[assembly: UseElarion]` turns on generation for module handlers, services, and
 scheduled jobs. If you want only a subset, use the narrower triggers instead — see
 [Source generation](/docs/concepts/source-generation).
 

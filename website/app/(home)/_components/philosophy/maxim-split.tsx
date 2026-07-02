@@ -7,7 +7,7 @@
 export function MaximSplit() {
   const detected = [
     'class GetClient : IHandler<Query, Result<…>>',
-    'class OrderValidator : AbstractValidator<…>',
+    'record Command { [EmailAddress] Email … }',
     '[ConsumeEvent] OnOrderShipped : IHandler<…>',
     '[EntityConfiguration] InvoiceConfiguration',
   ];
@@ -39,7 +39,7 @@ export function MaximSplit() {
       viewBox="0 0 960 470"
       className="h-auto w-full"
       role="img"
-      aria-label="Application patterns — handlers, validators, event consumers, entity configurations — are detected at build time and their wiring is generated. Platform capabilities — caching, resilience, idempotency, authorization — are declared once as attributes and attached as decorators. Runtime scanning, convention guessing, and reflection magic are explicitly ruled out."
+      aria-label="Application patterns — handlers, annotated request DTOs, event consumers, entity configurations — are detected at build time and their wiring is generated. Platform capabilities — caching, resilience, idempotency, authorization — are declared once as attributes and attached as decorators. Runtime scanning, convention guessing, and reflection magic are explicitly ruled out."
       xmlns="http://www.w3.org/2000/svg"
     >
       {/* left: detected */}

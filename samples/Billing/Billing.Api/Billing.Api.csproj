@@ -15,6 +15,7 @@
     <ProjectReference Include="..\..\..\src\Elarion.Caching\Elarion.Caching.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.Caching.PostgreSql\Elarion.Caching.PostgreSql.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.Resilience\Elarion.Resilience.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Validation\Elarion.Validation.csproj" />
     <ProjectReference Include="..\Billing.Application\Billing.Application.csproj" />
     <ProjectReference Include="..\Billing.Infrastructure\Billing.Infrastructure.csproj" />
   </ItemGroup>

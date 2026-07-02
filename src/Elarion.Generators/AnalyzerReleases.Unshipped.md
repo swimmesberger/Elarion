@@ -57,6 +57,8 @@ ELVAR004 | Elarion.Abstractions.Features | Error | Conflicting variant feature
 ELVAR005 | Elarion.Abstractions.Features | Warning | Variant service declares a blank feature
 ELVAR006 | Elarion.Abstractions.Features | Error | Generic variant implementation is not supported
 ELVAR007 | Elarion.Abstractions.Features | Error | Variant implementation must also be a [Service]
+ELVAL001 | Elarion.Abstractions.Validation | Error | Validated handler response cannot represent failure
+ELVAL002 | Elarion.Abstractions.Validation | Warning | Validation attributes are not enforced without Elarion.Validation
 ELIDEM001 | Elarion.Abstractions.Idempotency | Error | Idempotent handler response cannot represent failure
 ELIDEM002 | Elarion.Abstractions.Idempotency | Warning | [Idempotent] handler is not a command
 ELIDEM003 | Elarion.Abstractions.Idempotency | Error | [Idempotent] retention is invalid

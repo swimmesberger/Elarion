@@ -9,6 +9,35 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Declarative request validation (`Elarion.Validation`, ADR-0027).** Two-tier validation replaces the
+  FluentValidation integration: **tier 1** is standard `System.ComponentModel.DataAnnotations` attributes on the
+  request DTO (`[Range]`, `[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`,
+  `[EmailAddress]`, `[Url]`, `[Base64String]`; requiredness from NRT + `required`, no `[Required]` needed) —
+  enforced at runtime **and** exported to every contract surface — while **tier 2** (cross-field, conditional,
+  async/DB rules) lives in the handler, returning `AppError.Validation`/`Conflict` inside the transaction. The
+  handler generator auto-attaches the framework `ValidationDecorator` (`Elarion.Abstractions.Pipeline`, just
+  inside the feature gate, pre-transaction) for any handler whose request graph carries validation attributes —
+  zero cost when unannotated — over the new `IRequestValidator` seam (`Elarion.Abstractions.Validation`,
+  field-path-keyed `RequestValidationErrors`). The opt-in **`Elarion.Validation`** package (ADR-0017 shape)
+  adapts `Microsoft.Extensions.Validation`'s runtime base (never its generator) via `AddElarionValidation()`;
+  a new `ValidationResolverGenerator` emits per-module resolvers with constant-constructed attribute arrays
+  (no runtime attribute reflection), gated by module enablement. Custom constraints subclass a mapped attribute
+  (`[Slug] : RegularExpressionAttribute`) and get enforcement plus every schema for free. New diagnostics
+  `ELVAL001` (response cannot represent failure) and `ELVAL002` (attributes present but `Elarion.Validation`
+  not referenced — documented but unenforced). See [ADR-0027](docs/decisions/0027-declarative-request-validation.md)
+  and [the validation concept doc](docs/concepts/validation.mdx).
+- **Constraint export across every contract surface.** The same DataAnnotations flow into all four surfaces:
+  `JsonRpcSchemaExporter` injects the JSON Schema keywords (`[Range]` → `minimum`/`maximum` + exclusive
+  variants; length attributes → `minLength`/`maxLength`, `minItems`/`maxItems` on arrays;
+  `[RegularExpression]` → `pattern`; `[Url]`/`[Base64String]`/`[EmailAddress]` → `format`); MCP tool input
+  schemas share the same builder; OpenAPI gets the set natively from Microsoft (verified reflection-off) plus a
+  new `[EmailAddress]` → `format: "email"` parity transformer in `Elarion.AspNetCore.OpenApi`; and the
+  TypeScript client generator's Zod emitter maps the keywords (`.min`/`.max`, `.regex`, `.gte`/`.lte`,
+  `.gt`/`.lt`, array `.min`/`.max`, `.int()`, `.uuid()`/`.email()`/`.url()`). The generated client emits
+  **params schemas** (`rpcParamsSchemas`) beside result schemas and **pre-validates request params by default**
+  (`validateParams: false` opts out; a local failure throws `RpcParamsValidationError`, batch items included;
+  Zod v3 and v4 compatible) — a tier-1 violation never costs a round trip, and what the client pre-validates is
+  by construction what the server enforces.
 - **OpenAPI for the HTTP transport (`Elarion.AspNetCore.OpenApi`).** An opt-in sibling over
   `Microsoft.AspNetCore.OpenApi` that brings the `[HttpEndpoint]` REST transport to schema/contract parity with
   JSON-RPC (ADR-0026). `AddElarionOpenApi()` + `app.MapOpenApi()` serve a standard OpenAPI document; Elarion adds
@@ -120,6 +149,15 @@ minor releases may include breaking changes.
   Npgsql content path too.
 
 ### Changed
+- **Validation errors are field-keyed end to end.** `ValidationErrorData` gains an optional
+  `FieldErrors: IReadOnlyDictionary<string, string[]>?` beside the existing flat `Errors` list (additive), and
+  `AppError.Validation` gains a field-keyed factory overload. Keys are **wire-named field paths** per the
+  canonical JSON naming policy (`"address.street"`, indexers preserved: `"deliveries[1].street"`; the empty key
+  is not field-specific). HTTP 400s now surface `FieldErrors` as the standard RFC 7807 `errors` extension (the
+  `HttpValidationProblemDetails` shape); JSON-RPC carries the payload in `error.data` — so a client-side Zod
+  pre-flight failure and a server 400 address the same field the same way. The TypeScript generator now emits
+  params schemas alongside result schemas and the generated client validates params by default (set
+  `validateParams: false` to keep the previous behavior).
 - **`[HttpEndpoint]` responses serialize through the aligned HTTP JSON options.** `ElarionHttpResults.ToResult`
   now returns `TypedResults.Ok` instead of a custom result type, so request binding, responses, and OpenAPI
   schemas all flow through one `Microsoft.AspNetCore.Http.Json` options object (a host override applies
@@ -344,13 +382,23 @@ minor releases may include breaking changes.
   `Resolve(IVariableSource)` overload.
 
 ### Removed
+- **Breaking:** the FluentValidation integration is removed (pre-1.0, no compatibility shim, ADR-0027):
+  `[GenerateModuleValidators]`, `ModuleValidatorRegistrationGenerator` (the per-module `IValidator<T>`
+  registration), and every FluentValidation package reference are gone. Imperative rule lambdas were invisible
+  to every contract surface — exportable rules hid in unexportable places. **Migration:** move shape constraints
+  onto the request DTOs as DataAnnotations (one declaration now feeds runtime enforcement, `rpc-schema.json`,
+  OpenAPI, MCP tool schemas, and the Zod client), move business rules into the handler (inside the transaction),
+  reference `Elarion.Validation`, and call `services.AddElarionValidation()`. The Billing sample is migrated
+  accordingly and drops its hand-written `ValidationDecorator` for the framework one. Teams that want
+  FluentValidation can still wire it as an app-owned decorator — which is all it ever was.
 - **Breaking:** `ConfigPlaceholder` (`Elarion.Abstractions.Scheduling`) is removed in favor of the general
   `VariableSubstitution`. The common surface — `ScheduledJobSchedule.Resolve(IConfiguration)` — is unchanged;
   only direct callers of the low-level helper need to switch (same `${key:-default}` semantics).
 
 ### Documentation
-- Tutorial `features.mdx` now shows the no-reflection `IResultFailureFactory<TResponse>` /
-  `TResponse.Failure(...)` pattern for validation decorators instead of a reflection-based helper.
+- The validators concept doc is replaced by [`docs/concepts/validation`](docs/concepts/validation.mdx) — the
+  two-tier model, the export story, field-keyed errors, and the honest server-only boundary; the tutorial,
+  reference tables, and transport docs follow (ADR-0027).
 - New [`docs/concepts/transports`](docs/concepts/transports.mdx): authoring a new transport (gRPC, console, …)
   — the seams, the scope rail, off-HTTP `ICurrentUser`, the two invoke paths, and `ErrorKind` mapping.
 

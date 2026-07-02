@@ -7,7 +7,7 @@
     "results-and-errors",
     "modules",
     "services",
-    "validators",
+    "validation",
     "decorator-pipelines",
     "authorization",
     "resource-authorization",

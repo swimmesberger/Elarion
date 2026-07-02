@@ -21,10 +21,12 @@ override it for individual modules or handlers.
 ## Defining named pipelines
 
 The framework **does** ship built-in decorators for the common cross-cutting concerns —
-[transactions](/docs/concepts/persistence-and-transactions), [idempotency](/docs/concepts/idempotency),
+[transactions](/docs/concepts/persistence-and-transactions), [request validation](/docs/concepts/validation),
+[idempotency](/docs/concepts/idempotency),
 [authorization](/docs/concepts/authorization), [feature gating](/docs/concepts/feature-flags),
 [caching](/docs/capabilities/caching), [resilience](/docs/capabilities/resilience), tracing, and the
-async-resolved handler proxy — and the generator auto-attaches them from the handler's own attributes.
+async-resolved handler proxy — and the generator auto-attaches them from the handler's own attributes
+(validation from the attributes on the handler's *request* type).
 You still add your own for app-specific behavior (your logging, your tenancy model): define your
 decorators in the application and expose named pipeline attributes with `[DecoratorList]`:
 
@@ -35,13 +37,12 @@ using Elarion.Abstractions.Pipeline;
 namespace MyApp.Application.Pipeline;
 
 [DecoratorList(
-    typeof(TransactionDecorator<,>),
-    typeof(DbConstraintDecorator<,>),
-    typeof(ValidationDecorator<,>))]
+    typeof(LoggingDecorator<,>),
+    typeof(DbConstraintDecorator<,>))]
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
 public sealed class DefaultPipelineAttribute : Attribute;
 
-[DecoratorList(typeof(ValidationDecorator<,>))]
+[DecoratorList(typeof(LoggingDecorator<,>))]
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
 public sealed class ReadOnlyPipelineAttribute : Attribute;
 ```
@@ -67,7 +68,8 @@ public sealed class SearchClients
 }
 ```
 
-A read-only query gets just validation; a command gets the full transactional pipeline. Named
+A read-only query gets just logging; a command additionally translates database constraint
+violations. Named
 pipelines suit per-handler overrides and axes the request type can't express. For the common
 read/write split you usually don't need a second pipeline at all: make the decorator itself decide —
 either by a compile-time generic constraint ([Filtering by request kind](#filtering-by-request-kind))
@@ -158,20 +160,24 @@ Generic decorators (like validation) sometimes need to construct a failure `TRes
 `AppError`. Both `Result<T>` and the non-generic `Result` implement
 `IResultFailureFactory<TSelf>`, which exposes a `static abstract TSelf Failure(AppError)`. Constrain
 the decorator's `TResponse` to that interface and call `TResponse.Failure(error)` directly — **no
-reflection**:
+reflection**. The framework's own [`ValidationDecorator`](/docs/concepts/validation) is exactly this
+shape:
 
 ```csharp
+namespace Elarion.Abstractions.Pipeline;
+
 public sealed class ValidationDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
-    IValidator<TRequest> validator
+    IRequestValidator validator
 ) : IHandler<TRequest, TResponse>
     where TResponse : IResultFailureFactory<TResponse> {
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        var result = await validator.ValidateAsync(request, ct);
-        if (!result.IsValid)
-            return TResponse.Failure(AppError.Validation(result.ToString()));
+        var errors = await validator.ValidateAsync(typeof(TRequest), request!, ct);
+        if (errors is null)
+            return await inner.HandleAsync(request, ct);
 
-        return await inner.HandleAsync(request, ct);
+        var messages = ValidationErrorData.Flatten(errors.FieldErrors);
+        return TResponse.Failure(AppError.Validation(string.Join("; ", messages), errors.FieldErrors));
     }
 }
 ```
@@ -185,9 +191,11 @@ Prefer this over a reflection-based helper.
 ## Order matters
 
 Decorators run in the order listed in `[DecoratorList]`, outermost first. A pipeline of
-`[Transaction, DbConstraint, Validation]` validates innermost (closest to the handler) and wraps the
-transaction outermost — so validation failures never open a transaction. Choose the order
-deliberately; the generated code makes it explicit and inspectable.
+`[Logging, DbConstraint]` logs outermost and translates constraint violations closest to the handler.
+Choose the order deliberately; the generated code makes it explicit and inspectable. The framework's
+auto-attached gates keep a fixed position *outside* your list — tracing → authorization → feature gate
+→ [validation](/docs/concepts/validation) → your `[DecoratorList]` decorators → handler — so a
+validation failure never reaches your decorators or opens a transaction.
 
 ## Reading the handler's attributes (do not use `inner.GetType()`)
 

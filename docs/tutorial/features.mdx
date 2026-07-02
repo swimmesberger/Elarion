@@ -1,6 +1,6 @@
 ---
 title: Write the features
-description: Build the Clients module end to end — a decorator pipeline, current-user scoping, handlers, validators, results, and per-user caching.
+description: Build the Clients module end to end — a decorator pipeline, current-user scoping, handlers, declarative validation, results, and per-user caching.
 ---
 
 The Clients module is where most of Elarion's cross-cutting machinery earns its keep. You will set up
@@ -17,8 +17,10 @@ This page builds Clients in full. The Invoicing module follows the same patterns
 
 ### Define the decorator pipeline
 
-Elarion ships no concrete decorators — they depend on *your* logging, *your* `DbContext`, *your*
-conventions. Define them in the application and expose a pipeline with `[DecoratorList]`. A decorator
+Elarion auto-attaches its framework gates — authorization, feature gating, and
+[request validation](/docs/concepts/validation) — from the handler's own attributes; you never list
+those. What you define is the app-specific cross-cutting behavior that depends on *your* logging and
+*your* `DbContext`, exposed as a pipeline with `[DecoratorList]`. A decorator
 can declare *where it attaches* — by a generic constraint (`where TRequest : ICommand`) or a
 `static bool AppliesTo(HandlerMetadata handler)` predicate the generator evaluates per handler — so **one**
 pipeline serves commands, queries, and event handlers alike.
@@ -27,7 +29,6 @@ pipeline serves commands, queries, and event handlers alike.
 using System;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
-using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -40,30 +41,6 @@ public sealed class LoggingDecorator<TRequest, TResponse>(
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         logger.LogInformation("Handling {Request}", typeof(TRequest).DeclaringType?.Name ?? typeof(TRequest).Name);
         return await inner.HandleAsync(request, ct);
-    }
-}
-
-public sealed class ValidationDecorator<TRequest, TResponse>(
-    IHandler<TRequest, TResponse> inner,
-    IEnumerable<IValidator<TRequest>> validators
-) : IHandler<TRequest, TResponse>
-    where TResponse : IResultFailureFactory<TResponse> {
-    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        var failures = new List<string>();
-        foreach (var validator in validators) {
-            var result = await validator.ValidateAsync(request, ct);
-            failures.AddRange(result.Errors.Select(e => e.ErrorMessage));
-        }
-
-        if (failures.Count == 0) {
-            return await inner.HandleAsync(request, ct);
-        }
-
-        // Both Result<T> and the non-generic Result implement IResultFailureFactory<TSelf>; the constraint
-        // lets us build the failure via the static TResponse.Failure(error) — no reflection — and scopes the
-        // decorator at compile time to Result-returning handlers.
-        return TResponse.Failure(
-            AppError.Validation(string.Join("; ", failures), failures));
     }
 }
 
@@ -105,16 +82,16 @@ namespace Billing.Application.Pipeline;
 
 [DecoratorList(
     typeof(LoggingDecorator<,>),
-    typeof(ValidationDecorator<,>),
     typeof(TransactionDecorator<,>))]
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
 public sealed class DefaultPipelineAttribute : Attribute;
 ```
 
-Decorators run **outermost first**, in list order. Logging wraps everything; validation runs *before*
-the transaction, so a bad request is rejected without ever opening one; the transaction wraps only the
+Decorators run **outermost first**, in list order. Logging wraps everything; the transaction wraps only the
 handler — and only on commands and integration-event handlers, since its `AppliesTo` predicate keeps
-the generator from attaching it to queries or domain-event handlers. Apply the pipeline across the
+the generator from attaching it to queries or domain-event handlers. The framework's validation gate
+runs *before* this whole list, so a bad request is rejected without ever opening a transaction. Apply
+the pipeline across the
 whole assembly:
 
 ```csharp title="src/Billing.Application/ElarionAssembly.cs"
@@ -229,8 +206,8 @@ public sealed class ClientNumberGenerator(BillingDbContext db) : IClientNumberGe
 
 ### Write the command handler
 
-`CreateClient` is a state change, so its request is a nested `Command`. It runs through the default
-pipeline (logging → validation → transaction), scopes the row to the current user, invalidates the
+`CreateClient` is a state change, so its request is a nested `Command`. It runs through the pipeline
+(the framework's validation gate, then logging → transaction), scopes the row to the current user, invalidates the
 clients cache on success, and is exposed over JSON-RPC. `[Handler]` names the operation; the name is
 optional, and when omitted Elarion infers `{module}.{operation}` by convention (here `clients.createClient`
 from module `Clients` and the handler type name minus its `Handler`/`Command`/`Query`/`Request` suffix,
@@ -239,6 +216,7 @@ camelCased). An explicit name like `"clients.create"` is recommended for stable 
 
 ```csharp title="src/Billing.Application/Modules/Clients/Handlers/CreateClient.cs"
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using Billing.Application.Domain;
 using Billing.Application.Modules.Clients.Services;
 using Billing.Application.Modules.Core.Contracts;
@@ -262,9 +240,11 @@ public sealed class CreateClient(
 ) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
     public sealed record Command : ICommand {
         [Description("The client's display name.")]
+        [StringLength(200, MinimumLength = 1)]
         public required string Name { get; init; }
 
         [Description("The client's billing email address.")]
+        [EmailAddress, MaxLength(320)]
         public required string Email { get; init; }
     }
 
@@ -305,21 +285,28 @@ triggers the `clients` cache invalidation.
 
 ### Validate the command
 
-Rules live next to the handler with [FluentValidation](/docs/concepts/validators). The
-`ValidationDecorator` resolves and runs them before the handler executes.
+The `[StringLength]`/`[EmailAddress]`/`[MaxLength]` attributes on the `Command` **are** the input
+rules — there is no validator class. Because the request carries validation attributes, the generator
+auto-attaches the framework [`ValidationDecorator`](/docs/concepts/validation), which rejects a bad
+request with field-keyed `AppError.Validation` errors before logging or the transaction ever run.
+Requiredness needs no attribute at all: `required string Name` already means the member must be
+present.
 
-```csharp title="src/Billing.Application/Modules/Clients/Handlers/CreateClientValidator.cs"
-using FluentValidation;
+The same attributes flow into every contract surface — the exported `rpc-schema.json`, the MCP tool
+input schemas, and the generated Zod client (which pre-validates the form input with the identical
+rules, in [Build the frontend](/docs/tutorial/frontend)).
 
-namespace Billing.Application.Modules.Clients.Handlers;
+Enforcement comes from the `Elarion.Validation` package added during
+[scaffolding](/docs/tutorial#scaffold-the-solution); the host registers it with one line in
+[Host the API](/docs/tutorial/hosting):
 
-public sealed class CreateClientValidator : AbstractValidator<CreateClient.Command> {
-    public CreateClientValidator() {
-        RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
-        RuleFor(x => x.Email).NotEmpty().EmailAddress().MaximumLength(320);
-    }
-}
+```csharp title="src/Billing.Api/Program.cs (excerpt)"
+builder.Services.AddElarionValidation();
 ```
+
+Business rules stay in the handler: the duplicate-email check above is a database question, so it runs
+**inside the transaction** and returns `AppError.Conflict` — see
+[Validation](/docs/concepts/validation) for where that dividing line sits.
 
 </Step>
 
@@ -431,7 +418,8 @@ public sealed partial class ClientsJsonContext : JsonSerializerContext;
 ## What you have so far
 
 - One handler that is simultaneously a use case, a DI registration, a JSON-RPC method, and an MCP tool.
-- A pipeline that applies logging, validation, and transactions to every command — declared once.
+- A pipeline that applies logging and transactions to every command — declared once — with request
+  validation attached automatically from the DTO's DataAnnotations.
 - Per-user reads that are cached and invalidated by tag, with no manual key management.
 
 <Cards>

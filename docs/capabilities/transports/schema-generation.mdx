@@ -7,6 +7,12 @@ description: Export rpc-schema.json automatically during dotnet build with the E
 You can export it in code with `JsonRpcSchemaExporter`, or — more conveniently — have it written
 automatically during `dotnet build`.
 
+Beyond each operation's request/response shapes, the exported schema carries `[Description]` texts, the
+`idempotent` flag for [`[Idempotent]`](/docs/concepts/idempotency) operations, and the request DTOs'
+DataAnnotations constraints as JSON Schema keywords (`minLength`/`maxLength`, `minimum`/`maximum`,
+`pattern`, `format` — see [Validation](/docs/concepts/validation)), so the generated client can
+pre-validate requests against exactly what the server enforces.
+
 ## Build-time export
 
 Add the schema generation package as private build tooling in the host project:

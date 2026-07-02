@@ -124,6 +124,7 @@ public sealed record AppError {
 | --- | --- | --- |
 | `AppError.Validation(string message, object? data = null)` | `Validation` | Optional structured `Data` payload. |
 | `AppError.Validation(string message, IReadOnlyList<string> errors)` | `Validation` | Wraps `errors` in `ValidationErrorData` as `Data`. |
+| `AppError.Validation(string message, IReadOnlyDictionary<string, string[]> fieldErrors)` | `Validation` | Wraps messages keyed by wire-named field path (e.g. `"address.street"`; empty key = not field-specific) in `ValidationErrorData`, deriving the flat `Errors` list by flattening in ordinal key order. |
 | `AppError.NotFound(string message)` | `NotFound` | |
 | `AppError.Conflict(string message)` | `Conflict` | |
 | `AppError.Forbidden(string message)` | `Forbidden` | |
@@ -136,13 +137,21 @@ AppError.NotFound($"Client {id} was not found.");
 AppError.BusinessRule("Credit limit exceeded.", data: limitInfo);
 ```
 
-`ValidationErrorData` is the payload shape for the list-of-messages overload:
+`ValidationErrorData` is the payload shape for both structured overloads:
 
 ```csharp title="ValidationErrorData"
 public sealed record ValidationErrorData {
     public required IReadOnlyList<string> Errors { get; init; }
+
+    // Keyed by wire-named field path per the canonical JSON naming policy (e.g. "address.street",
+    // "deliveries[1].street"); null when the error was built from a flat message list.
+    public IReadOnlyDictionary<string, string[]>? FieldErrors { get; init; }
 }
 ```
+
+The framework [`ValidationDecorator`](/docs/concepts/validation) produces the field-keyed shape; the
+HTTP mapper surfaces `FieldErrors` as the RFC 7807 `errors` extension, and the JSON-RPC error carries
+the whole payload in `error.data`.
 
 ## `ErrorKind`
 

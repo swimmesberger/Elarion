@@ -50,6 +50,23 @@ public sealed class ElarionHttpResultsTests {
     }
 
     [Fact]
+    public void ToProblem_ValidationWithFieldErrors_SurfacesThemAsProblemDetailsErrors() {
+        var error = AppError.Validation("invalid", new Dictionary<string, string[]> {
+            ["name"] = ["Name is required"],
+            ["address.street"] = ["Street is too long"],
+        });
+
+        var result = ElarionHttpResults.ToProblem(error);
+
+        result.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(400);
+        var value = result.Should().BeAssignableTo<IValueHttpResult>().Which.Value;
+        var problem = value.Should().BeOfType<HttpValidationProblemDetails>().Subject;
+        problem.Errors.Keys.Should().BeEquivalentTo("name", "address.street");
+        problem.Errors["address.street"].Should().BeEquivalentTo("Street is too long");
+        problem.Detail.Should().Be("invalid");
+    }
+
+    [Fact]
     public void ToProblem_NonValidation_ReturnsProblemWithDetail() {
         var result = ElarionHttpResults.ToProblem(AppError.Conflict("already exists"));
 

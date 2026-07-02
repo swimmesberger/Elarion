@@ -51,6 +51,22 @@ public sealed record AppError {
     public static AppError Validation(string message, IReadOnlyList<string> errors) =>
         new() { Kind = ErrorKind.Validation, Message = message, Data = new ValidationErrorData { Errors = errors } };
 
+    /// <summary>
+    /// Creates a validation error carrying messages keyed by wire-named field path (e.g.
+    /// <c>"address.street"</c>; the empty-string key is for messages not specific to a field). The flat
+    /// <see cref="ValidationErrorData.Errors"/> list is derived by flattening in ordinal key order, so
+    /// consumers of either shape see the same messages.
+    /// </summary>
+    public static AppError Validation(string message, IReadOnlyDictionary<string, string[]> fieldErrors) =>
+        new() {
+            Kind = ErrorKind.Validation,
+            Message = message,
+            Data = new ValidationErrorData {
+                Errors = ValidationErrorData.Flatten(fieldErrors),
+                FieldErrors = fieldErrors,
+            },
+        };
+
     /// <summary>Creates a not-found error.</summary>
     public static AppError NotFound(string message) =>
         new() { Kind = ErrorKind.NotFound, Message = message };
@@ -80,4 +96,15 @@ public sealed record AppError {
 public sealed record ValidationErrorData {
     /// <summary>Human-readable validation messages.</summary>
     public required IReadOnlyList<string> Errors { get; init; }
+
+    /// <summary>
+    /// Validation messages keyed by wire-named field path (e.g. <c>"address.street"</c>, matching the property
+    /// names the client sent per the canonical JSON naming policy); the empty-string key carries messages not
+    /// specific to a single field. <see langword="null"/> when the error was built from a flat message list.
+    /// </summary>
+    public IReadOnlyDictionary<string, string[]>? FieldErrors { get; init; }
+
+    /// <summary>Flattens field-keyed messages into one list, in deterministic (ordinal key) order.</summary>
+    internal static string[] Flatten(IReadOnlyDictionary<string, string[]> fieldErrors) =>
+        [.. fieldErrors.OrderBy(static pair => pair.Key, StringComparer.Ordinal).SelectMany(static pair => pair.Value)];
 }
