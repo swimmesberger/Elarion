@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { BuildOutput } from './_components/build-output';
 import { CodeWindow } from './_components/code-window';
+import { MigrationDiffStat } from './_components/diff-stat';
 import { CopyCommand } from './_components/copy-button';
 import { Code } from './_components/highlight';
 import { OutputTabs } from './_components/output-tabs';
@@ -18,6 +19,7 @@ export default function HomePage() {
         <GeneratedOutput />
         <CapabilityIndex />
         <Diagnostics />
+        <FieldReport />
         <PhilosophyTeaser />
         <Start />
       </div>
@@ -551,6 +553,61 @@ function Diagnostics() {
   );
 }
 
+/* -------------------------------------------------- 04 · Field report */
+
+function FieldReport() {
+  return (
+    <Section id="field-report" n="04" label="Field report" aside="one production migration · real numbers">
+      <div className={`py-14 lg:py-16 ${PAD}`}>
+        <div className="grid items-center gap-10 *:min-w-0 lg:grid-cols-[1fr_0.95fr]">
+          <SectionTitle
+            title="The first migration deleted 16,223 lines."
+            lead={
+              <>
+                Elarion wasn&apos;t designed on a whiteboard — it was extracted from a production
+                application that had grown its own foundation: handler pipeline, transports,
+                wiring, caching, the lot. The pull request that moved that application onto the
+                released packages added 391 lines and removed 16,223. The same application came
+                out the other side, minus its plumbing.
+              </>
+            }
+          />
+
+          <MigrationDiffStat />
+        </div>
+
+        <div className="mt-10 grid gap-8 md:grid-cols-3">
+          {[
+            {
+              n: 'a',
+              title: 'What the 16,223 were',
+              body: 'Bespoke infrastructure — dispatch, registration, caching, retries, auth glue. Code every product rewrites and no product differentiates itself by.',
+            },
+            {
+              n: 'b',
+              title: 'What the 391 are',
+              body: 'Package references, attributes on the handlers that already existed, and a few registration calls — the declarations the build expands into wiring.',
+            },
+            {
+              n: 'c',
+              title: 'Why net −15,832 matters',
+              body: 'Every deleted line is one your team no longer reviews, tests, or patches — and one your AI assistants never read, or bill you for, again.',
+            },
+          ].map((point) => (
+            <div key={point.n} className="border-t border-(--line) pt-4">
+              <h3 className="font-medium text-fd-foreground">
+                <span className="mr-2 font-mono text-xs text-fd-muted-foreground">{point.n}.</span>
+                {point.title}
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{point.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 /* --------------------------------------------------- Philosophy teaser */
 
 function PhilosophyTeaser() {
@@ -570,7 +627,7 @@ function PhilosophyTeaser() {
   );
 }
 
-/* --------------------------------------------------------- 04 · Start */
+/* --------------------------------------------------------- 05 · Start */
 
 const stepModule = `
 [AppModule("Clients")]
@@ -636,7 +693,7 @@ const buildEmits = [
 
 function Start() {
   return (
-    <Section id="start" n="04" label="Start" aside="~5 minutes">
+    <Section id="start" n="05" label="Start" aside="~5 minutes">
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <SectionTitle title="A module in three steps." />
 
