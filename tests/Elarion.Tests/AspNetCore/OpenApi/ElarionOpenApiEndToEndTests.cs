@@ -1,0 +1,160 @@
+using System.Net;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using AwesomeAssertions;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Serialization;
+using Elarion.AspNetCore;
+using Elarion.AspNetCore.OpenApi;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Xunit;
+
+namespace Elarion.Tests.AspNetCore.OpenApi;
+
+/// <summary>
+/// End-to-end test that boots a real Kestrel host, maps endpoints exactly as <c>AppModuleDiscoveryGenerator</c>
+/// emits them for the OpenAPI package (module <c>.WithTags</c> and the idempotent <c>.WithMetadata</c> marker),
+/// registers <see cref="ElarionOpenApiServiceCollectionExtensions.AddElarionOpenApi(IServiceCollection, Action{Microsoft.AspNetCore.OpenApi.OpenApiOptions}?)"/>,
+/// and reads the served OpenAPI document. Reflection is off (the repo default) and the DTOs live only in a
+/// source-generated <see cref="JsonSerializerContext"/>, so a passing test proves the canonical-JSON wiring makes
+/// schema generation resolve body types through the source-gen resolver chain without reflection.
+/// </summary>
+public sealed partial class ElarionOpenApiEndToEndTests {
+    private sealed record CreatePaymentCommand {
+        public required string Amount { get; init; }
+    }
+
+    private sealed record CreatePaymentResponse(Guid Id);
+
+    private sealed record GetPaymentQuery {
+        public required Guid Id { get; init; }
+    }
+
+    private sealed record GetPaymentResponse(Guid Id, string Amount);
+
+    [JsonSerializable(typeof(CreatePaymentCommand))]
+    [JsonSerializable(typeof(CreatePaymentResponse))]
+    [JsonSerializable(typeof(GetPaymentResponse))]
+    private sealed partial class OpenApiTestJsonContext : JsonSerializerContext;
+
+    private sealed class CreatePaymentHandler : IHandler<CreatePaymentCommand, Result<CreatePaymentResponse>> {
+        public ValueTask<Result<CreatePaymentResponse>> HandleAsync(CreatePaymentCommand request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<CreatePaymentResponse>>(new CreatePaymentResponse(Guid.NewGuid()));
+    }
+
+    private sealed class GetPaymentHandler : IHandler<GetPaymentQuery, Result<GetPaymentResponse>> {
+        public ValueTask<Result<GetPaymentResponse>> HandleAsync(GetPaymentQuery request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<GetPaymentResponse>>(new GetPaymentResponse(request.Id, "10.00"));
+    }
+
+    [Fact]
+    public async Task GeneratedEndpoints_ProduceElarionOpenApiDocument() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+
+        // Reflection stays OFF (no EnableReflectionFallback): the DTOs resolve only through this source-gen context.
+        builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(OpenApiTestJsonContext.Default));
+        builder.Services.AddProblemDetails();
+        builder.Services.AddElarionOpenApi();
+        builder.Services.AddScoped<IHandler<CreatePaymentCommand, Result<CreatePaymentResponse>>, CreatePaymentHandler>();
+        builder.Services.AddScoped<IHandler<GetPaymentQuery, Result<GetPaymentResponse>>, GetPaymentHandler>();
+
+        await using var app = builder.Build();
+
+        // Mirrors the lambdas AppModuleDiscoveryGenerator emits, including the OpenAPI-relevant metadata: a module
+        // tag on both, and the idempotency marker on the [Idempotent] POST only.
+        app.MapPost("/payments", static async (
+                CreatePaymentCommand request,
+                [FromServices] IHandler<CreatePaymentCommand, Result<CreatePaymentResponse>> handler,
+                CancellationToken token) => ElarionHttpResults.ToResult(await handler.HandleAsync(request, token)))
+            .WithName("Sample.Payments.CreatePayment")
+            .WithTags("Payments")
+            .Produces<CreatePaymentResponse>(200)
+            .ProducesElarionErrors()
+            .WithMetadata(ElarionIdempotentEndpointMetadata.Instance);
+
+        app.MapGet("/payments/{id}", static async (
+                [AsParameters] GetPaymentQuery request,
+                [FromServices] IHandler<GetPaymentQuery, Result<GetPaymentResponse>> handler,
+                CancellationToken token) => ElarionHttpResults.ToResult(await handler.HandleAsync(request, token)))
+            .WithName("Sample.Payments.GetPayment")
+            .WithTags("Payments")
+            .Produces<GetPaymentResponse>(200)
+            .ProducesElarionErrors();
+
+        app.MapOpenApi();
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var response = await client.GetAsync("/openapi/v1.json", ct);
+            // (a) The document generates without throwing (which reflection-off schema failures would do → 500).
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            var root = doc.RootElement;
+
+            var post = root.GetProperty("paths").GetProperty("/payments").GetProperty("post");
+            var get = root.GetProperty("paths").GetProperty("/payments/{id}").GetProperty("get");
+
+            // (c) Module tag flows through from the generator's .WithTags.
+            post.GetProperty("tags")[0].GetString().Should().Be("Payments");
+            get.GetProperty("tags")[0].GetString().Should().Be("Payments");
+
+            // (d) Operation ids are normalized (namespace + no suffix), so generated clients get clean method names.
+            post.GetProperty("operationId").GetString().Should().Be("CreatePayment");
+            get.GetProperty("operationId").GetString().Should().Be("GetPayment");
+
+            // (e) ProblemDetails error responses are advertised.
+            post.GetProperty("responses").TryGetProperty("404", out _).Should().BeTrue();
+            post.GetProperty("responses").TryGetProperty("409", out _).Should().BeTrue();
+
+            // (b) The body type schema resolved through the source-gen context (reflection off) — proving the wiring.
+            root.GetProperty("components").GetProperty("schemas")
+                .TryGetProperty(nameof(CreatePaymentResponse), out _).Should().BeTrue();
+
+            // (f) The idempotent POST advertises the Idempotency-Key header and the x-elarion-idempotent extension…
+            HasHeaderParameter(post, "Idempotency-Key").Should().BeTrue();
+            post.TryGetProperty(ElarionOpenApiExtensionNames.Idempotent, out var flag).Should().BeTrue();
+            flag.GetBoolean().Should().BeTrue();
+
+            // …while the plain GET advertises neither.
+            HasHeaderParameter(get, "Idempotency-Key").Should().BeFalse();
+            get.TryGetProperty(ElarionOpenApiExtensionNames.Idempotent, out _).Should().BeFalse();
+        } finally {
+            await app.StopAsync(ct);
+        }
+    }
+
+    private static bool HasHeaderParameter(JsonElement operation, string name) {
+        if (!operation.TryGetProperty("parameters", out var parameters)) {
+            return false;
+        }
+
+        foreach (var parameter in parameters.EnumerateArray()) {
+            if (parameter.TryGetProperty("in", out var location) &&
+                string.Equals(location.GetString(), "header", StringComparison.OrdinalIgnoreCase) &&
+                parameter.TryGetProperty("name", out var parameterName) &&
+                string.Equals(parameterName.GetString(), name, StringComparison.OrdinalIgnoreCase)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}

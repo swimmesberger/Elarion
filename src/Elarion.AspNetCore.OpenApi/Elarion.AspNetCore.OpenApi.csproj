@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>OpenAPI document generation for Elarion [HttpEndpoint] handlers. Wraps Microsoft.AspNetCore.OpenApi and wires the canonical Elarion JSON serialization, module tags, clean operation ids, and the Idempotency-Key contract so the REST transport reaches JSON-RPC schema parity.</Description>
+    <PackageTags>elarion;openapi;swagger;aspnetcore;rest;http;json-rpc</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <!-- Override the vulnerable transitive Microsoft.OpenApi 2.0.0 (GHSA-v5pm-xwqc-g5wc); flows to consumers. -->
+    <PackageReference Include="Microsoft.OpenApi" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests" />
+  </ItemGroup>
+
+</Project>

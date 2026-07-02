@@ -117,6 +117,56 @@ public sealed class ModuleBootstrapperTransportTests {
         // The per-module handler method maps that module's [Handler] operation onto the registry with its flags.
         generated.Should().Contain(
             "dispatcher.Map<global::Sample.Billing.GetInvoiceRpc.Query, global::Sample.Billing.GetInvoiceRpc.Response>(\"invoices.get\", global::Elarion.Abstractions.HandlerTransports.All);");
+
+        // Each generated endpoint is tagged with its owning module so OpenAPI groups operations by module.
+        generated.Should().Contain(".WithTags(\"Billing\")");
+        generated.Should().Contain(".WithTags(\"Shipping\")");
+        // No handler here is [Idempotent], so no idempotency marker is emitted.
+        generated.Should().NotContain("ElarionIdempotentEndpointMetadata");
+    }
+
+    [Fact]
+    public void Bootstrapper_MarksIdempotentHttpEndpoints() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Idempotency;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Payments {
+                [AppModule("Payments", Kind = AppModuleKind.Core)]
+                public static class PaymentsModule { }
+
+                [HttpEndpoint("payments")]
+                [Idempotent]
+                public sealed class CreatePayment : IHandler<CreatePayment.Command, Result<CreatePayment.Response>> {
+                    public sealed record Command : ICommand { public required string Amount { get; init; } }
+                    public sealed record Response(System.Guid Id);
+                    public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(System.Guid.Empty));
+                }
+
+                [HttpEndpoint("payments/{id}")]
+                public sealed class GetPayment : IHandler<GetPayment.Query, Result<GetPayment.Response>> {
+                    public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
+                    public sealed record Response(System.Guid Id);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(request.Id));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out _);
+
+        // The [Idempotent] POST endpoint carries the inert marker the OpenAPI package reads; the plain GET does not,
+        // so the marker appears exactly once across both mapped endpoints.
+        generated.Should().Contain("app.MapPost(\"payments\",");
+        generated.Should().Contain("app.MapGet(\"payments/{id}\",");
+        generated.Should().Contain(".WithMetadata(global::Elarion.AspNetCore.ElarionIdempotentEndpointMetadata.Instance)");
+        generated.Should().Contain(".WithTags(\"Payments\")");
+        generated.Split("ElarionIdempotentEndpointMetadata").Length.Should().Be(2);
     }
 
     [Fact]
@@ -503,7 +553,8 @@ public sealed class ModuleBootstrapperTransportTests {
             "1",
             "0",
             "0",
-            null);
+            null,
+            "0");
         var rpc = EncodeFields(
             "manifest.get",
             "ManifestOnly",

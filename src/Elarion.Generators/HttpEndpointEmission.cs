@@ -13,6 +13,7 @@ internal static class HttpEndpointEmission
 {
     public const string HttpEndpointAttributeMetadataName = "Elarion.Abstractions.HttpEndpointAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
+    private const string IdempotentAttributeFqn = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
     private const string AsParametersAttributeFqn = "Microsoft.AspNetCore.Http.AsParametersAttribute";
     private const string BindingMetadataNamespace = "Microsoft.AspNetCore.Http.Metadata";
     private const string HttpNamespace = "Microsoft.AspNetCore.Http";
@@ -66,7 +67,8 @@ internal static class HttpEndpointEmission
         bool UseAsParameters,
         bool DisableAntiforgery,
         bool ResponseIsEmpty,
-        string? Description
+        string? Description,
+        bool IsIdempotent
     );
 
     public static void ReportDuplicateRoutes(IEnumerable<Model> entries, List<DiagnosticInfo> diagnostics)
@@ -89,13 +91,18 @@ internal static class HttpEndpointEmission
 
     /// <summary>
     /// Emits one minimal-API endpoint registration onto <paramref name="target"/> (e.g. <c>app</c> or
-    /// <c>endpoints</c>), indented by <paramref name="indent"/>.
+    /// <c>endpoints</c>), indented by <paramref name="indent"/>. When <paramref name="moduleTag"/> is non-null the
+    /// endpoint is tagged with the owning module (OpenAPI groups operations by tag); an <c>[Idempotent]</c> handler
+    /// gets an inert <c>ElarionIdempotentEndpointMetadata</c> marker the OpenAPI package reads to advertise the
+    /// <c>Idempotency-Key</c> header.
     /// </summary>
-    public static void AppendRegistration(StringBuilder sb, Model entry, string indent, string target)
+    public static void AppendRegistration(StringBuilder sb, Model entry, string indent, string target, string? moduleTag)
     {
         const string Handler = "global::Elarion.Abstractions.IHandler";
         const string Result = "global::Elarion.Abstractions.Result";
         const string Results = "global::Elarion.AspNetCore.ElarionHttpResults";
+        const string IdempotentMarker =
+            "global::Elarion.AspNetCore.ElarionIdempotentEndpointMetadata.Instance";
 
         var inner = indent + "    ";
         var deeper = indent + "        ";
@@ -111,23 +118,22 @@ internal static class HttpEndpointEmission
             $"{deeper}[global::Microsoft.AspNetCore.Mvc.FromServices] {Handler}<{entry.RequestTypeFqn}, {Result}<{entry.ResponseTypeFqn}>> handler,");
         sb.AppendLine($"{deeper}global::System.Threading.CancellationToken ct) =>");
         sb.AppendLine($"{deeper}{Results}.{resultCall}(await handler.HandleAsync(request, ct)))");
-        sb.AppendLine($"{inner}.WithName({Literal(entry.EndpointName)})");
+
+        // Fluent metadata chain: order is deterministic so the emitted text stays a byte-identical contract.
+        var chain = new List<string> { $".WithName({Literal(entry.EndpointName)})" };
         if (entry.Description is not null)
-            sb.AppendLine($"{inner}.WithDescription({Literal(entry.Description)})");
-
-        if (entry.ResponseIsEmpty)
-            sb.AppendLine($"{inner}.Produces(204)");
-        else
-            sb.AppendLine($"{inner}.Produces<{entry.ResponseTypeFqn}>(200)");
-
-        sb.Append($"{inner}.ProducesElarionErrors()");
+            chain.Add($".WithDescription({Literal(entry.Description)})");
+        if (moduleTag is not null)
+            chain.Add($".WithTags({Literal(moduleTag)})");
+        chain.Add(entry.ResponseIsEmpty ? ".Produces(204)" : $".Produces<{entry.ResponseTypeFqn}>(200)");
+        chain.Add(".ProducesElarionErrors()");
+        if (entry.IsIdempotent)
+            chain.Add($".WithMetadata({IdempotentMarker})");
         if (entry.DisableAntiforgery)
-        {
-            sb.AppendLine();
-            sb.Append($"{inner}.DisableAntiforgery()");
-        }
+            chain.Add(".DisableAntiforgery()");
 
-        sb.AppendLine(";");
+        for (var i = 0; i < chain.Count; i++)
+            sb.AppendLine($"{inner}{chain[i]}{(i == chain.Count - 1 ? ";" : string.Empty)}");
     }
 
     public static bool TryCreateModel(
@@ -174,8 +180,23 @@ internal static class HttpEndpointEmission
             useAsParameters,
             disableAntiforgery,
             responseNamed is not null && IsResponseEmpty(responseNamed),
-            GetDescription(type, descriptionType));
+            GetDescription(type, descriptionType),
+            IsIdempotentHandler(type));
         return true;
+    }
+
+    // [Idempotent] is declared with Inherited = false, so only the handler type's own attributes are inspected
+    // (never a base type's). A simple presence check is enough for the HTTP marker — the full validation of the
+    // attribute (e.g. the cacheable conflict) is owned by HandlerRegistrationGenerator's registration path.
+    private static bool IsIdempotentHandler(INamedTypeSymbol type)
+    {
+        foreach (var attr in type.GetAttributes())
+        {
+            if (attr.AttributeClass?.ToDisplayString() == IdempotentAttributeFqn)
+                return true;
+        }
+
+        return false;
     }
 
     private const string CommandMarkerDisplay = "Elarion.Abstractions.ICommand";
