@@ -167,7 +167,7 @@ Itemizing what phase 2 needs against what the outbox supplies:
 | `IJobScheduler.ScheduleAsync` kept as the API | New: thin adapter → envelope event | New: store write |
 | Cancel a pending job | New (cancel-pending-row API) | New (same) |
 | `JobId`/handle + inspector visibility | New (or dropped) | New (or dropped) |
-| Publish surface for "deliver later" | **Seam question**: `IIntegrationEventBus` is transport-neutral and shared with the in-memory tier, which cannot durably delay — so either an outbox-specific surface or the adapter hides it | None (API is the store's own) |
+| Publish surface for "deliver later" | New: optional `IntegrationPublishOptions` on `PublishAsync` (decided below) | None (API is the store's own) |
 
 The genuinely shared, unavoidable work is the payload envelope and dispatch; the outbox route saves the
 lease/delivery/purge machinery and its tests. A real saving — roughly half the feature, not 95% of it.
@@ -225,13 +225,21 @@ to receive an overdue slot.
   warranted only if job volume, run duration, or per-job semantics outgrow the shared pipeline — at which
   point an external engine through the seams deserves equal consideration.
 - **Downtime catch-up: claims-based**, independent of the outbox, as sketched in Finding 4.
+- **The delay surface lives on the seam itself.** `IIntegrationEventBus.PublishAsync` grows an optional
+  options bag — `PublishAsync<TEvent>(TEvent @event, IntegrationPublishOptions? options = null,
+  CancellationToken ct = default)` with `DeliverAfterUtc` as its first member — not an outbox-specific side
+  API. The first draft of this section kept delay off the seam because "the in-memory tier cannot durably
+  honor it"; that reasoning was **rejected on review** as a false constraint: seam contracts are designed for
+  the most capable implementation, and a weaker tier implements the closest semantics and documents the delta
+  rather than vetoing the parameter. The in-memory tier can honor delay *non-durably* (timer-buffered, lost
+  on crash) — precisely as durable as everything else it does, already covered by its documented best-effort
+  contract. Pre-1.0, backward compatibility is likewise no reason to avoid the parameter. The options record
+  also gives future publish options (dedup keys, priorities) an additive home without further seam churn.
 
 Open questions carried into phase 2 implementation: whether `EnqueueAsync` (run-now) keeps its in-memory fast
 path with durability opt-in via `ScheduledJobOptions` (current lean: yes — pay-for-what-you-use); the payload
-compatibility contract when a row is claimed by a newer binary; whether the delay surface lives on an
-outbox-specific API or stays hidden behind the `IJobScheduler` adapter (the transport-neutral
-`IIntegrationEventBus` should not grow a delay the in-memory tier cannot durably honor); and the shape of the
-scheduler's catch-up entry point.
+compatibility contract when a row is claimed by a newer binary; and the shape of the scheduler's catch-up
+entry point.
 
 ## Consequences
 
