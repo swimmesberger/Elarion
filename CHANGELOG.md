@@ -9,6 +9,22 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **OpenAPI for the HTTP transport (`Elarion.AspNetCore.OpenApi`).** An opt-in sibling over
+  `Microsoft.AspNetCore.OpenApi` that brings the `[HttpEndpoint]` REST transport to schema/contract parity with
+  JSON-RPC (ADR-0024). `AddElarionOpenApi()` + `app.MapOpenApi()` serve a standard OpenAPI document; Elarion adds
+  the wiring Microsoft can't: canonical-JSON schema generation (reflection-off), the module tags the generator
+  now emits (`.WithTags`), normalized operation ids, and the idempotency contract for `[Idempotent]` handlers
+  (an `Idempotency-Key` header parameter + an `x-elarion-idempotent` vendor extension, the OpenAPI analog of the
+  JSON-RPC `idempotent` flag). Client generation is off-the-shelf (`openapi-typescript` + `openapi-fetch`, or
+  Kiota) and build-time export reuses `Microsoft.Extensions.ApiDescription.Server` — no bespoke generator and no
+  Elarion OpenAPI MSBuild package. Pins `Microsoft.OpenApi` ≥ 2.7.5 (advisory GHSA-v5pm-xwqc-g5wc). See
+  [`docs/capabilities/transports/openapi`](docs/capabilities/transports/openapi.mdx).
+- **`AddElarionHttpJson()`.** Base HTTP-transport wiring in `Elarion.AspNetCore` that aligns ASP.NET's
+  `Microsoft.AspNetCore.Http.Json` options with the canonical `IElarionJsonSerialization` configuration, so the
+  `[HttpEndpoint]` transport (de)serializes request bodies and responses through the source-generated contexts
+  with reflection off — closing a latent gap where a `[HttpEndpoint]` JSON body could not deserialize under the
+  AOT-strict default. Idempotent, a deliberate global alignment, and overridable by a later
+  `ConfigureHttpJsonOptions`; `AddElarionOpenApi()` calls it.
 - **Host-priority JSON resolver overrides.** `ElarionJsonOptions.OverrideTypeInfoResolvers` composes ahead of
   every `TypeInfoResolvers` entry, so a host can override how any type serializes — including envelope types a
   transport context registers first-match (previously unbeatable). The full chain is overrides → contributed
@@ -64,6 +80,12 @@ minor releases may include breaking changes.
   [ADR-0023](docs/decisions/0023-canonical-json-serialization.md).
 
 ### Changed
+- **`[HttpEndpoint]` responses serialize through the aligned HTTP JSON options.** `ElarionHttpResults.ToResult`
+  now returns `TypedResults.Ok` instead of a custom result type, so request binding, responses, and OpenAPI
+  schemas all flow through one `Microsoft.AspNetCore.Http.Json` options object (a host override applies
+  consistently to both directions). Consequence: a `[HttpEndpoint]` host must call `AddElarionHttpJson()` (or
+  `AddElarionOpenApi()`) so responses serialize under the reflection-off default; by default REST output still
+  matches the JSON-RPC/MCP transports for the same DTO.
 - **Soundness-hardening pass: breaking contract and schema changes (breaking).** A full adversarial audit of the
   framework's concurrency, transaction, authorization, and AOT paths was fixed in one pass; the correctness fixes
   below ride on these breaks. **Migrations:** the idempotency key table gains a leading `operation` PK column
