@@ -17,10 +17,11 @@ using Xunit;
 namespace Elarion.Tests.AspNetCore;
 
 /// <summary>
-/// Regression for M20: a <c>[HttpEndpoint]</c> REST response must serialize through the canonical
-/// <see cref="IElarionJsonSerialization"/> options — the same options JSON-RPC/MCP use — so REST output cannot
-/// diverge from those transports for the same DTO. Here the canonical options apply an UPPERCASE naming policy
-/// that ASP.NET's default HTTP JSON options do not, proving the success path went through the accessor.
+/// Regression for M20: a <c>[HttpEndpoint]</c> REST response must serialize through Elarion's canonical JSON
+/// configuration — the same the JSON-RPC/MCP transports use — so REST output cannot diverge for the same DTO.
+/// The success value is written with <c>TypedResults.Ok</c>, so it flows through the HTTP JSON options that
+/// <c>AddElarionHttpJson</c> aligns to canonical. Here the canonical options apply an UPPERCASE naming policy that
+/// ASP.NET's default HTTP JSON options do not, proving the response went through the aligned canonical config.
 /// </summary>
 public sealed class HttpResultsCanonicalJsonTests {
     private sealed record Widget(string WidgetName);
@@ -46,13 +47,13 @@ public sealed class HttpResultsCanonicalJsonTests {
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
 
-        // ASP.NET's own HTTP JSON options stay at the camelCase default; the canonical Elarion options use an
-        // UPPERCASE policy. If REST went through ASP.NET's options the property would be "widgetName".
-        builder.Services.AddElarionJson();
+        // The canonical Elarion options use an UPPERCASE policy; AddElarionHttpJson aligns the HTTP JSON options
+        // to them. Without that alignment REST would serialize through ASP.NET's camelCase default ("widgetName").
         builder.Services.ConfigureElarionJson(o => {
             o.PropertyNamingPolicy = new UpperCaseNamingPolicy();
             o.EnableReflectionFallback = true;
         });
+        builder.Services.AddElarionHttpJson();
         builder.Services.AddScoped<IHandler<WidgetQuery, Result<Widget>>, WidgetHandler>();
 
         await using var app = builder.Build();

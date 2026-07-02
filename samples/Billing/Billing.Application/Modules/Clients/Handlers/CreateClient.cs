@@ -16,6 +16,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 /// to the current user, invalidates the clients cache on success, and is exposed over JSON-RPC and as an MCP
 /// tool. The <c>[Description]</c> attributes flow through to the MCP tool surface.</summary>
 [Handler("clients.create")]
+[HttpEndpoint("clients")]
 [RequirePermission("clients", Verbs.Write)]
 [CacheInvalidate("clients")]
 [Description("Creates a new client for the current account.")]

@@ -72,8 +72,37 @@ app.MapElarionEndpoints(app.Configuration);   // module routes, gated per module
 
 The generated registration is a strongly-typed minimal-API lambda per handler (no open generics, no
 runtime reflection binding), so it stays AOT/trimming friendly and works with the ASP.NET Core Request
-Delegate Generator. Each endpoint is also annotated with `.Produces<TResponse>(...)` and the full set of
-`.ProducesProblem(...)` responses, so it shows up correctly in OpenAPI.
+Delegate Generator. Each endpoint is also annotated with `.Produces<TResponse>(...)`, the full set of
+`.ProducesProblem(...)` responses, its owning module as an OpenAPI **tag**, and — for an `[Idempotent]`
+handler — an inert idempotency marker, so it shows up correctly in OpenAPI.
+
+Add the opt-in [`Elarion.AspNetCore.OpenApi`](/docs/capabilities/transports/openapi) package to turn that
+into a served OpenAPI document (and a generated client) — the REST analog of the JSON-RPC schema and
+TypeScript client.
+
+### JSON serialization with reflection off
+
+The `[HttpEndpoint]` transport serializes **both directions** — request-body binding (a POST/PUT/PATCH JSON body)
+and the success value (`ElarionHttpResults` uses `TypedResults.Ok`) — through ASP.NET's global
+`Microsoft.AspNetCore.Http.Json` options, which Elarion otherwise leaves at their defaults. With
+`JsonSerializerIsReflectionEnabledByDefault=false` (the AOT-friendly default) those options have no resolver for
+your DTOs, so (de)serialization fails. Call `AddElarionHttpJson()` once to fix it:
+
+```csharp
+builder.Services.AddElarion(builder.Configuration);   // contributes the module JSON contexts
+builder.Services.AddElarionHttpJson();                // aligns ASP.NET's HTTP JSON options with the canonical config
+```
+
+It mirrors the canonical naming knobs and source-generated resolver chain onto the HTTP JSON options, so requests,
+responses (and your host's own minimal-API endpoints) resolve through the same contexts every transport uses — and
+REST output matches the JSON-RPC/MCP transports for the same DTO. It is a deliberate, **global** alignment of the
+app's minimal-API JSON, is idempotent, and runs in registration order — a host that needs different behavior calls
+`ConfigureHttpJsonOptions(…)` **after** it and wins (applying to both directions consistently).
+
+<Callout type="info">
+`AddElarionOpenApi()` already calls `AddElarionHttpJson()`, so a host that adds
+[OpenAPI](/docs/capabilities/transports/openapi) does not need a separate call.
+</Callout>
 
 ### Per-module authorization and route conventions
 

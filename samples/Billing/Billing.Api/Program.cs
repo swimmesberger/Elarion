@@ -9,6 +9,7 @@ using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
+using Elarion.AspNetCore.OpenApi;
 using Elarion.Authorization;
 using Elarion.Caching;
 using Elarion.Caching.PostgreSql;
@@ -83,6 +84,12 @@ builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
 // source-generated JSON context to the canonical serializer options every subsystem reads.
 builder.Services.AddElarion(builder.Configuration);
 
+// Align ASP.NET's minimal-API JSON options with Elarion's canonical serialization, so [HttpEndpoint] request
+// bodies deserialize through the same source-generated contexts every transport uses (needed with reflection
+// off / AOT). Responses already bypass these options via ElarionHttpResults. A later ConfigureHttpJsonOptions
+// would override this. AddElarionOpenApi below also ensures it, so this call is optional when OpenAPI is used.
+builder.Services.AddElarionHttpJson();
+
 // JSON-RPC: methods gated per module. Serialization comes from the canonical IElarionJsonSerialization
 // (module contexts from AddElarion + the JSON-RPC envelope context); customize it via ConfigureElarionJson.
 builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
@@ -92,6 +99,11 @@ builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
     ElarionBootstrapper.RegisterHandlers,
     o => o.ServerName = "Billing");
+
+// OpenAPI for the REST transport: brings the [HttpEndpoint] handlers to schema/contract parity with JSON-RPC.
+// Wires the canonical Elarion JSON into schema generation, keeps the generator's module tags, normalizes
+// operation ids, and advertises the Idempotency-Key contract. Serve it with app.MapOpenApi() below.
+builder.Services.AddElarionOpenApi();
 
 // Telemetry: register the Elarion sources/meters; the Aspire dashboard collects them over OTLP.
 builder.Services.AddOpenTelemetry()
@@ -149,7 +161,8 @@ if (app.Environment.IsDevelopment()) {
 app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
-app.MapElarionEndpoints(app.Configuration);
+app.MapElarionEndpoints(app.Configuration);            // generated [HttpEndpoint] REST routes (e.g. GET /clients/{id})
+app.MapOpenApi();                                      // GET /openapi/v1.json — the REST contract (dev-only in production)
 app.MapElarionJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 

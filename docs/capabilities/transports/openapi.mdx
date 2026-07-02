@@ -1,0 +1,240 @@
+---
+title: OpenAPI
+description: Bring the [HttpEndpoint] REST transport to schema/contract parity with JSON-RPC — an OpenAPI document, module tags, clean operation ids, ProblemDetails, and the Idempotency-Key contract, from Microsoft.AspNetCore.OpenApi.
+---
+
+The [JSON-RPC transport](/docs/capabilities/transports/json-rpc) ships a build-time schema and a typed
+TypeScript client. `Elarion.AspNetCore.OpenApi` gives the [HTTP transport](/docs/capabilities/transports/http-endpoints)
+the same story with the tools the REST world already expects: a standard **OpenAPI document** you can feed to
+Swagger UI, Scalar, Kiota, or `openapi-typescript`. It is a thin, opt-in sibling of `Elarion.AspNetCore` over
+[`Microsoft.AspNetCore.OpenApi`](https://learn.microsoft.com/aspnet/core/fundamentals/openapi/aspnetcore-openapi) —
+Elarion adds only the wiring Microsoft can't ([ADR-0024](/docs/decisions/0024-openapi-http-transport)).
+
+## Enable it
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Elarion.AspNetCore.OpenApi" Version="0.2.3" />
+</ItemGroup>
+```
+
+```csharp
+builder.Services.AddElarion(builder.Configuration);   // contributes the module JSON contexts
+builder.Services.AddElarionOpenApi();                 // wires OpenAPI over the canonical JSON
+
+var app = builder.Build();
+
+app.MapElarionEndpoints(app.Configuration);           // the generated [HttpEndpoint] routes
+app.MapOpenApi();                                     // GET /openapi/v1.json
+```
+
+That is the whole runtime setup. `AddElarionOpenApi()` registers `AddOpenApi()` plus the Elarion transformers;
+`MapOpenApi()` (from `Microsoft.AspNetCore.OpenApi`) serves the document.
+
+<Callout type="warn">
+Expose `MapOpenApi()` and any UI (Swagger UI, Scalar) in development only — the document describes your whole
+API surface. Gate it with `if (app.Environment.IsDevelopment())` in production hosts.
+</Callout>
+
+## What Elarion adds
+
+Because the generator already annotates every `[HttpEndpoint]` with `.Produces<T>(...)`, the ProblemDetails
+`.ProducesProblem(...)` set, and a name and description, most of the document is correct out of the box. On top
+of that `AddElarionOpenApi()` contributes the parts that make it *Elarion's* contract:
+
+- **Canonical JSON, reflection-free.** OpenAPI schema generation (and minimal-API request-body binding) read
+  ASP.NET's `Microsoft.AspNetCore.Http.Json` options. `AddElarionOpenApi()` calls
+  [`AddElarionHttpJson()`](/docs/capabilities/transports/http-endpoints#json-serialization-with-reflection-off),
+  which mirrors the canonical [`IElarionJsonSerialization`](/docs/concepts/json-serialization) configuration onto
+  them — the naming knobs and the **source-generated** `TypeInfoResolverChain` — so body schemas resolve through
+  the same contexts every other transport uses, with `JsonSerializerIsReflectionEnabledByDefault=false`. A DTO
+  missing from every source-gen context throws (surfacing a missing `[JsonSerializable]`) instead of silently
+  reflecting, and the emitted schema matches the JSON-RPC/MCP wire shape for the same type.
+- **Module tags.** Each operation is tagged with its owning `[AppModule]`, so tools group your API by module —
+  the REST analog of JSON-RPC's module grouping.
+- **Clean operation ids.** The handler's fully-qualified type name (`Billing.Invoicing.GetInvoice`) is
+  normalized to a readable `operationId` (`GetInvoice`), so generated clients get sensible method names.
+  Colliding names keep their original id, so ids stay unique.
+- **The idempotency contract** (below).
+
+## Idempotency parity
+
+A handler marked [`[Idempotent]`](/docs/concepts/idempotency) is safe to retry: the same `Idempotency-Key`
+returns the original outcome instead of running again. Over HTTP the server already honors the
+`Idempotency-Key` header (`app.UseElarionIdempotencyKey()` feeds it to the pipeline). The OpenAPI package makes
+that contract **discoverable**: for every idempotent operation it adds
+
+- an optional `Idempotency-Key` **header parameter**, and
+- an `x-elarion-idempotent: true` **vendor extension** — the OpenAPI analog of the JSON-RPC schema's
+  `idempotent` flag, which lets a generated client auto-attach the key (see [below](#automatic-idempotency-keys)).
+
+Non-idempotent operations carry neither, so the document tells a client exactly which calls are safe to retry.
+
+## Export the document at build time
+
+For a committed contract (the REST analog of `rpc-schema.json`), reuse Microsoft's build-time exporter —
+Elarion does not ship its own for OpenAPI:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.9" />
+</ItemGroup>
+
+<PropertyGroup>
+  <OpenApiGenerateDocuments>true</OpenApiGenerateDocuments>
+  <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)</OpenApiDocumentsDirectory>
+</PropertyGroup>
+```
+
+`dotnet build` then emits `{ProjectName}.json` next to the project. Like Elarion's JSON-RPC schema tool, this
+boots the host with an inert server to read runtime metadata.
+
+<Callout type="warn">
+The build-time launch runs your program up to `app.Run()`. If the host does side-effecting startup work —
+e.g. `db.Database.MigrateAsync()` — guard it (skip when there's no server request pipeline) or export at
+runtime from a running instance via `MapOpenApi()` instead.
+</Callout>
+
+The two build-time exporters are intentionally parallel — both launch the host and dump a contract file. They
+differ only in surface:
+
+| Concern | JSON-RPC (`Elarion.AspNetCore.SchemaGeneration`) | OpenAPI (`Microsoft.Extensions.ApiDescription.Server`) |
+| --- | --- | --- |
+| Enable | `ElarionJsonRpcGenerateSchema=true` | `OpenApiGenerateDocuments=true` |
+| Output directory | `ElarionJsonRpcSchemaOutputDirectory` (default `obj/`) | `OpenApiDocumentsDirectory` (default project dir) |
+| File name | `rpc-schema.json` | `{ProjectName}.json` |
+| Mechanism | inert host launch + document cache | inert host launch + document cache |
+
+## Generate a typed client
+
+An OpenAPI document works with the whole client-generation ecosystem, so Elarion ships no bespoke HTTP client
+generator — pick the off-the-shelf tool that fits your stack.
+
+<Callout type="info">
+**Recommended: [`openapi-typescript`](https://openapi-ts.dev) + [`openapi-fetch`](https://openapi-ts.dev/openapi-fetch/).**
+It matches the JSON-RPC client's ethos — portable `fetch`, a ~6&nbsp;kB runtime, and **no generated method code to
+review** (the types come from the document, the client is one tiny library). It type-checks in the browser and
+under NodeNext, exactly like the generated JSON-RPC client.
+</Callout>
+
+| Tool | Emits | Reach for it when |
+| --- | --- | --- |
+| **`openapi-typescript` + `openapi-fetch`** (recommended) | Types only + a ~6&nbsp;kB typed `fetch` wrapper | A TypeScript front end or BFF, minimal dependencies, no generated call code |
+| [`@hey-api/openapi-ts`](https://heyapi.dev) | Types + generated service methods + optional Zod | You want ready-made `createClient().getClient(...)` methods and runtime validation baked in |
+| [Kiota](https://learn.microsoft.com/openapi/kiota/) | A full SDK in C#, TypeScript, Python, Go, Java, … | You need a non-TypeScript client, or a first-party Microsoft-supported generator |
+
+### Generate
+
+<Steps>
+<Step>
+**Get the document.** Either export it at build time (the [section above](#export-the-document-at-build-time) —
+`{ProjectName}.json`), or fetch it from a running host:
+
+```bash
+curl http://localhost:5000/openapi/v1.json -o openapi.json
+```
+</Step>
+<Step>
+**Install** the generator (dev) and the runtime client:
+
+```bash
+npm install -D openapi-typescript
+npm install openapi-fetch
+```
+</Step>
+<Step>
+**Add a script and generate** the types. Re-run it whenever the API changes (wire it into CI next to the JSON-RPC
+`gen:rpc` step):
+
+```jsonc
+// package.json
+{
+  "scripts": {
+    "gen:http": "openapi-typescript ./openapi.json -o ./src/generated/http-types.ts"
+  }
+}
+```
+
+```bash
+npm run gen:http
+```
+</Step>
+</Steps>
+
+### Use
+
+Create the client once with your base URL, then every call is typed from the path — path/query params, request
+body, and response are all inferred, and errors come back in the result instead of throwing:
+
+```ts
+import createClient from "openapi-fetch";
+import type { paths } from "./generated/http-types";
+
+const api = createClient<paths>({ baseUrl: "/" });
+
+// GET /clients/{id} — path params are required and typed.
+const { data, error } = await api.GET("/clients/{id}", {
+  params: { path: { id } },
+});
+if (error) {
+  // `error` is the typed RFC 7807 ProblemDetails body from ProducesElarionErrors().
+  console.error(error.title, error.status);
+} else {
+  console.log(data.name); // `data` is the CreateClient response, fully typed.
+}
+
+// POST /clients — the body is typed to the handler's Command.
+const created = await api.POST("/clients", {
+  body: { name: "Acme", email: "billing@acme.test" },
+});
+```
+
+Because the types are generated from the same document your server produces, a renamed field or a changed route
+is a compile error in the client — the end-to-end typing the JSON-RPC client gives you, over REST.
+
+### Automatic idempotency keys
+
+The JSON-RPC client auto-attaches an idempotency key for `[Idempotent]` methods. Reproduce that over HTTP with a
+small, reusable `openapi-fetch` middleware that keys off the `x-elarion-idempotent` extension. First emit the set
+of idempotent operations from the document (a ~15-line build step — read each operation, keep the `{method, path}`
+of those whose `x-elarion-idempotent` is `true`), then attach the middleware once:
+
+```ts
+// idempotency.ts
+import type { Middleware } from "openapi-fetch";
+
+// { method, path } pairs where the OpenAPI operation carries x-elarion-idempotent: true.
+import { idempotentOperations } from "./generated/idempotent-operations";
+
+const isIdempotent = (method: string, path: string) =>
+  idempotentOperations.has(`${method.toUpperCase()} ${path}`);
+
+export function idempotencyMiddleware(newKey: () => string = () => crypto.randomUUID()): Middleware {
+  return {
+    onRequest({ request, schemaPath }) {
+      // schemaPath is the templated route, e.g. "/clients"; request.method is the verb.
+      if (isIdempotent(request.method, schemaPath) && !request.headers.has("Idempotency-Key")) {
+        request.headers.set("Idempotency-Key", newKey());
+      }
+      return request;
+    },
+  };
+}
+```
+
+```ts
+// Attach it once; every idempotent call now carries a key by default.
+api.use(idempotencyMiddleware());
+```
+
+That gives an idempotent HTTP call the same exactly-once-on-retry behavior as the JSON-RPC client — attach a key
+by default, pass your own to reuse across your retries, or skip it per call — with the `Idempotency-Key` header
+that is idiomatic for HTTP rather than JSON-RPC's `params._meta`.
+
+## HTTP or JSON-RPC?
+
+Both remain first-class — the choice is [per-handler](/docs/capabilities/transports/http-endpoints#http-or-json-rpc),
+and a handler can expose both. Reach for OpenAPI when you serve third-party or public consumers who expect REST +
+Swagger tooling; reach for the JSON-RPC client when one team owns both ends and wants an operation-shaped,
+end-to-end-typed contract. With this package, neither transport is the "typed" one and the other the "loose" one —
+both carry a machine-readable contract.

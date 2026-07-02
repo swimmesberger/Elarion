@@ -987,8 +987,10 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine($"    public static global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder {HttpMethodName(moduleName)}(");
         sb.AppendLine("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)");
         sb.AppendLine("    {");
+        // Tag each operation with its owning module so OpenAPI groups them; unmatched endpoints carry no tag.
+        var moduleTag = moduleName == UnmatchedModuleName ? null : moduleName;
         foreach (var endpoint in endpoints)
-            HttpEndpointEmission.AppendRegistration(sb, endpoint, "        ", "app");
+            HttpEndpointEmission.AppendRegistration(sb, endpoint, "        ", "app", moduleTag);
         sb.AppendLine("        return app;");
         sb.AppendLine("    }");
     }
