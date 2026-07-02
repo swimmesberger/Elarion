@@ -632,6 +632,23 @@ When adding a doc page, drop the `.mdx` under `docs/` and list it in the relevan
 new `icon:` frontmatter values must be valid Lucide icon names (resolved in
 `website/lib/source.ts`).
 
+## Pull requests
+
+Prefer **stacked pull requests** for any change large enough that a single PR would be hard to
+review. Split it into an ordered chain of small, focused PRs where each PR targets the branch of the
+PR below it and only the bottom PR targets `main` (PR #1 → `main`, PR #2 → PR #1's branch, and so
+on), so reviewers approve and merge from the bottom up. See
+[GitHub's stacked-PR guide](https://github.github.com/gh-stack/).
+
+- **Each layer stands on its own.** Keep every PR small and single-purpose (one reviewable idea) and
+  green (build + tests pass), pushing follow-up concerns up the stack rather than widening a PR.
+- **Merge bottom-up.** When the lowest PR lands on `main`, GitHub automatically rebases the remaining
+  PRs so the next unmerged PR retargets the updated base — no manual rebasing of the stack.
+- **Branch protection is enforced against the final target branch (`main`)**, so the whole stack
+  satisfies the usual checks before the bottom layer merges.
+- **Tooling is optional.** Build stacks by hand with plain Git + the PR base-branch selector, or use
+  the `gh stack` CLI extension, which automates branch creation, rebasing, pushing, and PR setup.
+
 ## Publishing
 
 Publishing uses GitHub Actions trusted publishing/OIDC. `<VersionPrefix>` in
