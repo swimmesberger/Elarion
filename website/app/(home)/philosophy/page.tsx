@@ -83,16 +83,22 @@ function ModelSection() {
             title="Your code already says it — or you say it once."
             lead={
               <>
-                A class implementing <Mono>IHandler&lt;,&gt;</Mono> has already told you it handles
-                that request; repeating it in a registration list creates a second model that
-                drifts. But no amount of code inspection can tell a framework how long to cache a
-                result or which retry policy an external call deserves — those are decisions, and
-                decisions deserve syntax. Elarion splits the world exactly there: patterns are
-                detected and their wiring generated; capabilities are declared once, as attributes,
-                where the reviewer can see them. The third option — guessing at runtime — is
-                banned outright.
+                What the code already states is detected at build time. What only you can decide is
+                declared once, as an attribute. Nothing is guessed at runtime.
               </>
             }
+            points={[
+              <>
+                A class implementing <Mono>IHandler&lt;,&gt;</Mono> has said it handles that
+                request — repeating it in a registration list creates a second model that drifts.
+              </>,
+              <>
+                Cache duration, retry policy, permissions are{' '}
+                <span className="text-fd-foreground">decisions</span> — and decisions deserve
+                syntax the reviewer can see.
+              </>,
+              <>The third option — guessing at runtime — is banned outright.</>,
+            ]}
           />
         </div>
 
@@ -110,22 +116,26 @@ function ModelSection() {
 
 function FeedbackSection() {
   return (
-    <Section id="feedback" n="02" label="The feedback loop" aside="keystroke → build → CI">
+    <Section id="feedback" n="02" label="The feedback loop" aside="keystroke → build → CI" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
           <SectionTitle
             title="Move every failure to the left."
             lead={
               <>
-                The cost of a mistake is a function of when you learn about it. A red squiggle
-                costs seconds; a failed build costs minutes; a production incident costs a
-                post-mortem. Because Elarion&apos;s wiring is computed at compile time, whole
-                classes of failure — the missing registration, the unroutable endpoint, the
-                authorization gate that can&apos;t fail closed, the drifted client contract —
-                surface where they are cheapest. Determinism isn&apos;t an aesthetic preference;
-                it&apos;s a budget decision about where your team pays for its mistakes.
+                The cost of a mistake is a function of when you learn about it. Compile-time wiring
+                moves whole failure classes to where they are cheapest — determinism is a budget
+                decision, not an aesthetic one.
               </>
             }
+            points={[
+              <>A red squiggle costs seconds; a failed build, minutes; a production incident, a post-mortem.</>,
+              <>
+                Missing wiring, unroutable endpoints, authorization that can&apos;t fail closed —{' '}
+                <span className="text-fd-foreground">build errors</span>.
+              </>,
+              <>Contract drift fails CI the moment the generated client stops type-checking.</>,
+            ]}
           />
         </div>
 
@@ -150,15 +160,18 @@ function PipelineSection() {
             title="Cross-cutting concerns, cut once."
             lead={
               <>
-                Every request — whether it arrives over JSON-RPC, REST, MCP, a scheduled job, or
-                an event — runs the same decorator pipeline around your handler. Authorization is
-                the outermost functional gate, so a denied caller never warms a cache or opens a
-                transaction; domain events dispatch inline inside your transaction while
-                integration events wait for the commit. Your handler stays a plain function over
-                your domain: it takes a request, returns a{' '}
-                <Mono>Result&lt;T&gt;</Mono>, and has no idea HTTP exists.
+                Every request — JSON-RPC, REST, MCP, a scheduled job, an event — runs the same
+                decorator pipeline around your handler.
               </>
             }
+            points={[
+              <>Authorization sits outermost: a denied caller never warms a cache or opens a transaction.</>,
+              <>Domain events ride your transaction; integration events wait for the commit.</>,
+              <>
+                The handler stays a plain function: request in, <Mono>Result&lt;T&gt;</Mono> out —
+                it has no idea HTTP exists.
+              </>,
+            ]}
           />
         </div>
 
@@ -181,21 +194,25 @@ function PipelineSection() {
 
 function BatteriesSection() {
   return (
-    <Section id="batteries" n="04" label="Batteries" aside="ADR-0017 · pay for what you use">
+    <Section id="batteries" n="04" label="Batteries" aside="ADR-0017 · pay for what you use" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
           <SectionTitle
             title="Batteries included. Sockets standard."
             lead={
               <>
-                Frameworks usually make you choose: batteries included (and a dependency graph you
-                didn&apos;t order), or bring-your-own-everything. Elarion&apos;s answer is the
-                socket: the seam and its decorator live in the dependency-light core; the battery
-                — with its heavy dependency — lives one opt-in package away. A service that never
-                caches never ships a cache. And because the seam is public, every battery is
-                replaceable without touching a handler.
+                Frameworks make you choose: batteries included — plus a dependency graph you
+                didn&apos;t order — or bring-your-own-everything. Elarion&apos;s answer is the
+                socket.
               </>
             }
+            points={[
+              <>The seam and its decorator live in the dependency-light core; the battery lives one opt-in package away.</>,
+              <>
+                <span className="text-fd-foreground">A service that never caches never ships a cache.</span>
+              </>,
+              <>Every seam is public — swap any battery without touching a handler.</>,
+            ]}
           />
         </div>
 

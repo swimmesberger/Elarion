@@ -21,16 +21,19 @@ export function Section({
   n,
   label,
   aside,
+  tinted,
   children,
 }: {
   id: string;
   n: string;
   label: string;
   aside?: string;
+  /** Subtle background wash — used on alternating sections for page rhythm. */
+  tinted?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="relative border-b border-(--line)">
+    <section id={id} className={`relative border-b border-(--line) ${tinted ? 'bg-fd-muted/25' : ''}`}>
       <Ticks />
       <div className={`flex items-baseline justify-between gap-4 border-b border-(--line-soft) py-3 ${PAD}`}>
         <span className="eyebrow">
@@ -43,13 +46,42 @@ export function Section({
   );
 }
 
-export function SectionTitle({ title, lead }: { title: ReactNode; lead?: ReactNode }) {
-  return (
-    <div className="max-w-3xl">
+export function SectionTitle({
+  title,
+  lead,
+  points,
+}: {
+  title: ReactNode;
+  lead?: ReactNode;
+  /**
+   * Scannable key fragments rendered beside the lead (editorial standfirst
+   * pattern). Keep the lead to ~2 lines and let these carry the detail —
+   * long intro paragraphs are walls nobody reads.
+   */
+  points?: ReactNode[];
+}) {
+  const heading = (
+    <div className={points ? 'max-w-2xl' : 'max-w-3xl'}>
       <h2 className="font-display text-3xl font-semibold tracking-[-0.02em] text-fd-foreground sm:text-4xl">
         {title}
       </h2>
       {lead ? <p className="mt-4 text-[1.0625rem] leading-relaxed text-(--body)">{lead}</p> : null}
+    </div>
+  );
+
+  if (!points) return heading;
+
+  return (
+    <div className="grid gap-x-14 gap-y-7 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
+      {heading}
+      <ul className="space-y-3 border-t border-(--line) pt-5 lg:border-t-0 lg:pt-2.5">
+        {points.map((point, i) => (
+          <li key={i} className="flex items-start gap-3 text-sm leading-relaxed text-(--body)">
+            <span aria-hidden className="mt-[7px] size-1.5 shrink-0 bg-(--accent-gen)" />
+            <span>{point}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

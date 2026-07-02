@@ -209,12 +209,15 @@ function GeneratedOutput() {
           lead={
             <>
               The generators run inside <Mono>dotnet build</Mono> and emit the wiring you would
-              otherwise write and keep in sync by hand: DI registrations with the full decorator
-              pipeline, minimal-API route maps, the shared JSON-RPC + MCP operation registry, and a
-              schema that becomes a typed TypeScript client. It is code, not container magic — open
-              it, read it, step through it.
+              otherwise write and keep in sync by hand. It is code, not container magic — open it,
+              read it, step through it.
             </>
           }
+          points={[
+            <>DI registrations with the full decorator pipeline, composed in source.</>,
+            <>Minimal-API route maps and the shared JSON-RPC + MCP operation registry.</>,
+            <>A schema export that becomes a typed TypeScript client.</>,
+          ]}
         />
 
         <OutputTabs
@@ -505,18 +508,23 @@ const contrastRows: { scan: string; gen: string }[] = [
 
 function Diagnostics() {
   return (
-    <Section id="diagnostics" n="03" label="Diagnostics" aside="60+ compile-time checks">
+    <Section id="diagnostics" n="03" label="Diagnostics" aside="60+ compile-time checks" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <SectionTitle
           title="Wrong wiring doesn't ship."
           lead={
             <>
-              What the generators wire, they also validate. A handler that reaches into another
-              module, a route with no inferable verb, an authorization gate that could not fail
-              closed — each is a precise diagnostic with a fix direction, surfaced in the IDE and
-              failing the build in CI. Production never finds out.
+              What the generators wire, they also validate — every mistake becomes a precise
+              diagnostic with a fix direction. Production never finds out.
             </>
           }
+          points={[
+            <>
+              A reach into another module is flagged as you type (<Mono>ELMOD002</Mono>).
+            </>,
+            <>A route with no inferable verb fails the build, not the demo.</>,
+            <>An authorization gate that can&apos;t fail closed is an error, not a hope.</>,
+          ]}
         />
 
         <div className="mt-10 grid items-start gap-10 *:min-w-0 lg:grid-cols-[0.9fr_1.1fr]">

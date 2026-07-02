@@ -156,15 +156,19 @@ function ReachSection() {
           title="Build a feature once. Every audience gets it — including AI."
           lead={
             <>
-              Software used to have two audiences: the people using your app, and the partner
-              systems connected to it. There is a third audience now — AI assistants acting on
-              your customers&apos; behalf. Elarion treats it as standard equipment: the moment your
-              team finishes a feature, it is available to your website, to your partners, and to AI
-              assistants through MCP — the open plug standard the AI industry has settled on, the
-              way USB became the standard for devices. No second project. No separate
-              &ldquo;AI version&rdquo; of your product to build and keep in sync.
+              Software has a third audience now — AI assistants acting on your customers&apos;
+              behalf. Elarion treats it as standard equipment: finish a feature, and all three
+              audiences have it.
             </>
           }
+          points={[
+            <>
+              Through <span className="text-fd-foreground">MCP</span> — the open plug standard the
+              AI industry settled on, the way USB became the standard for devices.
+            </>,
+            <>No second project, no separate &ldquo;AI version&rdquo; of your product to keep in sync.</>,
+            <>One set of permissions for people, partners, and AI alike.</>,
+          ]}
         />
         </div>
 
@@ -214,21 +218,24 @@ function ReachSection() {
 
 function EconomicsSection() {
   return (
-    <Section id="economics" n="02" label="Economics" aside="measured, not estimated">
+    <Section id="economics" n="02" label="Economics" aside="measured, not estimated" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
         <SectionTitle
           title="AI reads everything, every time. Hand it a shorter book."
           lead={
             <>
-              AI assistants are billed by the amount of text they read and write — and before an AI
-              can work on your product, it has to read the code around the task. Every unnecessary
-              line is a small tax, charged again on every task, forever. Elarion&apos;s answer:
-              your people and their AI write only the business decisions. The machinery around
-              those decisions — connections, safety checks, record-keeping — is produced
-              automatically at every build. What was never written is never read, and never billed.
+              AI assistants are billed by the text they read and write — and before an AI can work
+              on your product, it has to read the code around the task.
             </>
           }
+          points={[
+            <>Every unnecessary line is a small tax, charged again on every task, forever.</>,
+            <>Your people and their AI write only the business decisions; the machinery is produced at every build.</>,
+            <>
+              <span className="text-fd-foreground">What was never written is never read — and never billed.</span>
+            </>,
+          ]}
         />
         </div>
 
@@ -286,15 +293,18 @@ function GateSection() {
           title="Mistakes stop at the gate."
           lead={
             <>
-              AI writes code fast — and is sometimes confidently wrong. In an Elarion codebase,
-              every change, human or AI, must pass a gate of more than sixty automatic checks
-              before it can even finish building: security rules that cannot be quietly weakened,
-              boundaries between departments&apos; code that cannot be crossed, connections that
-              cannot be left half-wired. A change that fails comes back with written instructions —
-              which today&apos;s AI reads, applies, and resubmits in seconds. Nothing unchecked
-              reaches your customers. Nothing unchecked even reaches your people.
+              AI writes code fast — and is sometimes confidently wrong. So every change, human or
+              AI, passes a gate of more than sixty automatic checks before it can even finish
+              building.
             </>
           }
+          points={[
+            <>Security rules that cannot be quietly weakened; boundaries that cannot be crossed.</>,
+            <>A failed change comes back with written instructions — the AI applies them and resubmits in seconds.</>,
+            <>
+              <span className="text-fd-foreground">Nothing unchecked reaches your people — let alone your customers.</span>
+            </>,
+          ]}
         />
         </div>
 
@@ -330,22 +340,26 @@ function GateSection() {
 
 function JournalSection() {
   return (
-    <Section id="insight" n="04" label="Insight" aside="Microsoft .NET Aspire · OpenTelemetry">
+    <Section id="insight" n="04" label="Insight" aside="Microsoft .NET Aspire · OpenTelemetry" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
         <SectionTitle
           title="Every request keeps a journal. Your AI reads it."
           lead={
             <>
-              Every customer action in an Elarion system automatically writes a journal entry —
-              what happened, in what order, how long each step took — in OpenTelemetry, the
-              industry&apos;s standard format, which your monitoring tools already speak. During
-              development, Microsoft&apos;s .NET Aspire puts that journal on a live dashboard and
-              hands it to AI assistants directly. So when something misbehaves, your AI
-              doesn&apos;t guess from the code. It looks at what actually happened — and answers in
-              plain language.
+              Every customer action automatically writes a journal entry — what happened, in what
+              order, how long each step took. When something misbehaves, your AI reads the record
+              instead of guessing from the code.
             </>
           }
+          points={[
+            <>
+              In <span className="text-fd-foreground">OpenTelemetry</span>, the industry&apos;s
+              standard format — your monitoring tools already speak it.
+            </>,
+            <>Microsoft&apos;s .NET Aspire puts the journal on a live dashboard and hands it to AI assistants directly.</>,
+            <>Answers come back in plain language — &ldquo;why was Tuesday slow?&rdquo; is a question, not a ticket.</>,
+          ]}
         />
         </div>
 
@@ -423,7 +437,7 @@ const seats = [
 
 function SeatSection() {
   return (
-    <Section id="seats" n="06" label="In your language" aside="one page · three seats">
+    <Section id="seats" n="06" label="In your language" aside="one page · three seats" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
           <SectionTitle title="What it means, seat by seat." />
