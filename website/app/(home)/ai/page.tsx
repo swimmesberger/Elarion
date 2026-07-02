@@ -3,6 +3,7 @@ import { ArrowRight } from 'lucide-react';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { AudienceDiagram } from '../_components/ai/audience-diagram';
+import { BetPanel } from '../_components/ai/bet-panel';
 import { FloorPlan } from '../_components/ai/floor-plan';
 import { GateDiagram } from '../_components/ai/gate-diagram';
 import { GeneratedRing } from '../_components/ai/generated-ring';
@@ -44,7 +45,7 @@ function PointList({ points }: { points: { title: string; body: ReactNode }[] })
       {points.map((point) => (
         <div key={point.title} className="border-t border-(--line) pt-4">
           <h3 className="font-medium text-fd-foreground">{point.title}</h3>
-          <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{point.body}</p>
+          <p className="mt-2 text-sm leading-relaxed text-(--body)">{point.body}</p>
         </div>
       ))}
     </div>
@@ -59,7 +60,9 @@ function Hero() {
       <Ticks />
       <div className={`grid grid-cols-1 items-center gap-12 py-16 *:min-w-0 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14 lg:py-24 ${PAD}`}>
         <div className="min-w-0">
-          <p className="eyebrow">/// Elarion, explained for decision-makers</p>
+          <p className="eyebrow">
+            <span className="text-(--accent-brand)">///</span> Elarion, explained for decision-makers
+          </p>
 
           <h1 className="mt-6 font-display text-[2.4rem] font-semibold leading-[1.08] tracking-[-0.03em] text-fd-foreground sm:text-5xl">
             “Why a framework?
@@ -67,11 +70,12 @@ function Hero() {
             The AI writes the code.”
           </h1>
 
-          <p className="mt-6 max-w-xl text-lg leading-relaxed text-fd-muted-foreground">
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-(--body)">
             Fair question — here is the straight answer. AI didn&apos;t make foundations obsolete;
             it changed what they are for. Less about typing speed. More about keeping machine-speed
-            work safe, affordable, and connected to everything — including the AI itself. Four
-            arguments. No jargon. Each one checkable.
+            work{' '}
+            <span className="font-medium text-fd-foreground">safe, affordable, and connected</span>{' '}
+            to everything — including the AI itself. Four arguments. No jargon. Each one checkable.
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -110,7 +114,7 @@ function StatPanel() {
           <dt className="max-w-[15rem] text-sm leading-snug text-fd-muted-foreground">
             Lines the machinery adds by itself, on every build
           </dt>
-          <dd className="font-display text-4xl font-semibold tracking-[-0.02em] text-fd-primary">
+          <dd className="font-display text-4xl font-semibold tracking-[-0.02em] text-(--accent-gen)">
             ≈3,500
           </dd>
         </div>
@@ -129,7 +133,9 @@ function PathBand() {
   return (
     <section className="border-b border-(--line)">
       <div className={`py-10 ${PAD}`}>
-        <p className="eyebrow">/// the same guarded path, every time</p>
+        <p className="eyebrow">
+          <span className="text-(--accent-brand)">///</span> the same guarded path, every time
+        </p>
         <div className="mt-6 overflow-x-auto">
           <div className="min-w-[640px]">
             <RequestPath />
@@ -151,15 +157,19 @@ function ReachSection() {
           title="Build a feature once. Every audience gets it — including AI."
           lead={
             <>
-              Software used to have two audiences: the people using your app, and the partner
-              systems connected to it. There is a third audience now — AI assistants acting on
-              your customers&apos; behalf. Elarion treats it as standard equipment: the moment your
-              team finishes a feature, it is available to your website, to your partners, and to AI
-              assistants through MCP — the open plug standard the AI industry has settled on, the
-              way USB became the standard for devices. No second project. No separate
-              &ldquo;AI version&rdquo; of your product to build and keep in sync.
+              Software has a third audience now — AI assistants acting on your customers&apos;
+              behalf. Elarion treats it as standard equipment: finish a feature, and all three
+              audiences have it.
             </>
           }
+          points={[
+            <>
+              Through <span className="text-fd-foreground">MCP</span> — the open plug standard the
+              AI industry settled on, the way USB became the standard for devices.
+            </>,
+            <>No second project, no separate &ldquo;AI version&rdquo; of your product to keep in sync.</>,
+            <>One set of permissions for people, partners, and AI alike.</>,
+          ]}
         />
         </div>
 
@@ -169,7 +179,7 @@ function ReachSection() {
               <AudienceDiagram />
             </div>
           </div>
-          <p className="mx-auto mt-6 max-w-2xl text-center text-sm leading-relaxed text-fd-muted-foreground">
+          <p className="mx-auto mt-6 max-w-2xl text-center text-sm leading-relaxed text-(--body)">
             Every path runs through the same checkpoint. An AI assistant obeys exactly the
             permissions a person would — being a machine opens no doors.
           </p>
@@ -178,7 +188,7 @@ function ReachSection() {
         <div className="vt-rise mt-12 grid gap-8 md:grid-cols-3">
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">No parallel project</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               Most companies bolt AI onto their product as a separate initiative, with its own
               budget, its own timeline, and its own bugs. Here it is the same feature, reaching two
               more audiences at no extra cost.
@@ -186,7 +196,7 @@ function ReachSection() {
           </div>
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">Same locks on every door</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               Who may do what is decided in one place, beneath all three audiences. Change a rule
               once and the website, your partners, and every AI assistant obey it — instantly and
               identically.
@@ -194,7 +204,7 @@ function ReachSection() {
           </div>
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">A standard, not a gamble</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               MCP is backed across the industry — Anthropic, OpenAI, Microsoft. You are plugging
               into a standard, not marrying a vendor&apos;s platform.
             </p>
@@ -209,21 +219,24 @@ function ReachSection() {
 
 function EconomicsSection() {
   return (
-    <Section id="economics" n="02" label="Economics" aside="measured, not estimated">
+    <Section id="economics" n="02" label="Economics" aside="measured, not estimated" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
         <SectionTitle
           title="AI reads everything, every time. Hand it a shorter book."
           lead={
             <>
-              AI assistants are billed by the amount of text they read and write — and before an AI
-              can work on your product, it has to read the code around the task. Every unnecessary
-              line is a small tax, charged again on every task, forever. Elarion&apos;s answer:
-              your people and their AI write only the business decisions. The machinery around
-              those decisions — connections, safety checks, record-keeping — is produced
-              automatically at every build. What was never written is never read, and never billed.
+              AI assistants are billed by the text they read and write — and before an AI can work
+              on your product, it has to read the code around the task.
             </>
           }
+          points={[
+            <>Every unnecessary line is a small tax, charged again on every task, forever.</>,
+            <>Your people and their AI write only the business decisions; the machinery is produced at every build.</>,
+            <>
+              <span className="text-fd-foreground">What was never written is never read — and never billed.</span>
+            </>,
+          ]}
         />
         </div>
 
@@ -261,7 +274,7 @@ function EconomicsSection() {
           ].map((point) => (
             <div key={point.title} className="border-t border-(--line) pt-4">
               <h3 className="font-medium text-fd-foreground">{point.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{point.body}</p>
+              <p className="mt-2 text-sm leading-relaxed text-(--body)">{point.body}</p>
             </div>
           ))}
         </div>
@@ -281,15 +294,18 @@ function GateSection() {
           title="Mistakes stop at the gate."
           lead={
             <>
-              AI writes code fast — and is sometimes confidently wrong. In an Elarion codebase,
-              every change, human or AI, must pass a gate of more than sixty automatic checks
-              before it can even finish building: security rules that cannot be quietly weakened,
-              boundaries between departments&apos; code that cannot be crossed, connections that
-              cannot be left half-wired. A change that fails comes back with written instructions —
-              which today&apos;s AI reads, applies, and resubmits in seconds. Nothing unchecked
-              reaches your customers. Nothing unchecked even reaches your people.
+              AI writes code fast — and is sometimes confidently wrong. So every change, human or
+              AI, passes a gate of more than sixty automatic checks before it can even finish
+              building.
             </>
           }
+          points={[
+            <>Security rules that cannot be quietly weakened; boundaries that cannot be crossed.</>,
+            <>A failed change comes back with written instructions — the AI applies them and resubmits in seconds.</>,
+            <>
+              <span className="text-fd-foreground">Nothing unchecked reaches your people — let alone your customers.</span>
+            </>,
+          ]}
         />
         </div>
 
@@ -302,7 +318,7 @@ function GateSection() {
         <div className="vt-rise mt-10 grid gap-8 md:grid-cols-2">
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">Security that cannot rot</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               The rule is not &ldquo;remember to lock the door.&rdquo; Doors are locked unless
               someone deliberately opens one — so &ldquo;the AI forgot&rdquo; is not a failure mode
               your company can have.
@@ -310,7 +326,7 @@ function GateSection() {
           </div>
           <div className="border-t border-(--line) pt-4">
             <h3 className="font-medium text-fd-foreground">Architecture that survives speed</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-(--body)">
               The structure your architects designed is enforced by the gate itself. It holds on
               the hundredth AI-written change, at two in the morning, with nobody watching.
             </p>
@@ -325,22 +341,26 @@ function GateSection() {
 
 function JournalSection() {
   return (
-    <Section id="insight" n="04" label="Insight" aside="Microsoft .NET Aspire · OpenTelemetry">
+    <Section id="insight" n="04" label="Insight" aside="Microsoft .NET Aspire · OpenTelemetry" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
         <SectionTitle
           title="Every request keeps a journal. Your AI reads it."
           lead={
             <>
-              Every customer action in an Elarion system automatically writes a journal entry —
-              what happened, in what order, how long each step took — in OpenTelemetry, the
-              industry&apos;s standard format, which your monitoring tools already speak. During
-              development, Microsoft&apos;s .NET Aspire puts that journal on a live dashboard and
-              hands it to AI assistants directly. So when something misbehaves, your AI
-              doesn&apos;t guess from the code. It looks at what actually happened — and answers in
-              plain language.
+              Every customer action automatically writes a journal entry — what happened, in what
+              order, how long each step took. When something misbehaves, your AI reads the record
+              instead of guessing from the code.
             </>
           }
+          points={[
+            <>
+              In <span className="text-fd-foreground">OpenTelemetry</span>, the industry&apos;s
+              standard format — your monitoring tools already speak it.
+            </>,
+            <>Microsoft&apos;s .NET Aspire puts the journal on a live dashboard and hands it to AI assistants directly.</>,
+            <>Answers come back in plain language — &ldquo;why was Tuesday slow?&rdquo; is a question, not a ticket.</>,
+          ]}
         />
         </div>
 
@@ -418,7 +438,7 @@ const seats = [
 
 function SeatSection() {
   return (
-    <Section id="seats" n="06" label="In your language" aside="one page · three seats">
+    <Section id="seats" n="06" label="In your language" aside="one page · three seats" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
           <SectionTitle title="What it means, seat by seat." />
@@ -426,8 +446,8 @@ function SeatSection() {
         <div className="vt-rise mt-10 grid gap-5 md:grid-cols-3">
           {seats.map((seat) => (
             <div key={seat.role} className="rounded-[4px] border border-(--line) p-6">
-              <p className="eyebrow text-fd-primary">{seat.role}</p>
-              <p className="mt-3 text-sm leading-relaxed text-fd-muted-foreground">{seat.body}</p>
+              <p className="eyebrow text-(--accent-brand)">{seat.role}</p>
+              <p className="mt-3 text-sm leading-relaxed text-(--body)">{seat.body}</p>
             </div>
           ))}
         </div>
@@ -438,24 +458,70 @@ function SeatSection() {
 
 /* -------------------------------------------------------------- 06 · Bet */
 
-const betRows = [
+type BetIconKind = 'plug' | 'key' | 'magnifier' | 'door';
+
+const betRows: { title: string; body: string; icon: BetIconKind }[] = [
   {
     title: 'Open standards end to end',
     body: 'The connections — to AI, to partners, to monitoring — are industry standards, not proprietary sockets. Any vendor on any side can be swapped without rewriting your product.',
+    icon: 'plug',
   },
   {
     title: 'Software you own',
     body: 'Elarion is open source under Apache-2.0, the permissive license trusted across the industry. No hosted platform, no per-seat fee, nothing phoning home.',
+    icon: 'key',
   },
   {
     title: 'Homework you can check',
     body: 'Twenty-three written decision records explain every major choice, and six hundred automated tests guard them. Your architects can audit the reasoning before you commit a single sprint.',
+    icon: 'magnifier',
   },
   {
     title: 'An exit that stays open',
     body: 'If you ever walk away, you keep a conventional, readable .NET codebase your team already understands. Leaving is an afternoon’s decision, not a rewrite.',
+    icon: 'door',
   },
 ];
+
+/** Stroke icons for the bet rows — iris to match the panel's seals. */
+function BetIcon({ kind }: { kind: BetIconKind }) {
+  const common = {
+    fill: 'none' as const,
+    stroke: 'var(--accent-brand)',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  };
+  return (
+    <svg viewBox="0 0 24 24" className="size-[22px] shrink-0" aria-hidden xmlns="http://www.w3.org/2000/svg">
+      {kind === 'plug' && (
+        <>
+          <path d="M9 3.5 v3.5 M15 3.5 v3.5" {...common} />
+          <rect x={6.5} y={7} width={11} height={6.5} rx={2} {...common} />
+          <path d="M12 13.5 v2.5 c0 2.2 -1.8 3.5 -4 3.5" {...common} />
+        </>
+      )}
+      {kind === 'key' && (
+        <>
+          <circle cx={7.5} cy={7.5} r={3.3} {...common} />
+          <path d="M10 10 L20 20 M15.5 15.5 l2.2 -2.2 M18 18 l2.2 -2.2" {...common} />
+        </>
+      )}
+      {kind === 'magnifier' && (
+        <>
+          <circle cx={10.5} cy={10.5} r={5.6} {...common} />
+          <path d="M14.6 14.6 L20.5 20.5 M8.2 10.7 l1.7 1.7 l3.2 -3.6" {...common} />
+        </>
+      )}
+      {kind === 'door' && (
+        <>
+          <path d="M13.5 3.5 H6 a1.5 1.5 0 0 0 -1.5 1.5 v14 a1.5 1.5 0 0 0 1.5 1.5 h7.5" {...common} />
+          <path d="M12.5 12 h8 M17 8.8 L20.5 12 L17 15.2" {...common} />
+        </>
+      )}
+    </svg>
+  );
+}
 
 function BetSection() {
   return (
@@ -469,11 +535,20 @@ function BetSection() {
           />
         </div>
 
+        <div className="vt-rise mt-12 overflow-x-auto">
+          <div className="mx-auto min-w-[720px] max-w-4xl">
+            <BetPanel />
+          </div>
+        </div>
+
         <div className="vt-rise mt-10 grid gap-8 md:grid-cols-2">
           {betRows.map((row) => (
             <div key={row.title} className="border-t border-(--line) pt-4">
-              <h3 className="font-medium text-fd-foreground">{row.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{row.body}</p>
+              <div className="flex items-center gap-3">
+                <BetIcon kind={row.icon} />
+                <h3 className="font-medium text-fd-foreground">{row.title}</h3>
+              </div>
+              <p className="mt-2.5 text-sm leading-relaxed text-(--body)">{row.body}</p>
             </div>
           ))}
         </div>
@@ -493,7 +568,7 @@ function ClosingCta() {
           <h2 className="font-display text-3xl font-semibold tracking-[-0.02em] text-fd-foreground sm:text-4xl">
             Forward this to your tech lead.
           </h2>
-          <p className="mt-4 leading-relaxed text-fd-muted-foreground">
+          <p className="mt-4 leading-relaxed text-(--body)">
             They&apos;ll want the version with the code — it&apos;s one page away. And because
             Elarion&apos;s documentation is also published in a format AI assistants read natively,
             your own AI can evaluate it exactly the way your engineers will.

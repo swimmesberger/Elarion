@@ -264,7 +264,7 @@ export function FloorPlan() {
             );
           })}
         </div>
-        <p className="mt-4 text-sm leading-relaxed text-fd-muted-foreground">
+        <p className="mt-4 text-sm leading-relaxed text-(--body)">
           Not a mock-up: a wing really can be switched off in configuration, and its features
           vanish from the website, from partners, and from AI assistants at once — no half-removed
           leftovers. Individual features can also be dimmed live, per customer, for careful

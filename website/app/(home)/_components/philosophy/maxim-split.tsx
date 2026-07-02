@@ -48,10 +48,10 @@ export function MaximSplit() {
         YOUR CODE ALREADY SAYS IT
       </text>
       {detected.map((t, i) => chip(48, 76 + i * 54, t, `d${i}`))}
-      <g className="text-fd-primary">
+      <g className="text-(--accent-gen)">
         <path d="M244,292 L244,312" stroke="currentColor" strokeWidth={2} strokeOpacity={0.7} className="flow-dash" />
       </g>
-      <rect x={48} y={314} width={392} height={38} rx={5} fill="var(--color-fd-primary)" fillOpacity={0.1} stroke="var(--color-fd-primary)" strokeOpacity={0.45} />
+      <rect x={48} y={314} width={392} height={38} rx={5} fill="var(--accent-gen)" fillOpacity={0.1} stroke="var(--accent-gen)" strokeOpacity={0.5} />
       <text x={244} y={338} fontSize={12.5} textAnchor="middle" fill="var(--color-fd-foreground)">
         detected at build — the wiring is generated
       </text>
@@ -62,10 +62,10 @@ export function MaximSplit() {
         YOU SAY IT ONCE, EXPLICITLY
       </text>
       {declared.map((t, i) => chip(520, 76 + i * 54, t, `e${i}`))}
-      <g className="text-fd-primary">
+      <g className="text-(--accent-brand)">
         <path d="M716,292 L716,312" stroke="currentColor" strokeWidth={2} strokeOpacity={0.7} className="flow-dash" style={{ animationDelay: '0.5s' }} />
       </g>
-      <rect x={520} y={314} width={392} height={38} rx={5} fill="var(--color-fd-primary)" fillOpacity={0.1} stroke="var(--color-fd-primary)" strokeOpacity={0.45} />
+      <rect x={520} y={314} width={392} height={38} rx={5} fill="var(--accent-brand)" fillOpacity={0.1} stroke="var(--accent-brand)" strokeOpacity={0.5} />
       <text x={716} y={338} fontSize={12.5} textAnchor="middle" fill="var(--color-fd-foreground)">
         declared — the decorator attaches in the pipeline
       </text>

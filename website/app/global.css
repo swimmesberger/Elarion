@@ -49,6 +49,18 @@
      structure reads as intentional, plus a fainter variant for inner rows. */
   --line: color-mix(in oklab, #1b2742 16%, transparent);
   --line-soft: color-mix(in oklab, #1b2742 9%, transparent);
+
+  /* Text tone ladder: --body sits between foreground (headings, emphasis) and
+     muted-foreground (captions, tags, footnotes). Reading copy uses --body so
+     pages don't collapse into a single gray. */
+  --body: color-mix(in oklab, #0b1430 82%, #525d75);
+
+  /* Semantic accents beside the interactive azure (fd-primary):
+     --accent-gen marks "generated / automatic / passed" signals (brand aqua),
+     --accent-brand marks structural brand moments — /// marks, section
+     numbers (brand iris). Both tuned per theme for contrast. */
+  --accent-gen: #0d7789;
+  --accent-brand: #6045d8;
 }
 
 /* Brand-tune the Fumadocs color system (dark) */
@@ -72,6 +84,10 @@
 
   --line: color-mix(in oklab, #6f86c6 22%, transparent);
   --line-soft: color-mix(in oklab, #6f86c6 12%, transparent);
+
+  --body: color-mix(in oklab, #e9eef9 76%, #97a3bd);
+  --accent-gen: #2fd6e8;
+  --accent-brand: #9b82ff;
 }
 
 html {

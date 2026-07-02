@@ -40,9 +40,9 @@ export function GateDiagram() {
         </g>
       ))}
 
-      {/* arrows out of the gate for the shipped changes */}
+      {/* arrows out of the gate for the shipped changes — aqua = passed */}
       {shipped.map((c, i) => (
-        <g key={c.title} className="text-fd-primary">
+        <g key={c.title} className="text-(--accent-gen)">
           <path d={`M494,${c.y + 30} L644,${c.y + 30}`} stroke="var(--line)" strokeWidth={1.5} fill="none" />
           <path
             d={`M494,${c.y + 30} L644,${c.y + 30}`}
@@ -118,7 +118,7 @@ export function GateDiagram() {
           <text x={666} y={c.y + 46} fontSize={12} fill="var(--color-fd-muted-foreground)">
             checked · shipped to customers
           </text>
-          <text x={896} y={c.y + 37} fontSize={16} textAnchor="end" fill="var(--color-fd-primary)">
+          <text x={896} y={c.y + 37} fontSize={16} textAnchor="end" fill="var(--accent-gen)">
             ✓
           </text>
         </g>

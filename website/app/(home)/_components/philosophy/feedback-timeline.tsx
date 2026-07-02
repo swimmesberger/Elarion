@@ -32,9 +32,9 @@ export function FeedbackTimeline() {
       xmlns="http://www.w3.org/2000/svg"
     >
       {/* cost zones */}
-      <rect x={40} y={186} width={530} height={54} rx={6} fill="var(--color-fd-primary)" fillOpacity={0.09} />
+      <rect x={40} y={186} width={530} height={54} rx={6} fill="var(--accent-gen)" fillOpacity={0.08} />
       <rect x={578} y={186} width={342} height={54} rx={6} fill="#fb7185" fillOpacity={0.07} />
-      <text x={56} y={234} fontSize={10.5} letterSpacing="0.14em" fill="var(--color-fd-primary)" fillOpacity={0.9}>
+      <text x={56} y={234} fontSize={10.5} letterSpacing="0.14em" fill="var(--accent-gen)" fillOpacity={0.95}>
         CHEAP TO FIX
       </text>
       <text x={904} y={234} fontSize={10.5} letterSpacing="0.14em" textAnchor="end" fill="#fb7185" fillOpacity={0.85}>
@@ -57,7 +57,7 @@ export function FeedbackTimeline() {
         WITH ELARION
       </text>
       {elarion.map((c) => (
-        <g key={c.x} className="text-fd-primary">
+        <g key={c.x} className="text-(--accent-gen)">
           <rect x={c.x - c.w / 2} y={60} width={c.w} height={58} rx={6} fill="var(--color-fd-card)" stroke="currentColor" strokeOpacity={0.45} />
           {c.lines.map((line, i) => (
             <text key={line} x={c.x} y={84 + i * 18} fontSize={11.5} textAnchor="middle" fill="var(--color-fd-foreground)">

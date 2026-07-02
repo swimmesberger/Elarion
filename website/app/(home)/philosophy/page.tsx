@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import type { Metadata } from 'next';
+import { AdrShelf } from '../_components/philosophy/adr-shelf';
 import { Batteries } from '../_components/philosophy/batteries';
 import { FeedbackTimeline } from '../_components/philosophy/feedback-timeline';
 import { MaximSplit } from '../_components/philosophy/maxim-split';
@@ -37,13 +38,15 @@ function Hero() {
     <section className="relative border-b border-(--line)">
       <Ticks />
       <div className={`flex flex-col items-center py-16 text-center lg:py-24 ${PAD}`}>
-        <p className="eyebrow">/// the philosophy, for engineers</p>
+        <p className="eyebrow">
+          <span className="text-(--accent-brand)">///</span> the philosophy, for engineers
+        </p>
 
         <h1 className="mt-7 max-w-4xl font-display text-[2.4rem] font-semibold leading-[1.12] tracking-[-0.03em] text-fd-foreground sm:text-5xl">
           “Auto-detect application patterns, explicitly wire platform capabilities.”
         </h1>
 
-        <p className="mt-7 max-w-2xl text-lg leading-relaxed text-fd-muted-foreground">
+        <p className="mt-7 max-w-2xl text-lg leading-relaxed text-(--body)">
           One sentence drives every API in the framework. This page unpacks it: the mental model,
           the feedback loop it buys, the pipeline it produces, the batteries it ships — and the
           opinions underneath, every one of them written down and arguable.
@@ -81,16 +84,22 @@ function ModelSection() {
             title="Your code already says it — or you say it once."
             lead={
               <>
-                A class implementing <Mono>IHandler&lt;,&gt;</Mono> has already told you it handles
-                that request; repeating it in a registration list creates a second model that
-                drifts. But no amount of code inspection can tell a framework how long to cache a
-                result or which retry policy an external call deserves — those are decisions, and
-                decisions deserve syntax. Elarion splits the world exactly there: patterns are
-                detected and their wiring generated; capabilities are declared once, as attributes,
-                where the reviewer can see them. The third option — guessing at runtime — is
-                banned outright.
+                What the code already states is detected at build time. What only you can decide is
+                declared once, as an attribute. Nothing is guessed at runtime.
               </>
             }
+            points={[
+              <>
+                A class implementing <Mono>IHandler&lt;,&gt;</Mono> has said it handles that
+                request — repeating it in a registration list creates a second model that drifts.
+              </>,
+              <>
+                Cache duration, retry policy, permissions are{' '}
+                <span className="text-fd-foreground">decisions</span> — and decisions deserve
+                syntax the reviewer can see.
+              </>,
+              <>The third option — guessing at runtime — is banned outright.</>,
+            ]}
           />
         </div>
 
@@ -108,22 +117,26 @@ function ModelSection() {
 
 function FeedbackSection() {
   return (
-    <Section id="feedback" n="02" label="The feedback loop" aside="keystroke → build → CI">
+    <Section id="feedback" n="02" label="The feedback loop" aside="keystroke → build → CI" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
           <SectionTitle
             title="Move every failure to the left."
             lead={
               <>
-                The cost of a mistake is a function of when you learn about it. A red squiggle
-                costs seconds; a failed build costs minutes; a production incident costs a
-                post-mortem. Because Elarion&apos;s wiring is computed at compile time, whole
-                classes of failure — the missing registration, the unroutable endpoint, the
-                authorization gate that can&apos;t fail closed, the drifted client contract —
-                surface where they are cheapest. Determinism isn&apos;t an aesthetic preference;
-                it&apos;s a budget decision about where your team pays for its mistakes.
+                The cost of a mistake is a function of when you learn about it. Compile-time wiring
+                moves whole failure classes to where they are cheapest — determinism is a budget
+                decision, not an aesthetic one.
               </>
             }
+            points={[
+              <>A red squiggle costs seconds; a failed build, minutes; a production incident, a post-mortem.</>,
+              <>
+                Missing wiring, unroutable endpoints, authorization that can&apos;t fail closed —{' '}
+                <span className="text-fd-foreground">build errors</span>.
+              </>,
+              <>Contract drift fails CI the moment the generated client stops type-checking.</>,
+            ]}
           />
         </div>
 
@@ -148,15 +161,18 @@ function PipelineSection() {
             title="Cross-cutting concerns, cut once."
             lead={
               <>
-                Every request — whether it arrives over JSON-RPC, REST, MCP, a scheduled job, or
-                an event — runs the same decorator pipeline around your handler. Authorization is
-                the outermost functional gate, so a denied caller never warms a cache or opens a
-                transaction; domain events dispatch inline inside your transaction while
-                integration events wait for the commit. Your handler stays a plain function over
-                your domain: it takes a request, returns a{' '}
-                <Mono>Result&lt;T&gt;</Mono>, and has no idea HTTP exists.
+                Every request — JSON-RPC, REST, MCP, a scheduled job, an event — runs the same
+                decorator pipeline around your handler.
               </>
             }
+            points={[
+              <>Authorization sits outermost: a denied caller never warms a cache or opens a transaction.</>,
+              <>Domain events ride your transaction; integration events wait for the commit.</>,
+              <>
+                The handler stays a plain function: request in, <Mono>Result&lt;T&gt;</Mono> out —
+                it has no idea HTTP exists.
+              </>,
+            ]}
           />
         </div>
 
@@ -165,7 +181,7 @@ function PipelineSection() {
             <PipelineDiagram />
           </div>
         </div>
-        <p className="vt-rise mx-auto mt-4 max-w-2xl text-center text-sm leading-relaxed text-fd-muted-foreground">
+        <p className="vt-rise mx-auto mt-4 max-w-2xl text-center text-sm leading-relaxed text-(--body)">
           Each stage attaches only when the handler asks for it — a bare handler compiles to a
           bare call. And because it&apos;s all generated source, you can read the exact chain in
           your build output.
@@ -179,21 +195,25 @@ function PipelineSection() {
 
 function BatteriesSection() {
   return (
-    <Section id="batteries" n="04" label="Batteries" aside="ADR-0017 · pay for what you use">
+    <Section id="batteries" n="04" label="Batteries" aside="ADR-0017 · pay for what you use" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
           <SectionTitle
             title="Batteries included. Sockets standard."
             lead={
               <>
-                Frameworks usually make you choose: batteries included (and a dependency graph you
-                didn&apos;t order), or bring-your-own-everything. Elarion&apos;s answer is the
-                socket: the seam and its decorator live in the dependency-light core; the battery
-                — with its heavy dependency — lives one opt-in package away. A service that never
-                caches never ships a cache. And because the seam is public, every battery is
-                replaceable without touching a handler.
+                Frameworks make you choose: batteries included — plus a dependency graph you
+                didn&apos;t order — or bring-your-own-everything. Elarion&apos;s answer is the
+                socket.
               </>
             }
+            points={[
+              <>The seam and its decorator live in the dependency-light core; the battery lives one opt-in package away.</>,
+              <>
+                <span className="text-fd-foreground">A service that never caches never ships a cache.</span>
+              </>,
+              <>Every seam is public — swap any battery without touching a handler.</>,
+            ]}
           />
         </div>
 
@@ -275,21 +295,29 @@ function OpinionsSection() {
           />
         </div>
 
-        <div className="vt-rise mt-10 grid gap-x-10 gap-y-8 md:grid-cols-2">
+        <div className="vt-rise mt-10">
+          <AdrShelf />
+        </div>
+
+        <div className="vt-rise mt-10 grid gap-5 md:grid-cols-2">
           {opinions.map((opinion) => (
-            <div key={opinion.stance} className="border-t border-(--line) pt-4">
-              <div className="flex items-baseline justify-between gap-4">
-                <h3 className="font-medium text-fd-foreground">{opinion.stance}</h3>
+            <div key={opinion.stance} className="flex flex-col rounded-[4px] border border-(--line) bg-fd-card p-5">
+              <div className="flex items-center justify-between gap-4 border-b border-(--line-soft) pb-3">
                 <a
                   href={opinion.href}
                   target={opinion.href.startsWith('http') ? '_blank' : undefined}
                   rel={opinion.href.startsWith('http') ? 'noreferrer' : undefined}
-                  className="shrink-0 font-mono text-xs text-fd-primary hover:underline"
+                  className="rounded-[3px] border px-2 py-0.5 font-mono text-xs text-(--accent-brand) transition-colors hover:bg-fd-accent/60"
+                  style={{ borderColor: 'color-mix(in oklab, var(--accent-brand) 45%, transparent)' }}
                 >
                   {opinion.ref} →
                 </a>
+                <span className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-fd-muted-foreground">
+                  decided · on file
+                </span>
               </div>
-              <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{opinion.why}</p>
+              <h3 className="mt-3.5 font-medium text-fd-foreground">{opinion.stance}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-(--body)">{opinion.why}</p>
             </div>
           ))}
         </div>
@@ -309,7 +337,7 @@ function ClosingCta() {
           <h2 className="font-display text-3xl font-semibold tracking-[-0.02em] text-fd-foreground sm:text-4xl">
             Now see it in code.
           </h2>
-          <p className="mt-4 leading-relaxed text-fd-muted-foreground">
+          <p className="mt-4 leading-relaxed text-(--body)">
             The front page has the meat — real handlers, the generated output, a five-minute
             quickstart. The docs carry the long-form rationale. And if the people who hold the
             budget need convincing,{' '}

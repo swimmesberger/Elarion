@@ -58,7 +58,9 @@ function Hero() {
       <Ticks />
       <div className={`grid grid-cols-1 items-center gap-12 py-16 *:min-w-0 lg:grid-cols-[1.02fr_0.98fr] lg:gap-14 lg:py-24 ${PAD}`}>
         <div className="min-w-0">
-          <p className="eyebrow">/// Application framework for .NET</p>
+          <p className="eyebrow">
+            <span className="text-(--accent-brand)">///</span> Application framework for .NET
+          </p>
 
           <h1 className="mt-6 font-display text-[2.5rem] font-semibold leading-[1.06] tracking-[-0.03em] text-fd-foreground sm:text-5xl 2xl:text-6xl">
             Write the handler.
@@ -66,11 +68,13 @@ function Hero() {
             The build wires the rest.
           </h1>
 
-          <p className="mt-6 max-w-xl text-lg leading-relaxed text-fd-muted-foreground">
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-(--body)">
             One <Mono>[Handler]</Mono> class becomes a JSON-RPC method, a REST endpoint, and an MCP
             tool for AI agents — authorized, validated, and traced by a decorator pipeline that
-            Roslyn source generators emit as ordinary C#. No reflection scanning, no startup
-            discovery, no registration lists to drift.
+            Roslyn source generators emit as ordinary C#.{' '}
+            <span className="font-medium text-fd-foreground">
+              No reflection scanning, no startup discovery, no registration lists to drift.
+            </span>
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -138,7 +142,9 @@ function AiTeaser() {
         href="/ai"
         className={`group flex flex-col gap-1 py-3.5 transition-colors hover:bg-fd-accent/50 sm:flex-row sm:items-baseline sm:justify-between ${PAD}`}
       >
-        <span className="eyebrow">/// building with AI agents?</span>
+        <span className="eyebrow">
+          <span className="text-(--accent-brand)">///</span> building with AI agents?
+        </span>
         <span className="inline-flex items-center gap-2 text-sm font-medium text-fd-foreground">
           The case for Elarion in an AI-first team — in business terms
           <ArrowRight className="size-4 text-fd-primary transition-transform group-hover:translate-x-1" />
@@ -203,12 +209,15 @@ function GeneratedOutput() {
           lead={
             <>
               The generators run inside <Mono>dotnet build</Mono> and emit the wiring you would
-              otherwise write and keep in sync by hand: DI registrations with the full decorator
-              pipeline, minimal-API route maps, the shared JSON-RPC + MCP operation registry, and a
-              schema that becomes a typed TypeScript client. It is code, not container magic — open
-              it, read it, step through it.
+              otherwise write and keep in sync by hand. It is code, not container magic — open it,
+              read it, step through it.
             </>
           }
+          points={[
+            <>DI registrations with the full decorator pipeline, composed in source.</>,
+            <>Minimal-API route maps and the shared JSON-RPC + MCP operation registry.</>,
+            <>A schema export that becomes a typed TypeScript client.</>,
+          ]}
         />
 
         <OutputTabs
@@ -255,7 +264,7 @@ function GeneratedOutput() {
                 <span className="mr-2 font-mono text-xs text-fd-muted-foreground">{point.n}.</span>
                 {point.title}
               </h3>
-              <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">{point.body}</p>
+              <p className="mt-2 text-sm leading-relaxed text-(--body)">{point.body}</p>
             </div>
           ))}
         </div>
@@ -453,7 +462,7 @@ function CapabilityIndex() {
                 className={`group grid grid-cols-1 gap-x-6 gap-y-1 border-t border-(--line-soft) py-3.5 transition-colors hover:bg-fd-accent/50 md:grid-cols-[12rem_1fr_auto] md:items-baseline ${PAD}`}
               >
                 <span className="font-medium text-fd-foreground">{cap.name}</span>
-                <span className="text-sm leading-relaxed text-fd-muted-foreground">{cap.desc}</span>
+                <span className="text-sm leading-relaxed text-(--body)">{cap.desc}</span>
                 <span className="hidden items-baseline gap-3 md:flex">
                   <span className="tag">{cap.tag}</span>
                   <ArrowRight className="size-3.5 shrink-0 self-center text-fd-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
@@ -499,25 +508,30 @@ const contrastRows: { scan: string; gen: string }[] = [
 
 function Diagnostics() {
   return (
-    <Section id="diagnostics" n="03" label="Diagnostics" aside="60+ compile-time checks">
+    <Section id="diagnostics" n="03" label="Diagnostics" aside="60+ compile-time checks" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <SectionTitle
           title="Wrong wiring doesn't ship."
           lead={
             <>
-              What the generators wire, they also validate. A handler that reaches into another
-              module, a route with no inferable verb, an authorization gate that could not fail
-              closed — each is a precise diagnostic with a fix direction, surfaced in the IDE and
-              failing the build in CI. Production never finds out.
+              What the generators wire, they also validate — every mistake becomes a precise
+              diagnostic with a fix direction. Production never finds out.
             </>
           }
+          points={[
+            <>
+              A reach into another module is flagged as you type (<Mono>ELMOD002</Mono>).
+            </>,
+            <>A route with no inferable verb fails the build, not the demo.</>,
+            <>An authorization gate that can&apos;t fail closed is an error, not a hope.</>,
+          ]}
         />
 
         <div className="mt-10 grid items-start gap-10 *:min-w-0 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
             <div className="grid grid-cols-2 gap-x-6 border-b border-(--line) pb-2">
               <span className="eyebrow">Reflection scanning</span>
-              <span className="eyebrow text-fd-primary">Elarion</span>
+              <span className="eyebrow text-(--accent-gen)">Elarion</span>
             </div>
             {contrastRows.map((row) => (
               <div
@@ -529,7 +543,7 @@ function Diagnostics() {
                   {row.scan}
                 </span>
                 <span className="text-fd-foreground">
-                  <span className="mr-2 font-mono text-fd-primary">✓</span>
+                  <span className="mr-2 font-mono text-(--accent-gen)">✓</span>
                   {row.gen}
                 </span>
               </div>
@@ -617,7 +631,9 @@ function PhilosophyTeaser() {
         href="/philosophy"
         className={`group flex flex-col gap-1 py-3.5 transition-colors hover:bg-fd-accent/50 sm:flex-row sm:items-baseline sm:justify-between ${PAD}`}
       >
-        <span className="eyebrow">/// why it&apos;s built this way</span>
+        <span className="eyebrow">
+          <span className="text-(--accent-brand)">///</span> why it&apos;s built this way
+        </span>
         <span className="inline-flex items-center gap-2 text-sm font-medium text-fd-foreground">
           The philosophy, for engineers — one maxim, the pipeline, the batteries
           <ArrowRight className="size-4 text-fd-primary transition-transform group-hover:translate-x-1" />
@@ -719,8 +735,8 @@ function Start() {
             <p className="eyebrow mt-6">The build now emits</p>
             <ul className="mt-3 space-y-2.5">
               {buildEmits.map((item) => (
-                <li key={item} className="flex items-baseline gap-2.5 text-sm text-fd-muted-foreground">
-                  <span className="font-mono text-fd-primary">✓</span>
+                <li key={item} className="flex items-baseline gap-2.5 text-sm text-(--body)">
+                  <span className="font-mono text-(--accent-gen)">✓</span>
                   <span className="font-mono text-[0.8rem]">{item}</span>
                 </li>
               ))}
