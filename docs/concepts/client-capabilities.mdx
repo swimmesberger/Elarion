@@ -47,6 +47,11 @@ The bootstrap evaluates **only those names, only for enabled modules**. A listed
 user's context. The names are collected into a per-deployment manifest by the bootstrapper generator
 (`configuration.GetClientCapabilityManifest()`).
 
+`GetClientCapabilityManifest()` is emitted for **every** host, so the one-liner below compiles even when no module
+declares `[ClientFeatures]` — you then get module enablement plus the user's grants, with empty `flags`/`variants`.
+Using the session bootstrap purely for grants + module enablement is a fully supported case; you don't need a single
+client flag to adopt it.
+
 ## Wiring the host
 
 The bootstrap handler is framework-shipped (you don't own its class), so it is exposed **imperatively** — see

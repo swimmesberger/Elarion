@@ -158,9 +158,11 @@ exposed imperatively instead — see [ADR-0031](0031-imperative-handler-transpor
 ## Implementation (shipped)
 
 - `[ClientFeatures]` attribute in `Elarion.Abstractions.Modules`, collected per module by `AppModuleDiscoveryGenerator`
-  (and round-tripped cross-assembly through the Elarion manifest) into a gated
-  `configuration.GetClientCapabilityManifest()` on the generated `ElarionBootstrapper`, emitted only when a module
-  opts in.
+  (and round-tripped cross-assembly through the Elarion manifest) into `configuration.GetClientCapabilityManifest()` on
+  the generated `ElarionBootstrapper`. The method is **always emitted** so `AddElarionSession(configuration.GetClientCapabilityManifest())`
+  compiles for every host: a host with no `[ClientFeatures]` gets a modules-only manifest (every module, empty
+  `Features`), which the session bootstrap still projects into per-user module enablement — an empty manifest would
+  drop that.
 - The `SessionHandler` in `Elarion` core composes `GetClientCapabilityManifest` + `IFeatureFlagService` +
   `IFeatureVariantService` + `ICurrentUser`, returning the `{ user, modules, flags, variants }` `SessionResponse`. The
   flag/variant services are optional, so a host without feature flags still gets modules + grants. Exposed via the
