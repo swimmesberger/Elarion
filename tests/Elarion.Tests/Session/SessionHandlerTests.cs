@@ -4,6 +4,7 @@ using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.Serialization;
 using Elarion.Session;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -108,6 +109,20 @@ public sealed class SessionHandlerTests {
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().BeOfType<SessionResponse>()
             .Which.Modules.Should().ContainKey("Billing");
+    }
+
+    [Fact]
+    public void AddElarionSession_ContributesSessionJsonContextToCanonicalSerialization() {
+        var services = new ServiceCollection();
+        services.AddElarionSession(ClientCapabilityManifest.Empty);
+        using var provider = services.BuildServiceProvider();
+
+        var serialization = provider.GetRequiredService<IElarionJsonSerialization>();
+
+        // AOT-strict: GetTypeInfo throws for a type absent from every source-gen context, so a non-null result
+        // proves AddElarionSession self-registered SessionJsonContext — the host wires no serialization for it.
+        serialization.GetTypeInfo<SessionResponse>().Should().NotBeNull();
+        serialization.GetTypeInfo<SessionRequest>().Should().NotBeNull();
     }
 
     private sealed class FakeCurrentUser : ICurrentUser {

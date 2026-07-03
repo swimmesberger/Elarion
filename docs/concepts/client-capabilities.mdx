@@ -63,19 +63,16 @@ builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityMani
 var registerHandlers = (HandlerDispatcher dispatcher, IConfiguration configuration) =>
     ElarionBootstrapper.RegisterHandlers(dispatcher, configuration).MapElarionSession();
 
-builder.Services.AddElarionJsonRpc(serializerOptions, registerHandlers);
-builder.Services.AddElarionMcp(configuration.GetMcpMetadata(), serializerOptions, registerHandlers, configure);
+builder.Services.AddElarionJsonRpc(registerHandlers);
+builder.Services.AddElarionMcp(configuration.GetMcpMetadata(), registerHandlers, configure);
 
 // REST — a concrete, framework-authored endpoint (AOT/trim-safe; see ADR-0031).
 app.MapElarionSession();   // GET /session
 ```
 
-For Native AOT, combine the framework feature's own source-gen resolver into the host's serializer options:
-
-```csharp
-TypeInfoResolver = JsonTypeInfoResolver.Combine(
-    [JsonRpcJsonContext.Default, SessionJsonContext.Default, .. moduleResolvers, new DefaultJsonTypeInfoResolver()]);
-```
+Nothing else is needed for Native AOT: `AddElarionSession` contributes the framework-owned `SessionJsonContext`
+to the canonical [`IElarionJsonSerialization`](./transports.mdx) itself (ADR-0023), so the session's wire types
+serialize reflection-free on every transport — the same self-registration every other subsystem's `Add…` performs.
 
 ## On the client — one mechanism over OpenFeature
 

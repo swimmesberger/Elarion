@@ -410,7 +410,8 @@ user's roles/permissions. It is a **read-only UX projection, never an enforcemen
    [ADR-0031](docs/decisions/0031-imperative-handler-transport-mapping.md): `AddElarionSession(manifest)` (DI) ·
    the bus `MapElarionSession()` (a `HandlerDispatcher.Map` over `"elarion.session"`, chained into the host's
    `RegisterHandlers` so the shared dispatcher is still built once) · the concrete REST `MapElarionSession(route)`
-   in `Elarion.AspNetCore` · the `SessionJsonContext` AOT resolver (contributed via `ConfigureElarionJson`). The
+   in `Elarion.AspNetCore`. `AddElarionSession` **self-registers** the `SessionJsonContext` into the canonical
+   `IElarionJsonSerialization` (ADR-0023), so the host wires no serialization for this framework feature. The
    TypeScript generator emits a self-contained `session-client.ts` (typed `ClientSnapshot`, typed `Keys`, and an
    **OpenFeature web-SDK provider** hydrated from one snapshot — reserved `module.`/`permission.`/`role.`
    namespaces, a bare key is a flag/variant) **only** when the schema exposes `elarion.session`.

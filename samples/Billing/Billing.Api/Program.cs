@@ -7,7 +7,6 @@ using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Scheduling;
-using Elarion.Abstractions.Serialization;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.Session;
@@ -97,10 +96,6 @@ builder.Services.AddElarion(builder.Configuration);
 // [ClientFeatures] flags/variants, and the user's grants for the frontend. The manifest is built once from the
 // generated bootstrapper; the handler evaluates the flags per user.
 builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityManifest());
-
-// The session bootstrap's wire types are framework-owned, so contribute their source-generated JSON context to
-// the canonical serializer every transport reads (ADR-0023).
-builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SessionJsonContext.Default));
 
 // Align ASP.NET's minimal-API JSON options with Elarion's canonical serialization, so [HttpEndpoint] request
 // bodies deserialize through the same source-generated contexts every transport uses (needed with reflection

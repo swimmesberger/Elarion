@@ -165,8 +165,10 @@ exposed imperatively instead — see [ADR-0031](0031-imperative-handler-transpor
   `IFeatureVariantService` + `ICurrentUser`, returning the `{ user, modules, flags, variants }` `SessionResponse`. The
   flag/variant services are optional, so a host without feature flags still gets modules + grants. Exposed via the
   imperative mapping of [ADR-0031](0031-imperative-handler-transport-mapping.md): `AddElarionSession(manifest)` (DI),
-  the bus `MapElarionSession()` (a `Map` over `"elarion.session"`), the concrete REST `MapElarionSession(route)`
-  in `Elarion.AspNetCore`, and the `SessionJsonContext` AOT resolver.
+  the bus `MapElarionSession()` (a `Map` over `"elarion.session"`), and the concrete REST `MapElarionSession(route)`
+  in `Elarion.AspNetCore`. `AddElarionSession` self-registers the `SessionJsonContext` into the canonical
+  `IElarionJsonSerialization` ([ADR-0023](0023-canonical-json-serialization.md)), so the host wires no serialization
+  for this framework feature.
 - TypeScript generator: a self-contained `session-client.ts` (typed `ClientSnapshot`, `SessionCapabilities`, the
   OpenFeature web-SDK provider that dispatches the reserved namespaces, and the typed `Keys`), emitted only when the
   schema exposes `elarion.session`.
