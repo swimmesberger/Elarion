@@ -384,6 +384,42 @@ provider-agnostic** — the same shape as authorization, and distinct from compi
    one backend; pin via the vocabulary consts (configuration keys are the lower-cased values; keyed lookup does
    not normalize), never raw strings.
 
+## Client capability bootstrap
+
+The framework ships one **client-capability snapshot** so a frontend can hide/adapt UI from a single call —
+what the backend offers *this user and this deployment*: enabled modules, the exposed flags/variants, and the
+user's roles/permissions. It is a **read-only UX projection, never an enforcement boundary** — the handler's
+`[RequirePermission]`/`[FeatureGate]` is still the real gate (a hidden button is not a secured operation). See
+[ADR-0030](docs/decisions/0030-client-capability-bootstrap.md) and
+[the client-capabilities concept doc](docs/concepts/client-capabilities.mdx).
+
+1. **`[ClientFeatures("a","b")]`** (`Elarion.Abstractions.Modules`) on an `[AppModule]` type declares the flag/
+   variant names that module **exposes to the client** — opt-in by enumeration, so an internal flag never reaches
+   the wire unless a module names it, and a disabled module exposes nothing. A listed name needs **no**
+   `[FeatureGate]`/`[FeatureVariant]` behind it (a pure UI flag is first-class). `AppModuleDiscoveryGenerator`
+   collects the names — round-tripped cross-assembly through the Elarion manifest — into a gated
+   `configuration.GetClientCapabilityManifest()` on `ElarionBootstrapper`, emitted **only** when a module opts in
+   (hosts that never use it get byte-identical output).
+2. **`SessionHandler`** (`Elarion.Session`, in `Elarion` core) composes that manifest + `IFeatureFlagService` +
+   `IFeatureVariantService` + `ICurrentUser` into `SessionResponse { user{id,email?,isAuthenticated,roles,
+   permissions}, modules, flags, variants }`. Only enabled modules' names are evaluated; a name lands under
+   `variants` when the variant accessor resolves one, else under `flags`. The flag/variant and
+   `AuthorizationOptions` dependencies are all **optional**, so a host without feature flags still gets modules +
+   grants.
+3. **Wiring** follows the imperative-mapping pattern of
+   [ADR-0031](docs/decisions/0031-imperative-handler-transport-mapping.md): `AddElarionSession(manifest)` (DI) ·
+   the bus `MapElarionSession()` (a `HandlerDispatcher.Map` over `"elarion.session"`, chained into the host's
+   `RegisterHandlers` so the shared dispatcher is still built once) · the concrete REST `MapElarionSession(route)`
+   in `Elarion.AspNetCore` · the `SessionJsonContext` AOT resolver (contributed via `ConfigureElarionJson`). The
+   TypeScript generator emits a self-contained `session-client.ts` (typed `ClientSnapshot`, typed `Keys`, and an
+   **OpenFeature web-SDK provider** hydrated from one snapshot — reserved `module.`/`permission.`/`role.`
+   namespaces, a bare key is a flag/variant) **only** when the schema exposes `elarion.session`.
+
+The session bootstrap is the first consumer of the **imperative handler-mapping seam** (`HandlerDispatcher.Map`):
+the way to expose a handler whose class the host does not own — framework-shipped, third-party, or
+startup-decided. The bus seam is generic; REST stays a concrete, hand-authored `MapElarionX(route)` per handler
+(RDG/AOT-safe — no generic HTTP map). See [ADR-0031](docs/decisions/0031-imperative-handler-transport-mapping.md).
+
 ## Validation model
 
 Request validation is **two-tier**, and the dividing line is **what a wire contract can express** — not
@@ -772,6 +808,23 @@ on), so reviewers approve and merge from the bottom up. See
   satisfies the usual checks before the bottom layer merges.
 - **Tooling is optional.** Build stacks by hand with plain Git + the PR base-branch selector, or use
   the `gh stack` CLI extension, which automates branch creation, rebasing, pushing, and PR setup.
+
+**Guardrails against stranding a stacked PR** (a real incident: PR #33's content never reached `main`
+even though GitHub marked it *MERGED* — it had merged into an orphaned base branch). The failure mode
+is a stacked PR that merges into its base while that base never carries the content up to `main`. To
+prevent it:
+
+- **One branch per PR — never reuse a head branch across PRs.** #31 and #32 shared a single head
+  branch, which defeats GitHub's auto-retarget/auto-delete (it assumes one branch per PR) and left the
+  base alive after it merged, so the dependent PR (#33) still pointed at a now-orphaned base.
+- **"MERGED" is not "on `main`."** A PR merged into a base branch that itself never reached `main` is
+  stranded. Before treating a stacked PR as done, verify its content actually landed:
+  `git merge-base --is-ancestor <pr-head-sha> origin/main` (must succeed), or confirm the base chain
+  terminates at `main`.
+- **After a base PR merges, confirm each dependent PR retargeted** to `main` (or the next unmerged
+  base). If GitHub did not auto-retarget — e.g. because the base branch was reused or not deleted —
+  retarget it by hand *before* merging it.
+- **Do not delete or reuse a base branch while any open PR still targets it.**
 
 ## Publishing
 

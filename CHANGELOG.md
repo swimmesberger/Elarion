@@ -9,6 +9,25 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Client capability bootstrap (`Elarion.Session`, ADR-0030).** A framework-shipped handler returns one snapshot
+  of what the backend offers the current user and deployment — enabled modules, the exposed flags/variants, and
+  the user's roles/permissions — so a frontend can hide/adapt UI from a single call (a **read-only UX projection,
+  not enforcement**; the handler's `[RequirePermission]`/`[FeatureGate]` is still the real gate). Modules opt in
+  by enumeration with **`[ClientFeatures("a","b")]`** (`Elarion.Abstractions.Modules`) on their `[AppModule]`
+  type — leak-safe, module-gated — which `AppModuleDiscoveryGenerator` round-trips cross-assembly through the
+  Elarion manifest into a gated `configuration.GetClientCapabilityManifest()` (emitted only when a module opts
+  in). `SessionHandler` composes the manifest with `IFeatureFlagService`/`IFeatureVariantService`/`ICurrentUser`
+  into `SessionResponse { user, modules, flags, variants }` (flag/variant services optional). Wired with
+  `AddElarionSession(manifest)` (DI), the bus `MapElarionSession()`, and the concrete REST `MapElarionSession(route)`
+  in `Elarion.AspNetCore`; the TypeScript generator emits a self-contained `session-client.ts` with an
+  **OpenFeature web-SDK provider** hydrated from one snapshot when the schema exposes `elarion.session`. See
+  [ADR-0030](docs/decisions/0030-client-capability-bootstrap.md) and
+  [the client-capabilities concept doc](docs/concepts/client-capabilities.mdx).
+- **Imperative handler transport mapping (ADR-0031).** `HandlerDispatcher.Map<TRequest, TResponse>(name, transports)`
+  is documented and reused as the host-facing seam for exposing a handler whose class the host does not own
+  (framework-shipped, third-party, or startup-decided) — kept under its existing name. REST stays a concrete,
+  hand-authored `MapElarionX(route)` per handler (RDG/AOT-safe; no generic HTTP map, by design). The session
+  bootstrap is the first consumer. See [ADR-0031](docs/decisions/0031-imperative-handler-transport-mapping.md).
 - **Declarative request validation (`Elarion.Validation`, ADR-0027).** Two-tier validation replaces the
   FluentValidation integration: **tier 1** is standard `System.ComponentModel.DataAnnotations` attributes on the
   request DTO (`[Range]`, `[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`,

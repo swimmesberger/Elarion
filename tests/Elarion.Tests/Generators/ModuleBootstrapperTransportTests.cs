@@ -390,6 +390,48 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_EmitsClientCapabilityManifest_FromReferencedClientFeatures() {
+        // A module declaring [ClientFeatures] in a referenced assembly — the names must survive the manifest
+        // round-trip (encode → image → decode), and every module appears with its IsModuleEnabled state.
+        var modulesReference = CompileToImage(
+            """
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.ClientFeatures {
+                [AppModule("Billing")]
+                [ClientFeatures("new-checkout", "dashboard-v2")]
+                public static class BillingModule { }
+
+                [AppModule("Core", Kind = AppModuleKind.Core)]
+                public static class CoreModule { }
+            }
+            """,
+            "Sample.ClientFeatures");
+
+        var generated = RunGenerator([modulesReference], out var compilationWithGenerated);
+
+        var method = Slice(generated, "GetClientCapabilityManifest(");
+        method.Should().Contain(
+                "new global::Elarion.Session.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\"), Features = new string[] { \"new-checkout\", \"dashboard-v2\" } }")
+            .And.Contain(
+                "new global::Elarion.Session.ClientModuleManifest { Name = \"Core\", Enabled = IsModuleEnabled(configuration, \"Core\"), Features = global::System.Array.Empty<string>() }");
+
+        // The generated code references the real Elarion.Session manifest types, so it compiles.
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_OmitsClientCapabilityManifest_WhenNoModuleExposesClientFeatures() {
+        // No module declares [ClientFeatures], so the method is not emitted — hosts that never use the feature
+        // get byte-identical output.
+        var generated = RunGenerator(out _);
+
+        generated.Should().NotContain("GetClientCapabilityManifest");
+    }
+
+    [Fact]
     public void Bootstrapper_IsDeterministic() {
         var first = RunGenerator(out _);
         var second = RunGenerator(out _);
@@ -542,7 +584,9 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             "0",
             "0",
-            "0");
+            "0",
+            // The client-features blob (10th field) — empty for a module with no [ClientFeatures].
+            "");
         var http = EncodeFields(
             "ManifestOnly.GetManifest",
             "ManifestOnly",
@@ -594,7 +638,7 @@ public sealed class ModuleBootstrapperTransportTests {
     private static string ResourceFilterLibSource() {
         // A feature module (IsCore = 0) so its filter registration is gated by the module flag.
         var module = EncodeFields(
-            "FilterLib", "FilterLib", "global::FilterLib.FilterModule", null, "0", "0", "0", "0", "0");
+            "FilterLib", "FilterLib", "global::FilterLib.FilterModule", null, "0", "0", "0", "0", "0", "");
         var owner = EncodeFields(
             "global::FilterLib.ContactAccess", "global::FilterLib.Contact", "FilterLib", "0");
         var shared = EncodeFields(

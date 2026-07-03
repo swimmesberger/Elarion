@@ -1,0 +1,115 @@
+---
+title: Client capabilities
+description: One bootstrap snapshot — modules, feature flags/variants, and the user's grants — projected to the frontend over OpenFeature so the UI can hide or adapt itself.
+---
+
+A frontend usually needs to hide or adapt UI based on **what the backend actually offers for the current user and
+deployment**: which modules are enabled, which feature flags/variants are on, and the user's roles and permissions.
+Elarion ships a single, framework-owned **client-capability bootstrap** that returns all of that in one snapshot, and
+a generated TypeScript client (plus an OpenFeature provider) that the frontend reads. The backend stays the source of
+truth — the client *reflects* it, it never re-evaluates flags or re-hosts provider config.
+
+<Callout type="warn">
+This is a **read-only UX projection, not an enforcement boundary.** A hidden button is not a secured operation — the
+real gate is the handler's `[RequirePermission]`/`[FeatureGate]`, enforced server-side on every call. Use the snapshot
+to adapt the UI; never to authorize.
+</Callout>
+
+## The snapshot
+
+The bootstrap returns one object for the current user and deployment:
+
+```jsonc
+{ "user":     { "id": "u-123", "isAuthenticated": true, "roles": ["admin"], "permissions": ["billing.write"] },
+  "modules":  { "Billing": true, "Experiments": false },
+  "flags":    { "new-checkout": true },
+  "variants": { "ForecastAlgorithm": "neural" } }
+```
+
+It composes existing seams only — the generated `IsModuleEnabled`, [`IFeatureFlagService`](/docs/concepts/feature-flags),
+the `IFeatureVariantService` variant accessor, and [`ICurrentUser`](/docs/concepts/handlers) — so module enablement is
+deployment-scoped while flags, variants, and grants are per-user. See
+[ADR-0030](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0030-client-capability-bootstrap.md).
+
+## Exposing flags per module — `[ClientFeatures]`
+
+A module declares the flag/variant names it exposes to the client on its `[AppModule]` type. Nothing reaches the wire
+unless a module names it, so exposure is leak-safe by construction:
+
+```csharp
+[AppModule("Billing")]
+[ClientFeatures("new-checkout", "dashboard-v2")]   // exposed to the frontend
+public static class BillingModule { }
+```
+
+The bootstrap evaluates **only those names, only for enabled modules**. A listed name needs **no** server-side
+`[FeatureGate]`/`[FeatureVariant]` behind it — a pure UI flag is first-class, evaluated by the same provider and the
+user's context. The names are collected into a per-deployment manifest by the bootstrapper generator
+(`configuration.GetClientCapabilityManifest()`).
+
+## Wiring the host
+
+The bootstrap handler is framework-shipped (you don't own its class), so it is exposed **imperatively** — see
+[exposing a handler you don't own](/docs/concepts/transports#exposing-a-handler-you-do-not-own) and
+[ADR-0031](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0031-imperative-handler-transport-mapping.md).
+A host opts in and chooses surfaces:
+
+```csharp
+// DI — registers the handler and the deployment manifest.
+builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityManifest());
+
+// Named bus (JSON-RPC + MCP) — chain MapElarionSession into the same RegisterHandlers delegate, so the
+// shared dispatcher is still built once.
+var registerHandlers = (HandlerDispatcher dispatcher, IConfiguration configuration) =>
+    ElarionBootstrapper.RegisterHandlers(dispatcher, configuration).MapElarionSession();
+
+builder.Services.AddElarionJsonRpc(serializerOptions, registerHandlers);
+builder.Services.AddElarionMcp(configuration.GetMcpMetadata(), serializerOptions, registerHandlers, configure);
+
+// REST — a concrete, framework-authored endpoint (AOT/trim-safe; see ADR-0031).
+app.MapElarionSession();   // GET /session
+```
+
+For Native AOT, combine the framework feature's own source-gen resolver into the host's serializer options:
+
+```csharp
+TypeInfoResolver = JsonTypeInfoResolver.Combine(
+    [JsonRpcJsonContext.Default, SessionJsonContext.Default, .. moduleResolvers, new DefaultJsonTypeInfoResolver()]);
+```
+
+## On the client — one mechanism over OpenFeature
+
+When the schema exposes `elarion.session`, the TypeScript generator emits a self-contained `session-client.ts`
+alongside the RPC client: a typed `ClientSnapshot`, synchronous `SessionCapabilities` accessors, and an
+[OpenFeature web-SDK](https://openfeature.dev) provider. The provider is hydrated from one fetched snapshot and answers
+**every** key from the cache via reserved namespaces, so React only ever uses OpenFeature:
+
+| OpenFeature key | resolves from |
+| --- | --- |
+| `module.Billing` | `modules["Billing"]` (deployment-scoped) |
+| `permission.billing.write` | `user.permissions.includes(...)` |
+| `role.admin` | `user.roles.includes(...)` |
+| `new-checkout` | `flags[...]` (the `[ClientFeatures]` set) |
+| `ForecastAlgorithm` | `variants[...]` (string / `.variant`) |
+
+```ts
+import { createElarionOpenFeatureProvider, Keys } from './generated/session-client'
+
+const snapshot = await rpc.elarion.session({})         // typed, via the generated RPC client
+OpenFeature.setProvider(createElarionOpenFeatureProvider(snapshot) as unknown as Provider)
+
+// then, anywhere — one API for modules, flags, variants, and grants:
+client.getBooleanValue(Keys.module('Billing'), false)
+client.getBooleanValue(Keys.permission('billing.write'), false)
+client.getStringValue('ForecastAlgorithm', 'control')
+```
+
+Teams that don't want OpenFeature can use `SessionCapabilities` (`isModuleEnabled`, `hasPermission`, `hasRole`,
+`isFlagEnabled`, `getVariant`) directly. Refresh the snapshot (and rebuild the provider) on login or context change.
+
+## See also
+
+- [ADR-0030: Client capability bootstrap](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0030-client-capability-bootstrap.md)
+- [ADR-0031: Imperative handler transport mapping](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0031-imperative-handler-transport-mapping.md)
+- [Feature flags](/docs/concepts/feature-flags) — the flag/variant seams the snapshot reads.
+- [Transports](/docs/concepts/transports) — declarative vs. imperative exposure.

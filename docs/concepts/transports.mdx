@@ -137,6 +137,31 @@ error. Implement `IAppErrorTranslator<TError>` for your wire type (the JSON-RPC 
 - **Authorization is automatic**: the generator attaches the `AuthorizationDecorator` to `[Require*]`
   handlers; it reads `ICurrentUser` and runs per scope. You don't wire it per transport.
 
+## Exposing a handler you do not own
+
+The declarative attributes (`[Handler]`, `[HttpEndpoint]`, `[McpHandler]`) only work for a handler **whose class you
+own** — you put the attribute on the class. They cannot expose a **framework-shipped** handler (e.g. the
+[client-capability bootstrap](/docs/concepts/client-capabilities)), a third-party handler, or one whose exposure you
+want to decide at startup. For those, map the handler **imperatively** — see
+[ADR-0031](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0031-imperative-handler-transport-mapping.md).
+
+- **Named bus (JSON-RPC + MCP)** — a generic seam on the dispatcher, chained into the host's `RegisterHandlers`:
+
+  ```csharp
+  dispatcher.Map<MyRequest, MyResponse>("my.operation", HandlerTransports.JsonRpc | HandlerTransports.Mcp);
+  ```
+
+  It is name-routed (you pick the transports, no route); serialization goes through the configured
+  `JsonTypeInfo`. This is the same `Map` the generated bootstrapper calls per `[Handler]`.
+
+- **REST** — there is **no** generic HTTP map, by design. ASP.NET's Request Delegate Generator only keeps
+  endpoints AOT/trim-safe for **concrete** `MapGet`/`MapPost` calls, so a framework feature ships a hand-authored,
+  concrete `MapElarionX(route)` extension (the `MapHealthChecks`/`MapIdentityApi` precedent). The asymmetry — generic
+  bus seam, concrete-per-handler HTTP — is deliberate and AOT-driven.
+
+A framework feature therefore ships `AddElarionX()` (DI + its `JsonTypeInfo` resolver), a bus contribution via
+`Map`, and a concrete `MapElarionX(route)` for REST; the host opts in and picks surfaces.
+
 ## Packaging
 
 A non-HTTP transport references `Elarion` and `Elarion.Abstractions`. Core is **transport-agnostic** — it does

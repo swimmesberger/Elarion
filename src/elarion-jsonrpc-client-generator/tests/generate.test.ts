@@ -515,6 +515,54 @@ describe('JSON-RPC client generator', () => {
     expect(events).toEqual(['start', 'error', 'end'])
   })
 
+  it('generates a self-contained session client + OpenFeature provider when the schema exposes elarion.session', async () => {
+    const generated = generateRpcClientFiles(sessionSchema(), {
+      generatedBy: 'test-generator',
+      sourceLabel: 'session.json',
+    })
+
+    expect(generated.sessionClientFileName).toBe('session-client.ts')
+    expect(generated.sessionClientSource).toBeDefined()
+    const source = generated.sessionClientSource as string
+    expect(source).toContain('export function createElarionOpenFeatureProvider')
+    expect(source).toContain('export class SessionCapabilities')
+    expect(source).toContain('export const Keys')
+    // The session client is self-contained — it must not import the RPC types or the OpenFeature SDK.
+    expect(source).not.toContain('import ')
+
+    const sessionModule = await loadGeneratedSessionClient(source)
+    const snapshot = {
+      user: { id: 'u-1', isAuthenticated: true, roles: ['admin'], permissions: ['billing.write'] },
+      modules: { Billing: true, Experiments: false },
+      flags: { 'new-checkout': true },
+      variants: { ForecastAlgorithm: 'neural' },
+    }
+
+    const provider = sessionModule.createElarionOpenFeatureProvider(snapshot)
+    expect(provider.runsOn).toBe('client')
+    expect(provider.resolveBooleanEvaluation('module.Billing', false).value).toBe(true)
+    expect(provider.resolveBooleanEvaluation('module.Experiments', true).value).toBe(false)
+    expect(provider.resolveBooleanEvaluation('permission.billing.write', false).value).toBe(true)
+    expect(provider.resolveBooleanEvaluation('permission.billing.read', false).value).toBe(false)
+    expect(provider.resolveBooleanEvaluation('role.admin', false).value).toBe(true)
+    expect(provider.resolveBooleanEvaluation('new-checkout', false).value).toBe(true)
+    expect(provider.resolveBooleanEvaluation('unknown-flag', false)).toMatchObject({ value: false, reason: 'DEFAULT' })
+    expect(provider.resolveStringEvaluation('ForecastAlgorithm', 'control')).toMatchObject({ value: 'neural', variant: 'neural' })
+    expect(provider.resolveStringEvaluation('missing', 'control')).toMatchObject({ value: 'control', reason: 'DEFAULT' })
+
+    const caps = sessionModule.createSessionCapabilities(snapshot)
+    expect(caps.isModuleEnabled('Billing')).toBe(true)
+    expect(caps.hasPermission('billing.write')).toBe(true)
+    expect(caps.getVariant('ForecastAlgorithm')).toBe('neural')
+    expect(sessionModule.Keys.module('Billing')).toBe('module.Billing')
+  })
+
+  it('omits the session client when the schema does not expose elarion.session', () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    expect(generated.sessionClientSource).toBeUndefined()
+    expect(generated.sessionClientFileName).toBeUndefined()
+  })
+
   it('starts one span per batch and treats per-item errors as data, not span failures', async () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     const clientModule = await loadGeneratedClient(generated.clientSource)
@@ -652,6 +700,44 @@ describe('JSON-RPC client generator', () => {
     expect(fetchCalls).toBe(2)
   })
 })
+
+interface SessionClientModule {
+  createElarionOpenFeatureProvider(snapshot: unknown): {
+    runsOn: string
+    resolveBooleanEvaluation(flagKey: string, defaultValue: boolean): { value: boolean; reason: string }
+    resolveStringEvaluation(flagKey: string, defaultValue: string): { value: string; variant?: string; reason: string }
+  }
+  createSessionCapabilities(snapshot: unknown): {
+    isModuleEnabled(name: string): boolean
+    hasPermission(permission: string): boolean
+    getVariant(name: string): string | undefined
+  }
+  Keys: { module(name: string): string; permission(permission: string): string; role(role: string): string }
+}
+
+function sessionSchema(): RpcSchema {
+  return {
+    methods: {
+      'elarion.session': {
+        params: { type: 'object', properties: {} },
+        result: { type: 'object', properties: {} },
+      },
+    },
+  }
+}
+
+async function loadGeneratedSessionClient(source: string): Promise<SessionClientModule> {
+  const dir = mkdtempSync(join(tmpdir(), 'elarion-session-client-'))
+  const jsSource = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+
+  writeFileSync(join(dir, 'session-client.mjs'), jsSource, 'utf-8')
+  return await import(pathToFileURL(join(dir, 'session-client.mjs')).href) as SessionClientModule
+}
 
 function rpcClientTestSchema(): RpcSchema {
   return {

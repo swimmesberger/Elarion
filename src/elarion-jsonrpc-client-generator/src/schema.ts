@@ -40,6 +40,10 @@ export interface GenerateRpcClientOptions {
   typesFileName?: string
   schemasFileName?: string
   clientFileName?: string
+  /** Output filename for the client-capability snapshot client + OpenFeature provider (default `session-client.ts`). */
+  sessionClientFileName?: string
+  /** The operation name the client-capability snapshot is served under (default `elarion.session`). */
+  sessionOperationName?: string
 }
 
 export interface GeneratedRpcClientFiles {
@@ -50,4 +54,10 @@ export interface GeneratedRpcClientFiles {
   typesSource: string
   schemasSource: string
   clientSource: string
+  /**
+   * The client-capability snapshot client + OpenFeature provider (ADR-0020). Present only when the schema exposes
+   * the session operation (default `elarion.session`); otherwise both fields are `undefined`.
+   */
+  sessionClientFileName?: string
+  sessionClientSource?: string
 }
