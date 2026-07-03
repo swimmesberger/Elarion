@@ -948,7 +948,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         sb.AppendLine("    }");
 
-        // --- GetClientCapabilityManifest (ADR-0030) — only when a module exposes [ClientFeatures] ---
+        // --- GetClientCapabilityManifest (ADR-0030) ---
         AppendClientCapabilityManifest(sb, entries);
 
         // --- Per-module transport methods (group hooks) ---
@@ -965,24 +965,12 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     /// <summary>
     /// Emits the deployment-resolved client-capability manifest the session bootstrap handler consumes: every module
     /// with its <c>IsModuleEnabled</c> state plus the names from its <c>[ClientFeatures]</c> list (empty for modules
-    /// that expose none). Emitted only when at least one module opts in, so hosts that never use the feature get
-    /// byte-identical output.
+    /// that expose none). Always emitted so <c>AddElarionSession(configuration.GetClientCapabilityManifest())</c>
+    /// compiles for every host — a host with no <c>[ClientFeatures]</c> still gets a modules-only manifest, which the
+    /// session bootstrap projects into per-user module enablement (an empty manifest would drop that entirely).
     /// </summary>
     private static void AppendClientCapabilityManifest(StringBuilder sb, List<ModuleEntry> entries)
     {
-        var hasClientFeatures = false;
-        foreach (var entry in entries)
-        {
-            if (!entry.ClientFeatures.IsEmpty)
-            {
-                hasClientFeatures = true;
-                break;
-            }
-        }
-
-        if (!hasClientFeatures)
-            return;
-
         const string ManifestFqn = "global::Elarion.Abstractions.Modules.ClientCapabilityManifest";
         const string ModuleManifestFqn = "global::Elarion.Abstractions.Modules.ClientModuleManifest";
 

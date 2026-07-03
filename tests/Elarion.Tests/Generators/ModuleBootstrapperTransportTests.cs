@@ -423,12 +423,22 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
-    public void Bootstrapper_OmitsClientCapabilityManifest_WhenNoModuleExposesClientFeatures() {
-        // No module declares [ClientFeatures], so the method is not emitted — hosts that never use the feature
-        // get byte-identical output.
-        var generated = RunGenerator(out _);
+    public void Bootstrapper_EmitsModulesOnlyClientCapabilityManifest_WhenNoModuleExposesClientFeatures() {
+        // No module declares [ClientFeatures], but the method is still emitted with a modules-only manifest so
+        // AddElarionSession(configuration.GetClientCapabilityManifest()) compiles for every host — the session
+        // bootstrap still projects per-user module enablement from it (an empty manifest would drop that).
+        var generated = RunGenerator(out var compilationWithGenerated);
 
-        generated.Should().NotContain("GetClientCapabilityManifest");
+        var method = Slice(generated, "GetClientCapabilityManifest(");
+        method.Should().Contain(
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\"), Features = global::System.Array.Empty<string>() }")
+            .And.Contain(
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Shipping\", Enabled = IsModuleEnabled(configuration, \"Shipping\"), Features = global::System.Array.Empty<string>() }");
+
+        // The generated code references the real Elarion.Session manifest types, so it compiles.
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
     }
 
     [Fact]
