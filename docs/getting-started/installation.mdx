@@ -31,6 +31,7 @@ client generation. You only install the pieces you use.
 | `Elarion.AspNetCore.SchemaGeneration` | Host (build tooling) | MSBuild target that exports `rpc-schema.json` during `dotnet build`. |
 | `Elarion.EntityFrameworkCore` | Application | Marker attributes for generated `DbSet`s and entity inclusion. **Bundles the EF Core source generator** (`DbSet` properties, entity configuration, keyset pagination). |
 | `@swimmesberger/elarion-jsonrpc-client-generator` | Frontend (npm) | Generates TypeScript method contracts, constraint-aware Zod params/result schemas, and a params-pre-validating fetch client from a schema export. |
+| `@swimmesberger/elarion-contributions` | Frontend (npm) | The frontend contribution model: typed extension points, declarative module manifests, and capability-gated resolution; React bindings under `/react`. See [Frontend modules](/docs/concepts/frontend-modules). |
 
 <Callout type="info">
   The source generators ship **inside** their runtime packages — the Elarion generator in `Elarion`

@@ -10,8 +10,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { useClients } from "@/hooks/useClients"
-import { useCreateInvoice, useSendStatus } from "@/hooks/useInvoices"
+// Cross-module data access goes through the Clients module's public entry — its published hook — never
+// through its internals.
+import { useClients } from "@/modules/clients"
+import { useCreateInvoice, useSendStatus } from "../hooks/useInvoices"
 
 export function CreateInvoiceDialog() {
   const [open, setOpen] = useState(false)

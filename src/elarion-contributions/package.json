@@ -1,0 +1,66 @@
+{
+  "name": "@swimmesberger/elarion-contributions",
+  "version": "0.1.0",
+  "description": "The Elarion frontend contribution model: typed extension points, declarative module manifests, and capability-gated resolution — framework-free core with React bindings under /react.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./tanstack-router": {
+      "types": "./dist/tanstack-router.d.ts",
+      "import": "./dist/tanstack-router.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "prepack": "npm run build",
+    "prepare": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swimmesberger/Elarion.git",
+    "directory": "src/elarion-contributions"
+  },
+  "bugs": {
+    "url": "https://github.com/swimmesberger/Elarion/issues"
+  },
+  "homepage": "https://github.com/swimmesberger/Elarion#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "peerDependencies": {
+    "@tanstack/react-router": ">=1",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "@tanstack/react-router": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@tanstack/react-router": "^1.170.17",
+    "@types/react": "^19.2.17",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

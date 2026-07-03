@@ -1,5 +1,12 @@
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useInvoices } from "@/hooks/useInvoices"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { useInvoices } from "../hooks/useInvoices"
 
 function formatMoney(cents: number, currency: string) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(cents / 100)

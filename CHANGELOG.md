@@ -35,6 +35,19 @@ minor releases may include breaking changes.
   are compile-checked against the same vocabulary the backend enforces. ADR-0032 also records the frontend
   contribution model (declarative manifests, extension-point tokens, `when` clauses) ahead of its sample-first
   implementation. See [ADR-0032](docs/decisions/0032-frontend-contribution-model.md).
+- **Frontend contribution model — `@swimmesberger/elarion-contributions` (ADR-0032, sample-first).** The
+  backend's review-isolation rule ("a module only touches its own code") extended to the TypeScript frontend:
+  typed extension-point tokens (`defineExtensionPoint` — the frontend `[ModuleContract]`), declarative module
+  manifests (`defineModule` + `contribute`; a manifest-level `when` ANDs into every contribution), the
+  fail-closed AND `when` evaluator over the capability snapshot (a **read-only UX projection, never security**),
+  and the deterministic `createContributionRegistry`. Framework-free, dependency-free core with a `/react`
+  sub-export (`ContributionProvider`/`useContributions`/`<ExtensionSlot>`) and a `/tanstack-router` sub-export
+  (one `redirectUnless` route guard sharing the `when` semantics) — React and the router are optional peers.
+  Point payload shapes, the app shell, module discovery, and route composition stay app-owned (no UI kit, no
+  router machinery — non-goals). The Billing web sample is restructured into `platform/` + `modules/*` with
+  `import.meta.glob` discovery (a new module is a new folder), proving an app-owned sidebar point and a
+  module-owned cross-module row-action point. See
+  [the frontend-modules concept doc](docs/concepts/frontend-modules.mdx).
 - **Imperative handler transport mapping (ADR-0031).** `HandlerDispatcher.Map<TRequest, TResponse>(name, transports)`
   is documented and reused as the host-facing seam for exposing a handler whose class the host does not own
   (framework-shipped, third-party, or startup-decided) — kept under its existing name. REST stays a concrete,

@@ -144,6 +144,7 @@ JSON-RPC endpoint end to end.
 | [`Elarion.Settings.EntityFrameworkCore`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Settings.EntityFrameworkCore) | EF Core database backend for settings: a relational, provider-neutral `ISettingsStore` with optimistic concurrency. |
 | [`Elarion.Settings.Configuration`](https://github.com/swimmesberger/Elarion/tree/main/src/Elarion.Settings.Configuration) | `IConfiguration`/`IOptionsMonitor` adapter over the `Global` settings scope, with `IChangeToken` reload so config consumers pick up runtime changes. |
 | [`@swimmesberger/elarion-jsonrpc-client-generator`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-jsonrpc-client-generator) | TypeScript CLI that turns a schema export into method contracts, constraint-aware Zod params/result schemas, and a params-pre-validating fetch client. |
+| [`@swimmesberger/elarion-contributions`](https://github.com/swimmesberger/Elarion/tree/main/src/elarion-contributions) | The frontend contribution model: typed extension points, declarative module manifests, and capability-gated resolution — framework-free core, React bindings under `/react`. |
 
 ## Documentation
 

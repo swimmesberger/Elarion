@@ -50,6 +50,7 @@
     <Project Path="src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <Project Path="src/Elarion.Validation/Elarion.Validation.csproj" />
     <Project Path="src/Elarion/Elarion.csproj" />
+    <Project Path="src/elarion-contributions/elarion-contributions.csproj" />
     <Project Path="src/elarion-jsonrpc-client-generator/elarion-jsonrpc-client-generator.csproj" />
   </Folder>
   <Folder Name="/samples/">
