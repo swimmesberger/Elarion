@@ -50,6 +50,9 @@ public static class ElarionOpenApiServiceCollectionExtensions {
             // [EmailAddress] parity: Microsoft's DataAnnotations mapping stops short of email, but the JSON-RPC
             // schema exporter emits format:"email" — keep the two documents in agreement (ADR-0027).
             options.AddSchemaTransformer<ElarionEmailFormatSchemaTransformer>();
+            // [AllowedValues] parity: same story — the RPC/MCP schemas emit the enum keyword for a declared
+            // value set (e.g. a configuration-variant vocabulary); mirror it onto the OpenAPI document.
+            options.AddSchemaTransformer<ElarionAllowedValuesSchemaTransformer>();
             configureOptions?.Invoke(options);
         });
 

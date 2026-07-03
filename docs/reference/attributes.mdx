@@ -273,11 +273,33 @@ See [Feature flags](/docs/capabilities/feature-flags).
 | --- | --- | --- | --- |
 | `feature` | `string` (ctor) → `Feature` | required | The single feature whose allocated variant selects the implementation. All variants of one contract must name the same feature (`ELVAR004`). |
 | `Variant` | `string?` (init) | `null` | The variant key this implementation serves. Omit it on exactly **one** implementation to mark it the default (used when no variant is allocated); a contract without a default warns `ELVAR003`, and a duplicate variant key reports `ELVAR001`. |
+| `IsDefault` | `bool` (init) | `false` | Marks this implementation as a **named default**: it serves its `Variant` name *and* every unallocated/unknown allocation. More than one default per contract reports `ELVAR001`. |
 
 <Callout type="warn">
   Diagnostics: `ELVAR001` (duplicate variant key), `ELVAR003` (no default implementation — warning), `ELVAR004`
-  (contract bound to more than one feature), `ELVAR005` (blank feature name — warning), `ELVAR006` (generic
-  implementation unsupported), `ELVAR007` (missing `[Service]`). `ELVAR002` is intentionally unused.
+  (contract bound to more than one selector), `ELVAR005` (blank feature name — warning), `ELVAR006` (generic
+  implementation unsupported), `ELVAR007` (missing `[Service]`), `ELVAR008` (contract also bound by
+  `[ConfigurationVariant]` — one selection axis per contract). `ELVAR002` is intentionally unused.
+</Callout>
+
+See [Feature flags](/docs/capabilities/feature-flags).
+
+### `[ConfigurationVariant]`
+
+- **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (single, not inherited)
+- **Triggers:** the **configuration-selected sibling of `[FeatureVariant]`** — a modifier on a `[Service]` registration that binds multiple implementations of one contract, with a plain `IConfiguration` value picking which implementation resolves. Selection is a **synchronous** configuration read, so there is no async-resolving proxy and no per-scope warm-up: any consumer (handler, service, any assembly) injects the contract directly, each new DI scope observes the current value, and an open scope keeps the implementation it started with. Any configuration provider drives the switch — `appsettings.json` (with `reloadOnChange`), environment variables, or the [settings bridge](/docs/concepts/settings) (`AddElarionSettingsConfiguration`) for admin-writable, cluster-propagated runtime switching with no flag provider. The implementation class **must also carry `[Service]`** (otherwise `ELVAR007`); the contract is whatever `[Service]` registers under. Runtime seam: `IVariantServiceProvider<TService>` (completes synchronously); the `VariantServiceRegistrationGenerator` emits the wiring ([ADR-0028](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0028-configuration-selected-service-variants.md)).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `key` | `string` (ctor) → `Key` | required | The configuration key whose value selects the implementation (e.g. `"Email:Backend"`). All variants of one contract must name the same key (`ELVAR004`), and a contract cannot mix `[ConfigurationVariant]` with `[FeatureVariant]` (`ELVAR008`). A blank key warns `ELVAR009`. |
+| `Value` | `string?` (init) | `null` | The configured value this implementation is selected for, matched **case-insensitively**. Omit it on exactly **one** implementation to mark it the default (used when the key is absent or its value matches no variant); a contract without a default warns `ELVAR003`, and a duplicate value — including case-only differences — reports `ELVAR001`. |
+| `IsDefault` | `bool` (init) | `false` | Marks this implementation as a **named default**: selectable by its `Value` *and* the fallback when the key is absent or unknown — so the default state stays writable by name (an admin switches back with `"smtp"` rather than by removing the key). Recommended for admin-facing switches; more than one default per contract reports `ELVAR001`. |
+
+<Callout type="warn">
+  Diagnostics: `ELVAR001` (duplicate value), `ELVAR003` (no default implementation — warning), `ELVAR004`
+  (contract bound to more than one selector), `ELVAR006` (generic implementation unsupported), `ELVAR007`
+  (missing `[Service]`), `ELVAR008` (contract also bound by `[FeatureVariant]`), `ELVAR009` (blank
+  configuration key — warning).
 </Callout>
 
 See [Feature flags](/docs/capabilities/feature-flags).
@@ -612,7 +634,7 @@ See [Cross-module communication](/docs/concepts/cross-module-communication).
 ### `[UseElarion]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** enables the core Elarion source-generation features at once — equivalent to applying `[GenerateModuleHandlers]`, `[GenerateModuleServices]`, `[GenerateScheduledJobs]`, `[GenerateEventConsumers]`, and `[GenerateResiliencePolicies]`. It does **not** subsume `[GeneratePermissionCatalog]`, which has its own assembly-level trigger (below). Application-owned attributes such as pipeline defaults also remain explicit. Marker only — no parameters.
+- **Triggers:** enables the core Elarion source-generation features at once — equivalent to applying `[GenerateModuleHandlers]`, `[GenerateModuleServices]`, `[GenerateScheduledJobs]`, `[GenerateEventConsumers]`, and `[GenerateResiliencePolicies]`, and it also subsumes the catalog triggers `[GeneratePermissionCatalog]` and `[GenerateVariantCatalog]` (each usable standalone, below). Application-owned attributes such as pipeline defaults remain explicit. Marker only — no parameters.
 
 ### Individual generation triggers
 
@@ -629,13 +651,24 @@ All are `Elarion.Abstractions`, applied to the assembly, marker-only (no paramet
 ### `[GeneratePermissionCatalog]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** runs the `PermissionCatalogGenerator` to harvest every `[RequirePermission]`/`[RequireRole]` in the assembly into a runtime `IPermissionCatalog` (a K8s-style resource + verb catalog, with `Verbs`, in `Elarion.Abstractions.Authorization`) — so admin UIs, role editors, and audits read straight from the handler attributes with no second source of truth to drift. Marker only — no parameters. **Not** subsumed by `[UseElarion]`; apply it explicitly. Diagnostics `ELPERM001` (handler with requirements outside any `[AppModule]`) / `ELPERM002` (two permissions colliding on the same typed accessor).
+- **Triggers:** runs the `PermissionCatalogGenerator` to harvest every `[RequirePermission]`/`[RequireRole]` in the assembly into a runtime `IPermissionCatalog` (a K8s-style resource + verb catalog, with `Verbs`, in `Elarion.Abstractions.Authorization`) — so admin UIs, role editors, and audits read straight from the handler attributes with no second source of truth to drift. Marker only — no parameters. Subsumed by `[UseElarion]`, or apply it standalone. Diagnostics `ELPERM001` (handler with requirements outside any `[AppModule]`) / `ELPERM002` (two permissions colliding on the same typed accessor).
 
 ```csharp
 [assembly: GeneratePermissionCatalog]
 ```
 
 See [Authorization](/docs/concepts/authorization).
+
+### `[GenerateVariantCatalog]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** assembly
+- **Triggers:** runs the `VariantCatalogGenerator` to emit the assembly's `ElarionVariants` registry — the compile-time catalog of every `[FeatureVariant]`/`[ConfigurationVariant]` switch, aggregated across referenced assemblies from the Elarion manifest (the variant analog of `ElarionPermissions`). Per switch it emits an accessor class with the selector `Key` and one `const string` per value (usable in `[AllowedValues(...)]`), plus `VariantDescriptor` data surfaced as `All`/`ByKey`/`ByModule`/`Platform` (variants outside every module — the platform-adapter placement — carry `Module = null`). The host seeds runtime consumers explicitly: `services.AddElarionVariantCatalog(ElarionVariants.All)`, optionally with `AddElarionVariantValidation()` for startup + reload validation. Marker only — no parameters. Subsumed by `[UseElarion]`, or apply it standalone. Diagnostic `ELVAR010` (two selectors/values colliding on the same typed accessor).
+
+```csharp
+[assembly: GenerateVariantCatalog]
+```
+
+See [Feature flags](/docs/concepts/feature-flags).
 
 ### `[UseElarionEntityFrameworkCore]`
 

@@ -103,6 +103,19 @@ The generator wires variant resolution automatically; outside a handler construc
 async-resolving proxy keeps contracts synchronous, and the provider requirement for surfacing variant
 names.
 
+For a **process-global, admin- or ops-made** choice (which e-mail backend?), use the configuration-selected
+sibling `[ConfigurationVariant("Email:Backend", Value = "office365")]` instead: a plain `IConfiguration` value
+picks the implementation synchronously — no flag provider, no proxy — and pairing it with the
+[settings bridge](/docs/concepts/settings) makes the switch admin-writable at run time, cluster-wide. The
+generated **`ElarionVariants` registry** catalogs every switch (keys, value consts for `[AllowedValues]`,
+descriptors) so admin surfaces enumerate and validate with zero hand-kept lists — seed it with
+`AddElarionVariantCatalog(ElarionVariants.All)` + `AddElarionVariantValidation()`. Choose the axis by *who
+decides*: per-caller experiments are `[FeatureVariant]`; a process-global admin/ops choice is
+`[ConfigurationVariant]` — and when in doubt, start configuration-selected (the smaller machine). For
+switchable adapters the recommended shape is a **port-owned vocabulary** (consts beside the port). See
+[Feature-selected or configuration-selected?](/docs/concepts/feature-flags#feature-selected-or-configuration-selected)
+and [Who owns the switch](/docs/concepts/feature-flags#who-owns-the-switch).
+
 <Cards>
   <Card title="Feature flags in depth" href="/docs/concepts/feature-flags">
     Gate forms, the runtime `IFeatureFlagService`, variant injection, and the design rationale.

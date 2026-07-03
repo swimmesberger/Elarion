@@ -221,19 +221,22 @@ attributes. See [Validation](/docs/concepts/validation).
 | ELVAL001 | Error | A handler's request type carries validation attributes but its response type does not implement `IResultFailureFactory<T>`, so the validation check cannot short-circuit and would be silently skipped (mirrors `ELAUTH001`). | Return `Result<T>` or `Result` from the handler so the validation decorator can short-circuit to `AppError.Validation`. |
 | ELVAL002 | Warning | A handler's request type carries validation attributes but the compilation does not reference `Elarion.Validation`; the constraints are exported to every schema surface but **not enforced** at runtime. | Reference `Elarion.Validation` and call `AddElarionValidation()` in the host, or remove the validation attributes — the gap must be a visible choice. |
 
-## ELVAR — Feature variant services
+## ELVAR — Variant services
 
-Variant-service registration for `[FeatureVariant]`. See [Feature flags](/docs/concepts/feature-flags).
-(`ELVAR002` is intentionally unused.)
+Variant-service registration for `[FeatureVariant]` and `[ConfigurationVariant]`. See
+[Feature flags](/docs/concepts/feature-flags). (`ELVAR002` is intentionally unused.)
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELVAR001 | Error | A variant key is declared more than once for the same contract. | Give each `[FeatureVariant]` implementation of a contract a distinct `Variant` name (one default plus unique named variants). |
-| ELVAR003 | Warning | A contract has no default `[FeatureVariant]` implementation (one declared without a `Variant`), so resolution for an unallocated user will fail. | Add one `[FeatureVariant]` implementation with no `Variant` set as the default. |
-| ELVAR004 | Error | A contract is bound to more than one feature; a contract maps to exactly one feature. | Use a single feature name across all `[FeatureVariant]` implementations of a contract. |
+| ELVAR001 | Error | A variant key is declared more than once for the same contract. | Give each implementation of a contract a distinct `Variant`/`Value` (one default plus unique named variants). `[ConfigurationVariant]` values match case-insensitively, so values differing only by case also collide. |
+| ELVAR003 | Warning | A contract has no default implementation (one declared without a `Variant`/`Value`), so resolution when nothing matches will fail. | Add one implementation with no `Variant`/`Value` set as the default. |
+| ELVAR004 | Error | A contract is bound to more than one selector; a contract maps to exactly one feature or configuration key. | Use a single feature name (or configuration key) across all variant implementations of a contract. |
 | ELVAR005 | Warning | A variant service declares a blank feature name. | Pass a non-blank feature name to `[FeatureVariant]`. |
-| ELVAR006 | Error | A generic variant-service implementation is not supported. | Make the `[FeatureVariant]` `[Service]` implementation non-generic (concrete). |
-| ELVAR007 | Error | A variant service is not also annotated with `[Service]`; `[FeatureVariant]` is a modifier on a service registration (the `[Service]` declares the service and its lifetime). | Add `[Service]` alongside `[FeatureVariant]` on the implementation class. |
+| ELVAR006 | Error | A generic variant-service implementation is not supported. | Make the variant `[Service]` implementation non-generic (concrete). |
+| ELVAR007 | Error | A variant service is not also annotated with `[Service]`; `[FeatureVariant]`/`[ConfigurationVariant]` is a modifier on a service registration (the `[Service]` declares the service and its lifetime). | Add `[Service]` alongside the variant attribute on the implementation class. |
+| ELVAR008 | Error | A contract is bound by both `[FeatureVariant]` and `[ConfigurationVariant]`; a contract is selected by exactly one axis. | Pick one axis per contract: per-user feature allocation, or a global configuration value. |
+| ELVAR009 | Warning | A variant service declares a blank configuration key. | Pass a non-blank configuration key to `[ConfigurationVariant]`. |
+| ELVAR010 | Warning | Two variant selectors or values map to the same `ElarionVariants` accessor name (PascalCase collision); the second is omitted from the typed accessors, while every entry remains in the data surfaces (`All`/`ByKey`/…). | Rename one of the colliding selector keys or values so the PascalCased accessors differ. |
 
 ## ELRG — Resource grants
 

@@ -211,6 +211,9 @@ public sealed partial class HandlerRegistrationGenerator {
     // A handler whose constructor injects a variant contract is registered behind the async-resolving proxy so the
     // contract's variant is awaited (per user) before the handler is built. Returns the distinct variant contracts
     // the handler depends on, in constructor-parameter order; empty for the common (no-variant) case.
+    private const string FromKeyedServicesAttributeFqn =
+        "Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute";
+
     private static EquatableArray<string> GetVariantContractDeps(
         INamedTypeSymbol classSymbol,
         HashSet<string>? variantContracts,
@@ -225,6 +228,12 @@ public sealed partial class HandlerRegistrationGenerator {
         ImmutableArray<string>.Builder? builder = null;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var parameter in constructor.Parameters) {
+            // A [FromKeyedServices(...)] parameter pins a specific keyed implementation — DI resolves it
+            // directly, bypassing variant selection — so it must not force the proxy (or warm a switch the
+            // handler never consults; with no default and no allocation that warm would even fail the call).
+            if (IsKeyedServiceParameter(parameter))
+                continue;
+
             var parameterFqn = parameter.Type.ToDisplayString(fmt);
             if (variantContracts.Contains(parameterFqn) && seen.Add(parameterFqn)) {
                 builder ??= ImmutableArray.CreateBuilder<string>();
@@ -233,6 +242,15 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         return builder is null ? EquatableArray<string>.Empty : builder.ToImmutable();
+    }
+
+    private static bool IsKeyedServiceParameter(IParameterSymbol parameter) {
+        foreach (var attribute in parameter.GetAttributes()) {
+            if (attribute.AttributeClass?.ToDisplayString() == FromKeyedServicesAttributeFqn)
+                return true;
+        }
+
+        return false;
     }
 
     // The constructor DI resolves: the public instance constructor with the most parameters (greedy selection).

@@ -24,6 +24,8 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
 
     private const string FeatureVariantAttributeMetadataName =
         "Elarion.Abstractions.Features.FeatureVariantAttribute";
+    private const string ConfigurationVariantAttributeMetadataName =
+        "Elarion.Abstractions.Features.ConfigurationVariantAttribute";
 
     private const string HostedServiceMetadataName =
         "Microsoft.Extensions.Hosting.IHostedService";
@@ -151,10 +153,10 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
 
         var compilation = ctx.SemanticModel.Compilation;
 
-        // A [FeatureVariant] modifies how its [Service] is registered (keyed + transparent contract registration,
-        // emitted by VariantServiceRegistrationGenerator). Skip the plain registration here so the two never
-        // double-register the same contract.
-        if (HasFeatureVariantAttribute(classSymbol, compilation))
+        // A [FeatureVariant]/[ConfigurationVariant] modifies how its [Service] is registered (keyed + transparent
+        // contract registration, emitted by VariantServiceRegistrationGenerator). Skip the plain registration here
+        // so the two never double-register the same contract.
+        if (HasVariantAttribute(classSymbol, compilation))
         {
             return null;
         }
@@ -247,19 +249,24 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         return new ServiceResult(service, ImmutableArray<DiagnosticInfo>.Empty);
     }
 
-    private static bool HasFeatureVariantAttribute(INamedTypeSymbol classSymbol, Compilation compilation)
+    private static bool HasVariantAttribute(INamedTypeSymbol classSymbol, Compilation compilation)
     {
         var featureVariantSymbol = compilation.GetTypeByMetadataName(FeatureVariantAttributeMetadataName);
-        if (featureVariantSymbol is null)
+        var configurationVariantSymbol = compilation.GetTypeByMetadataName(ConfigurationVariantAttributeMetadataName);
+        if (featureVariantSymbol is null && configurationVariantSymbol is null)
         {
             return false;
         }
 
         foreach (var attribute in classSymbol.GetAttributes())
         {
-            // The attribute is the generic FeatureVariantAttribute<TContract>; compare the unbound definition.
-            if (attribute.AttributeClass is { } attributeClass &&
-                SymbolEqualityComparer.Default.Equals(attributeClass.OriginalDefinition, featureVariantSymbol))
+            if (attribute.AttributeClass is not { } attributeClass)
+            {
+                continue;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(attributeClass.OriginalDefinition, featureVariantSymbol) ||
+                SymbolEqualityComparer.Default.Equals(attributeClass.OriginalDefinition, configurationVariantSymbol))
             {
                 return true;
             }

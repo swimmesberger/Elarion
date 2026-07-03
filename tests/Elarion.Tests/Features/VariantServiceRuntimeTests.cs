@@ -4,6 +4,7 @@ using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Pipeline;
 using Elarion.Tests.Authorization;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -98,6 +99,82 @@ public sealed class VariantServiceRuntimeTests {
         (await RunForecastFor("u-B", ct)).Should().Be("linear");
     }
 
+    [Fact]
+    public void ConfigurationVariant_TransparentInjection_SelectsConfiguredImplementation() {
+        using var provider = BuildConfigurationVariantServices(BuildConfiguration("neural")).BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeOfType<NeuralAlgorithm>();
+    }
+
+    [Fact]
+    public void ConfigurationVariant_FallsBackToDefault_WhenKeyAbsentOrValueUnknown() {
+        using var absent = BuildConfigurationVariantServices(BuildConfiguration(null)).BuildServiceProvider();
+        using (var scope = absent.CreateScope()) {
+            scope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeOfType<LinearAlgorithm>();
+        }
+
+        using var unknown = BuildConfigurationVariantServices(BuildConfiguration("does-not-exist")).BuildServiceProvider();
+        using (var scope = unknown.CreateScope()) {
+            scope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeOfType<LinearAlgorithm>();
+        }
+    }
+
+    [Fact]
+    public void ConfigurationVariant_MatchesConfiguredValueCaseInsensitively() {
+        // Variant keys are registered lower-case; a human-typed "NeUrAl" still selects the "neural" variant.
+        using var provider = BuildConfigurationVariantServices(BuildConfiguration("NeUrAl")).BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeOfType<NeuralAlgorithm>();
+    }
+
+    [Fact]
+    public void ConfigurationVariant_NewScopeObservesChangedValue_WhileOpenScopeStaysPinned() {
+        var configuration = BuildConfiguration(null);
+        using var provider = BuildConfigurationVariantServices(configuration).BuildServiceProvider();
+
+        using var firstScope = provider.CreateScope();
+        var initial = firstScope.ServiceProvider.GetRequiredService<IAlgorithm>();
+        initial.Should().BeOfType<LinearAlgorithm>();
+
+        configuration["Forecast:Algorithm"] = "neural";
+
+        // The open scope keeps the implementation it started with (scoped resolution is cached per scope)...
+        firstScope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeSameAs(initial);
+
+        // ...while the next scope observes the changed value — no restart, no re-registration.
+        using var secondScope = provider.CreateScope();
+        secondScope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeOfType<NeuralAlgorithm>();
+    }
+
+    [Fact]
+    public async Task ConfigurationVariantProvider_ImperativeAccess_ResolvesLikeTransparentInjection() {
+        var ct = TestContext.Current.CancellationToken;
+        using var provider = BuildConfigurationVariantServices(BuildConfiguration("neural")).BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var variants = scope.ServiceProvider.GetRequiredService<IVariantServiceProvider<IAlgorithm>>();
+
+        (await variants.GetAsync(ct)).Should().BeOfType<NeuralAlgorithm>();
+    }
+
+    [Fact]
+    public async Task ConfigurationVariant_Throws_WhenNothingMatchesAndNoDefaultRegistered() {
+        var ct = TestContext.Current.CancellationToken;
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(BuildConfiguration(null));
+        services.AddElarionConfigurationVariantService<IAlgorithm>("Forecast:Algorithm", defaultKey: null);
+        services.AddKeyedScoped<IAlgorithm, NeuralAlgorithm>("neural");
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var transparent = () => scope.ServiceProvider.GetRequiredService<IAlgorithm>();
+        transparent.Should().Throw<InvalidOperationException>().WithMessage("*Forecast:Algorithm*");
+
+        var variants = scope.ServiceProvider.GetRequiredService<IVariantServiceProvider<IAlgorithm>>();
+        (await variants.GetOrDefaultAsync(ct)).Should().BeNull();
+    }
+
     private static IVariantServiceProvider<IAlgorithm> ResolveProvider(string userId) {
         var provider = BuildVariantServices(userId).BuildServiceProvider();
         return provider.CreateScope().ServiceProvider.GetRequiredService<IVariantServiceProvider<IAlgorithm>>();
@@ -130,6 +207,24 @@ public sealed class VariantServiceRuntimeTests {
         services.AddKeyedScoped<IAlgorithm, NeuralAlgorithm>("neural");
         services.AddKeyedScoped<IAlgorithm, LinearAlgorithm>(VariantServiceKeys.Default);
         return services;
+    }
+
+    private static ServiceCollection BuildConfigurationVariantServices(IConfiguration configuration) {
+        var services = new ServiceCollection();
+        services.AddSingleton(configuration);
+        services.AddElarionConfigurationVariantService<IAlgorithm>("Forecast:Algorithm");
+        services.AddKeyedScoped<IAlgorithm, NeuralAlgorithm>("neural");
+        services.AddKeyedScoped<IAlgorithm, LinearAlgorithm>(VariantServiceKeys.Default);
+        return services;
+    }
+
+    private static IConfiguration BuildConfiguration(string? algorithm) {
+        var values = new Dictionary<string, string?>();
+        if (algorithm is not null) {
+            values["Forecast:Algorithm"] = algorithm;
+        }
+
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
     }
 
     // Allocates "neural" only to user u-A; everyone else gets no variant (→ default fallback).
