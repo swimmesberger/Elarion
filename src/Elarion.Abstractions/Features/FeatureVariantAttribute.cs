@@ -39,4 +39,12 @@ public sealed class FeatureVariantAttribute(string feature) : Attribute {
     /// <i>default</i> (used when no variant is allocated to the current user).
     /// </summary>
     public string? Variant { get; set; }
+
+    /// <summary>
+    /// Marks this implementation as the default <i>in addition to</i> its <see cref="Variant"/> — a <b>named
+    /// default</b>: it serves users allocated that variant name and every user with no (or an unknown)
+    /// allocation. Useful when the flag backend names the control group explicitly (e.g.
+    /// <c>Variant = "control", IsDefault = true</c>).
+    /// </summary>
+    public bool IsDefault { get; set; }
 }

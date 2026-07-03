@@ -72,6 +72,41 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
+    public void AllowedValuesRequest_EmitsConstantConstructedEnumAttribute()
+    {
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record SetBackendCommand : ICommand {
+                    [AllowedValues("smtp", "office365")]
+                    public required string Backend { get; init; }
+                }
+
+                public sealed class SetBackendHandler : IHandler<SetBackendCommand, Result<string>> {
+                    public ValueTask<Result<string>> HandleAsync(SetBackendCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<string>.Success("ok"));
+                }
+            }
+            """;
+
+        var result = Run(source);
+        var generated = GetGenerated(result, "AppValidatableInfoResolver.g.cs");
+
+        // The params object?[] constructor renders as a constant-constructed array — enforcement of the
+        // declared value set needs no runtime attribute reflection, like every other mapped constraint.
+        generated.Should().Contain("new global::System.ComponentModel.DataAnnotations.AllowedValuesAttribute(");
+        generated.Should().Contain("\"smtp\"");
+        generated.Should().Contain("\"office365\"");
+        generated.Should().NotContain("GetCustomAttributes");
+
+        AssertGeneratedOutputCompiles(source);
+    }
+
+    [Fact]
     public void NestedAnnotatedType_RegistersCarrierAndNestedType()
     {
         // The request itself carries no attribute; only the nested type does. The runtime walker recurses into

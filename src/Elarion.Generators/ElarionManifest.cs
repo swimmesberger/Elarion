@@ -28,6 +28,7 @@ internal static class ElarionManifest
     public const string ResourceFilterKey = "Elarion.Manifest.ResourceFilter.v1";
     public const string PermissionKey = "Elarion.Manifest.Permission.v1";
     public const string RoleKey = "Elarion.Manifest.Role.v1";
+    public const string VariantKey = "Elarion.Manifest.Variant.v1";
 
     // A [RequirePermission(resource, verb)]/[RequireRole] declared by a handler, carried so the host-side
     // ElarionPermissions static can aggregate the permission catalog across referenced module assemblies.
@@ -35,6 +36,21 @@ internal static class ElarionManifest
     public sealed record Permission(string Namespace, string Resource, string Verb);
 
     public sealed record Role(string Namespace, string Value);
+
+    // A [FeatureVariant]/[ConfigurationVariant] implementation's contribution to the variant registry (one per
+    // contract), carried so the host-side ElarionVariants static aggregates switches across referenced
+    // assemblies. Namespace is the implementation's namespace (the static resolves the owning module — or
+    // "platform" for none — by longest prefix); ContractIsPublic gates the aggregating assembly's typeof()
+    // emission (an internal contract still contributes its key/values, but no Type).
+    public sealed record Variant(
+        string Namespace,
+        bool IsConfiguration,
+        string SelectorKey,
+        string ContractFqn,
+        string? Value,
+        bool IsDefault,
+        bool ContractIsPublic
+    );
 
     // A generated [ResourceFilter] data-level authorizer that the host bootstrapper registers as
     // IQueryAuthorizer<TEntity>. The emitted-member contract: a non-shared spec exposes a static
@@ -65,14 +81,15 @@ internal static class ElarionManifest
         IReadOnlyList<RpcMethodEmission.Model> RpcMethods,
         IReadOnlyList<ResourceFilter> ResourceFilters,
         IReadOnlyList<Permission> Permissions,
-        IReadOnlyList<Role> Roles
+        IReadOnlyList<Role> Roles,
+        IReadOnlyList<Variant> Variants
     )
     {
-        public static readonly Data Empty = new([], [], [], [], [], []);
+        public static readonly Data Empty = new([], [], [], [], [], [], []);
 
         public bool HasEntries =>
             Modules.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0 || ResourceFilters.Count > 0
-            || Permissions.Count > 0 || Roles.Count > 0;
+            || Permissions.Count > 0 || Roles.Count > 0 || Variants.Count > 0;
 
         public static Data Combine(IEnumerable<Data> manifests)
         {
@@ -82,6 +99,7 @@ internal static class ElarionManifest
             var resourceFilters = new List<ResourceFilter>();
             var permissions = new List<Permission>();
             var roles = new List<Role>();
+            var variants = new List<Variant>();
 
             foreach (var manifest in manifests)
             {
@@ -91,6 +109,7 @@ internal static class ElarionManifest
                 resourceFilters.AddRange(manifest.ResourceFilters);
                 permissions.AddRange(manifest.Permissions);
                 roles.AddRange(manifest.Roles);
+                variants.AddRange(manifest.Variants);
             }
 
             modules.Sort(static (a, b) =>
@@ -138,7 +157,18 @@ internal static class ElarionManifest
                 return byValue != 0 ? byValue : string.Compare(a.Namespace, b.Namespace, StringComparison.Ordinal);
             });
 
-            return new Data(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles);
+            variants.Sort(static (a, b) =>
+            {
+                var byKey = string.Compare(a.SelectorKey, b.SelectorKey, StringComparison.Ordinal);
+                if (byKey != 0)
+                    return byKey;
+                var byContract = string.Compare(a.ContractFqn, b.ContractFqn, StringComparison.Ordinal);
+                if (byContract != 0)
+                    return byContract;
+                return string.Compare(a.Value, b.Value, StringComparison.Ordinal);
+            });
+
+            return new Data(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles, variants);
         }
     }
 
@@ -215,6 +245,41 @@ internal static class ElarionManifest
             return false;
 
         permission = new Permission(fields[0]!, fields[1]!, fields[2]!);
+        return true;
+    }
+
+    public static string EncodeVariant(Variant variant) =>
+        ElarionManifestCodec.EncodeFields(
+            variant.Namespace,
+            EncodeBool(variant.IsConfiguration),
+            variant.SelectorKey,
+            variant.ContractFqn,
+            variant.Value,
+            EncodeBool(variant.IsDefault),
+            EncodeBool(variant.ContractIsPublic));
+
+    public static bool TryDecodeVariant(string value, out Variant? variant)
+    {
+        variant = null;
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 7)
+            return false;
+        if (fields[0] is null || fields[2] is null || fields[3] is null)
+            return false;
+        if (!TryDecodeBool(fields[1], out var isConfiguration) ||
+            !TryDecodeBool(fields[5], out var isDefault) ||
+            !TryDecodeBool(fields[6], out var contractIsPublic))
+        {
+            return false;
+        }
+
+        variant = new Variant(
+            fields[0]!,
+            isConfiguration,
+            fields[2]!,
+            fields[3]!,
+            fields[4],
+            isDefault,
+            contractIsPublic);
         return true;
     }
 
@@ -467,6 +532,7 @@ internal static class ElarionManifestReader
         var resourceFilters = new List<ElarionManifest.ResourceFilter>();
         var permissions = new List<ElarionManifest.Permission>();
         var roles = new List<ElarionManifest.Role>();
+        var variants = new List<ElarionManifest.Variant>();
 
         var entries = AssemblyMetadataReader.ReadRawEntries(reference, ct);
 
@@ -500,10 +566,10 @@ internal static class ElarionManifestReader
         }
 
         foreach (var (key, value) in entries)
-            AddEntry(key, value, modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles);
+            AddEntry(key, value, modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles, variants);
 
         return new ManifestReadResult(
-            CreateData(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles),
+            CreateData(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles, variants),
             null);
     }
 
@@ -513,7 +579,8 @@ internal static class ElarionManifestReader
             or ElarionManifest.RpcMethodKey
             or ElarionManifest.ResourceFilterKey
             or ElarionManifest.PermissionKey
-            or ElarionManifest.RoleKey;
+            or ElarionManifest.RoleKey
+            or ElarionManifest.VariantKey;
 
     private static string DescribeReference(MetadataReference reference)
     {
@@ -529,9 +596,10 @@ internal static class ElarionManifestReader
         List<RpcMethodEmission.Model> rpcMethods,
         List<ElarionManifest.ResourceFilter> resourceFilters,
         List<ElarionManifest.Permission> permissions,
-        List<ElarionManifest.Role> roles) =>
+        List<ElarionManifest.Role> roles,
+        List<ElarionManifest.Variant> variants) =>
         ElarionManifest.Data.Combine(
-            [new ElarionManifest.Data(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles)]);
+            [new ElarionManifest.Data(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles, variants)]);
 
     private static void AddEntry(
         string key,
@@ -541,7 +609,8 @@ internal static class ElarionManifestReader
         List<RpcMethodEmission.Model> rpcMethods,
         List<ElarionManifest.ResourceFilter> resourceFilters,
         List<ElarionManifest.Permission> permissions,
-        List<ElarionManifest.Role> roles)
+        List<ElarionManifest.Role> roles,
+        List<ElarionManifest.Variant> variants)
     {
         switch (key)
         {
@@ -570,6 +639,10 @@ internal static class ElarionManifestReader
             case ElarionManifest.RoleKey:
                 if (ElarionManifest.TryDecodeRole(value, out var role) && role is not null)
                     roles.Add(role);
+                break;
+            case ElarionManifest.VariantKey:
+                if (ElarionManifest.TryDecodeVariant(value, out var variant) && variant is not null)
+                    variants.Add(variant);
                 break;
         }
     }

@@ -128,7 +128,8 @@ public static class JsonRpcSchemaExporter {
     /// Injects JSON Schema validation keywords from a property's
     /// <c>System.ComponentModel.DataAnnotations</c> attributes, mirroring
     /// <c>Microsoft.AspNetCore.OpenApi</c>'s attribute→keyword mapping (plus
-    /// <see cref="EmailAddressAttribute"/> → <c>format: "email"</c>) so the JSON-RPC schema, the MCP tool input
+    /// <see cref="EmailAddressAttribute"/> → <c>format: "email"</c> and
+    /// <see cref="AllowedValuesAttribute"/> → <c>enum</c>) so the JSON-RPC schema, the MCP tool input
     /// schemas, and the OpenAPI document agree on the same declared constraints (ADR-0027). Attributes apply in
     /// declaration order with last-wins on duplicate keywords, matching Microsoft. Reads the attributes
     /// reflectively — appropriate for this build-time exporter.
@@ -176,10 +177,44 @@ public static class JsonRpcSchemaExporter {
                 case Base64StringAttribute:
                     obj["format"] = "byte";
                     break;
+                case AllowedValuesAttribute allowedValues:
+                    obj["enum"] = CreateEnumArray(allowedValues.Values);
+                    break;
             }
         }
 
         return schema;
+    }
+
+    /// <summary>
+    /// Converts <see cref="AllowedValuesAttribute"/> values — compile-time constants: strings, numbers,
+    /// booleans, or <c>null</c> — to a JSON Schema <c>enum</c> array, preserving declaration order. The
+    /// generated TypeScript client maps the keyword to <c>z.enum</c>/literal unions, so a declared value set
+    /// (e.g. a configuration-variant vocabulary) pre-validates client-side like every other constraint.
+    /// </summary>
+    private static JsonArray CreateEnumArray(IReadOnlyList<object?> values) {
+        var array = new JsonArray();
+        foreach (var value in values) {
+            // The statically-typed local keeps overload resolution on the primitive-safe Add(JsonNode?) —
+            // the generic Add<T> is RequiresDynamicCode and would break the IsAotCompatible contract.
+            JsonNode? node = value switch {
+                null => null,
+                string text => JsonValue.Create(text),
+                bool flag => JsonValue.Create(flag),
+                int number => JsonValue.Create(number),
+                long number => JsonValue.Create(number),
+                short number => JsonValue.Create(number),
+                byte number => JsonValue.Create(number),
+                double number => JsonValue.Create(number),
+                float number => JsonValue.Create(number),
+                decimal number => JsonValue.Create(number),
+                char character => JsonValue.Create(character.ToString()),
+                _ => JsonValue.Create(Convert.ToString(value, CultureInfo.InvariantCulture)),
+            };
+            array.Add(node);
+        }
+
+        return array;
     }
 
     private static void ApplyRange(JsonObject schema, RangeAttribute range) {

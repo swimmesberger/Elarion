@@ -58,6 +58,12 @@ are enforced (and reported) too. The supported vocabulary is the set every schem
 | `[EmailAddress]` | email shape | `format: "email"` |
 | `[Url]` | absolute URL | `format: "uri"` |
 | `[Base64String]` | base64 content | `format: "byte"` |
+| `[AllowedValues(...)]` | value ∈ the declared set | `enum` |
+
+`[AllowedValues]` pairs naturally with the generated variant registry: declare a switch's vocabulary once
+(`[AllowedValues(ElarionVariants.EmailBackend.Smtp, ElarionVariants.EmailBackend.Office365)]`) and the 400,
+the schema `enum`, the OpenAPI document, and the TypeScript client's `z.enum(...)` all follow — see
+[Feature flags](/docs/concepts/feature-flags#the-variant-registry).
 
 ### Custom constraints
 

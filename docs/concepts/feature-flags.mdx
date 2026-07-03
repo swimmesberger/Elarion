@@ -173,9 +173,193 @@ surface its name, so variant injection is unavailable through the `AddElarionFea
 `[FeatureGate]` is unaffected). See [ADR-0019](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0019-variant-service-injection.md).
 </Callout>
 
+## Configuration-selected variants
+
+`[FeatureVariant]` selects per *user* — the answer can differ per request, so it is evaluated per scope and
+awaited. When the selection is a **process-global choice an admin or operator makes** — "which e-mail backend
+are we using?" — that machinery is pure overhead: the answer changes on a configuration edit, not per caller.
+Declare the selection axis instead with `[ConfigurationVariant]`, and a plain configuration value picks the
+implementation:
+
+```csharp
+[Service]
+[ConfigurationVariant("Email:Backend", Value = "smtp", IsDefault = true)]   // the named default
+public sealed class SmtpEmailSender : IEmailSender { /* ... */ }
+
+[Service]
+[ConfigurationVariant("Email:Backend", Value = "office365")]
+public sealed class Office365EmailSender : IEmailSender { /* ... */ }
+
+public sealed class SendInvoice(IEmailSender sender)         // still no variant awareness
+    : IHandler<SendInvoice.Command, Result<Unit>> { /* ... */ }
+```
+
+A **named default** (`Value` + `IsDefault = true`) is both the fallback *and* explicitly selectable by its
+value — so the default state has a writable name (an admin switches back to SMTP by writing `"smtp"`, not by
+removing the key), and the switch's whole vocabulary is declared. Prefer it for admin-facing switches; a
+default with no `Value` still works and simply has no selectable name.
+
+Because the configuration read is synchronous, there is **no async-resolving proxy and no per-scope warm-up**:
+the contract is injectable anywhere (handlers, services, across assemblies), each new DI scope observes the
+current value, and work already in flight keeps the implementation it started with. The configured value is
+matched case-insensitively; an absent key or a value matching no variant resolves the default implementation. A
+contract is selected by exactly one axis — mixing `[FeatureVariant]` and `[ConfigurationVariant]` on one
+contract is rejected (`ELVAR008`).
+
+Any configuration provider drives the switch, which is the point — the attribute knows nothing about where the
+value comes from:
+
+- **`appsettings.json`** — pinned per deployment; with `reloadOnChange`, an ops edit switches at run time.
+- **Environment variables** — a per-environment choice.
+- **The settings bridge** — `AddElarionSettingsConfiguration()` surfaces the runtime
+  [settings store](/docs/concepts/settings) as live configuration, so an admin writes
+  `Email:Backend = office365` through the settings API and (with `AddElarionPostgreSqlSettingsChanges`) the next
+  scope on **every node** resolves `Office365EmailSender` — no restart, and no feature-flag provider involved.
+
+## Feature-selected or configuration-selected?
+
+The two attributes are the same substrate — keyed implementations, a default, transparent injection — with
+different **selection axes**, and the differences follow from one fact: a feature variant's answer can differ
+per caller, a configuration variant's cannot.
+
+| | `[FeatureVariant]` | `[ConfigurationVariant]` |
+| --- | --- | --- |
+| **Selected by** | *who is asking* — the flag backend's per-user allocation | *what is configured* — one `IConfiguration` value |
+| **Answer varies** | per user / per request | per process, until the value changes |
+| **Evaluation** | async, once per DI scope — the handler is wrapped in an async-resolving proxy that warms a per-scope cache | a synchronous configuration read at resolution — no proxy, no warm-up, no per-scope cache |
+| **Inject the contract** | transparently in handlers (same compilation); elsewhere use `IVariantServiceProvider<T>` | anywhere — any service, any assembly |
+| **Requires** | an OpenFeature provider that surfaces variant names (flagd, ConfigCat, LaunchDarkly, …) | nothing beyond `IConfiguration`; add the [settings bridge](/docs/concepts/settings) for admin-writable runtime switching |
+| **A switch takes effect** | on the next scope, once the provider re-allocates | on the next scope after the value changes — cluster-wide with `AddElarionPostgreSqlSettingsChanges` |
+| **Reach for it when** | A/B experiments, gradual rollouts, per-user/percentage targeting | admin- or ops-chosen backends, environment-shaped choices, kill-switch-style implementation swaps |
+
+The decision rule: ask **who decides the answer**. If two concurrent requests could legitimately get
+*different* implementations, that is per-caller selection — `[FeatureVariant]`. If there is one answer for
+the whole process, that is configuration — `[ConfigurationVariant]`.
+
+<Callout type="info">
+**When in doubt, start configuration-selected.** It is the smaller machine — no flag provider to run, no
+async proxy, injectable anywhere — and an admin-writable switch already covers most "we might want to change
+this later" needs. If a switch later turns out to need per-user allocation, the migration is confined to the
+implementation classes' attributes (handler consumers are untouched; consumers outside handlers move to
+`IVariantServiceProvider<T>`).
+</Callout>
+
+## The variant registry
+
+The generator already knows every switch you ship — its key, its value vocabulary, its default, its owning
+module — so it also emits that knowledge as the **`ElarionVariants` registry** (triggered by
+`[assembly: UseElarion]` or `[assembly: GenerateVariantCatalog]`), the variant analog of `ElarionPermissions`:
+one accessor class per switch with `const string` values, plus `VariantDescriptor` data, **aggregated across
+referenced assemblies** from the Elarion manifest — so the host's registry is the complete menu:
+
+```csharp
+// generated into the assembly root namespace
+ElarionVariants.EmailBackend.Key        // "Email:Backend"
+ElarionVariants.EmailBackend.Smtp       // "smtp"   — consts, usable in attributes
+ElarionVariants.EmailBackend.Office365  // "office365"
+ElarionVariants.All                     // every VariantDescriptor (axis, key, values, default, contract, module)
+ElarionVariants.ByKey / ByModule / Platform
+```
+
+The host seeds runtime consumers **explicitly** — the generator registers nothing in DI:
+
+```csharp
+builder.Services.AddElarionVariantCatalog(ElarionVariants.All);   // IVariantCatalog for handlers/UI
+builder.Services.AddElarionVariantValidation();                   // startup + reload validation (see below)
+```
+
+`AddElarionVariantValidation()` checks, at startup and again on every configuration reload, that each
+configuration-selected switch's current value is one the registry offers (an unknown value otherwise falls
+back to the default *silently* — the fallback keeps requests serving; the validator makes the mismatch loud),
+and that each **platform** switch's contract actually resolves from DI (catching a forgotten host wiring call
+at boot). `Strict = true` fails startup on findings instead of warning.
+
+Because adding a variant implementation *is* the declaration, the write-DTO allowed set, the admin dropdown
+data, the exported schema `enum`, the client-side validation, and the startup checks all follow with **zero
+central edits** — `[AllowedValues(...)]` is exported as the JSON Schema `enum` keyword to the JSON-RPC schema,
+MCP tool schemas, and the OpenAPI document, and the generated TypeScript client turns it into `z.enum(...)`
+with string-union types (see [Validation](/docs/concepts/validation)).
+
+## Who owns the switch
+
+Variant implementations often live in the **infrastructure** project — the adapter half of the port/adapter
+pattern, under no module. That is first-class: such descriptors carry `Module = null` and group under
+`ElarionVariants.Platform`; the host wires them with the generated per-contract call
+(`builder.Services.AddIEmailSenderVariantService()`). It also raises the real design question: **who owns the
+switch's vocabulary?** Three patterns, all of which keep the application in charge of its own settings APIs:
+
+| Pattern | Menu owner | Consumers use | Best for |
+| --- | --- | --- | --- |
+| **Module variant** | the module's own declarations — registry consts *are* the vocabulary | `ElarionVariants.X.Y` consts, `[AllowedValues]` | in-app strategies (a forecast algorithm) |
+| **Port-owned vocabulary** ⭐ recommended | app-declared consts beside the port; adapters reference them | the same app consts in DTOs and attributes | product-meaningful choices the app's UX presents |
+| **Platform offering** | infrastructure declarations; the host aggregates | `IVariantCatalog` — host-seeded *data*, no symbols | ops-flavored parameters, generic settings consoles |
+
+<Callout type="info">
+**The happy path: declare the menu where the port lives.** For an in-module strategy there is nothing to
+decide — the module's declarations are the vocabulary. For a switchable adapter, default to **port-owned
+vocabulary**: the port already owns the interface, so it owns the menu, and one set of consts then feeds the
+adapters' attributes, the admin DTO's `[AllowedValues]`, the 400s, every exported schema's `enum`, the
+generated client's `z.enum`, and the registry — convention over configuration, end to end. Reach for the
+**platform offering** pattern only when you genuinely want zero per-switch code (a generic settings console)
+or the application must not know the choices exist.
+</Callout>
+
+**Port-owned vocabulary** resolves the layering constraint head-on: the application cannot reference
+infrastructure, so when it wants to *name* the choices (typed DTOs, schema enums), it declares the consts
+beside the port and the adapters reference them — the dependency direction that works:
+
+```csharp
+// Application — the port owns the menu, so the application owns the API
+public static class EmailBackends {
+    public const string Key = "Email:Backend";
+    public const string Smtp = "smtp";
+    public const string Office365 = "office365";
+}
+
+public sealed record ConfigureEmailCommand : ICommand {
+    [AllowedValues(EmailBackends.Smtp, EmailBackends.Office365)]   // 400 + schema enum + client z.enum
+    public required string Backend { get; init; }
+}
+
+// Infrastructure — adapters implement the menu
+[Service]
+[ConfigurationVariant(EmailBackends.Key, Value = EmailBackends.Smtp, IsDefault = true)]
+public sealed class SmtpEmailSender : IEmailSender { /* ... */ }
+```
+
+**Platform offering** covers switches the application handles *without* naming them: the host seeds the
+catalog, and an application handler validates against "what the platform offers" at runtime — its own route,
+DTO, authorization, and audit, with zero per-switch code:
+
+```csharp
+[Handler("admin.platform.setSwitch")]
+[RequirePermission("settings", Verbs.Update)]
+public sealed class SetPlatformSwitch(IVariantCatalog catalog, ISettingsManager settings)
+    : IHandler<SetPlatformSwitchCommand> {
+    public async ValueTask<Result> HandleAsync(SetPlatformSwitchCommand command, CancellationToken ct) {
+        var descriptors = catalog.FindByKey(command.Key);
+        if (descriptors.Count == 0)
+            return AppError.NotFound($"No switch '{command.Key}' is offered.");
+        if (!descriptors[0].Values.Contains(command.Value.ToLowerInvariant()))
+            return AppError.Validation($"'{command.Value}' is not offered for '{command.Key}'.");
+
+        await settings.SetStringAsync(command.Key, command.Value, cancellationToken: ct);
+        return Result.Success();
+    }
+}
+```
+
+The tradeoff between the last two is compile-time versus runtime knowledge: port-owned vocabularies buy typed
+DTOs, schema-exported enums, and client-side pre-validation at the cost of the application updating its consts
+when the menu grows; the platform offering buys zero-per-switch generality at the cost of dynamic-only
+validation (the values reach the UI through an enumerate call, not the schema). Elarion deliberately ships
+**no admin endpoint** — the registry is data handed to your code, which decides how it is exposed.
+
 ## See also
 
 - [ADR-0016: Feature-flag gating](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0016-feature-flag-gating.md) — why a thin Elarion seam over OpenFeature rather than `IFeatureManager` directly.
 - [ADR-0019: Variant service injection](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0019-variant-service-injection.md) — transparent per-variant implementation injection via the async-resolving handler proxy.
+- [ADR-0028: Configuration-selected service variants](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0028-configuration-selected-service-variants.md) — the synchronous, proxy-free `[ConfigurationVariant]` axis and why it reads `IConfiguration` rather than the settings API or `IOptionsMonitor`.
+- [ADR-0029: The variant registry](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0029-variant-registry-and-catalog.md) — `ElarionVariants`, named defaults, the host-seeded `IVariantCatalog`, the validation worker, and the switch-ownership patterns.
 - [Decorator pipelines](/docs/concepts/decorator-pipelines) — how the gate composes with authorization, caching, and resilience.
 - [Authorization](/docs/concepts/authorization) — the sibling declarative gate the feature gate is modeled on.

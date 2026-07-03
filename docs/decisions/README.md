@@ -48,3 +48,5 @@ designs that are not yet implemented.
 - [ADR-0025: Cross-instance scheduler coordination (per-occurrence claims over EF Core/PostgreSQL)](0025-distributed-scheduler-coordination.md)
 - [ADR-0026: OpenAPI for the HTTP transport](0026-openapi-http-transport.md)
 - [ADR-0027: Declarative request validation (DataAnnotations exported to every contract surface; business rules in the handler)](0027-declarative-request-validation.md)
+- [ADR-0028: Configuration-selected service variants (`[ConfigurationVariant]` — synchronous, proxy-free sibling of `[FeatureVariant]`)](0028-configuration-selected-service-variants.md)
+- [ADR-0029: The variant registry (`ElarionVariants`), named defaults, and the host-seeded catalog](0029-variant-registry-and-catalog.md)

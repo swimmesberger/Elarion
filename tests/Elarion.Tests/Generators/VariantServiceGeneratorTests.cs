@@ -203,10 +203,236 @@ public sealed class VariantServiceGeneratorTests {
         AllGenerated(result).Should().NotContain("AddElarionVariantService<global::Sample.App.IAlgorithm>");
     }
 
+    private const string EmailDefs =
+        """
+
+        namespace Sample.Mail {
+            [AppModule("Mail")] public static class MailModule { }
+            public interface IEmailSender { }
+            [Service]
+            [ConfigurationVariant("Email:Backend")]
+            public sealed class SmtpEmailSender : IEmailSender { }
+            [Service]
+            [ConfigurationVariant("Email:Backend", Value = "Office365")]
+            public sealed class Office365EmailSender : IEmailSender { }
+        }
+        """;
+
+    [Fact]
+    public void ConfigurationVariant_EmitsConfigurationRegistration_WithLowercasedKeys() {
+        var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), Preamble + EmailDefs);
+
+        diagnostics.Any(d => d.Id.StartsWith("ELVAR")).Should().BeFalse();
+        var generated = AllGenerated(result);
+        generated.Should().Contain("AddElarionConfigurationVariantService<global::Sample.Mail.IEmailSender>");
+        generated.Should().Contain("\"Email:Backend\"");
+        // The declared Value is lower-cased at emit time so the runtime's lowered configured value matches it.
+        generated.Should().Contain("\"office365\"");
+        generated.Should().NotContain("\"Office365\"");
+        generated.Should().Contain("typeof(global::Sample.Mail.Office365EmailSender)");
+        generated.Should().Contain("global::Elarion.Abstractions.Features.VariantServiceKeys.Default");
+        // The configuration axis never registers through the feature-selected API.
+        generated.Should().NotContain("AddElarionVariantService<global::Sample.Mail.IEmailSender>");
+    }
+
+    [Fact]
+    public void HandlerInjectingConfigurationVariantContract_KeepsSynchronousRegistration() {
+        // Configuration-selected variants resolve synchronously (a configuration read), so the handler must not
+        // pay the async-resolving proxy the feature axis needs.
+        var source = Preamble + EmailDefs +
+            """
+
+            namespace Sample.Mail {
+                public sealed record SendCommand(int Id) : ICommand;
+
+                public sealed class SendEmail(IEmailSender sender) : IHandler<SendCommand, Result<string>> {
+                    public ValueTask<Result<string>> HandleAsync(SendCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<string>.Success("sent"));
+                }
+            }
+            """;
+
+        var (result, _) = Run(new HandlerRegistrationGenerator(), source);
+
+        GetGenerated(result, "Sample_Mail_SendEmail.g.cs").Should().NotContain("AsyncResolvedHandler");
+    }
+
+    [Fact]
+    public void ServiceGenerator_SkipsPlainRegistration_ForConfigurationVariantClass() {
+        var (result, _) = Run(new ModuleServiceRegistrationGenerator(), Preamble + EmailDefs);
+
+        var generated = AllGenerated(result);
+        generated.Should().NotContain("SmtpEmailSenderServiceRegistration");
+        generated.Should().NotContain("Office365EmailSenderServiceRegistration");
+    }
+
+    [Fact]
+    public void ReportsElvar008_AndSuppressesEmission_WhenContractMixesSelectionAxes() {
+        var source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")] public static class AppModule { }
+                public interface IAlgorithm { }
+                [Service]
+                [FeatureVariant("ForecastAlgorithm")]
+                public sealed class LinearAlgo : IAlgorithm { }
+                [Service]
+                [ConfigurationVariant("Forecast:Algorithm", Value = "neural")]
+                public sealed class NeuralAlgo : IAlgorithm { }
+            }
+            """;
+
+        var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Any(d => d.Id == "ELVAR008" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+        // The mixed contract is not emitted with an arbitrarily-picked axis.
+        AllGenerated(result).Should().NotContain("VariantService<global::Sample.App.IAlgorithm>");
+    }
+
+    [Fact]
+    public void ReportsElvar009_WhenConfigurationKeyIsBlank() {
+        var source = Preamble +
+            """
+
+            namespace Sample.Mail {
+                [AppModule("Mail")] public static class MailModule { }
+                public interface IEmailSender { }
+                [Service]
+                [ConfigurationVariant("  ")]
+                public sealed class SmtpEmailSender : IEmailSender { }
+            }
+            """;
+
+        var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Any(d => d.Id == "ELVAR009" && d.Severity == DiagnosticSeverity.Warning).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ReportsElvar001_WhenConfigurationValuesDifferOnlyByCase() {
+        // Configuration values match case-insensitively, so two variants distinguished only by case collide.
+        var source = Preamble +
+            """
+
+            namespace Sample.Mail {
+                [AppModule("Mail")] public static class MailModule { }
+                public interface IEmailSender { }
+                [Service]
+                [ConfigurationVariant("Email:Backend", Value = "office365")]
+                public sealed class GraphEmailSender : IEmailSender { }
+                [Service]
+                [ConfigurationVariant("Email:Backend", Value = "OFFICE365")]
+                public sealed class LegacyEmailSender : IEmailSender { }
+            }
+            """;
+
+        var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Any(d => d.Id == "ELVAR001" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ReportsElvar003_WhenNoDefaultConfigurationVariant() {
+        var source = Preamble +
+            """
+
+            namespace Sample.Mail {
+                [AppModule("Mail")] public static class MailModule { }
+                public interface IEmailSender { }
+                [Service]
+                [ConfigurationVariant("Email:Backend", Value = "office365")]
+                public sealed class Office365EmailSender : IEmailSender { }
+            }
+            """;
+
+        var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Any(d => d.Id == "ELVAR003" && d.Severity == DiagnosticSeverity.Warning).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ReportsElvar007_WhenConfigurationVariantIsNotAService() {
+        var source = Preamble +
+            """
+
+            namespace Sample.Mail {
+                [AppModule("Mail")] public static class MailModule { }
+                public interface IEmailSender { }
+                [ConfigurationVariant("Email:Backend")]
+                public sealed class SmtpEmailSender : IEmailSender { }
+            }
+            """;
+
+        var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Any(d => d.Id == "ELVAR007" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+    }
+
+    [Fact]
+    public void NamedDefault_RegistersUnderItsValue_AndBecomesTheDefaultKey() {
+        var source = Preamble +
+            """
+
+            namespace Sample.Mail {
+                [AppModule("Mail")] public static class MailModule { }
+                public interface IEmailSender { }
+                [Service]
+                [ConfigurationVariant("Email:Backend", Value = "smtp", IsDefault = true)]
+                public sealed class SmtpEmailSender : IEmailSender { }
+                [Service]
+                [ConfigurationVariant("Email:Backend", Value = "office365")]
+                public sealed class Office365EmailSender : IEmailSender { }
+            }
+            """;
+
+        var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Any(d => d.Id.StartsWith("ELVAR")).Should().BeFalse();
+        var generated = AllGenerated(result);
+        generated.Should().Contain(
+            "AddElarionConfigurationVariantService<global::Sample.Mail.IEmailSender>(services, \"Email:Backend\", \"smtp\")");
+        // A named default is keyed under its own value; the collision-proof sentinel never appears.
+        generated.Should().NotContain("VariantServiceKeys.Default");
+    }
+
+    [Fact]
+    public void ReportsElvar001_WhenTwoDefaultsAreDeclared() {
+        var source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")] public static class AppModule { }
+                public interface IAlgorithm { }
+                [Service]
+                [FeatureVariant("ForecastAlgorithm")]
+                public sealed class LinearAlgo : IAlgorithm { }
+                [Service]
+                [FeatureVariant("ForecastAlgorithm", Variant = "neural", IsDefault = true)]
+                public sealed class NeuralAlgo : IAlgorithm { }
+            }
+            """;
+
+        var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Any(d => d.Id == "ELVAR001" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+        AllGenerated(result).Should().NotContain("AddElarionVariantService<global::Sample.App.IAlgorithm>");
+    }
+
+    [Fact]
+    public void ModuleAggregation_IncludesConfigurationVariantContracts() {
+        var (result, _) = Run(new VariantServiceRegistrationGenerator(), Preamble + EmailDefs);
+
+        var aggregation = GetGenerated(result, "MailVariantServiceExtensions.g.cs");
+        aggregation.Should().Contain("AddMailVariantServices");
+        aggregation.Should().Contain("VariantService(services);");
+    }
+
     [Fact]
     public void IrrelevantEditReusesVariantPipeline() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
-            new VariantServiceRegistrationGenerator(), Preamble + AlgorithmDefs, "VariantServices");
+            new VariantServiceRegistrationGenerator(), Preamble + AlgorithmDefs + EmailDefs,
+            "VariantServices", "ConfigurationVariantServices");
     }
 
     private static (GeneratorDriverRunResult Result, IReadOnlyList<Diagnostic> Diagnostics) Run(

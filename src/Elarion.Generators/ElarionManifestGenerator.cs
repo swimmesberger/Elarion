@@ -76,15 +76,33 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             .Select(static (guard, _) => guard!)
             .Collect();
 
+        var featureVariants = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                VariantDiscovery.FeatureVariantAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => VariantDiscovery.CreateVariants(ctx, isConfiguration: false))
+            .Collect();
+
+        var configurationVariants = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                VariantDiscovery.ConfigurationVariantAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => VariantDiscovery.CreateVariants(ctx, isConfiguration: true))
+            .Collect();
+
         var combined = modules.Combine(httpEndpoints).Combine(rpcMethods).Combine(resourceFilters)
-            .Combine(permissions).Combine(roles);
+            .Combine(permissions).Combine(roles).Combine(featureVariants).Combine(configurationVariants);
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var (((((moduleEntries, httpEndpointEntries), rpcMethodEntries), resourceFilterEntries), permissionGuards), roleGuards) = source;
+            var (((((((moduleEntries, httpEndpointEntries), rpcMethodEntries), resourceFilterEntries), permissionGuards), roleGuards), featureVariantGroups), configurationVariantGroups) = source;
             EmitManifest(
-                spc, moduleEntries, httpEndpointEntries, rpcMethodEntries, resourceFilterEntries, permissionGuards, roleGuards);
+                spc, moduleEntries, httpEndpointEntries, rpcMethodEntries, resourceFilterEntries, permissionGuards,
+                roleGuards, featureVariantGroups.AddRange(configurationVariantGroups));
         });
     }
+
+    // Variant discovery (one manifest entry per service contract) is shared with the variant-catalog
+    // generator via VariantDiscovery, so the manifest and the registry cannot drift.
 
     private static ElarionManifest.ResourceFilter? CreateResourceFilter(GeneratorAttributeSyntaxContext ctx)
     {
@@ -211,7 +229,8 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         ImmutableArray<ManifestItem<RpcMethodEmission.Model>> rpcMethodItems,
         ImmutableArray<ElarionManifest.ResourceFilter> resourceFilters,
         ImmutableArray<PermissionDiscovery.PermissionGuard> permissionGuards,
-        ImmutableArray<PermissionDiscovery.RoleGuard> roleGuards)
+        ImmutableArray<PermissionDiscovery.RoleGuard> roleGuards,
+        ImmutableArray<EquatableArray<ElarionManifest.Variant>> variantGroups)
     {
         foreach (var item in httpEndpointItems)
         {
@@ -253,8 +272,19 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             .ThenBy(static r => r.Namespace, StringComparer.Ordinal)
             .ToArray();
 
+        var variantSet = new HashSet<ElarionManifest.Variant>();
+        foreach (var group in variantGroups)
+        foreach (var variant in group)
+            variantSet.Add(variant);
+        var variants = variantSet
+            .OrderBy(static v => v.SelectorKey, StringComparer.Ordinal)
+            .ThenBy(static v => v.ContractFqn, StringComparer.Ordinal)
+            .ThenBy(static v => v.Value, StringComparer.Ordinal)
+            .ThenBy(static v => v.Namespace, StringComparer.Ordinal)
+            .ToArray();
+
         if (modules.Length == 0 && httpEndpoints.Length == 0 && rpcMethods.Length == 0 && resourceFilters.Length == 0
-            && permissions.Length == 0 && roles.Length == 0)
+            && permissions.Length == 0 && roles.Length == 0 && variants.Length == 0)
             return;
 
         var sb = new StringBuilder();
@@ -297,6 +327,11 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         foreach (var role in roles)
         {
             AppendAssemblyMetadata(sb, ElarionManifest.RoleKey, ElarionManifest.EncodeRole(role));
+        }
+
+        foreach (var variant in variants)
+        {
+            AppendAssemblyMetadata(sb, ElarionManifest.VariantKey, ElarionManifest.EncodeVariant(variant));
         }
 
         spc.AddSource("ElarionManifest.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));

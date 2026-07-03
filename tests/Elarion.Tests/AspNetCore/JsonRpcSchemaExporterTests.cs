@@ -109,6 +109,11 @@ public sealed class JsonRpcSchemaExporterTests {
         // [EmailAddress] → format: "email".
         properties.GetProperty("email").GetProperty("format").GetString().Should().Be("email");
 
+        // [AllowedValues] → enum, in declaration order (a configuration-variant vocabulary, backend names, …).
+        var backend = properties.GetProperty("backend");
+        backend.GetProperty("enum").EnumerateArray().Select(static value => value.GetString())
+            .Should().Equal("smtp", "office365");
+
         // [MaxLength] on an array schema becomes maxItems, never maxLength.
         var tags = properties.GetProperty("tags");
         tags.GetProperty("maxItems").GetInt32().Should().Be(10);
@@ -118,7 +123,7 @@ public sealed class JsonRpcSchemaExporterTests {
         var untouched = properties.GetProperty("untouched");
         string[] constraintKeywords = [
             "minLength", "maxLength", "minItems", "maxItems", "pattern", "format",
-            "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+            "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum",
         ];
         foreach (var keyword in constraintKeywords) {
             untouched.TryGetProperty(keyword, out _).Should().BeFalse();
@@ -147,6 +152,9 @@ public sealed class JsonRpcSchemaExporterTests {
 
         [EmailAddress]
         public required string Email { get; init; }
+
+        [AllowedValues("smtp", "office365")]
+        public required string Backend { get; init; }
 
         [MaxLength(10)]
         public required IReadOnlyList<string> Tags { get; init; }

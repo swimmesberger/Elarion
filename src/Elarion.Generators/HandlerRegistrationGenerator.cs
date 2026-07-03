@@ -21,9 +21,12 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
         // [Require*]/[FeatureGate] on base classes — which must stay fresh rather than cached against a stale
         // tree. Its cost is bounded by the number of actual handlers, and its value-equatable output keeps
         // emission cached when no handler model changed.
-        // The set of variant contracts ([FeatureVariant<TContract>] targets) in the compilation. A handler whose
+        // The set of feature-variant contracts ([FeatureVariant] targets) in the compilation. A handler whose
         // constructor depends on one is registered behind the async-resolving proxy, so the contract's variant can
-        // be awaited per user. Collected via the attribute syntax provider so it stays incremental.
+        // be awaited per user. Deliberately excludes [ConfigurationVariant] contracts: their selection is a
+        // synchronous configuration read, so their transparent registration resolves in ordinary construction and
+        // the handler keeps the plain synchronous registration. Collected via the attribute syntax provider so it
+        // stays incremental.
         var variantContracts = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 FeatureVariantAttributeMetadataName,
