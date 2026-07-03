@@ -106,13 +106,19 @@ export function generateRpcClientFiles(
     idempotentMethods,
   })
 
-  // The client-capability snapshot client + OpenFeature provider (ADR-0020) is emitted only when the host exposes
-  // the session operation, so a schema without it produces byte-identical output.
+  // The client-capability snapshot client + OpenFeature provider (ADR-0030) is emitted only when the host exposes
+  // the session operation, so a schema without it produces byte-identical output. The schema's optional
+  // `capabilities` vocabulary (ADR-0032) turns the emitted module/flag/permission/role names into typed constants.
   const sessionOperationName = options.sessionOperationName ?? DEFAULT_SESSION_OPERATION
   const sessionClientFileName = options.sessionClientFileName ?? DEFAULT_SESSION_CLIENT_FILE
   const hasSession = Object.prototype.hasOwnProperty.call(schema.methods, sessionOperationName)
   const sessionClientSource = hasSession
-    ? generateSessionClientSource({ generatedBy, sourceLabel, operationName: sessionOperationName })
+    ? generateSessionClientSource({
+        generatedBy,
+        sourceLabel,
+        operationName: sessionOperationName,
+        capabilities: schema.capabilities,
+      })
     : undefined
 
   return {

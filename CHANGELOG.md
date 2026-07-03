@@ -23,6 +23,18 @@ minor releases may include breaking changes.
   **OpenFeature web-SDK provider** hydrated from one snapshot when the schema exposes `elarion.session`. See
   [ADR-0030](docs/decisions/0030-client-capability-bootstrap.md) and
   [the client-capabilities concept doc](docs/concepts/client-capabilities.mdx).
+- **Typed capability vocabulary in the exported schema (ADR-0032).** `JsonRpcSchemaExporter.Generate` accepts an
+  optional `JsonRpcSchemaExportOptions` and emits a `capabilities` block — enabled modules with their
+  `[ClientFeatures]` names, the structured permission catalog (`{permission,resource,verb}`), and role names —
+  auto-resolved by the schema-generation tool from the app's own DI registrations (`ClientCapabilityManifest`,
+  now in `Elarion.Abstractions.Modules` beside `[ClientFeatures]`, and `IPermissionCatalog`; both optional, the
+  block is omitted when absent so existing schemas stay byte-identical). The TypeScript generator turns the block
+  into typed constants and literal unions in `session-client.ts` (`Modules`/`Flags`/`Permissions`/`Roles` with
+  `ModuleName`/`FlagName`/`PermissionName`/`RoleName`; accessors take `Name | (string & {})`, falling back to
+  `string` on older schemas) — the frontend analog of the generated `ElarionPermissions`, so capability checks
+  are compile-checked against the same vocabulary the backend enforces. ADR-0032 also records the frontend
+  contribution model (declarative manifests, extension-point tokens, `when` clauses) ahead of its sample-first
+  implementation. See [ADR-0032](docs/decisions/0032-frontend-contribution-model.md).
 - **Imperative handler transport mapping (ADR-0031).** `HandlerDispatcher.Map<TRequest, TResponse>(name, transports)`
   is documented and reused as the host-facing seam for exposing a handler whose class the host does not own
   (framework-shipped, third-party, or startup-decided) — kept under its existing name. REST stays a concrete,

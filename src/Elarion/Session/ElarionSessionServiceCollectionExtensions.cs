@@ -1,5 +1,6 @@
 using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
+using Elarion.Abstractions.Modules;
 using Elarion.Abstractions.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -51,7 +52,7 @@ public static class ElarionSessionServiceCollectionExtensions {
     /// <summary>
     /// Maps the session bootstrap onto the named bus under <see cref="OperationName"/> for the given
     /// <paramref name="transports"/> (JSON-RPC and MCP by default). Chain it into the host's <c>RegisterHandlers</c>
-    /// delegate so it joins the shared dispatcher — see <c>ADR-0021</c>.
+    /// delegate so it joins the shared dispatcher — see <c>ADR-0031</c>.
     /// </summary>
     /// <example>
     /// <code>

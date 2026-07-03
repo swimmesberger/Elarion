@@ -104,9 +104,30 @@ client.getStringValue('ForecastAlgorithm', 'control')
 Teams that don't want OpenFeature can use `SessionCapabilities` (`isModuleEnabled`, `hasPermission`, `hasRole`,
 `isFlagEnabled`, `getVariant`) directly. Refresh the snapshot (and rebuild the provider) on login or context change.
 
+## Typed vocabulary — no stringly-typed capability checks
+
+The exported schema carries the application's **capability vocabulary** (module names, each module's
+`[ClientFeatures]`, and the `[RequirePermission]`/`[RequireRole]` catalog) in an optional `capabilities` block —
+resolved automatically by the schema tool from the app's own registrations. The generator turns it into typed
+constants and literal unions in `session-client.ts`, so a typo is a compile error instead of a silent `false`:
+
+```ts
+import { Modules, Permissions, Keys, createSessionCapabilities } from './generated/session-client'
+
+caps.hasPermission(Permissions.invoices.read)          // typed — 'invocies.read' would not compile
+client.getBooleanValue(Keys.module(Modules.Invoicing), false)
+```
+
+`ModuleName`/`FlagName`/`PermissionName`/`RoleName` are literal unions when the vocabulary is present and fall
+back to `string` on older schemas; accessors accept `Name | (string & {})`, so out-of-vocabulary names remain
+expressible. This is the frontend analog of the generated `ElarionPermissions` static — one vocabulary,
+compile-checked on both sides of the wire (see
+[ADR-0032](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md)).
+
 ## See also
 
 - [ADR-0030: Client capability bootstrap](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0030-client-capability-bootstrap.md)
 - [ADR-0031: Imperative handler transport mapping](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0031-imperative-handler-transport-mapping.md)
+- [ADR-0032: Frontend contribution model and the typed capability vocabulary](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md)
 - [Feature flags](/docs/concepts/feature-flags) — the flag/variant seams the snapshot reads.
 - [Transports](/docs/concepts/transports) — declarative vs. imperative exposure.

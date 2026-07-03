@@ -4,6 +4,7 @@ using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.Modules;
 using Elarion.Abstractions.Serialization;
 using Elarion.Session;
 using Microsoft.Extensions.DependencyInjection;

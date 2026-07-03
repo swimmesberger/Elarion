@@ -1,4 +1,6 @@
 using System.Text;
+using Elarion.Abstractions.Authorization;
+using Elarion.Abstractions.Modules;
 using Elarion.JsonRpc;
 
 namespace Elarion.AspNetCore.SchemaGeneration.Tool;
@@ -48,7 +50,15 @@ internal static class Program {
             ?? throw new InvalidOperationException(
                 "The application did not register a JsonRpcDispatcher service. Register the dispatcher before building the host.");
 
-        var schemaJson = JsonRpcSchemaExporter.Generate(dispatcher, dispatcher.JsonOptions);
+        // Capability vocabulary (ADR-0032): both optional, resolved from the app's own registrations — the
+        // manifest when a module opts in via [ClientFeatures] + AddElarionSession, the catalog when the host
+        // calls AddElarionAuthorization. Absent, the schema is byte-identical to a vocabulary-free export.
+        var exportOptions = new JsonRpcSchemaExportOptions {
+            ClientCapabilities = host.Services.GetService(typeof(ClientCapabilityManifest)) as ClientCapabilityManifest,
+            PermissionCatalog = host.Services.GetService(typeof(IPermissionCatalog)) as IPermissionCatalog,
+        };
+
+        var schemaJson = JsonRpcSchemaExporter.Generate(dispatcher, dispatcher.JsonOptions, exportOptions);
 
         await File.WriteAllTextAsync(outputPath, schemaJson, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 

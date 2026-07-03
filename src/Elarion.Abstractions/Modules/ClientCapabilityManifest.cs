@@ -1,10 +1,12 @@
-namespace Elarion.Session;
+namespace Elarion.Abstractions.Modules;
 
 /// <summary>
 /// The deployment-resolved input the session bootstrap evaluates per user: every module with its enabled state and
 /// the feature/variant names it exposes to the client (its <c>[ClientFeatures]</c> list). Built once at startup by
 /// the generated <c>ElarionBootstrapper.GetClientCapabilityManifest(IConfiguration)</c> and registered as a singleton
-/// by <see cref="ElarionSessionServiceCollectionExtensions.AddElarionSession"/>. See <c>ADR-0020</c>.
+/// by <c>AddElarionSession</c> (<c>Elarion.Session</c>). Lives in Abstractions — beside
+/// <see cref="ClientFeaturesAttribute"/>, whose aggregated data it is — so transport packages (e.g. the JSON-RPC
+/// schema exporter, which references only Abstractions) can consume the vocabulary too. See <c>ADR-0030</c>.
 /// </summary>
 public sealed record ClientCapabilityManifest {
     /// <summary>Every discovered module, with its enabled state and the names it exposes to the client.</summary>

@@ -28,12 +28,21 @@ internal sealed class ApplicationHostLoader(string assemblyPath) : IAsyncDisposa
 
     private static async Task InvokeEntryPointAsync(MethodInfo entryPoint, string[] applicationArguments) {
         var parameters = entryPoint.GetParameters();
-        object? result = parameters.Length switch {
-            0 => entryPoint.Invoke(null, null),
-            1 when parameters[0].ParameterType == typeof(string[]) => entryPoint.Invoke(null, [applicationArguments]),
-            _ => throw new InvalidOperationException(
-                $"Application entry point '{entryPoint.DeclaringType?.FullName}.{entryPoint.Name}' has an unsupported signature."),
-        };
+        object? result;
+        try {
+            result = parameters.Length switch {
+                0 => entryPoint.Invoke(null, null),
+                1 when parameters[0].ParameterType == typeof(string[]) => entryPoint.Invoke(null, [applicationArguments]),
+                _ => throw new InvalidOperationException(
+                    $"Application entry point '{entryPoint.DeclaringType?.FullName}.{entryPoint.Name}' has an unsupported signature."),
+            };
+        } catch (TargetInvocationException ex) when (ex.InnerException is not null and not HostAbortedException) {
+            // Surface the application's real startup failure instead of reflection's opaque
+            // "Exception has been thrown by the target of an invocation."; HostAbortedException stays wrapped so
+            // the expected-abort handling in LoadAsync keeps matching it.
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw; // unreachable
+        }
 
         switch (result) {
             case Task<int> intTask:

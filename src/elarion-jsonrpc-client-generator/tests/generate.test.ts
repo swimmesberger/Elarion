@@ -563,6 +563,63 @@ describe('JSON-RPC client generator', () => {
     expect(generated.sessionClientFileName).toBeUndefined()
   })
 
+  it('emits typed vocabulary constants from the schema capabilities block', async () => {
+    const schema = sessionSchema()
+    schema.capabilities = {
+      modules: {
+        Clients: { features: ['client-portal-v2', 'bulk-import'] },
+        Invoicing: { features: ['late-fees'] },
+      },
+      permissions: [
+        { permission: 'clients.read', resource: 'clients', verb: 'read' },
+        { permission: 'clients.write', resource: 'clients', verb: 'write' },
+        { permission: 'invoices.read', resource: 'invoices', verb: 'read' },
+      ],
+      roles: ['billing-admin'],
+    }
+
+    const generated = generateRpcClientFiles(schema, { generatedBy: 'test', sourceLabel: 'session.json' })
+    const source = generated.sessionClientSource as string
+
+    // Const objects with literal-union type aliases — a typo in a capability check is a compile error.
+    expect(source).toContain('export const Modules = {')
+    expect(source).toContain('"Clients": "Clients",')
+    expect(source).toContain('export type ModuleName = (typeof Modules)[keyof typeof Modules]')
+    expect(source).toContain('export const Flags = {')
+    expect(source).toContain('"bulk-import": "bulk-import",')
+    expect(source).toContain('export const Permissions = {')
+    expect(source).toContain('"read": "clients.read",')
+    expect(source).toContain(
+      'export type PermissionName = "clients.read" | "clients.write" | "invoices.read"'
+    )
+    expect(source).toContain('export const Roles = {')
+    // Still self-contained.
+    expect(source).not.toContain('import ')
+
+    // The vocabulary is real runtime data, usable as lookup constants.
+    const sessionModule = (await loadGeneratedSessionClient(source)) as SessionClientModule & {
+      Modules: Record<string, string>
+      Permissions: Record<string, Record<string, string>>
+    }
+    expect(sessionModule.Modules.Clients).toBe('Clients')
+    expect(sessionModule.Permissions.clients.write).toBe('clients.write')
+    expect(sessionModule.Keys.permission(sessionModule.Permissions.clients.read)).toBe(
+      'permission.clients.read'
+    )
+  })
+
+  it('falls back to string aliases when the schema has no capabilities block', () => {
+    const generated = generateRpcClientFiles(sessionSchema(), { generatedBy: 'test', sourceLabel: 'session.json' })
+    const source = generated.sessionClientSource as string
+
+    expect(source).toContain('export type ModuleName = string')
+    expect(source).toContain('export type FlagName = string')
+    expect(source).toContain('export type PermissionName = string')
+    expect(source).toContain('export type RoleName = string')
+    expect(source).not.toContain('export const Modules')
+    expect(source).not.toContain('export const Permissions')
+  })
+
   it('starts one span per batch and treats per-item errors as data, not span failures', async () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     const clientModule = await loadGeneratedClient(generated.clientSource)

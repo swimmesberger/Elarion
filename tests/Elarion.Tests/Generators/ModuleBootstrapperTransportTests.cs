@@ -412,9 +412,9 @@ public sealed class ModuleBootstrapperTransportTests {
 
         var method = Slice(generated, "GetClientCapabilityManifest(");
         method.Should().Contain(
-                "new global::Elarion.Session.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\"), Features = new string[] { \"new-checkout\", \"dashboard-v2\" } }")
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\"), Features = new string[] { \"new-checkout\", \"dashboard-v2\" } }")
             .And.Contain(
-                "new global::Elarion.Session.ClientModuleManifest { Name = \"Core\", Enabled = IsModuleEnabled(configuration, \"Core\"), Features = global::System.Array.Empty<string>() }");
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Core\", Enabled = IsModuleEnabled(configuration, \"Core\"), Features = global::System.Array.Empty<string>() }");
 
         // The generated code references the real Elarion.Session manifest types, so it compiles.
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)

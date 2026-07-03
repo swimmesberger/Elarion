@@ -8,7 +8,7 @@ namespace Elarion.Abstractions.Modules;
 /// <para>
 /// The names listed here are the <em>only</em> flags/variants the client-capability bootstrap evaluates and returns
 /// for the current user — exposure is <b>opt-in by enumeration</b>, so an internal flag never reaches the wire unless
-/// a module names it here, and a disabled module exposes nothing. See <c>ADR-0020</c> and the
+/// a module names it here, and a disabled module exposes nothing. See <c>ADR-0030</c> and the
 /// <c>client-capabilities</c> concept doc.
 /// </para>
 /// <para>

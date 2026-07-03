@@ -11,7 +11,7 @@ namespace Elarion.AspNetCore;
 /// Maps the framework-shipped client-capability bootstrap onto a REST endpoint. This is a deliberately
 /// <b>concrete</b>, hand-authored mapping (not a generic helper) so ASP.NET Core's Request Delegate Generator keeps
 /// it Native-AOT and trim-safe — the same reason <c>[HttpEndpoint]</c> handlers emit concrete lambdas. See
-/// <c>ADR-0021</c>.
+/// <c>ADR-0031</c>.
 /// </summary>
 public static class ElarionSessionEndpointRouteBuilderExtensions {
     /// <summary>

@@ -30,8 +30,27 @@ export interface RpcMethodSchema {
   idempotent?: boolean
 }
 
+/** One structured permission from the schema's capability vocabulary ({resource}.{verb} plus its parts). */
+export interface RpcCapabilityPermission {
+  permission: string
+  resource: string
+  verb: string
+}
+
+/**
+ * The capability vocabulary block emitted by the server exporter (ADR-0032): module names with the
+ * `[ClientFeatures]` each exposes, the structured permission catalog, and role names. All optional — older
+ * schemas (or hosts without the session/authorization registrations) simply omit it.
+ */
+export interface RpcSchemaCapabilities {
+  modules?: Record<string, { features?: string[] }>
+  permissions?: RpcCapabilityPermission[]
+  roles?: string[]
+}
+
 export interface RpcSchema {
   methods: Record<string, RpcMethodSchema>
+  capabilities?: RpcSchemaCapabilities
 }
 
 export interface GenerateRpcClientOptions {
