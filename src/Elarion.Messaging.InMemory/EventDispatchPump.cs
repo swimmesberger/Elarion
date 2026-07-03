@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Threading.Channels;
+using Elarion.Abstractions.Idempotency;
 using Elarion.Abstractions.Messaging;
 using Elarion.Messaging;
 using Microsoft.Extensions.DependencyInjection;
@@ -144,6 +145,14 @@ internal sealed class EventDispatchPump : BackgroundService {
         }
 
         await using var scope = _scopeFactory.CreateAsyncScope();
+
+        // Seed the delivered message id as the scope's idempotency key so the inbox decorator on handler-form
+        // consumers (ADR-0022) claims per (consumer, message). Soft-resolved: without AddElarionIdempotency the
+        // seam is absent and consumers simply run un-deduped, exactly as before the inbox existed.
+        if (envelope.Context.MessageId is { } messageId) {
+            scope.ServiceProvider.GetService<IIdempotencyKeySeed>()?.Seed(messageId.ToString("N"));
+        }
+
         foreach (var descriptor in subscribers) {
             var startTimestamp = Stopwatch.GetTimestamp();
             try {

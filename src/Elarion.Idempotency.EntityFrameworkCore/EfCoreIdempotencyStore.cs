@@ -117,7 +117,11 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
     }
 
     private static string MapScope(IdempotencyScope scope) =>
-        scope == IdempotencyScope.CurrentUser ? "user" : "global";
+        scope switch {
+            IdempotencyScope.CurrentUser => "user",
+            IdempotencyScope.Consumer => "consumer",
+            _ => "global",
+        };
 
     private static string BuildClaimSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(IdempotencyKeyEntity))

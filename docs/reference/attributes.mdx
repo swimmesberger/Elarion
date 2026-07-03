@@ -320,7 +320,7 @@ See [Feature flags](/docs/capabilities/feature-flags).
 | `ConflictBehavior` | `IdempotencyConflictBehavior` (init) | `Conflict` | Behavior for a concurrent in-flight duplicate (default 409). |
 | `StoreFailures` | `IdempotencyFailureStorage` (init) | `None` | Whether definitive failures are stored and replayed (default success-only). |
 
-**`IdempotencyScope`:** `CurrentUser` (= 0, isolated per authenticated user), `Global` (= 1, single shared namespace).
+**`IdempotencyScope`:** `CurrentUser` (= 0, isolated per authenticated user), `Global` (= 1, single shared namespace), `Consumer` (= 2, isolated per event consumer — the inbox; owner is the consuming handler's identity, key is the message id).
 
 **`IdempotencyConflictBehavior`:** `Conflict` (= 0, fail fast with 409 then replay — the IETF/Stripe standard), `WaitThenReplay` (= 1, block on the key's lock until the first request commits, then replay).
 
@@ -334,6 +334,18 @@ See [Feature flags](/docs/capabilities/feature-flags).
 </Callout>
 
 See [Idempotency](/docs/concepts/idempotency).
+
+### `[Inbox]`
+
+- **Package:** `Elarion.Abstractions` (Messaging) · **Applies to:** class (single, not inherited)
+- **Triggers:** configures — or opts out of — the **inbox** on a handler-form integration-event consumer. The inbox is **on by default** for every handler whose request is an `IIntegrationEvent`: the generator attaches a `Consumer`-scoped `IdempotencyDecorator` that claims *(consumer, message id)* inside the consumer's own transaction, so a redelivered message is acknowledged instead of re-run (ADR-0022). The attribute exists to opt out (`Enabled = false` — the plain transaction decorator returns) or to tune retention; its absence means the default inbox applies. `[Inbox]` on a non-integration-event handler is inert (`ELINBX001`). Domain-event consumers never get an inbox (exactly-once by atomicity); method-form consumers have no pipeline to attach to.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Enabled` | `bool` (init) | `true` | Set `false` to opt out — the consumer handles duplicates itself (naturally idempotent effect, or a downstream keyed on the message id). |
+| `RetentionHours` | `int` (init) | `24` | How long a completed inbox claim is retained, in hours. Must exceed the delivery tier's maximum retry window (`ELINBX002` if non-positive). |
+
+See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
 
 ## Validation
 
@@ -686,7 +698,7 @@ See [Entity Framework](/docs/capabilities/entity-framework).
 ## Related references
 
 <Cards>
-  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELVAL/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELIDEMEF/ELOBX/ELSET/ELBLB/ELTUS/ELCACHE) referenced above.</Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELVAL/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELINBX/ELIDEMEF/ELOBX/ELSET/ELBLB/ELTUS/ELCACHE) referenced above.</Card>
   <Card title="Configuration" href="/docs/reference/configuration">Feature flags (`Modules:{Name}:Enabled`) and other settings keys.</Card>
   <Card title="Conventions" href="/docs/reference/conventions">Module statics, namespace matching, and naming rules.</Card>
   <Card title="Packages" href="/docs/reference/packages">Which package each attribute ships in.</Card>

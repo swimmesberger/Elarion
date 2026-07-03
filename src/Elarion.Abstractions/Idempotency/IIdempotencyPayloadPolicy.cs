@@ -28,6 +28,14 @@ public interface IIdempotencyPayloadPolicy<in TRequest, TResponse> {
     /// <summary>How long a completed record is retained/replayable.</summary>
     TimeSpan Retention { get; }
 
+    /// <summary>
+    /// The fixed owner discriminator for <see cref="IdempotencyScope.Consumer"/>-scoped keys: the consuming
+    /// handler's identity, baked in by the generator (ADR-0022 inbox). <see langword="null"/> for the
+    /// caller-derived scopes (<see cref="IdempotencyScope.CurrentUser"/>/<see cref="IdempotencyScope.Global"/>),
+    /// whose owner comes from the current user or is empty.
+    /// </summary>
+    string? Owner => null;
+
     /// <summary>Serializes the handler outcome (success value, or — when storing failures — the error) for storage.</summary>
     string Serialize(TResponse response, JsonSerializerOptions options);
 

@@ -22,6 +22,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
     private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string IdempotentAttributeMetadataName = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
+    private const string InboxAttributeMetadataName = "Elarion.Abstractions.Messaging.InboxAttribute";
     private const string ElarionValidationExtensionsMetadataName = "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
     private const string DomainEventMetadataName = "Elarion.Abstractions.Messaging.IDomainEvent";
@@ -47,6 +48,8 @@ public sealed partial class HandlerRegistrationGenerator {
         EquatableArray<DiagnosticInfo> Diagnostics
     );
 
+    // Owner is the Consumer-scope owner discriminator (the consuming handler's identity) baked into the generated
+    // policy for the inbox (ADR-0022); null for command idempotency, whose owner derives from the caller.
     private sealed record IdempotentInfo(
         int RetentionHours,
         bool KeyRequired,
@@ -54,7 +57,8 @@ public sealed partial class HandlerRegistrationGenerator {
         bool Fingerprint,
         int ConflictBehaviorValue,
         int StoreFailuresValue,
-        string? ResultValueFqn
+        string? ResultValueFqn,
+        string? Owner
     );
 
     // A [RequireResource] binding: the resource type, the operation, and the compile-checked request path the
@@ -250,5 +254,23 @@ public sealed partial class HandlerRegistrationGenerator {
         + "commands",
         "Elarion.Abstractions.Idempotency",
         DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor InboxOnNonIntegrationEventDescriptor = new(
+        "ELINBX001",
+        "[Inbox] handler is not an integration-event consumer",
+        "Handler '{0}' declares [Inbox] but its request type '{1}' is not an IIntegrationEvent; the inbox only "
+        + "applies to handler-form integration-event consumers (domain events run inline in the publisher's "
+        + "transaction and are exactly-once by atomicity), so the attribute has no effect",
+        "Elarion.Abstractions.Messaging",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor InvalidInboxRetentionDescriptor = new(
+        "ELINBX002",
+        "[Inbox] retention is invalid",
+        "Handler '{0}' must declare a positive RetentionHours on [Inbox]",
+        "Elarion.Abstractions.Messaging",
+        DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 }

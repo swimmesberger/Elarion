@@ -85,11 +85,13 @@ await integrationEvents.PublishAsync(new InvoiceCreated(invoice.Id, client.Email
 
 `PublishAsync<TEvent> where TEvent : IIntegrationEvent` only **records** the event; the configured
 backend delivers it after commit. Because delivery happens later on its own scope, integration consumers
-run **at-least-once** and **without an ordering guarantee** — write them to be idempotent and
-order-independent (see [Consuming events](/docs/capabilities/events/consuming-events#handling-duplicates)).
-Unlike a domain-event handler, an integration-event handler runs on a **fresh post-commit scope** with
-its own `DbContext` and transaction, so the **full** pipeline — including a transaction decorator — is
-exactly right.
+run **at-least-once** and **without an ordering guarantee**. Handler-form consumers are deduped by the
+**built-in inbox** by default; write them order-independent, and see
+[Consuming events](/docs/capabilities/events/consuming-events#handling-duplicates) for what the inbox
+covers and when to opt out. Unlike a domain-event handler, an integration-event handler runs on a
+**fresh post-commit scope** with its own `DbContext` and transaction, so the full pipeline is exactly
+right (the inbox decorator owns that transaction, claiming the message id atomically with the consumer's
+writes).
 
 This is the **only broker-portable plane**: an alternative backend implements *only*
 `IIntegrationEventBus`. Two backends ship — a best-effort in-memory tier and the durable EF Core outbox.

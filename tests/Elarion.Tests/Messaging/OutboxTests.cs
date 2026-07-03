@@ -1,7 +1,9 @@
 using System.Text.Json;
 using AwesomeAssertions;
+using Elarion.Abstractions.Idempotency;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Serialization;
+using Elarion.Idempotency;
 using Elarion.Messaging.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -79,6 +81,45 @@ public sealed class OutboxEventDispatcherTests
         receivedContext.Plane.Should().Be(EventPlane.Integration);
         // The generated subscriber delegate may cast the context to the strongly typed form.
         receivedContext.Should().BeAssignableTo<IEventContext<OutboxTestEvent>>();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ExposesTheOutboxRowIdAsMessageId()
+    {
+        IEventContext? receivedContext = null;
+        var dispatcher = CreateDispatcher((_, _, context, _) =>
+        {
+            receivedContext = context;
+            return ValueTask.CompletedTask;
+        });
+
+        var message = CreateMessage(new OutboxTestEvent(7, "alice"), Guid.NewGuid());
+        await dispatcher.DispatchAsync(EmptyProvider.Instance, message, TestContext.Current.CancellationToken);
+
+        // The durable, redelivery-stable identity a consumer keys downstream dedup on (ADR-0022) — distinct
+        // from the correlation id, which is a tracing identifier.
+        receivedContext!.MessageId.Should().Be(message.Id);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_SeedsTheMessageIdAsTheScopeIdempotencyKey()
+    {
+        // The inbox rail: the delivery scope's idempotency key is the outbox row id, so the Consumer-scoped
+        // decorator on a handler-form consumer claims per (consumer, message).
+        await using var provider = new ServiceCollection().AddElarionIdempotency().BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+
+        string? seededKey = null;
+        var dispatcher = CreateDispatcher((sp, _, _, _) =>
+        {
+            sp.GetRequiredService<IIdempotencyKeyAccessor>().TryGetKey(out seededKey);
+            return ValueTask.CompletedTask;
+        });
+
+        var message = CreateMessage(new OutboxTestEvent(7, "alice"), Guid.NewGuid());
+        await dispatcher.DispatchAsync(scope.ServiceProvider, message, TestContext.Current.CancellationToken);
+
+        seededKey.Should().Be(message.Id.ToString("N"));
     }
 
     [Fact]

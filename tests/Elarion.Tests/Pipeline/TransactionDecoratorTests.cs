@@ -50,6 +50,77 @@ public sealed class TransactionDecoratorTests {
         uow.Scope.Rollbacks.Should().Be(0);
     }
 
+    [Fact]
+    public void AppliesTo_Command_True_ButNotWhenIdempotent() {
+        AppliesTo(typeof(PlainCommandHandler)).Should().BeTrue();
+        // [Idempotent] owns the unit of work — a second transaction would nest.
+        AppliesTo(typeof(IdempotentCommandHandler)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AppliesTo_IntegrationConsumer_False_ByDefault_TheInboxOwnsTheTransaction() {
+        // ADR-0022: the default-on inbox decorator claims the message id and runs the consumer inside its own
+        // unit of work, so the plain transaction decorator must stay off — mirroring the [Idempotent] exclusion.
+        AppliesTo(typeof(PlainIntegrationConsumer)).Should().BeFalse();
+        AppliesTo(typeof(TunedInboxConsumer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AppliesTo_IntegrationConsumer_True_WhenInboxOptedOut() {
+        // [Inbox(Enabled = false)] hands the plain transaction back — the consumer dedups itself.
+        AppliesTo(typeof(OptedOutIntegrationConsumer)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AppliesTo_DomainConsumer_False() {
+        AppliesTo(typeof(DomainConsumer)).Should().BeFalse();
+    }
+
+    private static bool AppliesTo(Type handlerType) {
+        var handlerInterface = handlerType.GetInterfaces()
+            .First(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IHandler<,>));
+        var args = handlerInterface.GetGenericArguments();
+        return TransactionDecorator<TestCommand, Result<string>>.AppliesTo(
+            new HandlerMetadata(handlerType, args[0], args[1]));
+    }
+
+    private sealed record TestIntegrationEvent : IIntegrationEvent;
+
+    private sealed record TestDomainEvent : IDomainEvent;
+
+    private sealed class PlainCommandHandler : IHandler<TestCommand, Result<string>> {
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) =>
+            ValueTask.FromResult(Result<string>.Success("ok"));
+    }
+
+    [Elarion.Abstractions.Idempotency.Idempotent]
+    private sealed class IdempotentCommandHandler : IHandler<TestCommand, Result<string>> {
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) =>
+            ValueTask.FromResult(Result<string>.Success("ok"));
+    }
+
+    private sealed class PlainIntegrationConsumer : IHandler<TestIntegrationEvent> {
+        public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) =>
+            ValueTask.FromResult(Result.Success());
+    }
+
+    [Inbox(RetentionHours = 48)]
+    private sealed class TunedInboxConsumer : IHandler<TestIntegrationEvent> {
+        public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) =>
+            ValueTask.FromResult(Result.Success());
+    }
+
+    [Inbox(Enabled = false)]
+    private sealed class OptedOutIntegrationConsumer : IHandler<TestIntegrationEvent> {
+        public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) =>
+            ValueTask.FromResult(Result.Success());
+    }
+
+    private sealed class DomainConsumer : IHandler<TestDomainEvent> {
+        public ValueTask<Result> HandleAsync(TestDomainEvent request, CancellationToken ct) =>
+            ValueTask.FromResult(Result.Success());
+    }
+
     private sealed record TestCommand : ICommand;
 
     private sealed class StubHandler(Result<string> response) : IHandler<TestCommand, Result<string>> {

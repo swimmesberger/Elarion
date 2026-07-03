@@ -18,13 +18,22 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
     IUnitOfWork unitOfWork
 ) : IHandler<TRequest, TResponse> {
     /// <summary>
-    /// Attaches to commands and integration-event handlers, except those already carrying
-    /// <see cref="IdempotentAttribute"/> (they own their own unit of work).
+    /// Attaches to commands and integration-event handlers, except those whose pipeline already owns the unit of
+    /// work: <see cref="IdempotentAttribute"/> commands, and integration-event consumers under the default-on
+    /// inbox (ADR-0022) — only an <c>[Inbox(Enabled = false)]</c> opt-out gets the plain transaction back.
     /// </summary>
-    public static bool AppliesTo(HandlerMetadata handler) =>
-        (handler.RequestType.IsAssignableTo(typeof(ICommand)) ||
-         handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent)))
-        && handler.GetAttribute<IdempotentAttribute>() is null;
+    public static bool AppliesTo(HandlerMetadata handler) {
+        if (handler.GetAttribute<IdempotentAttribute>() is not null)
+            return false;
+
+        // Mirrors the generator's inbox attachment: an integration-event consumer is inboxed by default, and the
+        // inbox decorator owns the transaction (claim + business writes commit atomically). Wrapping it again
+        // here would nest two units of work.
+        if (handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent)))
+            return handler.GetAttribute<InboxAttribute>() is { Enabled: false };
+
+        return handler.RequestType.IsAssignableTo(typeof(ICommand));
+    }
 
     /// <inheritdoc />
     /// <remarks>

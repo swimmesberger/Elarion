@@ -114,7 +114,8 @@ The event bus is pub/sub-only, so a method that returns a `Result<TResponse>` *w
 event (see [calling a handler from other code](/docs/concepts/handlers#calling-a-handler-from-other-code)).
 
 Beyond the message parameter, a method-form consumer may optionally declare — in any order — an
-`IEventContext` (or `IEventContext<TEvent>`) for the correlation id and message, and a `CancellationToken`.
+`IEventContext` (or `IEventContext<TEvent>`) for the correlation id, the durable message id
+(`MessageId`, the dedup key on the integration plane), and the message, plus a `CancellationToken`.
 Both are supplied by the runtime; omit what you don't need, and use `[ConsumeEvent(Order = n)]` to order
 fan-out subscribers. (The handler form takes the event and an optional `CancellationToken`.)
 
@@ -133,49 +134,76 @@ reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`.
 Integration delivery is **at-least-once**: a consumer can see the same message more than once — a worker
 crash after the consumer ran but before the message was finalized, a fan-out consumer that threw and
 retried the whole message, or a lease that expired under multiple instances. There is no exactly-once
-*delivery*; you build exactly-once *effect* by making the consumer idempotent. Every redelivery carries
-the **same** `IEventContext.CorrelationId`, so that id is your stable deduplication key.
+*delivery*; exactly-once *effect* comes from deduplication on the consumer side. Every redelivery carries
+the **same** `IEventContext.MessageId` (the durable message identity — for the outbox, the row's id), so
+that id is the deduplication key. (`CorrelationId` is a *tracing* identifier — don't key dedup on it.)
 
-The framework cannot close this gap from the outside, and the reason is a **grain mismatch**: the outbox
-row is one row per *event*, finalized by the delivery worker per **message**, on the worker's own
-connection, *after* your consumer's transaction has already committed — and only once **every** fan-out
-consumer has run. Your effect, though, is a fact per *(message, consumer)*. Only a write inside your
-consumer's **own transaction** can atomically couple "already processed" to the effect itself; that is
-what mechanism 3 below does literally, while mechanisms 1 and 2 sidestep the bookkeeping by making the
-effect convergent or delegating the dedup downstream.
+**Handler-form consumers get this for free: the inbox is on by default.** Every handler-form consumer
+whose event is an `IIntegrationEvent` is wrapped in an inbox decorator that claims the pair
+*(consumer, message id)* in **the consumer's own transaction** — replacing the plain transaction
+decorator — so the claim commits atomically with the consumer's business writes. A redelivery finds the
+committed claim and is acknowledged as already-done without re-running the consumer; a failed `Result`
+rolls the claim back with the writes, so the message retries. When two workers race the same message,
+the loser waits on the winner's uncommitted claim and then replays it — only a *committed* claim is ever
+acknowledged.
 
-Pick the cheapest mechanism the side effect allows — an inbox table is the last resort, not the default.
+Why this must live in *your* transaction rather than the outbox row: the outbox row has the wrong
+**grain**. It is one row per *event*, finalized by the delivery worker per **message**, on the worker's
+own connection, *after* your consumer's transaction has already committed — and only once **every**
+fan-out consumer has run. Your effect is a fact per *(message, consumer)*, and only a write inside your
+consumer's own transaction can atomically couple "already processed" to the effect itself. The inbox is
+exactly that write, done for you.
 
-**1. Make the operation idempotent (prefer this).** A conditional state transition or an upsert is
-self-deduplicating — running it twice is the same as once, with no extra bookkeeping:
+Two things to know about the default:
+
+- **Durability follows the idempotency store.** The delivery tiers register the in-memory store
+  automatically (process-local dedup); pair the outbox with
+  [`AddElarionIdempotencyEntityFrameworkCore`](/docs/capabilities/idempotency) so inbox claims survive
+  restarts — the outbox is durable, so its inbox should be too.
+- **Retention must outlive retries.** Inbox rows expire like idempotency keys (default 24 h, tune with
+  `[Inbox(RetentionHours = …)]`). Keep retention above the outbox's maximum retry window (≈43 minutes at
+  the defaults), or a still-retrying message could re-run after its claim was purged.
+
+The inbox dedups the consumer's **transactional effect**. A foreign side effect inside the consumer — an
+email, a payment API call — re-runs only in the narrow window where the process dies between the foreign
+call and the commit. To close that last window, pass the **message id** as the downstream's idempotency
+key and let it collapse duplicates too. A method-form consumer reads it from its `IEventContext`
+parameter; a handler-form consumer (which takes only the event) injects `IIdempotencyKeyAccessor` — in a
+delivery scope its key *is* the seeded message id:
 
 ```csharp
 [ConsumeEvent]
-public async ValueTask OnInvoicePaid(InvoicePaid e, CancellationToken ct) {
-    // "Mark paid only if not already paid" — a second delivery updates zero rows.
-    await db.Invoices
-        .Where(i => i.Id == e.InvoiceId && i.Status != InvoiceStatus.Paid)
-        .ExecuteUpdateAsync(s => s.SetProperty(i => i.Status, InvoiceStatus.Paid), ct);
+public sealed class ChargeInvoice(IPaymentGateway payments, IIdempotencyKeyAccessor messageId)
+    : IHandler<InvoiceCreated> {
+    public async ValueTask<Result> HandleAsync(InvoiceCreated e, CancellationToken ct) {
+        // The same id the inbox claims — stable across redeliveries, unique per message.
+        messageId.TryGetKey(out var key);
+        await payments.ChargeAsync(e.InvoiceId, idempotencyKey: key!, ct);
+        return Result.Success();
+    }
 }
 ```
 
-**2. Delegate to the downstream's idempotency key.** External systems that charge cards or send mail take
-a dedup key; pass the correlation id and let them collapse duplicates. Declare an `IEventContext` to
-receive it:
+**Opting out.** `[Inbox(Enabled = false)]` removes the inbox (the plain transaction decorator returns) for
+consumers that need no dedup rows — the effect is naturally idempotent, or its only effect is a call to a
+keyed downstream:
 
 ```csharp
 [ConsumeEvent]
-public async ValueTask OnInvoiceCreated(
-    InvoiceCreated e, IEventContext context, CancellationToken ct) {
-    await payments.ChargeAsync(
-        e.InvoiceId, idempotencyKey: context.CorrelationId.ToString("N"), ct);
+[Inbox(Enabled = false)] // "mark paid only if not already paid" converges by itself
+public sealed class MarkInvoicePaid(AppDbContext db) : IHandler<InvoicePaid> {
+    public async ValueTask<Result> HandleAsync(InvoicePaid e, CancellationToken ct) {
+        await db.Invoices
+            .Where(i => i.Id == e.InvoiceId && i.Status != InvoiceStatus.Paid)
+            .ExecuteUpdateAsync(s => s.SetProperty(i => i.Status, InvoiceStatus.Paid), ct);
+        return Result.Success();
+    }
 }
 ```
 
-**3. Guard with a local dedup table — a lightweight inbox.** Only when the effect is neither idempotent
-nor has a downstream key: record the handled id in **the same transaction** as the consumer's write.
-Because the consumer runs in-process on your `DbContext`, this is a unique-constrained insert, not a
-message broker's inbox machinery:
+**Method-form consumers have no pipeline, so no inbox.** Convert to the handler form when dedup matters,
+or dedup by hand keyed on `(consumer, context.MessageId)` — a unique-constrained insert in the same
+transaction as the side effect, which is precisely what the inbox automates:
 
 ```csharp
 [ConsumeEvent]
@@ -183,7 +211,7 @@ public async ValueTask OnInvoiceCreated(
     InvoiceCreated e, IEventContext context, CancellationToken ct) {
     db.ProcessedEvents.Add(new ProcessedEvent {
         Consumer = nameof(InvoiceNotifications),
-        CorrelationId = context.CorrelationId,   // unique index on (Consumer, CorrelationId)
+        MessageId = context.MessageId!.Value,   // unique index on (Consumer, MessageId)
     });
     DoTheSideEffect(e);
     try {
@@ -196,10 +224,10 @@ public async ValueTask OnInvoiceCreated(
 ```
 
 <Callout type="info">
-  The case where a guard earns its keep: when a message has **several** fan-out consumers and one throws,
-  the *whole* message is retried, so consumers that already succeeded run again. Idempotent operations (1)
-  absorb this for free; a consumer that genuinely cannot be made idempotent should keep its own guard keyed
-  by `(consumer, CorrelationId)` so it skips work it already did.
+  The case where the inbox earns its keep is **routine, not exotic**: when a message has several fan-out
+  consumers and one throws, the *whole* message is retried, so consumers that already succeeded run again
+  — on every backoff attempt. The inbox absorbs that automatically; an opted-out consumer must absorb it
+  itself (a naturally idempotent operation does so for free).
 </Callout>
 
 ## Subscribing without the generator (advanced)

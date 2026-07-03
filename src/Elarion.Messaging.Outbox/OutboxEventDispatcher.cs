@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Elarion.Abstractions.Idempotency;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Serialization;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Elarion.Messaging.Outbox;
@@ -118,7 +120,13 @@ public sealed class OutboxEventDispatcher
             return OutboxDispatchOutcome.Unresolvable;
         }
 
-        var context = OutboxEventContext.Create(instance, eventType, message.CorrelationId);
+        // Seed the outbox row's id as the delivery scope's idempotency key: the inbox decorator on handler-form
+        // consumers (ADR-0022) claims it per (consumer, message), and it is stable across redeliveries — unlike
+        // the correlation id, which is a tracing identifier. Soft-resolved so a host without idempotency wiring
+        // simply delivers un-deduped, as before the inbox existed.
+        serviceProvider.GetService<IIdempotencyKeySeed>()?.Seed(message.Id.ToString("N"));
+
+        var context = OutboxEventContext.Create(instance, eventType, message.CorrelationId, message.Id);
         foreach (var descriptor in consumers)
         {
             var startTimestamp = Stopwatch.GetTimestamp();
@@ -149,22 +157,25 @@ public sealed class OutboxEventDispatcher
 /// </summary>
 internal static class OutboxEventContext
 {
-    public static IEventContext Create(object message, Type eventType, Guid correlationId) =>
+    public static IEventContext Create(object message, Type eventType, Guid correlationId, Guid messageId) =>
         // The generated subscriber delegate casts the context to IEventContext<TEvent> when the consumer declares a
         // typed context parameter, so the concrete type argument must match the runtime event type. The type is kept
         // alive by its descriptor, so this generic construction is safe under trimming.
         (IEventContext)Activator.CreateInstance(
             typeof(OutboxEventContext<>).MakeGenericType(eventType),
             message,
-            correlationId)!;
+            correlationId,
+            messageId)!;
 }
 
 /// <summary>The delivery-tier <see cref="IEventContext{TEvent}"/> for an outbox-delivered integration event.</summary>
-internal sealed class OutboxEventContext<TEvent>(TEvent message, Guid correlationId) : IEventContext<TEvent>
+internal sealed class OutboxEventContext<TEvent>(TEvent message, Guid correlationId, Guid messageId) : IEventContext<TEvent>
 {
     public TEvent Message { get; } = message;
 
     public Guid CorrelationId { get; } = correlationId;
+
+    public Guid? MessageId { get; } = messageId;
 
     public EventPlane Plane => EventPlane.Integration;
 

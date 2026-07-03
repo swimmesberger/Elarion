@@ -106,6 +106,51 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
             Json);
     }
 
+    [Fact]
+    public async Task Inbox_ConsumerScope_DedupsPerConsumer_AndFansOutAcrossConsumers() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        // The inbox shape (ADR-0022): the key is the delivered message id; two consumers of the same event each
+        // claim their own (consumer, message) row, while a redelivery to the same consumer replays.
+        var messageId = UniqueKey();
+
+        var firstDelivery = await BuildInboxDecorator(messageId, owner: "App.SendInvoiceEmail")
+            .HandleAsync(new DemoCommand(1), Ct);
+        firstDelivery.IsSuccess.Should().BeTrue();
+
+        // The sibling consumer of the same message is NOT blocked by the first consumer's claim.
+        var siblingConsumer = await BuildInboxDecorator(messageId, owner: "App.UpdateStatistics")
+            .HandleAsync(new DemoCommand(1), Ct);
+        siblingConsumer.IsSuccess.Should().BeTrue();
+
+        // A redelivery to the first consumer replays without re-running its effect.
+        var redelivery = await BuildInboxDecorator(messageId, owner: "App.SendInvoiceEmail")
+            .HandleAsync(new DemoCommand(1), Ct);
+        redelivery.IsSuccess.Should().BeTrue();
+
+        await using var verify = fixture.CreateContext();
+        // Two business writes (one per consumer), not three — the redelivery was absorbed.
+        (await verify.DemoRows.CountAsync(row => row.IdempotencyKey == messageId, Ct)).Should().Be(2);
+        // The rows are namespaced under the "consumer" scope discriminator with per-consumer owners.
+        var rows = await verify.Set<IdempotencyKeyEntity>()
+            .Where(entity => entity.Key == messageId)
+            .ToListAsync(Ct);
+        rows.Should().HaveCount(2);
+        rows.Should().OnlyContain(entity => entity.Scope == "consumer");
+        rows.Select(entity => entity.Owner).Should().BeEquivalentTo("App.SendInvoiceEmail", "App.UpdateStatistics");
+    }
+
+    private IdempotencyDecorator<DemoCommand, Result<string>> BuildInboxDecorator(string messageId, string owner) {
+        var context = fixture.CreateContext();
+        return new IdempotencyDecorator<DemoCommand, Result<string>>(
+            new DemoHandler(context, messageId, 0),
+            new EfUnitOfWork<IdempotencyIntegrationDbContext>(context),
+            new EfCoreIdempotencyStore<IdempotencyIntegrationDbContext>(context, TimeProvider.System),
+            new FixedKeyAccessor(messageId),
+            new InboxPolicy(owner),
+            currentUser: null,
+            Json);
+    }
+
     private sealed record DemoCommand(int Id) : ICommand;
 
     private sealed class DemoHandler(IdempotencyIntegrationDbContext context, string key, int delayMs)
@@ -129,6 +174,36 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         public IdempotencyConflictBehavior ConflictBehavior => conflict;
         public IdempotencyFailureStorage StoreFailures => IdempotencyFailureStorage.None;
         public TimeSpan Retention => TimeSpan.FromHours(24);
+
+        public string Serialize(Result<string> response, JsonSerializerOptions options) =>
+            JsonSerializer.Serialize(
+                new StoredResult {
+                    Ok = response.IsSuccess,
+                    Value = response.IsSuccess ? JsonSerializer.SerializeToElement(response.Value, options) : null,
+                    Error = response.IsSuccess ? null : response.Error,
+                },
+                options);
+
+        public Result<string> Deserialize(string payload, JsonSerializerOptions options) {
+            var stored = JsonSerializer.Deserialize<StoredResult>(payload, options)!;
+            if (!stored.Ok)
+                return Result<string>.Failure(stored.Error ?? AppError.InternalError);
+            var value = stored.Value is { } element ? element.Deserialize<string>(options) : null;
+            return Result<string>.Success(value!);
+        }
+    }
+
+    // The inbox policy shape the generator synthesizes for a handler-form integration consumer (ADR-0022):
+    // Consumer scope with the consumer identity as owner, WaitThenReplay, no fingerprint.
+    private sealed class InboxPolicy(string owner)
+        : IIdempotencyPayloadPolicy<DemoCommand, Result<string>> {
+        public IdempotencyScope Scope => IdempotencyScope.Consumer;
+        public bool KeyRequired => false;
+        public bool Fingerprint => false;
+        public IdempotencyConflictBehavior ConflictBehavior => IdempotencyConflictBehavior.WaitThenReplay;
+        public IdempotencyFailureStorage StoreFailures => IdempotencyFailureStorage.None;
+        public TimeSpan Retention => TimeSpan.FromHours(24);
+        public string? Owner => owner;
 
         public string Serialize(Result<string> response, JsonSerializerOptions options) =>
             JsonSerializer.Serialize(
