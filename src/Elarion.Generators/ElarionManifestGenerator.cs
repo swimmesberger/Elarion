@@ -135,6 +135,9 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         if (ctx.TargetSymbol is not INamedTypeSymbol type)
             return null;
 
+        var clientFeaturesType =
+            ctx.SemanticModel.Compilation.GetTypeByMetadataName(ElarionGeneratorConventions.ClientFeaturesAttribute);
+
         foreach (var attr in ctx.Attributes)
         {
             if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Value is not string moduleName)
@@ -159,10 +162,37 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
                 HasStaticMethod(type, "ConfigureServices", 2),
                 HasStaticMethod(type, "MapEndpoints", 1),
                 HasStaticMethod(type, "GetJsonTypeInfoResolver", 0),
-                HasStaticMethod(type, "ConfigureEndpointGroup", 1));
+                HasStaticMethod(type, "ConfigureEndpointGroup", 1),
+                ReadClientFeatures(type, clientFeaturesType));
         }
 
         return null;
+    }
+
+    /// <summary>Reads the names listed by a module's <c>[ClientFeatures(...)]</c> attribute (empty when absent).</summary>
+    private static EquatableArray<string> ReadClientFeatures(INamedTypeSymbol type, INamedTypeSymbol? clientFeaturesType)
+    {
+        if (clientFeaturesType is null)
+            return EquatableArray<string>.Empty;
+
+        foreach (var attr in type.GetAttributes())
+        {
+            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, clientFeaturesType))
+                continue;
+            if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Kind != TypedConstantKind.Array)
+                return EquatableArray<string>.Empty;
+
+            var names = new List<string>();
+            foreach (var value in attr.ConstructorArguments[0].Values)
+            {
+                if (value.Value is string name && name.Length > 0)
+                    names.Add(name);
+            }
+
+            return names.ToEquatableArray();
+        }
+
+        return EquatableArray<string>.Empty;
     }
 
     private static ManifestItem<HttpEndpointEmission.Model> CreateHttpEndpoint(

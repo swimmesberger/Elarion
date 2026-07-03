@@ -34,6 +34,21 @@ export interface RpcMethods {
     }[]
   }
   }
+  "elarion.session": {
+    params: unknown
+    result: {
+    user: {
+      id: string
+      email?: string | null | undefined
+      isAuthenticated: boolean
+      roles: string[]
+      permissions: string[]
+    }
+    modules: unknown
+    flags: unknown
+    variants: unknown
+  }
+  }
   "invoices.create": {
     params: {
     clientId: string

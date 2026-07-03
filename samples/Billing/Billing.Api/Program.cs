@@ -5,9 +5,11 @@ using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
 using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
+using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
+using Elarion.Session;
 using Elarion.AspNetCore.Mcp;
 using Elarion.AspNetCore.OpenApi;
 using Elarion.Authorization;
@@ -54,8 +56,14 @@ builder.Services.AddElarionResilience();
 
 // Per-user handler caching, backed by HybridCache with a PostgreSQL L2 — the recommended L2 for most apps
 // already on Postgres: it reuses the "billing" database (an auto-created UNLOGGED cache table) instead of
-// operating a separate Redis. HybridCache's in-process L1 still carries the hot path.
-builder.Services.AddElarionPostgreSqlHandlerCaching(builder.Configuration.GetConnectionString("billing")!);
+// operating a separate Redis. HybridCache's in-process L1 still carries the hot path. During build-time schema
+// generation the Aspire-injected connection string is absent, so fall back to the in-memory tier — the schema
+// tool only builds the host, it never serves traffic.
+if (JsonRpcSchemaGeneration.IsRunning) {
+    builder.Services.AddElarionHandlerCaching();
+} else {
+    builder.Services.AddElarionPostgreSqlHandlerCaching(builder.Configuration.GetConnectionString("billing")!);
+}
 
 // Transport-neutral current user, filled from the authenticated principal.
 builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");
@@ -90,20 +98,31 @@ builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
 // source-generated JSON context to the canonical serializer options every subsystem reads.
 builder.Services.AddElarion(builder.Configuration);
 
+// Client-capability bootstrap (ADR-0030): a framework-shipped handler that returns module enablement, the
+// [ClientFeatures] flags/variants, and the user's grants for the frontend. The manifest is built once from the
+// generated bootstrapper; the handler evaluates the flags per user.
+builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityManifest());
+
 // Align ASP.NET's minimal-API JSON options with Elarion's canonical serialization, so [HttpEndpoint] request
 // bodies deserialize through the same source-generated contexts every transport uses (needed with reflection
 // off / AOT). Responses already bypass these options via ElarionHttpResults. A later ConfigureHttpJsonOptions
 // would override this. AddElarionOpenApi below also ensures it, so this call is optional when OpenAPI is used.
 builder.Services.AddElarionHttpJson();
 
+// The session bootstrap is framework-owned (no [Handler] attribute), so it is mapped onto the named bus
+// imperatively (ADR-0031) — chained into the same RegisterHandlers delegate passed to every transport, so the
+// shared dispatcher is still built once.
+var registerHandlers = (HandlerDispatcher dispatcher, IConfiguration configuration) =>
+    ElarionBootstrapper.RegisterHandlers(dispatcher, configuration).MapElarionSession();
+
 // JSON-RPC: methods gated per module. Serialization comes from the canonical IElarionJsonSerialization
 // (module contexts from AddElarion + the JSON-RPC envelope context); customize it via ConfigureElarionJson.
-builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
+builder.Services.AddElarionJsonRpc(registerHandlers);
 
 // MCP: an equally gated transport adapter over the same shared handler registry (the named bus).
 builder.Services.AddElarionMcp(
     builder.Configuration.GetMcpMetadata(),
-    ElarionBootstrapper.RegisterHandlers,
+    registerHandlers,
     o => o.ServerName = "Billing");
 
 // OpenAPI for the REST transport: brings the [HttpEndpoint] handlers to schema/contract parity with JSON-RPC.
@@ -168,6 +187,7 @@ app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
 app.MapElarionEndpoints(app.Configuration);            // generated [HttpEndpoint] REST routes (e.g. GET /clients/{id})
+app.MapElarionSession();                                // GET /session — client-capability snapshot (anonymous-friendly)
 app.MapOpenApi();                                      // GET /openapi/v1.json — the REST contract (dev-only in production)
 app.MapElarionJsonRpc().RequireAuthorization();        // POST /rpc
 app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc

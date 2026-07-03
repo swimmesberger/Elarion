@@ -72,7 +72,8 @@ internal static class ElarionManifest
         bool HasConfigureServices,
         bool HasMapEndpoints,
         bool HasGetJsonTypeInfoResolver,
-        bool HasConfigureEndpointGroup
+        bool HasConfigureEndpointGroup,
+        EquatableArray<string> ClientFeatures
     );
 
     public sealed record Data(
@@ -182,7 +183,10 @@ internal static class ElarionManifest
             EncodeBool(module.HasConfigureServices),
             EncodeBool(module.HasMapEndpoints),
             EncodeBool(module.HasGetJsonTypeInfoResolver),
-            EncodeBool(module.HasConfigureEndpointGroup));
+            EncodeBool(module.HasConfigureEndpointGroup),
+            // The exposed client-feature names ride a nested length-prefixed blob (like RPC parameters), so a
+            // name containing a separator can never corrupt the outer field framing.
+            ElarionManifestCodec.EncodeFields([.. module.ClientFeatures]));
 
     public static string EncodeHttpEndpoint(HttpEndpointEmission.Model model) =>
         ElarionManifestCodec.EncodeFields(
@@ -301,7 +305,7 @@ internal static class ElarionManifest
     public static bool TryDecodeModule(string value, out Module? module)
     {
         module = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 9)
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 10)
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null)
             return false;
@@ -314,6 +318,20 @@ internal static class ElarionManifest
             return false;
         }
 
+        var clientFeatures = EquatableArray<string>.Empty;
+        if (fields[9] is { Length: > 0 } encodedFeatures &&
+            ElarionManifestCodec.TryDecodeFields(encodedFeatures, out var featureFields))
+        {
+            var names = new List<string>();
+            foreach (var name in featureFields)
+            {
+                if (name is not null)
+                    names.Add(name);
+            }
+
+            clientFeatures = names.ToEquatableArray();
+        }
+
         module = new Module(
             fields[0]!,
             fields[1]!,
@@ -323,7 +341,8 @@ internal static class ElarionManifest
             hasConfigureServices,
             hasMapEndpoints,
             hasGetJsonTypeInfoResolver,
-            hasConfigureEndpointGroup);
+            hasConfigureEndpointGroup,
+            clientFeatures);
         return true;
     }
 

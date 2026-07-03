@@ -12,6 +12,7 @@
     "authorization",
     "resource-authorization",
     "feature-flags",
+    "client-capabilities",
     "idempotency",
     "settings",
     "persistence-and-transactions",

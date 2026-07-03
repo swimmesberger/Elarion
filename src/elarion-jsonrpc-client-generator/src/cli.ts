@@ -10,6 +10,7 @@ interface CliOptions {
   typesFileName?: string
   schemasFileName?: string
   clientFileName?: string
+  sessionClientFileName?: string
   sourceLabel?: string
 }
 
@@ -57,6 +58,11 @@ function parseArgs(argv: string[]): CliOptions {
       index += 1
       continue
     }
+    if (arg === '--session-client') {
+      options.sessionClientFileName = next
+      index += 1
+      continue
+    }
     if (arg === '--source-label') {
       options.sourceLabel = next
       index += 1
@@ -78,6 +84,8 @@ Options:
   --types <file>        TypeScript types filename (default: rpc-types.ts)
   --schemas <file>      Zod schemas filename (default: rpc-schemas.ts)
   --client <file>       Fetch client filename (default: rpc-client.ts)
+  --session-client <file> Client-capability snapshot client + OpenFeature provider (default: session-client.ts;
+                          emitted only when the schema exposes the elarion.session operation)
   --source-label <text> Source label written into generated file headers
 `)
 }
@@ -94,6 +102,7 @@ function main() {
     typesFileName: options.typesFileName,
     schemasFileName: options.schemasFileName,
     clientFileName: options.clientFileName,
+    sessionClientFileName: options.sessionClientFileName,
   })
 
   mkdirSync(outDir, { recursive: true })
@@ -101,8 +110,14 @@ function main() {
   writeFileSync(resolve(outDir, generated.schemasFileName), generated.schemasSource, 'utf-8')
   writeFileSync(resolve(outDir, generated.clientFileName), generated.clientSource, 'utf-8')
 
+  let sessionNote = ''
+  if (generated.sessionClientFileName !== undefined && generated.sessionClientSource !== undefined) {
+    writeFileSync(resolve(outDir, generated.sessionClientFileName), generated.sessionClientSource, 'utf-8')
+    sessionNote = ` (+ ${generated.sessionClientFileName})`
+  }
+
   console.log(
-    `[jsonrpc-client-generator] Generated ${generated.methodCount} RPC method types and schemas -> ${outDir}`
+    `[jsonrpc-client-generator] Generated ${generated.methodCount} RPC method types and schemas${sessionNote} -> ${outDir}`
   )
 }
 

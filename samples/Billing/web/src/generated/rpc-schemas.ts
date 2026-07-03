@@ -12,6 +12,7 @@ export const rpcParamsSchemas = {
     id: z.string().uuid(),
   }),
   "clients.list": z.unknown(),
+  "elarion.session": z.unknown(),
   "invoices.create": z.object({
     clientId: z.string().uuid(),
     amountCents: z.number().int().gte(1),
@@ -44,6 +45,18 @@ export const rpcResultSchemas = {
       name: z.string(),
       email: z.string(),
     })),
+  }),
+  "elarion.session": z.object({
+    user: z.object({
+      id: z.string(),
+      email: z.string().nullish().optional(),
+      isAuthenticated: z.boolean(),
+      roles: z.array(z.string()),
+      permissions: z.array(z.string()),
+    }),
+    modules: z.unknown(),
+    flags: z.unknown(),
+    variants: z.unknown(),
   }),
   "invoices.create": z.object({
     invoiceId: z.string().uuid(),

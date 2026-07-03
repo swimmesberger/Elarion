@@ -2,6 +2,7 @@ import { jsonSchemaToTypeScript } from './json-schema-to-ts.js'
 import { jsonSchemaToZod } from './json-schema-to-zod.js'
 import { stripNullable, type SchemaContext } from './json-schema.js'
 import { generateRpcClientSource } from './rpc-client-source.js'
+import { generateSessionClientSource } from './session-client-source.js'
 import type { GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema } from './schema.js'
 
 const DEFAULT_GENERATED_BY = 'elarion-jsonrpc-client-generator'
@@ -9,6 +10,8 @@ const DEFAULT_SOURCE_LABEL = 'rpc-schema.json'
 const DEFAULT_TYPES_FILE = 'rpc-types.ts'
 const DEFAULT_SCHEMAS_FILE = 'rpc-schemas.ts'
 const DEFAULT_CLIENT_FILE = 'rpc-client.ts'
+const DEFAULT_SESSION_CLIENT_FILE = 'session-client.ts'
+const DEFAULT_SESSION_OPERATION = 'elarion.session'
 
 export { UnsupportedJsonSchemaError } from './json-schema.js'
 export type { GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema } from './schema.js'
@@ -103,6 +106,21 @@ export function generateRpcClientFiles(
     idempotentMethods,
   })
 
+  // The client-capability snapshot client + OpenFeature provider (ADR-0030) is emitted only when the host exposes
+  // the session operation, so a schema without it produces byte-identical output. The schema's optional
+  // `capabilities` vocabulary (ADR-0032) turns the emitted module/flag/permission/role names into typed constants.
+  const sessionOperationName = options.sessionOperationName ?? DEFAULT_SESSION_OPERATION
+  const sessionClientFileName = options.sessionClientFileName ?? DEFAULT_SESSION_CLIENT_FILE
+  const hasSession = Object.prototype.hasOwnProperty.call(schema.methods, sessionOperationName)
+  const sessionClientSource = hasSession
+    ? generateSessionClientSource({
+        generatedBy,
+        sourceLabel,
+        operationName: sessionOperationName,
+        capabilities: schema.capabilities,
+      })
+    : undefined
+
   return {
     methodCount: methods.length,
     typesFileName,
@@ -111,6 +129,8 @@ export function generateRpcClientFiles(
     typesSource: typesLines.join('\n'),
     schemasSource: schemasLines.join('\n'),
     clientSource,
+    sessionClientFileName: sessionClientSource === undefined ? undefined : sessionClientFileName,
+    sessionClientSource,
   }
 }
 

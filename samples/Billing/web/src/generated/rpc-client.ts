@@ -101,6 +101,9 @@ export interface RpcApi {
     readonly "get": RpcEndpoint<"clients.get">
     readonly "list": RpcEndpoint<"clients.list">
   }
+  readonly "elarion": {
+    readonly "session": RpcEndpoint<"elarion.session">
+  }
   readonly "invoices": {
     readonly "create": RpcEndpoint<"invoices.create">
     readonly "list": RpcEndpoint<"invoices.list">
@@ -113,6 +116,9 @@ export interface RpcRequestApi {
     readonly "create": RpcBatchRequest<"clients.create">
     readonly "get": RpcBatchRequest<"clients.get">
     readonly "list": RpcBatchRequest<"clients.list">
+  }
+  readonly "elarion": {
+    readonly "session": RpcBatchRequest<"elarion.session">
   }
   readonly "invoices": {
     readonly "create": RpcBatchRequest<"invoices.create">
@@ -138,6 +144,7 @@ const rpcMethodNames = [
   "clients.create",
   "clients.get",
   "clients.list",
+  "elarion.session",
   "invoices.create",
   "invoices.list",
   "invoices.sendStatus",

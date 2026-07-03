@@ -30,8 +30,27 @@ export interface RpcMethodSchema {
   idempotent?: boolean
 }
 
+/** One structured permission from the schema's capability vocabulary ({resource}.{verb} plus its parts). */
+export interface RpcCapabilityPermission {
+  permission: string
+  resource: string
+  verb: string
+}
+
+/**
+ * The capability vocabulary block emitted by the server exporter (ADR-0032): module names with the
+ * `[ClientFeatures]` each exposes, the structured permission catalog, and role names. All optional — older
+ * schemas (or hosts without the session/authorization registrations) simply omit it.
+ */
+export interface RpcSchemaCapabilities {
+  modules?: Record<string, { features?: string[] }>
+  permissions?: RpcCapabilityPermission[]
+  roles?: string[]
+}
+
 export interface RpcSchema {
   methods: Record<string, RpcMethodSchema>
+  capabilities?: RpcSchemaCapabilities
 }
 
 export interface GenerateRpcClientOptions {
@@ -40,6 +59,10 @@ export interface GenerateRpcClientOptions {
   typesFileName?: string
   schemasFileName?: string
   clientFileName?: string
+  /** Output filename for the client-capability snapshot client + OpenFeature provider (default `session-client.ts`). */
+  sessionClientFileName?: string
+  /** The operation name the client-capability snapshot is served under (default `elarion.session`). */
+  sessionOperationName?: string
 }
 
 export interface GeneratedRpcClientFiles {
@@ -50,4 +73,10 @@ export interface GeneratedRpcClientFiles {
   typesSource: string
   schemasSource: string
   clientSource: string
+  /**
+   * The client-capability snapshot client + OpenFeature provider (ADR-0020). Present only when the schema exposes
+   * the session operation (default `elarion.session`); otherwise both fields are `undefined`.
+   */
+  sessionClientFileName?: string
+  sessionClientSource?: string
 }
