@@ -378,7 +378,11 @@ provider-agnostic** — the same shape as authorization, and distinct from compi
    the three patterns are not an open menu): in-module strategies use their module's declarations; switchable
    adapters default to **port-owned vocabulary** (consts beside the port in the application, referenced by the
    adapters' attributes and the admin DTO's `[AllowedValues]`); the platform-offering pattern
-   (`IVariantCatalog` data, no symbols) is for generic zero-per-switch surfaces only.
+   (`IVariantCatalog` data, no symbols) is for generic zero-per-switch surfaces only. **Pinning**
+   (`[FromKeyedServices(ElarionVariants.X.Y)]`, both axes) deliberately bypasses selection — handler discovery
+   skips pinned parameters, so no proxy/warm — and is the escape hatch for consumers that semantically require
+   one backend; pin via the vocabulary consts (configuration keys are the lower-cased values; keyed lookup does
+   not normalize), never raw strings.
 
 ## Validation model
 

@@ -68,6 +68,59 @@ public sealed class VariantServiceGeneratorTests {
     }
 
     [Fact]
+    public void HandlerPinningVariantContractWithFromKeyedServices_KeepsSynchronousRegistration() {
+        // [FromKeyedServices] pins a specific keyed implementation — DI resolves it directly, bypassing
+        // variant selection — so the handler must not pay the proxy (nor warm a switch it never consults).
+        var source = Preamble + AlgorithmDefs +
+            """
+
+            namespace Sample.App {
+                using Microsoft.Extensions.DependencyInjection;
+
+                public sealed record PinnedCommand(int Id) : ICommand;
+
+                public sealed class PinnedForecast([FromKeyedServices("neural")] IAlgorithm algorithm)
+                    : IHandler<PinnedCommand, Result<string>> {
+                    public ValueTask<Result<string>> HandleAsync(PinnedCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<string>.Success("x"));
+                }
+            }
+            """;
+
+        var (result, _) = Run(new HandlerRegistrationGenerator(), source);
+
+        GetGenerated(result, "Sample_App_PinnedForecast.g.cs").Should().NotContain("AsyncResolvedHandler");
+    }
+
+    [Fact]
+    public void HandlerMixingPinnedAndSelectedVariantContract_IsStillWrapped() {
+        // The unkeyed parameter still needs the warmed per-scope selection; only the pinned one opts out.
+        var source = Preamble + AlgorithmDefs +
+            """
+
+            namespace Sample.App {
+                using Microsoft.Extensions.DependencyInjection;
+
+                public sealed record CompareCommand(int Id) : ICommand;
+
+                public sealed class CompareForecasts(
+                    IAlgorithm selected,
+                    [FromKeyedServices("neural")] IAlgorithm pinned)
+                    : IHandler<CompareCommand, Result<string>> {
+                    public ValueTask<Result<string>> HandleAsync(CompareCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<string>.Success("x"));
+                }
+            }
+            """;
+
+        var (result, _) = Run(new HandlerRegistrationGenerator(), source);
+
+        var generated = GetGenerated(result, "Sample_App_CompareForecasts.g.cs");
+        generated.Should().Contain("AsyncResolvedHandler");
+        generated.Should().Contain("WarmAsync<global::Sample.App.IAlgorithm>");
+    }
+
+    [Fact]
     public void EmitsKeyedRegistrations_Binding_And_TransparentFactory() {
         var (result, _) = Run(new VariantServiceRegistrationGenerator(), Preamble + AlgorithmDefs);
 

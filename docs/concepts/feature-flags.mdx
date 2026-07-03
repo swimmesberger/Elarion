@@ -355,6 +355,40 @@ when the menu grows; the platform offering buys zero-per-switch generality at th
 validation (the values reach the UI through an enumerate call, not the schema). Elarion deliberately ships
 **no admin endpoint** — the registry is data handed to your code, which decides how it is exposed.
 
+## Pinning a specific implementation
+
+The variant registrations are ordinary **keyed services**, so a consumer can deliberately opt out of selection
+and pin one implementation — on either axis:
+
+```csharp
+// This job must always use the SMTP relay, regardless of what the switch currently selects.
+public sealed class ComplianceExport(
+    [FromKeyedServices(EmailBackends.Smtp)] IEmailSender alwaysSmtp) { /* ... */ }
+```
+
+Pinning bypasses the selection machinery entirely: no flag evaluation, no configuration read, and — on the
+feature axis — no async proxy or per-scope warm-up, so a pinned feature-variant implementation is injectable
+anywhere (the generator recognizes `[FromKeyedServices]` parameters and keeps such handlers on the plain
+synchronous registration). Lifetimes come from the implementation's `[Service]`, and when the pinned key
+matches what the switch currently selects, both consumers share the same scoped instance.
+
+Two rules keep pinning safe:
+
+- **Pin via the vocabulary consts** (`ElarionVariants.EmailBackend.Smtp`, or the port-owned consts) — never a
+  raw string. Configuration-axis keys are the **lower-cased** declared values, and a direct keyed lookup does
+  no normalization: `[FromKeyedServices("Office365")]` silently misses where the switch itself would have
+  matched. The consts make a typo or rename a compile error.
+- **Name the default.** An unnamed default is keyed under the internal `VariantServiceKeys.Default` sentinel;
+  if a consumer needs to pin it, give it a real name with `IsDefault = true` and pin that.
+
+<Callout type="warn">
+Pinning is the escape hatch, not the path: it is **invisible to the switch** — the admin flips the value, the
+registry and validation say everything is consistent, and the pinned consumer doesn't follow. Reach for it
+only when a consumer *semantically* requires one backend (a compliance job that must always use the relay),
+for explicit fallback chains (try the selected implementation, fall back to a pinned one), and in tests.
+Everything else injects the contract and follows the switch.
+</Callout>
+
 ## See also
 
 - [ADR-0016: Feature-flag gating](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0016-feature-flag-gating.md) — why a thin Elarion seam over OpenFeature rather than `IFeatureManager` directly.
