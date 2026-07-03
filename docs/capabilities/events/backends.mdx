@@ -170,6 +170,14 @@ that fails past `MaxDeliveryAttempts` is left for inspection and no longer retri
 low/single-instance deployments — in multi-instance deployments keep `LeaseDuration` comfortably above the
 time to deliver a full `BatchSize` batch.
 
+**Delivery is not atomic with your consumers.** Each handler-form consumer commits its **own**
+transaction (via the transaction decorator on the delivery scope); the worker then finalizes the message —
+a separate lease-guarded write on the worker's connection, per message, once **all** fan-out consumers
+have run. Two consequences are inherent: a crash between a consumer's commit and the finalize redelivers
+the message, and one failed consumer retries the *whole* message, re-running siblings that already
+succeeded. That is what at-least-once means in practice — write consumers to absorb it (see
+[Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates)).
+
 **Finalizing is lease-guarded.** Every finalize — mark delivered, mark failed, or park — is conditioned on
 the finalizing worker still owning the lease it claimed under. If a worker stalls past its lease and another
 worker legitimately reclaims and delivers the message, the stalled worker's late finalize matches zero rows,

@@ -54,13 +54,69 @@ idempotency store + decorator, not a new subsystem.
   `src/Elarion.Messaging.Outbox/OutboxMessage.cs`). **It is NOT exposed to consumers today** —
   `OutboxEventDispatcher.DispatchAsync` has the `OutboxMessage` but builds `OutboxEventContext` from
   `(message, message.CorrelationId)` only. `IEventContext` exposes `CorrelationId`, `Plane`, `Message` — **no message
-  id**. `CorrelationId` is `Guid.NewGuid()` per publish (a *tracing* id that may span messages), so it is **not** the
-  right dedup key; the dedup key must be `OutboxMessage.Id`.
+  id**. `CorrelationId` is `Guid.NewGuid()` per publish (`OutboxIntegrationEventBus`), so **today** it happens to be
+  1:1 with the outbox message and stable across redeliveries — the shipped docs' hand-rolled dedup examples key on it
+  for exactly that reason. But it is semantically the *tracing* id: its natural evolution is to **flow** from the
+  publishing operation across everything it causes (one command → N events sharing one correlation id), which would
+  silently break any dedup keyed on it. The durable dedup contract must be `OutboxMessage.Id`; exposing it also frees
+  `CorrelationId` to become a flowing tracing id later, and the docs' examples should move onto the message id then.
 - **Idempotency store reuse** (ADR-0021): `IIdempotencyStore.TryBeginAsync/CompleteAsync/AbandonAsync` keyed by
   `IdempotencyStoreKey(IdempotencyScope Scope, string Owner, string Key)`, backed by the composite-unique
   `EfCoreIdempotencyStore` (`INSERT … ON CONFLICT (scope, owner, key) DO NOTHING`). The decorator resolves the key via
   `IIdempotencyKeyAccessor` and can be seeded via `IIdempotencyKeySeed` (the write-seam added for the JSON-RPC
   `params._meta` path).
+
+## Why the outbox row cannot be the dedup ledger (the grain mismatch)
+
+The intuition "the consumer marks the outbox row processed in the same transaction as its own writes, so a single
+database is already exactly-once" fails on the actual transaction boundaries. The delivery sequence
+(`OutboxDeliveryService.ProcessBatchAsync`/`DeliverAsync`, verified):
+
+```text
+── publish ──────────────────────────────────────────────────────────────────
+publisher tx    business writes + INSERT outbox row       ← atomic (the outbox's whole job)
+
+── consume (delivery worker) ────────────────────────────────────────────────
+poll scope      ClaimPendingAsync: lease under a lockId   ← ExecuteUpdate, worker's connection
+consumer scope  consumer A: BEGIN … A's writes … COMMIT   ← A's own transaction (TransactionDecorator)
+                consumer B: BEGIN … B's writes … COMMIT   ← B's own transaction
+poll scope      MarkProcessedAsync(message.Id, lockId)    ← worker's write, after the fact
+```
+
+`ProcessedOnUtc` is stamped by the **worker**, per **message**, on its own connection, after every consumer
+transaction has already committed. The three duplicate windows follow directly:
+
+1. **Sibling failure (routine).** A commits, B throws → `MarkFailedAsync` → the whole message is redelivered → A
+   re-runs. The outbox row cannot record "A done, B pending": it is one row per **event**, while completion is a
+   fact per **(event, consumer)** — a grain mismatch, not an implementation gap.
+2. **Crash between the last consumer's commit and the finalize.** The lease expires, another worker reclaims, and
+   every consumer re-runs.
+3. **Lease expiry mid-flight.** A stalled worker's message is reclaimed while its consumers are still executing, so
+   two workers run them concurrently (the late finalize is lease-guarded and skipped, but the double execution has
+   already happened).
+
+Moving `MarkProcessedAsync` into "the consumer's transaction" cannot close these windows:
+
+- **Fan-out grain**: with N consumers there is no single consumer transaction that can atomically assert all-done.
+  Per-consumer status columns on the outbox row would *be* the inbox — denormalized into the publisher's table.
+- **Protocol ownership**: the finalize is half of the lease protocol (`lockId` guard, `Attempts`, backoff, parking)
+  and belongs to the worker's state machine, not to business transactions.
+- **Broker portability**: Plane B is the broker-portable plane. On a real broker the "mark" is an **ack** — a
+  protocol frame that can never join a database transaction — so any consumer-marks-the-outbox design dies at the
+  seam swap.
+
+The inbox is the same intuition placed at the only grain where atomicity with the effect is possible — a second
+ledger beside the first:
+
+| | Outbox row | Inbox row |
+|---|---|---|
+| Grain | one per **event** | one per **(event, consumer)** |
+| Written by | publisher tx (insert), worker (finalize) | the **consumer's own transaction** |
+| Asserts | "this event is durably recorded / dispatched" | "**this consumer** has processed this message" |
+| Atomic with | the publisher's business writes | the consumer's business writes |
+
+(With exactly one consumer, claiming + working + marking in one transaction does work — that is a single-table job
+queue, `FOR UPDATE SKIP LOCKED`. Fan-out pub/sub is what forces the two-ledger split.)
 
 ## Decision (proposed)
 
@@ -92,6 +148,46 @@ keyed per **(consumer, message)**:
 - **Activation** (see open decision B): recommended **automatic for every handler-form integration-event consumer**
   (the MassTransit/NServiceBus default — every consumer is deduped, which is the safe default for at-least-once), with
   an opt-out, rather than an opt-in attribute.
+
+## When is the inbox needed (usage guidance)
+
+The inbox dedups the consumer's **transactional effect** — with it, the consumer's DB writes happen exactly once
+per message. It does **not** make a foreign side effect (an SMTP send, a third-party API call) exactly-once: it
+removes the *systemic* duplicate sources and narrows the residual to the crash window between the foreign call and
+the commit (the ADR-0021 cooperative-recipient caveat, transitively). Per consumer:
+
+| Consumer | Inbox | Why |
+|---|---|---|
+| Domain-event (Plane A), either form | **Never** — the decorator must not attach | Runs inline in the publisher's transaction; exactly-once by atomicity. |
+| Integration, **method-form** | Unavailable | No pipeline to attach to. Convert to handler-form when dedup matters. |
+| Integration, handler-form, **in-memory bus** | Low value | Best-effort tier: no redelivery across a crash; the inbox guards only in-process multi-delivery. |
+| Integration, handler-form, **outbox** | **Default-on** (decision B), opt-out | Delivery is at-least-once *and* retry is per-message: one failing consumer re-runs every already-succeeded sibling consumer of the same event. |
+| …whose only effect is a call to a sink that dedups on a caller-supplied key | Legitimate opt-out | Keying the sink call on the **message id** already makes that effect exactly-once; the inbox would only save the wasted duplicate call. |
+| …whose effect is naturally idempotent (a pure upsert on a business key) | Legitimate opt-out | Redelivery converges by itself. |
+
+Why default-on rather than opt-in: the routine duplicate source is **not a crash** —
+`OutboxEventDispatcher.DispatchAsync` propagates any consumer failure so the **whole message** is retried,
+re-invoking consumers that already succeeded. One buggy or transiently-failing sibling consumer re-runs every
+healthy consumer on every backoff attempt; under that contract dedup must be the pit of success.
+
+For an external sink (the `IEmailSender` case), the layers compose rather than compete:
+
+1. **Outbox** — the intent ("send this email") is never lost on a crash and never phantom-sent on a rollback.
+2. **Inbox** — the consumer's DB effect is exactly-once; the sink call re-runs only if the process dies between the
+   sink accepting and the transaction committing.
+3. **Sink idempotency key** — pass the seeded **message id** as the recipient's dedup key (the same id the inbox
+   reads from the dispatch scope, so one piece of plumbing serves both layers) to close that last window. A keyless
+   protocol (bare SMTP) cannot; the residual is an accepted, documented at-least-once window — crash-only and
+   milliseconds wide at Elarion's tier.
+
+The inbox and a keyed sink are complementary, not redundant: the inbox also protects the consumer's co-located DB
+writes and saves the duplicate external round-trip. When the implementation ships, fold this matrix into the
+[idempotency concept doc](../concepts/idempotency.mdx) and the
+[consuming-events doc](../capabilities/events/consuming-events.mdx), whose "Handling duplicates" section already
+documents the hand-rolled tiers (idempotent operation → downstream idempotency key → hand-rolled guard table). The
+guard-table tier becomes this built-in default-on decorator, the "an inbox table is the last resort, not the
+default" guidance flips to "the inbox is the free safety net; natural idempotency remains the cheapest opt-out",
+and the `CorrelationId`-keyed examples move to the exposed message id.
 
 ## Implementation notes (for a clean session)
 

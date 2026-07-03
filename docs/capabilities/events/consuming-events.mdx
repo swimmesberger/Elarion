@@ -136,6 +136,14 @@ retried the whole message, or a lease that expired under multiple instances. The
 *delivery*; you build exactly-once *effect* by making the consumer idempotent. Every redelivery carries
 the **same** `IEventContext.CorrelationId`, so that id is your stable deduplication key.
 
+The framework cannot close this gap from the outside, and the reason is a **grain mismatch**: the outbox
+row is one row per *event*, finalized by the delivery worker per **message**, on the worker's own
+connection, *after* your consumer's transaction has already committed — and only once **every** fan-out
+consumer has run. Your effect, though, is a fact per *(message, consumer)*. Only a write inside your
+consumer's **own transaction** can atomically couple "already processed" to the effect itself; that is
+what mechanism 3 below does literally, while mechanisms 1 and 2 sidestep the bookkeeping by making the
+effect convergent or delegating the dedup downstream.
+
 Pick the cheapest mechanism the side effect allows — an inbox table is the last resort, not the default.
 
 **1. Make the operation idempotent (prefer this).** A conditional state transition or an upsert is
