@@ -241,7 +241,11 @@ to receive an overdue slot.
 Open questions carried into phase 2 implementation: whether `EnqueueAsync` (run-now) keeps its in-memory fast
 path with durability opt-in via `ScheduledJobOptions` (current lean: yes — pay-for-what-you-use); the payload
 compatibility contract when a row is claimed by a newer binary; and the shape of the scheduler's catch-up
-entry point.
+entry point. One wiring fact to not trip over: the ADR-0022 inbox auto-attaches via
+`HandlerRegistrationGenerator`, which only sees handlers in app assemblies — the **framework-shipped**
+job-envelope consumer is hand-wired (the ADR-0031 pattern), so its pipeline must hand-compose the
+`IdempotencyDecorator` with a `Consumer`-scoped policy (small; consider promoting a public reusable
+`Result`-payload inbox policy at that point rather than pre-shipping one).
 
 ### Addendum (2026-07-04): the ADR-0022 inbox shifts the phase-2 math
 
