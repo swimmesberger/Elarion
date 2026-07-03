@@ -4,8 +4,10 @@
 - Date: 2026-07-02
 - Related: [ADR-0017](0017-dependency-light-core.md) (seam in Abstractions, provider-backed default in an
   opt-in package), [ADR-0021](0021-idempotency.md) (the unique-constrained claim row as a lock-free fence),
-  [ADR-0024](0024-postgres-listen-notify-settings-changes.md) (the settings change source whose live
-  rescheduling this composes with), and the outbox lease pattern in `EfCoreOutboxStore`.
+  [ADR-0022](0022-inbox-idempotent-event-consumers.md) (the inbox that now dedups the phase-2 job-envelope
+  consumer by default — see the Phase 2 addendum), [ADR-0024](0024-postgres-listen-notify-settings-changes.md)
+  (the settings change source whose live rescheduling this composes with), and the outbox lease pattern in
+  `EfCoreOutboxStore`.
 
 ## Context
 
@@ -240,6 +242,30 @@ Open questions carried into phase 2 implementation: whether `EnqueueAsync` (run-
 path with durability opt-in via `ScheduledJobOptions` (current lean: yes — pay-for-what-you-use); the payload
 compatibility contract when a row is claimed by a newer binary; and the shape of the scheduler's catch-up
 entry point.
+
+### Addendum (2026-07-04): the ADR-0022 inbox shifts the phase-2 math
+
+The findings above were validated two days before the inbox
+([ADR-0022](0022-inbox-idempotent-event-consumers.md)) shipped. They stand, but three read differently now:
+
+- **Finding 1's contract improves by default.** "At-least-once with mandatory consumer idempotency" assumed
+  dedup was the consumer author's burden. The phase-2 job-envelope consumer is precisely a handler-form
+  integration consumer, so the **default-on inbox dedups its transactional effect automatically** — a
+  redelivered envelope (lease race, crash between the consumer's commit and the finalize) replays the committed
+  claim instead of re-executing the job. "Mandatory idempotency" narrows to the foreign-side-effect window
+  only (pass `IEventContext.MessageId` — the envelope's durable id — as the downstream's dedup key). This
+  further favors the outbox-first direction.
+- **Finding 3's batch-lease hazard downgrades from duplicate *execution* to wasted *redelivery*.** A slow job
+  letting its batch-mates' leases expire still causes reclaims, but each already-succeeded consumer's inbox
+  claim absorbs the re-invocation. The latency argument is untouched — long-running jobs still do not belong in
+  the shared single-file pipeline.
+- **The delivery side needs no bespoke per-execution fence.** The inbox claim, committed atomically with the
+  job's writes, *is* the fence: a failed or crashed job rolls its claim back and retries under the outbox
+  backoff; a completed job never re-runs. `DeliverAfterUtc` interacts benignly with inbox retention — the claim
+  is written at delivery time, not at publish, so a far-future one-shot does not age against `RetentionHours`.
+
+Unchanged: Finding 4's catch-up analysis (chain death, live rescheduling, and seeding races are about durable
+*schedule state*, which the inbox does not provide) and the claims-based catch-up direction.
 
 ## Consequences
 
