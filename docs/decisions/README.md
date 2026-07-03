@@ -52,3 +52,4 @@ designs that are not yet implemented.
 - [ADR-0029: The variant registry (`ElarionVariants`), named defaults, and the host-seeded catalog](0029-variant-registry-and-catalog.md)
 - [ADR-0030: Client capability bootstrap — modules, flags/variants, and grants projected to the frontend over OpenFeature](0030-client-capability-bootstrap.md)
 - [ADR-0031: Imperative handler transport mapping (and why HTTP stays concrete)](0031-imperative-handler-transport-mapping.md)
+- [ADR-0032: Frontend contribution model and the typed capability vocabulary](0032-frontend-contribution-model.md)

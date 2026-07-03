@@ -2,6 +2,7 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.Modules;
 
 namespace Elarion.Session;
 
@@ -9,7 +10,7 @@ namespace Elarion.Session;
 /// The framework-shipped client-capability bootstrap handler. It composes existing seams only — the deployment
 /// <see cref="ClientCapabilityManifest"/>, the current <see cref="ICurrentUser"/>, and (when present) the
 /// <see cref="IFeatureFlagService"/>/<see cref="IFeatureVariantService"/> — into a single <see cref="SessionResponse"/>
-/// the frontend reflects. See <c>ADR-0020</c>.
+/// the frontend reflects. See <c>ADR-0030</c>.
 /// </summary>
 /// <remarks>
 /// The flag and variant services are optional: a host that does not use feature flags still gets the module map and

@@ -56,8 +56,14 @@ builder.Services.AddElarionResilience();
 
 // Per-user handler caching, backed by HybridCache with a PostgreSQL L2 — the recommended L2 for most apps
 // already on Postgres: it reuses the "billing" database (an auto-created UNLOGGED cache table) instead of
-// operating a separate Redis. HybridCache's in-process L1 still carries the hot path.
-builder.Services.AddElarionPostgreSqlHandlerCaching(builder.Configuration.GetConnectionString("billing")!);
+// operating a separate Redis. HybridCache's in-process L1 still carries the hot path. During build-time schema
+// generation the Aspire-injected connection string is absent, so fall back to the in-memory tier — the schema
+// tool only builds the host, it never serves traffic.
+if (JsonRpcSchemaGeneration.IsRunning) {
+    builder.Services.AddElarionHandlerCaching();
+} else {
+    builder.Services.AddElarionPostgreSqlHandlerCaching(builder.Configuration.GetConnectionString("billing")!);
+}
 
 // Transport-neutral current user, filled from the authenticated principal.
 builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");

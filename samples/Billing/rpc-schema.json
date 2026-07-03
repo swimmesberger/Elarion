@@ -119,6 +119,75 @@
         ]
       }
     },
+    "elarion.session": {
+      "params": {
+        "type": "object"
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "isAuthenticated": {
+                "type": "boolean"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "isAuthenticated",
+              "roles",
+              "permissions"
+            ]
+          },
+          "modules": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "flags": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "variants": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "user",
+          "modules",
+          "flags",
+          "variants"
+        ]
+      }
+    },
     "invoices.create": {
       "params": {
         "type": "object",
@@ -268,5 +337,43 @@
         ]
       }
     }
+  },
+  "capabilities": {
+    "modules": {
+      "Clients": {
+        "features": [
+          "bulk-import",
+          "client-portal-v2"
+        ]
+      },
+      "Core": {
+        "features": []
+      },
+      "Invoicing": {
+        "features": []
+      }
+    },
+    "permissions": [
+      {
+        "permission": "clients.read",
+        "resource": "clients",
+        "verb": "read"
+      },
+      {
+        "permission": "clients.write",
+        "resource": "clients",
+        "verb": "write"
+      },
+      {
+        "permission": "invoices.read",
+        "resource": "invoices",
+        "verb": "read"
+      },
+      {
+        "permission": "invoices.write",
+        "resource": "invoices",
+        "verb": "write"
+      }
+    ]
   }
 }

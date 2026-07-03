@@ -1,21 +1,109 @@
+import type { RpcSchemaCapabilities } from './schema.js'
+
 export interface GenerateSessionClientSourceOptions {
   generatedBy: string
   sourceLabel: string
   /** The bus/REST operation name the session snapshot is served under (default `elarion.session`). */
   operationName: string
+  /** The schema's capability vocabulary (ADR-0032); absent on older schemas — types then fall back to `string`. */
+  capabilities?: RpcSchemaCapabilities
+}
+
+const q = (value: string): string => JSON.stringify(value)
+
+/**
+ * Emits the typed vocabulary section: `Modules`/`Flags`/`Permissions`/`Roles` const objects (only those with
+ * entries) plus the `ModuleName`/`FlagName`/`PermissionName`/`RoleName` aliases the accessors reference. With no
+ * vocabulary every alias is `string`, so the emitted accessors keep their pre-vocabulary signatures.
+ */
+function vocabularySection(capabilities: RpcSchemaCapabilities | undefined): string {
+  const moduleNames = Object.keys(capabilities?.modules ?? {}).sort()
+  const flagNames = [
+    ...new Set(Object.values(capabilities?.modules ?? {}).flatMap((m) => m.features ?? [])),
+  ].sort()
+  const permissions = [...(capabilities?.permissions ?? [])].sort((a, b) =>
+    a.permission < b.permission ? -1 : a.permission > b.permission ? 1 : 0
+  )
+  const roles = [...(capabilities?.roles ?? [])].sort()
+
+  const lines: string[] = []
+
+  if (moduleNames.length > 0) {
+    lines.push('/** Module names declared by the backend (enabled at schema-export time). */')
+    lines.push('export const Modules = {')
+    for (const name of moduleNames) lines.push(`  ${q(name)}: ${q(name)},`)
+    lines.push('} as const')
+    lines.push('export type ModuleName = (typeof Modules)[keyof typeof Modules]')
+  } else {
+    lines.push('/** No module vocabulary in the schema — any string is accepted. */')
+    lines.push('export type ModuleName = string')
+  }
+  lines.push('')
+
+  if (flagNames.length > 0) {
+    lines.push('/** Flag/variant names the backend exposes to the client (the union of every [ClientFeatures] list). */')
+    lines.push('export const Flags = {')
+    for (const name of flagNames) lines.push(`  ${q(name)}: ${q(name)},`)
+    lines.push('} as const')
+    lines.push('export type FlagName = (typeof Flags)[keyof typeof Flags]')
+  } else {
+    lines.push('/** No flag vocabulary in the schema — any string is accepted. */')
+    lines.push('export type FlagName = string')
+  }
+  lines.push('')
+
+  if (permissions.length > 0) {
+    const byResource = new Map<string, Array<{ verb: string; permission: string }>>()
+    for (const entry of permissions) {
+      const list = byResource.get(entry.resource) ?? []
+      list.push({ verb: entry.verb, permission: entry.permission })
+      byResource.set(entry.resource, list)
+    }
+    lines.push('/** The declared permission catalog, nested by resource → verb (values are the composed claim strings). */')
+    lines.push('export const Permissions = {')
+    for (const [resource, entries] of [...byResource.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
+      lines.push(`  ${q(resource)}: {`)
+      for (const { verb, permission } of entries) lines.push(`    ${q(verb)}: ${q(permission)},`)
+      lines.push('  },')
+    }
+    lines.push('} as const')
+    lines.push(
+      `export type PermissionName = ${permissions.map((p) => q(p.permission)).join(' | ')}`
+    )
+  } else {
+    lines.push('/** No permission vocabulary in the schema — any string is accepted. */')
+    lines.push('export type PermissionName = string')
+  }
+  lines.push('')
+
+  if (roles.length > 0) {
+    lines.push('/** Role names declared by the backend ([RequireRole] across enabled modules). */')
+    lines.push('export const Roles = {')
+    for (const name of roles) lines.push(`  ${q(name)}: ${q(name)},`)
+    lines.push('} as const')
+    lines.push('export type RoleName = (typeof Roles)[keyof typeof Roles]')
+  } else {
+    lines.push('/** No role vocabulary in the schema — any string is accepted. */')
+    lines.push('export type RoleName = string')
+  }
+
+  return lines.join('\n')
 }
 
 /**
  * Emits a self-contained client for the Elarion client-capability snapshot (ADR-0030): a typed `ClientSnapshot`,
  * synchronous capability accessors, and an `@openfeature/web-sdk`-shaped provider that answers every key from the
  * cached snapshot via the reserved `module.` / `permission.` / `role.` namespaces (a bare key is a flag/variant).
+ * When the schema carries the ADR-0032 capability vocabulary, the module/flag/permission/role names become typed
+ * constants and literal unions, so a typo in a capability check is a compile error; accessor parameters keep an
+ * escape hatch (`| (string & {})`) for names outside the exported vocabulary.
  *
  * The module has **no imports** — it neither depends on the RPC schema's generated dictionary typing nor pins
  * `@openfeature/web-sdk`, so it type-checks and runs in any browser or Node target. The consumer fetches the
  * snapshot through the generated RPC client (`rpc.{operation}(...)`) and hands it to the factory.
  */
 export function generateSessionClientSource(options: GenerateSessionClientSourceOptions): string {
-  const { generatedBy, sourceLabel, operationName } = options
+  const { generatedBy, sourceLabel, operationName, capabilities } = options
   return `// Auto-generated by ${generatedBy} — DO NOT EDIT
 // Source: ${sourceLabel}
 //
@@ -39,38 +127,46 @@ export interface ClientSnapshot {
   readonly variants: Readonly<Record<string, string>>
 }
 
+${vocabularySection(capabilities)}
+
 /** The reserved OpenFeature key namespaces and their typed builders. */
 export const Keys = {
-  module: (name: string): string => \`module.\${name}\`,
-  permission: (permission: string): string => \`permission.\${permission}\`,
-  role: (role: string): string => \`role.\${role}\`,
+  module: (name: ModuleName | (string & {})): string => \`module.\${name}\`,
+  permission: (permission: PermissionName | (string & {})): string => \`permission.\${permission}\`,
+  role: (role: RoleName | (string & {})): string => \`role.\${role}\`,
 } as const
 
 /** Synchronous, typed accessors over a cached snapshot. */
 export class SessionCapabilities {
-  constructor(private readonly snapshot: ClientSnapshot) {}
+  // An explicit field, not a constructor parameter property — the emitted code must stay valid under
+  // 'erasableSyntaxOnly' (parameter properties are non-erasable TypeScript).
+  private readonly snapshot: ClientSnapshot
+
+  constructor(snapshot: ClientSnapshot) {
+    this.snapshot = snapshot
+  }
 
   get user(): ClientSnapshotUser {
     return this.snapshot.user
   }
 
-  isModuleEnabled(name: string): boolean {
+  isModuleEnabled(name: ModuleName | (string & {})): boolean {
     return this.snapshot.modules[name] ?? false
   }
 
-  hasRole(role: string): boolean {
+  hasRole(role: RoleName | (string & {})): boolean {
     return this.snapshot.user.roles.includes(role)
   }
 
-  hasPermission(permission: string): boolean {
+  hasPermission(permission: PermissionName | (string & {})): boolean {
     return this.snapshot.user.permissions.includes(permission)
   }
 
-  isFlagEnabled(name: string): boolean {
+  isFlagEnabled(name: FlagName | (string & {})): boolean {
     return this.snapshot.flags[name] ?? false
   }
 
-  getVariant(name: string): string | undefined {
+  getVariant(name: FlagName | (string & {})): string | undefined {
     return this.snapshot.variants[name]
   }
 

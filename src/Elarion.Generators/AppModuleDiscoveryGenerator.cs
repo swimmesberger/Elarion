@@ -948,7 +948,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         sb.AppendLine("    }");
 
-        // --- GetClientCapabilityManifest (ADR-0020) — only when a module exposes [ClientFeatures] ---
+        // --- GetClientCapabilityManifest (ADR-0030) — only when a module exposes [ClientFeatures] ---
         AppendClientCapabilityManifest(sb, entries);
 
         // --- Per-module transport methods (group hooks) ---
@@ -983,8 +983,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         if (!hasClientFeatures)
             return;
 
-        const string ManifestFqn = "global::Elarion.Session.ClientCapabilityManifest";
-        const string ModuleManifestFqn = "global::Elarion.Session.ClientModuleManifest";
+        const string ManifestFqn = "global::Elarion.Abstractions.Modules.ClientCapabilityManifest";
+        const string ModuleManifestFqn = "global::Elarion.Abstractions.Modules.ClientModuleManifest";
 
         sb.AppendLine();
         sb.AppendLine("    /// <summary>Builds the deployment-resolved client-capability manifest (modules + exposed feature names) the session bootstrap evaluates per user.</summary>");

@@ -421,6 +421,19 @@ the way to expose a handler whose class the host does not own — framework-ship
 startup-decided. The bus seam is generic; REST stays a concrete, hand-authored `MapElarionX(route)` per handler
 (RDG/AOT-safe — no generic HTTP map). See [ADR-0031](docs/decisions/0031-imperative-handler-transport-mapping.md).
 
+**Typed capability vocabulary** ([ADR-0032](docs/decisions/0032-frontend-contribution-model.md)): the exported
+JSON-RPC schema carries an optional `capabilities` block — enabled modules with their `[ClientFeatures]` names,
+the structured `[RequirePermission]`/`[RequireRole]` catalog, and role names — built by
+`JsonRpcSchemaExporter.Generate(dispatcher, jsonOptions, JsonRpcSchemaExportOptions)` and auto-resolved by the
+schema tool from the app's DI (`ClientCapabilityManifest` — which lives in `Elarion.Abstractions.Modules`, beside
+`[ClientFeatures]`, so the Abstractions-only exporter can type it — and `IPermissionCatalog`; both optional,
+omitted block keeps schemas byte-identical). The TS generator turns it into typed constants + literal unions in
+`session-client.ts` (`Modules`/`Flags`/`Permissions`/`Roles`, `PermissionName` etc., `string` fallback on older
+schemas) — the frontend `ElarionPermissions`. ADR-0032 also pins the frontend **contribution model** (declarative
+module manifests, extension-point tokens as the frontend `[ModuleContract]`, `when` clauses over the snapshot,
+sample-first packaging) and its non-goals (no micro-frontends/module federation, no C#-declared UI contributions,
+no UI kit).
+
 ## Validation model
 
 Request validation is **two-tier**, and the dividing line is **what a wire contract can express** — not

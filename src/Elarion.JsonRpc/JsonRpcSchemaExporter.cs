@@ -28,10 +28,17 @@ public static class JsonRpcSchemaExporter {
     /// </summary>
     /// <param name="dispatcher">A fully configured dispatcher with all methods registered.</param>
     /// <param name="jsonOptions">Optional serializer options (used for type info resolution).</param>
+    /// <param name="exportOptions">
+    /// Optional capability vocabulary (modules/features, permissions, roles) emitted as the schema's
+    /// <c>capabilities</c> block; omitted entirely when absent so existing schemas stay byte-identical.
+    /// </param>
     /// <returns>A formatted JSON string containing the schema document.</returns>
     [RequiresUnreferencedCode(SchemaReflectionMessage)]
     [RequiresDynamicCode(SchemaReflectionMessage)]
-    public static string Generate(JsonRpcDispatcher dispatcher, JsonSerializerOptions? jsonOptions = null) {
+    public static string Generate(
+        JsonRpcDispatcher dispatcher,
+        JsonSerializerOptions? jsonOptions = null,
+        JsonRpcSchemaExportOptions? exportOptions = null) {
         var options = CreateSchemaOptions(jsonOptions);
         IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)> methods;
         try {
@@ -70,7 +77,77 @@ public static class JsonRpcSchemaExporter {
             ["methods"] = methodsObj,
         };
 
+        var capabilities = BuildCapabilitiesNode(exportOptions);
+        if (capabilities is not null) {
+            schema["capabilities"] = capabilities;
+        }
+
         return schema.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    /// <summary>
+    /// Builds the <c>capabilities</c> vocabulary block — module names with their exposed <c>[ClientFeatures]</c>
+    /// (enabled modules only, matching the method gating), the structured permission catalog, and the role names —
+    /// or <see langword="null"/> when nothing was supplied, keeping vocabulary-free schemas byte-identical. All
+    /// collections are emitted in a deterministic ordinal order.
+    /// </summary>
+    private static JsonObject? BuildCapabilitiesNode(JsonRpcSchemaExportOptions? exportOptions) {
+        if (exportOptions is null) {
+            return null;
+        }
+
+        var capabilities = new JsonObject();
+
+        if (exportOptions.ClientCapabilities is { Modules.Count: > 0 } manifest) {
+            var modules = new JsonObject();
+            foreach (var module in manifest.Modules
+                         .Where(static m => m.Enabled)
+                         .OrderBy(static m => m.Name, StringComparer.Ordinal)) {
+                var features = new JsonArray();
+                foreach (var feature in module.Features.OrderBy(static f => f, StringComparer.Ordinal)) {
+                    features.Add((JsonNode?)JsonValue.Create(feature));
+                }
+
+                modules[module.Name] = new JsonObject { ["features"] = features };
+            }
+
+            if (modules.Count > 0) {
+                capabilities["modules"] = modules;
+            }
+        }
+
+        if (exportOptions.PermissionCatalog is { } catalog) {
+            if (catalog.Modules.Count > 0) {
+                // Structured entries (not just the composed string) so client generators can nest by resource/verb
+                // without re-parsing the composed value, whose parts are free-form strings.
+                var permissions = new JsonArray();
+                foreach (var entry in catalog.Modules
+                             .SelectMany(static m => m.Permissions)
+                             .DistinctBy(static e => e.Permission)
+                             .OrderBy(static e => e.Permission, StringComparer.Ordinal)) {
+                    permissions.Add((JsonNode)new JsonObject {
+                        ["permission"] = entry.Permission,
+                        ["resource"] = entry.Resource,
+                        ["verb"] = entry.Verb,
+                    });
+                }
+
+                if (permissions.Count > 0) {
+                    capabilities["permissions"] = permissions;
+                }
+            }
+
+            if (catalog.Roles.Count > 0) {
+                var roles = new JsonArray();
+                foreach (var role in catalog.Roles.OrderBy(static r => r, StringComparer.Ordinal)) {
+                    roles.Add((JsonNode?)JsonValue.Create(role));
+                }
+
+                capabilities["roles"] = roles;
+            }
+        }
+
+        return capabilities.Count > 0 ? capabilities : null;
     }
 
     /// <summary>

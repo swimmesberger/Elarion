@@ -11,7 +11,7 @@ public sealed record SessionRequest;
 /// The client-capability snapshot for the current user and deployment: which modules are enabled, which exposed
 /// flags/variants resolve to what, and the user's raw grants. The frontend reflects this (hides/adapts UI); it is a
 /// <b>read-only UX projection, not an enforcement boundary</b> — the real gate is the handler's authorization. See
-/// <c>ADR-0020</c> and the <c>client-capabilities</c> concept doc.
+/// <c>ADR-0030</c> and the <c>client-capabilities</c> concept doc.
 /// </summary>
 public sealed record SessionResponse {
     /// <summary>The current user's identity and raw grants (roles + permissions).</summary>

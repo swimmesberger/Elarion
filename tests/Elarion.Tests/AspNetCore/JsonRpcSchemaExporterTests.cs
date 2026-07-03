@@ -2,6 +2,8 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using AwesomeAssertions;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Authorization;
+using Elarion.Abstractions.Modules;
 using Elarion.JsonRpc;
 using Xunit;
 
@@ -128,6 +130,91 @@ public sealed class JsonRpcSchemaExporterTests {
         foreach (var keyword in constraintKeywords) {
             untouched.TryGetProperty(keyword, out _).Should().BeFalse();
         }
+    }
+
+    [Fact]
+    public void Generate_EmitsCapabilitiesVocabulary_EnabledModulesSortedAndStructuredPermissions() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, PingResponse>(
+                "sample.ping",
+                (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)))
+            .Freeze();
+
+        var exportOptions = new JsonRpcSchemaExportOptions {
+            ClientCapabilities = new ClientCapabilityManifest {
+                Modules = [
+                    new ClientModuleManifest { Name = "Invoicing", Enabled = true, Features = ["late-fees"] },
+                    new ClientModuleManifest { Name = "Clients", Enabled = true, Features = ["client-portal-v2", "bulk-import"] },
+                    new ClientModuleManifest { Name = "Experiments", Enabled = false, Features = ["beta-x"] },
+                ],
+            },
+            PermissionCatalog = new FakePermissionCatalog(
+                [
+                    new PermissionCatalogEntry { Permission = "invoices.read", Resource = "invoices", Verb = "read" },
+                    new PermissionCatalogEntry { Permission = "clients.read", Resource = "clients", Verb = "read" },
+                    // Duplicate across modules — must be deduplicated in the export.
+                    new PermissionCatalogEntry { Permission = "clients.read", Resource = "clients", Verb = "read" },
+                ],
+                ["billing-admin", "auditor"]),
+        };
+
+        var schema = JsonRpcSchemaExporter.Generate(dispatcher, options, exportOptions);
+
+        using var doc = JsonDocument.Parse(schema);
+        var capabilities = doc.RootElement.GetProperty("capabilities");
+
+        // Enabled modules only, ordinally sorted; each carries its sorted feature names.
+        var modules = capabilities.GetProperty("modules");
+        modules.EnumerateObject().Select(static p => p.Name).Should().Equal("Clients", "Invoicing");
+        modules.GetProperty("Clients").GetProperty("features").EnumerateArray()
+            .Select(static f => f.GetString()).Should().Equal("bulk-import", "client-portal-v2");
+        modules.TryGetProperty("Experiments", out _).Should().BeFalse();
+
+        // Structured, deduplicated, sorted permission entries; sorted roles.
+        var permissions = capabilities.GetProperty("permissions").EnumerateArray().ToArray();
+        permissions.Select(static p => p.GetProperty("permission").GetString())
+            .Should().Equal("clients.read", "invoices.read");
+        permissions[0].GetProperty("resource").GetString().Should().Be("clients");
+        permissions[0].GetProperty("verb").GetString().Should().Be("read");
+        capabilities.GetProperty("roles").EnumerateArray().Select(static r => r.GetString())
+            .Should().Equal("auditor", "billing-admin");
+    }
+
+    [Fact]
+    public void Generate_OmitsCapabilitiesBlock_WhenNoVocabularySupplied() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, PingResponse>(
+                "sample.ping",
+                (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)))
+            .Freeze();
+
+        // No options, and options with nothing in them, must both stay byte-identical to the plain export.
+        var plain = JsonRpcSchemaExporter.Generate(dispatcher, options);
+        var withEmptyOptions = JsonRpcSchemaExporter.Generate(dispatcher, options, new JsonRpcSchemaExportOptions());
+
+        plain.Should().NotContain("\"capabilities\"");
+        withEmptyOptions.Should().Be(plain);
+    }
+
+    private sealed class FakePermissionCatalog(
+        IReadOnlyList<PermissionCatalogEntry> permissions,
+        IReadOnlyList<string> roles) : IPermissionCatalog {
+        public IReadOnlyList<string> Permissions { get; } =
+            [.. permissions.Select(static e => e.Permission).Distinct().Order()];
+
+        public IReadOnlyList<string> Roles { get; } = [.. roles.Order()];
+
+        public IReadOnlyDictionary<string, IReadOnlyList<string>> ByResource { get; } =
+            new Dictionary<string, IReadOnlyList<string>>();
+
+        public IReadOnlyDictionary<string, IReadOnlyList<string>> ByVerb { get; } =
+            new Dictionary<string, IReadOnlyList<string>>();
+
+        public IReadOnlyList<PermissionCatalogModule> Modules { get; } = [
+            new PermissionCatalogModule { Module = "Test", Permissions = permissions, Roles = roles },
+        ];
     }
 
     private sealed record PingRequest(string Message);
