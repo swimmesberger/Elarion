@@ -15,7 +15,7 @@ real PostgreSQL database.
 | `Billing.Infrastructure` | Intent-only mechanism adapters only: the SMTP email sender behind the module's port. The database is **not** here — it is application logic and lives in `Billing.Application.Persistence`. |
 | `Billing.Api` | The ASP.NET Core host: `[GenerateModuleBootstrapper]`, JSON-RPC + MCP transports, the scheduler/resilience/cache runtimes, current-user, and OpenTelemetry. |
 | `Billing.AppHost` | The .NET Aspire app host: provisions PostgreSQL, runs the API and the web frontend, and wires them together. |
-| `web` | A Vite + React 19 + Tailwind v4 + shadcn/ui + TanStack Query frontend that calls the API through the **generated** JSON-RPC client (`rpc-schema.json` → `src/generated/`). |
+| `web` | A Vite + React 19 + Tailwind v4 + shadcn/ui + TanStack Query/Router frontend that calls the API through the **generated** JSON-RPC client (`rpc-schema.json` → `src/generated/`), structured as **frontend modules** with the ADR-0032 contribution model (see below). |
 
 Entities live in a shared-kernel **namespace** and the whole persistence layer (configuration, the
 `BillingDbContext`, and migrations) in a shared `Persistence` namespace (both under no `[AppModule]`), not
@@ -42,6 +42,58 @@ for when each would graduate to its own assembly.
 - **Real persistence** — PostgreSQL via EF Core, migrations applied on startup, all provisioned by Aspire.
 - **The full chain** — a C# handler becomes a JSON-RPC method, an exported `rpc-schema.json`, a generated
   TypeScript client, and a typed React call, all driven by the same contract.
+- **Frontend modules with the contribution model (ADR-0032)** — the review-isolation property extended to
+  the web app; see the next section.
+
+## Frontend modules
+
+`web/src` mirrors the backend's modular-monolith rule — *a module only touches its own code* — using the
+contribution model of
+[ADR-0032](../../docs/decisions/0032-frontend-contribution-model.md):
+
+```
+src/
+  platform/                  # the frontend shared kernel (everything outside modules/ is shareable)
+    contributions.ts         # the @swimmesberger/elarion-contributions kernel bound to the generated
+                             #   capability vocabulary (typed `when` clauses)
+    points.ts                # the shell's own extension points (sidebarItems)
+    router.tsx, AppShell.tsx # root route + shell; the sidebar renders contributions, it hard-codes nothing
+    session.ts               # fetches the ADR-0030 capability snapshot once at boot
+  modules/
+    clients/                 # manifest + route subtree + components/hooks; publishes the
+                             #   clientRowActions extension point from its index.ts (the frontend [ModuleContract])
+    invoicing/               # contributes its sidebar item AND a "new invoice" action into
+                             #   clients' row-action point — a cross-module contribution via the token import
+  app.tsx                    # the composition root: discovers modules/*/index.ts via import.meta.glob,
+                             #   so adding a module is creating its folder — no central edits
+```
+
+The contribution machinery itself (`defineExtensionPoint`, `defineModule`, `contribute`, the `when`
+evaluator, the registry, and the React `<ExtensionSlot>` bindings) is imported from
+[`@swimmesberger/elarion-contributions`](../../src/elarion-contributions) — consumed here as a local
+`file:` dependency, so build it once (`npm ci` in `src/elarion-contributions`, which builds via its
+`prepare` script) before the web app's first build. What stays app-owned — and is meant to be copied
+when starting a new app — is the vocabulary binding, the points, the shell, and the route composition.
+
+- **Adding a module is creating its folder** — `app.tsx` discovers `modules/*/index.ts` with
+  `import.meta.glob` (expanded at build time into static imports), so no central file changes. The
+  tradeoff, noted in `app.tsx`: the glob-composed route tree types as `AnyRoute[]`, so `Link to` loses
+  literal-union checking; a statically listed tuple is the fully-typed alternative.
+- **Adding a sidebar item** touches only the owning module's `module.tsx` — the shell never changes.
+- **Contributions are declarative manifests** (`defineModule` + `contribute`), filtered by `when` clauses
+  (`{ module?, permission?, flag?, role? }`) against the `GET /session` snapshot and deterministically
+  ordered. The `when` vocabulary is the generated literal unions, so a typo'd permission fails to compile.
+- **Cross-module extension** works by importing the owning module's token from its public entry
+  (`index.ts`) — Invoicing contributes a lazily-loaded dialog to the Clients table without either module
+  seeing the other's internals. Module boundaries are held by convention here (imports only via
+  `modules/{name}/index.ts`); workspace packages with `exports` maps enforce the same rule at scale.
+- **Routes are module-owned TanStack Router subtrees** with lazy page components, so each module (and the
+  contributed dialog) is its own chunk; the Invoicing route's `beforeLoad` uses the package's
+  `redirectUnless` guard with the same `when` clause shape as its sidebar item, so a deep link into a
+  hidden module bounces home. Hiding is UX only — every handler still enforces its
+  `[RequirePermission]`/`[FeatureGate]` server-side.
+
+The kernel's unit tests live with the package: `npm --prefix src/elarion-contributions test`.
 
 ## Run it
 
@@ -51,6 +103,7 @@ starts the API and the Vite dev server (injecting the API URL as `VITE_API_URL`)
 dashboard with traces and metrics:
 
 ```bash
+npm ci --prefix src/elarion-contributions        # builds the contribution package the web app links
 npm install --prefix samples/Billing/web
 dotnet run --project samples/Billing/Billing.AppHost
 ```

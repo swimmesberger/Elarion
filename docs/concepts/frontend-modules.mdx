@@ -1,0 +1,291 @@
+---
+title: Frontend modules
+description: The contribution model — typed extension points, declarative module manifests, and capability-gated resolution — extends "a module only touches its own code" to the web app.
+---
+
+Elarion's backend has a hard review-isolation property: adding a feature to a module touches only that
+module's code. The **frontend contribution model**
+([ADR-0032](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md),
+shipped as [`@swimmesberger/elarion-contributions`](https://www.npmjs.com/package/@swimmesberger/elarion-contributions))
+extends that rule to the TypeScript app: a new sidebar item is one edit in the owning module's manifest, a
+new module is a new folder (discovered by the composition root's glob — no central edits), and a
+cross-module action is a manifest entry plus one token import — the shell never changes.
+
+```bash
+npm install @swimmesberger/elarion-contributions
+```
+
+## The model in one pass
+
+- A frontend **module** is a folder that ships a **manifest** — plain data plus lazy component references —
+  from its public entry. There is no import-time `registry.register(...)`: manifests are inspectable
+  without executing module code, deterministic, and testable as plain arrays.
+- An **extension point** is a typed token (`defineExtensionPoint<TItem, TContext>`). Exporting one from a
+  module's public entry is the frontend [`[ModuleContract]`](/docs/concepts/cross-module-communication):
+  contributors import the token — an explicit, compile-checked, correctly-directed dependency — without
+  pulling the owner's components into their chunk.
+- Every contribution carries a **`when` clause** (`{ module?, permission?, flag?, role? }`) evaluated
+  against the [client-capability snapshot](/docs/concepts/client-capabilities). The vocabulary is the
+  generated literal unions, so `when: { permission: "invocies.read" }` fails to compile.
+- The **registry** resolves once per snapshot: filter by `when` (a manifest-level `when` is ANDed into
+  every contribution), then sort deterministically by `order`, then id, then contributing module. A slot
+  renders the resolved list; server render and client hydration see identical trees.
+
+<Callout type="warn">
+Contribution visibility is a **read-only UX projection, never an enforcement boundary**. A hidden sidebar
+item is not a secured operation — the handler's own `[RequirePermission]`/`[FeatureGate]` gates every call
+server-side (see [Authorization](/docs/concepts/authorization)).
+</Callout>
+
+## What you import vs. what you own
+
+The package ships the *machinery* with fixed semantics; the application owns the *points* and the shell —
+Elarion deliberately ships no UI kit and no router integration:
+
+| You import (fixed semantics) | You own (copy from the sample) |
+| --- | --- |
+| `defineExtensionPoint`, `defineModule`, `contribute` | Your extension points (`sidebarItems`, …) and payload types |
+| The `when` evaluator and its AND semantics | The kit instantiation binding your generated vocabulary |
+| `createContributionRegistry` (filter + deterministic order) | The app shell that renders each slot |
+| `ContributionProvider`, `useContributions`, `<ExtensionSlot>` (`/react`) | Route composition and module discovery (the glob) |
+| `redirectUnless` route guard (`/tanstack-router`) | Everything else routing — TanStack's own API |
+
+Keeping the machinery imported is what preserves review isolation: the semantics live in the framework and
+are not re-reviewed (or silently forked) in every application. Keeping the points app-owned is the same
+rule as the backend: Elarion ships the `[ModuleContract]` mechanism, never your contracts.
+
+## Wiring it up
+
+Bind the kernel once to the generated capability vocabulary, in the app's platform folder:
+
+```ts title="platform/contributions.ts"
+import { createContributionKit, type ModuleManifest } from "@swimmesberger/elarion-contributions"
+import type { FlagName, ModuleName, PermissionName, RoleName } from "@/generated/session-client"
+
+export interface AppVocabulary {
+  module: ModuleName
+  permission: PermissionName
+  flag: FlagName
+  role: RoleName
+}
+export type AppManifest = ModuleManifest<AppVocabulary>
+export const { defineModule, defineExtensionPoint, contribute } = createContributionKit<AppVocabulary>()
+```
+
+Declare points where the slot's owner lives — the shell for a sidebar, a module for its own surface. The
+payload shape is deliberately **yours**: whatever your shell needs to render an entry (keep `to` a plain
+string so the point stays router-agnostic data — the shell is the one place that hands it to a router
+link):
+
+```ts title="platform/points.ts"
+import type { LucideIcon } from "lucide-react"
+import { defineExtensionPoint } from "@/platform/contributions"
+
+export interface SidebarItem {
+  readonly label: string
+  readonly icon: LucideIcon
+  readonly to: string
+}
+export const sidebarItems = defineExtensionPoint<SidebarItem>("platform.sidebar")
+```
+
+A module declares everything it adds in its manifest. A backend-paired module gates itself once at the
+manifest level, so disabling the backend module removes the whole frontend module:
+
+```ts title="modules/invoicing/module.tsx"
+export const invoicingManifest = defineModule({
+  name: Modules.Invoicing,
+  when: { module: Modules.Invoicing },
+  contributes: [
+    contribute(sidebarItems, [{
+      id: "invoices", label: "Invoices", icon: ReceiptText, to: "/invoices", order: 20,
+      when: { permission: Permissions.invoices.read },
+    }]),
+  ],
+})
+```
+
+The composition root **discovers** modules from the filesystem — adding a module is creating its folder,
+with no central edits. Vite expands the glob at build time into static imports, so discovery stays
+compile-time and deterministic; it then resolves the registry once per snapshot and hands it to the React
+bindings:
+
+```tsx title="app.tsx / main.tsx"
+import { createContributionRegistry } from "@swimmesberger/elarion-contributions"
+import { ContributionProvider } from "@swimmesberger/elarion-contributions/react"
+
+const discovered = import.meta.glob<AppModule>("./modules/*/index.ts", { eager: true, import: "default" })
+const appModules = Object.values(discovered)
+const routeTree = rootRoute.addChildren([indexRoute, ...appModules.map((m) => m.route)])
+
+const caps = await loadCapabilities()          // the /session snapshot (see Client capabilities)
+const registry = createContributionRegistry(appModules.map((m) => m.manifest), caps)
+// <ContributionProvider registry={registry}> … <RouterProvider context={{ caps }} /> …
+```
+
+<Callout type="info">
+The glob's one tradeoff: the composed route tree types as `AnyRoute[]`, so `Link to` loses literal-union
+checking. A team that wants fully-typed navigation lists modules statically instead —
+`rootRoute.addChildren([indexRoute, clients.route, invoicing.route])`, one line per module — and both
+forms compose the same manifests.
+</Callout>
+
+## The approach: a modular sidebar
+
+The division of labor for any shell surface: the **framework** ships the mechanics (the registry, `when`
+filtering, the slot bindings), the **app** owns the point's payload shape and one file of look, and
+**modules** supply data. The shell renders whatever resolved — it never knows the contributors, so it
+never changes when a module is added, and a disabled module's entries are simply absent. The integration
+is always the same single move, whatever the UI kit: **wherever your shell would map a hard-coded array
+of nav items, map `useContributions(point)` instead.**
+
+With plain elements:
+
+```tsx title="platform/AppShell.tsx"
+import { Link, Outlet } from "@tanstack/react-router"
+import { useContributions } from "@swimmesberger/elarion-contributions/react"
+import { sidebarItems } from "@/platform/points"
+
+export function AppShell() {
+  const items = useContributions(sidebarItems)   // filtered by `when`, deterministically ordered
+  return (
+    <div className="flex min-h-screen">
+      <aside className="w-56 border-r px-3 py-6">
+        <nav className="flex flex-col gap-1">
+          {items.map((item) => (
+            <Link key={item.id} to={item.to} activeProps={{ className: "bg-accent font-medium" }}>
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </aside>
+      <main className="flex-1 px-8 py-10">
+        <Outlet />
+      </main>
+    </div>
+  )
+}
+```
+
+### With shadcn/ui's Sidebar
+
+[shadcn/ui's Sidebar](https://ui.shadcn.com/docs/components/sidebar) renders its menu from an items array
+in every one of its examples — that array is exactly where the contributions go. Add the component
+(`npx shadcn@latest add sidebar`), keep its structure, and swap the hard-coded `const items = [...]` for
+the resolved contributions:
+
+```tsx title="platform/AppSidebar.tsx"
+import { Link } from "@tanstack/react-router"
+import { useContributions } from "@swimmesberger/elarion-contributions/react"
+import {
+  Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+} from "@/components/ui/sidebar"
+import { sidebarItems } from "@/platform/points"
+
+export function AppSidebar() {
+  const items = useContributions(sidebarItems)   // was: a hard-coded items constant
+  return (
+    <Sidebar>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Application</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {items.map((item) => (
+                <SidebarMenuItem key={item.id}>
+                  <SidebarMenuButton asChild>
+                    <Link to={item.to}>
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
+  )
+}
+```
+
+The shell wraps it exactly as shadcn documents — `<SidebarProvider><AppSidebar /><main><SidebarTrigger />
+<Outlet /></main></SidebarProvider>` as the root route's component — and collapsing, the mobile sheet,
+and theming all come from shadcn untouched. Sidebar *sections* are the same idea one level up: either
+group by a field your payload carries (`group: "main" | "admin"` on the item type, one `<SidebarGroup>`
+per group), or define one extension point per section when the sections themselves are the contract
+between shell and modules.
+
+A module's sidebar entry is then one manifest item (the Invoicing example above) — label, icon, target,
+`order`, `when` — and nothing else: no shell edit, no registration call. The same pattern serves any
+shell surface (top nav, settings sections, dashboards, command palettes): define a point, render
+`useContributions`/`<ExtensionSlot>` where it lives. The shell's *look* is deliberately yours — copy the
+sample's `AppShell` or shadcn's blocks as a starting point rather than importing one from Elarion (the
+no-UI-kit non-goal).
+
+## Cross-module contribution
+
+A module publishes a point from its public entry; another module imports the token and contributes.
+Payloads carry **lazy component references**, so the contributed UI stays in the contributor's chunk and
+downloads on first use:
+
+```ts title="modules/invoicing/module.tsx"
+import { clientRowActions } from "@/modules/clients"   // the Clients module's published token
+
+contribute(clientRowActions, [{
+  id: "create-invoice",
+  label: "New invoice for this client",
+  icon: FilePlus2,
+  component: lazy(() => import("./components/CreateInvoiceForClient")
+    .then((m) => ({ default: m.CreateInvoiceForClient }))),
+  when: { permission: Permissions.invoices.write },
+}])
+```
+
+The slot owner renders whatever resolved — if Invoicing is disabled, the action simply never appears; if
+Clients is disabled, its slot never renders and the contribution is inert. Neither module sees the other's
+internals: the boundary is the public entry (`modules/{name}/index.ts` by convention; workspace packages
+with `exports` maps enforce the same rule at scale — the `ELMOD002` analog).
+
+## Routes
+
+Routes are **module-owned router subtrees**, composed with the router's own API — Elarion adds no routing
+machinery (an ADR-0032 non-goal). With TanStack Router, each module exports one lazy route subtree and the
+composition root adds them as children. Each module's pages are their own chunk; a disabled module's chunk
+never downloads.
+
+The one piece the framework does own is the guard semantics: the `/tanstack-router` sub-export ships
+`redirectUnless`, a `beforeLoad` guard that evaluates **the same `when` clause** as a contribution — same
+AND, same fail-closed behavior — so a route and its sidebar item can never gate differently. Bind it to
+your vocabulary once, next to the root route:
+
+```ts title="platform/router.tsx"
+import { createRouteGuards } from "@swimmesberger/elarion-contributions/tanstack-router"
+
+export const { redirectUnless } = createRouteGuards<AppVocabulary>()
+```
+
+```ts title="modules/invoicing/module.tsx"
+export const invoicingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/invoices",
+  // The route-level mirror of the sidebar item's `when`: a deep link into a hidden module bounces home.
+  beforeLoad: redirectUnless({ module: Modules.Invoicing, permission: Permissions.invoices.read }, "/"),
+  component: lazyRouteComponent(() => import("./InvoicesPage"), "InvoicesPage"),
+})
+```
+
+## Reference usage
+
+The [Billing sample's web app](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing/web) is
+the living reference: module folders, the shell-owned sidebar point, the cross-module row-action point,
+snapshot-gated routes, and the composition root — start a new app by copying its app-owned half.
+
+## See also
+
+- [Client capabilities](/docs/concepts/client-capabilities) — the snapshot and typed vocabulary `when` clauses evaluate against.
+- [Cross-module communication](/docs/concepts/cross-module-communication) — the backend boundary model this mirrors.
+- [ADR-0032](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md) — decisions and non-goals (no micro-frontends, no C#-declared UI, no UI kit, no bespoke router).

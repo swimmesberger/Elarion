@@ -44,11 +44,12 @@ infrastructure stay in consuming projects.
 | `Elarion.Settings.Configuration` | Surfaces the `Global` settings scope as an `IConfiguration` provider with `IChangeToken` reload, so `IConfiguration`/`IOptionsMonitor` and `${...}` variable substitution pick up runtime changes — `builder.AddElarionSettingsConfiguration()`. | `Elarion.Settings` and `Microsoft.Extensions.{Configuration,Hosting.Abstractions,DependencyInjection.Abstractions,Logging.Abstractions}`. |
 | `Elarion.Settings.PostgreSql` | Cross-instance change notification over PostgreSQL `LISTEN/NOTIFY`: a settings write on one node fires `IChangeToken` watchers on every node, and the EF store's writes are announced on their own connection so a transactional write is notified only on commit — `AddElarionPostgreSqlSettingsChanges(connectionString)` (or an `NpgsqlDataSource`). | `Elarion.Settings`, `Elarion.Settings.EntityFrameworkCore`, and `Npgsql`. |
 
-## npm package
+## npm packages
 
 | Package | Purpose |
 | --- | --- |
 | `@swimmesberger/elarion-jsonrpc-client-generator` | TypeScript CLI/library that converts an exported `rpc-schema.json` into method contracts, constraint-aware Zod params/result schemas, and a portable fetch client that pre-validates request params. |
+| `@swimmesberger/elarion-contributions` | The frontend contribution model ([ADR-0032](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md)): typed extension-point tokens, declarative module manifests, and capability-gated deterministic resolution. Framework-free core; React bindings under `/react` and the `redirectUnless` route guard under `/tanstack-router` (both peers optional). See [Frontend modules](/docs/concepts/frontend-modules). |
 
 ## Architecture boundaries
 
@@ -83,4 +84,4 @@ The package split enforces clean dependencies:
 | Application library | `Elarion` (bundles the generator); optionally `Elarion.Validation` (enforces the request DTOs' DataAnnotations and triggers the validation-resolver generation), `Elarion.Blobs`, `Elarion.EntityFrameworkCore` (bundles the EF Core generator). |
 | Domain / entity library (if separate) | None — entities are plain classes with no marker. `[EntityConfiguration]` configurations live with the modules in the application library; the project holding the concrete `DbContext` references `Elarion.EntityFrameworkCore` so its generator reads the per-assembly configuration manifest and fills the context. |
 | ASP.NET Core host | `Elarion` (for the generator), `Elarion.JsonRpc`, `Elarion.AspNetCore`; optionally `Elarion.Blobs.PostgreSql`, blob-upload transports (`Elarion.Blobs.Tus` + `Elarion.Blobs.Tus.PostgreSql`, or `Elarion.Blobs.AspNetCore`), `Elarion.AspNetCore.SchemaGeneration` (build tooling), `Elarion.AspNetCore.OpenApi` (OpenAPI for `[HttpEndpoint]`), and `Elarion.AspNetCore.Mcp` (MCP server). |
-| Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`. |
+| Frontend | `@swimmesberger/elarion-jsonrpc-client-generator` + `zod`; optionally `@swimmesberger/elarion-contributions` (+ `/react`) for the frontend module/contribution model. |

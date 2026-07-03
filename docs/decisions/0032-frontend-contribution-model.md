@@ -61,22 +61,34 @@ one vocabulary, compile-checked on both sides of the wire.
 
 ### 2. Contributions are declarative manifests, not import-time registration
 
-A frontend module ships a **manifest** — plain data plus lazy component references — as its default export;
-the composition root imports the manifests (one line per *module*, zero lines per *contribution*, the same grain
-as the host referencing a module's project) and hands them to the shell:
+A frontend module ships a **manifest** — plain data plus lazy component references — from its public entry
+(`modules/{name}/index.ts`); the composition root **discovers** the modules with a Vite glob
+(`import.meta.glob("./modules/*/index.ts", { eager: true, import: "default" })`), so adding a module is
+creating its folder — zero central edits, zero lines per *contribution*. The glob expands at build time into
+static imports (compile-time discovery, deterministic order), and disabled modules stay in the one build
+artifact but resolve to nothing at runtime. The accepted cost: a glob-composed route tree types as
+`AnyRoute[]`, so `Link to` loses literal-union checking — a team that wants fully-typed navigation lists the
+modules statically instead (one line per module, the grain of a host `ProjectReference`); both compose the
+same manifests:
 
 ```ts
-// modules/invoicing/module.ts
-export default defineModule({
+// modules/invoicing/module.tsx
+export const invoicingManifest = defineModule({
   name: Modules.Invoicing,
-  contributes: {
-    [sidebar]: [{
-      id: 'invoices', label: 'Invoices', icon: FileText, route: '/invoices', order: 30,
-      when: { module: Modules.Invoicing, permission: Permissions.invoices.read },
-    }],
-  },
+  when: { module: Modules.Invoicing },   // module-level gate, ANDed into every contribution below
+  contributes: [
+    contribute(sidebarItems, [{
+      id: 'invoices', label: 'Invoices', icon: ReceiptText, to: '/invoices', order: 20,
+      when: { permission: Permissions.invoices.read },
+    }]),
+  ],
 })
 ```
+
+Two shapes are deliberate: `contribute(point, items)` batches rather than a computed-key record, because a
+computed key cannot type its items against the point's payload (the batch function can); and a **manifest-level
+`when`** ANDed into every contribution, so a backend-paired module gates itself on its module once instead of
+repeating the clause per item.
 
 Imperative `registry.register(...)` calls in module initializers are rejected: they are import-order-dependent,
 side-effectful, break tree-shaking, and cannot be validated up front (the reason VS Code moved contributions into
@@ -85,11 +97,14 @@ and testable — a slot renders from a plain array.
 
 ### 3. Extension points are typed tokens exported from a module's public entry
 
-`defineExtensionPoint<TContext, TItem>(id)` creates a token; exporting it from the module's public entry is the
-frontend `[ModuleContract]`. A module contributing to another module's point imports that token — the dependency
+`defineExtensionPoint<TItem, TContext = void>(id)` creates a token; exporting it from the module's public entry is
+the frontend `[ModuleContract]`. A module contributing to another module's point imports that token — the dependency
 is explicit, compile-checked (the generics type both the contribution and the context the slot supplies), and
 correctly directed. Because contributions are data + lazy refs, importing a token does not pull the owning module
-into the contributor's chunk. Boundaries are enforced the way TS already can: one workspace package (or folder
+into the contributor's chunk. The kernel itself is application-agnostic; typing `when` clauses against the
+*generated* vocabulary is the app's one-liner — `createContributionKit<AppVocabulary>()` in its platform folder,
+from which modules import `defineModule`/`defineExtensionPoint`/`contribute` (the `createSessionCapabilities`
+pattern). Boundaries are enforced the way TS already can: one workspace package (or folder
 with lint boundaries) per module, deep imports blocked by `package.json` `exports` — the `ELMOD002` analog.
 
 ### 4. `when` clauses evaluate against the capability snapshot — UX, never security
@@ -124,8 +139,8 @@ while the core primitives and everything in this ADR up to the slot component st
 **Positive**
 
 - The review-isolation test extends to the frontend: a new sidebar item touches one file in the owning module;
-  a new module is one composition-root line; a cross-module action is the contributor's manifest plus a token
-  import.
+  a new module is a new folder (glob-discovered — no central edits); a cross-module action is the contributor's
+  manifest plus a token import.
 - Capability checks are compile-checked against the same vocabulary the backend enforces, ending string drift.
 - The vocabulary block is additive and self-gating — hosts without `[ClientFeatures]`/authorization export
   byte-identical schemas; older generated clients ignore the block.
@@ -143,6 +158,21 @@ while the core primitives and everything in this ADR up to the slot component st
 - **Shipped with this ADR:** the `capabilities` schema block (`JsonRpcSchemaExportOptions`, tool auto-wiring,
   `ClientCapabilityManifest` relocated to `Elarion.Abstractions.Modules`) and the typed TS vocabulary in
   `session-client.ts`.
-- **Next (sample-first):** the contribution primitives + `<ExtensionSlot>` in the Billing web app restructured
-  into module folders with TanStack Router; then promotion to `@swimmesberger/elarion-frontend` (+ `/react`) and
-  a concept doc.
+- **Shipped (sample-first, then promoted):** the contribution primitives were proven in the Billing web app —
+  restructured into module folders with TanStack Router: module-owned lazy route subtrees, the shell-owned
+  `sidebarItems` point, and a cross-module contribution (Invoicing → the Clients row-action point) whose dialog
+  loads as the contributor's own chunk — and then promoted to **`@swimmesberger/elarion-contributions`**
+  (`src/elarion-contributions`: framework-free, dependency-free core; React bindings
+  `ContributionProvider`/`useContributions`/`<ExtensionSlot>` under the `/react` sub-export with React as an
+  optional peer; unit-tested). Point payload shapes stay app-owned — a framework `NavItem` contract was
+  considered and rejected (a five-line interface with no drift cost is not framework-worthy); the
+  modular-sidebar approach is documented instead. The sample now consumes the package; the app-owned half (kit instantiation,
+  points, shell, route composition) deliberately stays sample code to copy.
+- **Router integration is one semantic helper, not machinery:** the `/tanstack-router` sub-export ships
+  `redirectUnless(when, to)` (+ the vocabulary-bound `createRouteGuards<V>()`), a `beforeLoad` guard that
+  evaluates the same `when` clause with the same AND/fail-closed semantics as slot filtering — so a route and
+  its sidebar item can never gate differently. `@tanstack/react-router` is an optional peer; everything else
+  routing-related remains TanStack's own API composed by the app. A TanStack **Start** integration is
+  deliberately deferred until the sample itself runs Start (sample-first).
+- **Docs:** the [frontend-modules concept doc](../concepts/frontend-modules.mdx) documents the model and the
+  import-vs-own boundary.

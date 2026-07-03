@@ -119,16 +119,24 @@ jobs:
           path: artifacts/nuget/*
 
   publish-npm:
-    name: Publish npm package
+    name: Publish npm package (${{ matrix.package }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
 
+    strategy:
+      # Publish every package even when a sibling fails (each has its own trusted-publisher policy).
+      fail-fast: false
+      matrix:
+        package:
+          - src/elarion-jsonrpc-client-generator
+          - src/elarion-contributions
+
     defaults:
       run:
-        working-directory: src/elarion-jsonrpc-client-generator
+        working-directory: ${{ matrix.package }}
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -193,7 +201,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: src/elarion-jsonrpc-client-generator/package-lock.json
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
 
       - name: Install
         run: npm ci

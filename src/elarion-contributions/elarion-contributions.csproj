@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.Build.NoTargets/3.7.134">
+
+  <!--
+    Wrapper for the @swimmesberger/elarion-contributions npm/TypeScript package. It surfaces the package
+    in the .NET solution (IDE visibility, grouping) but produces no .NET assembly and is not packed.
+    The TypeScript build/test is driven by npm (see package.json), not by `dotnet build`.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <!-- Not a C# project: opt out of the implicit global usings inherited from Directory.Build.props,
+         which would otherwise emit a GlobalUsings.g.cs the IDE flags (no framework references behind it). -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!--
+      Opt-in: build the TypeScript package as part of `dotnet build` (requires Node/npm on PATH). Off by
+      default so a normal .NET build needs no Node. Enable per build with `-p:BuildJsClient=true`.
+    -->
+    <BuildJsClient Condition="'$(BuildJsClient)' == ''">false</BuildJsClient>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="package.json" />
+    <None Include="package-lock.json" />
+    <None Include="tsconfig.json" />
+    <None Include="README.md" />
+    <None Include="src/**/*.ts" />
+    <None Include="src/**/*.tsx" />
+    <None Include="tests/**/*.ts" />
+  </ItemGroup>
+
+  <!-- Install dependencies once (clean, lockfile-based) when opted in and node_modules is absent. -->
+  <Target Name="RestoreJsContributions"
+          Condition="'$(BuildJsClient)' == 'true' and !Exists('$(MSBuildProjectDirectory)/node_modules')">
+    <Message Importance="high" Text="elarion-contributions: npm ci" />
+    <Exec Command="npm ci" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <!-- Compile the TypeScript package (tsc) after the (no-op) .NET build when opted in. -->
+  <Target Name="BuildJsContributionsPackage"
+          Condition="'$(BuildJsClient)' == 'true'"
+          DependsOnTargets="RestoreJsContributions"
+          AfterTargets="Build"
+          Inputs="@(None)"
+          Outputs="$(MSBuildProjectDirectory)/dist/index.js">
+    <Message Importance="high" Text="elarion-contributions: npm run build" />
+    <Exec Command="npm run build" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+</Project>
