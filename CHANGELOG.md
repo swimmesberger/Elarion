@@ -9,6 +9,24 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Inbox for integration-event consumers — on by default (ADR-0022).** Handler-form consumers of an
+  `IIntegrationEvent` are now deduplicated automatically: the handler generator attaches the ADR-0021
+  `IdempotencyDecorator` with a synthesized `Consumer`-scoped policy — owner = the consuming handler's identity,
+  key = the delivered message id — claimed **inside the consumer's own transaction** (it takes over unit-of-work
+  ownership from `TransactionDecorator` there), so a redelivered message replays the committed claim instead of
+  re-running the consumer's effect. Lease races use `WaitThenReplay` (only a *committed* claim is ever
+  acknowledged); a failed `Result` rolls the claim back and the message retries. Opt out or tune with the new
+  **`[Inbox]`** attribute (`Enabled = false` restores the plain transaction; `RetentionHours`, default 24, must
+  exceed the delivery retry window) — diagnostics `ELINBX001`/`ELINBX002`. Attachment is **soft**: with no
+  `IIdempotencyStore` registered the consumer runs un-deduped as before; `AddElarionOutbox<T>` and the in-memory
+  integration bus now wire `AddElarionIdempotency()` so the store is present by default (pair the outbox with
+  `AddElarionIdempotencyEntityFrameworkCore` for claims that survive restarts — inbox rows share the idempotency
+  table under a `"consumer"` scope). New **`IEventContext.MessageId`** (`Guid?`, `null` on the domain plane)
+  exposes the durable, redelivery-stable message identity — use it (not `CorrelationId`, a tracing id) for
+  hand-rolled dedup and as the idempotency key for downstream systems; both delivery tiers also seed it into the
+  scope's `IIdempotencyKeyAccessor`. Domain-event and method-form consumers are never inboxed. See
+  [ADR-0022](docs/decisions/0022-inbox-idempotent-event-consumers.md) and
+  [Handling duplicates](docs/capabilities/events/consuming-events.mdx).
 - **Client capability bootstrap (`Elarion.Session`, ADR-0030).** A framework-shipped handler returns one snapshot
   of what the backend offers the current user and deployment — enabled modules, the exposed flags/variants, and
   the user's roles/permissions — so a frontend can hide/adapt UI from a single call (a **read-only UX projection,
@@ -267,6 +285,10 @@ minor releases may include breaking changes.
   to `using Elarion.EntityFrameworkCore.Identity;`. See [`docs/capabilities/identity`](docs/capabilities/identity.mdx).
 
 ### Fixed
+- **`Result<Unit>` idempotency payloads no longer touch `GetTypeInfo(typeof(Unit))`.** The generated
+  `[Idempotent]`/inbox policy for a `Result<Unit>` response stores only the success flag and reconstructs
+  `Unit.Value` on replay — previously the emitted serializer would have thrown on an AOT-strict host, because
+  `Unit` is registered in no JSON context.
 - **Soundness-hardening pass: ~50 adversarially-verified findings across every subsystem.** Highlights by area —
   *outbox:* finalize is lease-guarded (a stalled worker can no longer wipe a legitimate re-claimant's lease and
   trigger cascading redelivery), failed messages retry with exponential backoff instead of head-of-line blocking,
