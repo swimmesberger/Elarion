@@ -171,7 +171,19 @@ the commit (the ADR-0021 cooperative-recipient caveat, transitively). Per consum
 Why default-on rather than opt-in: the routine duplicate source is **not a crash** —
 `OutboxEventDispatcher.DispatchAsync` propagates any consumer failure so the **whole message** is retried,
 re-invoking consumers that already succeeded. One buggy or transiently-failing sibling consumer re-runs every
-healthy consumer on every backoff attempt; under that contract dedup must be the pit of success.
+healthy consumer on every backoff attempt; under that contract dedup must be the pit of success. Re-examined
+post-implementation against "most consumers can be written idempotently, so opt-in like `[Idempotent]`", and
+upheld on three grounds: **(a) asymmetric loss** — the inbox on an already-convergent consumer wastes two writes
+inside an existing transaction (reclaimable, visibly, via `[AllowDuplicates]`), while a missing inbox on a
+non-convergent consumer double-executes effects in production; default to the side whose error is cheap.
+**(b) the duplicate is an externality** — a consumer is re-run because a *sibling* failed, so "write it
+idempotently" is a burden imposed by code its author doesn't own; the framework that manufactures the redelivery
+internalizes it. **(c) the self-serve alternative is often the inbox in disguise** — the "idempotent framing" of
+an insert-per-event consumer is a unique index on the message id + `ON CONFLICT DO NOTHING`, hand-rolled per
+table; and delta-shaped effects (increments, accumulations) cannot be framed convergent at all. Commands differ
+on feasibility, not philosophy: there a default-on guard has no coherent semantics without a client key (see the
+symmetric-opt-out rejection below), while here the framework mints the key — so consumers are decided by
+cost-benefit and commands by the trilemma.
 
 For an external sink (the `IEmailSender` case), the layers compose rather than compete:
 
@@ -283,6 +295,20 @@ corrected:
   to be visible" is ever wanted as a team discipline, the sanctioned path is a module/assembly-scoped strictness
   attribute mirroring `[ElarionAuthorizationDefaults]` — warning on commands that declare neither `[Idempotent]`
   nor a deliberate opt-out — not a per-handler default flip that taxes every keyless client.
+- **Dedup consumers on the originating command's idempotency key** (an "operation id" flowing through the causal
+  chain) — **rejected as the framework key**: it exists only when the source command carried a key (a minority,
+  by the opt-in design), and it has the wrong grain — one operation can emit several messages, including several
+  of one event type, which would wrongly collapse under one key (the same grain error that disqualified
+  `CorrelationId`). The kernel it reaches for is already satisfied: a replayed `[Idempotent]` command returns its
+  stored result without re-running, so it never re-publishes its events — each leg of the chain dedups with the
+  id that leg owns (client key → command; message id → delivery; message id passed downstream → foreign effect).
+  An app may still carry a business/operation id in the event payload for domain-level checks.
+- **Rename `[Idempotent]` to `[Dedup]` for all handlers** — **rejected**: it inverts the convention the
+  `[AllowDuplicates]` rename established. Attributes declare the requested property or outcome (`[Cacheable]`,
+  `[Resilient]`, `[Idempotent]`), not the machinery; `[Dedup]` names the machinery. It would also detach the
+  attribute from the ecosystem vocabulary it participates in — the `Idempotency-Key` header (an industry/IETF
+  term that cannot be renamed), `IdempotencyScope`, `IIdempotencyStore`, and the keyed provider APIs the docs
+  point at.
 
 ## Consequences
 
