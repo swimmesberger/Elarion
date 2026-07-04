@@ -78,6 +78,74 @@ const rpc = createRpcApi({
 })
 ```
 
+### TanStack Start
+
+During SSR you usually need to forward the incoming request's `cookie` so the RPC call runs as the
+signed-in user. Generate with `--framework tanstack-start` to emit an **opt-in** `start-adapter.ts` next to
+the neutral core client (it needs the `@tanstack/react-start` peer dependency):
+
+```bash
+npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated --framework tanstack-start
+```
+
+`createStartRpcApi` is a turnkey `createRpcApi` with request-scoped cookie forwarding pre-wired; any
+`headers` you pass are layered on top:
+
+```ts
+import { createStartRpcApi } from './generated/start-adapter'
+
+export const rpc = createStartRpcApi({ url: '/rpc' })
+```
+
+For finer control the adapter also exports `forwardRequestCookie` — the isomorphic headers function on its
+own — so you can compose it into a plain `createRpcApi({ headers: forwardRequestCookie })` call.
+
+<Callout type="warn">
+  The cookie read must stay inside `createIsomorphicFn().server(...)`. Importing `@tanstack/react-start/server`
+  from any module the client bundle can reach — even a dynamic import behind a `typeof window` guard — fails
+  `vite build` with `[import-protection] Import denied`. The emitted adapter is structured so the Start
+  compiler strips the import (and the read) from the client build; keep that shape if you hand-roll it instead.
+  Because the frontend rarely rebuilds in CI, this is easy to get wrong unnoticed.
+</Callout>
+
+## Error handling
+
+A JSON-RPC error returned by the server is thrown as a typed `RpcError` carrying `code`, `message`, and
+optional `data`. Beyond the standard JSON-RPC codes, Elarion maps its transport-agnostic `AppError` kinds
+onto the server-reserved range, and the generated `RpcError` exposes a getter per kind — so a frontend
+branches on the kind directly instead of re-wrapping the error:
+
+```ts
+import { RpcError, ElarionErrorCodes } from './generated/rpc-client'
+
+try {
+  await rpc.clients.get({ id })
+} catch (error) {
+  if (error instanceof RpcError) {
+    if (error.isNotFound) return renderNotFound()
+    if (error.isForbidden || error.isUnauthorized) return redirectToLogin()
+    if (error.isConflict) return showConflictToast(error.message)
+  }
+  throw error
+}
+```
+
+| Getter | Code | `AppError` kind |
+| --- | --- | --- |
+| `isInvalidParams` | `-32602` | `Validation` |
+| `isNotFound` | `-32001` | `NotFound` |
+| `isConflict` | `-32002` | `Conflict` |
+| `isForbidden` | `-32003` | `Forbidden` |
+| `isBusinessRule` | `-32004` | `BusinessRule` |
+| `isUnauthorized` | `-32005` | `Unauthorized` |
+| `isInternalError` | `-32603` | `Internal` |
+
+The application codes are also exported as `ElarionErrorCodes` for `switch` statements, and the standard
+JSON-RPC getters (`isParseError`, `isInvalidRequest`, `isMethodNotFound`) stay available. These codes are
+the framework default from [`AppErrorMapper`](/docs/reference/result-and-errors); a host that registers a
+custom `IAppErrorTranslator<RpcError>` changes the wire codes, so keep the frontend aligned. A network or
+HTTP-level failure throws `RpcTransportError` and a malformed JSON-RPC envelope throws `RpcProtocolError`.
+
 ## Params validation
 
 The client **pre-validates request params by default** through `rpcParamsSchemas`, before anything
@@ -146,6 +214,11 @@ transport and `AbortSignal`, validates with Zod, and supports batching — but n
 TanStack, Vite, or any downstream framework. Applications own the adapter layer: server functions,
 auth forwarding, UI-framework hooks, and result normalization wrap `createRpcApi(...)` rather than
 replacing the transport.
+
+The one exception is an **opt-in** framework adapter (`--framework tanstack-start`), emitted as a separate
+`start-adapter.ts` that the core client never imports. A consumer that does not pass the flag gets
+byte-identical, framework-free output — the neutrality boundary is about what the core client pulls in, not
+about whether a separate opt-in file may exist.
 
 <Callout type="warn">
   The generator interprets the framework's schema format and does not support arbitrary JSON Schema

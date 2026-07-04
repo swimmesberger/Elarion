@@ -18,6 +18,11 @@ public static class AppErrorMapper {
         new() { Code = MapToCode(error.Kind), Message = error.Message, Data = error.Data };
 
     /// <summary>Maps an <see cref="ErrorKind"/> to its JSON-RPC integer error code.</summary>
+    /// <remarks>
+    /// The application-range codes (-32001..-32005) are a wire contract mirrored by the TypeScript client
+    /// generator (<c>src/elarion-jsonrpc-client-generator/src/rpc-client-source.ts</c>, <c>ElarionErrorCodes</c>
+    /// and the <c>RpcError</c> getters). Keep both in sync — changing a code breaks every generated client.
+    /// </remarks>
     public static int MapToCode(ErrorKind kind) => kind switch {
         ErrorKind.Validation => -32602,   // Invalid params
         ErrorKind.NotFound => -32001,

@@ -3,6 +3,7 @@ import { jsonSchemaToZod } from './json-schema-to-zod.js'
 import { stripNullable, type SchemaContext } from './json-schema.js'
 import { generateRpcClientSource } from './rpc-client-source.js'
 import { generateSessionClientSource } from './session-client-source.js'
+import { generateStartAdapterSource } from './start-adapter-source.js'
 import type { GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema } from './schema.js'
 
 const DEFAULT_GENERATED_BY = 'elarion-jsonrpc-client-generator'
@@ -12,6 +13,7 @@ const DEFAULT_SCHEMAS_FILE = 'rpc-schemas.ts'
 const DEFAULT_CLIENT_FILE = 'rpc-client.ts'
 const DEFAULT_SESSION_CLIENT_FILE = 'session-client.ts'
 const DEFAULT_SESSION_OPERATION = 'elarion.session'
+const DEFAULT_START_ADAPTER_FILE = 'start-adapter.ts'
 
 export { UnsupportedJsonSchemaError } from './json-schema.js'
 export type { GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema } from './schema.js'
@@ -121,6 +123,13 @@ export function generateRpcClientFiles(
       })
     : undefined
 
+  // The framework adapter (ADR-boundary: kept opt-in so the core client stays framework-neutral) is emitted only
+  // when a framework is requested, so an unopted schema produces byte-identical output.
+  const frameworkAdapterFileName = options.frameworkAdapterFileName ?? DEFAULT_START_ADAPTER_FILE
+  const frameworkAdapterSource = options.framework === 'tanstack-start'
+    ? generateStartAdapterSource({ generatedBy, sourceLabel, clientFileName })
+    : undefined
+
   return {
     methodCount: methods.length,
     typesFileName,
@@ -131,6 +140,8 @@ export function generateRpcClientFiles(
     clientSource,
     sessionClientFileName: sessionClientSource === undefined ? undefined : sessionClientFileName,
     sessionClientSource,
+    frameworkAdapterFileName: frameworkAdapterSource === undefined ? undefined : frameworkAdapterFileName,
+    frameworkAdapterSource,
   }
 }
 

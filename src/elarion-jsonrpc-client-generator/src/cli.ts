@@ -11,8 +11,12 @@ interface CliOptions {
   schemasFileName?: string
   clientFileName?: string
   sessionClientFileName?: string
+  frameworkAdapterFileName?: string
+  framework?: 'tanstack-start'
   sourceLabel?: string
 }
+
+const SUPPORTED_FRAMEWORKS = ['tanstack-start'] as const
 
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
@@ -63,6 +67,19 @@ function parseArgs(argv: string[]): CliOptions {
       index += 1
       continue
     }
+    if (arg === '--framework') {
+      if (!(SUPPORTED_FRAMEWORKS as readonly string[]).includes(next)) {
+        throw new Error(`Unsupported framework ${next}. Supported: ${SUPPORTED_FRAMEWORKS.join(', ')}`)
+      }
+      options.framework = next as CliOptions['framework']
+      index += 1
+      continue
+    }
+    if (arg === '--framework-adapter') {
+      options.frameworkAdapterFileName = next
+      index += 1
+      continue
+    }
     if (arg === '--source-label') {
       options.sourceLabel = next
       index += 1
@@ -86,6 +103,9 @@ Options:
   --client <file>       Fetch client filename (default: rpc-client.ts)
   --session-client <file> Client-capability snapshot client + OpenFeature provider (default: session-client.ts;
                           emitted only when the schema exposes the elarion.session operation)
+  --framework <name>    Emit an opt-in framework adapter alongside the neutral core client.
+                          Supported: tanstack-start (needs the @tanstack/react-start peer dependency)
+  --framework-adapter <file> Framework adapter filename (default: start-adapter.ts)
   --source-label <text> Source label written into generated file headers
 `)
 }
@@ -103,6 +123,8 @@ function main() {
     schemasFileName: options.schemasFileName,
     clientFileName: options.clientFileName,
     sessionClientFileName: options.sessionClientFileName,
+    framework: options.framework,
+    frameworkAdapterFileName: options.frameworkAdapterFileName,
   })
 
   mkdirSync(outDir, { recursive: true })
@@ -110,14 +132,19 @@ function main() {
   writeFileSync(resolve(outDir, generated.schemasFileName), generated.schemasSource, 'utf-8')
   writeFileSync(resolve(outDir, generated.clientFileName), generated.clientSource, 'utf-8')
 
-  let sessionNote = ''
+  const extraNotes: string[] = []
   if (generated.sessionClientFileName !== undefined && generated.sessionClientSource !== undefined) {
     writeFileSync(resolve(outDir, generated.sessionClientFileName), generated.sessionClientSource, 'utf-8')
-    sessionNote = ` (+ ${generated.sessionClientFileName})`
+    extraNotes.push(generated.sessionClientFileName)
+  }
+  if (generated.frameworkAdapterFileName !== undefined && generated.frameworkAdapterSource !== undefined) {
+    writeFileSync(resolve(outDir, generated.frameworkAdapterFileName), generated.frameworkAdapterSource, 'utf-8')
+    extraNotes.push(generated.frameworkAdapterFileName)
   }
 
+  const extraNote = extraNotes.length > 0 ? ` (+ ${extraNotes.join(', ')})` : ''
   console.log(
-    `[jsonrpc-client-generator] Generated ${generated.methodCount} RPC method types and schemas${sessionNote} -> ${outDir}`
+    `[jsonrpc-client-generator] Generated ${generated.methodCount} RPC method types and schemas${extraNote} -> ${outDir}`
   )
 }
 

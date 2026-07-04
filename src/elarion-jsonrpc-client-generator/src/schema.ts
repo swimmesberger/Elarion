@@ -63,6 +63,14 @@ export interface GenerateRpcClientOptions {
   sessionClientFileName?: string
   /** The operation name the client-capability snapshot is served under (default `elarion.session`). */
   sessionOperationName?: string
+  /**
+   * Emit an opt-in framework adapter alongside the neutral core client. `tanstack-start` produces
+   * `start-adapter.ts` (request-scoped cookie forwarding via `@tanstack/react-start`). Omitted → no adapter,
+   * so output stays byte-identical for consumers that do not opt in.
+   */
+  framework?: 'tanstack-start'
+  /** Output filename for the framework adapter (default `start-adapter.ts`). */
+  frameworkAdapterFileName?: string
 }
 
 export interface GeneratedRpcClientFiles {
@@ -79,4 +87,10 @@ export interface GeneratedRpcClientFiles {
    */
   sessionClientFileName?: string
   sessionClientSource?: string
+  /**
+   * The opt-in framework adapter. Present only when `framework` is requested (e.g. `tanstack-start`); otherwise
+   * both fields are `undefined`.
+   */
+  frameworkAdapterFileName?: string
+  frameworkAdapterSource?: string
 }

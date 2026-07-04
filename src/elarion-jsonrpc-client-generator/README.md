@@ -59,6 +59,39 @@ Result validation is enabled by default through `rpcResultSchemas`. Use `transfo
 
 Params validation is also enabled by default through `rpcParamsSchemas`: single calls and batch items are checked against the exported schema's constraints (lengths, ranges, patterns, formats) before the request is sent, and a failure throws `RpcParamsValidationError` locally — naming the method, with the underlying Zod error as `cause` — so tier-1 contract violations never reach the wire. Set `validateParams: false` to opt out.
 
+## Error handling
+
+A JSON-RPC error from the server is thrown as a typed `RpcError` (`code`, `message`, optional `data`). Elarion maps its `AppError` kinds onto the JSON-RPC server-reserved range, so the generated `RpcError` exposes a getter per kind — branch on the kind directly instead of re-wrapping:
+
+```ts
+import { RpcError, ElarionErrorCodes } from './generated/rpc-client'
+
+try {
+  await rpc.clients.get({ id })
+} catch (error) {
+  if (error instanceof RpcError && error.isNotFound) return renderNotFound()
+  throw error
+}
+```
+
+`isNotFound` (`-32001`), `isConflict` (`-32002`), `isForbidden` (`-32003`), `isBusinessRule` (`-32004`), and `isUnauthorized` (`-32005`) cover the Elarion application kinds; `isInvalidParams` (`-32602`) and `isInternalError` (`-32603`) cover `Validation`/`Internal`; and the standard `isParseError`/`isInvalidRequest`/`isMethodNotFound` getters stay available. The application codes are also exported as `ElarionErrorCodes` for `switch` statements.
+
+## Framework adapters
+
+The core client stays framework-neutral, but you can opt into a framework adapter emitted as a separate file. Pass `--framework tanstack-start` to also emit `start-adapter.ts` (needs the `@tanstack/react-start` peer dependency):
+
+```bash
+npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated --framework tanstack-start
+```
+
+It exports `createStartRpcApi` — a `createRpcApi` with request-scoped cookie forwarding pre-wired for SSR — and `forwardRequestCookie`, the isomorphic headers function on its own. The core client never imports the adapter, so consumers that don't opt in stay framework-neutral and their output is byte-identical.
+
+```ts
+import { createStartRpcApi } from './generated/start-adapter'
+
+export const rpc = createStartRpcApi({ url: '/rpc' })
+```
+
 ## Client-side tracing
 
 The generated client never imports an OpenTelemetry SDK. Instead it exposes an optional `instrumentation` hook so client-side tracing stays a host decision and adds zero dependencies. The client calls `startSpan` once per request (and once per batch), reads the returned span's `headers` to inject trace context into the outgoing request, then calls `setError`/`end` as the request settles:
