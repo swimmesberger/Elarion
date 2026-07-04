@@ -4,6 +4,7 @@ using Elarion.Abstractions.Pipeline;
 using Elarion.Abstractions.Validation;
 using Xunit;
 
+using Elarion.Pipeline;
 namespace Elarion.Tests.Pipeline;
 
 public sealed class ValidationDecoratorTests {

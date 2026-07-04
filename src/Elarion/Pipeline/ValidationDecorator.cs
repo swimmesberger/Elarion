@@ -1,6 +1,7 @@
 using Elarion.Abstractions.Validation;
+using Elarion.Abstractions;
 
-namespace Elarion.Abstractions.Pipeline;
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Validates the request through the <see cref="IRequestValidator"/> seam before it reaches the handler: a

@@ -1,5 +1,6 @@
 using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Identity;
+using Elarion.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -37,6 +38,10 @@ public static class ClaimsCurrentUserServiceCollectionExtensions {
         // middleware) from the captured principal. TryAddEnumerable so a host's own initializers compose.
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IDispatchScopeInitializer, CurrentUserScopeInitializer>());
+
+        // On-by-default user-context trace/log enrichment (ADR-0033): registering current-user support also
+        // registers the built-in UserContextEnricher. AddElarionUserContextEnrichment(o => o.Enabled = false) opts out.
+        services.AddElarionUserContextEnricherDefault();
 
         return services;
     }

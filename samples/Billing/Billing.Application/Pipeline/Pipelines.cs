@@ -13,6 +13,6 @@ namespace Billing.Application.Pipeline;
 /// never opens a transaction.</summary>
 [DecoratorList(
     typeof(LoggingDecorator<,>),
-    typeof(Elarion.Abstractions.Pipeline.TransactionDecorator<,>))]
+    typeof(Elarion.Pipeline.TransactionDecorator<,>))]
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
 public sealed class DefaultPipelineAttribute : Attribute;

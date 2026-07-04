@@ -1,7 +1,9 @@
 using Elarion.Abstractions.Idempotency;
 using Elarion.Abstractions.Messaging;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Pipeline;
 
-namespace Elarion.Abstractions.Pipeline;
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Wraps a handler in a single <see cref="IUnitOfWork"/> transaction: the inner handler and every write it

@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Pipeline;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Features;
+using Elarion.Diagnostics;
 
-namespace Elarion.Abstractions.Features;
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Enforces the <see cref="FeatureGateAttribute"/>s declared on a handler. The gates are read off the concrete

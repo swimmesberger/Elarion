@@ -14,12 +14,12 @@ public sealed class LoggingDecorator<TRequest, TResponse>(
 }
 
 // The transaction/unit-of-work decorator is framework-owned
-// (Elarion.Abstractions.Pipeline.TransactionDecorator, over IUnitOfWork) so features like idempotency compose
+// (Elarion.Pipeline.TransactionDecorator, over IUnitOfWork) so features like idempotency compose
 // on the same boundary. The sample references it directly in its [DecoratorList] and registers the EF unit of
 // work with AddElarionUnitOfWork<BillingDbContext>().
 //
 // Validation is framework-owned too (ADR-0027): wire-shape rules are DataAnnotations on the request DTOs, and
-// the handler generator auto-attaches Elarion.Abstractions.Pipeline.ValidationDecorator (over the
+// the handler generator auto-attaches Elarion.Pipeline.ValidationDecorator (over the
 // IRequestValidator seam) for any handler whose request carries them — it must never appear in a
 // [DecoratorList]. The host enables enforcement with AddElarionValidation(); business rules (cross-field,
 // async/database-backed) live in the handlers themselves.

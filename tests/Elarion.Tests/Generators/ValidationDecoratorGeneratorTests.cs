@@ -54,7 +54,7 @@ public sealed class ValidationDecoratorGeneratorTests {
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_CreateThingHandler.g.cs");
 
-        generated.Should().Contain("global::Elarion.Abstractions.Pipeline.ValidationDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.ValidationDecorator<");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Validation.IRequestValidator>()");
         // Emission is innermost-first, so an outer decorator is constructed later (higher index). The contract:
         // tracing → authorization → feature gate → validation → handler.
@@ -148,7 +148,7 @@ public sealed class ValidationDecoratorGeneratorTests {
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_RegisterCustomerHandler.g.cs");
 
-        generated.Should().Contain("global::Elarion.Abstractions.Pipeline.ValidationDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.ValidationDecorator<");
     }
 
     [Fact]

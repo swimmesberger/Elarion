@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Pipeline;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Authorization;
+using Elarion.Diagnostics;
 
-namespace Elarion.Abstractions.Authorization;
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Enforces the authorization requirements declared on a handler (<c>[RequirePermission]</c>,

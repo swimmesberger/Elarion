@@ -5,6 +5,7 @@ using Elarion.Abstractions.Resilience;
 using Elarion.Resilience;
 using Xunit;
 
+using Elarion.Pipeline;
 namespace Elarion.Tests.Services;
 
 public sealed class ResilienceDecoratorTests {

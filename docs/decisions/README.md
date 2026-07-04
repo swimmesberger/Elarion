@@ -53,3 +53,5 @@ designs that are not yet implemented.
 - [ADR-0030: Client capability bootstrap — modules, flags/variants, and grants projected to the frontend over OpenFeature](0030-client-capability-bootstrap.md)
 - [ADR-0031: Imperative handler transport mapping (and why HTTP stays concrete)](0031-imperative-handler-transport-mapping.md)
 - [ADR-0032: Frontend contribution model and the typed capability vocabulary](0032-frontend-contribution-model.md)
+- [ADR-0033: User-context trace and log enrichment](0033-user-context-trace-and-log-enrichment.md)
+- [ADR-0034: Abstractions holds contracts, not implementations](0034-abstractions-holds-contracts-not-implementations.md)

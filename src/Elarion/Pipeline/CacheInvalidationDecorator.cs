@@ -1,4 +1,7 @@
-namespace Elarion.Abstractions.Caching;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Invalidates cache tags after an inner handler completes with a successful result.

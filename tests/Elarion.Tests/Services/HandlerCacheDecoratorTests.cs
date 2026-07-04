@@ -7,6 +7,7 @@ using Elarion.Caching;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
+using Elarion.Pipeline;
 namespace Elarion.Tests.Services;
 
 public sealed class HandlerCacheDecoratorTests {

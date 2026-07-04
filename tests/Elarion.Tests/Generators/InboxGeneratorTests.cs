@@ -47,7 +47,7 @@ public sealed class InboxGeneratorTests {
         var generated = GetGenerated(result, "Sample_App_SendInvoiceEmail.g.cs");
 
         diagnostics.Where(d => d.Severity >= DiagnosticSeverity.Warning).Should().BeEmpty();
-        generated.Should().Contain("global::Elarion.Abstractions.Idempotency.IdempotencyDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.IdempotencyDecorator<");
         // Consumer scope, message-id key semantics: no fingerprint, WaitThenReplay, pass-through without a seed.
         generated.Should().Contain("IdempotencyScope)2");
         generated.Should().Contain("public bool KeyRequired => false;");
