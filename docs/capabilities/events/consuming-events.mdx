@@ -224,7 +224,8 @@ The classic CRUD-with-side-effects shape — create a row, generate a PDF, send 
 module's statistics current — maps onto the pieces like this:
 
 ```csharp
-// The command: create-without-a-natural-key is the classic double-submit case — a client retry
+// The command — natural key first: is there a unique constraint that makes a second insert impossible?
+// Here there isn't (nothing makes two invoices "the same"), so escalate to [Idempotent]: a client retry
 // must return the FIRST invoice, not create a second. The client sends an Idempotency-Key.
 // Bonus: a replayed command never re-runs, so InvoiceCreated is never published twice — the
 // entire downstream chain is protected at its source.
@@ -251,10 +252,11 @@ public sealed class SendInvoiceEmail(IEmailSender email) : IHandler<InvoiceCreat
 public sealed class RecalculateStatistics(StatsDbContext db) : IHandler<InvoiceCreated> { … }
 ```
 
-The rule of thumb that falls out: **write the consumer and ship it — the default is safe. Declare
-`[AllowDuplicates]` only when you can name the reason re-running is harmless; declare `[Idempotent]` on the
-command when a client retry could create something twice** (see
-[when does a command need it](/docs/concepts/idempotency#when-does-a-command-need-it)).
+The rule of thumb that falls out: **defaults need no justification; deviations must name their reason.**
+Write the consumer and ship it — the default inbox is safe; declare `[AllowDuplicates]` only when you can
+say why re-running is harmless. On the command side, model a **natural key + unique constraint** first, and
+escalate to `[Idempotent]` only for a named reason — no natural key, replay-beats-rejection, money, or
+increments (see [when does a command need it](/docs/concepts/idempotency#when-does-a-command-need-it)).
 
 **Method-form consumers have no pipeline, so no inbox.** Convert to the handler form when dedup matters,
 or dedup by hand keyed on `(consumer, context.MessageId)` — a unique-constrained insert in the same

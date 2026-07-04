@@ -53,25 +53,38 @@ Attribute options (all optional):
 
 ## When does a command need it?
 
-`[Idempotent]` pays off when an unkeyed client retry would do damage a constraint can't catch — or when a
-keyed replay gives a better client experience than an error. The classic cases:
+**Default: model the duplicate away with a natural key before reaching for machinery.** Most creates in a
+CRUD application have a natural identity if you ask *"what makes two of these the same?"* — often composite:
+`(TenantId, Email)`, `(CustomerId, ExternalOrderNo)`, `(InvoiceId, LineNo)`. Declare it as a **unique
+constraint/index** and translate the violation into a friendly `AppError.Conflict` in the handler (Tier-2
+validation: the constraint *is* the TOCTOU-safe check — a pre-insert lookup alone would race). This is the
+default because it deduplicates **facts, not just requests**: it catches the same client retrying, but also
+the second browser tab (which carries a *different* idempotency key and walks straight past `[Idempotent]`),
+double data-entry by another user, and the import job run twice. It needs no client cooperation and costs
+nothing per call.
 
-| Command shape | `[Idempotent]`? | Why |
+Escalate to `[Idempotent]` when you can **name the reason** — the deviations, ranked by how often they occur:
+
+| Reason to escalate | Example | Why the constraint isn't enough |
 |---|---|---|
-| Create **without** a natural unique key ("create invoice", "place order") | **Yes** | The classic double-submit: a timeout retry silently creates a second row. Replay returns the *first* invoice. |
-| Payment / money movement / non-repeatable external effect | **Yes** | The Stripe case: a retry must return the first charge, never make a second. |
-| Increment / accumulate ("add credit", "consume quota") | **Yes** | Deltas never converge — a retry double-applies. (Or redesign to set-style.) |
-| Create **with** a natural unique key (external order no., email-as-login) | Optional | The unique constraint already blocks the duplicate — but it *rejects* (409/422) where `[Idempotent]` *replays* the original success. Choose by client experience. |
-| Set-style update ("rename", "set address", "mark shipped") | No | Last-write-wins converges; a retry rewrites the same value. |
-| Delete by id | Usually no | The second delete finds nothing; decide whether NotFound-on-retry is acceptable to the client. |
-| Query | Never | Reads are idempotent by definition (`ELIDEM002` warns on non-commands). |
+| **No natural key exists** — identical submissions are legitimately distinct | "add a note", an order where the same basket twice is a real second order | Only the *client* knows whether it's a retry; only a client key can dedup. |
+| **Replay beats rejection** — the retrying client should get the created resource, not an error | checkout confirmation after a timeout | A constraint *rejects* the retry (409, client must re-fetch); `[Idempotent]` *replays* the first success. |
+| **Money / non-repeatable effects** | payments, provisioning | The Stripe case — use `[Idempotent]` here even *with* a natural key (the key gives replay; the constraint backstops every non-retry duplicate). |
+| **Increment / accumulate** | "add credit", "consume quota" | Deltas never converge; a retry double-applies. (Or redesign to set-style.) |
+
+And the shapes that need **neither**: set-style updates ("rename", "set address" — last-write-wins
+converges), deletes by id (the second delete finds nothing; decide whether NotFound-on-retry is acceptable),
+and queries (idempotent by definition; `ELIDEM002` warns on non-commands). **The default path needs no
+justification; every `[Idempotent]` should be able to say which row of this table it is.**
 
 Two things follow from annotating:
 
-- **The client must send the key** — the `Idempotency-Key` header on HTTP, `params._meta` on JSON-RPC. The
-  framework cannot invent one: only the client can distinguish "retry of the same submit" from "a second,
-  deliberate, identical command". `[Idempotent]` enforces and advertises the contract (the OpenAPI transformer
-  marks the operation); it does not remove the client's half.
+- **The client must send the key — and reuse it across retries of the same submit.** The `Idempotency-Key`
+  header on HTTP, `params._meta` on JSON-RPC; minted when the user *intends* the action (form render, submit
+  click), not per attempt — a key regenerated on every retry deduplicates nothing. The framework cannot invent
+  the key: only the client can distinguish "retry of the same submit" from "a second, deliberate, identical
+  command". `[Idempotent]` enforces and advertises the contract (the OpenAPI transformer marks the operation);
+  it does not remove the client's half.
 - **Protecting the command protects the whole chain at its source.** A replayed command returns its stored
   result *without re-running the handler*, so it never re-publishes its integration events — the downstream
   consumers, PDFs, and emails of a client retry simply never happen twice. Consumers then only need to survive
