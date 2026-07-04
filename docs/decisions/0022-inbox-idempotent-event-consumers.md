@@ -10,9 +10,9 @@
 
 > Originally captured as a proposed design while shipping idempotency (ADR-0021). Implemented 2026-07-04; the
 > open decisions are resolved in [Resolution](#resolution-as-implemented) below (A: **both** — the scope-seed
-> rail *and* `IEventContext.MessageId`; B: **default-on** with an `[Inbox(Enabled = false)]` opt-out). One
-> proposed detail was corrected during implementation: an `InProgress` claim is **not** acknowledged as success
-> (see the resolution — acking a still-uncommitted winner's message can lose the event).
+> rail *and* `IEventContext.MessageId`; B: **default-on** with an `[AllowDuplicates]` opt-out). One proposed
+> detail was corrected during implementation: an `InProgress` claim is **not** acknowledged as success (see the
+> resolution — acking a still-uncommitted winner's message can lose the event).
 
 ## Context
 
@@ -214,12 +214,19 @@ corrected:
    idempotency key, and so method-form consumers can hand-dedup with the *right* key. Null on the domain plane; the
    in-memory bus assigns a per-publish id so the consumer-visible contract matches the outbox tier. This also frees
    `CorrelationId` to become a flowing tracing id later without silently breaking dedup.
-4. **Open decision B resolved as default-on.** `HandlerRegistrationGenerator` synthesizes the inbox policy for every
-   handler whose request implements `IIntegrationEvent` (unless `[Idempotent]` is present — inert + ELIDEM002 there).
-   `[Inbox]` (`Elarion.Abstractions.Messaging`) opts out (`Enabled = false`) or tunes `RetentionHours` (default 24).
-   Diagnostics: `ELINBX001` (warning — `[Inbox]` on a non-integration-event handler), `ELINBX002` (error —
-   non-positive retention). `TransactionDecorator.AppliesTo` mirrors the attachment exactly: an integration-event
-   handler gets the plain transaction back only under `[Inbox(Enabled = false)]`.
+4. **Open decision B resolved as default-on, with a semantic opt-out.** `HandlerRegistrationGenerator` synthesizes
+   the inbox policy for every handler whose request implements `IIntegrationEvent` (unless `[Idempotent]` is
+   present — inert + ELIDEM002 there). The opt-out is **`[AllowDuplicates]`** (`Elarion.Abstractions.Messaging`) —
+   the consumer declares the *property* ("duplicate deliveries are harmless here": a naturally-idempotent effect,
+   or dedup delegated to a message-id-keyed downstream), not a mechanism toggle. This is the consumer-side mirror
+   of `[AllowAnonymous]` switching off a default-on guard, making it a house convention rather than a one-off; a
+   first-draft `[Inbox(Enabled = false)]` was rejected on review as naming the machinery instead of the
+   declaration (and reusing `[Idempotent]` itself was rejected: on commands it means "add the guard", so its
+   consumer-side negation would read exactly backwards). Retention is deliberately **not per-consumer** — the
+   invariant it serves is transport-scoped (see 8), so the first-draft `RetentionHours` knob was dropped along
+   with its diagnostic. Diagnostics: `ELINBX001` (warning — `[AllowDuplicates]` on a non-integration-event
+   handler). `TransactionDecorator.AppliesTo` mirrors the attachment exactly: an integration-event handler gets
+   the plain transaction back only under `[AllowDuplicates]`.
 5. **Soft attachment.** The generated inbox pipeline gates on `sp.GetService<IIdempotencyStore>()`: present → the
    decorator attaches; absent → the consumer runs un-deduped exactly as before this ADR (never a resolution
    failure). The delivery tiers make "present" the default: `AddElarionOutbox<T>` and the in-memory integration bus
@@ -234,12 +241,14 @@ corrected:
 7. **`Result<Unit>` payloads store the success flag only.** `Unit` is registered in no JSON context, so the previous
    `GetTypeInfo(typeof(Unit))` emission would have thrown on an AOT-strict host — a latent bug for `[Idempotent]`
    `IHandler<T>` commands too, fixed for both by a Unit special-case in the generated policy.
-8. **Retention** reuses the `IdempotencyKeyPurgeService`; inbox rows self-expire like command keys. The invariant
-   stands as proposed and is documented on `[Inbox]` and in the docs: **retention must exceed the delivery tier's
-   maximum retry window** (for the outbox: the backoff sum across `OutboxOptions.MaxDeliveryAttempts`, ≈43 minutes
-   at the defaults — 24 h leaves ample margin), or a still-retrying message could re-run after its row was purged.
-   Cross-package startup validation was deliberately skipped: the outbox and the idempotency store do not reference
-   each other, and the default margin is ~33×.
+8. **Retention** reuses the `IdempotencyKeyPurgeService`; inbox rows self-expire like command keys, after a fixed
+   24 h. The invariant stands as proposed: **retention must exceed the delivery tier's maximum retry window** (for
+   the outbox: the backoff sum across `OutboxOptions.MaxDeliveryAttempts`, ≈43 minutes at the defaults — 24 h is
+   ~33× that), or a still-retrying message could re-run after its row was purged. Per-consumer tuning was dropped
+   (see 4): the invariant is transport-scoped, so a per-handler knob had no derivable use case; if a deployment
+   ever configures retries beyond 24 h, the additive fix is a single global option, not a per-consumer attribute.
+   Cross-package startup validation was likewise skipped: the outbox and the idempotency store do not reference
+   each other, and the default margin is ample.
 
 ## Alternatives considered
 

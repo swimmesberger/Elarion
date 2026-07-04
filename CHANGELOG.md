@@ -15,9 +15,11 @@ minor releases may include breaking changes.
   key = the delivered message id — claimed **inside the consumer's own transaction** (it takes over unit-of-work
   ownership from `TransactionDecorator` there), so a redelivered message replays the committed claim instead of
   re-running the consumer's effect. Lease races use `WaitThenReplay` (only a *committed* claim is ever
-  acknowledged); a failed `Result` rolls the claim back and the message retries. Opt out or tune with the new
-  **`[Inbox]`** attribute (`Enabled = false` restores the plain transaction; `RetentionHours`, default 24, must
-  exceed the delivery retry window) — diagnostics `ELINBX001`/`ELINBX002`. Attachment is **soft**: with no
+  acknowledged); a failed `Result` rolls the claim back and the message retries. Opt out with the new
+  **`[AllowDuplicates]`** attribute — the consumer-side mirror of `[AllowAnonymous]`, a positive declaration
+  that redelivery is harmless (naturally idempotent effect, or dedup delegated to a message-id-keyed
+  downstream), restoring the plain transaction decorator (`ELINBX001` when declared off-plane). Claims expire
+  after a fixed 24 h, well above the outbox retry window. Attachment is **soft**: with no
   `IIdempotencyStore` registered the consumer runs un-deduped as before; `AddElarionOutbox<T>` and the in-memory
   integration bus now wire `AddElarionIdempotency()` so the store is present by default (pair the outbox with
   `AddElarionIdempotencyEntityFrameworkCore` for claims that survive restarts — inbox rows share the idempotency

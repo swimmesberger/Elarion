@@ -200,9 +200,10 @@ the generator attaches the same `IdempotencyDecorator` with a `Consumer`-scoped 
 handler's identity (so each fan-out consumer of one event claims its own row), key = the message id, seeded into
 the delivery scope by the outbox dispatcher and the in-memory pump. A redelivered message replays the recorded
 success instead of re-running the consumer; a failed consumer rolls its claim back with its writes and retries.
-Opt out with `[Inbox(Enabled = false)]` (naturally idempotent effect, or the only effect is a call to a keyed
-downstream); tune retention with `[Inbox(RetentionHours = …)]` — keep it above the outbox's maximum retry
-window. Rows share the idempotency table and purge loop under a `"consumer"` scope discriminator. See
+Opt out with `[AllowDuplicates]` — a positive declaration that redelivery is harmless (naturally idempotent
+effect, or the only effect is a call to a keyed downstream), the consumer-side mirror of `[AllowAnonymous]`.
+Rows share the idempotency table and purge loop under a `"consumer"` scope discriminator and expire after
+24 h, well above the outbox's maximum retry window. See
 [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates) for the full model.
 
 ## Side effects and cooperative recipients
@@ -224,7 +225,6 @@ duplicate charge is not.
 - `ELIDEM002` (warning) — `[Idempotent]` on a non-`ICommand` handler (no effect).
 - `ELIDEM003` (error) — non-positive `RetentionHours`.
 - `ELIDEM004` (warning) — a handler that is both `[Idempotent]` and `[Cacheable]`.
-- `ELINBX001` (warning) — `[Inbox]` on a handler whose request is not an `IIntegrationEvent` (no effect).
-- `ELINBX002` (error) — non-positive `RetentionHours` on `[Inbox]`.
+- `ELINBX001` (warning) — `[AllowDuplicates]` on a handler whose request is not an `IIntegrationEvent` (no effect).
 - `ELIDEMEF001` (error) — a context annotated with `[GenerateElarionIdempotencyKeys]` but not `[GenerateDbSets]`
   (add `[GenerateDbSets]` so the keys `DbSet` and model-configuration seam are generated).

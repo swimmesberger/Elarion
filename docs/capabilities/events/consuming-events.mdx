@@ -160,9 +160,9 @@ Two things to know about the default:
   automatically (process-local dedup); pair the outbox with
   [`AddElarionIdempotencyEntityFrameworkCore`](/docs/capabilities/idempotency) so inbox claims survive
   restarts — the outbox is durable, so its inbox should be too.
-- **Retention must outlive retries.** Inbox rows expire like idempotency keys (default 24 h, tune with
-  `[Inbox(RetentionHours = …)]`). Keep retention above the outbox's maximum retry window (≈43 minutes at
-  the defaults), or a still-retrying message could re-run after its claim was purged.
+- **Retention outlives retries.** Inbox rows expire like idempotency keys after 24 h — comfortably above
+  the outbox's maximum retry window (≈43 minutes at the defaults). The margin matters: a still-retrying
+  message must never re-run because its claim was purged.
 
 The inbox dedups the consumer's **transactional effect**. A foreign side effect inside the consumer — an
 email, a payment API call — re-runs only in the narrow window where the process dies between the foreign
@@ -184,13 +184,14 @@ public sealed class ChargeInvoice(IPaymentGateway payments, IIdempotencyKeyAcces
 }
 ```
 
-**Opting out.** `[Inbox(Enabled = false)]` removes the inbox (the plain transaction decorator returns) for
-consumers that need no dedup rows — the effect is naturally idempotent, or its only effect is a call to a
-keyed downstream:
+**Opting out.** `[AllowDuplicates]` declares that redelivery is harmless to this consumer and removes the
+inbox (the plain transaction decorator returns) — the consumer-side mirror of `[AllowAnonymous]`
+switching off a default guard. Declare it when the effect is naturally idempotent, or when the only
+effect is a call to a downstream keyed on the message id:
 
 ```csharp
 [ConsumeEvent]
-[Inbox(Enabled = false)] // "mark paid only if not already paid" converges by itself
+[AllowDuplicates] // "mark paid only if not already paid" converges by itself
 public sealed class MarkInvoicePaid(AppDbContext db) : IHandler<InvoicePaid> {
     public async ValueTask<Result> HandleAsync(InvoicePaid e, CancellationToken ct) {
         await db.Invoices

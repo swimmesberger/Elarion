@@ -154,7 +154,7 @@ public sealed partial class HandlerRegistrationGenerator {
             classDecl, classSymbol, requestType, responseType, compilation, fmt, cacheable, diagnostics);
 
         // The inbox (ADR-0022): an integration-event consumer without explicit [Idempotent] gets a synthesized
-        // Consumer-scoped policy by default, keyed on the delivered message id. [Inbox(Enabled = false)] opts out
+        // Consumer-scoped policy by default, keyed on the delivered message id. [AllowDuplicates] opts out
         // (TransactionDecorator.AppliesTo mirrors this, handing the plain transaction back).
         idempotent ??= ParseInbox(
             classDecl, classSymbol, requestType, responseType, compilation, fmt, diagnostics);

@@ -20,7 +20,7 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
     /// <summary>
     /// Attaches to commands and integration-event handlers, except those whose pipeline already owns the unit of
     /// work: <see cref="IdempotentAttribute"/> commands, and integration-event consumers under the default-on
-    /// inbox (ADR-0022) — only an <c>[Inbox(Enabled = false)]</c> opt-out gets the plain transaction back.
+    /// inbox (ADR-0022) — only an <c>[AllowDuplicates]</c> opt-out gets the plain transaction back.
     /// </summary>
     public static bool AppliesTo(HandlerMetadata handler) {
         if (handler.GetAttribute<IdempotentAttribute>() is not null)
@@ -30,7 +30,7 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
         // inbox decorator owns the transaction (claim + business writes commit atomically). Wrapping it again
         // here would nest two units of work.
         if (handler.RequestType.IsAssignableTo(typeof(IIntegrationEvent)))
-            return handler.GetAttribute<InboxAttribute>() is { Enabled: false };
+            return handler.GetAttribute<AllowDuplicatesAttribute>() is not null;
 
         return handler.RequestType.IsAssignableTo(typeof(ICommand));
     }

@@ -335,15 +335,10 @@ See [Feature flags](/docs/capabilities/feature-flags).
 
 See [Idempotency](/docs/concepts/idempotency).
 
-### `[Inbox]`
+### `[AllowDuplicates]`
 
 - **Package:** `Elarion.Abstractions` (Messaging) · **Applies to:** class (single, not inherited)
-- **Triggers:** configures — or opts out of — the **inbox** on a handler-form integration-event consumer. The inbox is **on by default** for every handler whose request is an `IIntegrationEvent`: the generator attaches a `Consumer`-scoped `IdempotencyDecorator` that claims *(consumer, message id)* inside the consumer's own transaction, so a redelivered message is acknowledged instead of re-run (ADR-0022). The attribute exists to opt out (`Enabled = false` — the plain transaction decorator returns) or to tune retention; its absence means the default inbox applies. `[Inbox]` on a non-integration-event handler is inert (`ELINBX001`). Domain-event consumers never get an inbox (exactly-once by atomicity); method-form consumers have no pipeline to attach to.
-
-| Parameter | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `Enabled` | `bool` (init) | `true` | Set `false` to opt out — the consumer handles duplicates itself (naturally idempotent effect, or a downstream keyed on the message id). |
-| `RetentionHours` | `int` (init) | `24` | How long a completed inbox claim is retained, in hours. Must exceed the delivery tier's maximum retry window (`ELINBX002` if non-positive). |
+- **Triggers:** declares that **duplicate deliveries are harmless** to this handler-form integration-event consumer, opting it out of the default-on **inbox** (ADR-0022). The inbox attaches automatically to every handler whose request is an `IIntegrationEvent` — a `Consumer`-scoped `IdempotencyDecorator` claiming *(consumer, message id)* inside the consumer's own transaction, so a redelivered message is acknowledged instead of re-run (claims expire after 24 h, well above the outbox retry window). Declare `[AllowDuplicates]` when re-running is safe by construction — the effect is naturally idempotent (a conditional transition/upsert), or the only effect is a call to a downstream keyed on `IEventContext.MessageId` — and the plain transaction decorator returns. The consumer-side mirror of `[AllowAnonymous]`: a positive property declaration switching off a default guard. Inert on non-integration-event handlers (`ELINBX001`); domain-event consumers never have an inbox (exactly-once by atomicity); method-form consumers have no pipeline to attach to.
 
 See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
 

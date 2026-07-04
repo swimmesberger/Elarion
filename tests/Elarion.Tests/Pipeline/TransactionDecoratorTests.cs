@@ -62,12 +62,11 @@ public sealed class TransactionDecoratorTests {
         // ADR-0022: the default-on inbox decorator claims the message id and runs the consumer inside its own
         // unit of work, so the plain transaction decorator must stay off — mirroring the [Idempotent] exclusion.
         AppliesTo(typeof(PlainIntegrationConsumer)).Should().BeFalse();
-        AppliesTo(typeof(TunedInboxConsumer)).Should().BeFalse();
     }
 
     [Fact]
-    public void AppliesTo_IntegrationConsumer_True_WhenInboxOptedOut() {
-        // [Inbox(Enabled = false)] hands the plain transaction back — the consumer dedups itself.
+    public void AppliesTo_IntegrationConsumer_True_WhenDuplicatesAreAllowed() {
+        // [AllowDuplicates] hands the plain transaction back — the consumer has declared redelivery harmless.
         AppliesTo(typeof(OptedOutIntegrationConsumer)).Should().BeTrue();
     }
 
@@ -104,13 +103,7 @@ public sealed class TransactionDecoratorTests {
             ValueTask.FromResult(Result.Success());
     }
 
-    [Inbox(RetentionHours = 48)]
-    private sealed class TunedInboxConsumer : IHandler<TestIntegrationEvent> {
-        public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) =>
-            ValueTask.FromResult(Result.Success());
-    }
-
-    [Inbox(Enabled = false)]
+    [AllowDuplicates]
     private sealed class OptedOutIntegrationConsumer : IHandler<TestIntegrationEvent> {
         public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) =>
             ValueTask.FromResult(Result.Success());

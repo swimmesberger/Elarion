@@ -22,7 +22,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
     private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string IdempotentAttributeMetadataName = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
-    private const string InboxAttributeMetadataName = "Elarion.Abstractions.Messaging.InboxAttribute";
+    private const string AllowDuplicatesAttributeMetadataName = "Elarion.Abstractions.Messaging.AllowDuplicatesAttribute";
     private const string ElarionValidationExtensionsMetadataName = "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
     private const string DomainEventMetadataName = "Elarion.Abstractions.Messaging.IDomainEvent";
@@ -256,21 +256,13 @@ public sealed partial class HandlerRegistrationGenerator {
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
-    private static readonly DiagnosticDescriptor InboxOnNonIntegrationEventDescriptor = new(
+    private static readonly DiagnosticDescriptor AllowDuplicatesOnNonIntegrationEventDescriptor = new(
         "ELINBX001",
-        "[Inbox] handler is not an integration-event consumer",
-        "Handler '{0}' declares [Inbox] but its request type '{1}' is not an IIntegrationEvent; the inbox only "
-        + "applies to handler-form integration-event consumers (domain events run inline in the publisher's "
-        + "transaction and are exactly-once by atomicity), so the attribute has no effect",
+        "[AllowDuplicates] handler is not an integration-event consumer",
+        "Handler '{0}' declares [AllowDuplicates] but its request type '{1}' is not an IIntegrationEvent; only "
+        + "handler-form integration-event consumers have a default-on inbox to opt out of (domain events run "
+        + "inline in the publisher's transaction and are exactly-once by atomicity), so the attribute has no effect",
         "Elarion.Abstractions.Messaging",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
-
-    private static readonly DiagnosticDescriptor InvalidInboxRetentionDescriptor = new(
-        "ELINBX002",
-        "[Inbox] retention is invalid",
-        "Handler '{0}' must declare a positive RetentionHours on [Inbox]",
-        "Elarion.Abstractions.Messaging",
-        DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 }

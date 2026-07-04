@@ -53,8 +53,10 @@ public sealed class InboxGeneratorTests {
         generated.Should().Contain("public bool KeyRequired => false;");
         generated.Should().Contain("public bool Fingerprint => false;");
         generated.Should().Contain("IdempotencyConflictBehavior)1");
-        // The owner discriminator is the consumer's identity, baked in at compile time.
+        // The owner discriminator is the consumer's identity, baked in at compile time; retention is the fixed
+        // framework default (a transport-scoped invariant, not a per-consumer knob).
         generated.Should().Contain("public string? Owner => \"Sample.App.SendInvoiceEmail\";");
+        generated.Should().Contain("global::System.TimeSpan.FromHours(24)");
         // Soft attach: without AddElarionIdempotency the consumer runs un-deduped instead of failing resolution,
         // and the delivery scope has no caller, so ICurrentUser is soft-resolved too.
         generated.Should().Contain("if (sp.GetService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>() is { } __inboxStore)");
@@ -68,7 +70,7 @@ public sealed class InboxGeneratorTests {
     }
 
     [Fact]
-    public void InboxOptOutRestoresPlainPipeline() {
+    public void AllowDuplicatesRestoresPlainPipeline() {
         const string source = Preamble +
             """
 
@@ -79,7 +81,7 @@ public sealed class InboxGeneratorTests {
                 public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
 
                 [ConsumeEvent]
-                [Inbox(Enabled = false)]
+                [AllowDuplicates] // conditional state transition — converges by itself
                 public sealed class SelfDedupingConsumer : IHandler<InvoiceCreated> {
                     public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
                         ValueTask.FromResult(Result.Success());
@@ -91,32 +93,6 @@ public sealed class InboxGeneratorTests {
 
         diagnostics.Where(d => d.Severity >= DiagnosticSeverity.Warning).Should().BeEmpty();
         GetGenerated(result, "Sample_App_SelfDedupingConsumer.g.cs").Should().NotContain("IdempotencyDecorator");
-    }
-
-    [Fact]
-    public void InboxRetentionIsConfigurable() {
-        const string source = Preamble +
-            """
-
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
-
-                public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
-
-                [ConsumeEvent]
-                [Inbox(RetentionHours = 72)]
-                public sealed class LongRetentionConsumer : IHandler<InvoiceCreated> {
-                    public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
-
-        var (result, _) = Run(source);
-
-        GetGenerated(result, "Sample_App_LongRetentionConsumer.g.cs")
-            .Should().Contain("global::System.TimeSpan.FromHours(72)");
     }
 
     [Fact]
@@ -155,7 +131,7 @@ public sealed class InboxGeneratorTests {
 
                 public sealed record PayCommand(int Id) : ICommand;
 
-                [Inbox]
+                [AllowDuplicates]
                 public sealed class PayHandler : IHandler<PayCommand, Result<string>> {
                     public ValueTask<Result<string>> HandleAsync(PayCommand request, CancellationToken ct) =>
                         ValueTask.FromResult(Result<string>.Success("r"));
@@ -167,31 +143,6 @@ public sealed class InboxGeneratorTests {
 
         diagnostics.Any(d => d.Id == "ELINBX001" && d.Severity == DiagnosticSeverity.Warning).Should().BeTrue();
         GetGenerated(result, "Sample_App_PayHandler.g.cs").Should().NotContain("IdempotencyDecorator");
-    }
-
-    [Fact]
-    public void ReportsElinbx002OnInvalidRetention() {
-        const string source = Preamble +
-            """
-
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
-
-                public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
-
-                [ConsumeEvent]
-                [Inbox(RetentionHours = 0)]
-                public sealed class BadRetentionConsumer : IHandler<InvoiceCreated> {
-                    public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
-
-        var (_, diagnostics) = Run(source);
-
-        diagnostics.Any(d => d.Id == "ELINBX002" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
     }
 
     [Fact]

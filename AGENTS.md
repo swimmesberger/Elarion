@@ -294,9 +294,10 @@ carrying both is rejected. Pub/sub-only — a non-`Unit` `Result<T>` is request/
 - **Inbox (ADR-0022)**: handler-form integration consumers are **deduped by default** — a `Consumer`-scoped reuse of the
   ADR-0021 `IdempotencyDecorator`, keyed `(consumer identity, IEventContext.MessageId)`, claimed in the consumer's own
   transaction (it replaces `TransactionDecorator` there), `WaitThenReplay` on races, soft-attached (no `IIdempotencyStore`
-  registered → un-deduped, never a resolution failure). `[Inbox(Enabled=false)]` opts out (plain transaction returns);
-  `RetentionHours` (default 24) must exceed the delivery retry window (ELINBX001/ELINBX002). Domain + method-form consumers
-  are never inboxed; pass `MessageId` as a downstream idempotency key to close the foreign-side-effect window.
+  registered → un-deduped, never a resolution failure). `[AllowDuplicates]` opts out (the consumer-side `[AllowAnonymous]`:
+  declares redelivery harmless, plain transaction returns; ELINBX001 off-plane). Claims expire after a fixed 24 h (transport-
+  scoped invariant, deliberately no per-consumer knob). Domain + method-form consumers are never inboxed; pass `MessageId`
+  as a downstream idempotency key to close the foreign-side-effect window.
 - `EventConsumerRegistrationGenerator` (`[GenerateEventConsumers]`/`[UseElarion]`) discovers consumers, validates signatures
   (`ELEVT001`/`ELEVT002`/`ELEVT005`), emits a per-module `Add{Module}EventConsumers` wired into `ConfigureDefaultServices`.
   Module-scoped only — a consumer under no module → `ELEVT003`. The scheduler is symmetric (`SchedulerRegistrationGenerator`,
