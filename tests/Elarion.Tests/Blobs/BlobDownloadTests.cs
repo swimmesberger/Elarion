@@ -41,7 +41,8 @@ public sealed class BlobDownloadTests {
             Name = "name",
             ContentType = "application/octet-stream",
             Size = 0,
-            CreatedAt = DateTimeOffset.UnixEpoch
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            State = BlobLifecycleState.Committed
         };
 
     private sealed class TrackingStream(Action onDispose) : MemoryStream {

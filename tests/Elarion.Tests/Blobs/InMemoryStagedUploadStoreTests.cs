@@ -187,5 +187,11 @@ public sealed class InMemoryStagedUploadStoreTests {
 
         public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
             Task.FromResult<BlobDownload?>(null);
+
+        public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

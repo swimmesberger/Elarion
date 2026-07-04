@@ -134,6 +134,23 @@ public sealed class BlobStoreExtensionsTests {
         destination.Length.Should().Be(0);
     }
 
+    [Fact]
+    public async Task ListAllAsync_WalksEveryPageInOrder() {
+        var store = new FakeBlobStore();
+        foreach (var name in new[] { "f1.bin", "f2.bin", "f3.bin", "f4.bin", "f5.bin" }) {
+            var blobRef = new BlobRef { Value = name };
+            store.Seed(blobRef, Metadata(blobRef, size: 1) with { Name = name }, [1]);
+        }
+
+        var names = new List<string>();
+        await foreach (var blob in store.ListAllAsync(
+            "documents", pageSize: 2, cancellationToken: TestContext.Current.CancellationToken)) {
+            names.Add(blob.Name);
+        }
+
+        names.Should().Equal("f1.bin", "f2.bin", "f3.bin", "f4.bin", "f5.bin");
+    }
+
     private static BlobMetadata Metadata(BlobRef blobRef, long size) =>
         new() {
             Id = blobRef.Value,
@@ -141,6 +158,7 @@ public sealed class BlobStoreExtensionsTests {
             Name = "report.bin",
             ContentType = "application/octet-stream",
             Size = size,
-            CreatedAt = DateTimeOffset.UnixEpoch
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            State = BlobLifecycleState.Committed
         };
 }

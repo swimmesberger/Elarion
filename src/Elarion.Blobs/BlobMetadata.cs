@@ -35,6 +35,12 @@ public sealed record BlobMetadata {
     public required DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>
+    /// Gets the blob's lifecycle state — most useful when listing, so a browse surface can distinguish
+    /// (or filter out) half-finished pending uploads from committed blobs.
+    /// </summary>
+    public required BlobLifecycleState State { get; init; }
+
+    /// <summary>
     /// Gets the id of the principal that owns the blob, or <c>null</c> when the blob is unowned.
     /// </summary>
     /// <remarks>

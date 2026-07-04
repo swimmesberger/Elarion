@@ -27,6 +27,18 @@ minor releases may include breaking changes.
   no relational staging table, zero protocol knowledge (`AddElarionAzureBlobStore` /
   `AddElarionAzureBlobLifecycle` / `AddElarionAzureStagedUploads`; Azurite-backed integration tests). See
   [ADR-0035](docs/decisions/0035-protocol-neutral-staged-upload-seam.md).
+- **Blob listing — prefix + delimiter virtual hierarchy (ADR-0036).** `IBlobStore` gains
+  **`ListAsync(BlobListRequest)`** and **`ListContainersAsync`**: flat prefix listing, optionally rolled up
+  into delimiter-inclusive virtual-directory `Prefixes` (the S3/Azure/GCS model — deliberately *not* real
+  directories; apps that need folder semantics model folders as entities). Entries page in ordinal name
+  order behind an opaque continuation token; `BlobMetadata` now carries the lifecycle **`State`** and the
+  request filters on it, so browse surfaces can hide pending uploads. `BlobStoreExtensions.ListAllAsync`
+  adds the auto-paging `IAsyncEnumerable` enumeration migration/backup tooling wants. Azure maps natively
+  onto `GetBlobsByHierarchy` (state filtering is client-side per page — Azure cannot filter metadata
+  server-side); PostgreSQL computes the roll-up in one grouped `COLLATE "C"` keyset query over the
+  existing `(container, name)` index. Listing is a browse/ops surface — handlers keep answering
+  "which blobs belong to X" from their own tables. See
+  [ADR-0036](docs/decisions/0036-blob-listing-virtual-hierarchy.md).
 
 ### Changed
 - **Breaking:** `ITusUploadStore`/`TusUpload`/`TusUploadCreation`/`TusOffsetConflictException` are replaced by

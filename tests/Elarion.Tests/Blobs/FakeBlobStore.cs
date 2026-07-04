@@ -46,4 +46,33 @@ internal sealed class FakeBlobStore : IBlobStore {
 
     public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
         Task.FromResult(_blobs.ContainsKey(blobRef.Value));
+
+    // Flat, ordinal-ordered listing over the seeded blobs (hierarchy is not modeled by the fake), so
+    // the auto-paging extension can be exercised without a database.
+    public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) {
+        var after = request.ContinuationToken;
+        var page = _blobs.Values
+            .Select(entry => entry.Metadata)
+            .Where(metadata => metadata.Container == request.Container)
+            .Where(metadata => request.Prefix is null
+                || metadata.Name.StartsWith(request.Prefix, StringComparison.Ordinal))
+            .Where(metadata => request.State is null || metadata.State == request.State)
+            .Where(metadata => after is null || string.CompareOrdinal(metadata.Name, after) > 0)
+            .OrderBy(metadata => metadata.Name, StringComparer.Ordinal)
+            .Take(request.PageSize)
+            .ToList();
+
+        return Task.FromResult(new BlobListing {
+            Blobs = page,
+            Prefixes = [],
+            ContinuationToken = page.Count == request.PageSize ? page[^1].Name : null,
+        });
+    }
+
+    public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<string>>(_blobs.Values
+            .Select(entry => entry.Metadata.Container)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList());
 }

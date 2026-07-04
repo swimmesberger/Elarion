@@ -125,6 +125,99 @@ public sealed class AzureBlobStore(
     }
 
     /// <inheritdoc />
+    public async Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Container, nameof(request));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(request.PageSize, nameof(request));
+
+        var container = client.GetBlobContainerClient(request.Container);
+        var prefix = string.IsNullOrEmpty(request.Prefix) ? null : request.Prefix;
+        var continuationToken = string.IsNullOrEmpty(request.ContinuationToken) ? null : request.ContinuationToken;
+        var blobs = new List<BlobMetadata>();
+        var prefixes = new List<string>();
+        string? nextToken = null;
+
+        // The service pages natively (continuation tokens are Azure's own). A blob without Elarion
+        // state metadata (written by another producer) reads as Committed. The lifecycle-state filter
+        // is applied per page after listing — Azure cannot filter by metadata server-side — so a
+        // filtered page may carry fewer items than PageSize while more remain (documented on
+        // BlobListRequest.State).
+        try {
+            if (request.Delimiter is { Length: > 0 } delimiter) {
+                var pageable = container.GetBlobsByHierarchyAsync(
+                    BlobTraits.Metadata, BlobStates.None, delimiter, prefix, cancellationToken);
+                await foreach (var page in pageable.AsPages(continuationToken, request.PageSize)) {
+                    foreach (var item in page.Values) {
+                        if (item.IsPrefix) {
+                            prefixes.Add(item.Prefix);
+                        }
+                        else {
+                            AddIfMatchesState(blobs, request, item.Blob);
+                        }
+                    }
+
+                    nextToken = string.IsNullOrEmpty(page.ContinuationToken) ? null : page.ContinuationToken;
+                    break;
+                }
+            }
+            else {
+                var pageable = container.GetBlobsAsync(
+                    new GetBlobsOptions { Traits = BlobTraits.Metadata, Prefix = prefix }, cancellationToken);
+                await foreach (var page in pageable.AsPages(continuationToken, request.PageSize)) {
+                    foreach (var item in page.Values) {
+                        AddIfMatchesState(blobs, request, item);
+                    }
+
+                    nextToken = string.IsNullOrEmpty(page.ContinuationToken) ? null : page.ContinuationToken;
+                    break;
+                }
+            }
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404) {
+            // A missing container yields an empty listing, matching the relational store.
+        }
+
+        return new BlobListing {
+            Blobs = blobs,
+            Prefixes = prefixes,
+            ContinuationToken = nextToken,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) {
+        var names = new List<string>();
+        await foreach (var containerItem in client.GetBlobContainersAsync(cancellationToken: cancellationToken)) {
+            names.Add(containerItem.Name);
+        }
+
+        return names;
+    }
+
+    private void AddIfMatchesState(List<BlobMetadata> blobs, BlobListRequest request, BlobItem item) {
+        var state = item.Metadata is not null && AzureBlobMetadata.IsPending(item.Metadata)
+            ? BlobLifecycleState.Pending
+            : BlobLifecycleState.Committed;
+        if (request.State is { } filter && filter != state) {
+            return;
+        }
+
+        var location = new AzureBlobLocation(request.Container, item.Name);
+        blobs.Add(new BlobMetadata {
+            Id = location.ToBlobRef().Value,
+            Container = location.Container,
+            Name = location.Name,
+            ContentType = item.Properties.ContentType ?? "application/octet-stream",
+            Size = item.Properties.ContentLength ?? 0,
+            CreatedAt = item.Properties.CreatedOn ?? default,
+            State = state,
+            OwnerId = item.Metadata is null
+                ? null
+                : AzureBlobMetadata.Decode(item.Metadata, AzureBlobMetadata.OwnerKey),
+        });
+    }
+
+    /// <inheritdoc />
     public async Task<bool> CommitAsync(BlobRef blobRef, CancellationToken cancellationToken) {
         var location = AzureBlobLocation.Parse(blobRef);
         var blob = client.GetBlobContainerClient(location.Container).GetBlobClient(location.Name);
@@ -239,6 +332,9 @@ public sealed class AzureBlobStore(
             ContentType = properties.ContentType,
             Size = properties.ContentLength,
             CreatedAt = properties.CreatedOn,
+            State = AzureBlobMetadata.IsPending(properties.Metadata)
+                ? BlobLifecycleState.Pending
+                : BlobLifecycleState.Committed,
             OwnerId = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.OwnerKey),
         };
 

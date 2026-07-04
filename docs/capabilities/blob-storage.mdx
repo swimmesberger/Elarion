@@ -22,7 +22,7 @@ direct-upload HTTP transports on top of this storage contract.
 
 | Package | Use it in | Contains |
 | --- | --- | --- |
-| `Elarion.Blobs` | Application code | `IBlobStore`, `BlobRef`, `BlobUploadRequest`, `BlobDownload`, `BlobMetadata`, `BlobContent`, and `BlobStoreExtensions`. No provider dependency. |
+| `Elarion.Blobs` | Application code | `IBlobStore`, `BlobRef`, `BlobUploadRequest`, `BlobDownload`, `BlobMetadata`, `BlobContent`, listing (`BlobListRequest`/`BlobListing`), and `BlobStoreExtensions`. No provider dependency. |
 | `Elarion.Blobs.PostgreSql` | Infrastructure / host | `PostgreSqlBlobStore<TDbContext>`, DI registration, and EF Core model configuration for PostgreSQL. |
 
 ```xml
@@ -90,6 +90,8 @@ The core `IBlobStore` is intentionally small:
 | `GetMetadataAsync` | Loads metadata without content. |
 | `ExistsAsync` | Checks whether a reference exists. |
 | `DeleteAsync` | Deletes a referenced blob. |
+| `ListAsync(BlobListRequest)` | Lists one page of blobs — optionally rolled up into virtual directories by a delimiter (see [Listing](#listing-prefixes-as-virtual-directories)). |
+| `ListContainersAsync` | Lists the containers known to the store. |
 
 `BlobStoreExtensions` layers the ergonomic call styles over those primitives, so every backend gets
 them for free:
@@ -101,9 +103,40 @@ them for free:
 | `DownloadContentAsync` | Loads metadata plus bytes into a `BlobContent`. |
 | `ReadAllBytesAsync` | Loads just the content bytes. |
 | `DownloadToAsync` | Copies content to a destination stream (for example an HTTP response body). |
+| `ListAllAsync` | Enumerates every blob under a prefix as an `IAsyncEnumerable`, walking `ListAsync` page by page — the flat enumeration migration/backup tooling wants. |
 
 The PostgreSQL implementation replaces an existing blob when `container` and `name` match, preserving
 the blob id while updating content type, size, timestamp, and bytes.
+
+## Listing: prefixes as virtual directories
+
+Listing follows the industry model shared by S3 (`ListObjectsV2`), Azure (`GetBlobsByHierarchy`), and
+GCS: a **flat namespace with prefix + delimiter emulation of hierarchy**. Pass a `Delimiter`
+(typically `"/"`) and names containing it beyond the `Prefix` roll up into `BlobListing.Prefixes` —
+one delimiter-inclusive entry per virtual directory — while only blobs at the current level appear in
+`BlobListing.Blobs`:
+
+```csharp
+var root = await blobs.ListAsync(new BlobListRequest { Container = "uploads", Delimiter = "/" }, ct);
+// root.Prefixes: ["user-1/", "user-2/"]      root.Blobs: blobs directly in the container
+var level = await blobs.ListAsync(
+    new BlobListRequest { Container = "uploads", Prefix = "user-1/", Delimiter = "/" }, ct);
+```
+
+Entries come back in lexicographic (ordinal) name order, paged via an opaque, store-specific
+`ContinuationToken` (`null` = exhausted). A missing container yields an empty page. `BlobMetadata`
+carries the blob's lifecycle `State`, and `BlobListRequest.State` filters on it, so a browse surface
+can hide half-finished pending uploads — on Azure that filter is applied per page after listing
+(metadata cannot be filtered server-side), so a filtered page may hold fewer than `PageSize` items
+while more remain; loop on the token, not on page fill.
+
+Directories are never real objects — there are no empty folders and no subtree renames. An application
+that needs true folder semantics (rename, per-folder permissions) models folders as entities in its
+own database and keeps blobs flat. Listing is a **browse/ops surface** (admin UIs, migration and
+backup tooling): an application answers "which files belong to this contract" from its own tables,
+which hold the `BlobRef`s — it does not enumerate the store. For the same reason, never derive
+ownership from a name prefix (names are client-influenced); ownership is the exact-match
+`BlobMetadata.OwnerId`.
 
 ## PostgreSQL setup
 
