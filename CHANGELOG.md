@@ -9,6 +9,26 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **User-context trace & log enrichment — on by default (ADR-0033).** Every handler span is now enriched with
+  the calling user, and a matching `ILogger` scope carries that context onto every log line the handler produces,
+  so traces and logs can be filtered by user. The Elarion source generator attaches a new
+  **`HandlerContextEnrichmentDecorator`** (`Elarion.Pipeline`) immediately inside the `TracingDecorator`, so it
+  tags `Activity.Current` (the handler span) and its `BeginScope` wraps the authorization/validation/handler
+  chain — a denied or invalid request is still attributed to its caller. Because it runs in the handler pipeline
+  rather than an ASP.NET middleware, it works identically across **every** transport (JSON-RPC, `[HttpEndpoint]`,
+  MCP, scheduler jobs, event consumers), reading the dispatch-scope-seeded `ICurrentUser`; anonymous executions
+  add nothing. The decorator itself is user-agnostic — it drains whatever the registered **`IHandlerContextEnricher`**
+  instances (new seam in `Elarion.Abstractions.Diagnostics`) contribute. The framework ships one,
+  **`UserContextEnricher`**, registered by default when current-user support is added (`AddElarionClaimsCurrentUser`),
+  emitting `user.id` + `user.roles` + `user.permissions` (OpenTelemetry semantic-convention `user.*` keys, not the
+  deprecated `enduser.*`); **email is PII and opt-in**, and user identity is deliberately kept **off metrics**
+  (unbounded cardinality) — it rides only the span and the log scope (which surfaces only when the host enables
+  `IncludeScopes`). Configure or disable the built-in enricher with **`AddElarionUserContextEnrichment(o => …)`**;
+  contribute your own trace tags / log-scope items — a tenant id, a request source, a correlation value — by
+  implementing `IHandlerContextEnricher` and registering it with **`AddElarionHandlerContextEnricher<T>()`**
+  (composes with, rather than replaces, the built-in one). Zero new package dependencies. See
+  [ADR-0033](docs/decisions/0033-user-context-trace-and-log-enrichment.md) and
+  [Telemetry & observability › User & request context](docs/capabilities/telemetry.mdx).
 - **Inbox for integration-event consumers — on by default (ADR-0022).** Handler-form consumers of an
   `IIntegrationEvent` are now deduplicated automatically: the handler generator attaches the ADR-0021
   `IdempotencyDecorator` with a synthesized `Consumer`-scoped policy — owner = the consuming handler's identity,
@@ -213,6 +233,17 @@ minor releases may include breaking changes.
   Npgsql content path too.
 
 ### Changed
+- **Abstractions holds contracts, not implementations — pipeline decorators moved to core (ADR-0034).** The nine
+  framework pipeline decorators (`TracingDecorator`, `AuthorizationDecorator`, `ValidationDecorator`,
+  `FeatureGateDecorator`, `IdempotencyDecorator`, `ResilienceDecorator`, `CacheDecorator`,
+  `CacheInvalidationDecorator`, `TransactionDecorator`) and `HandlerTelemetry` moved out of `Elarion.Abstractions`
+  into `Elarion` core — the decorators under the new **`Elarion.Pipeline`** namespace, `HandlerTelemetry` under
+  **`Elarion.Diagnostics`**. `Elarion.Abstractions` now holds only contracts (interfaces, attributes, records) and
+  grants `InternalsVisibleTo("Elarion")` as the reference implementation. The source generator emits the new
+  fully-qualified names; the emitted pipeline order is unchanged and no package gains a new dependency.
+  **Breaking (namespace):** code referencing these types directly updates its `using`s — most notably a host's
+  OpenTelemetry registration of `HandlerTelemetry.ActivitySourceName`/`MeterName` now imports `Elarion.Diagnostics`.
+  See [ADR-0034](docs/decisions/0034-abstractions-holds-contracts-not-implementations.md).
 - **Validation errors are field-keyed end to end.** `ValidationErrorData` gains an optional
   `FieldErrors: IReadOnlyDictionary<string, string[]>?` beside the existing flat `Errors` list (additive), and
   `AppError.Validation` gains a field-keyed factory overload. Keys are **wire-named field paths** per the

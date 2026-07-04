@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
-namespace Elarion.Abstractions.Diagnostics;
+namespace Elarion.Diagnostics;
 
 /// <summary>
 /// Central OpenTelemetry-compatible instrumentation for opt-in handler execution tracing.

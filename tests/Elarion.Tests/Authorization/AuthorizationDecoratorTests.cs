@@ -10,6 +10,8 @@ using Elarion.Tests.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
+using Elarion.Pipeline;
+using Elarion.Diagnostics;
 namespace Elarion.Tests.Authorization;
 
 public sealed class AuthorizationDecoratorTests {

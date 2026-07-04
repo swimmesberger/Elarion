@@ -44,7 +44,7 @@ public sealed class IdempotencyGeneratorTests {
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_PayHandler.g.cs");
 
-        generated.Should().Contain("global::Elarion.Abstractions.Idempotency.IdempotencyDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.IdempotencyDecorator<");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Pipeline.IUnitOfWork>()");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>()");
         generated.Should().Contain("PayHandlerIdempotencyPolicy");

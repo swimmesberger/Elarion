@@ -1,6 +1,6 @@
 ---
 title: Telemetry & observability
-description: Elarion emits OpenTelemetry-compatible traces and metrics through System.Diagnostics — the host chooses exporters, the runtime forces no SDK dependency.
+description: Elarion emits OpenTelemetry-compatible traces and metrics through System.Diagnostics — the host chooses exporters, the runtime forces no SDK dependency — and enriches every handler span and log scope with user context by default.
 ---
 
 Elarion emits OpenTelemetry-compatible signals through `System.Diagnostics.ActivitySource` and
@@ -12,7 +12,7 @@ framework lightweight while making every framework-owned boundary observable.
 
 ```csharp
 using Elarion.AspNetCore;
-using Elarion.Abstractions.Diagnostics;
+using Elarion.Diagnostics;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Scheduling;
 using Elarion.Caching;
@@ -50,7 +50,7 @@ builder.Services
 | Scheduler | `SchedulerTelemetry` (`Elarion.Scheduling`) | Schedule/enqueue/cancel operations and job executions create spans. Runtime-scheduled jobs preserve scheduling trace context into the later execution span when possible. Fixed-rate, fixed-delay, cron, skipped, misfired/coalesced, retry, cancellation, and failure outcomes are trace-visible. |
 | Handler cache | `HandlerCacheTelemetry` (`Elarion.Caching`) | Cache get/create spans expose the precise outcome — `miss-factory-executed`, `miss-non-cacheable`, or `cached-or-coalesced`. Factory execution events, payload policy errors, and invalidation spans are trace-visible. Tags avoid full keys, raw user ids, and request values. |
 | Resilience | `ResilienceTelemetry` (`Elarion.Resilience`) | Named policy execution spans expose final outcome and duration. Retry and timeout callbacks add span events under the default Microsoft/Polly-backed runtime. |
-| Handler | `HandlerTelemetry` (`Elarion.Handlers`) | Every generated handler is wrapped in a `TracingDecorator` as the outermost decorator, emitting one `Internal` span per invocation that parents any cache/resilience/pipeline child spans, plus execution count/duration metrics. The pipeline gates surface their decisions on the same handler span and meter: authorization denials tag `elarion.authorization.outcome` (`unauthorized`/`forbidden`) and count denials per handler, a closed feature gate tags `elarion.feature_gate.outcome` and counts per handler (the wire response stays an opaque 404), and idempotent handlers tag `elarion.idempotency.outcome` (`completed`/`replayed`/`conflict`/`fingerprint_mismatch`/`abandoned`) and count outcomes per request type. Bounded tags only: handler name, request type name, and outcome — never request or response payloads. |
+| Handler | `HandlerTelemetry` (`Elarion.Handlers`) | Every generated handler is wrapped in a `TracingDecorator` as the outermost decorator, emitting one `Internal` span per invocation that parents any cache/resilience/pipeline child spans, plus execution count/duration metrics. The pipeline gates surface their decisions on the same handler span and meter: authorization denials tag `elarion.authorization.outcome` (`unauthorized`/`forbidden`) and count denials per handler, a closed feature gate tags `elarion.feature_gate.outcome` and counts per handler (the wire response stays an opaque 404), and idempotent handlers tag `elarion.idempotency.outcome` (`completed`/`replayed`/`conflict`/`fingerprint_mismatch`/`abandoned`) and count outcomes per request type. **Metric** tags stay bounded: handler name, request type name, and outcome — never request/response payloads or user identity. The [context-enrichment decorator](#user--request-context) just inside tracing additionally stamps caller identity (`user.id`, `user.roles`, `user.permissions`) onto the **span** and opens a matching log scope — on the span and in logs only, never on metrics. |
 
 ## Handler tracing
 
@@ -62,6 +62,95 @@ how `HttpClient` and EF Core ship always-present `ActivitySource`s and leave col
 no opt-in attribute required. The handler span adds the application-operation boundary as the stable
 parent of the decorator chain, so JSON-RPC, scheduler, cache, and resilience child spans all appear
 inside it.
+
+## User & request context
+
+Every handler span is enriched with **who made the call**, and a matching logging scope carries that
+context onto every log line the handler produces — so a trace or a log search can be filtered by user.
+This is a first-class part of handler tracing: the generator attaches a context-enrichment decorator
+**just inside** the `TracingDecorator`, so it tags the handler span (`Activity.Current`) and its scope
+wraps the authorization, validation, and handler chain — a denied or invalid request is still attributed
+to its caller.
+
+Because it runs in the handler pipeline (not an ASP.NET middleware), it works the same across **every**
+transport — JSON-RPC, `[HttpEndpoint]`, MCP, scheduler jobs, and event consumers — reading the
+[current user](/docs/capabilities/current-user) the dispatch scope already seeded. The decorator itself
+knows nothing about "user": it drains whatever the registered `IHandlerContextEnricher` instances
+contribute. The framework ships one — `UserContextEnricher` — that is registered **by default when
+current-user support is added** (`AddElarionClaimsCurrentUser` / `AddElarionCurrentUser`), so user
+context is on out of the box; anonymous executions (scheduler, after-commit delivery) contribute nothing.
+
+By default it emits, from `ICurrentUser`:
+
+| Span tag | Log-scope key | Source |
+| --- | --- | --- |
+| `user.id` | `UserId` | the caller's id |
+| `user.roles` | `UserRoles` | the caller's roles (bounded, comma-joined) |
+| `user.permissions` | `UserPermissions` | permission claims (the `AuthorizationOptions` permission claim type) |
+
+`user.id` and `user.roles` are [OpenTelemetry semantic-convention](https://opentelemetry.io/docs/specs/semconv/registry/attributes/user/)
+attributes; `user.permissions` mirrors them (no semantic convention exists for permissions). **Email is
+PII and off by default**; user identity is deliberately kept **off metrics** (unbounded cardinality) —
+it rides only the span and the log scope.
+
+<Callout type="info">
+  The log-scope keys only appear in output if the host enables scopes on its logging exporter — e.g.
+  `builder.Logging.AddOpenTelemetry(o => o.IncludeScopes = true)`, or `IncludeScopes = true` on the
+  console formatter. The span tags need no such switch.
+</Callout>
+
+### Configuring or disabling the built-in enricher
+
+The built-in `UserContextEnricher` is registered by current-user support. Call
+`AddElarionUserContextEnrichment` to narrow the payload, opt into email, turn it off (host-registered
+enrichers keep running), or enable it for a host with a custom `ICurrentUser` that did not go through
+`AddElarionClaimsCurrentUser`:
+
+```csharp
+using Elarion.Diagnostics;
+
+builder.Services.AddElarionUserContextEnrichment(o =>
+{
+    o.IncludeEmail = true;    // opt into user.email / UserEmail (PII — you own redaction/retention)
+    o.MaxItems     = 32;      // cap on roles/permissions joined into a tag (default 16)
+});
+
+// or disable the built-in user enricher (a host-provided IHandlerContextEnricher still runs):
+builder.Services.AddElarionUserContextEnrichment(o => o.Enabled = false);
+```
+
+### Contributing your own context
+
+Enrichment is an open seam. Implement `IHandlerContextEnricher` to add your own trace tags and
+log-scope items — a tenant id, a request source, a correlation value — alongside (or instead of) the
+built-in user context. Enrichers are resolved per handler execution, so they may inject scoped services
+such as `ICurrentUser`, and registrations **compose** rather than replace:
+
+```csharp
+using Elarion.Abstractions.Diagnostics;
+using Elarion.Abstractions.Identity;
+
+public sealed class TenantContextEnricher(ICurrentUser user) : IHandlerContextEnricher
+{
+    public void Enrich(HandlerEnrichmentContext context)
+    {
+        if (!user.IsAuthenticated) return;                     // anonymous transports run enrichers too
+        foreach (var tenant in user.GetClaimValues("tenant"))
+        {
+            context.SetTag("tenant.id", tenant);               // OTel-style key on the span
+            context.AddScopeItem("TenantId", tenant);          // PascalCase key in the log scope
+            break;
+        }
+    }
+}
+
+// register — composes with the built-in user enricher
+builder.Services.AddElarionHandlerContextEnricher<TenantContextEnricher>();
+```
+
+Keep the two key styles idiomatic to their sink — OpenTelemetry semantic-convention keys on tags
+(`tenant.id`), PascalCase keys in the scope (`TenantId`) — and keep `Enrich` cheap and non-throwing: it
+runs on every handler invocation. See [ADR-0033](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0033-user-context-trace-and-log-enrichment.md).
 
 ## Client-side telemetry
 

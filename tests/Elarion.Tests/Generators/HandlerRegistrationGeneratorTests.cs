@@ -139,7 +139,7 @@ public sealed class HandlerRegistrationGeneratorTests {
         var generated = GenerateHandlerRegistrationSource(source);
 
         // Tracing is applied unconditionally to every handler, with no opt-in attribute.
-        generated.Should().Contain("global::Elarion.Abstractions.Diagnostics.TracingDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.TracingDecorator<");
         generated.Should().Contain("\"CreateOrder\"");
         // Tracing is emitted last so its span parents the pipeline decorators.
         generated.IndexOf("TransactionDecorator", StringComparison.Ordinal)
@@ -156,9 +156,26 @@ public sealed class HandlerRegistrationGeneratorTests {
         var generated = GenerateHandlerRegistrationSource(source);
 
         // Default-on: tracing wraps the handler even when no other decorator applies.
-        generated.Should().Contain("global::Elarion.Abstractions.Diagnostics.TracingDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.TracingDecorator<");
         generated.Should().NotContain("TransactionDecorator");
         generated.Should().NotContain("ValidationDecorator");
+    }
+
+    [Fact]
+    public void GenerateRegistration_AnyHandler_EmitsContextEnrichmentJustInsideTracing() {
+        var source = CreateSource(
+            assemblyPipelineAttribute: "",
+            modulePipelineAttribute: "",
+            handlerPipelineAttribute: "");
+
+        var generated = GenerateHandlerRegistrationSource(source);
+
+        // User/context enrichment is on by default for every handler (no opt-in attribute), like tracing.
+        generated.Should().Contain("global::Elarion.Pipeline.HandlerContextEnrichmentDecorator<");
+        // Emitted just before tracing (inner→outer), so at runtime it runs just inside the handler span: its tags
+        // land on that span and its log scope wraps authorization/validation/handler.
+        generated.IndexOf("HandlerContextEnrichmentDecorator", StringComparison.Ordinal)
+            .Should().BeLessThan(generated.IndexOf("TracingDecorator", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -558,7 +575,7 @@ public sealed class HandlerRegistrationGeneratorTests {
 
         generated.Should().Contain(
             "global::Elarion.Abstractions.IHandler<global::Sample.Modules.Sales.Handlers.Ping, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>");
-        generated.Should().Contain("global::Elarion.Abstractions.Diagnostics.TracingDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.TracingDecorator<");
     }
 
     [Fact]

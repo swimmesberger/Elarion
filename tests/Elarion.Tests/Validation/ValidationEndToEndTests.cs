@@ -9,6 +9,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
+using Elarion.Pipeline;
 namespace Elarion.Tests.Validation;
 
 /// <summary>

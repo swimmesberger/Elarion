@@ -11,6 +11,8 @@ using Elarion.Abstractions.Pipeline;
 using Elarion.Tests.Services;
 using Xunit;
 
+using Elarion.Pipeline;
+using Elarion.Diagnostics;
 namespace Elarion.Tests.Idempotency;
 
 public sealed class IdempotencyDecoratorTests {

@@ -43,7 +43,7 @@ public sealed class FeatureGateGeneratorTests {
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_GatedHandler.g.cs");
 
-        generated.Should().Contain("global::Elarion.Abstractions.Features.FeatureGateDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.FeatureGateDecorator<");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Features.IFeatureFlagService>()");
         generated.Should().Contain("__handlerMetadata");
         // The feature gate is a functional gate just inside tracing.
@@ -190,7 +190,7 @@ public sealed class FeatureGateGeneratorTests {
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_DerivedHandler.g.cs");
 
-        generated.Should().Contain("global::Elarion.Abstractions.Features.FeatureGateDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.FeatureGateDecorator<");
         AssertCompiles(source, generated);
     }
 

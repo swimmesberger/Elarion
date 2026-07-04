@@ -1,4 +1,7 @@
-namespace Elarion.Abstractions.Caching;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Caching;
+
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Wraps a handler with cache lookup and population behavior using a generated cache policy.

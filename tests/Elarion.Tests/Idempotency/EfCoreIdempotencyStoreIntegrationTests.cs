@@ -10,6 +10,7 @@ using Elarion.Idempotency.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
+using Elarion.Pipeline;
 namespace Elarion.Tests.Idempotency;
 
 /// <summary>

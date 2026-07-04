@@ -173,6 +173,11 @@ public sealed partial class HandlerRegistrationGenerator {
         // Authorization is the outermost functional gate (just inside tracing): a denied request never touches
         // caching, the pipeline (validation/transaction), or the handler, yet the denial is still traced.
         AppendAuthorizationDecorator(sb, handler);
+        // Context enrichment sits just inside tracing so it tags the handler span (Activity.Current) and its log
+        // scope wraps authorization/validation/handler — a denied or invalid request is still attributed to its
+        // caller. Runs the built-in user-context enricher plus any host IHandlerContextEnricher; on by default across
+        // every transport, inert for anonymous callers with no host enrichers.
+        AppendContextEnrichmentDecorator(sb, handler);
         // Note: tracing is emitted last so the handler span is the outermost decorator and parents
         // any cache/resilience/pipeline child spans.
         AppendTracingDecorator(sb, handler);
@@ -203,7 +208,7 @@ public sealed partial class HandlerRegistrationGenerator {
         if (handler.Cacheable is null)
             return;
 
-        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Caching.CacheDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.CacheDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Caching.IHandlerCache>(),");
         sb.AppendLine($"                    new {handler.HandlerName}CachePolicy());");
@@ -234,7 +239,7 @@ public sealed partial class HandlerRegistrationGenerator {
         if (handler.ResiliencePolicyName is null)
             return;
 
-        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Resilience.ResilienceDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.ResilienceDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Resilience.IResiliencePipelineRunner>(),");
         sb.AppendLine($"                    new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference {{ Name = {FormatStringLiteral(handler.ResiliencePolicyName)} }});");
@@ -258,7 +263,7 @@ public sealed partial class HandlerRegistrationGenerator {
             indent += "    ";
         }
 
-        sb.AppendLine($"{indent}handler = new global::Elarion.Abstractions.Idempotency.IdempotencyDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"{indent}handler = new global::Elarion.Pipeline.IdempotencyDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine($"{indent}    handler,");
         sb.AppendLine($"{indent}    sp.GetRequiredService<global::Elarion.Abstractions.Pipeline.IUnitOfWork>(),");
         sb.AppendLine(isInbox
@@ -395,7 +400,7 @@ public sealed partial class HandlerRegistrationGenerator {
         if (!handler.HasAuthorization)
             return;
 
-        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Authorization.AuthorizationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.AuthorizationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    __handlerMetadata,");
         sb.Append("                    sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>()");
@@ -418,7 +423,7 @@ public sealed partial class HandlerRegistrationGenerator {
         if (!handler.HasValidation)
             return;
 
-        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Pipeline.ValidationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.ValidationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Validation.IRequestValidator>());");
     }
@@ -427,23 +432,33 @@ public sealed partial class HandlerRegistrationGenerator {
         if (!handler.HasFeatureGates)
             return;
 
-        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Features.FeatureGateDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.FeatureGateDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    __handlerMetadata,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Features.IFeatureFlagService>());");
     }
 
     private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {
-        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Diagnostics.TracingDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.TracingDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine($"                    {FormatStringLiteral(handler.HandlerName)});");
+    }
+
+    // Runs every registered IHandlerContextEnricher (the built-in UserContextEnricher is on by default with
+    // current-user support). Soft-resolves via GetServices/GetService so a bare/test host never fails resolution, and
+    // the decorator stays inert when no enricher contributes anything.
+    private static void AppendContextEnrichmentDecorator(StringBuilder sb, HandlerInfo handler) {
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.HandlerContextEnrichmentDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine("                    sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>(),");
+        sb.AppendLine("                    sp.GetService<global::Microsoft.Extensions.Logging.ILoggerFactory>());");
     }
 
     private static void AppendCacheInvalidationDecorator(StringBuilder sb, HandlerInfo handler) {
         if (handler.CacheInvalidation is null)
             return;
 
-        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Caching.CacheInvalidationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.CacheInvalidationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Caching.IHandlerCache>(),");
         sb.AppendLine($"                    new {handler.HandlerName}CacheInvalidationPolicy());");

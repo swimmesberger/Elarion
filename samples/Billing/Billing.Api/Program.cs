@@ -5,6 +5,7 @@ using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
 using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
+using Elarion.Diagnostics;
 using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;

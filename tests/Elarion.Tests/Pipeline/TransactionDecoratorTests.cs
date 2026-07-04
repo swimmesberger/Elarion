@@ -4,6 +4,7 @@ using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Pipeline;
 using Xunit;
 
+using Elarion.Pipeline;
 namespace Elarion.Tests.Pipeline;
 
 public sealed class TransactionDecoratorTests {

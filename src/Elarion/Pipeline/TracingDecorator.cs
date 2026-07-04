@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using Elarion.Abstractions;
+using Elarion.Diagnostics;
 
-namespace Elarion.Abstractions.Diagnostics;
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Wraps a handler invocation in an OpenTelemetry span and execution metrics.

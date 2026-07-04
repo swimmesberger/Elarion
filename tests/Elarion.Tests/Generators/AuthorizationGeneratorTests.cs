@@ -42,7 +42,7 @@ public sealed class AuthorizationGeneratorTests {
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_GuardedHandler.g.cs");
 
-        generated.Should().Contain("global::Elarion.Abstractions.Authorization.AuthorizationDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.AuthorizationDecorator<");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>()");
         generated.Should().Contain("__handlerMetadata");
         // Authorization is the outermost functional gate, just inside tracing.
@@ -179,7 +179,7 @@ public sealed class AuthorizationGeneratorTests {
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_DerivedHandler.g.cs");
 
-        generated.Should().Contain("global::Elarion.Abstractions.Authorization.AuthorizationDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.AuthorizationDecorator<");
         AssertCompiles(source, generated);
     }
 

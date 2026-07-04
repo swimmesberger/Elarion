@@ -199,3 +199,33 @@ builder.Services.AddElarionValidation();
 | `MaxDepth` | `32` (cycle protection when walking the request object graph) |
 
 See [Validation](/docs/concepts/validation).
+
+## Handler context enrichment (options, not config)
+
+Every handler is wrapped in a context-enrichment decorator that is **on by default** — it needs no
+registration. `AddElarionUserContextEnrichment(configure => …)` (from `Elarion`) takes an optional
+`Action<UserContextEnrichmentOptions>` configured in code rather than `appsettings`; call it only to
+narrow the payload, opt into email, or disable the built-in user enricher:
+
+```csharp
+// on by default — nothing to register; call only to change the defaults
+builder.Services.AddElarionUserContextEnrichment(o => o.IncludeEmail = true);   // opt into user.email (PII)
+builder.Services.AddElarionUserContextEnrichment(o => o.Enabled = false);       // disable the built-in user enricher
+```
+
+| Option | Default |
+| --- | --- |
+| `Enabled` | `true` (the built-in user enricher runs; host-registered enrichers are unaffected) |
+| `IncludeRoles` | `true` (emit `user.roles` / `UserRoles`) |
+| `IncludePermissions` | `true` (emit `user.permissions` / `UserPermissions` from the permission claim type) |
+| `IncludeEmail` | `false` (email is PII — opt in to emit `user.email` / `UserEmail`) |
+| `MaxItems` | `16` (upper bound on roles/permissions joined into a tag) |
+
+Contribute your own trace tags / log-scope items by registering an `IHandlerContextEnricher`:
+
+```csharp
+builder.Services.AddElarionHandlerContextEnricher<TenantContextEnricher>();
+```
+
+The log-scope keys only surface if the host enables `IncludeScopes` on its logging exporter. See
+[Telemetry & observability › User & request context](/docs/capabilities/telemetry#user--request-context).

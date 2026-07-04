@@ -2,11 +2,13 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Pipeline;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Idempotency;
+using Elarion.Diagnostics;
 
-namespace Elarion.Abstractions.Idempotency;
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Makes a command handler idempotent. It owns a single <see cref="IUnitOfWork"/> transaction in which it

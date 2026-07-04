@@ -4,6 +4,8 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Diagnostics;
 using Xunit;
 
+using Elarion.Pipeline;
+using Elarion.Diagnostics;
 namespace Elarion.Tests.Services;
 
 public sealed class TracingDecoratorTests {

@@ -7,6 +7,8 @@ using Elarion.Abstractions.Pipeline;
 using Elarion.Tests.Services;
 using Xunit;
 
+using Elarion.Pipeline;
+using Elarion.Diagnostics;
 namespace Elarion.Tests.Features;
 
 public sealed class FeatureGateDecoratorTests {

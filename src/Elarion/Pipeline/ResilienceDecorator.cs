@@ -1,4 +1,7 @@
-namespace Elarion.Abstractions.Resilience;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Resilience;
+
+namespace Elarion.Pipeline;
 
 /// <summary>
 /// Wraps a handler invocation in a named resilience policy.

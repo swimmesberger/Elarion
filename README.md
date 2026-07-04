@@ -90,7 +90,8 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
   resilience policies.
 - **Observable by default** — JSON-RPC, scheduling, caching, and resilience emit
   OpenTelemetry-compatible traces and metrics through `System.Diagnostics`, with no SDK dependency
-  forced on you.
+  forced on you, and every handler span and log scope is enriched with the calling user across all
+  transports (extensible via `IHandlerContextEnricher`).
 
 ## Install
 

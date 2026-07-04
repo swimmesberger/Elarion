@@ -193,7 +193,8 @@ Prefer this over a reflection-based helper.
 Decorators run in the order listed in `[DecoratorList]`, outermost first. A pipeline of
 `[Logging, DbConstraint]` logs outermost and translates constraint violations closest to the handler.
 Choose the order deliberately; the generated code makes it explicit and inspectable. The framework's
-auto-attached gates keep a fixed position *outside* your list — tracing → authorization → feature gate
+auto-attached gates keep a fixed position *outside* your list — tracing →
+[context enrichment](/docs/capabilities/telemetry#user--request-context) → authorization → feature gate
 → [validation](/docs/concepts/validation) → your `[DecoratorList]` decorators → handler — so a
 validation failure never reaches your decorators or opens a transaction.
 
