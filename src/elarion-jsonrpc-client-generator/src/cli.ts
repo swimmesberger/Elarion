@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, watchFile, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { generateRpcClientFiles, type RpcSchema } from './generate.js'
 
@@ -14,7 +14,13 @@ interface CliOptions {
   frameworkAdapterFileName?: string
   framework?: 'tanstack-start'
   sourceLabel?: string
+  watch?: boolean
 }
+
+// Poll interval for --watch. Polling (rather than fs.watch) is deliberate: the schema is (re)written by a
+// build tool, often via a temp-file + rename, which event-based watchers miss or double-fire; polling the
+// exact path is robust to that and to delete/recreate, at the cost of up-to-one-interval latency.
+const WATCH_INTERVAL_MS = 300
 
 const SUPPORTED_FRAMEWORKS = ['tanstack-start'] as const
 
@@ -31,6 +37,10 @@ function parseArgs(argv: string[]): CliOptions {
     if (arg === '--help' || arg === '-h') {
       printHelp()
       process.exit(0)
+    }
+    if (arg === '--watch') {
+      options.watch = true
+      continue
     }
 
     if (!next) {
@@ -107,15 +117,37 @@ Options:
                           Supported: tanstack-start (needs the @tanstack/react-start peer dependency)
   --framework-adapter <file> Framework adapter filename (default: start-adapter.ts)
   --source-label <text> Source label written into generated file headers
+  --watch               Regenerate whenever the schema file changes (Ctrl+C to stop)
 `)
 }
 
-function main() {
-  const options = parseArgs(process.argv.slice(2))
+// Reads the schema and writes the generated files once. Returns false (without throwing) on a missing or
+// malformed schema so --watch can keep running across the transient states a build tool leaves the file in
+// mid-write, and so a one-shot run exits non-zero with a clean message instead of a stack trace.
+function generateOnce(options: CliOptions): boolean {
   const schemaPath = resolve(process.cwd(), options.schemaPath)
   const outDir = resolve(process.cwd(), options.outDir)
-  const raw = readFileSync(schemaPath, 'utf-8')
-  const schema = JSON.parse(raw) as RpcSchema
+
+  let raw: string
+  try {
+    raw = readFileSync(schemaPath, 'utf-8')
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    console.error(
+      code === 'ENOENT'
+        ? `[jsonrpc-client-generator] Schema not found at ${schemaPath}`
+        : `[jsonrpc-client-generator] Cannot read ${schemaPath}: ${errorMessage(error)}`
+    )
+    return false
+  }
+
+  let schema: RpcSchema
+  try {
+    schema = JSON.parse(raw) as RpcSchema
+  } catch (error) {
+    console.error(`[jsonrpc-client-generator] Invalid JSON in ${schemaPath}: ${errorMessage(error)}`)
+    return false
+  }
 
   const generated = generateRpcClientFiles(schema, {
     sourceLabel: options.sourceLabel ?? basename(schemaPath),
@@ -146,6 +178,37 @@ function main() {
   console.log(
     `[jsonrpc-client-generator] Generated ${generated.methodCount} RPC method types and schemas${extraNote} -> ${outDir}`
   )
+  return true
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function main() {
+  const options = parseArgs(process.argv.slice(2))
+  const ok = generateOnce(options)
+
+  if (!options.watch) {
+    if (!ok) {
+      process.exitCode = 1
+    }
+    return
+  }
+
+  const schemaPath = resolve(process.cwd(), options.schemaPath)
+  console.log(`[jsonrpc-client-generator] Watching ${schemaPath} for changes (Ctrl+C to stop)…`)
+  watchFile(schemaPath, { interval: WATCH_INTERVAL_MS }, (curr, prev) => {
+    // mtimeMs === 0 means the file does not currently exist (not yet written, or just deleted); wait for the
+    // next write rather than regenerating from a stale/absent file.
+    if (curr.mtimeMs === 0) {
+      return
+    }
+    if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) {
+      return
+    }
+    generateOnce(options)
+  })
 }
 
 main()

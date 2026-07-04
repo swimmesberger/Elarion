@@ -32,6 +32,31 @@ request DTOs flow through the exported schema into the client (see
 bounds `.gt()`/`.lt()`), `minItems`/`maxItems` become array `.min()`/`.max()`, integers get `.int()`,
 and the `uuid`/`email`/`uri` formats become `.uuid()`/`.email()`/`.url()`.
 
+### Watch mode
+
+For a tight dev loop, pass `--watch` to regenerate whenever `rpc-schema.json` changes:
+
+```bash
+npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated --watch
+```
+
+It generates once, then watches the schema file and regenerates on every write — surviving the transient
+states a build tool leaves the file in mid-write (a partial or momentarily-invalid schema is logged and
+skipped, never fatal). Paired with a server that re-exports the schema on save, an edit to a C# handler
+flows straight to the typed frontend:
+
+```bash
+# terminal 1 — API: re-export rpc-schema.json on every change (see Schema generation)
+dotnet watch
+
+# terminal 2 — regenerate the TS client whenever the schema lands
+npx elarion-jsonrpc-client-generator --schema ../api/rpc-schema.json --out src/generated --watch
+```
+
+The two stay decoupled: the .NET build owns [schema export](/docs/capabilities/transports/schema-generation),
+the generator owns the client — no Node/npm dependency is baked into the server build. For a permanent setup,
+wire the watch command into a `package.json` script (e.g. `"rpc:watch"`).
+
 ## Calling methods
 
 Dotted JSON-RPC method names become nested properties, so `clients.get` is `rpc.clients.get(...)`:
