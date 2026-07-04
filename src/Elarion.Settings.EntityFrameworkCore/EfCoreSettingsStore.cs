@@ -28,10 +28,11 @@ namespace Elarion.Settings.EntityFrameworkCore;
 /// <para>
 /// After a successful write the <see cref="IEfCoreSettingsChangeNotifier"/> is signalled with the store's
 /// <see cref="DbContext"/>. The default notifier publishes through the in-process
-/// <see cref="ISettingsChangePublisher"/> for a non-transactional write and skips a write running inside a
-/// caller-owned ambient transaction (a phantom notification would fire watchers for a value a rollback
-/// discards); a backend-aware notifier (the PostgreSQL <c>LISTEN/NOTIFY</c> source) publishes on the store's
-/// own connection so the database commit-gates delivery — including for transactional writes.
+/// <see cref="ISettingsChangePublisher"/>: immediately for a non-transactional write, and — for a write running
+/// inside a caller-owned ambient transaction — deferred and announced only when that transaction commits (dropped
+/// on rollback, so a phantom notification never fires watchers for a value a rollback discards). A backend-aware
+/// notifier (the PostgreSQL <c>LISTEN/NOTIFY</c> source) instead publishes on the store's own connection so the
+/// database commit-gates delivery across every node.
 /// </para>
 /// </remarks>
 public sealed class EfCoreSettingsStore<TDbContext>(

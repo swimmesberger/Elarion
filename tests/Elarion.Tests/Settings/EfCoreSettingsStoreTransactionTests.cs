@@ -24,7 +24,8 @@ public sealed class EfCoreSettingsStoreTransactionTests(PostgreSqlSettingsStoreF
         new(
             context,
             new ChangePublisherSettingsChangeNotifier(
-                new InProcessSettingsChangeSource(), NullLogger<ChangePublisherSettingsChangeNotifier>.Instance),
+                new SettingsChangeDispatchScope(
+                    new InProcessSettingsChangeSource(), NullLogger<SettingsChangeDispatchScope>.Instance)),
             TimeProvider.System);
 
     [Fact]

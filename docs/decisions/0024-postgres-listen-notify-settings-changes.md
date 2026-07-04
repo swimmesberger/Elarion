@@ -38,7 +38,9 @@ implementing the existing seams unchanged — no contract change, per the origin
    reload is cheap and always safe (watchers re-read through the store).
 3. **Transactional writes are notified by the database itself.** The EF store signals successful writes through
    a new EF-side seam, `IEfCoreSettingsChangeNotifier`, which receives the store's `DbContext`. The default
-   implementation preserves the old behavior (publish in-process, skip inside an ambient transaction). The
+   implementation preserves the old behavior (publish in-process, skip inside an ambient transaction) — later
+   refined so the in-process default *also* commit-gates transactional writes rather than skipping them; see the
+   [2026-07-04 update](#update-2026-07-04-in-process-commit-gating). The
    PostgreSQL implementation issues `pg_notify` **on the store's own connection**, where PostgreSQL makes
    `NOTIFY` transactional: inside an ambient transaction the notification is delivered only on commit and
    discarded on rollback. This solves M13 outright for this backend — every successful settings write reaches
@@ -82,3 +84,28 @@ PostgreSQL's ~8 kB notification payload limit by schema construction (key/owner 
   store's path does not have this gap — its `pg_notify` rides the write's own connection and transaction.
 - The package depends on `Elarion.Settings.EntityFrameworkCore` (for the notifier seam) and `Npgsql`; like the
   other Npgsql-backed packages it is not `IsAotCompatible`.
+
+## Update (2026-07-04): in-process commit-gating
+
+Decision point 3 above closed M13 (transactional writes silently unnotified) **only for the PostgreSQL backend**,
+leaving the default single-node composition — EF Core store + in-process source — with the gap: a setting changed
+from inside a command handler (which the `TransactionDecorator` runs in a transaction) was written but never
+announced in-process, so `IConfiguration`/`IOptionsMonitor<T>`/`IOptionsSnapshot<T>` and the scheduler stayed
+stale until the process restarted. Because M13 shows up at **one** node, the scale posture (ADR-0025) says to fix
+it in the shipped default, not to require swapping in the cross-instance backend.
+
+The default `ChangePublisherSettingsChangeNotifier` now **commit-gates in-process** instead of skipping: a write
+with no ambient transaction is announced immediately (already durable), while a write inside a caller-owned
+transaction is deferred into a scoped `SettingsChangeDispatchScope` and announced by a
+`SettingsChangeDispatchTransactionInterceptor` (an EF Core `DbTransactionInterceptor`) only after the transaction
+commits — dropped on rollback, and savepoint-aware so a partial rollback undoes exactly the changes made after a
+savepoint. The interceptor is auto-attached to `TContext` via `IDbContextOptionsConfiguration<TContext>`, so a
+plain `AddDbContext` needs no manual `AddInterceptors` wiring. This is the same commit-gating machinery the
+in-memory integration-event bus already uses (ADR-0001 Plane B), so it is a reused pattern, not new
+infrastructure — which qualifies point 3's "no commit-hook machinery is needed in Elarion" (true for the
+`NOTIFY`-backed path; the in-process path needed exactly this lightweight hook).
+
+Unchanged: the `IEfCoreSettingsChangeNotifier` seam, the `ISettingsChangeSource`/`ISettingsChangePublisher`
+contracts, and the PostgreSQL notifier. Cross-instance delivery remains PostgreSQL's job (the in-process source
+still cannot cross process boundaries, and the `MultiInstanceChangeNotificationWarning` still fires) — this update
+only makes single-node live reload correct out of the box.
