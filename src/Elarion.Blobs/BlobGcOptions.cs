@@ -1,4 +1,4 @@
-namespace Elarion.Blobs.PostgreSql;
+namespace Elarion.Blobs;
 
 /// <summary>
 /// Configures the background garbage collector that reclaims expired, never-committed pending blobs.
@@ -9,8 +9,7 @@ public sealed class BlobGcOptions {
     /// </summary>
     /// <remarks>
     /// When a sweep deletes a full <see cref="BatchSize"/> it keeps draining without waiting, so this
-    /// bounds idle latency only. With the partial pending index an empty sweep is a near-instant index
-    /// probe.
+    /// bounds idle latency only.
     /// </remarks>
     public TimeSpan PollingInterval { get; set; } = TimeSpan.FromMinutes(5);
 

@@ -1,10 +1,10 @@
-namespace Elarion.Blobs.Tus.PostgreSql;
+namespace Elarion.Blobs.PostgreSql;
 
 /// <summary>
-/// Durable staging row for an in-progress tus upload, persisted by
-/// <see cref="PostgreSqlTusUploadStore{TDbContext}"/>.
+/// Durable staging row for an in-progress resumable upload, persisted by
+/// <see cref="PostgreSqlStagedUploadStore{TDbContext}"/>.
 /// </summary>
-public sealed class TusUploadRow {
+public sealed class StagedUploadRow {
     /// <summary>The opaque upload id.</summary>
     public string Id { get; set; } = string.Empty;
 
@@ -14,22 +14,25 @@ public sealed class TusUploadRow {
     /// <summary>The collision-safe storage name the completed upload is stored under.</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>The declared total size in bytes.</summary>
-    public long UploadLength { get; set; }
+    /// <summary>The declared total size in bytes, or <c>null</c> while the length is deferred.</summary>
+    public long? Length { get; set; }
 
     /// <summary>The number of bytes received so far.</summary>
-    public long UploadOffset { get; set; }
+    public long Offset { get; set; }
 
     /// <summary>The content type the completed blob is stored with.</summary>
     public string ContentType { get; set; } = string.Empty;
 
-    /// <summary>The raw tus <c>Upload-Metadata</c> header value, or <c>null</c>.</summary>
+    /// <summary>Opaque transport metadata carried with the session, or <c>null</c>.</summary>
     public string? Metadata { get; set; }
 
     /// <summary>The id of the user that created the upload, or <c>null</c>.</summary>
     public string? OwnerId { get; set; }
 
-    /// <summary>When the incomplete session expires and may be reclaimed.</summary>
+    /// <summary>
+    /// When the session expires and may be reclaimed — the creation expiry while in progress, or the
+    /// completed-retention deadline once complete.
+    /// </summary>
     public DateTimeOffset ExpiresAt { get; set; }
 
     /// <summary>When the session was created.</summary>

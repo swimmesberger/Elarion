@@ -9,6 +9,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Testcontainers.Azurite" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="xunit.v3.mtp-v2" />
     <PackageReference Include="AwesomeAssertions" />
@@ -27,9 +28,9 @@
     <ProjectReference Include="../../src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <ProjectReference Include="../../src/Elarion.Blobs/Elarion.Blobs.csproj" />
     <ProjectReference Include="../../src/Elarion.Blobs.AspNetCore/Elarion.Blobs.AspNetCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.Blobs.Azure/Elarion.Blobs.Azure.csproj" />
     <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql/Elarion.Blobs.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Blobs.Tus/Elarion.Blobs.Tus.csproj" />
-    <ProjectReference Include="../../src/Elarion.Blobs.Tus.PostgreSql/Elarion.Blobs.Tus.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.OpenApi/Elarion.AspNetCore.OpenApi.csproj" />
     <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj" />
@@ -46,7 +47,6 @@
     <ProjectReference Include="../../src/Elarion.Messaging.Outbox.Generators/Elarion.Messaging.Outbox.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore.Generators/Elarion.Settings.EntityFrameworkCore.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql.Generators/Elarion.Blobs.PostgreSql.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.Blobs.Tus.PostgreSql.Generators/Elarion.Blobs.Tus.PostgreSql.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.Generators/Elarion.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj" />

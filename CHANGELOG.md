@@ -9,6 +9,37 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Protocol-neutral staged (resumable) uploads + Azure Blob Storage backend (ADR-0035).** The tus staging seam
+  is promoted into `Elarion.Blobs` as **`IStagedUploadStore`** — offset-guarded `AppendAsync`, an **explicit,
+  idempotent `CompleteAsync`** that seals the staged bytes into a pending blob, nullable declared length
+  (deferred-length uploads), and all expiry policy arriving as data (`StagedUploadCreation.ExpiresAt`,
+  `StagedUploadCompletion.SessionExpiresAt`/`BlobExpiresAt`). This is the shape of the IETF *Resumable Uploads*
+  draft ("tus 2.0"): when it stabilizes it becomes a second endpoint adapter over the same seam, and every
+  staging backend lights up unchanged. `Elarion.Blobs.Tus` is now a **pure protocol adapter** (policy in
+  `TusOptions`, including the new `CompletedSessionRetention`), completes uploads explicitly (no more
+  zero-byte-append finalize hack), and **self-heals** the append-versus-completion crash window on the next
+  `HEAD`. The provider-neutral collectors (`StagedUploadGarbageCollector`, and `BlobGarbageCollector`, moved up
+  from `Elarion.Blobs.PostgreSql`) live beside the seam, so the in-memory staging default is now swept too.
+  New **`Elarion.Blobs.Azure`** exercises the seam on the bare Azure SDK: `AzureBlobStore` implements
+  `IBlobStore` + `IBlobLifecycle` over blob metadata (ETag-guarded commit/GC races), and
+  `AzureStagedUploadStore` stages each session as an **append blob** whose offset guard is the server-side
+  `If-Append-Position-Equal` precondition, completing via a **server-side copy** into the final pending blob —
+  no relational staging table, zero protocol knowledge (`AddElarionAzureBlobStore` /
+  `AddElarionAzureBlobLifecycle` / `AddElarionAzureStagedUploads`; Azurite-backed integration tests). See
+  [ADR-0035](docs/decisions/0035-protocol-neutral-staged-upload-seam.md).
+
+### Changed
+- **Breaking:** `ITusUploadStore`/`TusUpload`/`TusUploadCreation`/`TusOffsetConflictException` are replaced by
+  the `IStagedUploadStore` family in `Elarion.Blobs`; the `Elarion.Blobs.Tus.PostgreSql` package dissolves into
+  `Elarion.Blobs.PostgreSql`. **Migration:** `AddElarionTusPostgreSql<T>` → `AddElarionPostgreSqlStagedUploads<T>`,
+  `UseElarionTusStorage()` → `UseElarionStagedUploads()`, `[GenerateElarionTusStorage]` →
+  `[GenerateElarionStagedUploads]` (diagnostic `ELTUS001` → `ELBLB002`), staging table default `tus_uploads` →
+  `staged_uploads` (declared length column is now nullable), and `TusGcOptions` → the provider-neutral
+  `StagedUploadGcOptions` with completed-session retention moving to `TusOptions.CompletedSessionRetention`.
+  The tus wire behavior is unchanged. `Elarion.Blobs` now references the `Microsoft.Extensions.*` abstractions
+  packages (DI/Hosting/Logging) to host the seam's default and collectors.
+
+### Added
 - **User-context trace & log enrichment — on by default (ADR-0033).** Every handler span is now enriched with
   the calling user, and a matching `ILogger` scope carries that context onto every log line the handler produces,
   so traces and logs can be filtered by user. The Elarion source generator attaches a new

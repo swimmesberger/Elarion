@@ -1,35 +1,35 @@
 using Microsoft.EntityFrameworkCore;
 
-namespace Elarion.Blobs.Tus.PostgreSql;
+namespace Elarion.Blobs.PostgreSql;
 
 /// <summary>
-/// Configures the EF Core model used by <see cref="PostgreSqlTusUploadStore{TDbContext}"/>.
+/// Configures the EF Core model used by <see cref="PostgreSqlStagedUploadStore{TDbContext}"/>.
 /// </summary>
-public static class PostgreSqlTusStorageModelBuilderExtensions {
+public static class PostgreSqlStagedUploadModelBuilderExtensions {
     /// <summary>
-    /// Adds the tus upload staging table to the EF Core model. Call from <c>OnModelCreating</c> on the
-    /// context that backs the tus store — or annotate the context with <c>[GenerateElarionTusStorage]</c>
-    /// and let the bundled generator call this for you.
+    /// Adds the staged-upload table to the EF Core model. Call from <c>OnModelCreating</c> on the
+    /// context that backs the staging store — or annotate the context with
+    /// <c>[GenerateElarionStagedUploads]</c> and let the bundled generator call this for you.
     /// </summary>
     /// <param name="modelBuilder">The model builder to configure.</param>
     /// <param name="tableName">
-    /// The table name, or <see langword="null"/> for the default (<c>tus_uploads</c> /
-    /// <c>TusUploads</c> depending on <paramref name="snakeCase"/>).
+    /// The table name, or <see langword="null"/> for the default (<c>staged_uploads</c> /
+    /// <c>StagedUploads</c> depending on <paramref name="snakeCase"/>).
     /// </param>
     /// <param name="schema">The schema, or <see langword="null"/> to use the provider's default schema.</param>
     /// <param name="snakeCase">Whether to use snake_case table/column names. Defaults to <see langword="true"/>.</param>
     /// <returns>The same model builder for chaining.</returns>
-    public static ModelBuilder UseElarionTusStorage(
+    public static ModelBuilder UseElarionStagedUploads(
         this ModelBuilder modelBuilder,
         string? tableName = null,
         string? schema = null,
         bool snakeCase = true) {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
-        var table = tableName ?? (snakeCase ? "tus_uploads" : "TusUploads");
+        var table = tableName ?? (snakeCase ? "staged_uploads" : "StagedUploads");
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
 
-        modelBuilder.Entity<TusUploadRow>(builder => {
+        modelBuilder.Entity<StagedUploadRow>(builder => {
             builder.ToTable(table, schema);
             builder.HasKey(e => e.Id);
 
@@ -42,8 +42,8 @@ public static class PostgreSqlTusStorageModelBuilderExtensions {
             builder.Property(e => e.Id).HasColumnName(snakeCase ? "id" : "Id").ValueGeneratedNever();
             builder.Property(e => e.Container).HasColumnName(snakeCase ? "container" : "Container").IsRequired();
             builder.Property(e => e.Name).HasColumnName(snakeCase ? "name" : "Name").IsRequired();
-            builder.Property(e => e.UploadLength).HasColumnName(snakeCase ? "upload_length" : "UploadLength");
-            builder.Property(e => e.UploadOffset).HasColumnName(snakeCase ? "upload_offset" : "UploadOffset");
+            builder.Property(e => e.Length).HasColumnName(snakeCase ? "length" : "Length");
+            builder.Property(e => e.Offset).HasColumnName(snakeCase ? "upload_offset" : "UploadOffset");
             builder.Property(e => e.ContentType).HasColumnName(snakeCase ? "content_type" : "ContentType").IsRequired();
             builder.Property(e => e.Metadata).HasColumnName(snakeCase ? "metadata" : "Metadata");
             builder.Property(e => e.OwnerId).HasColumnName(snakeCase ? "owner_id" : "OwnerId");

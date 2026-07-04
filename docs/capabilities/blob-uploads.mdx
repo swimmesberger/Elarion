@@ -26,10 +26,10 @@ protocol lives only at the HTTP layer.
 
 | Package | Use it in | Contains |
 | --- | --- | --- |
-| `Elarion.Blobs` | Application | `BlobLifecycleState`, `IBlobLifecycle` (`CommitAsync`/`DeleteExpiredPendingAsync`), and the additive `BlobUploadRequest.InitialState`/`ExpiresAt`. |
-| `Elarion.Blobs.PostgreSql` | Infrastructure / host | The lifecycle on the PostgreSQL store, `state`/`expires_at` columns with a partial index, the `BlobGarbageCollector` sweeper, and `AddElarionPostgreSqlBlobLifecycle`. |
-| `Elarion.Blobs.Tus` | Host | The tus 1.0 resumable transport (`MapElarionTus`, `AddElarionTus`) and the `ITusUploadStore` seam with an in-memory default. |
-| `Elarion.Blobs.Tus.PostgreSql` | Infrastructure / host | Durable PostgreSQL tus staging (`UseElarionTusStorage`, `AddElarionTusPostgreSql`) so in-progress uploads survive restarts. |
+| `Elarion.Blobs` | Application | `BlobLifecycleState`, `IBlobLifecycle` (`CommitAsync`/`DeleteExpiredPendingAsync`), the additive `BlobUploadRequest.InitialState`/`ExpiresAt`, and the protocol-neutral **staged-upload seam** (`IStagedUploadStore`) with its in-memory default and the garbage collectors. |
+| `Elarion.Blobs.PostgreSql` | Infrastructure / host | The lifecycle on the PostgreSQL store (`state`/`expires_at` columns with a partial index, `AddElarionPostgreSqlBlobLifecycle`) and durable staged-upload staging (`UseElarionStagedUploads`, `AddElarionPostgreSqlStagedUploads`) so in-progress uploads survive restarts. |
+| `Elarion.Blobs.Azure` | Infrastructure / host | The same two roles on Azure Blob Storage: blob store + lifecycle over blob metadata, and native staging over append blobs (`AddElarionAzureBlobLifecycle`, `AddElarionAzureStagedUploads`). |
+| `Elarion.Blobs.Tus` | Host | The tus 1.0 resumable transport (`MapElarionTus`, `AddElarionTus`) — a pure protocol adapter over the staging seam. |
 | `Elarion.Blobs.AspNetCore` | Host | The minimal direct-upload endpoint (`MapElarionBlobUploads`, `AddElarionBlobUploads`). |
 
 ```xml
@@ -37,7 +37,6 @@ protocol lives only at the HTTP layer.
   <PackageReference Include="Elarion.Blobs" Version="0.2.2" />
   <PackageReference Include="Elarion.Blobs.PostgreSql" Version="0.2.2" />
   <PackageReference Include="Elarion.Blobs.Tus" Version="0.2.2" />
-  <PackageReference Include="Elarion.Blobs.Tus.PostgreSql" Version="0.2.2" />
 </ItemGroup>
 ```
 
@@ -115,6 +114,13 @@ capabilities, `POST` creates an upload (baking the current user's id), `PATCH`/`
 reference is returned in the `Elarion-Blob-Ref` response header (also available on `HEAD`) — the handle
 the client passes to entity creation.
 
+Under the endpoints sits the protocol-neutral **`IStagedUploadStore`** seam: offset-guarded appends, an
+explicit idempotent completion (so a crash between the last chunk and completion self-heals on the next
+status probe), and deferred-length sessions — the shape of the IETF *Resumable Uploads* draft ("tus 2.0"),
+which will be a second adapter over the same seam. All policy (upload expiry, pending-blob TTL, completed-
+session retention) lives in `TusOptions` and reaches the store as data, so staging backends are
+protocol-free and interchangeable.
+
 <Callout type="info">
 The default in-memory staging keeps in-progress uploads in process. For resumability **across restarts
 and instances**, add the durable PostgreSQL staging store — it persists staged bytes and reaps both
@@ -123,26 +129,34 @@ past a retention window:
 
 ```csharp
 services.AddElarionTus();
-services.AddElarionTusPostgreSql<AppDbContext>(connectionString);
-modelBuilder.UseElarionBlobStorage(); // blob tables, in OnModelCreating
-modelBuilder.UseElarionTusStorage();     // tus staging table, in OnModelCreating
+services.AddElarionPostgreSqlStagedUploads<AppDbContext>(connectionString);
+modelBuilder.UseElarionBlobStorage();  // blob tables, in OnModelCreating
+modelBuilder.UseElarionStagedUploads(); // staging table, in OnModelCreating
 ```
 
-`AddElarionTusPostgreSql` also wires the PostgreSQL **blob lifecycle** and its `BlobGarbageCollector`
-(idempotently, via `AddElarionPostgreSqlBlobLifecycle`) — a completed tus upload produces a *pending* blob, so
-without that collector an abandoned upload would leak its blob forever. Map the blob tables with
-`UseElarionBlobStorage()` alongside the staging table. Both wiring methods take optional `tableName`
-(plus `contentTableName` on the blob side) and `schema` parameters and a `snakeCase` toggle (default
-`true`; `false` switches to PascalCase names — `TusUploads`, `StoredBlobs`/`BlobContents`); the stores'
-raw Npgsql SQL (content streaming and the tus conditional append) is built from the EF model, so the
-overrides apply there too. On a `[GenerateDbSets]` context, `[GenerateElarionBlobStorage]` and
-`[GenerateElarionTusStorage]` (each with optional `SnakeCase`/`TableName`/`Schema` — the blob attribute
-also takes `ContentTableName`) replace the hand-written calls: the bundled generators emit the `DbSet`s
-and apply the same configuration through the EF generator's model-config seam (`ELBLB001`/`ELTUS001` if
-`[GenerateDbSets]` is missing). A completed session row is retained for
-`TusGcOptions.CompletedRetention` (default 1 hour) so a client `HEAD` can still fetch the reference, then
-reclaimed; the collector applies a `SafetyMargin` (default 1 minute) to the expiry cutoff, mirroring the
-blob collector.
+`AddElarionPostgreSqlStagedUploads` also wires the PostgreSQL **blob lifecycle** and its
+`BlobGarbageCollector` (idempotently, via `AddElarionPostgreSqlBlobLifecycle`) — a completed upload
+produces a *pending* blob, so without that collector an abandoned upload would leak its blob forever. Map
+the blob tables with `UseElarionBlobStorage()` alongside the staging table. Both wiring methods take
+optional `tableName` (plus `contentTableName` on the blob side) and `schema` parameters and a `snakeCase`
+toggle (default `true`; `false` switches to PascalCase names — `StagedUploads`,
+`StoredBlobs`/`BlobContents`); the stores' raw Npgsql SQL (content streaming and the staging conditional
+append) is built from the EF model, so the overrides apply there too. On a `[GenerateDbSets]` context,
+`[GenerateElarionBlobStorage]` and `[GenerateElarionStagedUploads]` (each with optional
+`SnakeCase`/`TableName`/`Schema` — the blob attribute also takes `ContentTableName`) replace the
+hand-written calls: the bundled generators emit the `DbSet`s and apply the same configuration through the
+EF generator's model-config seam (`ELBLB001`/`ELBLB002` if `[GenerateDbSets]` is missing). A completed
+session row is retained for `TusOptions.CompletedSessionRetention` (default 1 hour) so a client `HEAD`
+can still fetch the reference, then reclaimed; the session collector applies a
+`StagedUploadGcOptions.SafetyMargin` (default 1 minute) to the expiry cutoff, mirroring the blob
+collector.
+
+Prefer Azure Blob Storage? `AddElarionAzureStagedUploads(connectionString)` stages each session as an
+**append blob** — the offset guard is Azure's server-side `If-Append-Position-Equal` precondition, and
+completion is a server-side copy into the final pending blob, so bytes never round-trip through the
+application. The matching `AzureBlobStore` serves reads and the commit lifecycle over blob metadata
+(commit takes effect immediately rather than joining a caller transaction — the documented delta from the
+PostgreSQL tier).
 </Callout>
 
 Cross-origin frontends must expose the reference header via CORS:
@@ -186,5 +200,6 @@ Both transports bake the current user's id into the upload, so the host must reg
 Elarion deliberately does **not** implement the S3 wire protocol (SigV4, `aws-chunked` streaming
 signatures, multipart XML). That is the interop-fragile, expensive part of S3, and upload widgets never
 need it — Uppy treats every upload URL as opaque. The S3 wire protocol is only required for real AWS SDK
-/ CLI interoperability, which is a non-goal. The abstraction stays S3-free, so a future direct-to-storage
-backend (real S3/Azure) could add a presigned-URL capability without changing the lifecycle.
+/ CLI interoperability, which is a non-goal. The abstraction stays S3-free — `Elarion.Blobs.Azure` is
+exactly such a direct-to-storage backend behind the neutral seams, and a presigned-URL capability could
+be added the same way without changing the lifecycle.

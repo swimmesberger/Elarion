@@ -57,7 +57,7 @@ These rules are load-bearing for the generators in `Elarion.Generators`.
 Framework registration and wiring methods follow a single prefix convention: **DI registration methods are
 named `AddElarionX`** (`AddElarionScheduler`, `AddElarionOutbox<TDbContext>`, `AddElarionResilience`,
 `AddElarionInMemoryEventBus<TContext>`, …), and **EF Core model-wiring methods are `UseElarionX` /
-`ApplyElarionX`** (`UseElarionOutbox`, `UseElarionSettings`, `UseElarionBlobStorage`, `UseElarionTusStorage`,
+`ApplyElarionX`** (`UseElarionOutbox`, `UseElarionSettings`, `UseElarionBlobStorage`, `UseElarionStagedUploads`,
 `ApplyElarionIdempotencyKeys`, `ApplyElarionResourceGrants`, `ApplyElarionIdentity`). The model-wiring methods
 share the same override shape — optional `tableName` (plus `contentTableName` for blobs; Identity takes a
 `tablePrefix` instead) and `schema` parameters and a `snakeCase` toggle (default `true`) — and each has a

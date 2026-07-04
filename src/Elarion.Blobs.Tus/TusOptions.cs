@@ -1,7 +1,8 @@
 namespace Elarion.Blobs.Tus;
 
 /// <summary>
-/// Configures the tus 1.0 resumable-upload endpoints mapped by <c>MapElarionTus</c>.
+/// Configures the tus 1.0 resumable-upload endpoints mapped by <c>MapElarionTus</c>. All upload policy
+/// lives here — the staging store receives the resulting instants as data.
 /// </summary>
 public sealed class TusOptions {
     /// <summary>The route prefix the tus endpoints are mapped under. Defaults to <c>/_elarion/blobs/tus</c>.</summary>
@@ -21,6 +22,13 @@ public sealed class TusOptions {
     /// <c>Upload-Expires</c> window). Defaults to 24 hours.
     /// </summary>
     public TimeSpan UploadExpiry { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// How long a completed upload session remains queryable after completion, so a client's
+    /// <c>HEAD</c> can still fetch the <c>Elarion-Blob-Ref</c> header before the session record is
+    /// reclaimed. Defaults to 1 hour.
+    /// </summary>
+    public TimeSpan CompletedSessionRetention { get; set; } = TimeSpan.FromHours(1);
 
     /// <summary>The maximum accepted upload size in bytes (the tus <c>Tus-Max-Size</c>), or <c>null</c> for no limit. Defaults to 100 MiB.</summary>
     public long? MaxSize { get; set; } = 100L * 1024 * 1024;
