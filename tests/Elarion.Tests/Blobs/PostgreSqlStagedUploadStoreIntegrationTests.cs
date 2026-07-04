@@ -181,7 +181,9 @@ public sealed class PostgreSqlStagedUploadStoreIntegrationTests(PostgreSqlStaged
         var row = await verify.Set<StagedUploadRow>().AsNoTracking().FirstAsync(r => r.Id == created.Id, ct);
         row.BlobId.Should().Be(completed.BlobRef!.Value.Value);
         row.Data.Should().BeEmpty();
-        row.ExpiresAt.Should().Be(retention);
+        // timestamptz keeps microsecond precision; a tick-precision DateTimeOffset loses its last digit
+        // on the round trip, so compare within the truncation rather than for exact equality.
+        row.ExpiresAt.Should().BeCloseTo(retention, TimeSpan.FromMilliseconds(1));
     }
 
     [Fact]
