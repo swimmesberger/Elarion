@@ -1,15 +1,16 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace Elarion.Settings.EntityFrameworkCore;
 
 /// <summary>
 /// How <see cref="EfCoreSettingsStore{TDbContext}"/> signals a successful write to watchers. The store hands the
-/// notifier its <see cref="DbContext"/> so a backend-aware implementation can publish <b>through the store's own
-/// connection</b> — the PostgreSQL implementation issues <c>NOTIFY</c> on that connection, which PostgreSQL makes
-/// transactional: inside a caller-owned transaction the notification is delivered only on commit and discarded on
-/// rollback, so watchers never observe a value that was rolled back, and transactional writes are no longer
-/// silently unnotified.
+/// notifier its <see cref="DbContext"/> so the notification can be commit-gated by the caller's transaction: a
+/// backend-aware implementation can publish <b>through the store's own connection</b> — the PostgreSQL
+/// implementation issues <c>NOTIFY</c> on that connection, which PostgreSQL makes transactional and cross-instance —
+/// while the in-process default reads the context's transaction lifecycle to defer an in-process notification until
+/// commit. Either way, inside a caller-owned transaction the notification is delivered only on commit and dropped on
+/// rollback, so watchers never observe a value that was rolled back and a transactional write is never silently
+/// unnotified.
 /// </summary>
 public interface IEfCoreSettingsChangeNotifier {
     /// <summary>Signals that <paramref name="key"/> changed in <paramref name="scope"/> after a successful store write.</summary>
@@ -21,28 +22,27 @@ public interface IEfCoreSettingsChangeNotifier {
 }
 
 /// <summary>
-/// The default notifier over the in-process <see cref="ISettingsChangePublisher"/>. It signals immediately after a
-/// non-transactional write, and <b>skips</b> a write running inside a caller-owned ambient transaction — signalling
-/// immediately would fire watchers for a value a later rollback discards (a phantom notification). A
-/// transaction-aware backend (the PostgreSQL <c>LISTEN/NOTIFY</c> change source) replaces this with a notifier
-/// whose delivery is commit-gated by the database itself.
+/// The default notifier over the in-process <see cref="ISettingsChangePublisher"/>. A write with no ambient
+/// transaction is already durable, so it is announced immediately; a write inside a caller-owned transaction is
+/// deferred into the scoped <see cref="SettingsChangeDispatchScope"/> and announced by the
+/// <see cref="SettingsChangeDispatchTransactionInterceptor"/> only after the transaction commits (and dropped on
+/// rollback), so watchers never observe a value a rollback discards. A backend-aware notifier (the PostgreSQL
+/// <c>LISTEN/NOTIFY</c> change source) replaces this with one whose delivery the database commit-gates and which
+/// also crosses process boundaries.
 /// </summary>
-internal sealed class ChangePublisherSettingsChangeNotifier(
-    ISettingsChangePublisher changePublisher,
-    ILogger<ChangePublisherSettingsChangeNotifier> logger) : IEfCoreSettingsChangeNotifier {
+internal sealed class ChangePublisherSettingsChangeNotifier(SettingsChangeDispatchScope dispatch)
+    : IEfCoreSettingsChangeNotifier {
     /// <inheritdoc />
     public ValueTask NotifyAsync(DbContext dbContext, SettingsScope scope, string key, CancellationToken cancellationToken) {
         if (dbContext.Database.CurrentTransaction is not null) {
-            logger.LogDebug(
-                "Skipping settings change notification for key '{Key}' in scope '{Scope}' because the write is " +
-                "inside a caller-owned transaction; register a commit-hooked change source (for example the " +
-                "PostgreSQL LISTEN/NOTIFY source) to notify transactional writes.",
-                key,
-                scope.Kind);
-            return ValueTask.CompletedTask;
+            // Inside a caller-owned transaction: defer until commit so a rollback drops the notification rather than
+            // announcing a phantom change. The dispatch interceptor flushes the buffer once the transaction commits.
+            dispatch.Defer(scope, key);
+        } else {
+            // No ambient transaction: the ExecuteUpdate/raw INSERT already committed, so announce immediately.
+            dispatch.PublishNow(scope, key);
         }
 
-        changePublisher.Publish(scope, key);
         return ValueTask.CompletedTask;
     }
 }

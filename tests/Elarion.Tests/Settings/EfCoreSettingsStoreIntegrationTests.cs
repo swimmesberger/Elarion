@@ -24,8 +24,8 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         SettingsIntegrationDbContext context,
         out InProcessSettingsChangeSource changeSource) {
         changeSource = new InProcessSettingsChangeSource();
-        var notifier = new ChangePublisherSettingsChangeNotifier(
-            changeSource, NullLogger<ChangePublisherSettingsChangeNotifier>.Instance);
+        var dispatch = new SettingsChangeDispatchScope(changeSource, NullLogger<SettingsChangeDispatchScope>.Instance);
+        var notifier = new ChangePublisherSettingsChangeNotifier(dispatch);
         return new EfCoreSettingsStore<SettingsIntegrationDbContext>(context, notifier, TimeProvider.System);
     }
 
@@ -238,22 +238,6 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         second.IsSuccess.Should().BeTrue();
         // The version increments in place, so the second write lands version 3 on top of the first's version 2.
         second.Version.Should().Be(3);
-    }
-
-    [Fact]
-    public async Task Set_InsideAmbientTransaction_DoesNotPublishChange() {
-        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
-        await using var context = fixture.CreateContext();
-        var store = CreateStore(context, out var changeSource);
-        var key = UniqueKey();
-        var token = changeSource.Watch(SettingsScope.Global, "app");
-
-        await using var transaction = await context.Database.BeginTransactionAsync(Ct);
-        await store.SetAsync(SettingsScope.Global, key, "v", cancellationToken: Ct);
-        await transaction.CommitAsync(Ct);
-
-        // A transactional write skips the immediate notification so a rollback cannot fire a phantom change.
-        token.HasChanged.Should().BeFalse();
     }
 
     [Fact]

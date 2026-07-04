@@ -128,10 +128,15 @@ with a `version` column backing optimistic concurrency. Generate and apply an EF
 `elarion_settings` table; the framework ships no migrations.
 
 **Change notification and transactions.** A store write enlists in the context's ambient transaction when one
-is open. With the default in-process notifier, a write made *inside* a caller-owned transaction skips the
-immediate notification (and logs at Debug) — firing immediately would announce a value a later rollback
-discards. The PostgreSQL change source below removes this gap: its notifier rides the store's own connection,
-so the database itself delivers the notification on commit and drops it on rollback.
+is open, and the default in-process notifier is **commit-gated** to match: a write made *outside* a transaction
+is announced immediately (it is already durable), while a write made *inside* a caller-owned transaction is
+deferred and announced only when that transaction commits — and dropped on rollback, so a watcher never reloads
+a value a rollback discards. This works out of the box — `AddElarionSettingsEntityFrameworkCore<TContext>`
+auto-attaches an EF Core transaction interceptor to `TContext` — so single-node live reload of
+`IConfiguration`/`IOptionsMonitor<T>` and the scheduler applies as soon as the command that changed the setting
+commits (a setting changed from a command handler no longer needs a restart to take effect). The one thing
+the in-process notifier cannot do is cross process boundaries; the PostgreSQL change source below extends the
+same commit-gated delivery to **every** node.
 
 **Single-instance notification.** With only the shipped in-process source, a settings change on one node is
 not observed by another node's watchers or scheduler until that node restarts. When the EF Core store is
