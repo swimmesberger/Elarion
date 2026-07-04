@@ -266,6 +266,23 @@ corrected:
 - **Inbox for method-form consumers** via a dispatcher-level wrapper (not a pipeline decorator) — possible but
   inconsistent with the pipeline model; deferred. Method-form stays un-inboxed; recommend handler-form for
   at-least-once side effects.
+- **Symmetric opt-out for commands** (raised post-implementation): make `[Idempotent]` default-on for `ICommand`
+  handlers too — queries excluded — so both planes share the inbox's polarity under the "one handler, many
+  transports" theme. **Rejected**: the polarity is not a stylistic asymmetry; it tracks *who owns the duplicate
+  and who can mint the key*. On wire transports the duplicate originates with the client and only the client can
+  supply the key — the framework cannot manufacture one, because a body fingerprint cannot distinguish a network
+  retry from a deliberately repeated identical command. A default-on guard therefore degrades into a trilemma:
+  reject keyless calls (400 on every quickstart/test client, plus 401s from the default `CurrentUser` scope), or
+  attach-but-pass-through when unkeyed (idempotency *theater* — the caller believes they are protected while
+  unkeyed retries still double-execute; a default that lies), or infer keys (impossible). It would also pay a
+  claim+complete write per command for calls that are never retried, and make the OpenAPI transformer advertise
+  `Idempotency-Key` on operations that don't meaningfully accept one. The event plane passes both ownership tests
+  (the framework creates redeliveries and mints the message id) — exactly why the inbox alone can default on. The
+  planes ARE unified one layer down: one decorator, one store, one key-seed seam fed per transport (HTTP header,
+  `params._meta`, message id); only the default flips with duplicate ownership. If "force the idempotency decision
+  to be visible" is ever wanted as a team discipline, the sanctioned path is a module/assembly-scoped strictness
+  attribute mirroring `[ElarionAuthorizationDefaults]` — warning on commands that declare neither `[Idempotent]`
+  nor a deliberate opt-out — not a per-handler default flip that taxes every keyless client.
 
 ## Consequences
 
