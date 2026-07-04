@@ -202,6 +202,60 @@ public sealed class MarkInvoicePaid(AppDbContext db) : IHandler<InvoicePaid> {
 }
 ```
 
+### Which one does my consumer need?
+
+The default is already correct — `[AllowDuplicates]` is an *optimization you may claim* when you can say out
+loud why re-running is harmless, never something correctness requires. By effect shape:
+
+| Consumer effect | Reach for | Why |
+|---|---|---|
+| Insert-per-event (audit row, projection append, notification record) | **default inbox** | Inserts don't converge — the "idempotent version" is a unique index on the message id, i.e. the inbox hand-rolled per table. |
+| Delta / increment ("stats.Total += amount") | **default inbox** | Deltas double-apply on redelivery. |
+| Recompute-from-source ("recalculate totals from the invoice table") | `[AllowDuplicates]` | Re-running recomputes the same result. |
+| Conditional transition / absolute set ("mark paid if not paid") | `[AllowDuplicates]` | Converges by itself. |
+| Foreign call only, provider takes a dedup key | `[AllowDuplicates]` + pass `MessageId` | The recipient collapses duplicates; the inbox would only save the wasted call. |
+| Foreign call only, keyless protocol (bare SMTP) | **default inbox** | Narrows duplicates to the crash window; accept the residual. |
+| Mixed DB writes + foreign call | **default inbox** + pass `MessageId` downstream | The inbox dedups the writes; the key dedups the send. |
+| Blob creation (`Elarion.Blobs`) | **default inbox** | The claim and the blob commit share the consumer's transaction; a crash-window orphan stays `Pending` and the blob GC reaps it. |
+
+### A worked example: invoice creation, end to end
+
+The classic CRUD-with-side-effects shape — create a row, generate a PDF, send an email, keep another
+module's statistics current — maps onto the pieces like this:
+
+```csharp
+// The command: create-without-a-natural-key is the classic double-submit case — a client retry
+// must return the FIRST invoice, not create a second. The client sends an Idempotency-Key.
+// Bonus: a replayed command never re-runs, so InvoiceCreated is never published twice — the
+// entire downstream chain is protected at its source.
+[Idempotent]
+public sealed class CreateInvoiceHandler(AppDbContext db, IIntegrationEventBus events)
+    : IHandler<CreateInvoiceCommand, Result<InvoiceResponse>> { /* insert + PublishAsync + save */ }
+
+// Default inbox (do nothing): the PDF blob, its link on the invoice, and the inbox claim commit
+// atomically in the consumer's transaction. A redelivery replays instead of generating a second PDF.
+[ConsumeEvent]
+public sealed class GenerateInvoicePdf(AppDbContext db, IBlobStore blobs) : IHandler<InvoiceCreated> { … }
+
+// Default inbox (do nothing): SMTP takes no dedup key, so keep the inbox — duplicates narrow to the
+// crash window between the send and the commit, an accepted residual for email. With a keyed provider
+// (Resend, Brevo, …) instead: declare [AllowDuplicates] and pass the message id as the provider's
+// idempotency key — the recipient dedups better than the inbox can.
+[ConsumeEvent]
+public sealed class SendInvoiceEmail(IEmailSender email) : IHandler<InvoiceCreated> { … }
+
+// [AllowDuplicates]: recomputes from the source table, so re-running converges on the same numbers.
+// If this were incremental ("stats.Total += e.Amount") it would NOT converge — keep the default inbox.
+[ConsumeEvent]
+[AllowDuplicates]
+public sealed class RecalculateStatistics(StatsDbContext db) : IHandler<InvoiceCreated> { … }
+```
+
+The rule of thumb that falls out: **write the consumer and ship it — the default is safe. Declare
+`[AllowDuplicates]` only when you can name the reason re-running is harmless; declare `[Idempotent]` on the
+command when a client retry could create something twice** (see
+[when does a command need it](/docs/concepts/idempotency#when-does-a-command-need-it)).
+
 **Method-form consumers have no pipeline, so no inbox.** Convert to the handler form when dedup matters,
 or dedup by hand keyed on `(consumer, context.MessageId)` — a unique-constrained insert in the same
 transaction as the side effect, which is precisely what the inbox automates:

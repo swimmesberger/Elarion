@@ -51,6 +51,33 @@ Attribute options (all optional):
 | `ConflictBehavior` | `Conflict` | A concurrent in-flight duplicate fails fast with `409`, or `WaitThenReplay`. |
 | `StoreFailures` | `None` | Also store & replay **definitive** failures (`Definitive`), via a savepoint. |
 
+## When does a command need it?
+
+`[Idempotent]` pays off when an unkeyed client retry would do damage a constraint can't catch — or when a
+keyed replay gives a better client experience than an error. The classic cases:
+
+| Command shape | `[Idempotent]`? | Why |
+|---|---|---|
+| Create **without** a natural unique key ("create invoice", "place order") | **Yes** | The classic double-submit: a timeout retry silently creates a second row. Replay returns the *first* invoice. |
+| Payment / money movement / non-repeatable external effect | **Yes** | The Stripe case: a retry must return the first charge, never make a second. |
+| Increment / accumulate ("add credit", "consume quota") | **Yes** | Deltas never converge — a retry double-applies. (Or redesign to set-style.) |
+| Create **with** a natural unique key (external order no., email-as-login) | Optional | The unique constraint already blocks the duplicate — but it *rejects* (409/422) where `[Idempotent]` *replays* the original success. Choose by client experience. |
+| Set-style update ("rename", "set address", "mark shipped") | No | Last-write-wins converges; a retry rewrites the same value. |
+| Delete by id | Usually no | The second delete finds nothing; decide whether NotFound-on-retry is acceptable to the client. |
+| Query | Never | Reads are idempotent by definition (`ELIDEM002` warns on non-commands). |
+
+Two things follow from annotating:
+
+- **The client must send the key** — the `Idempotency-Key` header on HTTP, `params._meta` on JSON-RPC. The
+  framework cannot invent one: only the client can distinguish "retry of the same submit" from "a second,
+  deliberate, identical command". `[Idempotent]` enforces and advertises the contract (the OpenAPI transformer
+  marks the operation); it does not remove the client's half.
+- **Protecting the command protects the whole chain at its source.** A replayed command returns its stored
+  result *without re-running the handler*, so it never re-publishes its integration events — the downstream
+  consumers, PDFs, and emails of a client retry simply never happen twice. Consumers then only need to survive
+  *delivery-level* duplicates, which the [default-on inbox](/docs/capabilities/events/consuming-events#handling-duplicates)
+  absorbs.
+
 ## Behavior and status codes
 
 The decorator short-circuits with `AppError`s that map to the IETF `Idempotency-Key` header draft and Stripe:
