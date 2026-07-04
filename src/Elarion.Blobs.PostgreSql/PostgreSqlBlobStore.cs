@@ -242,6 +242,151 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     }
 
     /// <inheritdoc />
+    public async Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Container, nameof(request));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(request.PageSize, nameof(request));
+
+        // Phase 1: one grouped, keyset-paginated query computes the page of entries — blob names and,
+        // under a delimiter, the distinct virtual-directory prefixes — in ordinal (COLLATE "C") order.
+        // Fetching one extra row tells us whether a next page exists without a trailing empty page.
+        var entries = await QueryEntriesAsync(request, request.PageSize + 1, cancellationToken);
+        var hasMore = entries.Count > request.PageSize;
+        if (hasMore) {
+            entries.RemoveAt(entries.Count - 1);
+        }
+
+        // Phase 2: hydrate metadata for the blob entries (an entry deleted between the two phases is
+        // simply omitted). Prefix entries need no second query.
+        var blobNames = entries.Where(e => !e.IsPrefix).Select(e => e.Entry).ToList();
+        var rowsByName = blobNames.Count == 0
+            ? []
+            : (await dbContext.Set<StoredBlob>()
+                .AsNoTracking()
+                .Where(b => b.Container == request.Container && blobNames.Contains(b.Name))
+                .ToListAsync(cancellationToken))
+                .ToDictionary(b => b.Name, StringComparer.Ordinal);
+
+        var blobs = new List<BlobMetadata>(blobNames.Count);
+        var prefixes = new List<string>();
+        foreach (var entry in entries) {
+            if (entry.IsPrefix) {
+                prefixes.Add(entry.Entry);
+            }
+            else if (rowsByName.TryGetValue(entry.Entry, out var row)) {
+                blobs.Add(ToMetadata(row));
+            }
+        }
+
+        return new BlobListing {
+            Blobs = blobs,
+            Prefixes = prefixes,
+            ContinuationToken = hasMore && entries.Count > 0 ? EncodeListToken(entries[^1]) : null,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
+        await dbContext.Set<StoredBlob>()
+            .AsNoTracking()
+            .Select(blob => blob.Container)
+            .Distinct()
+            .OrderBy(container => container)
+            .ToListAsync(cancellationToken);
+
+    private async Task<List<BlobListEntryRow>> QueryEntriesAsync(
+        BlobListRequest request,
+        int limit,
+        CancellationToken cancellationToken) {
+        // The listing SQL is built from the EF model (like the content SQL) so table/column overrides
+        // and the snake-case toggle apply. Ordering and the keyset comparison use COLLATE "C" so pages
+        // are ordinal-ordered and pagination is stable regardless of the database's default collation.
+        // Not cached: listing is a browse/ops surface, not a hot path.
+        var entityType = dbContext.Model.FindEntityType(typeof(StoredBlob))
+            ?? throw new InvalidOperationException(
+                "The blob entity is not mapped. Call modelBuilder.UseElarionBlobStorage() in OnModelCreating.");
+        var sqlHelper = dbContext.GetService<ISqlGenerationHelper>();
+        var tableName = entityType.GetTableName()
+            ?? throw new InvalidOperationException("The blob entity is not mapped to a table.");
+        var storeObject = StoreObjectIdentifier.Table(tableName, entityType.GetSchema());
+
+        string Column(string propertyName) {
+            var property = entityType.FindProperty(propertyName)
+                ?? throw new InvalidOperationException($"The {nameof(StoredBlob)}.{propertyName} property is not mapped.");
+            var columnName = property.GetColumnName(storeObject)
+                ?? throw new InvalidOperationException($"The {nameof(StoredBlob)}.{propertyName} property has no column.");
+            return sqlHelper.DelimitIdentifier(columnName);
+        }
+
+        var table = sqlHelper.DelimitIdentifier(tableName, entityType.GetSchema());
+        var name = Column(nameof(StoredBlob.Name));
+        var container = Column(nameof(StoredBlob.Container));
+        var state = Column(nameof(StoredBlob.State));
+
+        var args = new List<object>();
+        string P(object value) {
+            args.Add(value);
+            return "{" + (args.Count - 1) + "}";
+        }
+
+        var containerParam = P(request.Container);
+        var prefixParam = P(request.Prefix ?? string.Empty);
+        var (afterEntry, afterIsPrefix) = DecodeListToken(request.ContinuationToken);
+
+        var filter = $"{container} = {containerParam} AND substr({name}, 1, length({prefixParam})) = {prefixParam}";
+        if (request.State is { } stateFilter) {
+            filter += $" AND {state} = {P((int)stateFilter)}";
+        }
+
+        string sql;
+        if (request.Delimiter is { Length: > 0 } delimiter) {
+            var delimiterParam = P(delimiter);
+            // Position of the delimiter within the name segment after the prefix; > 0 → the row rolls
+            // up into a (delimiter-inclusive) virtual-directory prefix instead of a blob entry.
+            var rest = $"substr({name}, length({prefixParam}) + 1)";
+            var position = $"strpos({rest}, {delimiterParam})";
+            sql =
+                $"SELECT e.\"Entry\", e.\"IsPrefix\" FROM (" +
+                $"SELECT DISTINCT CASE WHEN {position} > 0 " +
+                $"THEN substr({name}, 1, length({prefixParam}) + {position} + length({delimiterParam}) - 1) " +
+                $"ELSE {name} END AS \"Entry\", {position} > 0 AS \"IsPrefix\" " +
+                $"FROM {table} WHERE {filter}) AS e";
+            if (afterEntry is not null) {
+                sql += $" WHERE (e.\"Entry\" COLLATE \"C\", e.\"IsPrefix\") > ({P(afterEntry)}, {P(afterIsPrefix)})";
+            }
+
+            sql += $" ORDER BY e.\"Entry\" COLLATE \"C\", e.\"IsPrefix\" LIMIT {P(limit)}";
+        }
+        else {
+            sql = $"SELECT {name} AS \"Entry\", false AS \"IsPrefix\" FROM {table} WHERE {filter}";
+            if (afterEntry is not null) {
+                sql += $" AND {name} COLLATE \"C\" > {P(afterEntry)}";
+            }
+
+            sql += $" ORDER BY {name} COLLATE \"C\" LIMIT {P(limit)}";
+        }
+
+        return await dbContext.Database
+            .SqlQueryRaw<BlobListEntryRow>(sql, args.ToArray())
+            .ToListAsync(cancellationToken);
+    }
+
+    private static string EncodeListToken(BlobListEntryRow entry) =>
+        (entry.IsPrefix ? "p|" : "b|") + entry.Entry;
+
+    private static (string? Entry, bool IsPrefix) DecodeListToken(string? token) {
+        if (token is null) {
+            return (null, false);
+        }
+
+        if (token.Length < 2 || token[1] != '|' || token[0] is not ('b' or 'p')) {
+            throw new ArgumentException("The continuation token is not from this store.", nameof(token));
+        }
+
+        return (token[2..], token[0] == 'p');
+    }
+
+    /// <inheritdoc />
     public async Task<bool> CommitAsync(BlobRef blobRef, CancellationToken cancellationToken) {
         ValidateBlobRef(blobRef);
 
@@ -489,6 +634,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             ContentType = blob.ContentType,
             Size = blob.Size,
             CreatedAt = blob.CreatedAt,
+            State = blob.State,
             OwnerId = blob.OwnerId
         };
 
@@ -502,4 +648,14 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     private static void ValidateBlobRef(BlobRef blobRef) {
         ArgumentException.ThrowIfNullOrWhiteSpace(blobRef.Value, nameof(blobRef));
     }
+}
+
+/// <summary>
+/// Materialization shape for the listing's entry query (<c>SqlQueryRaw</c> needs a non-generic type
+/// with settable properties matching the column aliases).
+/// </summary>
+internal sealed class BlobListEntryRow {
+    public string Entry { get; set; } = string.Empty;
+
+    public bool IsPrefix { get; set; }
 }

@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using Elarion.Blobs.Tus.PostgreSql.Generators;
+using Elarion.Blobs.PostgreSql.Generators;
 using Elarion.EntityFrameworkCore.Generators;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ElarionTusStorageGeneratorTests
+public sealed class ElarionStagedUploadsGeneratorTests
 {
     private const string ContextSource =
         """
@@ -16,7 +16,7 @@ public sealed class ElarionTusStorageGeneratorTests
         namespace Sample.Data;
 
         [Elarion.EntityFrameworkCore.GenerateDbSets]
-        [Elarion.Blobs.Tus.PostgreSql.GenerateElarionTusStorage]
+        [Elarion.Blobs.PostgreSql.GenerateElarionStagedUploads]
         public partial class AppDbContext : DbContext
         {
             public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
@@ -30,12 +30,12 @@ public sealed class ElarionTusStorageGeneratorTests
         var result = RunGenerator(ContextSource);
 
         NoErrors(result);
-        var source = GetGenerated(result, "Sample_Data_AppDbContext.ElarionTusStorage.g.cs");
+        var source = GetGenerated(result, "Sample_Data_AppDbContext.ElarionStagedUploads.g.cs");
 
         source.Should().Contain(
-            "public DbSet<global::Elarion.Blobs.Tus.PostgreSql.TusUploadRow> TusUploads => Set<global::Elarion.Blobs.Tus.PostgreSql.TusUploadRow>();");
-        source.Should().Contain("partial void OnEntitiesConfigured_GenerateElarionTusStorage(ModelBuilder modelBuilder) =>");
-        source.Should().Contain("UseElarionTusStorage(");
+            "public DbSet<global::Elarion.Blobs.PostgreSql.StagedUploadRow> StagedUploads => Set<global::Elarion.Blobs.PostgreSql.StagedUploadRow>();");
+        source.Should().Contain("partial void OnEntitiesConfigured_GenerateElarionStagedUploads(ModelBuilder modelBuilder) =>");
+        source.Should().Contain("UseElarionStagedUploads(");
         source.Should().Contain("tableName: null");
         source.Should().Contain("schema: null");
         source.Should().Contain("snakeCase: true");
@@ -51,7 +51,7 @@ public sealed class ElarionTusStorageGeneratorTests
             namespace Sample.Data;
 
             [Elarion.EntityFrameworkCore.GenerateDbSets]
-            [Elarion.Blobs.Tus.PostgreSql.GenerateElarionTusStorage(SnakeCase = false, TableName = "MyTable", Schema = "infra")]
+            [Elarion.Blobs.PostgreSql.GenerateElarionStagedUploads(SnakeCase = false, TableName = "MyTable", Schema = "infra")]
             public partial class AppDbContext : DbContext
             {
                 public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
@@ -59,14 +59,14 @@ public sealed class ElarionTusStorageGeneratorTests
             """);
 
         NoErrors(result);
-        var source = GetGenerated(result, "Sample_Data_AppDbContext.ElarionTusStorage.g.cs");
+        var source = GetGenerated(result, "Sample_Data_AppDbContext.ElarionStagedUploads.g.cs");
         source.Should().Contain("tableName: \"MyTable\"");
         source.Should().Contain("schema: \"infra\"");
         source.Should().Contain("snakeCase: false");
     }
 
     [Fact]
-    public void MissingGenerateDbSets_ReportsEltus001AndGeneratesNothing()
+    public void MissingGenerateDbSets_ReportsElblb002AndGeneratesNothing()
     {
         var result = RunGenerator(
             """
@@ -74,32 +74,32 @@ public sealed class ElarionTusStorageGeneratorTests
 
             namespace Sample.Data;
 
-            [Elarion.Blobs.Tus.PostgreSql.GenerateElarionTusStorage]
+            [Elarion.Blobs.PostgreSql.GenerateElarionStagedUploads]
             public partial class AppDbContext : DbContext
             {
                 public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
             }
             """);
 
-        result.Diagnostics.Should().Contain(d => d.Id == "ELTUS001" && d.Severity == DiagnosticSeverity.Error);
+        result.Diagnostics.Should().Contain(d => d.Id == "ELBLB002" && d.Severity == DiagnosticSeverity.Error);
         result.GeneratedTrees.Should().BeEmpty();
     }
 
     [Fact]
     public void ComposesWithEfGeneratorSeamAndCompiles()
     {
-        // The EF DbContext generator declares the per-feature seam OnEntitiesConfigured_GenerateElarionTusStorage;
+        // The EF DbContext generator declares the per-feature seam OnEntitiesConfigured_GenerateElarionStagedUploads;
         // this generator implements it. Compiling source + both generated trees proves the contract holds.
         var ct = TestContext.Current.CancellationToken;
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var compilation = CSharpCompilation.Create(
-            "ElarionTusStorageGeneratorTestsCompose",
+            "ElarionStagedUploadsGeneratorTestsCompose",
             [CSharpSyntaxTree.ParseText(ContextSource, parseOptions, cancellationToken: ct)],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            new[] { new DbContextGenerator().AsSourceGenerator(), new ElarionTusStorageGenerator().AsSourceGenerator() },
+            new[] { new DbContextGenerator().AsSourceGenerator(), new ElarionStagedUploadsGenerator().AsSourceGenerator() },
             parseOptions: parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, ct);
 
@@ -112,25 +112,25 @@ public sealed class ElarionTusStorageGeneratorTests
     public void IrrelevantEditReusesTargets()
     {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
-            new ElarionTusStorageGenerator(), ContextSource, "TusStorageTargets");
+            new ElarionStagedUploadsGenerator(), ContextSource, "StagedUploadTargets");
     }
 
     [Fact]
     public void UnrelatedFileEditDoesNotRerunDiscovery()
     {
         GeneratorCacheAssert.ReusesDiscoveryAfterUnrelatedFileEdit(
-            new ElarionTusStorageGenerator(), ContextSource, "TusStorageTargets");
+            new ElarionStagedUploadsGenerator(), ContextSource, "StagedUploadTargets");
     }
 
     private static GeneratorDriverRunResult RunGenerator(string source)
     {
         var compilation = CSharpCompilation.Create(
-            "ElarionTusStorageGeneratorTests",
+            "ElarionStagedUploadsGeneratorTests",
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview))],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(new ElarionTusStorageGenerator());
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(new ElarionStagedUploadsGenerator());
         return driver.RunGenerators(compilation).GetRunResult();
     }
 

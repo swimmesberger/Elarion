@@ -164,6 +164,7 @@ public sealed class BlobUploadEndpointsTests {
             ContentType = "application/octet-stream",
             Size = 3,
             CreatedAt = DateTimeOffset.UnixEpoch,
+            State = BlobLifecycleState.Pending,
             OwnerId = "a/b"
         });
 
@@ -185,6 +186,7 @@ public sealed class BlobUploadEndpointsTests {
             ContentType = "application/octet-stream",
             Size = 1,
             CreatedAt = DateTimeOffset.UnixEpoch,
+            State = BlobLifecycleState.Pending,
             OwnerId = null
         });
 
@@ -216,7 +218,8 @@ public sealed class BlobUploadEndpointsTests {
             Name = "user-2/abc/secret.bin",
             ContentType = "application/octet-stream",
             Size = 3,
-            CreatedAt = DateTimeOffset.UnixEpoch
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            State = BlobLifecycleState.Pending
         });
 
         var response = await host.Client.DeleteAsync("/_elarion/blobs/blob-x", ct);
@@ -286,6 +289,7 @@ public sealed class BlobUploadEndpointsTests {
                     ContentType = request.ContentType,
                     Size = buffer.Length,
                     CreatedAt = DateTimeOffset.UnixEpoch,
+                    State = request.InitialState,
                     OwnerId = request.OwnerId
                 },
                 buffer.ToArray());
@@ -305,6 +309,12 @@ public sealed class BlobUploadEndpointsTests {
 
         public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
             Task.FromResult<BlobDownload?>(null);
+
+        public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class FakeCurrentUser(string userId, bool isAuthenticated) : ICurrentUser {

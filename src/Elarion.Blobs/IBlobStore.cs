@@ -56,4 +56,25 @@ public interface IBlobStore {
     /// <param name="cancellationToken">Token used to cancel the operation.</param>
     /// <returns><c>true</c> when the blob exists; otherwise <c>false</c>.</returns>
     Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists one page of blobs, optionally rolled up into virtual directories by a delimiter (the
+    /// S3/Azure prefix-plus-delimiter model — see <see cref="BlobListRequest"/>).
+    /// </summary>
+    /// <param name="request">Container, prefix/delimiter, state filter, and paging inputs.</param>
+    /// <param name="cancellationToken">Token used to cancel the operation.</param>
+    /// <returns>
+    /// The page, with entries in lexicographic (ordinal) name order. A missing container yields an
+    /// empty page, not an error. Listing is a browse/ops surface (admin UIs, migration and backup
+    /// tooling) — an application queries its own entities for "which blobs belong to X", it does not
+    /// enumerate the store.
+    /// </returns>
+    Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists the containers known to the store, in ascending name order.
+    /// </summary>
+    /// <param name="cancellationToken">Token used to cancel the operation.</param>
+    /// <returns>The container names.</returns>
+    Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken);
 }

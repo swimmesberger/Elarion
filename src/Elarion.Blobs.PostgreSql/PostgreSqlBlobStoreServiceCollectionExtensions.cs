@@ -79,12 +79,10 @@ public static class PostgreSqlBlobStoreServiceCollectionExtensions {
 
         services.AddElarionPostgreSqlBlobStore<TDbContext>();
 
-        var options = new BlobGcOptions();
-        configure?.Invoke(options);
-        services.TryAddSingleton(options);
-
         services.TryAddScoped<IBlobLifecycle, PostgreSqlBlobStore<TDbContext>>();
-        services.AddHostedService<BlobGarbageCollector>();
+        // Idempotent, so repeated wiring (for example via AddElarionPostgreSqlStagedUploads) never
+        // registers a second collector.
+        services.AddElarionBlobGarbageCollection(configure);
 
         return services;
     }

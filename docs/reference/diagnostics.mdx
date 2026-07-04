@@ -309,19 +309,13 @@ Settings-table generation for `[GenerateElarionSettings]`. See [Settings](/docs/
 | --- | --- | --- | --- |
 | ELSET001 | Error | A context is annotated with `[GenerateElarionSettings]` but not `[GenerateDbSets]`, so the settings `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionSettings]`. |
 
-## ELBLB — Blob storage (PostgreSQL)
+## ELBLB — Blob storage and staged uploads (PostgreSQL)
 
-Blob-table generation for `[GenerateElarionBlobStorage]`. See [Blob storage](/docs/capabilities/blob-storage).
-
-| Id | Severity | Meaning | Fix |
-| --- | --- | --- | --- |
-| ELBLB001 | Error | A context is annotated with `[GenerateElarionBlobStorage]` but not `[GenerateDbSets]`, so the blob `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionBlobStorage]`. |
-
-## ELTUS — tus staging (PostgreSQL)
-
-Tus upload-staging generation for `[GenerateElarionTusStorage]`. See
+Blob-table generation for `[GenerateElarionBlobStorage]` and staged-upload-table generation for
+`[GenerateElarionStagedUploads]`. See [Blob storage](/docs/capabilities/blob-storage) and
 [Blob uploads](/docs/capabilities/blob-uploads).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELTUS001 | Error | A context is annotated with `[GenerateElarionTusStorage]` but not `[GenerateDbSets]`, so the tus staging `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionTusStorage]`. |
+| ELBLB001 | Error | A context is annotated with `[GenerateElarionBlobStorage]` but not `[GenerateDbSets]`, so the blob `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionBlobStorage]`. |
+| ELBLB002 | Error | A context is annotated with `[GenerateElarionStagedUploads]` but not `[GenerateDbSets]`, so the staged-upload `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionStagedUploads]`. |

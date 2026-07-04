@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Elarion.Blobs;
 
 /// <summary>
@@ -125,6 +127,46 @@ public static class BlobStoreExtensions {
 
         await download.Content.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>
+    /// Enumerates every blob under a prefix, walking <see cref="IBlobStore.ListAsync"/> page by page —
+    /// the flat (recursive) enumeration migration and backup tooling wants.
+    /// </summary>
+    /// <param name="store">The store to enumerate.</param>
+    /// <param name="container">The container to list.</param>
+    /// <param name="prefix">Only names starting with this prefix, or <c>null</c> for all.</param>
+    /// <param name="state">Only blobs in this lifecycle state, or <c>null</c> for all.</param>
+    /// <param name="pageSize">The page size used for the underlying listing calls.</param>
+    /// <param name="cancellationToken">Token used to cancel the enumeration.</param>
+    public static async IAsyncEnumerable<BlobMetadata> ListAllAsync(
+        this IBlobStore store,
+        string container,
+        string? prefix = null,
+        BlobLifecycleState? state = null,
+        int pageSize = 500,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(container);
+
+        string? continuationToken = null;
+        do {
+            var page = await store.ListAsync(
+                new BlobListRequest {
+                    Container = container,
+                    Prefix = prefix,
+                    State = state,
+                    PageSize = pageSize,
+                    ContinuationToken = continuationToken,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            foreach (var blob in page.Blobs) {
+                yield return blob;
+            }
+
+            continuationToken = page.ContinuationToken;
+        } while (continuationToken is not null);
     }
 
     private static async Task<BlobRef> SaveAndDisposeAsync(

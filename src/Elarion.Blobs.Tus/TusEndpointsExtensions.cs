@@ -8,10 +8,11 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Elarion.Blobs.Tus;
 
 /// <summary>
-/// Maps the tus 1.0 resumable-upload endpoints (Core + Creation + Expiration + Termination). A completed
-/// upload produces a pending blob whose reference is returned in the <c>Elarion-Blob-Ref</c> response
-/// header (also available on <c>HEAD</c>); the client passes that reference when creating the owning
-/// entity, and an uncommitted upload is reclaimed by garbage collection.
+/// Maps the tus 1.0 resumable-upload endpoints (Core + Creation + Expiration + Termination) — a pure
+/// protocol adapter over the <see cref="IStagedUploadStore"/> seam. A completed upload produces a pending
+/// blob whose reference is returned in the <c>Elarion-Blob-Ref</c> response header (also available on
+/// <c>HEAD</c>); the client passes that reference when creating the owning entity, and an uncommitted
+/// upload is reclaimed by garbage collection.
 /// </summary>
 public static class TusEndpointsExtensions {
     /// <summary>
@@ -50,8 +51,9 @@ public static class TusEndpointsExtensions {
     private static async Task CreateAsync(
         HttpContext context,
         ICurrentUser currentUser,
-        ITusUploadStore store,
+        IStagedUploadStore store,
         TusOptions options,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken) {
         var response = context.Response;
         SetResumable(response);
@@ -79,20 +81,21 @@ public static class TusEndpointsExtensions {
             : "application/octet-stream";
 
         var upload = await store.CreateAsync(
-            new TusUploadCreation {
+            new StagedUploadCreation {
                 Container = options.Container,
                 Name = $"{currentUser.UserId}/{Guid.NewGuid():N}/{fileName}",
                 Length = length,
                 ContentType = contentType,
                 Metadata = string.IsNullOrEmpty(rawMetadata) ? null : rawMetadata,
                 OwnerId = currentUser.UserId,
+                ExpiresAt = timeProvider.GetUtcNow() + options.UploadExpiry,
             },
             cancellationToken);
 
-        // A zero-length upload is complete on creation (tus needs no PATCH), so finalize it now —
-        // appending nothing drives the same completion path and yields the blob reference.
+        // A zero-length upload is complete on creation (tus needs no PATCH), so seal it now — completion
+        // yields the blob reference the same way a final PATCH would.
         if (length == 0) {
-            upload = await store.AppendAsync(upload.Id, 0, Stream.Null, cancellationToken);
+            upload = await CompleteAsync(store, upload.Id, options, timeProvider, cancellationToken);
         }
 
         response.Headers.Location = BuildLocation(context.Request, options.RoutePrefix, upload.Id);
@@ -106,7 +109,9 @@ public static class TusEndpointsExtensions {
         HttpContext context,
         string id,
         ICurrentUser currentUser,
-        ITusUploadStore store,
+        IStagedUploadStore store,
+        TusOptions options,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken) {
         var response = context.Response;
         SetResumable(response);
@@ -117,9 +122,29 @@ public static class TusEndpointsExtensions {
             return;
         }
 
+        // Self-heal the crash window between the last append and completion: a session that has all its
+        // bytes but no blob reference is completed (idempotently) right here, so the client's status probe
+        // yields the reference instead of a forever-stuck "done but ref-less" upload.
+        if (upload is { Length: long total, IsComplete: false } && upload.Offset >= total) {
+            try {
+                upload = await CompleteAsync(store, id, options, timeProvider, cancellationToken);
+            }
+            catch (StagedUploadConflictException) {
+                // Raced by a concurrent completion or delete; serve the current state.
+                upload = await store.GetAsync(id, cancellationToken);
+                if (upload is null || !IsOwner(upload, currentUser)) {
+                    response.StatusCode = StatusCodes.Status404NotFound;
+                    return;
+                }
+            }
+        }
+
         response.Headers.CacheControl = "no-store";
         response.Headers[TusProtocol.UploadOffset] = upload.Offset.ToString(CultureInfo.InvariantCulture);
-        response.Headers[TusProtocol.UploadLength] = upload.Length.ToString(CultureInfo.InvariantCulture);
+        if (upload.Length is long length) {
+            response.Headers[TusProtocol.UploadLength] = length.ToString(CultureInfo.InvariantCulture);
+        }
+
         if (upload.Metadata is not null) {
             response.Headers[TusProtocol.UploadMetadata] = upload.Metadata;
         }
@@ -133,7 +158,8 @@ public static class TusEndpointsExtensions {
         HttpContext context,
         string id,
         ICurrentUser currentUser,
-        ITusUploadStore store,
+        IStagedUploadStore store,
+        TusOptions options,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) {
         var response = context.Response;
@@ -170,11 +196,17 @@ public static class TusEndpointsExtensions {
             return;
         }
 
-        TusUpload updated;
+        StagedUpload updated;
         try {
             updated = await store.AppendAsync(id, offset, context.Request.Body, cancellationToken);
+
+            // tus 1.0 declares the length up front, so the append that reaches it completes the upload —
+            // the explicit-completion analog of the IETF draft's Upload-Complete flag.
+            if (updated is { Length: long total, IsComplete: false } && updated.Offset >= total) {
+                updated = await CompleteAsync(store, id, options, timeProvider, cancellationToken);
+            }
         }
-        catch (TusOffsetConflictException) {
+        catch (StagedUploadConflictException) {
             response.StatusCode = StatusCodes.Status409Conflict;
             return;
         }
@@ -189,7 +221,7 @@ public static class TusEndpointsExtensions {
         HttpContext context,
         string id,
         ICurrentUser currentUser,
-        ITusUploadStore store,
+        IStagedUploadStore store,
         CancellationToken cancellationToken) {
         var response = context.Response;
         SetResumable(response);
@@ -204,13 +236,31 @@ public static class TusEndpointsExtensions {
         response.StatusCode = StatusCodes.Status204NoContent;
     }
 
+    // Completion policy is the endpoint's: the pending blob's time-to-live and the completed session's
+    // retention window are computed here and handed to the store as data.
+    private static Task<StagedUpload> CompleteAsync(
+        IStagedUploadStore store,
+        string id,
+        TusOptions options,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken) {
+        var now = timeProvider.GetUtcNow();
+        return store.CompleteAsync(
+            id,
+            new StagedUploadCompletion {
+                SessionExpiresAt = now + options.CompletedSessionRetention,
+                BlobExpiresAt = now + options.Ttl,
+            },
+            cancellationToken);
+    }
+
     private static void SetResumable(HttpResponse response) =>
         response.Headers[TusProtocol.Resumable] = TusProtocol.Version;
 
-    private static void SetExpires(HttpResponse response, TusUpload upload) =>
+    private static void SetExpires(HttpResponse response, StagedUpload upload) =>
         response.Headers[TusProtocol.UploadExpires] = upload.ExpiresAt.ToString("R", CultureInfo.InvariantCulture);
 
-    private static void SetBlobRef(HttpResponse response, TusUpload upload) {
+    private static void SetBlobRef(HttpResponse response, StagedUpload upload) {
         if (upload.BlobRef is { } blobRef) {
             response.Headers[TusProtocol.BlobRef] = blobRef.Value;
         }
@@ -219,7 +269,7 @@ public static class TusEndpointsExtensions {
     // Owner-scoped operations require an authenticated caller whose id matches the upload's recorded owner.
     // A session with no recorded owner is denied to everyone (fail closed), matching the direct-upload
     // endpoint's stance, so a null/empty owner id can never be matched by an unauthenticated caller.
-    private static bool IsOwner(TusUpload upload, ICurrentUser currentUser) =>
+    private static bool IsOwner(StagedUpload upload, ICurrentUser currentUser) =>
         currentUser.IsAuthenticated
         && upload.OwnerId is not null
         && string.Equals(upload.OwnerId, currentUser.UserId, StringComparison.Ordinal);

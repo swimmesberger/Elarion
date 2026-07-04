@@ -55,3 +55,5 @@ designs that are not yet implemented.
 - [ADR-0032: Frontend contribution model and the typed capability vocabulary](0032-frontend-contribution-model.md)
 - [ADR-0033: User-context trace and log enrichment](0033-user-context-trace-and-log-enrichment.md)
 - [ADR-0034: Abstractions holds contracts, not implementations](0034-abstractions-holds-contracts-not-implementations.md)
+- [ADR-0035: Protocol-neutral staged-upload seam (`IStagedUploadStore` supersedes `ITusUploadStore`)](0035-protocol-neutral-staged-upload-seam.md)
+- [ADR-0036: Blob listing is prefix + delimiter virtual hierarchy, not directories](0036-blob-listing-virtual-hierarchy.md)

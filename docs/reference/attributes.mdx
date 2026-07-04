@@ -583,15 +583,15 @@ See [Settings](/docs/concepts/settings).
 
 See [Blob storage](/docs/capabilities/blob-storage).
 
-### `[GenerateElarionTusStorage]`
+### `[GenerateElarionStagedUploads]`
 
-- **Package:** `Elarion.Blobs.Tus.PostgreSql` · **Applies to:** class
-- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<TusUploadRow>` and applies the tus upload-staging model configuration through the EF generator's model-config seam — the table backing the durable `ITusUploadStore`. The hand-written equivalent is `modelBuilder.UseElarionTusStorage()`. Mirrors `[GenerateElarionBlobStorage]`, which maps the blob tables a completed upload is written to. Requires `[GenerateDbSets]` (else `ELTUS001`).
+- **Package:** `Elarion.Blobs.PostgreSql` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<StagedUploadRow>` and applies the staged-upload model configuration through the EF generator's model-config seam — the table backing the durable `IStagedUploadStore` that resumable transports (tus) stage into. The hand-written equivalent is `modelBuilder.UseElarionStagedUploads()`. Mirrors `[GenerateElarionBlobStorage]`, which maps the blob tables a completed upload is written to. Requires `[GenerateDbSets]` (else `ELBLB002`).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
-| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`tus_uploads` / `TusUploads` depending on `SnakeCase`). |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`staged_uploads` / `StagedUploads` depending on `SnakeCase`). |
 | `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
 See [Blob uploads](/docs/capabilities/blob-uploads).
@@ -693,7 +693,7 @@ See [Entity Framework](/docs/capabilities/entity-framework).
 ## Related references
 
 <Cards>
-  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELVAL/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELINBX/ELIDEMEF/ELOBX/ELSET/ELBLB/ELTUS/ELCACHE) referenced above.</Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELVAL/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELINBX/ELIDEMEF/ELOBX/ELSET/ELBLB/ELCACHE) referenced above.</Card>
   <Card title="Configuration" href="/docs/reference/configuration">Feature flags (`Modules:{Name}:Enabled`) and other settings keys.</Card>
   <Card title="Conventions" href="/docs/reference/conventions">Module statics, namespace matching, and naming rules.</Card>
   <Card title="Packages" href="/docs/reference/packages">Which package each attribute ships in.</Card>

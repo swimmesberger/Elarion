@@ -2,22 +2,22 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Elarion.Blobs.Tus.PostgreSql;
+namespace Elarion.Blobs;
 
 /// <summary>
-/// Periodically reclaims expired, never-completed tus upload sessions — the analog of S3's
-/// "abort incomplete multipart upload" lifecycle rule for the resumable transport.
+/// Periodically reclaims expired staged-upload sessions — the analog of S3's "abort incomplete
+/// multipart upload" lifecycle rule for resumable upload transports. Provider-neutral: it sweeps
+/// whatever <see cref="IStagedUploadStore"/> is registered.
 /// </summary>
 /// <remarks>
-/// Mirrors the blob garbage collector: a <see cref="PeriodicTimer"/> drives sweeps on their own DI scope,
-/// a full batch keeps draining, and the delete rides the partial index over incomplete sessions, so it is
-/// idempotent and needs no lease.
+/// Mirrors the blob garbage collector: a <see cref="PeriodicTimer"/> drives sweeps on their own DI
+/// scope, a full batch keeps draining, and the delete is idempotent, so multiple instances coexist.
 /// </remarks>
-public sealed class TusUploadGarbageCollector(
+public sealed class StagedUploadGarbageCollector(
     IServiceScopeFactory scopeFactory,
-    TusGcOptions options,
+    StagedUploadGcOptions options,
     TimeProvider timeProvider,
-    ILogger<TusUploadGarbageCollector> logger) : BackgroundService {
+    ILogger<StagedUploadGarbageCollector> logger) : BackgroundService {
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         using var timer = new PeriodicTimer(options.PollingInterval, timeProvider);
@@ -31,7 +31,7 @@ public sealed class TusUploadGarbageCollector(
                 break;
             }
             catch (Exception ex) {
-                logger.LogError(ex, "tus session garbage-collection sweep failed.");
+                logger.LogError(ex, "Staged-upload garbage-collection sweep failed.");
                 deleted = 0;
             }
 
@@ -47,13 +47,13 @@ public sealed class TusUploadGarbageCollector(
 
     private async Task<int> SweepAsync(CancellationToken cancellationToken) {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var store = scope.ServiceProvider.GetRequiredService<ITusUploadStore>();
+        var store = scope.ServiceProvider.GetRequiredService<IStagedUploadStore>();
         var olderThan = timeProvider.GetUtcNow() - options.SafetyMargin;
         var deleted = await store
             .DeleteExpiredAsync(olderThan, options.BatchSize, cancellationToken)
             .ConfigureAwait(false);
         if (deleted > 0) {
-            logger.LogInformation("tus session garbage collection deleted {Count} expired incomplete session(s).", deleted);
+            logger.LogInformation("Staged-upload garbage collection deleted {Count} expired session(s).", deleted);
         }
 
         return deleted;

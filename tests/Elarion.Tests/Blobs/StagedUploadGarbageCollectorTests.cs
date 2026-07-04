@@ -1,7 +1,5 @@
 using AwesomeAssertions;
 using Elarion.Blobs;
-using Elarion.Blobs.Tus;
-using Elarion.Blobs.Tus.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -10,28 +8,28 @@ using Xunit;
 namespace Elarion.Tests.Blobs;
 
 /// <summary>
-/// Fast tests for <see cref="TusUploadGarbageCollector"/>: it applies the configured
-/// <see cref="TusGcOptions.SafetyMargin"/> to the sweep cutoff, mirroring the blob collector (TUS low a).
+/// Fast tests for <see cref="StagedUploadGarbageCollector"/>: it applies the configured
+/// <see cref="StagedUploadGcOptions.SafetyMargin"/> to the sweep cutoff, mirroring the blob collector.
 /// </summary>
-public sealed class TusUploadGarbageCollectorTests {
+public sealed class StagedUploadGarbageCollectorTests {
     [Fact]
     public async Task Sweep_AppliesSafetyMarginToCutoff() {
         var origin = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
         var time = new FakeTimeProvider(origin);
-        var store = new CapturingTusUploadStore();
-        var options = new TusGcOptions {
+        var store = new CapturingStagedUploadStore();
+        var options = new StagedUploadGcOptions {
             PollingInterval = TimeSpan.FromMinutes(5),
             SafetyMargin = TimeSpan.FromMinutes(3)
         };
         var services = new ServiceCollection();
-        services.AddScoped<ITusUploadStore>(_ => store);
+        services.AddScoped<IStagedUploadStore>(_ => store);
         using var provider = services.BuildServiceProvider();
 
-        var collector = new TusUploadGarbageCollector(
+        var collector = new StagedUploadGarbageCollector(
             provider.GetRequiredService<IServiceScopeFactory>(),
             options,
             time,
-            NullLogger<TusUploadGarbageCollector>.Instance);
+            NullLogger<StagedUploadGarbageCollector>.Instance);
 
         using var cts = new CancellationTokenSource();
         await collector.StartAsync(cts.Token);
@@ -42,18 +40,21 @@ public sealed class TusUploadGarbageCollectorTests {
         store.LastOlderThan.Should().Be(origin - TimeSpan.FromMinutes(3));
     }
 
-    private sealed class CapturingTusUploadStore : ITusUploadStore {
+    private sealed class CapturingStagedUploadStore : IStagedUploadStore {
         public TaskCompletionSource FirstSweep { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public DateTimeOffset LastOlderThan { get; private set; }
 
-        public Task<TusUpload> CreateAsync(TusUploadCreation creation, CancellationToken cancellationToken) =>
+        public Task<StagedUpload> CreateAsync(StagedUploadCreation creation, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<TusUpload?> GetAsync(string uploadId, CancellationToken cancellationToken) =>
+        public Task<StagedUpload?> GetAsync(string uploadId, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<TusUpload> AppendAsync(string uploadId, long offset, Stream chunk, CancellationToken cancellationToken) =>
+        public Task<StagedUpload> AppendAsync(string uploadId, long offset, Stream chunk, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<StagedUpload> CompleteAsync(string uploadId, StagedUploadCompletion completion, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
         public Task DeleteAsync(string uploadId, CancellationToken cancellationToken) =>
