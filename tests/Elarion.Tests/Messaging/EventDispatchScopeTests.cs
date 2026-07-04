@@ -228,6 +228,7 @@ public sealed class EventDispatchScopeTests {
 
     private sealed class TestEventContext(SampleIntegrationEvent message) : IEventContext {
         public Guid CorrelationId { get; } = Guid.NewGuid();
+        public Guid? MessageId { get; } = Guid.NewGuid();
         public EventPlane Plane => EventPlane.Integration;
         public object Message => message;
     }

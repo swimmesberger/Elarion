@@ -1,4 +1,5 @@
 using Elarion.Abstractions.Messaging;
+using Elarion.Idempotency;
 using Elarion.Messaging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -90,6 +91,10 @@ public static class EventBusServiceCollectionExtensions {
         EventBusOptions? options = null) {
         options ??= new EventBusOptions();
         services.TryAddSingleton(options);
+        // The inbox (ADR-0022) is default-on for handler-form integration consumers; the delivery tier wires the
+        // idempotency building blocks so their pipelines resolve (TryAdd-based — a durable EF store registration
+        // wins). On this best-effort tier the inbox only guards in-process multi-delivery.
+        services.AddElarionIdempotency();
         services.TryAddSingleton<EventSubscriptionRegistry>();
         services.TryAddSingleton<EventDispatchPump>();
         // TryAddEnumerable keyed on the concrete factory-target keeps a second registration call from adding a

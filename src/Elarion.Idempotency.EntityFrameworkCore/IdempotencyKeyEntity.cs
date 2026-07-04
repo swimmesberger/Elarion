@@ -12,13 +12,16 @@ public sealed class IdempotencyKeyEntity {
     /// <summary>The operation identity (the handler's request type name) that discriminates the record by handler.</summary>
     public required string Operation { get; init; }
 
-    /// <summary>The scope discriminator (<c>"user"</c> or <c>"global"</c>).</summary>
+    /// <summary>The scope discriminator (<c>"user"</c>, <c>"global"</c>, or <c>"consumer"</c> for inbox rows).</summary>
     public required string Scope { get; init; }
 
-    /// <summary>The scope owner (a hashed user id for the user scope), or the empty string for a global key.</summary>
+    /// <summary>
+    /// The scope owner: a hashed user id for the user scope, the consuming handler's identity for an inbox row
+    /// (<c>"consumer"</c> scope), or the empty string for a global key.
+    /// </summary>
     public required string Owner { get; init; }
 
-    /// <summary>The client-supplied idempotency key value.</summary>
+    /// <summary>The client-supplied idempotency key value (for an inbox row: the delivered message id).</summary>
     public required string Key { get; init; }
 
     /// <summary>A hash of the request body, used to reject reuse of the key with a different request.</summary>

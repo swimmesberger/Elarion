@@ -22,6 +22,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
     private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string IdempotentAttributeMetadataName = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
+    private const string AllowDuplicatesAttributeMetadataName = "Elarion.Abstractions.Messaging.AllowDuplicatesAttribute";
     private const string ElarionValidationExtensionsMetadataName = "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
     private const string DomainEventMetadataName = "Elarion.Abstractions.Messaging.IDomainEvent";
@@ -47,6 +48,8 @@ public sealed partial class HandlerRegistrationGenerator {
         EquatableArray<DiagnosticInfo> Diagnostics
     );
 
+    // Owner is the Consumer-scope owner discriminator (the consuming handler's identity) baked into the generated
+    // policy for the inbox (ADR-0022); null for command idempotency, whose owner derives from the caller.
     private sealed record IdempotentInfo(
         int RetentionHours,
         bool KeyRequired,
@@ -54,7 +57,8 @@ public sealed partial class HandlerRegistrationGenerator {
         bool Fingerprint,
         int ConflictBehaviorValue,
         int StoreFailuresValue,
-        string? ResultValueFqn
+        string? ResultValueFqn,
+        string? Owner
     );
 
     // A [RequireResource] binding: the resource type, the operation, and the compile-checked request path the
@@ -249,6 +253,16 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' cannot use both [Idempotent] and [Cacheable]; caching is for queries, idempotency for "
         + "commands",
         "Elarion.Abstractions.Idempotency",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor AllowDuplicatesOnNonIntegrationEventDescriptor = new(
+        "ELINBX001",
+        "[AllowDuplicates] handler is not an integration-event consumer",
+        "Handler '{0}' declares [AllowDuplicates] but its request type '{1}' is not an IIntegrationEvent; only "
+        + "handler-form integration-event consumers have a default-on inbox to opt out of (domain events run "
+        + "inline in the publisher's transaction and are exactly-once by atomicity), so the attribute has no effect",
+        "Elarion.Abstractions.Messaging",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 }

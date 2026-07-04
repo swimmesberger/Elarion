@@ -1,5 +1,6 @@
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Serialization;
+using Elarion.Idempotency;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -35,6 +36,11 @@ public static class OutboxServiceCollectionExtensions
         configure?.Invoke(options);
 
         services.AddElarionJson();
+        // The inbox (ADR-0022) is default-on for handler-form integration consumers, and the outbox is the tier
+        // where it matters (at-least-once). TryAdd-based, so a host that already wired the durable EF store via
+        // AddElarionIdempotencyEntityFrameworkCore keeps it; without one, the in-memory store gives process-local
+        // dedup (pair it with the EF store for an inbox that survives restarts).
+        services.AddElarionIdempotency();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton(options);
         services.TryAddSingleton<OutboxEventDispatcher>();

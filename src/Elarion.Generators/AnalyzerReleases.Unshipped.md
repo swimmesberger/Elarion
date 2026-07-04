@@ -66,3 +66,4 @@ ELIDEM001 | Elarion.Abstractions.Idempotency | Error | Idempotent handler respon
 ELIDEM002 | Elarion.Abstractions.Idempotency | Warning | [Idempotent] handler is not a command
 ELIDEM003 | Elarion.Abstractions.Idempotency | Error | [Idempotent] retention is invalid
 ELIDEM004 | Elarion.Abstractions.Idempotency | Warning | Handler cannot be both idempotent and cacheable
+ELINBX001 | Elarion.Abstractions.Messaging | Warning | [AllowDuplicates] handler is not an integration-event consumer

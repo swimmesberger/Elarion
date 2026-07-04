@@ -107,7 +107,92 @@ public sealed partial class HandlerRegistrationGenerator {
             fingerprint,
             conflictBehaviorValue,
             storeFailuresValue,
-            resultValueFqn);
+            resultValueFqn,
+            Owner: null);
+    }
+
+    // The inbox retention is deliberately NOT per-consumer: the invariant it serves — retention must exceed the
+    // delivery tier's maximum retry window — is a transport property (OutboxOptions), not a business one. 24 h
+    // is ~33× the default outbox retry window; a global knob can be added if a deployment ever configures
+    // retries beyond it.
+    private const int InboxRetentionHours = 24;
+
+    // The inbox (ADR-0022): every handler-form consumer whose request is an IIntegrationEvent is deduped by
+    // default — integration delivery is at-least-once and retry is per-message (one failing consumer re-runs every
+    // already-succeeded sibling), so dedup must be the pit of success. The synthesized policy reuses the
+    // idempotency decorator with Consumer scope: owner = this handler's identity (baked in below), key = the
+    // message id seeded by the delivery tier, WaitThenReplay so a lease-race loser waits for the winner's claim and
+    // replays it (never acknowledging success while the winner is still uncommitted), no fingerprint (the payload
+    // IS the message), and KeyRequired=false so a direct invocation without a seeded id (tests, hand-rolled
+    // dispatch) passes through un-deduped. [AllowDuplicates] opts out — the consumer-side [AllowAnonymous]: a
+    // positive declaration that duplicate deliveries are harmless here. [Idempotent] never combines (it is inert
+    // on non-commands — ELIDEM002).
+    private static IdempotentInfo? ParseInbox(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol classSymbol,
+        ITypeSymbol requestType,
+        ITypeSymbol responseType,
+        Compilation compilation,
+        SymbolDisplayFormat fmt,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        var allowDuplicatesSymbol = compilation.GetTypeByMetadataName(AllowDuplicatesAttributeMetadataName);
+        var allowDuplicates = allowDuplicatesSymbol is not null
+            && classSymbol.GetAttributes().Any(candidate =>
+                SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, allowDuplicatesSymbol));
+
+        var isIntegrationEvent = RequestImplementsMarker(requestType, compilation, IntegrationEventMetadataName);
+        if (!isIntegrationEvent) {
+            // ELINBX001: [AllowDuplicates] on a non-integration-event handler has no effect (domain-event
+            // consumers are exactly-once by atomicity; commands/queries use [Idempotent]).
+            if (allowDuplicates) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    AllowDuplicatesOnNonIntegrationEventDescriptor,
+                    classDecl.Identifier.GetLocation(),
+                    classSymbol.ToDisplayString(fmt),
+                    requestType.ToDisplayString(fmt)));
+            }
+
+            return null;
+        }
+
+        if (allowDuplicates)
+            return null;
+
+        // A handler-form consumer is IHandler<TEvent, Result<Unit>> (ELEVT005 rejects other shapes at consumer
+        // registration), so a response without IResultFailureFactory is not a consumer — skip silently.
+        if (!ResponseSupportsFailure(responseType, compilation))
+            return null;
+
+        return new IdempotentInfo(
+            InboxRetentionHours,
+            KeyRequired: false,
+            ScopeValue: 2, // IdempotencyScope.Consumer
+            Fingerprint: false,
+            ConflictBehaviorValue: 1, // IdempotencyConflictBehavior.WaitThenReplay
+            StoreFailuresValue: 0, // IdempotencyFailureStorage.None — a failed consumer retries
+            TryGetResultValueFqn(responseType, fmt),
+            Owner: ComputeConsumerOwner(classSymbol));
+    }
+
+    // The Consumer-scope owner discriminator: the handler's fully qualified name, verbatim while it fits the
+    // store's 128-char owner column, else truncated with a stable SHA-256 suffix so two long names never collide.
+    // Computed at generation time — deterministic across builds, no runtime hashing.
+    private static string ComputeConsumerOwner(INamedTypeSymbol classSymbol) {
+        const int maxOwnerLength = 128;
+        var fullName = classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        if (fullName.StartsWith("global::", StringComparison.Ordinal))
+            fullName = fullName.Substring("global::".Length);
+
+        if (fullName.Length <= maxOwnerLength)
+            return fullName;
+
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(fullName));
+        var suffix = new System.Text.StringBuilder(16);
+        for (var i = 0; i < 8; i++)
+            suffix.Append(hash[i].ToString("x2"));
+
+        return fullName.Substring(0, maxOwnerLength - 17) + "-" + suffix;
     }
 
     private static bool ImplementsCommand(ITypeSymbol requestType, Compilation compilation) {

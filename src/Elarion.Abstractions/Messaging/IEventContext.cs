@@ -15,9 +15,22 @@ public interface IEventContext {
     /// </summary>
     /// <remarks>
     /// The correlation identifier flows across the after-commit boundary so integration-event
-    /// consumers can be correlated back to the originating command.
+    /// consumers can be correlated back to the originating command. It is a <b>tracing</b> identifier —
+    /// do not key deduplication on it; use <see cref="MessageId"/>.
     /// </remarks>
     Guid CorrelationId { get; }
+
+    /// <summary>
+    /// The durable identity of the delivered message, stable across redeliveries of the same message —
+    /// for the EF Core outbox, the outbox row's id. <see langword="null"/> on the domain plane, which
+    /// dispatches inline in the publisher's transaction and has no message.
+    /// </summary>
+    /// <remarks>
+    /// This is the deduplication key (ADR-0022): the inbox claims it per consumer, and a consumer calling a
+    /// downstream system that dedups on a caller-supplied key (a payment API's idempotency key, for example)
+    /// should pass this value so a redelivery collapses at the recipient too.
+    /// </remarks>
+    Guid? MessageId { get; }
 
     /// <summary>The plane on which this message is being dispatched.</summary>
     EventPlane Plane { get; }

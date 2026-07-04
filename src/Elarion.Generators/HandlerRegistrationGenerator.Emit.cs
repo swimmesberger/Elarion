@@ -244,14 +244,35 @@ public sealed partial class HandlerRegistrationGenerator {
         if (handler.Idempotent is null)
             return;
 
-        sb.AppendLine($"                handler = new global::Elarion.Abstractions.Idempotency.IdempotencyDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
-        sb.AppendLine("                    handler,");
-        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Pipeline.IUnitOfWork>(),");
-        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>(),");
-        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyKeyAccessor>(),");
-        sb.AppendLine($"                    new {handler.HandlerName}IdempotencyPolicy(),");
-        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Identity.ICurrentUser>(),");
-        sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Serialization.IElarionJsonSerialization>().Options);");
+        // The synthesized inbox (Owner != null, ADR-0022) attaches softly: the delivery tiers register the
+        // idempotency building blocks (AddElarionOutbox / the in-memory bus call AddElarionIdempotency), but a
+        // host resolving a consumer without them — a unit test, a hand-rolled dispatcher — must degrade to the
+        // un-deduped pipeline rather than fail resolution. A delivery scope also has no caller, so ICurrentUser is
+        // soft-resolved (the Consumer scope never consults it). Explicit [Idempotent] keeps hard resolution: its
+        // author asked for idempotency, so a missing store should fail loudly.
+        var isInbox = handler.Idempotent.Owner is not null;
+        var indent = "                ";
+        if (isInbox) {
+            sb.AppendLine($"{indent}if (sp.GetService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>() is {{ }} __inboxStore)");
+            sb.AppendLine($"{indent}{{");
+            indent += "    ";
+        }
+
+        sb.AppendLine($"{indent}handler = new global::Elarion.Abstractions.Idempotency.IdempotencyDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine($"{indent}    handler,");
+        sb.AppendLine($"{indent}    sp.GetRequiredService<global::Elarion.Abstractions.Pipeline.IUnitOfWork>(),");
+        sb.AppendLine(isInbox
+            ? $"{indent}    __inboxStore,"
+            : $"{indent}    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>(),");
+        sb.AppendLine($"{indent}    sp.GetRequiredService<global::Elarion.Abstractions.Idempotency.IIdempotencyKeyAccessor>(),");
+        sb.AppendLine($"{indent}    new {handler.HandlerName}IdempotencyPolicy(),");
+        sb.AppendLine(isInbox
+            ? $"{indent}    sp.GetService<global::Elarion.Abstractions.Identity.ICurrentUser>(),"
+            : $"{indent}    sp.GetRequiredService<global::Elarion.Abstractions.Identity.ICurrentUser>(),");
+        sb.AppendLine($"{indent}    sp.GetRequiredService<global::Elarion.Abstractions.Serialization.IElarionJsonSerialization>().Options);");
+
+        if (isInbox)
+            sb.AppendLine("                }");
     }
 
     private static void AppendIdempotencyPolicy(StringBuilder sb, HandlerInfo handler) {
@@ -267,6 +288,11 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"        public global::Elarion.Abstractions.Idempotency.IdempotencyConflictBehavior ConflictBehavior => (global::Elarion.Abstractions.Idempotency.IdempotencyConflictBehavior){info.ConflictBehaviorValue};");
         sb.AppendLine($"        public global::Elarion.Abstractions.Idempotency.IdempotencyFailureStorage StoreFailures => (global::Elarion.Abstractions.Idempotency.IdempotencyFailureStorage){info.StoreFailuresValue};");
         sb.AppendLine($"        public global::System.TimeSpan Retention => global::System.TimeSpan.FromHours({info.RetentionHours});");
+        if (info.Owner is not null) {
+            // The inbox's Consumer-scope owner discriminator: this handler's identity, baked in at compile time.
+            sb.AppendLine($"        public string? Owner => {FormatStringLiteral(info.Owner)};");
+        }
+
         sb.AppendLine();
         AppendIdempotencyPayloadMethods(sb, handler, info);
         sb.AppendLine("    }");
@@ -279,6 +305,28 @@ public sealed partial class HandlerRegistrationGenerator {
         // module-generated contexts register handler response types, so a closed StoredResult<T> is never needed
         // (and would never be registered). See StoredResult / ADR-0023.
         const string stored = "global::Elarion.Abstractions.Idempotency.StoredResult";
+
+        // Result<Unit> (the IHandler<T> sugar, and every handler-form event consumer): there is no value to
+        // store, and Unit is registered in no JSON context — serializing it via GetTypeInfo(typeof(Unit)) would
+        // throw on an AOT-strict host. Store the success flag only and reconstruct Unit.Value on replay.
+        if (info.ResultValueFqn == "global::Elarion.Abstractions.Results.Unit") {
+            sb.AppendLine($"        public string Serialize({handler.ResponseFqn} response, global::System.Text.Json.JsonSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var stored = response.IsSuccess");
+            sb.AppendLine($"                ? new {stored} {{ Ok = true }}");
+            sb.AppendLine($"                : new {stored} {{ Ok = false, Error = response.Error }};");
+            sb.AppendLine($"            return global::System.Text.Json.JsonSerializer.Serialize(stored, global::Elarion.Abstractions.Serialization.ElarionFrameworkJsonContext.Default.StoredResult);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine($"        public {handler.ResponseFqn} Deserialize(string payload, global::System.Text.Json.JsonSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var stored = global::System.Text.Json.JsonSerializer.Deserialize(payload, global::Elarion.Abstractions.Serialization.ElarionFrameworkJsonContext.Default.StoredResult)!;");
+            sb.AppendLine("            return stored.Ok");
+            sb.AppendLine("                ? global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>.Success(global::Elarion.Abstractions.Results.Unit.Value)");
+            sb.AppendLine("                : global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>.Failure(stored.Error ?? global::Elarion.Abstractions.AppError.InternalError);");
+            sb.AppendLine("        }");
+            return;
+        }
 
         if (info.ResultValueFqn is not null) {
             // Result<T>: store the success value as embedded JSON, or (when storing failures) the AppError, so

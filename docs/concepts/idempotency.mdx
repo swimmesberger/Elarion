@@ -51,6 +51,46 @@ Attribute options (all optional):
 | `ConflictBehavior` | `Conflict` | A concurrent in-flight duplicate fails fast with `409`, or `WaitThenReplay`. |
 | `StoreFailures` | `None` | Also store & replay **definitive** failures (`Definitive`), via a savepoint. |
 
+## When does a command need it?
+
+**Default: model the duplicate away with a natural key before reaching for machinery.** Most creates in a
+CRUD application have a natural identity if you ask *"what makes two of these the same?"* — often composite:
+`(TenantId, Email)`, `(CustomerId, ExternalOrderNo)`, `(InvoiceId, LineNo)`. Declare it as a **unique
+constraint/index** and translate the violation into a friendly `AppError.Conflict` in the handler (Tier-2
+validation: the constraint *is* the TOCTOU-safe check — a pre-insert lookup alone would race). This is the
+default because it deduplicates **facts, not just requests**: it catches the same client retrying, but also
+the second browser tab (which carries a *different* idempotency key and walks straight past `[Idempotent]`),
+double data-entry by another user, and the import job run twice. It needs no client cooperation and costs
+nothing per call.
+
+Escalate to `[Idempotent]` when you can **name the reason** — the deviations, ranked by how often they occur:
+
+| Reason to escalate | Example | Why the constraint isn't enough |
+|---|---|---|
+| **No natural key exists** — identical submissions are legitimately distinct | "add a note", an order where the same basket twice is a real second order | Only the *client* knows whether it's a retry; only a client key can dedup. |
+| **Replay beats rejection** — the retrying client should get the created resource, not an error | checkout confirmation after a timeout | A constraint *rejects* the retry (409, client must re-fetch); `[Idempotent]` *replays* the first success. |
+| **Money / non-repeatable effects** | payments, provisioning | The Stripe case — use `[Idempotent]` here even *with* a natural key (the key gives replay; the constraint backstops every non-retry duplicate). |
+| **Increment / accumulate** | "add credit", "consume quota" | Deltas never converge; a retry double-applies. (Or redesign to set-style.) |
+
+And the shapes that need **neither**: set-style updates ("rename", "set address" — last-write-wins
+converges), deletes by id (the second delete finds nothing; decide whether NotFound-on-retry is acceptable),
+and queries (idempotent by definition; `ELIDEM002` warns on non-commands). **The default path needs no
+justification; every `[Idempotent]` should be able to say which row of this table it is.**
+
+Two things follow from annotating:
+
+- **The client must send the key — and reuse it across retries of the same submit.** The `Idempotency-Key`
+  header on HTTP, `params._meta` on JSON-RPC; minted when the user *intends* the action (form render, submit
+  click), not per attempt — a key regenerated on every retry deduplicates nothing. The framework cannot invent
+  the key: only the client can distinguish "retry of the same submit" from "a second, deliberate, identical
+  command". `[Idempotent]` enforces and advertises the contract (the OpenAPI transformer marks the operation);
+  it does not remove the client's half.
+- **Protecting the command protects the whole chain at its source.** A replayed command returns its stored
+  result *without re-running the handler*, so it never re-publishes its integration events — the downstream
+  consumers, PDFs, and emails of a client retry simply never happen twice. Consumers then only need to survive
+  *delivery-level* duplicates, which the [default-on inbox](/docs/capabilities/events/consuming-events#handling-duplicates)
+  absorbs.
+
 ## Behavior and status codes
 
 The decorator short-circuits with `AppError`s that map to the IETF `Idempotency-Key` header draft and Stripe:
@@ -188,16 +228,35 @@ a one-time warning on first use. Register
 of work) for the production guarantees.
 </Callout>
 
+## The inbox: the same mechanism for event consumers
+
+Command idempotency and the messaging **inbox** are the *same* mechanism — "record a unique id in the same
+transaction as the effect; skip if it already exists" — differing only in where the id comes from. A command
+sources a client `Idempotency-Key`; an integration-event consumer sources the **delivered message id**
+(`IEventContext.MessageId` — for the outbox, the row's id, stable across redeliveries).
+
+Because integration delivery is at-least-once, the inbox is **on by default** for every handler-form consumer:
+the generator attaches the same `IdempotencyDecorator` with a `Consumer`-scoped policy — owner = the consuming
+handler's identity (so each fan-out consumer of one event claims its own row), key = the message id, seeded into
+the delivery scope by the outbox dispatcher and the in-memory pump. A redelivered message replays the recorded
+success instead of re-running the consumer; a failed consumer rolls its claim back with its writes and retries.
+Opt out with `[AllowDuplicates]` — a positive declaration that redelivery is harmless (naturally idempotent
+effect, or the only effect is a call to a keyed downstream), the consumer-side mirror of `[AllowAnonymous]`.
+Rows share the idempotency table and purge loop under a `"consumer"` scope discriminator and expire after
+24 h, well above the outbox's maximum retry window. See
+[Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates) for the full model.
+
 ## Side effects and cooperative recipients
 
 The single-transaction model protects **database** state. A non-rollback-able foreign side effect (charging a
 card, sending mail) does not belong inline — record it as an **integration event in the outbox** in the same
-transaction as the key, and let the outbox deliver it after commit. The outbox is at-least-once, so
-**end-to-end exactly-once requires a cooperative recipient service** that accepts an idempotency key and
-deduplicates. Stamp each outbox message with a stable key derived from the event id and pass it to the provider.
-For email, SendGrid does **not** accept idempotency keys, but newer providers — **Resend, Brevo, MailPace,
-Bird** — do; for payments use a keyed API (Stripe). A duplicate email is usually tolerable; a duplicate charge is
-not.
+transaction as the key, and let the outbox deliver it after commit. The consumer's own database effect is then
+deduped by the built-in inbox (above), which leaves exactly one window: the foreign call itself re-runs if the
+process dies between the call and the consumer's commit. Closing it requires a **cooperative recipient service**
+that accepts an idempotency key and deduplicates — pass the delivered **message id** (the same value the inbox
+claims) as that key. For email, SendGrid does **not** accept idempotency keys, but newer providers — **Resend,
+Brevo, MailPace, Bird** — do; for payments use a keyed API (Stripe). A duplicate email is usually tolerable; a
+duplicate charge is not.
 
 ## Diagnostics
 
@@ -206,5 +265,6 @@ not.
 - `ELIDEM002` (warning) — `[Idempotent]` on a non-`ICommand` handler (no effect).
 - `ELIDEM003` (error) — non-positive `RetentionHours`.
 - `ELIDEM004` (warning) — a handler that is both `[Idempotent]` and `[Cacheable]`.
+- `ELINBX001` (warning) — `[AllowDuplicates]` on a handler whose request is not an `IIntegrationEvent` (no effect).
 - `ELIDEMEF001` (error) — a context annotated with `[GenerateElarionIdempotencyKeys]` but not `[GenerateDbSets]`
   (add `[GenerateDbSets]` so the keys `DbSet` and model-configuration seam are generated).

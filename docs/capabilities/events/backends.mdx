@@ -23,8 +23,10 @@ transactional outbox**. (For the plane model itself, see the [events overview](/
 | EF Core | needs interceptors on your `DbContext` (registered for you) | needs the outbox table on your `DbContext` |
 | Use when | events are advisory and loss is acceptable | events drive real side effects that must happen |
 
-Both deliver **at-least-once and unordered** to consumers, so consumers must be idempotent either way —
-see [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
+Both deliver **at-least-once and unordered** to consumers. Handler-form consumers are deduped by the
+**built-in inbox** by default (a per-consumer claim on the message id, committed with the consumer's own
+writes); method-form and opted-out consumers must absorb duplicates themselves — see
+[Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
 
 ## In-memory integration bus
 
@@ -169,6 +171,16 @@ double-delivers, and a crashed worker's in-flight messages are retried once thei
 that fails past `MaxDeliveryAttempts` is left for inspection and no longer retried. Defaults are tuned for
 low/single-instance deployments — in multi-instance deployments keep `LeaseDuration` comfortably above the
 time to deliver a full `BatchSize` batch.
+
+**Delivery is not atomic with your consumers.** Each handler-form consumer commits its **own**
+transaction; the worker then finalizes the message — a separate lease-guarded write on the worker's
+connection, per message, once **all** fan-out consumers have run. Two consequences are inherent: a crash
+between a consumer's commit and the finalize redelivers the message, and one failed consumer retries the
+*whole* message, re-running siblings that already succeeded. That is what at-least-once means in
+practice. The **built-in inbox** absorbs it for handler-form consumers by default — each consumer claims
+the message id inside its own transaction, so a redelivery is acknowledged instead of re-run (pair with
+`AddElarionIdempotencyEntityFrameworkCore` so claims survive restarts) — see
+[Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
 
 **Finalizing is lease-guarded.** Every finalize — mark delivered, mark failed, or park — is conditioned on
 the finalizing worker still owning the lease it claimed under. If a worker stalls past its lease and another

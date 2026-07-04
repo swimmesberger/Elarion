@@ -1,16 +1,18 @@
 # ADR-0022: Inbox pattern for integration-event consumers (idempotent consumers)
 
-- Status: Proposed
-- Date: 2026-07-01
+- Status: Accepted
+- Date: 2026-07-01 (proposed) · 2026-07-04 (accepted, implemented)
 - Related: [ADR-0021](0021-idempotency.md) (the idempotency store/decorator this reuses),
   [ADR-0001](0001-event-transaction-phase.md) (the domain/integration plane split),
   [ADR-0010](0010-event-bus-is-pub-sub-only.md) (consumers are fan-out, `Result<Unit>`),
   the [idempotency concept doc](../concepts/idempotency.mdx) and the
   [events backends doc](../capabilities/events/backends.mdx).
 
-> This is a **proposed** design captured while shipping idempotency (ADR-0021), so a future clean session can
-> implement it without re-deriving the analysis. It records the exact current APIs, the load-bearing constraints,
-> the recommended design, and the decisions still open.
+> Originally captured as a proposed design while shipping idempotency (ADR-0021). Implemented 2026-07-04; the
+> open decisions are resolved in [Resolution](#resolution-as-implemented) below (A: **both** — the scope-seed
+> rail *and* `IEventContext.MessageId`; B: **default-on** with an `[AllowDuplicates]` opt-out). One proposed
+> detail was corrected during implementation: an `InProgress` claim is **not** acknowledged as success (see the
+> resolution — acking a still-uncommitted winner's message can lose the event).
 
 ## Context
 
@@ -54,15 +56,71 @@ idempotency store + decorator, not a new subsystem.
   `src/Elarion.Messaging.Outbox/OutboxMessage.cs`). **It is NOT exposed to consumers today** —
   `OutboxEventDispatcher.DispatchAsync` has the `OutboxMessage` but builds `OutboxEventContext` from
   `(message, message.CorrelationId)` only. `IEventContext` exposes `CorrelationId`, `Plane`, `Message` — **no message
-  id**. `CorrelationId` is `Guid.NewGuid()` per publish (a *tracing* id that may span messages), so it is **not** the
-  right dedup key; the dedup key must be `OutboxMessage.Id`.
+  id**. `CorrelationId` is `Guid.NewGuid()` per publish (`OutboxIntegrationEventBus`), so **today** it happens to be
+  1:1 with the outbox message and stable across redeliveries — the shipped docs' hand-rolled dedup examples key on it
+  for exactly that reason. But it is semantically the *tracing* id: its natural evolution is to **flow** from the
+  publishing operation across everything it causes (one command → N events sharing one correlation id), which would
+  silently break any dedup keyed on it. The durable dedup contract must be `OutboxMessage.Id`; exposing it also frees
+  `CorrelationId` to become a flowing tracing id later, and the docs' examples should move onto the message id then.
 - **Idempotency store reuse** (ADR-0021): `IIdempotencyStore.TryBeginAsync/CompleteAsync/AbandonAsync` keyed by
   `IdempotencyStoreKey(IdempotencyScope Scope, string Owner, string Key)`, backed by the composite-unique
   `EfCoreIdempotencyStore` (`INSERT … ON CONFLICT (scope, owner, key) DO NOTHING`). The decorator resolves the key via
   `IIdempotencyKeyAccessor` and can be seeded via `IIdempotencyKeySeed` (the write-seam added for the JSON-RPC
   `params._meta` path).
 
-## Decision (proposed)
+## Why the outbox row cannot be the dedup ledger (the grain mismatch)
+
+The intuition "the consumer marks the outbox row processed in the same transaction as its own writes, so a single
+database is already exactly-once" fails on the actual transaction boundaries. The delivery sequence
+(`OutboxDeliveryService.ProcessBatchAsync`/`DeliverAsync`, verified):
+
+```text
+── publish ──────────────────────────────────────────────────────────────────
+publisher tx    business writes + INSERT outbox row       ← atomic (the outbox's whole job)
+
+── consume (delivery worker) ────────────────────────────────────────────────
+poll scope      ClaimPendingAsync: lease under a lockId   ← ExecuteUpdate, worker's connection
+consumer scope  consumer A: BEGIN … A's writes … COMMIT   ← A's own transaction (TransactionDecorator)
+                consumer B: BEGIN … B's writes … COMMIT   ← B's own transaction
+poll scope      MarkProcessedAsync(message.Id, lockId)    ← worker's write, after the fact
+```
+
+`ProcessedOnUtc` is stamped by the **worker**, per **message**, on its own connection, after every consumer
+transaction has already committed. The three duplicate windows follow directly:
+
+1. **Sibling failure (routine).** A commits, B throws → `MarkFailedAsync` → the whole message is redelivered → A
+   re-runs. The outbox row cannot record "A done, B pending": it is one row per **event**, while completion is a
+   fact per **(event, consumer)** — a grain mismatch, not an implementation gap.
+2. **Crash between the last consumer's commit and the finalize.** The lease expires, another worker reclaims, and
+   every consumer re-runs.
+3. **Lease expiry mid-flight.** A stalled worker's message is reclaimed while its consumers are still executing, so
+   two workers run them concurrently (the late finalize is lease-guarded and skipped, but the double execution has
+   already happened).
+
+Moving `MarkProcessedAsync` into "the consumer's transaction" cannot close these windows:
+
+- **Fan-out grain**: with N consumers there is no single consumer transaction that can atomically assert all-done.
+  Per-consumer status columns on the outbox row would *be* the inbox — denormalized into the publisher's table.
+- **Protocol ownership**: the finalize is half of the lease protocol (`lockId` guard, `Attempts`, backoff, parking)
+  and belongs to the worker's state machine, not to business transactions.
+- **Broker portability**: Plane B is the broker-portable plane. On a real broker the "mark" is an **ack** — a
+  protocol frame that can never join a database transaction — so any consumer-marks-the-outbox design dies at the
+  seam swap.
+
+The inbox is the same intuition placed at the only grain where atomicity with the effect is possible — a second
+ledger beside the first:
+
+| | Outbox row | Inbox row |
+|---|---|---|
+| Grain | one per **event** | one per **(event, consumer)** |
+| Written by | publisher tx (insert), worker (finalize) | the **consumer's own transaction** |
+| Asserts | "this event is durably recorded / dispatched" | "**this consumer** has processed this message" |
+| Atomic with | the publisher's business writes | the consumer's business writes |
+
+(With exactly one consumer, claiming + working + marking in one transaction does work — that is a single-table job
+queue, `FOR UPDATE SKIP LOCKED`. Fan-out pub/sub is what forces the two-ledger split.)
+
+## Decision
 
 Add an **inbox decorator** for **handler-form integration-event consumers**, reusing the ADR-0021 idempotency store,
 keyed per **(consumer, message)**:
@@ -88,39 +146,121 @@ keyed per **(consumer, message)**:
   (`OutboxEventDispatcher`) and the in-memory pump (`EventDispatchPump`) seed the per-consumer scope with the message
   id, and the inbox decorator reads it via `IIdempotencyKeyAccessor` — the *same* seam command idempotency uses. This
   keeps the message-id plumbing consistent with how `ICurrentUser` and the transport key already flow, and avoids a
-  breaking change to `IEventContext`. (See open decision A for the alternative.)
-- **Activation** (see open decision B): recommended **automatic for every handler-form integration-event consumer**
+  breaking change to `IEventContext`. (Resolved as **both** — see the Resolution: the seed rail carries the key to
+  the decorator, and `IEventContext.MessageId` exposes it to consumers.)
+- **Activation** (resolved as recommended — see the Resolution): **automatic for every handler-form integration-event consumer**
   (the MassTransit/NServiceBus default — every consumer is deduped, which is the safe default for at-least-once), with
   an opt-out, rather than an opt-in attribute.
 
-## Implementation notes (for a clean session)
+## When is the inbox needed (usage guidance)
 
-1. **Expose the message id to the dispatch scope.**
-   - Outbox: in `OutboxEventDispatcher.DispatchAsync`, build a `DispatchScopeContext` carrying `message.Id` and create
-     the per-consumer scope with it (the dispatcher currently invokes consumers on the poll scope — it will need a
-     per-consumer child scope via `CreateDispatchScope`, or seed the existing scope and reset per consumer). Reuse
-     `IdempotencyKey`/`IIdempotencyKeySeed` or add an `IEventMessageId` context type + initializer.
-   - In-memory (`EventDispatchPump`/`InMemoryIntegrationEventBus`): assign a stable per-publish id on the
-     `EventEnvelope` (today it carries only `CorrelationId`) and seed it the same way. **Caveat:** the in-memory tier
-     is best-effort and does not redeliver across a crash, so the inbox there only guards against in-process
-     multi-delivery; it is primarily an **outbox-tier** feature. Consider scoping the inbox to the outbox tier first.
-2. **`IdempotencyScope.Consumer`** + owner/key mapping. The inbox "policy" (generated per consumer, like the
-   `{Handler}IdempotencyPolicy`) bakes in `owner = hash(ServiceType.FullName)`; `key` comes from the seeded message id.
-3. **Inbox decorator** — a near-clone of `IdempotencyDecorator` with: no fingerprint (the event body is not a client
-   request — or fingerprint the payload if reuse-with-different-body is a concern), no `KeyRequired` 400 (a missing
-   message id is a framework bug, not a client error — fail closed or log), skip→`Result<Unit>.Success` on
-   `Replay`/`InProgress` (no 409). Consider whether to share code with `IdempotencyDecorator` (a common base) or emit
-   a dedicated `InboxDecorator`.
-4. **Generator attachment**: `HandlerRegistrationGenerator` attaches the inbox decorator to a handler whose request is
-   an `IIntegrationEvent` **and** the consumer is inbox-enabled (auto, or `[Idempotent]`/`[Inbox]` per decision B),
-   just like it attaches the idempotency decorator for `[Idempotent]` commands. Exclude domain-event (`IDomainEvent`)
-   handlers. Diagnostics mirror ELIDEM001–004 (`ELINBOX*`?) — e.g. inbox on a method-form/domain consumer warns.
-5. **Retention**: reuse the `IdempotencyKeyPurgeService`. The inbox rows self-expire like command keys; **retention
-   must exceed the outbox's maximum delivery-attempt window** (`OutboxOptions` — NServiceBus's rule: dedup retention
-   > max retry duration), or a still-retrying message could be re-processed after its inbox row was purged. Document
-   and/or validate this relationship.
-6. **DI**: `AddElarionIdempotencyEntityFrameworkCore` already wires the store + uow + purge; the inbox needs only the
-   scope-seeding in the two event dispatchers and the generator attachment.
+The inbox dedups the consumer's **transactional effect** — with it, the consumer's DB writes happen exactly once
+per message. It does **not** make a foreign side effect (an SMTP send, a third-party API call) exactly-once: it
+removes the *systemic* duplicate sources and narrows the residual to the crash window between the foreign call and
+the commit (the ADR-0021 cooperative-recipient caveat, transitively). Per consumer:
+
+| Consumer | Inbox | Why |
+|---|---|---|
+| Domain-event (Plane A), either form | **Never** — the decorator must not attach | Runs inline in the publisher's transaction; exactly-once by atomicity. |
+| Integration, **method-form** | Unavailable | No pipeline to attach to. Convert to handler-form when dedup matters. |
+| Integration, handler-form, **in-memory bus** | Low value | Best-effort tier: no redelivery across a crash; the inbox guards only in-process multi-delivery. |
+| Integration, handler-form, **outbox** | **Default-on** (decision B), opt-out | Delivery is at-least-once *and* retry is per-message: one failing consumer re-runs every already-succeeded sibling consumer of the same event. |
+| …whose only effect is a call to a sink that dedups on a caller-supplied key | Legitimate opt-out | Keying the sink call on the **message id** already makes that effect exactly-once; the inbox would only save the wasted duplicate call. |
+| …whose effect is naturally idempotent (a pure upsert on a business key) | Legitimate opt-out | Redelivery converges by itself. |
+
+Why default-on rather than opt-in: the routine duplicate source is **not a crash** —
+`OutboxEventDispatcher.DispatchAsync` propagates any consumer failure so the **whole message** is retried,
+re-invoking consumers that already succeeded. One buggy or transiently-failing sibling consumer re-runs every
+healthy consumer on every backoff attempt; under that contract dedup must be the pit of success. Re-examined
+post-implementation against "most consumers can be written idempotently, so opt-in like `[Idempotent]`", and
+upheld on three grounds: **(a) asymmetric loss** — the inbox on an already-convergent consumer wastes two writes
+inside an existing transaction (reclaimable, visibly, via `[AllowDuplicates]`), while a missing inbox on a
+non-convergent consumer double-executes effects in production; default to the side whose error is cheap.
+**(b) the duplicate is an externality** — a consumer is re-run because a *sibling* failed, so "write it
+idempotently" is a burden imposed by code its author doesn't own; the framework that manufactures the redelivery
+internalizes it. **(c) the self-serve alternative is often the inbox in disguise** — the "idempotent framing" of
+an insert-per-event consumer is a unique index on the message id + `ON CONFLICT DO NOTHING`, hand-rolled per
+table; and delta-shaped effects (increments, accumulations) cannot be framed convergent at all. Commands differ
+on feasibility, not philosophy: there a default-on guard has no coherent semantics without a client key (see the
+symmetric-opt-out rejection below), while here the framework mints the key — so consumers are decided by
+cost-benefit and commands by the trilemma.
+
+For an external sink (the `IEmailSender` case), the layers compose rather than compete:
+
+1. **Outbox** — the intent ("send this email") is never lost on a crash and never phantom-sent on a rollback.
+2. **Inbox** — the consumer's DB effect is exactly-once; the sink call re-runs only if the process dies between the
+   sink accepting and the transaction committing.
+3. **Sink idempotency key** — pass the seeded **message id** as the recipient's dedup key (the same id the inbox
+   reads from the dispatch scope, so one piece of plumbing serves both layers) to close that last window. A keyless
+   protocol (bare SMTP) cannot; the residual is an accepted, documented at-least-once window — crash-only and
+   milliseconds wide at Elarion's tier.
+
+The inbox and a keyed sink are complementary, not redundant: the inbox also protects the consumer's co-located DB
+writes and saves the duplicate external round-trip. This matrix is reflected in the
+[idempotency concept doc](../concepts/idempotency.mdx) and the
+[consuming-events doc](../capabilities/events/consuming-events.mdx): the hand-rolled guard-table tier became this
+built-in default-on decorator, the "an inbox table is the last resort" guidance flipped to "the inbox is the free
+safety net; natural idempotency remains the cheapest opt-out", and the dedup examples key on
+`IEventContext.MessageId` rather than the correlation id.
+
+## Resolution (as implemented)
+
+Implemented 2026-07-04. The decision stands as proposed, with the open decisions resolved and one semantic
+corrected:
+
+1. **No new decorator — `IdempotencyDecorator` *is* the inbox.** The existing decorator needed only a nullable
+   `ICurrentUser` (a delivery scope has no caller) and a `Consumer` branch in owner resolution. Everything else is
+   the generated policy: `Scope = Consumer`, `KeyRequired = false` (an un-seeded direct invocation — a test, a
+   hand-rolled dispatcher — passes through un-deduped instead of failing 400), `Fingerprint = false`,
+   `ConflictBehavior = WaitThenReplay`, `StoreFailures = None`.
+2. **`InProgress` is NOT acknowledged as success** (correcting the proposal's "skip on Replay/InProgress"). If a
+   lease-race loser acked success while the winner's transaction was still open, the loser's worker could finalize
+   the message; a subsequent winner rollback would then lose the event entirely. `WaitThenReplay` gives the safe
+   semantics: the loser blocks (bounded) on the winner's uncommitted claim — winner commits → `Replay` → success;
+   winner aborts → the loser claims and runs; wait times out → `Conflict` failure → `EventConsumerFailedException`
+   → the message backs off and redelivers. Only a *committed* claim is ever acknowledged.
+3. **Open decision A resolved as *both*.** The dispatchers seed the message id directly into the delivery scope via
+   `IIdempotencyKeySeed` (the same direct-seed shape `JsonRpcDispatcher` uses for `params._meta`; no
+   `DispatchScopeContext` change needed — the outbox already has a scope per message, the pump one per envelope),
+   **and** `IEventContext.MessageId` (`Guid?`) exposes it to consumers — for keying a downstream recipient's
+   idempotency key, and so method-form consumers can hand-dedup with the *right* key. Null on the domain plane; the
+   in-memory bus assigns a per-publish id so the consumer-visible contract matches the outbox tier. This also frees
+   `CorrelationId` to become a flowing tracing id later without silently breaking dedup.
+4. **Open decision B resolved as default-on, with a semantic opt-out.** `HandlerRegistrationGenerator` synthesizes
+   the inbox policy for every handler whose request implements `IIntegrationEvent` (unless `[Idempotent]` is
+   present — inert + ELIDEM002 there). The opt-out is **`[AllowDuplicates]`** (`Elarion.Abstractions.Messaging`) —
+   the consumer declares the *property* ("duplicate deliveries are harmless here": a naturally-idempotent effect,
+   or dedup delegated to a message-id-keyed downstream), not a mechanism toggle. This is the consumer-side mirror
+   of `[AllowAnonymous]` switching off a default-on guard, making it a house convention rather than a one-off; a
+   first-draft `[Inbox(Enabled = false)]` was rejected on review as naming the machinery instead of the
+   declaration (and reusing `[Idempotent]` itself was rejected: on commands it means "add the guard", so its
+   consumer-side negation would read exactly backwards). Retention is deliberately **not per-consumer** — the
+   invariant it serves is transport-scoped (see 8), so the first-draft `RetentionHours` knob was dropped along
+   with its diagnostic. Diagnostics: `ELINBX001` (warning — `[AllowDuplicates]` on a non-integration-event
+   handler). `TransactionDecorator.AppliesTo` mirrors the attachment exactly: an integration-event handler gets
+   the plain transaction back only under `[AllowDuplicates]`.
+5. **Soft attachment.** The generated inbox pipeline gates on `sp.GetService<IIdempotencyStore>()`: present → the
+   decorator attaches; absent → the consumer runs un-deduped exactly as before this ADR (never a resolution
+   failure). The delivery tiers make "present" the default: `AddElarionOutbox<T>` and the in-memory integration bus
+   both call `AddElarionIdempotency()` (TryAdd — a durable `AddElarionIdempotencyEntityFrameworkCore` registration
+   wins; `Elarion.Messaging.Outbox` now references `Elarion` for it). With only the in-memory store the inbox is
+   process-local; pair the outbox with the EF store for dedup that survives restarts. Explicit `[Idempotent]`
+   commands keep hard resolution — their author asked for idempotency, so a missing store fails loudly.
+6. **Owner discriminator** is generation-time: the consumer's fully qualified name verbatim while it fits the
+   store's 128-char owner column, else truncated with a stable SHA-256 suffix — readable in the common case,
+   collision-safe always. A `Consumer`-scoped policy with a null `Owner` fails loudly at run time (it would collapse
+   all consumers of an event onto one claim). The EF store maps the scope to a `"consumer"` discriminator.
+7. **`Result<Unit>` payloads store the success flag only.** `Unit` is registered in no JSON context, so the previous
+   `GetTypeInfo(typeof(Unit))` emission would have thrown on an AOT-strict host — a latent bug for `[Idempotent]`
+   `IHandler<T>` commands too, fixed for both by a Unit special-case in the generated policy.
+8. **Retention** reuses the `IdempotencyKeyPurgeService`; inbox rows self-expire like command keys, after a fixed
+   24 h. The invariant stands as proposed: **retention must exceed the delivery tier's maximum retry window** (for
+   the outbox: the backoff sum across `OutboxOptions.MaxDeliveryAttempts`, ≈43 minutes at the defaults — 24 h is
+   ~33× that), or a still-retrying message could re-run after its row was purged. Per-consumer tuning was dropped
+   (see 4): the invariant is transport-scoped, so a per-handler knob had no derivable use case; if a deployment
+   ever configures retries beyond 24 h, the additive fix is a single global option, not a per-consumer attribute.
+   Cross-package startup validation was likewise skipped: the outbox and the idempotency store do not reference
+   each other, and the default margin is ample.
 
 ## Alternatives considered
 
@@ -138,6 +278,37 @@ keyed per **(consumer, message)**:
 - **Inbox for method-form consumers** via a dispatcher-level wrapper (not a pipeline decorator) — possible but
   inconsistent with the pipeline model; deferred. Method-form stays un-inboxed; recommend handler-form for
   at-least-once side effects.
+- **Symmetric opt-out for commands** (raised post-implementation): make `[Idempotent]` default-on for `ICommand`
+  handlers too — queries excluded — so both planes share the inbox's polarity under the "one handler, many
+  transports" theme. **Rejected**: the polarity is not a stylistic asymmetry; it tracks *who owns the duplicate
+  and who can mint the key*. On wire transports the duplicate originates with the client and only the client can
+  supply the key — the framework cannot manufacture one, because a body fingerprint cannot distinguish a network
+  retry from a deliberately repeated identical command. A default-on guard therefore degrades into a trilemma:
+  reject keyless calls (400 on every quickstart/test client, plus 401s from the default `CurrentUser` scope), or
+  attach-but-pass-through when unkeyed (idempotency *theater* — the caller believes they are protected while
+  unkeyed retries still double-execute; a default that lies), or infer keys (impossible). It would also pay a
+  claim+complete write per command for calls that are never retried, and make the OpenAPI transformer advertise
+  `Idempotency-Key` on operations that don't meaningfully accept one. The event plane passes both ownership tests
+  (the framework creates redeliveries and mints the message id) — exactly why the inbox alone can default on. The
+  planes ARE unified one layer down: one decorator, one store, one key-seed seam fed per transport (HTTP header,
+  `params._meta`, message id); only the default flips with duplicate ownership. If "force the idempotency decision
+  to be visible" is ever wanted as a team discipline, the sanctioned path is a module/assembly-scoped strictness
+  attribute mirroring `[ElarionAuthorizationDefaults]` — warning on commands that declare neither `[Idempotent]`
+  nor a deliberate opt-out — not a per-handler default flip that taxes every keyless client.
+- **Dedup consumers on the originating command's idempotency key** (an "operation id" flowing through the causal
+  chain) — **rejected as the framework key**: it exists only when the source command carried a key (a minority,
+  by the opt-in design), and it has the wrong grain — one operation can emit several messages, including several
+  of one event type, which would wrongly collapse under one key (the same grain error that disqualified
+  `CorrelationId`). The kernel it reaches for is already satisfied: a replayed `[Idempotent]` command returns its
+  stored result without re-running, so it never re-publishes its events — each leg of the chain dedups with the
+  id that leg owns (client key → command; message id → delivery; message id passed downstream → foreign effect).
+  An app may still carry a business/operation id in the event payload for domain-level checks.
+- **Rename `[Idempotent]` to `[Dedup]` for all handlers** — **rejected**: it inverts the convention the
+  `[AllowDuplicates]` rename established. Attributes declare the requested property or outcome (`[Cacheable]`,
+  `[Resilient]`, `[Idempotent]`), not the machinery; `[Dedup]` names the machinery. It would also detach the
+  attribute from the ecosystem vocabulary it participates in — the `Idempotency-Key` header (an industry/IETF
+  term that cannot be renamed), `IdempotencyScope`, `IIdempotencyStore`, and the keyed provider APIs the docs
+  point at.
 
 ## Consequences
 

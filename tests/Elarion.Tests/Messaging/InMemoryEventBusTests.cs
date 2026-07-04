@@ -102,6 +102,69 @@ public sealed class InMemoryEventBusTests {
     }
 
     [Fact]
+    public async Task IntegrationEvent_CarriesAMessageId_AndSeedsItAsTheScopeIdempotencyKey() {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        Guid? contextMessageId = null;
+        string? seededKey = null;
+        var probe = new EventSubscriptionDescriptor {
+            EventType = typeof(SampleIntegrationEvent),
+            Plane = EventPlane.Integration,
+            ServiceType = typeof(EventRecorder),
+            Order = 0,
+            InvokeAsync = (sp, _, context, _) => {
+                contextMessageId = context.MessageId;
+                sp.GetRequiredService<Elarion.Abstractions.Idempotency.IIdempotencyKeyAccessor>().TryGetKey(out seededKey);
+                sp.GetRequiredService<EventRecorder>().Add("probed");
+                return ValueTask.CompletedTask;
+            }
+        };
+        await using var provider = BuildProvider(probe);
+
+        var pump = provider.GetServices<IHostedService>().Single();
+        await pump.StartAsync(cts.Token);
+
+        using (var scope = provider.CreateScope()) {
+            var bus = scope.ServiceProvider.GetRequiredService<IIntegrationEventBus>();
+            var dispatch = scope.ServiceProvider.GetRequiredService<EventDispatchScope>();
+            await bus.PublishAsync(new SampleIntegrationEvent("y"), cts.Token);
+            await dispatch.FlushAsync(cts.Token);
+        }
+
+        await provider.GetRequiredService<EventRecorder>().WaitForAsync(1, cts.Token);
+
+        // The in-memory tier assigns a per-publish message id and seeds it into the delivery scope, so the
+        // consumer-visible contract (IEventContext.MessageId, the inbox key) matches the outbox tier.
+        contextMessageId.Should().NotBeNull();
+        seededKey.Should().Be(contextMessageId!.Value.ToString("N"));
+
+        await pump.StopAsync(cts.Token);
+    }
+
+    [Fact]
+    public async Task DomainEvent_HasNoMessageId() {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        Guid? contextMessageId = Guid.Empty;
+        var probe = new EventSubscriptionDescriptor {
+            EventType = typeof(SampleDomainEvent),
+            Plane = EventPlane.Domain,
+            ServiceType = typeof(EventRecorder),
+            Order = 0,
+            InvokeAsync = (_, _, context, _) => {
+                contextMessageId = context.MessageId;
+                return ValueTask.CompletedTask;
+            }
+        };
+        await using var provider = BuildProvider(probe);
+
+        using var scope = provider.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IDomainEventBus>()
+            .PublishAsync(new SampleDomainEvent("payload"), cts.Token);
+
+        // Inline dispatch in the publisher's transaction: there is no message, so there is no message id.
+        contextMessageId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task IntegrationEvent_DiscardDropsBufferedEvents() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         await using var provider = BuildProvider(

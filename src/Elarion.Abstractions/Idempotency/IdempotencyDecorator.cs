@@ -14,8 +14,17 @@ namespace Elarion.Abstractions.Idempotency;
 /// writes commit together with the key, and — on a duplicate — replays the first request's stored result.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Auto-attached by the handler generator for handlers carrying <see cref="IdempotentAttribute"/>, just inside
 /// caching/feature-gate/authorization and outside the handler's own work. See the idempotency concept doc.
+/// </para>
+/// <para>
+/// The same decorator is the <b>inbox</b> for handler-form integration-event consumers (ADR-0022): the generator
+/// attaches it with a <see cref="IdempotencyScope.Consumer"/>-scoped policy whose key is the delivered message id,
+/// so a redelivered event replays the recorded success instead of re-running the consumer's effect.
+/// <paramref name="currentUser"/> is nullable because a delivery scope has no caller — it is only consulted for
+/// <see cref="IdempotencyScope.CurrentUser"/>-scoped keys.
+/// </para>
 /// </remarks>
 public sealed class IdempotencyDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
@@ -23,7 +32,7 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
     IIdempotencyStore store,
     IIdempotencyKeyAccessor keyAccessor,
     IIdempotencyPayloadPolicy<TRequest, TResponse> policy,
-    ICurrentUser currentUser,
+    ICurrentUser? currentUser,
     JsonSerializerOptions jsonOptions
 ) : IHandler<TRequest, TResponse>
     where TResponse : IResultFailureFactory<TResponse> {
@@ -51,12 +60,20 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
                 : await inner.HandleAsync(request, ct).ConfigureAwait(false);
         }
 
-        if (policy.Scope == IdempotencyScope.CurrentUser && !currentUser.IsAuthenticated) {
+        if (policy.Scope == IdempotencyScope.CurrentUser && currentUser is not { IsAuthenticated: true }) {
             return TResponse.Failure(
                 AppError.Unauthorized("A user-scoped idempotency key requires an authenticated caller."));
         }
 
-        var owner = policy.Scope == IdempotencyScope.CurrentUser ? Hash(currentUser.UserId) : string.Empty;
+        var owner = policy.Scope switch {
+            IdempotencyScope.CurrentUser => Hash(currentUser!.UserId),
+            // The inbox (ADR-0022): the generated policy bakes in the consuming handler's identity so each
+            // fan-out consumer of one event claims its own row. A null Owner here is a policy bug, and running
+            // without it would collapse all consumers of an event onto one claim — fail loud instead.
+            IdempotencyScope.Consumer => policy.Owner ?? throw new InvalidOperationException(
+                $"IdempotencyScope.Consumer requires the policy for '{typeof(TRequest).Name}' to supply Owner."),
+            _ => string.Empty,
+        };
         var storeKey = new IdempotencyStoreKey(Operation, policy.Scope, owner, key);
         var fingerprint = policy.Fingerprint ? ComputeFingerprint(request) : string.Empty;
 

@@ -241,6 +241,92 @@ public sealed class IdempotencyDecoratorTests {
     }
 
     [Fact]
+    public async Task ConsumerScope_UsesPolicyOwner_AndNeedsNoCurrentUser() {
+        // The inbox (ADR-0022): Consumer scope keys on the policy-baked consumer identity; a delivery scope has
+        // no caller, so a null ICurrentUser must not be consulted.
+        var inner = new RecordingHandler(Result<string>.Success("done"));
+        var store = new RecordingStore(IdempotencyBeginResult.Began());
+        var uow = new RecordingUnitOfWork();
+        var policy = new TestPolicy(scope: IdempotencyScope.Consumer, owner: "Sample.App.SendInvoiceEmail");
+        var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
+            inner, uow, store, new FakeKeyAccessor("message-1"), policy, currentUser: null, Json);
+
+        var result = await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
+
+        result.Value.Should().Be("done");
+        store.LastKey.Scope.Should().Be(IdempotencyScope.Consumer);
+        store.LastKey.Owner.Should().Be("Sample.App.SendInvoiceEmail");
+        store.LastKey.Key.Should().Be("message-1");
+        store.CompleteCount.Should().Be(1);
+        uow.Scope!.Commits.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ConsumerScope_Redelivery_ReplaysWithoutRunningHandler() {
+        var payload = JsonSerializer.Serialize(
+            new StoredResult { Ok = true, Value = JsonSerializer.SerializeToElement("first", Json) }, Json);
+        var inner = new RecordingHandler(Result<string>.Success("second"));
+        var store = new RecordingStore(IdempotencyBeginResult.Replay(payload));
+        var policy = new TestPolicy(scope: IdempotencyScope.Consumer, owner: "Sample.App.SendInvoiceEmail");
+        var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
+            inner, new RecordingUnitOfWork(), store, new FakeKeyAccessor("message-1"), policy, currentUser: null, Json);
+
+        var result = await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
+
+        // The redelivered message is acknowledged as already-done; the consumer's effect never re-runs.
+        result.IsSuccess.Should().BeTrue();
+        inner.Invocations.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ConsumerScope_MissingPolicyOwner_FailsLoud() {
+        // A Consumer-scope policy without an owner would collapse every consumer of an event onto one claim —
+        // the second consumer would skip its own distinct work. That is a policy bug, not a runtime condition.
+        var policy = new TestPolicy(scope: IdempotencyScope.Consumer, owner: null);
+        var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
+            new RecordingHandler(Result<string>.Success("x")), new RecordingUnitOfWork(),
+            new RecordingStore(IdempotencyBeginResult.Began()), new FakeKeyAccessor("message-1"), policy,
+            currentUser: null, Json);
+
+        var act = async () => await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ConsumerScope_MissingSeed_PassesThrough() {
+        // Direct invocation (a test, a hand-rolled dispatcher) has no seeded message id; the inbox policy sets
+        // KeyRequired=false so the consumer runs un-deduped instead of failing with a 400.
+        var inner = new RecordingHandler(Result<string>.Success("done"));
+        var store = new RecordingStore(IdempotencyBeginResult.Began());
+        var policy = new TestPolicy(scope: IdempotencyScope.Consumer, keyRequired: false, owner: "Sample.App.SendInvoiceEmail");
+        var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
+            inner, new RecordingUnitOfWork(), store, new FakeKeyAccessor(null), policy, currentUser: null, Json);
+
+        var result = await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
+
+        result.Value.Should().Be("done");
+        inner.Invocations.Should().Be(1);
+        store.CompleteCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CurrentUserScope_NullCurrentUser_Returns401() {
+        // A CurrentUser-scoped policy resolving in a scope without any ICurrentUser registration (the decorator's
+        // currentUser parameter is nullable for delivery scopes) must fail closed as unauthenticated, not throw.
+        var policy = new TestPolicy(scope: IdempotencyScope.CurrentUser);
+        var store = new RecordingStore(IdempotencyBeginResult.Began());
+        var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
+            new RecordingHandler(Result<string>.Success("x")), new RecordingUnitOfWork(), store,
+            new FakeKeyAccessor("k1"), policy, currentUser: null, Json);
+
+        var result = await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
+
+        result.Error.Kind.Should().Be(ErrorKind.Unauthorized);
+        store.CompleteCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task BothConflictModes_SetALockTimeout_ConflictShorterThanWait() {
         var conflictUow = new RecordingUnitOfWork();
         await Decorate(new RecordingHandler(Result<string>.Success("x")), new RecordingStore(IdempotencyBeginResult.Began()), conflictUow, "k1",
@@ -283,7 +369,8 @@ public sealed class IdempotencyDecoratorTests {
         bool keyRequired = true,
         bool fingerprint = true,
         IdempotencyConflictBehavior conflict = IdempotencyConflictBehavior.Conflict,
-        IdempotencyFailureStorage storeFailures = IdempotencyFailureStorage.None)
+        IdempotencyFailureStorage storeFailures = IdempotencyFailureStorage.None,
+        string? owner = null)
         : IIdempotencyPayloadPolicy<TestCommand, Result<string>> {
         public IdempotencyScope Scope => scope;
         public bool KeyRequired => keyRequired;
@@ -291,6 +378,7 @@ public sealed class IdempotencyDecoratorTests {
         public IdempotencyConflictBehavior ConflictBehavior => conflict;
         public IdempotencyFailureStorage StoreFailures => storeFailures;
         public TimeSpan Retention => TimeSpan.FromHours(24);
+        public string? Owner => owner;
 
         public string Serialize(Result<string> response, JsonSerializerOptions options) =>
             JsonSerializer.Serialize(

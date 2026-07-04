@@ -320,7 +320,7 @@ See [Feature flags](/docs/capabilities/feature-flags).
 | `ConflictBehavior` | `IdempotencyConflictBehavior` (init) | `Conflict` | Behavior for a concurrent in-flight duplicate (default 409). |
 | `StoreFailures` | `IdempotencyFailureStorage` (init) | `None` | Whether definitive failures are stored and replayed (default success-only). |
 
-**`IdempotencyScope`:** `CurrentUser` (= 0, isolated per authenticated user), `Global` (= 1, single shared namespace).
+**`IdempotencyScope`:** `CurrentUser` (= 0, isolated per authenticated user), `Global` (= 1, single shared namespace), `Consumer` (= 2, isolated per event consumer — the inbox; owner is the consuming handler's identity, key is the message id).
 
 **`IdempotencyConflictBehavior`:** `Conflict` (= 0, fail fast with 409 then replay — the IETF/Stripe standard), `WaitThenReplay` (= 1, block on the key's lock until the first request commits, then replay).
 
@@ -334,6 +334,13 @@ See [Feature flags](/docs/capabilities/feature-flags).
 </Callout>
 
 See [Idempotency](/docs/concepts/idempotency).
+
+### `[AllowDuplicates]`
+
+- **Package:** `Elarion.Abstractions` (Messaging) · **Applies to:** class (single, not inherited)
+- **Triggers:** declares that **duplicate deliveries are harmless** to this handler-form integration-event consumer, opting it out of the default-on **inbox** (ADR-0022). The inbox attaches automatically to every handler whose request is an `IIntegrationEvent` — a `Consumer`-scoped `IdempotencyDecorator` claiming *(consumer, message id)* inside the consumer's own transaction, so a redelivered message is acknowledged instead of re-run (claims expire after 24 h, well above the outbox retry window). Declare `[AllowDuplicates]` when re-running is safe by construction — the effect is naturally idempotent (a conditional transition/upsert), or the only effect is a call to a downstream keyed on `IEventContext.MessageId` — and the plain transaction decorator returns. The consumer-side mirror of `[AllowAnonymous]`: a positive property declaration switching off a default guard. Inert on non-integration-event handlers (`ELINBX001`); domain-event consumers never have an inbox (exactly-once by atomicity); method-form consumers have no pipeline to attach to.
+
+See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
 
 ## Validation
 
@@ -686,7 +693,7 @@ See [Entity Framework](/docs/capabilities/entity-framework).
 ## Related references
 
 <Cards>
-  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELVAL/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELIDEMEF/ELOBX/ELSET/ELBLB/ELTUS/ELCACHE) referenced above.</Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELVAL/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELINBX/ELIDEMEF/ELOBX/ELSET/ELBLB/ELTUS/ELCACHE) referenced above.</Card>
   <Card title="Configuration" href="/docs/reference/configuration">Feature flags (`Modules:{Name}:Enabled`) and other settings keys.</Card>
   <Card title="Conventions" href="/docs/reference/conventions">Module statics, namespace matching, and naming rules.</Card>
   <Card title="Packages" href="/docs/reference/packages">Which package each attribute ships in.</Card>

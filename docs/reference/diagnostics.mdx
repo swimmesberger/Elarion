@@ -266,6 +266,15 @@ Idempotency-decorator attachment for `[Idempotent]`. See [Idempotency](/docs/con
 | ELIDEM003 | Error | A handler's `[Idempotent]` declares a non-positive `RetentionHours`. | Set a positive `RetentionHours` on `[Idempotent]`. |
 | ELIDEM004 | Warning | A handler carries both `[Idempotent]` and `[Cacheable]`; caching is for queries, idempotency for commands. | Apply only one of `[Idempotent]` or `[Cacheable]` to the handler. |
 
+## ELINBX — Inbox (idempotent event consumers)
+
+Inbox attachment for handler-form integration-event consumers (on by default; `[AllowDuplicates]` opts out).
+See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELINBX001 | Warning | A handler declares `[AllowDuplicates]` but its request type is not an `IIntegrationEvent`; only handler-form integration-event consumers have a default-on inbox to opt out of (domain events are exactly-once by atomicity), so the attribute has no effect. | Remove `[AllowDuplicates]`, or make the handler consume an `IIntegrationEvent`. |
+
 ## ELIDEMEF — Idempotency keys (EF Core)
 
 Idempotency-keys generation for `[GenerateElarionIdempotencyKeys]`. See [Idempotency](/docs/concepts/idempotency).
