@@ -7,6 +7,12 @@ npm install --save-dev @swimmesberger/elarion-jsonrpc-client-generator
 npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated
 ```
 
+Add `--watch` for a tight dev loop — the generator regenerates whenever `rpc-schema.json` changes (and survives the partial/invalid states a build tool leaves the file in mid-write). Pair it with a server that re-exports the schema on save (e.g. `dotnet watch`) so an edit to a handler flows straight to the typed client:
+
+```bash
+npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated --watch
+```
+
 The generated files are:
 
 | File | Purpose |
