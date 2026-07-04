@@ -147,6 +147,19 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '  readonly error?: JsonRpcErrorObject',
     '}',
     '',
+    '// Elarion maps its transport-agnostic AppError kinds onto the JSON-RPC server-reserved range',
+    '// (-32000..-32099) via the framework default AppErrorMapper, so a frontend can branch on the kind',
+    '// directly instead of re-wrapping RpcError. These codes are a wire contract mirrored from the server',
+    "// (src/Elarion.JsonRpc/AppErrorMapper.cs) — keep both in sync. Validation reuses the standard -32602",
+    '// (isInvalidParams) and Internal reuses -32603 (isInternalError), so they are not repeated here.',
+    'export const ElarionErrorCodes = {',
+    '  notFound: -32001,',
+    '  conflict: -32002,',
+    '  forbidden: -32003,',
+    '  businessRule: -32004,',
+    '  unauthorized: -32005,',
+    '} as const',
+    '',
     'export class RpcError extends Error {',
     '  readonly code: number',
     '  readonly data?: unknown',
@@ -176,6 +189,28 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '',
     '  get isInternalError() {',
     '    return this.code === -32603',
+    '  }',
+    '',
+    '  // Elarion application-error kinds (see ElarionErrorCodes). isInvalidParams also covers Validation;',
+    '  // isInternalError also covers Internal.',
+    '  get isNotFound() {',
+    '    return this.code === ElarionErrorCodes.notFound',
+    '  }',
+    '',
+    '  get isConflict() {',
+    '    return this.code === ElarionErrorCodes.conflict',
+    '  }',
+    '',
+    '  get isForbidden() {',
+    '    return this.code === ElarionErrorCodes.forbidden',
+    '  }',
+    '',
+    '  get isBusinessRule() {',
+    '    return this.code === ElarionErrorCodes.businessRule',
+    '  }',
+    '',
+    '  get isUnauthorized() {',
+    '    return this.code === ElarionErrorCodes.unauthorized',
     '  }',
     '}',
     '',
@@ -545,7 +580,7 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
   ].join('\n')
 }
 
-function moduleSpecifier(fileName: string): string {
+export function moduleSpecifier(fileName: string): string {
   const withoutExtension = fileName.replace(/[.][cm]?tsx?$/, '')
   const relativePath = withoutExtension.startsWith('.')
     ? withoutExtension

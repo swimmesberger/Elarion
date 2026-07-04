@@ -61,7 +61,24 @@ interface GeneratedClientModule {
     transformResult?: (method: string, result: unknown) => unknown
     instrumentation?: TestInstrumentation
   }): RpcClientForTests
-  RpcError: new (code: number, message: string, data?: unknown) => Error & { code: number; data?: unknown }
+  RpcError: new (code: number, message: string, data?: unknown) => Error & {
+    code: number
+    data?: unknown
+    readonly isInvalidParams: boolean
+    readonly isInternalError: boolean
+    readonly isNotFound: boolean
+    readonly isConflict: boolean
+    readonly isForbidden: boolean
+    readonly isBusinessRule: boolean
+    readonly isUnauthorized: boolean
+  }
+  ElarionErrorCodes: {
+    readonly notFound: number
+    readonly conflict: number
+    readonly forbidden: number
+    readonly businessRule: number
+    readonly unauthorized: number
+  }
   RpcTransportError: new (status: number, statusText: string, body: string) => Error
   RpcProtocolError: new (message: string) => Error
   RpcParamsValidationError: new (method: string, cause: unknown) => Error & { method: string; cause?: unknown }
@@ -398,6 +415,52 @@ describe('JSON-RPC client generator', () => {
       })
   })
 
+  it('exposes Elarion app-error code getters on RpcError, matching the server AppErrorMapper', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+
+    // The codes are a wire contract mirrored from src/Elarion.JsonRpc/AppErrorMapper.cs.
+    expect(clientModule.ElarionErrorCodes).toMatchObject({
+      notFound: -32001,
+      conflict: -32002,
+      forbidden: -32003,
+      businessRule: -32004,
+      unauthorized: -32005,
+    })
+
+    // End-to-end: a NotFound error response surfaces on the getter, so a consumer branches without re-wrapping.
+    const notFoundClient = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async () => jsonResponse({
+        jsonrpc: '2.0',
+        id: 'request-1',
+        error: { code: clientModule.ElarionErrorCodes.notFound, message: 'Client not found' },
+      }),
+      idGenerator: () => 'request-1',
+    })
+
+    await expect(notFoundClient.call('math.add', { left: 1, right: 2 })).rejects.toMatchObject({
+      name: 'RpcError',
+      code: -32001,
+      isNotFound: true,
+      isConflict: false,
+    })
+
+    const cases = [
+      { code: -32002, getter: 'isConflict' },
+      { code: -32003, getter: 'isForbidden' },
+      { code: -32004, getter: 'isBusinessRule' },
+      { code: -32005, getter: 'isUnauthorized' },
+      { code: -32602, getter: 'isInvalidParams' },
+      { code: -32603, getter: 'isInternalError' },
+    ] as const
+    for (const { code, getter } of cases) {
+      const error = new clientModule.RpcError(code, 'boom')
+      expect(error[getter]).toBe(true)
+      expect(error.isNotFound).toBe(false)
+    }
+  })
+
   it('generates a batch client that preserves input order and per-item errors', async () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     const clientModule = await loadGeneratedClient(generated.clientSource)
@@ -561,6 +624,53 @@ describe('JSON-RPC client generator', () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     expect(generated.sessionClientSource).toBeUndefined()
     expect(generated.sessionClientFileName).toBeUndefined()
+  })
+
+  it('emits an opt-in TanStack Start adapter, keeping the core client framework-neutral', () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema(), {
+      generatedBy: 'test-generator',
+      sourceLabel: 'rpc.json',
+      framework: 'tanstack-start',
+    })
+
+    expect(generated.frameworkAdapterFileName).toBe('start-adapter.ts')
+    expect(generated.frameworkAdapterSource).toBeDefined()
+    const source = generated.frameworkAdapterSource as string
+
+    // Framework-specific imports live in the adapter, never in the core client.
+    expect(source).toContain("import { createIsomorphicFn } from '@tanstack/react-start'")
+    expect(source).toContain("import { getRequestHeader } from '@tanstack/react-start/server'")
+    expect(source).toContain("from './rpc-client.js'")
+    expect(source).toContain('export const forwardRequestCookie')
+    expect(source).toContain('export function createStartRpcApi')
+    expect(source).toContain("getRequestHeader('cookie')")
+    expect(generated.clientSource).not.toContain('@tanstack')
+
+    // The emitted adapter is syntactically valid TypeScript (it strips to runnable JS). It can't be
+    // runtime-loaded here because @tanstack/react-start is a consumer-side peer dependency.
+    const transpiled = ts.transpileModule(source, {
+      reportDiagnostics: true,
+      compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
+    })
+    expect(transpiled.diagnostics ?? []).toHaveLength(0)
+    expect(transpiled.outputText).toContain('forwardRequestCookie')
+  })
+
+  it('points the adapter at a renamed client file and honors a custom adapter filename', () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema(), {
+      framework: 'tanstack-start',
+      clientFileName: 'client/rpc.ts',
+      frameworkAdapterFileName: 'client/start.ts',
+    })
+
+    expect(generated.frameworkAdapterFileName).toBe('client/start.ts')
+    expect(generated.frameworkAdapterSource).toContain("from './client/rpc.js'")
+  })
+
+  it('omits the framework adapter by default', () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    expect(generated.frameworkAdapterSource).toBeUndefined()
+    expect(generated.frameworkAdapterFileName).toBeUndefined()
   })
 
   it('emits typed vocabulary constants from the schema capabilities block', async () => {
