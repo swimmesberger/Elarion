@@ -62,6 +62,20 @@ replace the token gate:** quorum sync guarantees the write is applied on *some* 
 gate — synchronous replication makes that gate cheap and gives durability; it is not itself the consistency
 mechanism. (This resolves the earlier flush-vs-replay question: recommend `remote_apply`.)
 
+**What synchronous commit does to application code.** Nothing in handler code — the wait is entirely inside the
+commit. When `TransactionDecorator`/the unit of work calls `CommitAsync`, PostgreSQL writes and flushes the
+commit locally, then **blocks the commit call until a quorum standby acknowledges** before returning. So a
+commit just takes the replication round-trip longer (async — awaited latency, no pinned thread, no spin), and
+there is **no "busy"/try-again status on the write path**: it returns success once replicated, and the cost
+lands only on writes (rare here). Two edges the app must respect, neither of which changes handler code:
+(1) if the quorum can't be met (standbys down), a *strict* setting makes the commit **hang** until one
+returns — precisely why `dataDurability: preferred` is recommended, so CloudNativePG drops the sync
+requirement and writes proceed (async) instead of freezing; (2) a commit wait canceled by
+timeout/cancellation/disconnect leaves the transaction **already durable on the primary** (Postgres warns "…
+already committed locally, but might not have been replicated") — so "commit errored" means **"maybe
+committed,"** which the ADR-0021 idempotency key already absorbs on retry (same key → no-op if it landed). The
+only "retry-after" signal in this design is on the *read* side (the not-yet-consistent `503`), never on commit.
+
 Two standing invariants constrain the design:
 
 - **Handlers inject the concrete `DbContext`.** There is deliberately no repository or `IAppDbContext`
