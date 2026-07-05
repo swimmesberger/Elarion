@@ -12,10 +12,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import type { ClientRowActionProps } from "@/modules/clients"
+import type { ContextOf } from "@swimmesberger/elarion-contributions"
+import { clientRowActions } from "@/modules/clients"
 import { useCreateInvoice } from "../hooks/useInvoices"
 
-export function CreateInvoiceForClient({ client, onClose }: ClientRowActionProps) {
+// ContextOf single-sources the props from the point's declaration: if Clients evolves what its slot
+// supplies, this component's signature follows — the payload and the slot site can't drift.
+export function CreateInvoiceForClient({ client, onClose }: ContextOf<typeof clientRowActions>) {
   const [amount, setAmount] = useState("19.99")
   const [currency, setCurrency] = useState("EUR")
   const [dueDate, setDueDate] = useState(() => new Date().toISOString().slice(0, 10))

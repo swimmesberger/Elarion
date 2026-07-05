@@ -26,19 +26,42 @@ export function useContributions<TItem, TContext>(
   return registry.get(point)
 }
 
-/** Renders a point's contributions through a render prop — sugar over {@link useContributions} for inline slots. */
-export function ExtensionSlot<TItem, TContext>({
-  point,
-  render,
-}: {
+/**
+ * Renders a point's contributions through a render prop — sugar over {@link useContributions} for inline
+ * slots. When the point declares a slot context (`TContext`), pass it as `context` and the render prop
+ * receives it, typed, as its second argument — so what the slot site supplies can never drift from what
+ * the point declares:
+ *
+ * ```tsx
+ * <ExtensionSlot point={stackDetailTabs} context={{ stack }} render={(tab, ctx) => tab.component(ctx)} />
+ * ```
+ *
+ * Without `context`, the render prop takes only the item — for slots that render inert parts (buttons,
+ * menu entries) and hand the payload its context later, at invocation time.
+ */
+export function ExtensionSlot<TItem, TContext>(props: {
+  point: ExtensionPoint<TItem, TContext>
+  /** The slot context the point declares — handed to `render` as the second argument. */
+  context: TContext
+  render: (item: Contribution<TItem>, context: TContext) => ReactNode
+}): ReactNode
+export function ExtensionSlot<TItem, TContext>(props: {
   point: ExtensionPoint<TItem, TContext>
   render: (item: Contribution<TItem>) => ReactNode
-}) {
-  const items = useContributions(point)
+}): ReactNode
+// Overloads rather than a props union: JSX contextually types the render prop per overload, where a
+// union would leave the render parameters implicitly `any`. The context form must come first — JSX
+// falls through cleanly on its *missing* `context` prop, but would not fall through past an *excess* one.
+export function ExtensionSlot<TItem, TContext>(props: {
+  point: ExtensionPoint<TItem, TContext>
+  context?: TContext
+  render: (item: Contribution<TItem>, context?: TContext) => ReactNode
+}): ReactNode {
+  const items = useContributions(props.point)
   return (
     <>
       {items.map((item) => (
-        <Fragment key={item.id}>{render(item)}</Fragment>
+        <Fragment key={item.id}>{props.render(item, props.context)}</Fragment>
       ))}
     </>
   )

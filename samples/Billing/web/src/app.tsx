@@ -1,16 +1,20 @@
-// The composition root. Frontend modules are discovered from the filesystem — adding a module means
-// creating a folder under modules/ with an index.ts default export; no central file changes (the
-// frontend analog of the generated AddElarion aggregation). Vite expands the glob at build time into
-// static imports, so discovery stays compile-time, bundled, and deterministic (keys come back sorted).
-//
-// The documented tradeoff: a glob-composed route tree is typed as AnyRoute[], so `Link to` loses its
-// literal-union checking. A team that prefers fully-typed navigation lists modules statically instead
-// (`rootRoute.addChildren([indexRoute, clients.route, invoicing.route])`) at one line per module.
+// The composition root. Manifests are DISCOVERED — the import.meta.glob below feeds every module's
+// contributions to the registry (main.tsx), so a new contribution, sidebar item, or route-less module
+// needs no edit here. Routes are REGISTERED — one typed line per route-owning module in addChildren, the
+// same grain as a backend host adding a ProjectReference — because a glob-composed route tree types as
+// AnyRoute[], which silently degrades `Link to`, `useLoaderData`, and `useParams` to untyped fallbacks
+// app-wide. (A team that prefers zero-edit route discovery can compose appModules.flatMap((m) => m.routes)
+// and register the router as AnyRouter instead — the tradeoff is documented in the frontend-modules
+// concept doc.)
 import { createRoute, createRouter } from "@tanstack/react-router"
+import clients from "@/modules/clients"
+import invoicing from "@/modules/invoicing"
 import { HomePage } from "@/platform/HomePage"
 import type { AppModule } from "@/platform/modules"
 import { rootRoute } from "@/platform/router"
 
+// Vite expands the glob at build time into static imports, so manifest discovery stays compile-time,
+// bundled, and deterministic (keys come back sorted).
 const discovered = import.meta.glob<AppModule>("./modules/*/index.ts", {
   eager: true,
   import: "default",
@@ -23,7 +27,7 @@ const indexRoute = createRoute({
   component: HomePage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, ...appModules.map((m) => m.route)])
+const routeTree = rootRoute.addChildren([indexRoute, ...clients.routes, ...invoicing.routes])
 
 export const router = createRouter({
   routeTree,

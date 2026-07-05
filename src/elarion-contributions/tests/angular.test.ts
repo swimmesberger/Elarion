@@ -1,6 +1,12 @@
-import { createEnvironmentInjector, runInInjectionContext, signal } from "@angular/core"
+import {
+  createEnvironmentInjector,
+  runInInjectionContext,
+  signal,
+  type EnvironmentInjector,
+} from "@angular/core"
 import { describe, expect, it } from "vitest"
 import {
+  contribute,
   createContributionRegistry,
   defineExtensionPoint,
   type CapabilityReader,
@@ -27,21 +33,19 @@ function registry(caps: CapabilityReader): ContributionRegistry {
   const manifest: ModuleManifest = {
     name: "demo",
     contributes: [
-      {
-        point,
-        items: [
-          { id: "b", label: "B", order: 2 },
-          { id: "a", label: "A", order: 1 },
-        ],
-      },
+      contribute(point, [
+        { id: "b", label: "B", order: 2 },
+        { id: "a", label: "A", order: 1 },
+      ]),
     ],
   }
   return createContributionRegistry([manifest], caps)
 }
 
-// A no-parent environment injector is enough to exercise the DI seam without a DOM, zone, or TestBed.
+// A no-parent environment injector is enough to exercise the DI seam without a DOM, zone, or TestBed —
+// the runtime tolerates the missing parent even though the signature demands one.
 function read<T>(fn: () => T, ...providers: ReturnType<typeof provideContributions>[]): T {
-  const injector = createEnvironmentInjector(providers, undefined)
+  const injector = createEnvironmentInjector(providers, undefined as unknown as EnvironmentInjector)
   return runInInjectionContext(injector, fn)
 }
 

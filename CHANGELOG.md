@@ -50,6 +50,23 @@ minor releases may include breaking changes.
   `StagedUploadGcOptions` with completed-session retention moving to `TusOptions.CompletedSessionRetention`.
   The tus wire behavior is unchanged. `Elarion.Blobs` now references the `Microsoft.Extensions.*` abstractions
   packages (DI/Hosting/Logging) to host the seam's default and collectors.
+- **`@swimmesberger/elarion-contributions` — adoption-feedback revisions (ADR-0032 addendum).** Two production
+  adoptions ([#71](https://github.com/swimmesberger/Elarion/issues/71) — a Vite SPA with no auth;
+  [#72](https://github.com/swimmesberger/Elarion/issues/72) — a TanStack Start SSR app) surfaced framework
+  gaps, not user errors. **`when` clauses are now strictly typed** against the vocabulary — a typo'd or
+  out-of-vocabulary name is a compile error (the `Name | (string & {})` escape hatch had silently voided that
+  guarantee on every axis, and the fail-closed evaluator turned typos into invisibly hidden UI), and
+  `Vocabulary` axes are optional so a no-auth app binds `{ module }` only and a stray permission/flag/role
+  clause fails to compile. New **`ItemOf`/`ContextOf`** extractors plus a typed `<ExtensionSlot context=…>`
+  deliver the point's declared slot context to the render prop (previously phantom, forcing hosts to smuggle
+  it through a separate React context). **`createContributionRegistry`** is generic over the vocabulary and
+  **throws on two co-visible contributions to one point sharing an id** (ids double as render keys). New
+  **`createStaticCapabilities`** ships the no-snapshot `CapabilityReader` (modules/permissions/roles default
+  `"all"`, flags none) for self-hosted/no-auth apps. Docs flip the recommended composition to *manifests by
+  glob, routes registered statically* (a glob-composed tree degrades `Link` **and**
+  `useLoaderData`/`useParams`), and gain a TanStack Start (SSR) shim, a no-auth recipe, and a Vite React-dedupe
+  callout. See the [ADR-0032](docs/decisions/0032-frontend-contribution-model.md) addendum and
+  [the frontend-modules concept doc](docs/concepts/frontend-modules.mdx).
 
 ### Added
 - **User-context trace & log enrichment — on by default (ADR-0033).** Every handler span is now enriched with

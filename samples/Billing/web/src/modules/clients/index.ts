@@ -13,5 +13,7 @@ export {
 } from "./points"
 export { useClients } from "./hooks/useClients"
 
-const clientsModule = { manifest: clientsManifest, route: clientsRoute } satisfies AppModule
+// `satisfies` (not a type annotation) keeps the routes' concrete types, so the static registration in
+// app.tsx preserves TanStack's Link/loader/param inference.
+const clientsModule = { manifest: clientsManifest, routes: [clientsRoute] } satisfies AppModule
 export default clientsModule
