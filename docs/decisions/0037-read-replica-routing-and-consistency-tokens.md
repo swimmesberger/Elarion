@@ -39,10 +39,14 @@ mechanism is
 better: capture the write position on the primary and require the replica to have replayed past it before
 serving the read — MySQL exposes it as a GTID ([ProxySQL GTID consistent reads][proxysql-gtid] tracks
 per-server GTIDs and routes each read to a replica known to have applied it; [Vitess reads-after-write][vitess-raw]
-is the same idea), and PostgreSQL as a WAL LSN. PostgreSQL has every
-piece: `pg_current_wal_insert_lsn()` on the primary, `pg_last_wal_replay_lsn()` on a standby, and — 17+ —
-`CALL pg_wal_replay_wait(lsn, timeout_ms)` to wait server-side. What generic frameworks lack is a place to
-put the token. Elarion owns the commit point (the unit of work), the transport surface, *and* the generated
+is the same idea), and PostgreSQL as a WAL LSN. On PostgreSQL the primary
+exposes its write position via `pg_current_wal_insert_lsn()`; a reader can then require a standby to have
+replayed past it. The classic way ([GitLab database load balancing][gitlab-lb] is the canonical framework
+prior art) is a client-side poll of `pg_last_wal_replay_lsn()` across replicas, with the LSN stashed per user
+(GitLab keeps it in Redis for a 30 s window). **PostgreSQL 17** collapses that whole loop into one server-side
+primitive — `CALL pg_wal_replay_wait(lsn, timeout_ms)` blocks until the standby catches up
+([WAIT FOR LSN write-up][pachot-waitlsn]) — so this ADR targets 17+ and does not implement the pre-17 poll.
+What generic frameworks lack is a place to put the token. Elarion owns the commit point (the unit of work), the transport surface, *and* the generated
 TypeScript client, so it can round-trip the token end-to-end with no sticky sessions and no server-side
 per-user state.
 
@@ -105,12 +109,16 @@ grants store over a primary-bound context for hosts that reject that window.
 - **Ratchet.** The generated TS client keeps a monotonic max (`token = max(token, response)`) and attaches it
   to every request automatically; the TanStack adapter therefore makes the standard mutate → invalidate →
   refetch cycle causally safe with zero app code. Third-party callers can propagate the header by hand.
-- **Enforce.** When a standby-intent scope opens a connection and a token is present: on PostgreSQL 17+,
-  `CALL pg_wal_replay_wait(lsn, timeout)`; earlier, compare `pg_last_wal_replay_lsn()`. Behind or timed out
-  (one `ReplayWaitTimeout` knob) → discard and reopen on the primary view. No token → serve eventual.
-- **Weak tier.** The token is opaque per the strongest-impl rule: the Postgres implementation carries an LSN;
-  a non-Postgres or test tier may carry a timestamp and implement the Rails-style fixed window, documenting
-  the delta.
+- **Enforce.** When a standby-intent scope opens a connection and a token is present, `CALL
+  pg_wal_replay_wait(lsn, timeout)` blocks server-side until the standby has replayed past the LSN; timed out
+  (one `ReplayWaitTimeout` knob) → discard and reopen on the primary view. No token → serve eventual. This
+  requires **PostgreSQL 17+**; the ADR deliberately does not carry the pre-17 client-side
+  `pg_last_wal_replay_lsn()` poll (more round-trips, racy under multi-host pooling — see the weak tier).
+- **Weak tier.** The token is opaque per the strongest-impl rule: the PostgreSQL 17+ implementation carries an
+  LSN and gates on it. Everything short of that — a non-Postgres backend, a test tier, or PostgreSQL **below
+  17** — carries a timestamp and implements the Rails/GitLab-style fixed time window instead, documenting the
+  reduced guarantee. So older PostgreSQL still gets intent-based routing and best-effort read-your-writes; only
+  the exact causal gate needs 17.
 
 **6. Escape hatches.** Per-call override is a rail item set before dispatch (options-bag style), not another
 attribute — with automatic tokens, caller-dependent consistency needs mostly evaporate.
@@ -155,8 +163,12 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
 - ADR-0027 composes untouched: Tier-2 invariant checks run in the handler, inside the transaction, on the
   primary — a replica can never participate in a uniqueness or business-rule decision. `[Cacheable]` also
   composes: a cache hit never consults the token gate; caching already declares staleness tolerance.
+- **The causal gate requires PostgreSQL 17+** (for `pg_wal_replay_wait`) — an accepted constraint, not a
+  fallback matrix: rather than maintain a pre-17 client-side replay-poll path, older PostgreSQL is treated as a
+  weak tier (intent routing + time window). PG17 shipped 2024-09; the requirement is scoped to the causal gate,
+  not the whole package. Routing, the attribute, and the hygiene list are version-independent.
 - Costs, only with the package active: one `SELECT pg_current_wal_insert_lsn()` per request that committed a
-  unit of work; one replay check (or bounded `pg_wal_replay_wait`) per gated standby read.
+  unit of work; one bounded `pg_wal_replay_wait` per gated standby read.
 - Testing: the intent rule is pure over rail + metadata (unit tests); the gate sits behind a fakeable seam;
   a Docker-gated Testcontainers primary+standby fixture covers replication end-to-end
   (`[Trait("Category", "Integration")]`, skipped without Docker).
@@ -179,6 +191,13 @@ Prior art for the consistency model:
 - Vitess — [RFC: Read After Write][vitess-raw]: the same causal-read goal at the routing layer, and a source
   of the cross-user-lag caveat (its query consolidator can lose read-your-write between concurrent users —
   the anomaly this ADR classifies as inherently eventual).
+- GitLab — [Database load balancing][gitlab-lb]: the closest PostgreSQL-LSN prior art. On a write it stores the
+  primary's WAL position, keyed per user, and only routes that user's later reads to a secondary once the
+  secondary's replay LSN has passed it (else sticks to the primary for ~30 s). ADR-0037 is the same causal
+  idea with the pointer carried in a client-ratcheted token instead of server-side Redis, and the replay wait
+  pushed into the database (`pg_wal_replay_wait`) instead of a client poll.
+- Franck Pachot — [Read-your-writes on replicas: PostgreSQL WAIT FOR LSN][pachot-waitlsn]: the PG17
+  `pg_wal_replay_wait` technique this ADR standardizes on, contrasted with MongoDB causal consistency.
 
 Primitives the machinery is built on:
 - PostgreSQL — [`pg_wal_replay_wait`][pg-replay-wait] (17+) and the WAL-position functions
@@ -190,6 +209,8 @@ Primitives the machinery is built on:
 [rails-switching]: https://guides.rubyonrails.org/active_record_multiple_databases.html#activating-automatic-role-switching
 [proxysql-gtid]: https://proxysql.com/blog/proxysql-gtid-causal-reads/
 [vitess-raw]: https://github.com/vitessio/vitess/issues/6843
+[gitlab-lb]: https://docs.gitlab.com/development/database/load_balancing/
+[pachot-waitlsn]: https://dev.to/franckpachot/read-your-writes-on-replicas-postgresql-wait-for-lsn-and-mongodb-causal-consistency-4he2
 [pg-replay-wait]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-RECOVERY-CONTROL
 [pg-wal-functions]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-BACKUP
 [npgsql-multihost]: https://www.npgsql.org/doc/failover-and-load-balancing.html
