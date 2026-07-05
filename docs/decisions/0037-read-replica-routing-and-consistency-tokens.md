@@ -36,8 +36,10 @@ Generic frameworks solve (1) heuristically — Rails' [automatic role switching]
 user's reads to the primary for a fixed window (2 s, `DatabaseSelector::Resolver`) after any write, tracked
 in the session, so "Rails guarantees 'read your own write' … within the `delay` window." The *causal*
 mechanism is
-better: capture the primary WAL position (LSN) of the commit and require the replica to have replayed past it
-before serving the read (MySQL GTID causal reads in ProxySQL, Vitess reads-after-write). PostgreSQL has every
+better: capture the write position on the primary and require the replica to have replayed past it before
+serving the read — MySQL exposes it as a GTID ([ProxySQL GTID consistent reads][proxysql-gtid] tracks
+per-server GTIDs and routes each read to a replica known to have applied it; [Vitess reads-after-write][vitess-raw]
+is the same idea), and PostgreSQL as a WAL LSN. PostgreSQL has every
 piece: `pg_current_wal_insert_lsn()` on the primary, `pg_last_wal_replay_lsn()` on a standby, and — 17+ —
 `CALL pg_wal_replay_wait(lsn, timeout_ms)` to wait server-side. What generic frameworks lack is a place to
 put the token. Elarion owns the commit point (the unit of work), the transport surface, *and* the generated
@@ -166,9 +168,19 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
 
 ## References
 
+Prior art for the consistency model:
+
 - Rails — [Activating Automatic Role Switching][rails-switching] (Active Record Multiple Databases guide): the
   `DatabaseSelector::Resolver` 2-second time-window heuristic and the opt-out polarity this ADR adopts (and
   improves on with causal tokens). Basis for the weak-tier fallback and the replica-by-default decision.
+- ProxySQL — [GTID consistent reads][proxysql-gtid]: the position-tracking, causal-routing model this ADR
+  mirrors, with a MySQL GTID where Elarion uses a PostgreSQL LSN. Its binlog reader tracks per-server GTIDs
+  and routes each causal read to a replica that has applied it — proxy-side, without an app-carried token.
+- Vitess — [RFC: Read After Write][vitess-raw]: the same causal-read goal at the routing layer, and a source
+  of the cross-user-lag caveat (its query consolidator can lose read-your-write between concurrent users —
+  the anomaly this ADR classifies as inherently eventual).
+
+Primitives the machinery is built on:
 - PostgreSQL — [`pg_wal_replay_wait`][pg-replay-wait] (17+) and the WAL-position functions
   [`pg_current_wal_insert_lsn` / `pg_last_wal_replay_lsn`][pg-wal-functions]: the causal-read primitives the
   token gate is built on.
@@ -176,6 +188,8 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
   `Primary` / `PreferStandby` routing views.
 
 [rails-switching]: https://guides.rubyonrails.org/active_record_multiple_databases.html#activating-automatic-role-switching
+[proxysql-gtid]: https://proxysql.com/blog/proxysql-gtid-causal-reads/
+[vitess-raw]: https://github.com/vitessio/vitess/issues/6843
 [pg-replay-wait]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-RECOVERY-CONTROL
 [pg-wal-functions]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-BACKUP
 [npgsql-multihost]: https://www.npgsql.org/doc/failover-and-load-balancing.html
