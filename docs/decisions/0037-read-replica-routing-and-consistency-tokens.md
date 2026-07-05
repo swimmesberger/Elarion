@@ -36,6 +36,19 @@ supplies routing and causal reads. Geo-distributing the ≥3 nodes means WAN-var
 exactly why the causal LSN token beats a fixed time window (no need to tune a conservative worst-case delay)
 and why the `ReplayWaitTimeout` + fail-open posture below earn their keep.
 
+**How quorum-synchronous replication works, in plain terms.** With plain *asynchronous* replication the primary
+says "done" the instant it has written a change locally, then ships it to the standbys whenever it can — fast,
+but if the primary dies a just-acknowledged write may never have reached anyone and is lost. *Synchronous*
+replication flips that: the primary holds the write as "not finished yet" and only reports success once a
+standby has confirmed it has the change. *Quorum* synchronous is the practical middle setting — "wait for **any
+1 of** my standbys to confirm," not all of them. So with three nodes (one primary, two standbys) every
+acknowledged write is guaranteed to already live on **at least one** standby, yet a single slow or crashed
+standby never stalls writes because the *other* one can satisfy the quorum. That's the failover payoff: if the
+primary dies, whichever standby is promoted, no acknowledged write is lost — a copy was required before
+"success" was ever returned. The catch that drives the rest of this design: you waited for *one* standby, not
+both, so the other may still be a beat behind — and your next read might be load-balanced onto that one. Hence
+the token gate.
+
 **Recommended replication posture: quorum-synchronous.** For a ≥3-node geo cluster the sane deployment default
 is *quorum* synchronous replication — `ANY 1 (…)` in `synchronous_standby_names`, `synchronous_commit =
 remote_apply`, and CloudNativePG `dataDurability: preferred`. Two payoffs: **RPO≈0 on failover** (a committed
@@ -152,7 +165,11 @@ grants store over a primary-bound context for hosts that reject that window.
   marginally longer), which keeps `IUnitOfWork` untouched.
 - **Carry.** The token rides transport headers — `Elarion-Consistency-Token` on response and request — never
   the JSON envelope: schema-invisible, uniform across REST/JSON-RPC/MCP (all HTTP-hosted), and batch-friendly
-  (one header carrying the batch max). Encoded as fixed-width hex so lexicographic order equals LSN order.
+  (one header carrying the batch max). Encoded as fixed-width hex so lexicographic order equals LSN order. The
+  **not-yet-consistent response** (client-retry rung below) is pinned in the same pass: a distinct status the
+  generated client recognizes — HTTP `503` with `Retry-After` plus an `Elarion-Consistency-Behind` header, and
+  the JSON-RPC/MCP envelope equivalent — so the request/response contract for both the token and its retry
+  signal lands together and neither becomes a later breaking change.
 - **Ratchet.** The generated TS client keeps a monotonic max (`token = max(token, response)`) and attaches it
   to every request automatically; the TanStack adapter therefore makes the standard mutate → invalidate →
   refetch cycle causally safe with zero app code. Third-party callers can propagate the header by hand.
@@ -169,10 +186,10 @@ grants store over a primary-bound context for hosts that reject that window.
   **PostgreSQL 17+** — below 17 is unsupported (no pre-17 `pg_last_wal_replay_lsn()` poll path is maintained).
 - **Where the wait happens (adaptive).** A behind replica offers three places to absorb the lag, cheapest
   first: **(a) inline server wait** — `WAIT FOR LSN` blocks the connection up to a *short* budget
-  (`InlineWaitBudget`, e.g. tens of ms); **(b) client retry** — if still behind, the server returns fast with a
-  "not yet consistent, retry after ~N ms" hint (the observed shortfall) and the generated client re-issues with
-  bounded backoff, so the wait costs a cheap round-trip instead of a held DB connection and *never* touches the
-  primary; **(c) primary fallback** — only after the client's retry budget is spent (or `[RequireImmediateConsistency]`
+  (`InlineWaitBudget`, e.g. tens of ms); **(b) client retry** — if still behind, the server returns fast with the
+  not-yet-consistent response pinned under *Carry* (`503` + `Retry-After` + `Elarion-Consistency-Behind`, the
+  observed shortfall) and the generated client re-issues with bounded backoff, so the wait costs a cheap
+  round-trip instead of a held DB connection and *never* touches the primary; **(c) primary fallback** — only after the client's retry budget is spent (or `[RequireImmediateConsistency]`
   demanded it up front). "Depending on how long it takes" *is* this ladder: brief lag is swallowed inline, a
   little more hands the wait back to the client, and only persistent lag pays the primary. The generated client
   makes (b) viable the same way it makes the token ratchet viable — Elarion owns both ends. Default budgets are
@@ -201,8 +218,9 @@ the `IHandlerContextEnricher` seam plus a replication-lag gauge and health-check
 package, so "the replica is 40 s behind" is an alarm, not a bug hunt.
 
 **8. Phasing.** Phase 1: routing + attribute + hygiene list. Phase 2: server-side token capture and gating.
-Phase 3: TS client ratchet + TanStack integration. Phases 2–3 are the payoff; fixing the header, token
-encoding, and rail shapes in this ADR is what keeps them from becoming breaking changes later.
+Phase 3: TS client ratchet + TanStack integration. Phases 2–3 are the payoff; fixing **both wire shapes — the
+`Elarion-Consistency-Token` header and the not-yet-consistent `503`/`Retry-After` response — together**, plus
+the token encoding and rail shapes, in this ADR is what keeps them from becoming breaking changes later.
 
 ## Options considered
 
