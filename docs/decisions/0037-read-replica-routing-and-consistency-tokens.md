@@ -32,8 +32,10 @@ matter, and they deserve different answers:
 2. *Monotonic reads*: successive reads land on differently-lagged replicas and data appears to go backwards.
 3. *Cross-user lag*: A writes, B reads a second later. Inherently eventual under asynchronous replication.
 
-Generic frameworks solve (1) heuristically — Rails' automatic connection switching sends a user's reads to
-the primary for a fixed window (2 s) after any write, tracked in the session. The *causal* mechanism is
+Generic frameworks solve (1) heuristically — Rails' [automatic role switching][rails-switching] sends a
+user's reads to the primary for a fixed window (2 s, `DatabaseSelector::Resolver`) after any write, tracked
+in the session, so "Rails guarantees 'read your own write' … within the `delay` window." The *causal*
+mechanism is
 better: capture the primary WAL position (LSN) of the commit and require the replica to have replayed past it
 before serving the read (MySQL GTID causal reads in ProxySQL, Vitess reads-after-write). PostgreSQL has every
 piece: `pg_current_wal_insert_lsn()` on the primary, `pg_last_wal_replay_lsn()` on a standby, and — 17+ —
@@ -161,3 +163,19 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
 - Open questions deferred to implementation: whether query responses also return an observed-LSN token (full
   monotonic reads rather than write-only ratcheting); the default for the grants pin (currently: documented
   staleness, pin opt-in); SSR token scoping in the TanStack adapter (per-request store vs module-global).
+
+## References
+
+- Rails — [Activating Automatic Role Switching][rails-switching] (Active Record Multiple Databases guide): the
+  `DatabaseSelector::Resolver` 2-second time-window heuristic and the opt-out polarity this ADR adopts (and
+  improves on with causal tokens). Basis for the weak-tier fallback and the replica-by-default decision.
+- PostgreSQL — [`pg_wal_replay_wait`][pg-replay-wait] (17+) and the WAL-position functions
+  [`pg_current_wal_insert_lsn` / `pg_last_wal_replay_lsn`][pg-wal-functions]: the causal-read primitives the
+  token gate is built on.
+- Npgsql — [`TargetSessionAttributes` / multi-host data sources][npgsql-multihost]: the
+  `Primary` / `PreferStandby` routing views.
+
+[rails-switching]: https://guides.rubyonrails.org/active_record_multiple_databases.html#activating-automatic-role-switching
+[pg-replay-wait]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-RECOVERY-CONTROL
+[pg-wal-functions]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-BACKUP
+[npgsql-multihost]: https://www.npgsql.org/doc/failover-and-load-balancing.html
