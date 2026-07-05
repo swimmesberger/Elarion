@@ -59,15 +59,22 @@ jobs:
           path: tests/**/TestResults/*.trx
 
   npm:
-    name: npm
+    name: npm (${{ matrix.package }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
 
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - src/elarion-jsonrpc-client-generator
+          - src/elarion-contributions
+
     defaults:
       run:
-        working-directory: src/elarion-jsonrpc-client-generator
+        working-directory: ${{ matrix.package }}
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -77,7 +84,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: src/elarion-jsonrpc-client-generator/package-lock.json
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
 
       - name: Install
         run: npm ci

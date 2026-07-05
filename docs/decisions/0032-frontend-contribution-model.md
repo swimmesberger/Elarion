@@ -176,3 +176,36 @@ while the core primitives and everything in this ADR up to the slot component st
   deliberately deferred until the sample itself runs Start (sample-first).
 - **Docs:** the [frontend-modules concept doc](../concepts/frontend-modules.mdx) documents the model and the
   import-vs-own boundary.
+
+## Addendum (2026-07-05): revisions from the first production adoptions
+
+Two independent production adoptions ([#71](https://github.com/swimmesberger/Elarion/issues/71) — a Vite
+SPA with no auth; [#72](https://github.com/swimmesberger/Elarion/issues/72) — a TanStack Start SSR app)
+confirmed the kernel's semantics but corrected four calls made above:
+
+- **`when` clauses are now strictly typed, and vocabulary axes are optional.** The original `Hint`
+  escape hatch (`Name | (string & {})`) on `WhenClause` silently voided the "a typo'd permission is a type
+  error" guarantee — any string compiled on every axis, and the fail-closed evaluator turned typos into
+  invisibly hidden UI. Axes are now `Extract<V[axis], string>` (typos and out-of-vocabulary names fail to
+  compile; `Hint` remains only on `ModuleManifest.name`, an identity rather than a lookup), and
+  `Vocabulary`'s axes are optional — a no-auth app binds `{ module: ModuleName }` and every stray
+  permission/flag/role clause is a compile error instead of accepting anything (#71).
+- **The recommended composition splits: manifests by glob, routes registered statically.** The "accepted
+  cost" above understated the glob tradeoff — a glob-composed tree degrades not just `Link to` but
+  `useLoaderData`/`useParams` to untyped fallbacks app-wide (#72), and the workable escape (`AnyRouter`)
+  strips typed routing entirely (#71). Both adopters independently landed on the same split now documented
+  as the happy path: contributions stay zero-edit (glob-discovered manifests; `routes: readonly
+  AnyRoute[]`, plural), route-owning modules cost one typed `addChildren` line — exactly the
+  `ProjectReference` grain this ADR already invoked. Glob-composed routes remain a documented alternative
+  with the full cost stated. The concept doc also gained the production-proven TanStack Start shim
+  (minimal `src/routes/__root.tsx` + code-composed tree), superseding "deferred until the sample runs
+  Start" for documentation purposes.
+- **`TContext` is delivered, not advisory.** Nothing consumed the point's declared slot context, so real
+  hosts smuggled it through a separate React context (#71). Core now exports `ItemOf`/`ContextOf`
+  extractors and the React `<ExtensionSlot>` takes a typed `context` prop handed to the render prop, so
+  the point declaration, the payload signature, and the slot site are compile-bound to one another.
+- **Two on-ramp gaps became framework surface.** `createStaticCapabilities` ships the no-snapshot
+  `CapabilityReader` both adopters hand-rolled (modules/permissions/roles default `"all"`, flags default
+  none — fail-closed), and the registry now throws on two co-visible contributions sharing an id on one
+  point (ids double as render keys; manifests are static data, so collisions fail fast at composition —
+  the up-front-validation argument above, enforced).

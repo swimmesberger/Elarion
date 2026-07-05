@@ -3,5 +3,5 @@
 import type { AppModule } from "@/platform/modules"
 import { invoicingManifest, invoicingRoute } from "./module"
 
-const invoicingModule = { manifest: invoicingManifest, route: invoicingRoute } satisfies AppModule
+const invoicingModule = { manifest: invoicingManifest, routes: [invoicingRoute] } satisfies AppModule
 export default invoicingModule

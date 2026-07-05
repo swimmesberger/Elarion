@@ -27,7 +27,9 @@ export const invoicingManifest = defineModule({
     ]),
     contribute(clientRowActions, [
       {
-        id: "create-invoice",
+        // Module-prefixed id: ids must be unique within a point (the registry enforces it), and a
+        // published point aggregates contributions from any module.
+        id: "invoicing.create-invoice",
         label: "New invoice for this client",
         icon: FilePlus2,
         component: lazy(() =>
