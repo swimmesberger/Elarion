@@ -16,6 +16,16 @@ streaming replica: offload list/dashboard/report reads, gain a warm standby. ADR
 *one* PostgreSQL, so replica support is by definition past the tier: it must arrive as an opt-in seam that
 leaves the single-Postgres happy path byte-identical, never as new complexity on a default.
 
+**Who this is for.** Read-heavy, high-volume, often public applications where the read:write ratio is lopsided
+and the reads are the scaling pressure — the primary handles writes comfortably, but query volume wants to
+fan out across replicas. A secondary benefit is **read-availability**: because reads are served from standbys,
+a primary outage degrades *writes* while reads keep serving (slightly stale) data. This is deliberately **not
+full high availability** — the single primary remains a write single-point-of-failure, and automatic
+promotion/failover is an external ops concern (Patroni, repmgr, a managed service), not something this package
+provides. The multi-host data source *follows* a promotion once it happens (a promoted standby starts
+answering `TargetSessionAttributes=primary`), but it does not perform one. So the honest pitch is "scale reads,
+and survive a primary outage in read-only mode," not "HA."
+
 Two standing invariants constrain the design:
 
 - **Handlers inject the concrete `DbContext`.** There is deliberately no repository or `IAppDbContext`
@@ -124,6 +134,15 @@ grants store over a primary-bound context for hosts that reject that window.
   (same author/semantics, promoted from procedure to command, with a `NO_THROW` status return that turns the
   timeout → primary-fallback branch into a plain result check instead of a caught exception). The floor is
   **PostgreSQL 17+** — below 17 is unsupported (no pre-17 `pg_last_wal_replay_lsn()` poll path is maintained).
+- **Primary-outage posture (fail-open).** The fallback above assumes the primary is reachable — but during a
+  primary outage that is exactly what's gone, and erroring the read would forfeit the read-availability this
+  feature is partly *for*. So a standby read whose gate cannot be satisfied because the primary is
+  unreachable **serves stale from the standby** rather than failing (an `OutageReadConsistency` posture,
+  default fail-open). Read-your-writes cannot hold while the primary is down anyway — the writer's LSN either
+  never committed or never shipped — so the honest degraded contract is "eventual reads keep working, causal
+  reads relax until the primary returns." A caller that would rather 503 than read stale sets the posture to
+  fail-closed (or carries `[RequireImmediateConsistency]`, which is primary-pinned and simply becomes
+  unavailable during the outage — correct for those reads).
 - **Weak tier.** The token is opaque per the strongest-impl rule: the PostgreSQL implementation carries an LSN
   and gates on it. A non-Postgres backend or the in-memory/test tier may instead carry a timestamp and
   implement the Rails/GitLab-style fixed time window, documenting the reduced guarantee — the weak tier exists
@@ -182,8 +201,12 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
 - Testing: the intent rule is pure over rail + metadata (unit tests); the gate sits behind a fakeable seam;
   a Docker-gated Testcontainers primary+standby fixture covers replication end-to-end
   (`[Trait("Category", "Integration")]`, skipped without Docker).
+- **Availability is read-only, not HA.** The win for read-heavy public apps is read scale-out; the bonus is
+  that a primary outage degrades to read-only (reads keep serving stale, writes fail) instead of full downtime.
+  The primary stays a write single-point-of-failure. Automatic failover/promotion is out of scope (external
+  ops: Patroni/repmgr/managed); the package follows a promotion but never triggers one. Do not sell this as HA.
 - Non-goals: a replica is not a read model (no projection/CQRS-view framework), no sharding or multi-primary,
-  no proxy requirement, no S3-style wire compatibility concerns.
+  **no automatic failover/promotion**, no proxy requirement, no S3-style wire compatibility concerns.
 - Open questions deferred to implementation: whether query responses also return an observed-LSN token (full
   monotonic reads rather than write-only ratcheting); the default for the grants pin (currently: documented
   staleness, pin opt-in); SSR token scoping in the TanStack adapter (per-request store vs module-global).
