@@ -57,3 +57,4 @@ designs that are not yet implemented.
 - [ADR-0034: Abstractions holds contracts, not implementations](0034-abstractions-holds-contracts-not-implementations.md)
 - [ADR-0035: Protocol-neutral staged-upload seam (`IStagedUploadStore` supersedes `ITusUploadStore`)](0035-protocol-neutral-staged-upload-seam.md)
 - [ADR-0036: Blob listing is prefix + delimiter virtual hierarchy, not directories](0036-blob-listing-virtual-hierarchy.md)
+- [ADR-0037: Read-replica query routing and read-your-writes consistency tokens — Proposed](0037-read-replica-routing-and-consistency-tokens.md)
