@@ -18,13 +18,23 @@ leaves the single-Postgres happy path byte-identical, never as new complexity on
 
 **Who this is for.** Read-heavy, high-volume, often public applications where the read:write ratio is lopsided
 and the reads are the scaling pressure — the primary handles writes comfortably, but query volume wants to
-fan out across replicas. A secondary benefit is **read-availability**: because reads are served from standbys,
-a primary outage degrades *writes* while reads keep serving (slightly stale) data. This is deliberately **not
-full high availability** — the single primary remains a write single-point-of-failure, and automatic
-promotion/failover is an external ops concern (Patroni, repmgr, a managed service), not something this package
-provides. The multi-host data source *follows* a promotion once it happens (a promoted standby starts
-answering `TargetSessionAttributes=primary`), but it does not perform one. So the honest pitch is "scale reads,
-and survive a primary outage in read-only mode," not "HA."
+fan out across replicas.
+
+**Reference deployment.** The concrete shape of the target tier is a self-hosted Kubernetes cluster (k3s) on
+owned or budget bare-metal (Strato/Hetzner), with PostgreSQL run by the [CloudNativePG][cnpg] operator across
+**≥3 instances in different locations**. That changes the availability story from the raw-`libpq` case: the
+operator *does* provide automatic failover — lease-based leader election promotes a replica when the primary
+fails (`.spec.failoverDelay` debounces transient blips, quorum prevents split-brain), so a primary loss is a
+**brief write interruption during promotion (seconds)**, not an indefinite write outage, and reads keep
+serving from the surviving replicas throughout. It also simplifies routing: CloudNativePG publishes stable
+Services — `<cluster>-rw` (primary, read-write), `<cluster>-ro` (replicas, read-only), `<cluster>-r` (any) —
+so the two data-source views are just two DNS names, with Kubernetes doing replica load-balancing on `-ro` and
+re-pointing `-rw`/`-ro` after a promotion. Elarion still does **not** implement failover; it *consumes* the
+operator's endpoints and follows the promotion. The honest pitch is "scale reads, survive a primary loss as a
+brief write pause plus continuous stale reads" — the operator supplies the HA mechanics, the framework
+supplies routing and causal reads. Geo-distributing the ≥3 nodes means WAN-variable replication lag, which is
+exactly why the causal LSN token beats a fixed time window (no need to tune a conservative worst-case delay)
+and why the `ReplayWaitTimeout` + fail-open posture below earn their keep.
 
 Two standing invariants constrain the design:
 
@@ -82,14 +92,24 @@ like `Elarion.Scheduling.EntityFrameworkCore`; not `IsAotCompatible`-flagged, sa
 Npgsql-backed packages). ADR-0025 design test: the default still covers 10 nodes on one Postgres — this
 package *is* the seam swap for the data tier.
 
-**2. Route below EF, at the connection source, per dispatch scope.** One `NpgsqlMultiHostDataSource` built
-from the multi-host connection string, exposed as two stable views via `WithTargetSession` (`Primary`,
-`PreferStandby`). `AddElarionReadReplicas<T>` owns the context's options wiring through the
-`(sp, options)` `AddDbContext` overload; a scoped `ConnectionIntent` read from the dispatch rail picks the
-view when the scope's options are built. Standby-intent connections set `default_transaction_read_only = on`
-at open, so a query handler that writes fails identically whether the connection landed on a standby or fell
-back to the primary. Incompatible with `AddDbContextPool` (pooling requires singleton options) — nothing in
-Elarion uses it; documented.
+**2. Route below EF, at the connection source, per dispatch scope.** The package resolves two stable
+data-source views — **`Primary`** and **`PreferStandby`** — and picks between them per scope. Two supported
+wirings produce the same pair:
+
+- **CloudNativePG (recommended):** point `Primary` at the `<cluster>-rw` Service and `PreferStandby` at
+  `<cluster>-ro` — two DNS names, Kubernetes load-balances replicas on `-ro` and re-points both Services after
+  a promotion, so the app's config is failover-stable. (`-ro` has no endpoints at zero replicas, e.g. a
+  single-instance dev cluster; the standby view then falls back to `-rw`/`-r`, preserving the "degrades to
+  primary" property.)
+- **Provider-agnostic (bare PostgreSQL / non-k8s):** one `NpgsqlMultiHostDataSource` from a multi-host
+  connection string, split via `WithTargetSession` into `Primary` and `PreferStandby` (the latter degrades to
+  the primary when no standby exists).
+
+`AddElarionReadReplicas<T>` owns the context's options wiring through the `(sp, options)` `AddDbContext`
+overload; a scoped `ConnectionIntent` read from the dispatch rail picks the view when the scope's options are
+built. Standby-intent connections set `default_transaction_read_only = on` at open, so a query handler that
+writes fails identically whether the connection landed on a standby or fell back to the primary. Incompatible
+with `AddDbContextPool` (pooling requires singleton options) — nothing in Elarion uses it; documented.
 
 **3. Intent rule — fail-closed.** A scope gets standby intent iff: it is a **top-level dispatch of an
 `IQuery`**, the handler carries no `[RequireImmediateConsistency]`, and no ambient unit of work exists.
@@ -201,12 +221,17 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
 - Testing: the intent rule is pure over rail + metadata (unit tests); the gate sits behind a fakeable seam;
   a Docker-gated Testcontainers primary+standby fixture covers replication end-to-end
   (`[Trait("Category", "Integration")]`, skipped without Docker).
-- **Availability is read-only, not HA.** The win for read-heavy public apps is read scale-out; the bonus is
-  that a primary outage degrades to read-only (reads keep serving stale, writes fail) instead of full downtime.
-  The primary stays a write single-point-of-failure. Automatic failover/promotion is out of scope (external
-  ops: Patroni/repmgr/managed); the package follows a promotion but never triggers one. Do not sell this as HA.
+- **Availability: the framework routes, the operator does HA.** The framework's own contribution is read
+  scale-out plus continuous stale reads through a primary loss. Write HA — promoting a replica so writes resume
+  — belongs to the deployment: in the reference stack CloudNativePG does it (lease-based election, quorum,
+  `failoverDelay`), turning a primary loss into a seconds-long write pause rather than downtime; on bare
+  PostgreSQL it's Patroni/repmgr/a managed service. Either way Elarion **consumes** the promotion (via the
+  `-rw`/`-ro` Services or `TargetSessionAttributes`) and never performs one. So the combined system can be
+  genuinely HA; the *package* is not what makes it so — don't credit the framework with HA it doesn't
+  implement.
 - Non-goals: a replica is not a read model (no projection/CQRS-view framework), no sharding or multi-primary,
-  **no automatic failover/promotion**, no proxy requirement, no S3-style wire compatibility concerns.
+  **no automatic failover/promotion in the framework** (delegated to the operator, e.g. CloudNativePG), no
+  proxy requirement, no S3-style wire compatibility concerns.
 - Open questions deferred to implementation: whether query responses also return an observed-LSN token (full
   monotonic reads rather than write-only ratcheting); the default for the grants pin (currently: documented
   staleness, pin opt-in); SSR token scoping in the TanStack adapter (per-request store vs module-global).
@@ -239,7 +264,12 @@ Primitives the machinery is built on:
   2025-11): the procedure promoted to a top-level statement with extra wait modes and a `NO_THROW` status
   return; the gate prefers it once the server is 19+.
 - Npgsql — [`TargetSessionAttributes` / multi-host data sources][npgsql-multihost]: the
-  `Primary` / `PreferStandby` routing views.
+  `Primary` / `PreferStandby` routing views (the provider-agnostic wiring).
+
+Reference deployment:
+- [CloudNativePG][cnpg] — the recommended operator: [default Services][cnpg-svc] (`-rw`/`-ro`/`-r`) supply the
+  two routing endpoints, and [automated failover][cnpg-failover] (lease-based election, quorum, `failoverDelay`)
+  supplies the write-HA the framework does not.
 
 [rails-switching]: https://guides.rubyonrails.org/active_record_multiple_databases.html#activating-automatic-role-switching
 [proxysql-gtid]: https://proxysql.com/blog/proxysql-gtid-causal-reads/
@@ -250,4 +280,7 @@ Primitives the machinery is built on:
 [pg-wal-functions]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-BACKUP
 [pg19-waitfor]: https://www.postgresql.org/docs/19/sql-wait-for.html
 [pg19-commit]: https://git.postgresql.org/gitweb/?p=postgresql.git;a=commitdiff;h=447aae13b
+[cnpg]: https://cloudnative-pg.io
+[cnpg-svc]: https://cloudnative-pg.io/docs/devel/service_management/
+[cnpg-failover]: https://cloudnative-pg.io/docs/devel/failover/
 [npgsql-multihost]: https://www.npgsql.org/doc/failover-and-load-balancing.html
