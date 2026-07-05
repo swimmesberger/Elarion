@@ -33,12 +33,12 @@ public sealed class OutboxIntegrationEventBus(
         var payload = JsonSerializer.Serialize(@event, options.SerializerOptions ?? jsonSerialization.Options);
         store.Append(new OutboxMessage
         {
-            Id = Guid.NewGuid(),
+            Id = Guid.CreateVersion7(),
             OccurredOnUtc = timeProvider.GetUtcNow(),
             EventType = typeof(TEvent).FullName
                 ?? throw new InvalidOperationException($"Integration event '{typeof(TEvent)}' has no full name and cannot be persisted."),
             Payload = payload,
-            CorrelationId = Guid.NewGuid(),
+            CorrelationId = Guid.CreateVersion7(),
             // Activity.Id is the W3C traceparent; persisting it keeps the after-commit delivery span
             // in the publishing operation's trace even across a restart or another worker instance.
             TraceParent = Activity.Current?.Id

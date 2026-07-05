@@ -158,7 +158,7 @@ namespace Billing.Application.Modules.Core.Services;
 internal sealed class AuditTrail(BillingDbContext db, ICurrentUser user, TimeProvider clock) : IAuditTrail {
     public async ValueTask RecordAsync(string action, string subjectId, CancellationToken ct = default) {
         db.AuditEntries.Add(new AuditEntry {
-            Id = Guid.NewGuid(), ActorId = user.UserId, Action = action,
+            Id = Guid.CreateVersion7(), ActorId = user.UserId, Action = action,
             SubjectId = subjectId, At = clock.GetUtcNow(),
         });
         await db.SaveChangesAsync(ct);
@@ -258,7 +258,7 @@ public sealed class CreateClient(
         }
 
         var client = new Client {
-            Id = Guid.NewGuid(),
+            Id = Guid.CreateVersion7(),
             OwnerId = user.UserId,
             Number = await numbers.NextAsync(user.UserId, ct),
             Name = command.Name,

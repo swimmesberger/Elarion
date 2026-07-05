@@ -116,6 +116,16 @@ EF Core entity configuration discovery for `[EntityConfiguration]`. See
 | ELEFC001 | Warning | An `[EntityConfiguration]` class implements no `IEntityTypeConfiguration<T>`, so no `DbSet` or configuration is generated for it. | Make the class implement at least one `IEntityTypeConfiguration<T>`, or remove the `[EntityConfiguration]` attribute. |
 | ELEFC002 | Warning | Two `[EntityConfiguration]` entities share a short type name across namespaces and map to the same `DbSet` property name; the colliding `DbSet` is skipped (the first entity by name wins) to avoid a `CS0102` duplicate member. | Rename one of the entities, or place it in a differently-scoped context so the two never map onto the same context. |
 
+## ELID — Identifier conventions
+
+The client-assigned identity doctrine: the application mints entity ids in code, preferably as UUIDv7.
+Reported by the analyzer bundled in the `Elarion` package. See
+[Entity Framework Core → Entity identity](/docs/capabilities/entity-framework#entity-identity).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELID001 | Warning | A `Guid.NewGuid()` invocation creates a random (v4) Guid; a UUIDv7's time-ordered prefix keeps primary-key b-tree inserts append-mostly, and v7 is the better default for nearly every other use too. The rule stays silent on target frameworks without `Guid.CreateVersion7()` (&lt; .NET 9). | Apply the code fix (rewrites to `Guid.CreateVersion7()`). Where the id must be unpredictable — v7 embeds its creation timestamp — keep `Guid.NewGuid()` and suppress with a justification; to make the rule advisory repo-wide, lower its severity in `.editorconfig`. |
+
 ## ELKEY — Keyset pagination
 
 Keyset-definition generation for `[Keyset<TEntity>]`. See [Pagination](/docs/capabilities/pagination).

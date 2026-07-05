@@ -73,6 +73,57 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
+    public void GenerateDbSets_WithEntities_DeclaresClientAssignedGuidKeysScopedToEntityAssemblies()
+    {
+        var source =
+            CreateSource(
+                """
+                namespace Sample.Domain {
+                    public sealed class Company {
+                    }
+
+                    public sealed class Invoice {
+                    }
+                }
+
+                namespace Sample.Infrastructure {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets]
+                    public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class CompanyConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.Company> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.Company> builder) {
+                        }
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class InvoiceConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.Invoice> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.Invoice> builder) {
+                        }
+                    }
+                }
+                """);
+
+        var dbContextSource = GetGeneratedSource(Generate(source), "AppDbContext.DbSets.g.cs");
+
+        // The pass exists, is assembly-scoped by the discovered entities, and only overrides EF's convention
+        // claim (explicit configuration, custom generators, and store defaults win).
+        dbContextSource.Should().Contain("private static void ApplyElarionClientAssignedGuidKeys(ModelBuilder modelBuilder)");
+        dbContextSource.Should().Contain("typeof(global::Sample.Domain.Company).Assembly,");
+        dbContextSource.Should().Contain("typeof(global::Sample.Domain.Invoice).Assembly,");
+        dbContextSource.Should().Contain("GetValueGeneratedConfigurationSource()");
+        dbContextSource.Should().Contain("global::Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.Never");
+
+        // It runs LAST in ConfigureEntities — after the neutral seam — so entities added by hand-written or
+        // feature-generator model configuration are covered too.
+        dbContextSource.IndexOf("OnEntitiesConfigured(modelBuilder);", StringComparison.Ordinal)
+            .Should().BeLessThan(dbContextSource.IndexOf("ApplyElarionClientAssignedGuidKeys(modelBuilder);", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void GenerateDbSets_ConfigurationImplementsMultipleEntities_GeneratesDbSetAndApplyPerEntity()
     {
         var source =
@@ -276,6 +327,9 @@ public sealed class DbContextGeneratorTests
         dbContextSource.Should().Contain("private void ConfigureEntities(ModelBuilder modelBuilder)");
         dbContextSource.Should().Contain("partial void OnEntitiesConfigured(ModelBuilder modelBuilder);");
         dbContextSource.Should().NotContain("NotAConfiguration");
+        // No discovered entities → no domain assemblies to scope to, so the key pass is elided entirely
+        // (an Identity-only context keeps Identity's packaged key generation untouched).
+        dbContextSource.Should().NotContain("ApplyElarionClientAssignedGuidKeys");
     }
 
     [Fact]

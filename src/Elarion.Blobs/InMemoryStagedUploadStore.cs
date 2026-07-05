@@ -20,7 +20,7 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
     public Task<StagedUpload> CreateAsync(StagedUploadCreation creation, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(creation);
 
-        var id = Guid.NewGuid().ToString("N");
+        var id = Guid.CreateVersion7().ToString("N");
         var upload = new StagedUpload {
             Id = id,
             Length = creation.Length,

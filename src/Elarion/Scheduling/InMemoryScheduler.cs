@@ -119,8 +119,8 @@ public sealed class InMemoryScheduler(
         }
 
         var normalizedDueTimeUtc = dueTimeUtc.ToUniversalTime();
-        var jobId = Guid.NewGuid();
-        var runId = Guid.NewGuid();
+        var jobId = Guid.CreateVersion7();
+        var runId = Guid.CreateVersion7();
         var maxAttempts = GetMaxAttempts(jobOptions);
         var item = new ScheduledJobWorkItem(
             runId,
@@ -451,8 +451,8 @@ public sealed class InMemoryScheduler(
 
     private static ScheduledJobWorkItem BuildRecurringOccurrence(ScheduledJobDescriptor descriptor, DateTimeOffset dueTimeUtc) =>
         new(
-            Guid.NewGuid(),
-            Guid.NewGuid(),
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
             descriptor,
             dueTimeUtc,
             null,
@@ -1243,7 +1243,7 @@ public sealed class InMemoryScheduler(
         var delay = CalculateRetryDelay(retry, item.Attempt);
         var nextDue = now + delay;
         var retryItem = item with {
-            RunId = Guid.NewGuid(),
+            RunId = Guid.CreateVersion7(),
             DueTimeUtc = nextDue,
             Attempt = item.Attempt + 1
         };
@@ -1358,8 +1358,8 @@ public sealed class InMemoryScheduler(
         }
 
         Enqueue(item with {
-            RunId = Guid.NewGuid(),
-            JobId = Guid.NewGuid(),
+            RunId = Guid.CreateVersion7(),
+            JobId = Guid.CreateVersion7(),
             DueTimeUtc = nextDue,
             Payload = null,
             IsRuntimeScheduled = false,

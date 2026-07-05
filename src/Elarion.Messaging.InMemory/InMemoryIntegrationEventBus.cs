@@ -17,7 +17,7 @@ internal sealed class InMemoryIntegrationEventBus(EventDispatchScope scope) : II
 
         // The per-publish message id: the in-memory tier delivers each envelope once, but assigning the id keeps
         // the consumer-visible contract (IEventContext.MessageId, the inbox key) identical to the outbox tier.
-        var context = new EventContext<TEvent>(@event, Guid.NewGuid(), EventPlane.Integration, messageId: Guid.NewGuid());
+        var context = new EventContext<TEvent>(@event, Guid.CreateVersion7(), EventPlane.Integration, messageId: Guid.CreateVersion7());
         // Capture the publisher's trace context now — delivery happens after commit on a pump thread
         // where Activity.Current is long gone.
         scope.Add(new EventEnvelope(@event, typeof(TEvent), context, Activity.Current?.Context ?? default));

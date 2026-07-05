@@ -56,7 +56,7 @@ idempotency store + decorator, not a new subsystem.
   `src/Elarion.Messaging.Outbox/OutboxMessage.cs`). **It is NOT exposed to consumers today** —
   `OutboxEventDispatcher.DispatchAsync` has the `OutboxMessage` but builds `OutboxEventContext` from
   `(message, message.CorrelationId)` only. `IEventContext` exposes `CorrelationId`, `Plane`, `Message` — **no message
-  id**. `CorrelationId` is `Guid.NewGuid()` per publish (`OutboxIntegrationEventBus`), so **today** it happens to be
+  id**. `CorrelationId` is a fresh Guid per publish (`OutboxIntegrationEventBus`), so **today** it happens to be
   1:1 with the outbox message and stable across redeliveries — the shipped docs' hand-rolled dedup examples key on it
   for exactly that reason. But it is semantically the *tracing* id: its natural evolution is to **flow** from the
   publishing operation across everything it causes (one command → N events sharing one correlation id), which would

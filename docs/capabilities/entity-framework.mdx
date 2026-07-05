@@ -82,6 +82,77 @@ Only a configuration carrying `[EntityConfiguration]` is discovered. A plain
   **ELEFC001** (Warning, category `Elarion.EntityFrameworkCore`) — nothing is generated for it.
 </Callout>
 
+## Entity identity
+
+**Elarion entities own their ids.** The application mints the id in code at the creation site, the
+database never generates domain keys, and the generated model declares exactly that. Use
+`Guid.CreateVersion7()` — a UUIDv7's time-ordered prefix keeps primary-key b-tree inserts append-mostly,
+where random v4 ids (`Guid.NewGuid()`) scatter across the whole index:
+
+```csharp
+var invoice = new Invoice {
+    Id = Guid.CreateVersion7(),
+    CreatedAt = clock.GetUtcNow(),
+    // …
+};
+db.Invoices.Add(invoice);
+```
+
+Because the id exists *before* `SaveChanges`, handlers can wire foreign keys, soft references, and links
+inside one unit of work — and return the id from a create handler — without a round trip.
+
+Two conscious trade-offs come with v7: the id **embeds its creation instant** (readable wherever the id is
+visible, e.g. in URLs), and ids created within the same millisecond are **mutually unordered** — never sort
+business data by id; that is what `CreatedAt` is for. The **ELID001** analyzer (Warning, in the `Elarion`
+package) flags every `Guid.NewGuid()` and ships a code fix that rewrites it to `Guid.CreateVersion7()`; the
+rare id that must be *unpredictable* is the one legitimate v4 site — suppress the diagnostic there with a
+justification. See [Diagnostics](/docs/reference/diagnostics#elid--identifier-conventions).
+
+### The model declares client-assigned keys
+
+EF Core's default convention claims the opposite of the idiom above: a `Guid` primary key is declared
+*generated* (`ValueGeneratedOnAdd`, client-side), and EF's **insert-vs-update heuristic rides that claim**
+— a set value on a "generated" key means "this row already exists". The mismatch detonates in one specific
+spot, the natural *replace the children* update on a tracked parent:
+
+```csharp
+var tenant = await db.Tenants.Include(t => t.Contacts).SingleAsync(t => t.Id == id, ct);
+tenant.Contacts.Clear();
+tenant.Contacts.Add(new Contact { Id = Guid.CreateVersion7(), … });
+await db.SaveChangesAsync(ct);
+// Under the convention's claim: UPDATE … WHERE id = <never-inserted-guid> → 0 rows
+// → DbUpdateConcurrencyException (dotnet/efcore#35090)
+```
+
+The generated `ConfigureEntities` therefore ends with a client-assigned-keys pass that declares every
+domain entity's single-property `Guid` primary key `ValueGenerated.Never`. It is scoped to the
+**assemblies of the discovered `[EntityConfiguration]` entities**, so navigation-discovered children —
+exactly where the heuristic detonates — are covered, while Identity, DataProtection, and Elarion feature
+tables keep their packaged generation. Deliberate generation choices always win: explicit or
+data-annotation `ValueGenerated` configuration, a custom `HasValueGenerator`, and store defaults
+(`HasDefaultValueSql` and friends) are never overridden. One entity that *should* use EF-generated ids
+opts back in inside its configuration:
+
+```csharp
+builder.Property(e => e.Id).ValueGeneratedOnAdd();   // explicit configuration wins over the pass
+```
+
+The change is **schema-neutral**: adopting it on an existing app produces an *empty* migration whose only
+purpose is re-syncing the model snapshot (EF refuses to `Migrate()` with pending model changes). An app
+that previously left `Id` unset and relied on EF's client-side generator must now set ids in code
+(recommended) or configure `ValueGeneratedOnAdd()` explicitly.
+
+<Callout type="warn">
+  The EF **InMemory provider skips the affected-rows check** (SQLite does not enforce it either), so a
+  write misclassified by the generated-key heuristic stays green in unit tests and only fails on a real
+  database. Cover replace-children behavior with a real-database integration test (e.g. Testcontainers
+  PostgreSQL) — creates always work (`Add` forces the whole graph `Added`), so a create-path test proves
+  nothing here.
+</Callout>
+
+The full rationale — including why database-side `uuidv7()` and an EF `ValueGenerator` were rejected —
+lives in [ADR-0038](../decisions/0038-client-assigned-entity-identity.md).
+
 ## Generating DbSets
 
 Annotate your **concrete partial `DbContext`** with `[GenerateDbSets]`. The generator emits, onto that

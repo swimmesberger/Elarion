@@ -83,7 +83,7 @@ public static class TusEndpointsExtensions {
         var upload = await store.CreateAsync(
             new StagedUploadCreation {
                 Container = options.Container,
-                Name = $"{currentUser.UserId}/{Guid.NewGuid():N}/{fileName}",
+                Name = $"{currentUser.UserId}/{Guid.CreateVersion7():N}/{fileName}",
                 Length = length,
                 ContentType = contentType,
                 Metadata = string.IsNullOrEmpty(rawMetadata) ? null : rawMetadata,

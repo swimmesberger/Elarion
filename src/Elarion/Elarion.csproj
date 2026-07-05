@@ -30,16 +30,21 @@
        references directly. Elarion is that single home: application libraries reference it for the
        runtime, and hosts reference it directly too (they already depend on it transitively via
        Elarion.AspNetCore). Keeping the generator in exactly one package avoids it running twice.
-       ReferenceOutputAssembly=false keeps it off the runtime surface; PrivateAssets=all keeps it from
-       becoming a downstream package dependency. -->
+       The CodeFixes sibling rides along in the same analyzers folder: it is Workspaces-layer (IDE-only),
+       so it must be a separate assembly from the compiler-loaded generator (RS1038).
+       ReferenceOutputAssembly=false keeps both off the runtime surface; PrivateAssets=all keeps them from
+       becoming downstream package dependencies. -->
   <ItemGroup>
     <ProjectReference Include="..\Elarion.Generators\Elarion.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+    <ProjectReference Include="..\Elarion.Generators.CodeFixes\Elarion.Generators.CodeFixes.csproj"
                      ReferenceOutputAssembly="false"
                      PrivateAssets="all" />
   </ItemGroup>
 
   <Target Name="_BundleElarionGenerator" BeforeTargets="_GetPackageFiles">
-    <MSBuild Projects="..\Elarion.Generators\Elarion.Generators.csproj"
+    <MSBuild Projects="..\Elarion.Generators\Elarion.Generators.csproj;..\Elarion.Generators.CodeFixes\Elarion.Generators.CodeFixes.csproj"
              Targets="GetTargetPath">
       <Output TaskParameter="TargetOutputs" ItemName="_ElarionGeneratorAnalyzer" />
     </MSBuild>
