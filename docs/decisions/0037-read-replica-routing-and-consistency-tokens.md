@@ -44,10 +44,12 @@ exposes its write position via `pg_current_wal_insert_lsn()`; a reader can then 
 replayed past it. The classic way ([GitLab database load balancing][gitlab-lb] is the canonical framework
 prior art) is a client-side poll of `pg_last_wal_replay_lsn()` across replicas, with the LSN stashed per user
 (GitLab keeps it in Redis for a 30 s window). **PostgreSQL 17** collapses that whole loop into one server-side
-primitive — `CALL pg_wal_replay_wait(lsn, timeout_ms)` blocks until the standby catches up
-([WAIT FOR LSN write-up][pachot-waitlsn]) — so the package requires **PostgreSQL 17+** and builds on that
-primitive rather than carrying the older poll (PG17 shipped 2024-09; requiring it is cheaper than maintaining
-a second, racier code path forever).
+primitive — `pg_wal_replay_wait(lsn, timeout_ms)` blocks until the standby catches up
+([WAIT FOR LSN technique][pachot-waitlsn]) — and **PostgreSQL 19** promotes it to a proper top-level command,
+[`WAIT FOR LSN`][pg19-waitfor] (same author, added modes, a `NO_THROW` status return; merged to master
+2025-11, on track for the PG19 release expected late 2026). So the package requires **PostgreSQL 17+** and
+builds on that primitive rather than carrying the older poll (PG17 shipped 2024-09; requiring it is cheaper
+than maintaining a second, racier code path forever), selecting the command form once 19 is available.
 What generic frameworks lack is a place to put the token. Elarion owns the commit point (the unit of work), the transport surface, *and* the generated
 TypeScript client, so it can round-trip the token end-to-end with no sticky sessions and no server-side
 per-user state.
@@ -111,11 +113,17 @@ grants store over a primary-bound context for hosts that reject that window.
 - **Ratchet.** The generated TS client keeps a monotonic max (`token = max(token, response)`) and attaches it
   to every request automatically; the TanStack adapter therefore makes the standard mutate → invalidate →
   refetch cycle causally safe with zero app code. Third-party callers can propagate the header by hand.
-- **Enforce.** When a standby-intent scope opens a connection and a token is present, `CALL
-  pg_wal_replay_wait(lsn, timeout)` blocks server-side until the standby has replayed past the LSN; timed out
-  (one `ReplayWaitTimeout` knob) → discard and reopen on the primary view. No token → serve eventual. The
-  package requires **PostgreSQL 17+** — PostgreSQL below 17 is simply not supported (no pre-17
-  `pg_last_wal_replay_lsn()` poll path is maintained).
+- **Enforce.** When a standby-intent scope opens a connection and a token is present, a server-side wait blocks
+  until the standby has replayed past the LSN, then the query proceeds; timed out (one `ReplayWaitTimeout`
+  knob) → discard and reopen on the primary view. No token → serve eventual. The wait runs **as its own
+  top-level statement at connection acquisition, before the query's transaction/snapshot** — not inside it —
+  which is both correct (a held snapshot would block the very replay we wait for; PostgreSQL forbids the call
+  under an active snapshot for exactly that self-deadlock reason) and the reason the gate is a distinct step,
+  not a query wrapper. The primitive is **version-selected within the supported range**: PostgreSQL 17–18 use
+  the `pg_wal_replay_wait(lsn, timeout)` procedure; PostgreSQL 19 uses the successor `WAIT FOR LSN` command
+  (same author/semantics, promoted from procedure to command, with a `NO_THROW` status return that turns the
+  timeout → primary-fallback branch into a plain result check instead of a caught exception). The floor is
+  **PostgreSQL 17+** — below 17 is unsupported (no pre-17 `pg_last_wal_replay_lsn()` poll path is maintained).
 - **Weak tier.** The token is opaque per the strongest-impl rule: the PostgreSQL implementation carries an LSN
   and gates on it. A non-Postgres backend or the in-memory/test tier may instead carry a timestamp and
   implement the Rails/GitLab-style fixed time window, documenting the reduced guarantee — the weak tier exists
@@ -169,7 +177,8 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
   path. PG17 shipped 2024-09. Teams on older PostgreSQL keep the single-Postgres default (this package simply
   isn't for them yet); non-Postgres providers use the weak-tier time window.
 - Costs, only with the package active: one `SELECT pg_current_wal_insert_lsn()` per request that committed a
-  unit of work; one bounded `pg_wal_replay_wait` per gated standby read.
+  unit of work; one bounded server-side replay wait (`pg_wal_replay_wait` / `WAIT FOR LSN`) per gated standby
+  read.
 - Testing: the intent rule is pure over rail + metadata (unit tests); the gate sits behind a fakeable seam;
   a Docker-gated Testcontainers primary+standby fixture covers replication end-to-end
   (`[Trait("Category", "Integration")]`, skipped without Docker).
@@ -201,9 +210,11 @@ Prior art for the consistency model:
   `pg_wal_replay_wait` technique this ADR standardizes on, contrasted with MongoDB causal consistency.
 
 Primitives the machinery is built on:
-- PostgreSQL — [`pg_wal_replay_wait`][pg-replay-wait] (17+) and the WAL-position functions
-  [`pg_current_wal_insert_lsn` / `pg_last_wal_replay_lsn`][pg-wal-functions]: the causal-read primitives the
-  token gate is built on.
+- PostgreSQL 17–18 — [`pg_wal_replay_wait`][pg-replay-wait] procedure, plus the WAL-position function
+  [`pg_current_wal_insert_lsn`][pg-wal-functions]: the causal-read primitives the token gate uses today.
+- PostgreSQL 19 — the [`WAIT FOR LSN`][pg19-waitfor] command ([commit `447aae13b`][pg19-commit], Korotkov,
+  2025-11): the procedure promoted to a top-level statement with extra wait modes and a `NO_THROW` status
+  return; the gate prefers it once the server is 19+.
 - Npgsql — [`TargetSessionAttributes` / multi-host data sources][npgsql-multihost]: the
   `Primary` / `PreferStandby` routing views.
 
@@ -214,4 +225,6 @@ Primitives the machinery is built on:
 [pachot-waitlsn]: https://dev.to/franckpachot/read-your-writes-on-replicas-postgresql-wait-for-lsn-and-mongodb-causal-consistency-4he2
 [pg-replay-wait]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-RECOVERY-CONTROL
 [pg-wal-functions]: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-BACKUP
+[pg19-waitfor]: https://www.postgresql.org/docs/19/sql-wait-for.html
+[pg19-commit]: https://git.postgresql.org/gitweb/?p=postgresql.git;a=commitdiff;h=447aae13b
 [npgsql-multihost]: https://www.npgsql.org/doc/failover-and-load-balancing.html
