@@ -1,7 +1,7 @@
 {
   "name": "@swimmesberger/elarion-contributions",
   "version": "0.1.0",
-  "description": "The Elarion frontend contribution model: typed extension points, declarative module manifests, and capability-gated resolution — framework-free core with React bindings under /react.",
+  "description": "The Elarion frontend contribution model: typed extension points, declarative module manifests, and capability-gated resolution — framework-free core with React bindings under /react and Angular bindings under /angular.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -12,6 +12,10 @@
     "./react": {
       "types": "./dist/react.d.ts",
       "import": "./dist/react.js"
+    },
+    "./angular": {
+      "types": "./dist/angular.d.ts",
+      "import": "./dist/angular.js"
     },
     "./tanstack-router": {
       "types": "./dist/tanstack-router.d.ts",
@@ -46,6 +50,7 @@
     "node": ">=20.11"
   },
   "peerDependencies": {
+    "@angular/core": ">=20",
     "@tanstack/react-router": ">=1",
     "react": ">=18"
   },
@@ -53,13 +58,18 @@
     "react": {
       "optional": true
     },
+    "@angular/core": {
+      "optional": true
+    },
     "@tanstack/react-router": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@angular/core": "^22.0.5",
     "@tanstack/react-router": "^1.170.17",
     "@types/react": "^19.2.17",
+    "rxjs": "^7.8.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }
