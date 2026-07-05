@@ -10,6 +10,11 @@ adding a sidebar item or a cross-module action edits one file in the owning modu
 - **React bindings** (`@swimmesberger/elarion-contributions/react`) — `ContributionProvider`,
   `useContributions`, `<ExtensionSlot>`. React is an optional peer dependency; other view frameworks
   can port the bindings in a page of code.
+- **Angular bindings** (`@swimmesberger/elarion-contributions/angular`) — `provideContributions`,
+  `injectContributions` (returns a `Signal`). Idiomatic for Angular 20–22: signal-first, standalone,
+  no NgModule, no shipped directive — you render with `@for`. `@angular/core` is an optional peer
+  dependency, and the bindings are decorator/template-free so they ship in this one package (no
+  ng-packagr).
 - **TanStack Router guard** (`@swimmesberger/elarion-contributions/tanstack-router`) —
   `redirectUnless(when, to)` + the vocabulary-bound `createRouteGuards<V>()`: a `beforeLoad` guard
   evaluating the same `when` clause as a contribution, so a route and its nav entry can never gate
@@ -30,7 +35,8 @@ This package ships the *machinery* with fixed semantics; your application owns t
 | `defineExtensionPoint`, `defineModule`, `contribute` | Your extension points (`sidebarItems`, …) and their payload types |
 | `evaluateWhen` + the `when` AND semantics | The kit instantiation binding your generated vocabulary |
 | `createContributionRegistry` (filter + deterministic order) | The app shell that renders each slot |
-| `ContributionProvider` / `useContributions` / `<ExtensionSlot>` | Route composition and module discovery (e.g. `import.meta.glob`) |
+| `ContributionProvider` / `useContributions` / `<ExtensionSlot>` (React) | Route composition and module discovery (e.g. `import.meta.glob`) |
+| `provideContributions` / `injectContributions` (Angular) | Slot rendering — an `@for` block, or a small `*extensionSlot` directive you own (see below) |
 | `redirectUnless` route guard (`/tanstack-router`) | Everything else routing — the router's own API |
 
 ## Quick start
@@ -91,6 +97,80 @@ const registry = createContributionRegistry(appModules.map((m) => m.manifest), c
 
 // anywhere in the shell:
 const items = useContributions(sidebarItems)
+```
+
+## Angular
+
+Same kernel, idiomatic Angular surface. `provideContributions` is an environment provider (shaped like
+`provideRouter`); `injectContributions` returns a `Signal` your templates track, so refreshing the
+capability snapshot re-resolves every slot by setting one signal:
+
+```ts
+// main.ts — hand the resolved registry to the injector tree
+import { createContributionRegistry } from "@swimmesberger/elarion-contributions"
+import { provideContributions } from "@swimmesberger/elarion-contributions/angular"
+
+const registry = createContributionRegistry(appModules.map((m) => m.manifest), capabilities)
+bootstrapApplication(App, { providers: [provideContributions(registry)] })
+// snapshot can change at runtime? provideContributions(signal(registry)) and .set(...) on login.
+```
+
+```ts
+// any standalone component — read the point as a signal, render with @for
+import { Component } from "@angular/core"
+import { injectContributions } from "@swimmesberger/elarion-contributions/angular"
+import { sidebarItems } from "../platform/points"
+
+@Component({
+  standalone: true,
+  imports: [RouterLink],
+  template: `@for (item of items(); track item.id) {
+    <a [routerLink]="item.to">{{ item.label }}</a>
+  }`,
+})
+export class Sidebar {
+  readonly items = injectContributions(sidebarItems)
+}
+```
+
+### Want a `*extensionSlot` directive? Build it on top
+
+The package deliberately ships no directive (that would need the Angular compiler / ng-packagr and a second
+build). If you prefer slot sugar over an inline `@for`, a structural directive is a few lines in **your**
+app over `injectContributions` — you own the rendering, the kernel stays framework-agnostic:
+
+```ts
+// app/extension-slot.directive.ts
+import {
+  Directive, effect, inject, Injector, input, runInInjectionContext, TemplateRef, ViewContainerRef,
+} from "@angular/core"
+import { injectContributions } from "@swimmesberger/elarion-contributions/angular"
+import type { Contribution, ExtensionPoint } from "@swimmesberger/elarion-contributions"
+
+@Directive({ selector: "[extensionSlot]", standalone: true })
+export class ExtensionSlotDirective<TItem> {
+  // *extensionSlot="point" — the point token to render.
+  readonly point = input.required<ExtensionPoint<TItem, unknown>>({ alias: "extensionSlot" })
+
+  private readonly tpl = inject<TemplateRef<{ $implicit: Contribution<TItem> }>>(TemplateRef)
+  private readonly vcr = inject(ViewContainerRef)
+  private readonly injector = inject(Injector)
+
+  constructor() {
+    // Re-render when the point changes or the snapshot refreshes; each item is the template's $implicit.
+    // injectContributions() calls inject(), so it must run in an injection context — hence runInInjectionContext.
+    effect(() => {
+      const items = runInInjectionContext(this.injector, () => injectContributions(this.point())())
+      this.vcr.clear()
+      for (const item of items) this.vcr.createEmbeddedView(this.tpl, { $implicit: item })
+    })
+  }
+}
+```
+
+```html
+<!-- usage: item is the contribution, typed by the point -->
+<a *extensionSlot="sidebarItems; let item" [routerLink]="item.to">{{ item.label }}</a>
 ```
 
 ## Semantics (the part that must not drift)

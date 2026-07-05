@@ -48,6 +48,7 @@ Elarion deliberately ships no UI kit and no router integration:
 | The `when` evaluator and its AND semantics | The kit instantiation binding your generated vocabulary |
 | `createContributionRegistry` (filter + deterministic order) | The app shell that renders each slot |
 | `ContributionProvider`, `useContributions`, `<ExtensionSlot>` (`/react`) | Route composition and module discovery (the glob) |
+| `provideContributions`, `injectContributions`→`Signal` (`/angular`) | Slot rendering — an `@for` block, or a self-owned `*extensionSlot` directive |
 | `redirectUnless` route guard (`/tanstack-router`) | Everything else routing — TanStack's own API |
 
 Keeping the machinery imported is what preserves review isolation: the semantics live in the framework and
