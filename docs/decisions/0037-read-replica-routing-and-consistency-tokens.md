@@ -36,6 +36,19 @@ supplies routing and causal reads. Geo-distributing the ≥3 nodes means WAN-var
 exactly why the causal LSN token beats a fixed time window (no need to tune a conservative worst-case delay)
 and why the `ReplayWaitTimeout` + fail-open posture below earn their keep.
 
+**Recommended replication posture: quorum-synchronous.** For a ≥3-node geo cluster the sane deployment default
+is *quorum* synchronous replication — `ANY 1 (…)` in `synchronous_standby_names`, `synchronous_commit =
+remote_apply`, and CloudNativePG `dataDurability: preferred`. Two payoffs: **RPO≈0 on failover** (a committed
+write is on at least one standby, so the seconds-long promotion loses no data), and the causal replay-wait is
+**near-instant** (a quorum member is already *applied*, not just flushed — `remote_apply` is the mode that
+buys that; `on`/flush would still need the replay wait more often). `preferred` self-heals: if standbys are
+unavailable the primary degrades to async and keeps accepting writes (guarantee relaxes for that window)
+rather than blocking — matching the read-availability priority. **Crucial nuance, and the reason sync does not
+replace the token gate:** quorum sync guarantees the write is applied on *some* member of the quorum, never on
+*the particular* replica a given read is load-balanced onto. So per-read read-your-writes still needs the LSN
+gate — synchronous replication makes that gate cheap and gives durability; it is not itself the consistency
+mechanism. (This resolves the earlier flush-vs-replay question: recommend `remote_apply`.)
+
 Two standing invariants constrain the design:
 
 - **Handlers inject the concrete `DbContext`.** There is deliberately no repository or `IAppDbContext`
@@ -154,6 +167,16 @@ grants store over a primary-bound context for hosts that reject that window.
   (same author/semantics, promoted from procedure to command, with a `NO_THROW` status return that turns the
   timeout → primary-fallback branch into a plain result check instead of a caught exception). The floor is
   **PostgreSQL 17+** — below 17 is unsupported (no pre-17 `pg_last_wal_replay_lsn()` poll path is maintained).
+- **Where the wait happens (adaptive).** A behind replica offers three places to absorb the lag, cheapest
+  first: **(a) inline server wait** — `WAIT FOR LSN` blocks the connection up to a *short* budget
+  (`InlineWaitBudget`, e.g. tens of ms); **(b) client retry** — if still behind, the server returns fast with a
+  "not yet consistent, retry after ~N ms" hint (the observed shortfall) and the generated client re-issues with
+  bounded backoff, so the wait costs a cheap round-trip instead of a held DB connection and *never* touches the
+  primary; **(c) primary fallback** — only after the client's retry budget is spent (or `[RequireImmediateConsistency]`
+  demanded it up front). "Depending on how long it takes" *is* this ladder: brief lag is swallowed inline, a
+  little more hands the wait back to the client, and only persistent lag pays the primary. The generated client
+  makes (b) viable the same way it makes the token ratchet viable — Elarion owns both ends. Default budgets are
+  tuned for the sync-replication posture below (lag is normally sub-millisecond, so inline almost always wins).
 - **Primary-outage posture (fail-open).** The fallback above assumes the primary is reachable — but during a
   primary outage that is exactly what's gone, and erroring the read would forfeit the read-availability this
   feature is partly *for*. So a standby read whose gate cannot be satisfied because the primary is
@@ -192,8 +215,12 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
   replicas, and forfeits the install-package-and-reads-scale story. Tokens make opt-out safe, so opt-out wins.
 - **Time-window stickiness as *the* mechanism (Rails).** Guesses lag and needs per-user state; survives only
   as the weak-tier token implementation.
-- **`synchronous_commit = remote_apply`.** Taxes every write for every reader and requires synchronous
-  standbys; apps may set it per-transaction themselves, never an Elarion default.
+- **Synchronous replication *as the consistency mechanism*.** Synchronous-to-*all* `remote_apply` would make
+  every replica readable-consistent, but taxes every write on the slowest standby and stalls writes when one is
+  down — unacceptable. Quorum sync (the recommended posture above) is a *complement*, not a substitute: it buys
+  durability and makes the gate cheap but, applying to only a quorum member, cannot guarantee the specific
+  replica a read lands on — so tokens remain the per-read mechanism. Elarion never sets `synchronous_commit`
+  itself; it's a deployment (CloudNativePG) setting.
 - **Proxy-level routing (pgpool/pgcat/RDS Proxy).** An infrastructure dependency whose statement-level
   heuristics can split a transaction and which can never see handler intent or
   `[RequireImmediateConsistency]`. Compatible if deployed, but not the mechanism.
@@ -232,9 +259,11 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
 - Non-goals: a replica is not a read model (no projection/CQRS-view framework), no sharding or multi-primary,
   **no automatic failover/promotion in the framework** (delegated to the operator, e.g. CloudNativePG), no
   proxy requirement, no S3-style wire compatibility concerns.
-- Open questions deferred to implementation: whether query responses also return an observed-LSN token (full
-  monotonic reads rather than write-only ratcheting); the default for the grants pin (currently: documented
-  staleness, pin opt-in); SSR token scoping in the TanStack adapter (per-request store vs module-global).
+- Open questions deferred to implementation: the default `InlineWaitBudget` / client-retry budget that split
+  inline-wait vs client-retry vs primary-fallback (tuned for the quorum-`remote_apply` posture, but the numbers
+  want real lag data); whether query responses also return an observed-LSN token (full monotonic reads rather
+  than write-only ratcheting); the default for the grants pin (currently: documented staleness, pin opt-in);
+  SSR token scoping in the TanStack adapter (per-request store vs module-global).
 
 ## References
 
