@@ -45,7 +45,9 @@ replayed past it. The classic way ([GitLab database load balancing][gitlab-lb] i
 prior art) is a client-side poll of `pg_last_wal_replay_lsn()` across replicas, with the LSN stashed per user
 (GitLab keeps it in Redis for a 30 s window). **PostgreSQL 17** collapses that whole loop into one server-side
 primitive — `CALL pg_wal_replay_wait(lsn, timeout_ms)` blocks until the standby catches up
-([WAIT FOR LSN write-up][pachot-waitlsn]) — so this ADR targets 17+ and does not implement the pre-17 poll.
+([WAIT FOR LSN write-up][pachot-waitlsn]) — so the package requires **PostgreSQL 17+** and builds on that
+primitive rather than carrying the older poll (PG17 shipped 2024-09; requiring it is cheaper than maintaining
+a second, racier code path forever).
 What generic frameworks lack is a place to put the token. Elarion owns the commit point (the unit of work), the transport surface, *and* the generated
 TypeScript client, so it can round-trip the token end-to-end with no sticky sessions and no server-side
 per-user state.
@@ -111,14 +113,13 @@ grants store over a primary-bound context for hosts that reject that window.
   refetch cycle causally safe with zero app code. Third-party callers can propagate the header by hand.
 - **Enforce.** When a standby-intent scope opens a connection and a token is present, `CALL
   pg_wal_replay_wait(lsn, timeout)` blocks server-side until the standby has replayed past the LSN; timed out
-  (one `ReplayWaitTimeout` knob) → discard and reopen on the primary view. No token → serve eventual. This
-  requires **PostgreSQL 17+**; the ADR deliberately does not carry the pre-17 client-side
-  `pg_last_wal_replay_lsn()` poll (more round-trips, racy under multi-host pooling — see the weak tier).
-- **Weak tier.** The token is opaque per the strongest-impl rule: the PostgreSQL 17+ implementation carries an
-  LSN and gates on it. Everything short of that — a non-Postgres backend, a test tier, or PostgreSQL **below
-  17** — carries a timestamp and implements the Rails/GitLab-style fixed time window instead, documenting the
-  reduced guarantee. So older PostgreSQL still gets intent-based routing and best-effort read-your-writes; only
-  the exact causal gate needs 17.
+  (one `ReplayWaitTimeout` knob) → discard and reopen on the primary view. No token → serve eventual. The
+  package requires **PostgreSQL 17+** — PostgreSQL below 17 is simply not supported (no pre-17
+  `pg_last_wal_replay_lsn()` poll path is maintained).
+- **Weak tier.** The token is opaque per the strongest-impl rule: the PostgreSQL implementation carries an LSN
+  and gates on it. A non-Postgres backend or the in-memory/test tier may instead carry a timestamp and
+  implement the Rails/GitLab-style fixed time window, documenting the reduced guarantee — the weak tier exists
+  for *other providers*, not for old PostgreSQL.
 
 **6. Escape hatches.** Per-call override is a rail item set before dispatch (options-bag style), not another
 attribute — with automatic tokens, caller-dependent consistency needs mostly evaporate.
@@ -163,10 +164,10 @@ encoding, and rail shapes in this ADR is what keeps them from becoming breaking 
 - ADR-0027 composes untouched: Tier-2 invariant checks run in the handler, inside the transaction, on the
   primary — a replica can never participate in a uniqueness or business-rule decision. `[Cacheable]` also
   composes: a cache hit never consults the token gate; caching already declares staleness tolerance.
-- **The causal gate requires PostgreSQL 17+** (for `pg_wal_replay_wait`) — an accepted constraint, not a
-  fallback matrix: rather than maintain a pre-17 client-side replay-poll path, older PostgreSQL is treated as a
-  weak tier (intent routing + time window). PG17 shipped 2024-09; the requirement is scoped to the causal gate,
-  not the whole package. Routing, the attribute, and the hygiene list are version-independent.
+- **The package requires PostgreSQL 17+** (for `pg_wal_replay_wait`) — an accepted, deliberate constraint, not
+  a fallback matrix: PostgreSQL below 17 is unsupported rather than carried on a second, racier replay-poll
+  path. PG17 shipped 2024-09. Teams on older PostgreSQL keep the single-Postgres default (this package simply
+  isn't for them yet); non-Postgres providers use the weak-tier time window.
 - Costs, only with the package active: one `SELECT pg_current_wal_insert_lsn()` per request that committed a
   unit of work; one bounded `pg_wal_replay_wait` per gated standby read.
 - Testing: the intent rule is pure over rail + metadata (unit tests); the gate sits behind a fakeable seam;
