@@ -90,8 +90,13 @@ public sealed class DeviceSessionActor { ... }
 A reentrant activation may start another message while one is awaiting, but turns never run in parallel —
 every segment executes on an exclusive scheduler, so state is still never mutated concurrently. What you
 give up is the "whole method is a critical section" guarantee: state observed across an `await` may have
-been changed by an interleaved message. One caveat: `ConfigureAwait(false)` inside a reentrant actor
-escapes the exclusive scheduler and forfeits the guarantee — don't use it there. There is deliberately no
+been changed by an interleaved message. One caveat: `ConfigureAwait(false)` written **in the actor's own
+methods** escapes the exclusive scheduler for the rest of that method and forfeits the guarantee — don't
+use it in code that touches actor state (public methods and private helpers alike). Libraries you call
+may freely use `ConfigureAwait(false)` internally: context capture is per-method, so your method still
+resumes on the actor's scheduler regardless of what the callee did. What *does* escape is a
+state-mutating delegate handed to a library (`library.Subscribe(x => _state = x)` runs wherever the
+library invokes it). There is deliberately no
 `ReenterAfter`-style callback API: interleaving is declared once at the class, and method bodies stay
 plain `async`/`await` (ADR-0042).
 
