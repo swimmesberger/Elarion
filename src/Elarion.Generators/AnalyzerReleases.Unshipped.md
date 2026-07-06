@@ -15,6 +15,11 @@ ELSG007 | Elarion.Generators | Error | Duplicate scheduled job name
 ELSG008 | Elarion.Generators | Error | Invalid schedule specification
 ELSG009 | Elarion.Generators | Error | Invalid scheduled job concurrency
 ELSG010 | Elarion.Generators | Warning | Scheduled job is not in any module
+ELACT001 | Elarion.Generators | Error | Invalid [Actor] type
+ELACT002 | Elarion.Generators | Error | Invalid actor method
+ELACT003 | Elarion.Generators | Warning | Actor is not in any module
+ELACT004 | Elarion.Generators | Error | Ambiguous actor key
+ELACT005 | Elarion.Generators | Error | Invalid actor constructor
 ELEVT001 | Elarion.Generators | Error | Event consumer must be declared on a [Service] class
 ELEVT002 | Elarion.Generators | Error | Invalid event consumer signature
 ELEVT003 | Elarion.Generators | Warning | Event consumer is not in any module

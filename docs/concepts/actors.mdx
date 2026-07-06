@@ -1,0 +1,191 @@
+---
+title: Actors
+description: In-memory state machines as plain classes — [Actor] gives you keyed, mailbox-protected instances with source-generated typed facades, Orleans-style single-threaded execution, and idle passivation. Single-node by design.
+---
+
+Handlers are stateless: a fresh scope per call, state in the database. Some problems are the opposite
+shape — a **state machine per order, session, or device** whose in-memory state must survive across calls
+and be mutated **sequentially**. Hand-rolling that means a `Channel` plus a reader loop, or locks over a
+singleton, with the actual state machine buried under concurrency plumbing.
+
+`Elarion.Actors` makes that shape declarative: a plain class marked `[Actor]` becomes a keyed,
+mailbox-protected instance, and a source-generated **typed facade** is how everyone calls it. No base
+class, no message types, no `Receive` method, no locks — the mailbox guarantees one message at a time, so
+methods mutate fields like single-threaded code.
+
+```csharp
+[Actor]
+public sealed class OrderFulfillmentActor(IActorContext<Guid> context, IEmailSender email)
+    : IActorLifecycle {
+    private FulfillmentState _state = FulfillmentState.Draft;   // plain fields, never locked
+
+    public ValueTask OnActivateAsync(CancellationToken ct) => LoadAsync(context.Key, ct);
+
+    public async Task<Result<Unit>> Ship(ShipmentInfo info, CancellationToken ct) {
+        if (_state != FulfillmentState.Packed) {
+            return AppError.Conflict($"Cannot ship in state {_state}.");
+        }
+
+        await email.SendShippedAsync(context.Key, ct);
+        _state = FulfillmentState.Shipped;
+        return Result.Success();
+    }
+
+    public Task<FulfillmentState> CurrentState() => Task.FromResult(_state);
+}
+```
+
+The generator emits `IOrderFulfillment` (the class name minus the `Actor` suffix, prefixed `I`) mirroring
+the public async methods. Callers resolve it through `IActorSystem`:
+
+```csharp
+public sealed class ShipOrderHandler(IActorSystem actors)
+    : IHandler<ShipOrder, Result<Unit>> {
+    public async ValueTask<Result<Unit>> HandleAsync(ShipOrder request, CancellationToken ct) {
+        var order = actors.Get<IOrderFulfillment>(request.OrderId);
+        return await order.Ship(request.Info, ct);
+    }
+}
+```
+
+A facade is a cheap, always-valid **address**, not a live handle: `Get` never activates anything, and the
+facade stays valid across passivation. A rename of an actor method is a compile error at every call site.
+
+## Keyed and singleton actors
+
+Declaring a constructor parameter `IActorContext<TKey>` makes an actor **keyed** (virtual, Orleans grain
+style): one activation per distinct key, created lazily by the first message, passivated after an idle
+timeout (default 5 minutes — state is dropped, the next message re-activates). `string`, `Guid`, `long`,
+and `int` keys have dedicated `Get` overloads; any other `notnull` key works via `GetByKey<TFacade, TKey>`.
+
+Without a key declaration the actor is a **process singleton**, resolved with `Get<TFacade>()`.
+
+Optional lifecycle hooks come from `IActorLifecycle`: `OnActivateAsync` runs before the first message
+(load state), `OnDeactivateAsync` after the mailbox drains on passivation or shutdown (flush state). Both
+run under the single-threaded guarantee. Anything that must survive passivation belongs in storage loaded
+and flushed by these hooks — in-memory actor state is deliberately ephemeral.
+
+Every activation owns a **DI scope**: constructor parameters beyond the context resolve from it via
+generated `GetRequiredService` calls, and the scope is disposed on passivation.
+
+## Execution model: single-threaded, non-reentrant by default
+
+One message runs start-to-finish before the next; an `await` inside a method holds the mailbox. Every
+method body is a critical section — the model that feels like normal C#.
+
+The corollary is the classic virtual-actor deadlock: if actor A awaits actor B while B awaits A, neither
+mailbox drains. Every facade call therefore carries a **call timeout** (default 30 seconds) that fails the
+call with a `TimeoutException` naming the actor and method — a cycle surfaces as a diagnosable error, not
+a hang. Treat actor→actor request cycles as a design smell; prefer events or short, acyclic calls.
+
+For actors that must stay responsive while a message awaits I/O — or that legitimately sit in a call
+cycle — opt into Orleans-style **turn-based interleaving** with `[Reentrant]`:
+
+```csharp
+[Actor]
+[Reentrant]
+public sealed class DeviceSessionActor { ... }
+```
+
+A reentrant activation may start another message while one is awaiting, but turns never run in parallel —
+every segment executes on an exclusive scheduler, so state is still never mutated concurrently. What you
+give up is the "whole method is a critical section" guarantee: state observed across an `await` may have
+been changed by an interleaved message. One caveat: `ConfigureAwait(false)` inside a reentrant actor
+escapes the exclusive scheduler and forfeits the guarantee — don't use it there. There is deliberately no
+`ReenterAfter`-style callback API: interleaving is declared once at the class, and method bodies stay
+plain `async`/`await` (ADR-0042).
+
+## Mailbox, cancellation, shutdown
+
+Mailboxes are unbounded by default. `[Actor(MailboxCapacity = 1000)]` bounds one; a full mailbox either
+makes callers wait asynchronously (`ActorMailboxFullMode.Wait`, default) or fails fast with
+`ActorMailboxFullException` (`Fail`). There are no silent drop modes — every facade call is request/reply,
+so a dropped call would strand its awaiting caller.
+
+The `CancellationToken` a caller passes cancels a queued call before it runs and flows into the executing
+method, linked with the call timeout and the activation's stopping token (`IActorContext.Stopping`). On
+host shutdown the runtime drains every mailbox, cancels in-flight work once the host's shutdown deadline
+fires, and runs `OnDeactivateAsync` per live activation.
+
+Attribute knobs: `Name`, `KeyType`, `MailboxCapacity`, `MailboxFullMode`, `IdleTimeoutSeconds`
+(`-1` = never passivate), `CallTimeoutSeconds` (`-1` = no timeout).
+
+## Wiring
+
+Actors follow the standard module flow. Reference `Elarion.Actors` (runtime) and `Elarion` (the bundled
+generator), and opt the assembly in:
+
+```csharp
+[assembly: GenerateActors]   // or the umbrella [assembly: UseElarion]
+```
+
+Under `[GenerateModuleBootstrapper]` nothing else is needed: each module's actors register through the
+generated `Add{Module}Actors`, called inside the module's feature gate — a disabled module's actors
+disappear like its handlers. Without the bootstrapper, call `services.Add{Module}Actors()` yourself (it
+also wires the actor system). An actor outside every module warns (`ELACT003`) and is not registered.
+
+Actors are module-internal like any implementation type: expose one to another module only through a
+[`[ModuleContract]`](cross-module-communication.mdx). They intentionally have **no decorator pipeline** —
+no `[RequirePermission]`, `[FeatureGate]`, or validation. An actor is internal machinery invoked by an
+already-gated handler; the handler remains the transport-facing gate.
+
+## Observability
+
+Register the `Elarion.Actors` ActivitySource and Meter with your OpenTelemetry providers. Each facade call
+emits a caller-side `actor.call` span that parents the actor-side `actor.process` span, so a trace crosses
+the mailbox like an RPC hop; metrics cover message count/duration, queue wait, and activation counts.
+Exceptions are never wrapped: the caller's `await` rethrows the actor-side exception with its original
+stack trace, followed by the caller's own frames.
+
+## Routing and worker pools (the Akka router patterns)
+
+Akka.NET ships router actors — round-robin pools, consistent-hash groups, broadcast — as dedicated
+machinery. In the virtual-actor model those collapse into **keying**: the actor identity *is* the
+routing function, so there is no router surface to configure. The classic patterns translate
+directly:
+
+```csharp
+// "Consistent hashing" — address by identity. Every message for this device lands on the same
+// activation, serialized. This is the pattern you want 95% of the time.
+var twin = actors.Get<IDeviceTwin>(deviceId);
+
+// Partition-affine worker pool — bound parallelism to K workers while keeping per-entity ordering:
+// all work for one entity hashes to the same worker, different entities spread across the pool.
+private const int PoolSize = 8;
+private IImportWorker WorkerFor(Guid entityId) =>
+    actors.Get<IImportWorker>((int)((uint)entityId.GetHashCode() % PoolSize));
+
+// Round-robin pool — spread independent jobs across K workers when no per-entity ordering matters.
+private int _next;
+private IImportWorker NextWorker() =>
+    actors.Get<IImportWorker>((int)((uint)Interlocked.Increment(ref _next) % PoolSize));
+
+// "Broadcast" — fan a call out to a known key set.
+await Task.WhenAll(shardIds.Select(shard => actors.Get<IShard>(shard).Refresh(ct).AsTask()));
+```
+
+Prefer the **partition-affine** form over round-robin: if ordering per entity didn't matter, the
+work probably shouldn't be in an actor at all — purely stateless parallelism is a handler (or a
+`[Service]`) plus `Task.WhenAll`/`Parallel.ForEachAsync`, where the scheduler can use every core
+without mailbox serialization. A worker-pool actor earns its place when each partition needs
+serialized processing or carries working state (batch buffers, connection handles, rate windows).
+
+Two sizing notes: pool keys are ordinary actor keys, so idle workers passivate like any activation
+(a fixed pool "re-materializes" on demand); and a bounded `MailboxCapacity` on the worker gives you
+per-partition backpressure for free.
+
+## When (not) to use an actor
+
+Reach for an actor only when **in-memory state must survive across calls and be mutated sequentially** —
+live session/connection state, per-entity workflow steps between persisted transitions, rate/flow control
+per key, device twins. Otherwise stay with the default building blocks: request/response work is a
+[handler](handlers.mdx), shared logic is a `[Service]`, fan-out is an [event](../capabilities/events/index.mdx),
+periodic work is a scheduled job. Stateless parallelism never belongs in actors — that's handlers plus
+`Task.WhenAll`. For bounded, ordered parallelism see [Routing and worker pools](#routing-and-worker-pools-the-akka-router-patterns).
+
+**Actors are single-node.** In-memory activations on three nodes are three independent states — fine for
+node-local concerns (per-node coordination, cache-like state), wrong for cluster-wide authoritative state.
+Elarion deliberately ships no clustering: if actor state must be authoritative across nodes, replace the
+runtime with a dedicated engine (Orleans, Akka.NET, Proto.Actor) rather than growing this one — the same
+replace-the-seam philosophy as the scheduler and cache defaults (ADR-0025, ADR-0042). The generated facade
+interfaces are the migration seam: they are shape-compatible with Orleans grain interfaces.

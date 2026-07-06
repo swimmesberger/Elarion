@@ -9,6 +9,23 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **In-memory actors — `Elarion.Actors` (ADR-0042).** Plain classes marked `[Actor]` become keyed,
+  mailbox-protected state machines with **source-generated typed facades**: public async methods are the
+  message surface, a generated `I{Name}` facade enqueues each call as a statically-typed work item (no
+  reflection, no message envelopes, AOT-clean), and `IActorSystem.Get<IOrderFulfillment>(orderId)` addresses
+  the virtual activation (created on first message, passivated after an idle timeout, per-activation DI
+  scope; optional `IActorLifecycle` load/flush hooks). Execution is Orleans-style single-threaded:
+  non-reentrant by default, with class-level `[Reentrant]` opting into turn-based interleaving (turns
+  interleave at awaits, never run in parallel — encoded in a dedicated test suite); every call carries a
+  timeout backstop (default 30 s) so actor→actor call cycles fail diagnosably instead of hanging. Exceptions
+  cross the mailbox unwrapped with their actor-side stack traces; `Elarion.Actors` ActivitySource/Meter spans
+  make a call look like an RPC hop. Actors are module-scoped like handlers (`AddActors` hook in
+  `ConfigureDefaultServices`; `[assembly: GenerateActors]`/`[UseElarion]`; diagnostics `ELACT001`–`ELACT005`)
+  and deliberately **single-node** — clustering is a non-goal (swap to Orleans/Akka.NET/Proto.Actor per the
+  ADR-0025 seam philosophy). The call path is benchmarked (`tests/Elarion.Benchmarks`, BenchmarkDotNet) and
+  optimized step-by-step (pooled per-call cancellation, sync-enqueue fast path, pass-through facades:
+  ~448 B / ~1.8M msg/s per mailbox pipelined). See [ADR-0042](docs/decisions/0042-in-memory-actors.md) and
+  the [Actors concept doc](docs/concepts/actors.mdx).
 - **File payloads — the in-memory `ElarionFile` tier and the staged-blob tier (ADR-0039).** A handler declares
   "I receive/return a file" once and every transport carries it the way that suits it best. **`ElarionFile`**
   (in `Elarion.Abstractions`, next to `Result<T>`) is the **small-file tier** — deliberately bytes-only

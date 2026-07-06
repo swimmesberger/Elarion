@@ -32,6 +32,7 @@ ADRs for mechanics. Trigger diagnostics are in parentheses.
 - `Elarion.Caching` — HybridCache-backed `IHandlerCache` default (`AddElarionHandlerCaching`); pulls `M.E.Caching.Hybrid`. The `[Cacheable]`/`[CacheInvalidate]` seam stays in Abstractions (ADR-0004/0017).
 - `Elarion.Caching.PostgreSql` — recommended **L2**: a Postgres `UNLOGGED` table behind HybridCache (`AddElarionPostgreSqlHandlerCaching`, `UseWAL=false`), reusing your Postgres instead of Redis (ADR-0020). Not `IsAotCompatible`.
 - `Elarion.Resilience` — Polly-backed `IResiliencePipelineRunner` default (`AddElarionResilience`); pulls `M.E.Resilience`. Catalog/metadata stay in Abstractions; `ResilienceDecorator` lives in `Elarion` core (ADR-0017/0034).
+- `Elarion.Actors` — in-memory actor runtime (ADR-0042): plain `[Actor]` classes become keyed, mailbox-protected state machines with **source-generated typed facades** (`IActorSystem.Get<IOrderFulfillment>(orderId)` — facade = class name minus `Actor`, prefixed `I`). Keyed via an `IActorContext<TKey>` ctor param (else singleton); virtual activation + idle passivation (default 5 min) with `IActorLifecycle` load/flush hooks; per-activation DI scope; non-reentrant default + `[Reentrant]` Orleans-style turn interleaving (no `ReenterAfter` — rejected); per-call timeout (default 30 s) is the deadlock backstop; backpressure = Wait/Fail only (no drops — calls are request/reply); no decorator pipeline (handlers stay the gate; actors are module-internal, ELMOD002). `ActorRegistrationGenerator` in `Elarion.Generators` (`[GenerateActors]`/`[UseElarion]`; per-module `Add{Module}Actors` via the `AddActors` hook; ELACT001–005). Telemetry source/meter `Elarion.Actors`; exceptions cross the mailbox unwrapped with actor-side stack traces. **Single-node by design** — need a cluster: swap to Orleans/Akka.NET/Proto.Actor, never grow this default (ADR-0025).
 - `Elarion.Validation` — `M.E.Validation`-backed `IRequestValidator` default (`AddElarionValidation`, also calls `AddElarionJson`); runtime base only (`ExcludeAssets="analyzers"` — Elarion's `ValidationResolverGenerator` supplies metadata). App references it to enforce validation + silence `ELVAL002`. `IsAotCompatible` (ADR-0027).
 - `Elarion.Scheduling.EntityFrameworkCore` — cross-instance scheduler coordination over EF/Postgres: per-occurrence claim rows → exactly one node runs each recurring occurrence (`AddElarionSchedulerEntityFrameworkCore<T>`; `UseElarionSchedulerClaims`/`[GenerateElarionSchedulerClaims]`, ELSCH001). `[ScheduledJob(Placement=JobPlacement.EveryNode)]` opts out. Fail-closed (ADR-0025).
 - `Elarion.FeatureFlags.OpenFeature` — OpenFeature-backed `IFeatureFlagService` default (`AddElarionOpenFeature`, bring your provider) + `ICurrentUser`→`EvaluationContext` mapping, no `HttpContext`.
@@ -316,11 +317,11 @@ carrying both is rejected. Pub/sub-only — a non-`Unit` `Result<T>` is request/
 
 ## Module default services
 
-Under `[GenerateModuleBootstrapper]`, each module's discovered handlers/services/validators/jobs/consumers are registered +
+Under `[GenerateModuleBootstrapper]`, each module's discovered handlers/services/validators/jobs/consumers/actors are registered +
 gated automatically via a cross-generator partial-method aggregation:
 
 - `ModuleDefaultServicesGenerator` emits, per `[AppModule]`, a `{ModuleType}ElarionModuleServices.ConfigureDefaultServices`
-  calling eight `static partial void` hooks (`AddHandlers`/`AddServices`/`AddValidators`/`AddScheduledJobs`/`AddEventConsumers`/`AddAuthorizationPolicies`/`AddPermissions`/`AddModuleApi`).
+  calling the `static partial void` hooks (`AddHandlers`/`AddServices`/`AddVariantServices`/`AddValidators`/`AddScheduledJobs`/`AddEventConsumers`/`AddAuthorizationPolicies`/`AddPermissions`/`AddModuleApi`/`AddActors`).
   Each category generator contributes a filler; unimplemented hooks elide to no-ops.
 - `AddElarion` calls `{Module}.ConfigureDefaultServices(services)` gated by `IsModuleEnabled`, **before** the module's optional
   hand-written `ConfigureServices` (now reserved for non-generated registrations). For a referenced module predating the
@@ -413,6 +414,7 @@ dotnet restore Elarion.slnx
 dotnet build Elarion.slnx --configuration Release
 dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release
 dotnet pack Elarion.slnx --configuration Release --no-build
+dotnet run --project tests/Elarion.Benchmarks -c Release    # hot-path microbenchmarks (gate for ADR-0042 optimizations)
 
 cd src/elarion-jsonrpc-client-generator
 npm ci && npm run build && npm test && npm pack --dry-run
