@@ -16,11 +16,34 @@ pretending the browser is a reliable message consumer. Elarion's model for this 
   payload; the projection from the internal integration event is one hand-written line, which is exactly
   where you review what leaks.
 
-Two packages ship the machinery — `Elarion.ClientEvents` (topic catalog, publisher, in-process fan-out) and
-`Elarion.ClientEvents.AspNetCore` (the SSE endpoint) — so what you write is only the policy: the contract,
-the topic declaration, the projection, and the resource authorization. The command handler that causes the
-change is **not** on the list — it publishes its integration event exactly as before and never learns the
-client tier exists.
+Three packages ship the machinery — `Elarion.ClientEvents` (topic catalog, publisher, in-process fan-out),
+`Elarion.ClientEvents.AspNetCore` (the SSE endpoint), and `Elarion.ClientEvents.PostgreSql` (cross-node
+fan-out, when you run more than one node) — so what you write is only the policy: the contract, the topic
+declaration, the projection, and the resource authorization. The command handler that causes the change is
+**not** on the list — it publishes its integration event exactly as before and never learns the client tier
+exists.
+
+## When to reach for it
+
+Client events are one tier in the event story; pick by *who must see the fact and how reliably*:
+
+| You need | Reach for |
+| --- | --- |
+| Browsers to refresh within ~a second of a committed change | **Client events** (this page) |
+| A server-side reaction that must not be missed (email, billing, sync) | An [integration event](/docs/capabilities/events) — at-least-once, inboxed |
+| A change that must commit atomically with the command | A [domain event](/docs/capabilities/events) — same transaction |
+| Live progress of one long-running command | Client events, [the ephemeral tier](#progress-the-ephemeral-tier) |
+| A dashboard where seconds of staleness are fine | Polling a [keyset query](/docs/capabilities/pagination) — less machinery |
+| Config/settings values that reload live | [`ISettingsManager.Watch`](/docs/concepts/settings) — not an event topic |
+
+The line to hold: a client event may be **dropped** (closed laptop, full buffer, reconnect gap) and the
+system must stay correct because the client re-queries. The moment a fact must not be missed, it belongs on
+the integration plane consumed server-side — push the *consequence* to browsers as a hint afterwards.
+
+**The happy path**, end to end: declare an `IClientEvent` contract in the module (topic registration is
+generated), project the integration event onto it in a `[ConsumeEvent]` method, map
+`MapElarionClientEvents("/events")`, and let the generated TypeScript client drive cache invalidation.
+Running more than one node? Add the one `AddElarionPostgreSqlClientEvents(...)` line. Each step is below.
 
 ## 1. Declare the wire contract
 
@@ -155,14 +178,38 @@ await clientEvents.PublishAsync(
 If the command later rolls back, the progress events were still sent — fine for status, wrong for facts.
 The guarantee is stated by where the call sits, mirroring how the two event planes state theirs.
 
+## Going multi-node
+
+The in-process broadcaster is single-node correct: an event published on node A does not reach a browser
+connected to node B. The moment you run a second node, add `Elarion.ClientEvents.PostgreSql` — cross-node
+fan-out over PostgreSQL `LISTEN/NOTIFY`, on the database the application already runs (no broker, no Redis):
+
+```csharp
+builder.Services.AddElarionPostgreSqlClientEvents(connectionString);
+```
+
+Every publish becomes a `pg_notify` on one channel; every node holds a dedicated `LISTEN` connection and
+hands received envelopes to its own connected browsers. The publishing node receives its own events through
+the same loop-back, so there is exactly one delivery path to reason about. Everything else — topics,
+projections, the endpoint, the TypeScript client — is unchanged.
+
+The at-most-once contract does the heavy lifting on failures: PostgreSQL does not queue notifications for
+absent listeners, so after a dropped listen connection the node delivers `elarion.connected` to **every**
+subscriber it holds — the generated client's `$client.onConnected` fires and the UI re-queries, converging
+instead of trusting a stream with a hole in it. Payloads must fit NOTIFY's ~8 KB cap; light events (ids and
+refs) never get close, and an oversized publish fails loud on the publishing node rather than delivering on
+some nodes and not others.
+
+This default follows the [scale positioning](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0025-distributed-scheduler-coordination.md)
+of every Elarion default: correct for ~1–10 nodes on the one PostgreSQL. Past that tier, replace the
+`IClientEventBroadcaster` seam with a dedicated backend (Redis pub/sub, a broker) — the seam is one method.
+
 ## Limits
 
-- **Single node by default.** The in-process broadcaster is single-node correct; an event published on node
-  A does not reach a browser connected to node B. Use sticky sessions, or replace the
-  `IClientEventBroadcaster` seam — a PostgreSQL `LISTEN/NOTIFY` backend is the planned sibling package (see
-  [ADR-0043](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0043-client-events.md)).
 - **Scope-blind topic handlers.** The wire frame carries the topic, not the scope — handlers on the same
   topic see every event the connection's subscriptions match. Subscribe distinct concerns as distinct topics.
+- **At-most-once, always.** No transport tier changes this: buffers drop oldest under pressure, reconnects
+  lose the gap. Design every consumer as "hint received → re-query", and it is impossible to be wrong.
 - **The humble alternative.** For dashboards where seconds of staleness are fine, polling a
   [keyset-paginated query](/docs/capabilities/pagination) on an interval is less machinery and often enough
   at this tier.

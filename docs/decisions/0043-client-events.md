@@ -50,7 +50,7 @@ wire contract** — the client-side analogue of `[ModuleContract]`.
 
 **Push is a hint, not a source of truth.** Client events are light (ids/refs, not state); the client
 converges by re-running normal query handlers, which carry the real `[Require*]` gates. Delivery is
-at-most-once by definition; the transport signals "you may have missed things" (`elarion.resync`) after any
+at-most-once by definition; the transport signals "you may have missed things" (`elarion.connected`) after any
 gap and the client re-queries. This single rule eliminates durable replay, per-client cursors, and ordering
 machinery from the design.
 
@@ -109,20 +109,25 @@ two planes explain themselves.
   can't). Plain HTTP — works through every proxy/auth setup the app already has, browser-native reconnect,
   no new wire protocol. Payloads are canonical JSON written as-is (`SseItem<string>` — serialized once at
   publish); the SSE event name is the topic name. Control signals are named `elarion.*` events:
-  `elarion.connected` when the stream opens (every occurrence means "you may have missed events" — re-query,
-  the same contract as the future `elarion.resync`) and `elarion.keepAlive` on idle so proxies keep the
-  connection open.
+  `elarion.connected` when the stream opens — every occurrence means "you may have missed events" — re-query;
+  a cross-node backend re-delivers the same event after a delivery gap, so there is one re-query contract,
+  not a separate resync event — and `elarion.keepAlive` on idle so proxies keep the connection open. The
+  names are the public `ClientEventControlEvents` constants.
 - **Subscription** = (topic, scope), passed as query parameters on the SSE `GET` (EventSource cannot POST);
   changing the subscription set reconnects. Server-side filtered: `User` scope is always derived from
   `ICurrentUser` — a client can never request another user's scope. `Resource` scope goes through an
   `IClientEventSubscriptionAuthorizer` seam and is **fail-closed**: no authorizer registered → resource
   subscriptions denied. Module-gated: a disabled module's topics do not exist.
 - **Cross-node fan-out** (`Elarion.ClientEvents.PostgreSql`): LISTEN/NOTIFY, copying the ADR-0024 listener —
-  one dedicated connection per node, commit-gated `pg_notify`, exponential-backoff reconnect. After a
-  reconnect the node pushes `elarion.resync` to its connected clients — the client-facing analogue of the
-  settings listener's `FireAll()` — because PostgreSQL does not queue notifications for absent listeners.
-  Light events keep payloads under the ~8 KB NOTIFY cap by construction. Past ~10 nodes: replace the
-  broadcaster seam (Redis/broker), never grow the default.
+  one dedicated connection per node, `pg_notify` on a pooled connection per publish (no transaction gating
+  needed: the recommended producer already runs after commit, and the direct-publish tier is pre-commit by
+  design), exponential-backoff reconnect. The publishing node receives its own events through the same
+  loop-back, keeping one delivery path. After a reconnect the node delivers `elarion.connected` to every
+  local subscriber (`IClientEventLocalDelivery.DeliverToAll`) — the client-facing analogue of the settings
+  listener's `FireAll()` — because PostgreSQL does not queue notifications for absent listeners.
+  Light events keep payloads under the ~8 KB NOTIFY cap by construction; an oversized publish is dropped
+  loudly on the publishing node instead of delivering on some nodes and not others. Past ~10 nodes: replace
+  the broadcaster seam (Redis/broker), never grow the default.
 - **In-process default** (`Elarion.ClientEvents`): subscription registry + broadcaster, single-node correct
   with zero configuration.
 
@@ -192,9 +197,9 @@ browser. No durable replay or ordering guarantees. No presence, collaboration, o
 generated integration-event forwarder. The S3-style rule applies: these are where realtime frameworks go to
 bloat, and each is either app-owned or a future seam replacement.
 
-## Recommended pattern today (before the packages ship)
+## Composing the pattern by hand (without the packages)
 
-Every semantic piece exists in shipped seams; single-node apps can compose the pattern by hand: a
+Every semantic piece also exists in independently shipped seams; a single-node app can compose the pattern by hand: a
 method-form `[ConsumeEvent]` on a `[Service]` (post-commit for free) pushing into per-subscriber
 `System.Threading.Channels`, drained by a hand-written SSE endpoint mapped through the module's endpoint
 hooks or `[ModuleEndpoints]` (ADR-0040). Multi-node today: sticky sessions, or the app copies the ADR-0024

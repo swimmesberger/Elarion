@@ -65,6 +65,18 @@ Result validation is enabled by default through `rpcResultSchemas`. Use `transfo
 
 Params validation is also enabled by default through `rpcParamsSchemas`: single calls and batch items are checked against the exported schema's constraints (lengths, ranges, patterns, formats) before the request is sent, and a failure throws `RpcParamsValidationError` locally — naming the method, with the underlying Zod error as `cause` — so tier-1 contract violations never reach the wire. Set `validateParams: false` to opt out.
 
+## Client-event subscriptions
+
+When the schema carries an `events` block (the host registers Elarion client-event topics, ADR-0043), the generator additionally emits `events-client.ts`: `createElarionEvents(...)` multiplexes topic-typed subscriptions over one `EventSource`, validates incoming payloads with the generated Zod schemas (`rpcEventPayloadSchemas`), and exposes `$client.onConnected(...)` — fired on connect and every reconnect — as the "you may have missed events, re-query" signal. Event-free schemas produce byte-identical output with no events file.
+
+```ts
+import { createElarionEvents } from './generated/events-client'
+
+const events = createElarionEvents({ url: '/events' })
+events.invoicing.invoiceChanged.subscribe((evt) => refetch(evt.invoiceId))
+events.$client.onConnected(() => refetchAll())
+```
+
 ## Error handling
 
 A JSON-RPC error from the server is thrown as a typed `RpcError` (`code`, `message`, optional `data`). Elarion maps its `AppError` kinds onto the JSON-RPC server-reserved range, so the generated `RpcError` exposes a getter per kind — branch on the kind directly instead of re-wrapping:

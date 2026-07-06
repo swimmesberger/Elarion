@@ -110,6 +110,22 @@ const [clientResult, projectsResult] = await rpc.$batch([
 ] as const)
 ```
 
+## Client-event subscriptions
+
+When the schema declares an `events` block (the host registers
+[client-event topics](/docs/capabilities/events/client-events)), the generator also emits
+`events-client.ts`: a topic-typed subscription client that multiplexes every subscription over one
+`EventSource`, validates payloads with the same generated Zod schemas, and exposes
+`$client.onConnected` as the "re-query now" signal. A schema without events produces byte-identical
+output — the file simply doesn't exist.
+
+```ts
+import { createElarionEvents } from './generated/events-client.js'
+
+const events = createElarionEvents({ url: '/events' })
+events.invoicing.invoiceChanged.subscribe((evt) => refetch(evt.invoiceId))
+```
+
 ## Server-side and SSR usage
 
 Pass an injected `fetch` and dynamic headers for SSR, edge, or server-function deployments — for
