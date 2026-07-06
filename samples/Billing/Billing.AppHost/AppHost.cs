@@ -14,8 +14,8 @@ var api = builder.AddProject<Projects.Billing_Api>("api")
     .WaitFor(billingDb);
 
 // The Vite + React frontend. Aspire runs `npm run dev` and injects the API URL as VITE_API_URL so the
-// generated JSON-RPC client points at the right endpoint. Run `npm install` in web/ once beforehand.
-builder.AddViteApp("web", "../web")
+// generated JSON-RPC client points at the right endpoint. Run `npm install` in Billing.Web/ once beforehand.
+builder.AddViteApp("web", "../Billing.Web")
     .WithReference(api)
     .WithEnvironment("VITE_API_URL", api.GetEndpoint("http"))
     .WaitFor(api);
