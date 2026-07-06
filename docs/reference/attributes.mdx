@@ -111,7 +111,7 @@ A handler responding with `Result<ElarionFile>` (the in-memory small-file payloa
 content type + file name, in `Elarion.Abstractions`) is mapped as a **file download** instead of JSON; the
 same handler may also carry `[Handler]`, where the payload rides the canonical base64 envelope over
 JSON-RPC/MCP (and the generated TypeScript client maps it to a native `File`). Large files use the
-staged-blob tier instead (ADR-0038). See
+staged-blob tier instead (ADR-0039). See
 [Files](/docs/capabilities/transports/http-endpoints#files-downloads-and-uploads) and
 [File payloads](/docs/capabilities/transports/json-rpc#file-payloads).
 
@@ -133,7 +133,7 @@ See [Hosting](/docs/capabilities/hosting).
 | --- | --- | --- | --- |
 | `moduleName` | `string` (ctor) → `ModuleName` | required | The `[AppModule]` name the hooks contribute to. |
 
-See [Modules](/docs/concepts/modules#declaring-the-hooks-outside-the-module-moduleendpoints) and [ADR-0039](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0039-host-declared-module-endpoints.md).
+See [Modules](/docs/concepts/modules#declaring-the-hooks-outside-the-module-moduleendpoints) and [ADR-0040](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0040-host-declared-module-endpoints.md).
 
 ## Scheduling
 

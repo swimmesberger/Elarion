@@ -1,8 +1,8 @@
-# ADR-0039: Host-declared module endpoint hooks (`[ModuleEndpoints]`)
+# ADR-0040: Host-declared module endpoint hooks (`[ModuleEndpoints]`)
 
 - Status: Accepted
 - Date: 2026-07-06
-- Related: [ADR-0038](0038-binary-file-responses.md) (file responses cover the download case that exposed this
+- Related: [ADR-0039](0039-binary-file-responses.md) (file responses cover the download case that exposed this
   gap), [ADR-0018](0018-generated-infrastructure-is-framework-named.md) (the bootstrapper the hooks compose
   into), [ADR-0031](0031-imperative-handler-transport-mapping.md) (imperative mapping for handlers you don't
   own), the [modules](../concepts/modules.mdx) concept doc.
@@ -61,9 +61,9 @@ internal static class ImportExportEndpoints {
   friendliness of statically-visible mapping calls (ADR-0031's constraint).
 - **A `partial ElarionBootstrapper` extension point.** Rejected — user-declared partials of framework-named
   types are exactly what ADR-0018 rules out, and a partial has no story for per-module gating.
-- **Only proposal 1 (file responses, ADR-0038) without this seam.** Rejected as incomplete — downloads were
+- **Only proposal 1 (file responses, ADR-0039) without this seam.** Rejected as incomplete — downloads were
   the trigger, but any endpoint a handler cannot express (SSE, websockets, third-party middleware, response
-  streaming beyond files) hits the same wall; this is the general seam, ADR-0038 is the happy path.
+  streaming beyond files) hits the same wall; this is the general seam, ADR-0039 is the happy path.
 
 ## Consequences
 

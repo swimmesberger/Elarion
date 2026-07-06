@@ -1,11 +1,11 @@
-# ADR-0038: File payloads — the in-memory `ElarionFile` tier and the staged-blob tier
+# ADR-0039: File payloads — the in-memory `ElarionFile` tier and the staged-blob tier
 
 - Status: Accepted
 - Date: 2026-07-06
 - Related: [ADR-0026](0026-openapi-http-transport.md) (OpenAPI is the REST contract),
   [ADR-0031](0031-imperative-handler-transport-mapping.md) (why HTTP mapping stays concrete),
   [ADR-0035](0035-protocol-neutral-staged-upload-seam.md) (resumable uploads feeding the staging area),
-  [ADR-0039](0039-host-declared-module-endpoints.md) (the sibling seam for endpoints a handler cannot express),
+  [ADR-0040](0040-host-declared-module-endpoints.md) (the sibling seam for endpoints a handler cannot express),
   the [http-endpoints](../capabilities/transports/http-endpoints.mdx), [json-rpc](../capabilities/transports/json-rpc.mdx),
   and [blob-storage](../capabilities/blob-storage.mdx) docs.
 

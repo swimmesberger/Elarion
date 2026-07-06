@@ -21,7 +21,7 @@ namespace Elarion.Abstractions;
 /// Above that, use the <b>staged-blob tier</b>: upload through the provided blob endpoints into the pending
 /// (staging) area and hand the handler a blob pointer to stream from — and for large exports, write a pending
 /// blob and return its pointer for a streamed download. Pending blobs expire through the blob garbage
-/// collector, giving temp-file semantics for free. See the file-handling docs and ADR-0038.
+/// collector, giving temp-file semantics for free. See the file-handling docs and ADR-0039.
 /// </para>
 /// <example>
 /// <code>

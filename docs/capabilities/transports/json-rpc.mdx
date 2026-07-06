@@ -170,7 +170,7 @@ first-class citizen here too, **both directions**. On every JSON surface it ride
 A `Result<ElarionFile>` handler returns the envelope as its result; an `ElarionFile` **property in a
 request DTO is an upload** — the client sends the same envelope and the handler receives decoded bytes.
 No registration needed: the type is seeded into the canonical serializer's framework context
-([ADR-0038](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0038-binary-file-responses.md)).
+([ADR-0039](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0039-binary-file-responses.md)).
 
 The exported schema marks the envelope with `x-elarion-file`, and the
 [generated TypeScript client](/docs/capabilities/transports/typescript-client) turns that into a **native

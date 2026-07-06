@@ -9,7 +9,7 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
-- **File payloads — the in-memory `ElarionFile` tier and the staged-blob tier (ADR-0038).** A handler declares
+- **File payloads — the in-memory `ElarionFile` tier and the staged-blob tier (ADR-0039).** A handler declares
   "I receive/return a file" once and every transport carries it the way that suits it best. **`ElarionFile`**
   (in `Elarion.Abstractions`, next to `Result<T>`) is the **small-file tier** — deliberately bytes-only
   (content + content type + optional file name, rule of thumb ≲ 4 MB). A `Result<ElarionFile>` response is
@@ -25,8 +25,8 @@ minor releases may include breaking changes.
   from; exports write a pending owner-scoped blob and return its `BlobRef`, streamed down from the new
   **`MapElarionBlobDownloads`** (`GET {prefix}/{blobId}`, exact-owner fail-closed → 404) — never-committed blobs
   expire via GC, giving temp-file semantics for free. `IFormFile` remains the HTTP-multipart escape hatch. See
-  [ADR-0038](docs/decisions/0038-binary-file-responses.md).
-- **Host-declared module endpoint hooks — `[ModuleEndpoints]` (ADR-0039).** A module whose assembly is
+  [ADR-0039](docs/decisions/0039-binary-file-responses.md).
+- **Host-declared module endpoint hooks — `[ModuleEndpoints]` (ADR-0040).** A module whose assembly is
   deliberately web-free (no shared-framework reference) cannot declare the `MapEndpoints`/`ConfigureEndpointGroup`
   hooks itself, since both take `IEndpointRouteBuilder`. **`[ModuleEndpoints("Name")]`** (in `Elarion.AspNetCore`)
   marks a static class that declares those same hooks *on behalf of* a module — typically in the host, or a web
@@ -35,7 +35,7 @@ minor releases may include breaking changes.
   first, contributors in stable type-name order, group hooks chained), so a disabled module's contributed
   endpoints disappear with it — no hand-duplicated `IsModuleEnabled` check. An unknown module name warns
   `ELMOD004` (hooks skipped); a class with no recognized hook warns `ELMOD005`. See
-  [ADR-0039](docs/decisions/0039-host-declared-module-endpoints.md).
+  [ADR-0040](docs/decisions/0040-host-declared-module-endpoints.md).
 - **Protocol-neutral staged (resumable) uploads + Azure Blob Storage backend (ADR-0035).** The tus staging seam
   is promoted into `Elarion.Blobs` as **`IStagedUploadStore`** — offset-guarded `AppendAsync`, an **explicit,
   idempotent `CompleteAsync`** that seals the staged bytes into a pending blob, nullable declared length
