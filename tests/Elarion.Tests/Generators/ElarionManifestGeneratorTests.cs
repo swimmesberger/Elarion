@@ -170,6 +170,84 @@ public sealed class ElarionManifestGeneratorTests {
     }
 
     [Fact]
+    public void Manifest_FileResponseHandler_PublishesBothTransportEntries() {
+        // A Result<ElarionFile> handler is a first-class citizen on every transport: HTTP streams the download,
+        // the name-routed transports carry the canonical base64 envelope — so both entries are published and
+        // the caller picks the efficient transport per payload.
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            namespace Sample.Manifest;
+
+            public sealed record ExportQuery(string Liste) : IQuery;
+
+            [Handler("exports.get")]
+            [HttpEndpoint("exports/{liste}")]
+            public sealed class GetExport : IHandler<ExportQuery, Result<ElarionFile>> {
+                public ValueTask<Result<ElarionFile>> HandleAsync(ExportQuery request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<ElarionFile>>(
+                        new ElarionFile(new byte[] { 1 }, "application/octet-stream"));
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Warning).Should().BeEmpty();
+        generated.Should().Contain("Elarion.Manifest.HttpEndpoint.v1");
+        generated.Should().Contain("Elarion.Manifest.RpcMethod.v1");
+        generated.Should().Contain("exports.get");
+    }
+
+    [Fact]
+    public void Manifest_PublishesModuleEndpointsContributors() {
+        const string source =
+            """
+            using Elarion.AspNetCore;
+            using Microsoft.AspNetCore.Routing;
+
+            namespace Sample.Manifest;
+
+            [ModuleEndpoints("Billing")]
+            public static class BillingWebEndpoints {
+                public static void MapEndpoints(IEndpointRouteBuilder endpoints) { }
+                public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder endpoints) => endpoints;
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        generated.Should().Contain("Elarion.Manifest.ModuleEndpoints.v1")
+            .And.Contain("Billing")
+            .And.Contain("Sample.Manifest.BillingWebEndpoints");
+    }
+
+    [Fact]
+    public void Manifest_ModuleEndpointsWithoutHooks_WarnsElmod005AndPublishesNothing() {
+        const string source =
+            """
+            using Elarion.AspNetCore;
+
+            namespace Sample.Manifest;
+
+            [ModuleEndpoints("Billing")]
+            public static class BillingWebEndpoints {
+                // Instance/arity mismatches are not hooks: nothing here is discoverable.
+                public static void MapEndpoints(object first, object second) { }
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "ELMOD005" && diagnostic.Severity == DiagnosticSeverity.Warning);
+        generated.Should().NotContain("Elarion.Manifest.ModuleEndpoints.v1");
+    }
+
+    [Fact]
     public void Manifest_RpcMethod_NonResultResponse_WarnsMissingShape() {
         const string source =
             """

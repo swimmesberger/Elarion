@@ -20,9 +20,12 @@ namespace Elarion.Abstractions.Serialization;
 /// <see cref="Elarion.Abstractions.Idempotency.StoredResult"/> replay envelope and the <see cref="AppError"/> it
 /// carries — none of which any app/module context registers, but which the idempotency store must serialize on an
 /// AOT-strict host); app-provided payloads (via <see cref="AppError.Validation(string, object?)"/> and friends)
-/// stay in the app's own context. When the framework introduces another type in this category, add a
-/// <c>[JsonSerializable]</c> for it here — the seeding logic and this type's name do not change. Kept camelCase /
-/// string-enum to match the transport envelopes.
+/// stay in the app's own context. <see cref="ElarionFile"/> is here for the same reason on the response side: a
+/// transport serializes a handler's success value by its runtime type, and a handler whose response <b>is</b>
+/// <see cref="ElarionFile"/> gives the STJ generator no app DTO to reach it from (its metadata delegates to
+/// <see cref="ElarionFileJsonConverter"/>, the canonical base64 envelope). When the framework introduces another
+/// type in this category, add a <c>[JsonSerializable]</c> for it here — the seeding logic and this type's name do
+/// not change. Kept camelCase / string-enum to match the transport envelopes.
 /// </remarks>
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
@@ -31,4 +34,5 @@ namespace Elarion.Abstractions.Serialization;
 [JsonSerializable(typeof(ValidationErrorData))]
 [JsonSerializable(typeof(Elarion.Abstractions.Idempotency.StoredResult))]
 [JsonSerializable(typeof(AppError))]
+[JsonSerializable(typeof(ElarionFile))]
 public sealed partial class ElarionFrameworkJsonContext : JsonSerializerContext;

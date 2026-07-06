@@ -10,7 +10,9 @@ namespace Elarion.Generators;
 /// <summary>
 /// Generates the fixed-name <c>ElarionBootstrapper</c> class that auto-discovers all classes annotated
 /// with <c>[AppModule]</c> and emits feature-flag-gated calls to their convention-based
-/// static methods (<c>ConfigureServices</c>, <c>MapEndpoints</c>, <c>GetJsonTypeInfoResolver</c>).
+/// static methods (<c>ConfigureServices</c>, <c>MapEndpoints</c>, <c>GetJsonTypeInfoResolver</c>), plus
+/// <c>[ModuleEndpoints]</c> contributor classes declaring endpoint hooks for a module from outside its assembly
+/// (current compilation and referenced manifests), called inside the named module's feature gate.
 /// <para>
 /// It additionally groups <c>[HttpEndpoint]</c> and <c>[Handler]</c> handlers by their owning module
 /// (longest-prefix namespace match) and emits per-module methods — <c>Map{Module}Http</c>,
@@ -41,6 +43,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
     private const string AppModuleAttributeMetadataName = ElarionGeneratorConventions.AppModuleAttribute;
 
+    private const string ModuleEndpointsAttributeMetadataName = ElarionGeneratorConventions.ModuleEndpointsAttribute;
+
     private const string ClientFeaturesAttributeMetadataName = ElarionGeneratorConventions.ClientFeaturesAttribute;
 
     private const string UnmatchedModuleName = "<Unmatched>";
@@ -55,7 +59,30 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor ModuleEndpointsUnknownModule = new(
+        id: "ELMOD004",
+        title: "[ModuleEndpoints] names an unknown module",
+        messageFormat:
+        "Class '{0}' is annotated with [ModuleEndpoints(\"{1}\")] but no discovered [AppModule] is named '{1}'; "
+        + "its endpoint hooks are not mapped",
+        category: "Elarion.Modules",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     private sealed record ClassTarget(string? Namespace, string ClassName);
+
+    /// <summary>
+    /// A <c>[ModuleEndpoints]</c> contributor merged from the current compilation (with a location for
+    /// diagnostics) or a referenced assembly's manifest (no location). Hook-less classes never get this far —
+    /// the manifest generator reports them (ELMOD005) and skips them.
+    /// </summary>
+    private sealed record ModuleEndpointsEntry(
+        string ModuleName,
+        string TypeFqn,
+        bool HasMapEndpoints,
+        bool HasConfigureEndpointGroup,
+        LocationInfo Location
+    );
 
     private sealed record ModuleEntry(
         string ModuleName,
@@ -152,6 +179,22 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
                 .ToEquatableArray())
             .WithTrackingName("BootstrapperModules");
 
+        // Current-compilation [ModuleEndpoints] contributors (typically the host mapping routes on behalf of a
+        // web-free module assembly); referenced assemblies contribute through their manifests instead.
+        var currentModuleEndpoints = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ModuleEndpointsAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => CreateModuleEndpointsEntry(ctx))
+            .Where(static entry => entry is not null)
+            .Select(static (entry, _) => entry!)
+            .Collect()
+            .Select(static (entries, _) => entries
+                .OrderBy(static e => e.ModuleName, StringComparer.Ordinal)
+                .ThenBy(static e => e.TypeFqn, StringComparer.Ordinal)
+                .ToEquatableArray())
+            .WithTrackingName("BootstrapperModuleEndpoints");
+
         // Deliberately compilation-fresh, cheap per-keystroke probes (symbol-table lookups only): the assembly
         // trigger, and which referenced modules' generated ConfigureDefaultServices siblings exist. Both project
         // to small equatable values, so downstream stays cached when they don't change.
@@ -164,13 +207,14 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         var model = manifestProvider
             .Combine(currentModules)
+            .Combine(currentModuleEndpoints)
             .Combine(referencedSiblings)
             .Combine(trigger)
             .Combine(rootNamespace)
             .Select(static (source, ct) =>
             {
-                var ((((manifests, modules), siblings), hasTrigger), rootNs) = source;
-                return BuildBootstrapperOutput(manifests, modules, siblings, hasTrigger, rootNs, ct);
+                var (((((manifests, modules), moduleEndpoints), siblings), hasTrigger), rootNs) = source;
+                return BuildBootstrapperOutput(manifests, modules, moduleEndpoints, siblings, hasTrigger, rootNs, ct);
             })
             .WithTrackingName("Bootstrapper");
 
@@ -187,6 +231,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private static BootstrapperOutput BuildBootstrapperOutput(
         ImmutableArray<ManifestReadResult> manifests,
         EquatableArray<ModuleEntry> currentModules,
+        EquatableArray<ModuleEndpointsEntry> currentModuleEndpoints,
         EquatableArray<string> referencedSiblings,
         bool hasTrigger,
         string rootNs,
@@ -209,11 +254,64 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         ct.ThrowIfCancellationRequested();
 
         var transport = CollectTransportMaps(manifest, entries, diagnostics);
+        var contributors = CollectModuleEndpointContributors(
+            currentModuleEndpoints, manifest.ModuleEndpointHooks, entries, diagnostics);
 
         var target = new ClassTarget(rootNs.Length == 0 ? null : rootNs, BootstrapperTypeName);
-        var code = BuildSource(target, sorted, transport);
+        var code = BuildSource(target, sorted, transport, contributors);
         return new BootstrapperOutput(code, diagnostics.ToEquatableArray());
     }
+
+    /// <summary>
+    /// Merges <c>[ModuleEndpoints]</c> contributors from the current compilation and referenced manifests,
+    /// bucketed by module name. A contributor naming a module no discovery produced is reported (ELMOD004) and
+    /// skipped — mapping it ungated would defeat the feature gate the attribute exists to reuse.
+    /// </summary>
+    private static Dictionary<string, List<ModuleEndpointsEntry>> CollectModuleEndpointContributors(
+        EquatableArray<ModuleEndpointsEntry> currentEntries,
+        IReadOnlyList<ElarionManifest.ModuleEndpoints> manifestEntries,
+        List<ModuleEntry> modules,
+        List<DiagnosticInfo> diagnostics)
+    {
+        var knownModules = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var module in modules)
+            knownModules.Add(module.ModuleName);
+
+        var merged = new List<ModuleEndpointsEntry>();
+        foreach (var entry in currentEntries)
+            merged.Add(entry);
+        foreach (var hooks in manifestEntries)
+        {
+            merged.Add(new ModuleEndpointsEntry(
+                hooks.ModuleName, hooks.TypeFqn, hooks.HasMapEndpoints, hooks.HasConfigureEndpointGroup, default));
+        }
+
+        var byModule = new Dictionary<string, List<ModuleEndpointsEntry>>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in merged)
+        {
+            if (!seen.Add(string.Join("\u001f", entry.ModuleName, entry.TypeFqn)))
+                continue;
+
+            if (!knownModules.Contains(entry.ModuleName))
+            {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    ModuleEndpointsUnknownModule, entry.Location, DisplayTypeName(entry.TypeFqn), entry.ModuleName));
+                continue;
+            }
+
+            Bucket(byModule, entry.ModuleName).Add(entry);
+        }
+
+        // Contributors run in stable type-name order after the module's own hooks.
+        foreach (var list in byModule.Values)
+            list.Sort(static (a, b) => string.Compare(a.TypeFqn, b.TypeFqn, StringComparison.Ordinal));
+
+        return byModule;
+    }
+
+    private static string DisplayTypeName(string typeFqn) =>
+        typeFqn.StartsWith("global::", StringComparison.Ordinal) ? typeFqn.Substring(8) : typeFqn;
 
     private static EquatableArray<string> ProbeReferencedSiblings(
         ImmutableArray<ManifestReadResult> manifests,
@@ -584,6 +682,39 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return null;
     }
 
+    // The per-node [ModuleEndpoints] transform (cached per tree). Everything read here — the module name and the
+    // convention-hook probes — lives on the annotated class itself. A class with no usable hook is dropped
+    // silently; the manifest generator (which always runs alongside this one) reports it as ELMOD005.
+    private static ModuleEndpointsEntry? CreateModuleEndpointsEntry(GeneratorAttributeSyntaxContext ctx)
+    {
+        if (ctx.TargetSymbol is not INamedTypeSymbol type)
+            return null;
+
+        foreach (var attr in ctx.Attributes)
+        {
+            if (attr.ConstructorArguments.Length == 0 ||
+                attr.ConstructorArguments[0].Value is not string moduleName ||
+                moduleName.Length == 0)
+            {
+                continue;
+            }
+
+            var hasMapEndpoints = HasStaticMethod(type, "MapEndpoints", 1);
+            var hasConfigureEndpointGroup = HasStaticMethod(type, "ConfigureEndpointGroup", 1);
+            if (!hasMapEndpoints && !hasConfigureEndpointGroup)
+                return null;
+
+            return new ModuleEndpointsEntry(
+                moduleName,
+                type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                hasMapEndpoints,
+                hasConfigureEndpointGroup,
+                LocationInfo.From(type));
+        }
+
+        return null;
+    }
+
     /// <summary>Reads the names listed by a module's <c>[ClientFeatures(...)]</c> attribute (empty when absent).</summary>
     private static EquatableArray<string> ReadClientFeatures(INamedTypeSymbol type, INamedTypeSymbol? clientFeaturesType)
     {
@@ -740,7 +871,11 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return string.Compare(left, right, StringComparison.Ordinal);
     }
 
-    private static string BuildSource(ClassTarget target, List<ModuleEntry> entries, TransportMaps transport)
+    private static string BuildSource(
+        ClassTarget target,
+        List<ModuleEntry> entries,
+        TransportMaps transport,
+        Dictionary<string, List<ModuleEndpointsEntry>> contributorsByModule)
     {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
@@ -818,14 +953,20 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // --- MapElarionEndpoints (module MapEndpoints + generated [HttpEndpoint] mapping, both gated) ---
-        sb.AppendLine("    /// <summary>Calls MapEndpoints and maps generated [HttpEndpoint] handlers on all enabled modules.</summary>");
+        // --- MapElarionEndpoints (module MapEndpoints + [ModuleEndpoints] contributors + generated [HttpEndpoint] mapping, all gated) ---
+        sb.AppendLine("    /// <summary>Calls MapEndpoints (module-declared and [ModuleEndpoints] contributors) and maps generated [HttpEndpoint] handlers on all enabled modules.</summary>");
         sb.AppendLine("    public static void MapElarionEndpoints(");
         sb.AppendLine("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
         foreach (var entry in entries)
-            EmitModuleEndpointMapping(sb, entry, transport.HttpByModule.ContainsKey(entry.ModuleName));
+        {
+            EmitModuleEndpointMapping(
+                sb,
+                entry,
+                transport.HttpByModule.ContainsKey(entry.ModuleName),
+                contributorsByModule.TryGetValue(entry.ModuleName, out var contributors) ? contributors : []);
+        }
 
         if (transport.UnmatchedHttp.Count > 0)
             sb.AppendLine($"        {HttpMethodName(UnmatchedModuleName)}(endpoints);");
@@ -1182,28 +1323,51 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Emits a module's endpoint mapping (its optional <c>MapEndpoints</c> hook and its generated
-    /// <c>[HttpEndpoint]</c> routes) inside the module's feature gate. When the module declares a
-    /// <c>ConfigureEndpointGroup</c> hook, both are mapped onto the builder it returns, so the module owns
-    /// its own route group/policy/conventions; otherwise they map onto the root <c>endpoints</c> builder.
+    /// Emits a module's endpoint mapping (its optional <c>MapEndpoints</c> hook, its <c>[ModuleEndpoints]</c>
+    /// contributors' hooks, and its generated <c>[HttpEndpoint]</c> routes) inside the module's feature gate.
+    /// When the module or a contributor declares a <c>ConfigureEndpointGroup</c> hook, everything is mapped onto
+    /// the builder the hook chain returns (module's hook first, then contributors in type-name order), so the
+    /// module owns its own route group/policy/conventions; otherwise they map onto the root <c>endpoints</c>
+    /// builder.
     /// </summary>
-    private static void EmitModuleEndpointMapping(StringBuilder sb, ModuleEntry entry, bool hasHttp)
+    private static void EmitModuleEndpointMapping(
+        StringBuilder sb,
+        ModuleEntry entry,
+        bool hasHttp,
+        IReadOnlyList<ModuleEndpointsEntry> contributors)
     {
-        if (!entry.HasMapEndpoints && !hasHttp)
+        if (!entry.HasMapEndpoints && !hasHttp && contributors.Count == 0)
             return;
 
-        // The group hook is only meaningful when the module actually maps something.
-        var useGroup = entry.HasConfigureEndpointGroup;
+        // The group hooks are only meaningful when the module actually maps something.
+        var groupHooks = new List<string>();
+        if (entry.HasConfigureEndpointGroup)
+            groupHooks.Add(entry.TypeFqn);
+        foreach (var contributor in contributors)
+        {
+            if (contributor.HasConfigureEndpointGroup)
+                groupHooks.Add(contributor.TypeFqn);
+        }
+
+        var useGroup = groupHooks.Count > 0;
         var target = "endpoints";
         var statements = new List<string>();
         if (useGroup)
         {
             target = $"{ModuleMethodNamePart(entry.ModuleName)}Endpoints";
-            statements.Add($"var {target} = {entry.TypeFqn}.ConfigureEndpointGroup(endpoints);");
+            statements.Add($"var {target} = {groupHooks[0]}.ConfigureEndpointGroup(endpoints);");
+            for (var i = 1; i < groupHooks.Count; i++)
+                statements.Add($"{target} = {groupHooks[i]}.ConfigureEndpointGroup({target});");
         }
 
         if (entry.HasMapEndpoints)
             statements.Add($"{entry.TypeFqn}.MapEndpoints({target});");
+        foreach (var contributor in contributors)
+        {
+            if (contributor.HasMapEndpoints)
+                statements.Add($"{contributor.TypeFqn}.MapEndpoints({target});");
+        }
+
         if (hasHttp)
             statements.Add($"{HttpMethodName(entry.ModuleName)}({target});");
 

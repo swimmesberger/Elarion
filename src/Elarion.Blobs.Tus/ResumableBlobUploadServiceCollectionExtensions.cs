@@ -6,13 +6,13 @@ namespace Elarion.Blobs.Tus;
 /// <summary>
 /// Registers the services backing the tus resumable-upload endpoints.
 /// </summary>
-public static class TusServiceCollectionExtensions {
+public static class ResumableBlobUploadServiceCollectionExtensions {
     /// <summary>
-    /// Registers <see cref="TusOptions"/> and the staged-upload seam (with its in-memory default) for
-    /// the endpoints mapped by <c>MapElarionTus</c>.
+    /// Registers <see cref="ResumableBlobUploadOptions"/> and the staged-upload seam (with its in-memory default) for
+    /// the endpoints mapped by <c>MapElarionResumableBlobUploads</c>.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="configure">Optional configuration of <see cref="TusOptions"/>.</param>
+    /// <param name="configure">Optional configuration of <see cref="ResumableBlobUploadOptions"/>.</param>
     /// <returns>The same service collection for chaining.</returns>
     /// <remarks>
     /// The endpoints additionally require an <see cref="IBlobStore"/> and an <c>ICurrentUser</c> from
@@ -20,12 +20,12 @@ public static class TusServiceCollectionExtensions {
     /// (for example PostgreSQL staging via <c>AddElarionPostgreSqlStagedUploads</c>, or Azure append-blob
     /// staging via <c>AddElarionAzureStagedUploads</c>) for resumability across restarts and instances.
     /// </remarks>
-    public static IServiceCollection AddElarionTus(
+    public static IServiceCollection AddElarionResumableBlobUploads(
         this IServiceCollection services,
-        Action<TusOptions>? configure = null) {
+        Action<ResumableBlobUploadOptions>? configure = null) {
         ArgumentNullException.ThrowIfNull(services);
 
-        var options = new TusOptions();
+        var options = new ResumableBlobUploadOptions();
         configure?.Invoke(options);
 
         services.TryAddSingleton(TimeProvider.System);

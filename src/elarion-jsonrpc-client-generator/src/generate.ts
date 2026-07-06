@@ -1,6 +1,6 @@
 import { jsonSchemaToTypeScript } from './json-schema-to-ts.js'
 import { jsonSchemaToZod } from './json-schema-to-zod.js'
-import { stripNullable, type SchemaContext } from './json-schema.js'
+import { collectFilePaths, stripNullable, type SchemaContext } from './json-schema.js'
 import { generateRpcClientSource } from './rpc-client-source.js'
 import { generateSessionClientSource } from './session-client-source.js'
 import { generateStartAdapterSource } from './start-adapter-source.js'
@@ -99,6 +99,29 @@ export function generateRpcClientFiles(
 
   const idempotentMethods = methods.filter((method) => schema.methods[method].idempotent === true)
 
+  // Where each method carries file payloads (x-elarion-file nodes), so the client can convert between
+  // native File values and the base64 wire envelope. Methods without files are omitted entirely.
+  const paramsFilePaths: Record<string, string[][]> = {}
+  const resultFilePaths: Record<string, string[][]> = {}
+  for (const method of methods) {
+    const definition = schema.methods[method]
+    const params = collectFilePaths(
+      stripNullable(definition.params),
+      createContext(definition.params, `methods.${method}.params`)
+    )
+    if (params.length > 0) {
+      paramsFilePaths[method] = params
+    }
+
+    const result = collectFilePaths(
+      stripNullable(definition.result),
+      createContext(definition.result, `methods.${method}.result`)
+    )
+    if (result.length > 0) {
+      resultFilePaths[method] = result
+    }
+  }
+
   const clientSource = generateRpcClientSource({
     generatedBy,
     sourceLabel,
@@ -106,6 +129,8 @@ export function generateRpcClientFiles(
     schemasFileName,
     methods,
     idempotentMethods,
+    paramsFilePaths,
+    resultFilePaths,
   })
 
   // The client-capability snapshot client + OpenFeature provider (ADR-0030) is emitted only when the host exposes

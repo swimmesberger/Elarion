@@ -23,6 +23,7 @@ internal static class ElarionManifest
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
     public const string ModuleKey = "Elarion.Manifest.Module.v1";
+    public const string ModuleEndpointsKey = "Elarion.Manifest.ModuleEndpoints.v1";
     public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v1";
     public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v1";
     public const string ResourceFilterKey = "Elarion.Manifest.ResourceFilter.v1";
@@ -76,8 +77,19 @@ internal static class ElarionManifest
         EquatableArray<string> ClientFeatures
     );
 
+    // A [ModuleEndpoints("Name")] static class contributing endpoint hooks to a module from another assembly
+    // (typically a host or web companion assembly beside a web-free module assembly). The host bootstrapper
+    // calls its MapEndpoints/ConfigureEndpointGroup hooks inside the named module's feature gate.
+    public sealed record ModuleEndpoints(
+        string ModuleName,
+        string TypeFqn,
+        bool HasMapEndpoints,
+        bool HasConfigureEndpointGroup
+    );
+
     public sealed record Data(
         IReadOnlyList<Module> Modules,
+        IReadOnlyList<ModuleEndpoints> ModuleEndpointHooks,
         IReadOnlyList<HttpEndpointEmission.Model> HttpEndpoints,
         IReadOnlyList<RpcMethodEmission.Model> RpcMethods,
         IReadOnlyList<ResourceFilter> ResourceFilters,
@@ -86,15 +98,16 @@ internal static class ElarionManifest
         IReadOnlyList<Variant> Variants
     )
     {
-        public static readonly Data Empty = new([], [], [], [], [], [], []);
+        public static readonly Data Empty = new([], [], [], [], [], [], [], []);
 
         public bool HasEntries =>
-            Modules.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0 || ResourceFilters.Count > 0
-            || Permissions.Count > 0 || Roles.Count > 0 || Variants.Count > 0;
+            Modules.Count > 0 || ModuleEndpointHooks.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0
+            || ResourceFilters.Count > 0 || Permissions.Count > 0 || Roles.Count > 0 || Variants.Count > 0;
 
         public static Data Combine(IEnumerable<Data> manifests)
         {
             var modules = new List<Module>();
+            var moduleEndpointHooks = new List<ModuleEndpoints>();
             var httpEndpoints = new List<HttpEndpointEmission.Model>();
             var rpcMethods = new List<RpcMethodEmission.Model>();
             var resourceFilters = new List<ResourceFilter>();
@@ -105,6 +118,7 @@ internal static class ElarionManifest
             foreach (var manifest in manifests)
             {
                 modules.AddRange(manifest.Modules);
+                moduleEndpointHooks.AddRange(manifest.ModuleEndpointHooks);
                 httpEndpoints.AddRange(manifest.HttpEndpoints);
                 rpcMethods.AddRange(manifest.RpcMethods);
                 resourceFilters.AddRange(manifest.ResourceFilters);
@@ -114,6 +128,15 @@ internal static class ElarionManifest
             }
 
             modules.Sort(static (a, b) =>
+            {
+                var byName = string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal);
+                if (byName != 0)
+                    return byName;
+
+                return string.Compare(a.TypeFqn, b.TypeFqn, StringComparison.Ordinal);
+            });
+
+            moduleEndpointHooks.Sort(static (a, b) =>
             {
                 var byName = string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal);
                 if (byName != 0)
@@ -169,7 +192,9 @@ internal static class ElarionManifest
                 return string.Compare(a.Value, b.Value, StringComparison.Ordinal);
             });
 
-            return new Data(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles, variants);
+            return new Data(
+                modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
+                variants);
         }
     }
 
@@ -187,6 +212,30 @@ internal static class ElarionManifest
             // The exposed client-feature names ride a nested length-prefixed blob (like RPC parameters), so a
             // name containing a separator can never corrupt the outer field framing.
             ElarionManifestCodec.EncodeFields([.. module.ClientFeatures]));
+
+    public static string EncodeModuleEndpoints(ModuleEndpoints hooks) =>
+        ElarionManifestCodec.EncodeFields(
+            hooks.ModuleName,
+            hooks.TypeFqn,
+            EncodeBool(hooks.HasMapEndpoints),
+            EncodeBool(hooks.HasConfigureEndpointGroup));
+
+    public static bool TryDecodeModuleEndpoints(string value, out ModuleEndpoints? hooks)
+    {
+        hooks = null;
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 4)
+            return false;
+        if (fields[0] is null || fields[1] is null)
+            return false;
+        if (!TryDecodeBool(fields[2], out var hasMapEndpoints) ||
+            !TryDecodeBool(fields[3], out var hasConfigureEndpointGroup))
+        {
+            return false;
+        }
+
+        hooks = new ModuleEndpoints(fields[0]!, fields[1]!, hasMapEndpoints, hasConfigureEndpointGroup);
+        return true;
+    }
 
     public static string EncodeHttpEndpoint(HttpEndpointEmission.Model model) =>
         ElarionManifestCodec.EncodeFields(
@@ -546,6 +595,7 @@ internal static class ElarionManifestReader
     public static ManifestReadResult Read(MetadataReference reference, CancellationToken ct)
     {
         var modules = new List<ElarionManifest.Module>();
+        var moduleEndpointHooks = new List<ElarionManifest.ModuleEndpoints>();
         var httpEndpoints = new List<HttpEndpointEmission.Model>();
         var rpcMethods = new List<RpcMethodEmission.Model>();
         var resourceFilters = new List<ElarionManifest.ResourceFilter>();
@@ -585,15 +635,20 @@ internal static class ElarionManifestReader
         }
 
         foreach (var (key, value) in entries)
-            AddEntry(key, value, modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles, variants);
+            AddEntry(
+                key, value, modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions,
+                roles, variants);
 
         return new ManifestReadResult(
-            CreateData(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles, variants),
+            CreateData(
+                modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
+                variants),
             null);
     }
 
     private static bool IsElarionManifestKey(string key) =>
         key is ElarionManifest.ModuleKey
+            or ElarionManifest.ModuleEndpointsKey
             or ElarionManifest.HttpEndpointKey
             or ElarionManifest.RpcMethodKey
             or ElarionManifest.ResourceFilterKey
@@ -611,6 +666,7 @@ internal static class ElarionManifestReader
 
     private static ElarionManifest.Data CreateData(
         List<ElarionManifest.Module> modules,
+        List<ElarionManifest.ModuleEndpoints> moduleEndpointHooks,
         List<HttpEndpointEmission.Model> httpEndpoints,
         List<RpcMethodEmission.Model> rpcMethods,
         List<ElarionManifest.ResourceFilter> resourceFilters,
@@ -618,12 +674,17 @@ internal static class ElarionManifestReader
         List<ElarionManifest.Role> roles,
         List<ElarionManifest.Variant> variants) =>
         ElarionManifest.Data.Combine(
-            [new ElarionManifest.Data(modules, httpEndpoints, rpcMethods, resourceFilters, permissions, roles, variants)]);
+            [
+                new ElarionManifest.Data(
+                    modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
+                    variants),
+            ]);
 
     private static void AddEntry(
         string key,
         string value,
         List<ElarionManifest.Module> modules,
+        List<ElarionManifest.ModuleEndpoints> moduleEndpointHooks,
         List<HttpEndpointEmission.Model> httpEndpoints,
         List<RpcMethodEmission.Model> rpcMethods,
         List<ElarionManifest.ResourceFilter> resourceFilters,
@@ -638,6 +699,14 @@ internal static class ElarionManifestReader
             case ElarionManifest.ModuleKey:
                 if (ElarionManifest.TryDecodeModule(value, out var moduleEntry) && moduleEntry is not null)
                     modules.Add(moduleEntry);
+                break;
+            case ElarionManifest.ModuleEndpointsKey:
+                if (ElarionManifest.TryDecodeModuleEndpoints(value, out var moduleEndpointsEntry)
+                    && moduleEndpointsEntry is not null)
+                {
+                    moduleEndpointHooks.Add(moduleEndpointsEntry);
+                }
+
                 break;
             case ElarionManifest.HttpEndpointKey:
                 if (ElarionManifest.TryDecodeHttpEndpoint(value, out var httpEndpoint) && httpEndpoint is not null)

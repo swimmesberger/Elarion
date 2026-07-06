@@ -102,7 +102,9 @@ public sealed class GetClient : IHandler<GetClientQuery, Result<ClientResponse>>
 A handler annotated with `[Handler]`/`[HttpEndpoint]` that does not implement `IHandler<,>` with a
 `Result<T>` response generates no endpoint and reports `ELRPC002` / `ELHTTP001`. For HTTP, when no explicit
 verb is given, the verb is inferred from the request's CQRS marker (`ICommand` → POST, `IQuery` → GET);
-neither marker present without an explicit verb reports `ELHTTP004`.
+neither marker present without an explicit verb reports `ELHTTP004`. A `Result<ElarionFile>` response maps
+as a [file download](/docs/capabilities/transports/http-endpoints#files-downloads-and-uploads) over HTTP and
+as the canonical [base64 envelope](/docs/capabilities/transports/json-rpc#file-payloads) over JSON-RPC/MCP.
 
 The `[Handler]` operation name is **optional**: `[Handler]` alone is valid. When omitted, the name is
 inferred by convention as `{module}.{operation}`, where `operation` is the handler type name minus a
@@ -170,7 +172,10 @@ public static partial class ClientsModule {
 The convention-based module hooks (`ConfigureServices`, `MapEndpoints`, `GetJsonTypeInfoResolver`,
 `ConfigureEndpointGroup`) and the core-vs-feature distinction are covered in
 [Modules](/docs/concepts/modules); the registration mechanics in
-[Source generation](/docs/concepts/source-generation).
+[Source generation](/docs/concepts/source-generation). The two endpoint hooks may also be declared for a
+module from outside its assembly with
+[`[ModuleEndpoints]`](/docs/concepts/modules#declaring-the-hooks-outside-the-module-moduleendpoints)
+(unknown module name → `ELMOD004`; class without a recognized hook → `ELMOD005`).
 
 ## Project dependency rules
 

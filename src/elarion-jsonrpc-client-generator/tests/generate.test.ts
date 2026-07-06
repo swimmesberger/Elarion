@@ -7,6 +7,7 @@ import ts from 'typescript'
 import {
   generateRpcClientFiles,
   UnsupportedJsonSchemaError,
+  type JsonSchema,
   type RpcSchema,
 } from '../src/generate.js'
 
@@ -363,6 +364,103 @@ describe('JSON-RPC client generator', () => {
       })
     ).resolves.toBe(3)
     expect(seenContexts).toEqual([{ methods: ['math.add'], batch: false }])
+  })
+
+  it('maps x-elarion-file nodes to native File in types and Zod schemas', () => {
+    const generated = generateRpcClientFiles(fileClientTestSchema())
+
+    // Callers never see the wire envelope: params take a File, results are a File.
+    expect(generated.typesSource).toContain('file?: File')
+    expect(generated.typesSource).toContain('required: File')
+    expect(generated.typesSource).toContain('result: File')
+    expect(generated.schemasSource).toContain('z.instanceof(File)')
+  })
+
+  it('emits no file-conversion runtime when the schema has no file payloads', () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+
+    expect(generated.clientSource).not.toContain('encodeFileParams')
+    expect(generated.clientSource).not.toContain('rpcParamsFilePaths')
+  })
+
+  it('converts File params to the base64 envelope and materializes file results as File', async () => {
+    const generated = generateRpcClientFiles(fileClientTestSchema())
+    const clientModule = await loadGeneratedFileClient(generated.clientSource)
+
+    const upload = new File([new TextEncoder().encode('id;name')], 'clients.csv', { type: 'text/csv' })
+    const extra = new File([new TextEncoder().encode('x')], 'extra.bin', { type: 'application/octet-stream' })
+
+    let wireParams: Record<string, unknown> | undefined
+    const fetchImpl: FetchLike = async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as { id: string; params: Record<string, unknown> }
+      wireParams = request.params
+      return jsonResponse({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: { contentType: 'application/pdf', fileName: 'report.pdf', data: btoa('pdf-bytes') },
+      })
+    }
+
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: fetchImpl,
+      idGenerator: () => 'file-1',
+    })
+
+    const result = await client.call('files.roundTrip', {
+      container: 'invoices',
+      required: upload,
+      attachments: [extra],
+    }) as File
+
+    expect(wireParams).toMatchObject({
+      container: 'invoices',
+      required: { contentType: 'text/csv', fileName: 'clients.csv', data: btoa('id;name') },
+    })
+    expect((wireParams?.attachments as unknown[])[0]).toMatchObject({
+      contentType: 'application/octet-stream',
+      fileName: 'extra.bin',
+      data: btoa('x'),
+    })
+
+    expect(result).toBeInstanceOf(File)
+    expect(result.name).toBe('report.pdf')
+    expect(result.type).toBe('application/pdf')
+    expect(new TextDecoder().decode(await result.arrayBuffer())).toBe('pdf-bytes')
+  })
+
+  it('encodes File params even when params validation is disabled', async () => {
+    const generated = generateRpcClientFiles(fileClientTestSchema())
+    const clientModule = await loadGeneratedFileClient(generated.clientSource)
+
+    let wireParams: Record<string, unknown> | undefined
+    const fetchImpl: FetchLike = async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as { id: string; params: Record<string, unknown> }
+      wireParams = request.params
+      return jsonResponse({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: { contentType: 'text/plain', data: btoa('ok') },
+      })
+    }
+
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: fetchImpl,
+      idGenerator: () => 'file-2',
+      validateParams: false,
+      validateResults: false,
+    })
+
+    const result = await client.call('files.roundTrip', {
+      container: 'invoices',
+      required: new File([new TextEncoder().encode('raw')], 'raw.txt', { type: 'text/plain' }),
+    }) as File
+
+    // Conversion is independent of validation: the wire always carries the envelope, and the caller
+    // always receives a File.
+    expect(wireParams?.required).toMatchObject({ contentType: 'text/plain', data: btoa('raw') })
+    expect(result).toBeInstanceOf(File)
   })
 
   it('throws typed errors for transport and JSON-RPC failures', async () => {
@@ -939,6 +1037,75 @@ function rpcClientTestSchema(): RpcSchema {
       },
     },
   }
+}
+
+function fileClientTestSchema(): RpcSchema {
+  const fileSchema = {
+    type: 'object',
+    'x-elarion-file': true,
+    description: 'A binary file payload; data is the base64-encoded content.',
+    properties: {
+      contentType: { type: 'string' },
+      fileName: { type: 'string' },
+      data: { type: 'string', format: 'byte' },
+    },
+    required: ['contentType', 'data'],
+  } satisfies JsonSchema
+
+  return {
+    methods: {
+      'files.roundTrip': {
+        params: {
+          type: 'object',
+          properties: {
+            container: { type: 'string' },
+            required: fileSchema,
+            file: fileSchema,
+            attachments: { type: 'array', items: fileSchema },
+          },
+          required: ['container', 'required'],
+        },
+        result: fileSchema,
+      },
+    },
+  }
+}
+
+async function loadGeneratedFileClient(clientSource: string): Promise<GeneratedClientModule> {
+  const dir = mkdtempSync(join(tmpdir(), 'elarion-rpc-file-client-'))
+  const jsSource = ts.transpileModule(clientSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+
+  writeFileSync(join(dir, 'rpc-client.mjs'), jsSource, 'utf-8')
+  // Schemas validate the user-facing shape: a required File on params, a File as the result (the client
+  // encodes params after validation and decodes results before validation).
+  writeFileSync(join(dir, 'rpc-schemas.js'), [
+    'export const rpcParamsSchemas = {',
+    "  'files.roundTrip': {",
+    '    parse(value) {',
+    "      if (typeof value !== 'object' || value === null) throw new Error('Expected params object')",
+    "      if (!(value.required instanceof File)) throw new Error('Expected required to be a File')",
+    '      return value',
+    '    }',
+    '  },',
+    '}',
+    '',
+    'export const rpcResultSchemas = {',
+    "  'files.roundTrip': {",
+    '    parse(value) {',
+    "      if (!(value instanceof File)) throw new Error('Expected a File result')",
+    '      return value',
+    '    }',
+    '  },',
+    '}',
+    '',
+  ].join('\n'), 'utf-8')
+
+  return await import(pathToFileURL(join(dir, 'rpc-client.mjs')).href) as GeneratedClientModule
 }
 
 async function loadGeneratedClient(clientSource: string): Promise<GeneratedClientModule> {

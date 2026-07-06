@@ -171,11 +171,37 @@ public static class JsonRpcSchemaExporter {
         var exporterOptions = new JsonSchemaExporterOptions {
             TreatNullObliviousAsNonNullable = true,
             TransformSchemaNode = extraTransform is null
-                ? NormalizeNumericType
-                : (ctx, schema) => extraTransform(ctx, NormalizeNumericType(ctx, schema)),
+                ? static (ctx, schema) => NormalizeNumericType(ctx, MapFilePayload(ctx, schema))
+                : (ctx, schema) => extraTransform(ctx, NormalizeNumericType(ctx, MapFilePayload(ctx, schema))),
         };
 
         return options.GetJsonSchemaAsNode(type, exporterOptions);
+    }
+
+    /// <summary>
+    /// Replaces the schema node for <see cref="ElarionFile"/> — opaque to the exporter because the type
+    /// serializes through its custom converter — with the converter's fixed base64 envelope, wherever the type
+    /// appears (a method's whole result, or a property inside a params/result DTO for uploads). <c>data</c>
+    /// carries <c>format: "byte"</c> like <c>[Base64String]</c> properties, and the object is marked
+    /// <c>x-elarion-file: true</c> so the TypeScript client generator maps it to a native <c>File</c> instead
+    /// of a plain envelope interface.
+    /// </summary>
+    private static JsonNode MapFilePayload(JsonSchemaExporterContext ctx, JsonNode schema) {
+        if (ctx.TypeInfo.Type != typeof(Abstractions.ElarionFile)) {
+            return schema;
+        }
+
+        return new JsonObject {
+            ["type"] = "object",
+            ["x-elarion-file"] = true,
+            ["description"] = "A binary file payload; data is the base64-encoded content.",
+            ["properties"] = new JsonObject {
+                ["contentType"] = new JsonObject { ["type"] = "string" },
+                ["fileName"] = new JsonObject { ["type"] = "string" },
+                ["data"] = new JsonObject { ["type"] = "string", ["format"] = "byte" },
+            },
+            ["required"] = new JsonArray("contentType", "data"),
+        };
     }
 
     /// <summary>

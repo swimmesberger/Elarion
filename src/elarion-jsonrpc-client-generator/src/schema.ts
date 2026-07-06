@@ -10,6 +10,12 @@ export interface JsonSchema {
   oneOf?: unknown[]
   anyOf?: unknown[]
   allOf?: unknown[]
+  /**
+   * Marks the Elarion binary-file envelope (`{ contentType, fileName?, data }`, base64 `data`), emitted by the
+   * server exporter for `ElarionFile` payloads. The generator maps it to a native `File`: params accept a
+   * `File`, results materialize one; the client converts to/from the wire envelope at the call boundary.
+   */
+  'x-elarion-file'?: boolean
   // Constraint keywords (JSON Schema 2020-12). exclusiveMinimum/exclusiveMaximum are numbers, not booleans.
   minLength?: number
   maxLength?: number

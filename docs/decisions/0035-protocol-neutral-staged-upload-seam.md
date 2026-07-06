@@ -19,7 +19,7 @@ baked in:
   completion with an explicit `Upload-Complete` flag and supports uploads whose length is unknown until the
   end (as does tus 1.0's `creation-defer-length` extension, which we did not support). It also forced the
   endpoint to fake an empty append (`AppendAsync(id, 0, Stream.Null)`) to finalize zero-length uploads.
-- **Policy inside the store**: both stores computed session expiry and pending-blob TTL from `TusOptions`,
+- **Policy inside the store**: both stores computed session expiry and pending-blob TTL from `ResumableBlobUploadOptions`,
   coupling every storage backend to the tus package's option bag.
 - **A tus-named seam** meant any future resumable protocol — RUFH above all — would either read tus types or
   need a second, near-identical seam and a second staging backend per provider.
@@ -55,7 +55,7 @@ Package layout consequences:
   providers reuse it). Deliberate cost: the previously dependency-free package now references the
   `Microsoft.Extensions.*` *Abstractions* trio (DI/Hosting/Logging) — within the framework's
   dependency-light rule.
-- `Elarion.Blobs.Tus` shrinks to a **pure protocol adapter** (endpoint mapping, header parsing, `TusOptions`
+- `Elarion.Blobs.Tus` shrinks to a **pure protocol adapter** (endpoint mapping, header parsing, `ResumableBlobUploadOptions`
   policy). `Elarion.Blobs.Tus.PostgreSql` and its generator project **dissolve into `Elarion.Blobs.PostgreSql`**
   (`PostgreSqlStagedUploadStore`, `UseElarionStagedUploads` / `[GenerateElarionStagedUploads]`, `ELBLB002`) —
   two projects deleted, one Postgres blob package owning blobs + staging.

@@ -24,8 +24,8 @@ public sealed class PostgreSqlStagedUploadRegistrationTests {
         services.AddScoped(_ => new TestStagedDbContext(new DbContextOptionsBuilder<TestStagedDbContext>().Options));
         services.AddSingleton<ILogger<PostgreSqlBlobStore<TestStagedDbContext>>>(
             NullLogger<PostgreSqlBlobStore<TestStagedDbContext>>.Instance);
-        // AddElarionTus registers the in-memory staging default (and its collector) first.
-        services.AddElarionTus();
+        // AddElarionResumableBlobUploads registers the in-memory staging default (and its collector) first.
+        services.AddElarionResumableBlobUploads();
 
         services.AddElarionPostgreSqlStagedUploads<TestStagedDbContext>("Host=localhost;Database=elarion;Username=elarion;Password=elarion");
 
@@ -53,14 +53,14 @@ public sealed class PostgreSqlStagedUploadRegistrationTests {
         services.AddScoped(_ => new TestStagedDbContext(new DbContextOptionsBuilder<TestStagedDbContext>().Options));
         services.AddSingleton<ILogger<PostgreSqlBlobStore<TestStagedDbContext>>>(
             NullLogger<PostgreSqlBlobStore<TestStagedDbContext>>.Instance);
-        services.AddElarionTus();
+        services.AddElarionResumableBlobUploads();
 
         services.AddElarionPostgreSqlStagedUploads<TestStagedDbContext>(
             gc => gc.BatchSize = 9,
             blobGc => blobGc.BatchSize = 11);
 
         using var provider = services.BuildServiceProvider();
-        // The explicit configuration wins over the defaults AddElarionTus registered earlier.
+        // The explicit configuration wins over the defaults AddElarionResumableBlobUploads registered earlier.
         provider.GetRequiredService<StagedUploadGcOptions>().BatchSize.Should().Be(9);
         provider.GetRequiredService<BlobGcOptions>().BatchSize.Should().Be(11);
     }

@@ -59,3 +59,5 @@ designs that are not yet implemented.
 - [ADR-0036: Blob listing is prefix + delimiter virtual hierarchy, not directories](0036-blob-listing-virtual-hierarchy.md)
 - [ADR-0037: Read-replica query routing and read-your-writes consistency tokens — Proposed](0037-read-replica-routing-and-consistency-tokens.md)
 - [ADR-0038: Client-assigned entity identity — UUIDv7 and a truthful key model](0038-client-assigned-entity-identity.md)
+- [ADR-0039: File payloads — the in-memory `ElarionFile` tier and the staged-blob tier](0039-binary-file-responses.md)
+- [ADR-0040: Host-declared module endpoint hooks (`[ModuleEndpoints]`)](0040-host-declared-module-endpoints.md)

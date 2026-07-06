@@ -16,12 +16,18 @@ public sealed class AppModuleDiscoveryGeneratorCacheTests {
         using Elarion.Abstractions;
         using Elarion.Abstractions.Modules;
         using Elarion.AspNetCore;
+        using Microsoft.AspNetCore.Routing;
 
         [assembly: GenerateModuleBootstrapper]
 
         namespace Sample.App {
             [AppModule("App")]
             public static class AppModule { }
+
+            [ModuleEndpoints("App")]
+            public static class AppWebEndpoints {
+                public static void MapEndpoints(IEndpointRouteBuilder endpoints) { }
+            }
 
             public sealed record PingCommand(int Id) : ICommand;
             public sealed record PingResponse(string Name);
@@ -40,17 +46,20 @@ public sealed class AppModuleDiscoveryGeneratorCacheTests {
             new AppModuleDiscoveryGenerator(),
             Source,
             "BootstrapperModules",
+            "BootstrapperModuleEndpoints",
             "BootstrapperSiblings",
             "Bootstrapper");
 
     [Fact]
     public void BootstrapperStaysCached_WhenAnUnrelatedFileChanges() =>
-        // The strict form: every input of the final model either is per-node cached (modules, manifests) or
-        // projects to an equal small value (trigger, sibling probes, root namespace), so the expensive
-        // collect + topological-sort + BuildSource stage must not re-run at all for an unrelated-file edit.
+        // The strict form: every input of the final model either is per-node cached (modules, manifests,
+        // [ModuleEndpoints] contributors) or projects to an equal small value (trigger, sibling probes, root
+        // namespace), so the expensive collect + topological-sort + BuildSource stage must not re-run at all
+        // for an unrelated-file edit.
         GeneratorCacheAssert.ReusesDiscoveryAfterUnrelatedFileEdit(
             new AppModuleDiscoveryGenerator(),
             Source,
             "BootstrapperModules",
+            "BootstrapperModuleEndpoints",
             "Bootstrapper");
 }

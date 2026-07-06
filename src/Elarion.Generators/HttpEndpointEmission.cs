@@ -69,7 +69,15 @@ internal static class HttpEndpointEmission
         bool ResponseIsEmpty,
         string? Description,
         bool IsIdempotent
-    );
+    )
+    {
+        /// <summary>
+        /// Whether the response is the binary file payload (<c>Result&lt;ElarionFile&gt;</c>), mapped through the
+        /// file translation instead of the JSON one. Derived from <see cref="ResponseTypeFqn"/>, so the manifest
+        /// encoding is unchanged and older manifests decode into the same behavior.
+        /// </summary>
+        public bool ResponseIsFile => ResponseTypeFqn == ElarionGeneratorConventions.FileResponseTypeFqn;
+    }
 
     public static void ReportDuplicateRoutes(IEnumerable<Model> entries, List<DiagnosticInfo> diagnostics)
     {
@@ -103,10 +111,14 @@ internal static class HttpEndpointEmission
         const string Results = "global::Elarion.AspNetCore.ElarionHttpResults";
         const string IdempotentMarker =
             "global::Elarion.AspNetCore.ElarionIdempotentEndpointMetadata.Instance";
+        const string FileMarker =
+            "global::Elarion.AspNetCore.ElarionFileEndpointMetadata.Instance";
 
         var inner = indent + "    ";
         var deeper = indent + "        ";
-        var resultCall = entry.ResponseIsEmpty ? "ToNoContentResult" : "ToResult";
+        var resultCall = entry.ResponseIsFile ? "ToFileResult"
+            : entry.ResponseIsEmpty ? "ToNoContentResult"
+            : "ToResult";
         var requestParameter = entry.UseAsParameters
             ? $"[global::Microsoft.AspNetCore.Http.AsParameters] {entry.RequestTypeFqn} request"
             : $"{entry.RequestTypeFqn} request";
@@ -125,8 +137,15 @@ internal static class HttpEndpointEmission
             chain.Add($".WithDescription({Literal(entry.Description)})");
         if (moduleTag is not null)
             chain.Add($".WithTags({Literal(moduleTag)})");
-        chain.Add(entry.ResponseIsEmpty ? ".Produces(204)" : $".Produces<{entry.ResponseTypeFqn}>(200)");
+        // A file response advertises the generic binary content type (the concrete type is per-payload at run
+        // time); the marker lets the OpenAPI package upgrade the schema to type: string, format: binary.
+        if (entry.ResponseIsFile)
+            chain.Add(".Produces(200, null, \"application/octet-stream\")");
+        else
+            chain.Add(entry.ResponseIsEmpty ? ".Produces(204)" : $".Produces<{entry.ResponseTypeFqn}>(200)");
         chain.Add(".ProducesElarionErrors()");
+        if (entry.ResponseIsFile)
+            chain.Add($".WithMetadata({FileMarker})");
         if (entry.IsIdempotent)
             chain.Add($".WithMetadata({IdempotentMarker})");
         if (entry.DisableAntiforgery)

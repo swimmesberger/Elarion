@@ -15,9 +15,25 @@ namespace Elarion.Generators;
 public sealed class ElarionManifestGenerator : IIncrementalGenerator
 {
     private const string AppModuleAttributeMetadataName = ElarionGeneratorConventions.AppModuleAttribute;
+    private const string ModuleEndpointsAttributeMetadataName = ElarionGeneratorConventions.ModuleEndpointsAttribute;
     private const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
     private const string ResourceFilterAttributeMetadataName = ElarionGeneratorConventions.ResourceFilterAttribute;
+
+    /// <summary>
+    /// A <c>[ModuleEndpoints]</c> class with no recognized hook contributes nothing — the attribute is dead
+    /// weight, most likely a signature mistake (the hooks must be <c>static</c> with exactly one parameter).
+    /// </summary>
+    public static readonly DiagnosticDescriptor ModuleEndpointsWithoutHooks = new(
+        id: "ELMOD005",
+        title: "[ModuleEndpoints] class declares no endpoint hook",
+        messageFormat:
+        "Class '{0}' is annotated with [ModuleEndpoints(\"{1}\")] but declares neither a static "
+        + "MapEndpoints(IEndpointRouteBuilder) nor a static ConfigureEndpointGroup(IEndpointRouteBuilder) hook; "
+        + "it contributes nothing to the module",
+        category: "Elarion.Modules",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
 
     private sealed record ManifestItem<T>(T? Model, ImmutableArray<Diagnostic> Diagnostics);
 
@@ -31,6 +47,14 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
                 static (ctx, _) => CreateModule(ctx))
             .Where(static module => module is not null)
             .Select(static (module, _) => module!)
+            .Collect();
+
+        var moduleEndpointHooks = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ModuleEndpointsAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => CreateModuleEndpoints(ctx))
+            .Where(static item => item.Model is not null || item.Diagnostics.Length > 0)
             .Collect();
 
         var httpEndpoints = context.SyntaxProvider
@@ -90,14 +114,16 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
                 static (ctx, _) => VariantDiscovery.CreateVariants(ctx, isConfiguration: true))
             .Collect();
 
-        var combined = modules.Combine(httpEndpoints).Combine(rpcMethods).Combine(resourceFilters)
-            .Combine(permissions).Combine(roles).Combine(featureVariants).Combine(configurationVariants);
+        var combined = modules.Combine(moduleEndpointHooks).Combine(httpEndpoints).Combine(rpcMethods)
+            .Combine(resourceFilters).Combine(permissions).Combine(roles).Combine(featureVariants)
+            .Combine(configurationVariants);
         context.RegisterSourceOutput(combined, static (spc, source) =>
         {
-            var (((((((moduleEntries, httpEndpointEntries), rpcMethodEntries), resourceFilterEntries), permissionGuards), roleGuards), featureVariantGroups), configurationVariantGroups) = source;
+            var ((((((((moduleEntries, moduleEndpointsItems), httpEndpointEntries), rpcMethodEntries), resourceFilterEntries), permissionGuards), roleGuards), featureVariantGroups), configurationVariantGroups) = source;
             EmitManifest(
-                spc, moduleEntries, httpEndpointEntries, rpcMethodEntries, resourceFilterEntries, permissionGuards,
-                roleGuards, featureVariantGroups.AddRange(configurationVariantGroups));
+                spc, moduleEntries, moduleEndpointsItems, httpEndpointEntries, rpcMethodEntries,
+                resourceFilterEntries, permissionGuards, roleGuards,
+                featureVariantGroups.AddRange(configurationVariantGroups));
         });
     }
 
@@ -195,6 +221,50 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         return EquatableArray<string>.Empty;
     }
 
+    // A [ModuleEndpoints] contributor: the named module plus which convention hooks the class declares. A class
+    // with no usable hook is reported (ELMOD005) and not published — an empty entry could never map anything.
+    private static ManifestItem<ElarionManifest.ModuleEndpoints> CreateModuleEndpoints(
+        GeneratorAttributeSyntaxContext ctx)
+    {
+        if (ctx.TargetSymbol is not INamedTypeSymbol type)
+            return new ManifestItem<ElarionManifest.ModuleEndpoints>(null, ImmutableArray<Diagnostic>.Empty);
+
+        foreach (var attr in ctx.Attributes)
+        {
+            if (attr.ConstructorArguments.Length == 0 ||
+                attr.ConstructorArguments[0].Value is not string moduleName ||
+                moduleName.Length == 0)
+            {
+                continue;
+            }
+
+            var hasMapEndpoints = HasStaticMethod(type, "MapEndpoints", 1);
+            var hasConfigureEndpointGroup = HasStaticMethod(type, "ConfigureEndpointGroup", 1);
+            if (!hasMapEndpoints && !hasConfigureEndpointGroup)
+            {
+                return new ManifestItem<ElarionManifest.ModuleEndpoints>(
+                    null,
+                    [
+                        Diagnostic.Create(
+                            ModuleEndpointsWithoutHooks,
+                            type.Locations.FirstOrDefault() ?? Location.None,
+                            type.ToDisplayString(),
+                            moduleName),
+                    ]);
+            }
+
+            return new ManifestItem<ElarionManifest.ModuleEndpoints>(
+                new ElarionManifest.ModuleEndpoints(
+                    moduleName,
+                    type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    hasMapEndpoints,
+                    hasConfigureEndpointGroup),
+                ImmutableArray<Diagnostic>.Empty);
+        }
+
+        return new ManifestItem<ElarionManifest.ModuleEndpoints>(null, ImmutableArray<Diagnostic>.Empty);
+    }
+
     private static ManifestItem<HttpEndpointEmission.Model> CreateHttpEndpoint(
         GeneratorAttributeSyntaxContext ctx,
         CancellationToken ct)
@@ -255,6 +325,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
     private static void EmitManifest(
         SourceProductionContext spc,
         ImmutableArray<ElarionManifest.Module> modules,
+        ImmutableArray<ManifestItem<ElarionManifest.ModuleEndpoints>> moduleEndpointsItems,
         ImmutableArray<ManifestItem<HttpEndpointEmission.Model>> httpEndpointItems,
         ImmutableArray<ManifestItem<RpcMethodEmission.Model>> rpcMethodItems,
         ImmutableArray<ElarionManifest.ResourceFilter> resourceFilters,
@@ -262,6 +333,12 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         ImmutableArray<PermissionDiscovery.RoleGuard> roleGuards,
         ImmutableArray<EquatableArray<ElarionManifest.Variant>> variantGroups)
     {
+        foreach (var item in moduleEndpointsItems)
+        {
+            foreach (var diagnostic in item.Diagnostics)
+                spc.ReportDiagnostic(diagnostic);
+        }
+
         foreach (var item in httpEndpointItems)
         {
             foreach (var diagnostic in item.Diagnostics)
@@ -274,6 +351,10 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
                 spc.ReportDiagnostic(diagnostic);
         }
 
+        var moduleEndpointHooks = moduleEndpointsItems
+            .Where(static item => item.Model is not null)
+            .Select(static item => item.Model!)
+            .ToArray();
         var httpEndpoints = httpEndpointItems
             .Where(static item => item.Model is not null)
             .Select(static item => item.Model!)
@@ -313,8 +394,9 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             .ThenBy(static v => v.Namespace, StringComparer.Ordinal)
             .ToArray();
 
-        if (modules.Length == 0 && httpEndpoints.Length == 0 && rpcMethods.Length == 0 && resourceFilters.Length == 0
-            && permissions.Length == 0 && roles.Length == 0 && variants.Length == 0)
+        if (modules.Length == 0 && moduleEndpointHooks.Length == 0 && httpEndpoints.Length == 0
+            && rpcMethods.Length == 0 && resourceFilters.Length == 0 && permissions.Length == 0 && roles.Length == 0
+            && variants.Length == 0)
             return;
 
         var sb = new StringBuilder();
@@ -329,6 +411,12 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
                      .ThenBy(static m => m.TypeFqn, StringComparer.Ordinal))
         {
             AppendAssemblyMetadata(sb, ElarionManifest.ModuleKey, ElarionManifest.EncodeModule(module));
+        }
+
+        foreach (var hooks in moduleEndpointHooks.OrderBy(static h => h.ModuleName, StringComparer.Ordinal)
+                     .ThenBy(static h => h.TypeFqn, StringComparer.Ordinal))
+        {
+            AppendAssemblyMetadata(sb, ElarionManifest.ModuleEndpointsKey, ElarionManifest.EncodeModuleEndpoints(hooks));
         }
 
         foreach (var endpoint in httpEndpoints.OrderBy(static e => e.Verb, StringComparer.Ordinal)
