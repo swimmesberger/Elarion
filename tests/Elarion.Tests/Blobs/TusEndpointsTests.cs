@@ -195,6 +195,36 @@ public sealed class TusEndpointsTests {
     }
 
     [Fact]
+    public async Task Patch_UnauthenticatedCaller_Returns401() {
+        // The auth guard runs before the ownership check, so an anonymous PATCH is a clean 401 rather than
+        // reaching (and, with the shipped ICurrentUser, throwing on) the absent caller id.
+        var ct = TestContext.Current.CancellationToken;
+        var user = new MutableCurrentUser { UserId = "user-1", IsAuthenticated = true };
+        await using var host = await StartAsync(ct, user: user);
+        var uploadPath = await CreateAsync(host.Client, 4, "a.bin", "application/octet-stream", ct);
+
+        user.IsAuthenticated = false;
+        var response = await host.Client.SendAsync(Patch(uploadPath, 0, [1, 2, 3, 4]), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Delete_UnauthenticatedCallerWithMatchingId_Returns404() {
+        // Fail closed like HEAD: DELETE is owner-scoped, so an unauthenticated caller — even one whose id
+        // equals the recorded owner — is denied 404 without the owner id ever being read.
+        var ct = TestContext.Current.CancellationToken;
+        var user = new MutableCurrentUser { UserId = "user-1", IsAuthenticated = true };
+        await using var host = await StartAsync(ct, user: user);
+        var uploadPath = await CreateAsync(host.Client, 4, "a.bin", "application/octet-stream", ct);
+
+        user.IsAuthenticated = false;
+        var delete = await host.Client.DeleteAsync(uploadPath, ct);
+
+        delete.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task Delete_RemovesSession() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);
