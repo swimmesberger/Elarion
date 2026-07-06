@@ -18,9 +18,9 @@ minor releases may include breaking changes.
   on a "generated" key and a replace-children update dies with `DbUpdateConcurrencyException` on a real
   database, dotnet/efcore#35090) are covered while Identity/framework entities keep their packaged
   generation; explicit or data-annotation configuration, custom value generators, and store defaults always
-  win. Schema-neutral: adopting it produces one *empty* migration to re-sync the snapshot. New **ELID001**
-  analyzer (Warning, bundled in `Elarion` with a code-fix sibling `Elarion.Generators.CodeFixes`) flags
-  every `Guid.NewGuid()` and rewrites it to `Guid.CreateVersion7()`; silent below .NET 9.
+  win. Schema-neutral: adopting it produces one *empty* migration to re-sync the snapshot. Minting a Guid
+  id with `Guid.CreateVersion7()` (UUIDv7) is the documented convention (framework code and docs updated
+  to match); the model pass prevents the phantom UPDATE regardless of v4 vs v7.
   `ApplyElarionIdentity` now declares `ValueGeneratedOnAdd` explicitly for a `Guid` `TKey`, so no app-level
   key convention can reinterpret Identity's keys. A Testcontainers pin test proves the replace-children
   pattern both ways (the EF InMemory provider skips the affected-rows check and cannot catch it). See

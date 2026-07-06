@@ -103,10 +103,9 @@ inside one unit of work — and return the id from a create handler — without 
 
 Two conscious trade-offs come with v7: the id **embeds its creation instant** (readable wherever the id is
 visible, e.g. in URLs), and ids created within the same millisecond are **mutually unordered** — never sort
-business data by id; that is what `CreatedAt` is for. The **ELID001** analyzer (Warning, in the `Elarion`
-package) flags every `Guid.NewGuid()` and ships a code fix that rewrites it to `Guid.CreateVersion7()`; the
-rare id that must be *unpredictable* is the one legitimate v4 site — suppress the diagnostic there with a
-justification. See [Diagnostics](/docs/reference/diagnostics#elid--identifier-conventions).
+business data by id; that is what `CreatedAt` is for. The one place to keep a random v4 `Guid.NewGuid()` is
+an id that must be *unpredictable* (a capability-style token) — precisely because a v7 id leaks its creation
+timestamp.
 
 ### The model declares client-assigned keys
 
@@ -147,7 +146,8 @@ that previously left `Id` unset and relied on EF's client-side generator must no
   write misclassified by the generated-key heuristic stays green in unit tests and only fails on a real
   database. Cover replace-children behavior with a real-database integration test (e.g. Testcontainers
   PostgreSQL) — creates always work (`Add` forces the whole graph `Added`), so a create-path test proves
-  nothing here.
+  nothing here. See [Testing persistence](/docs/concepts/persistence-and-transactions#testing-persistence)
+  for the fixture pattern and why InMemory hides this class of bug.
 </Callout>
 
 The full rationale — including why database-side `uuidv7()` and an EF `ValueGenerator` were rejected —

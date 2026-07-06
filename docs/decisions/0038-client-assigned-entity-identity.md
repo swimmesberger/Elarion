@@ -1,4 +1,4 @@
-# ADR-0038: Client-assigned entity identity — UUIDv7, a truthful key model, and ELID001
+# ADR-0038: Client-assigned entity identity — UUIDv7 and a truthful key model
 
 - Status: Accepted
 - Date: 2026-07-06
@@ -49,7 +49,7 @@ the hottest tables is worth having by default.
 **The application owns entity identity.** It mints ids in code at the creation site with
 `Guid.CreateVersion7()`; the database never generates domain keys; the model says so.
 
-Concretely, five moves:
+Concretely, four moves:
 
 1. **A truthful model, generated.** The `[GenerateDbSets]` `ConfigureEntities` now ends with a generated
    `ApplyElarionClientAssignedGuidKeys(modelBuilder)` pass that declares single-property `Guid` primary
@@ -68,23 +68,15 @@ Concretely, five moves:
    types that may live beside domain entities, and no app-level key convention may reinterpret them.
 3. **UUIDv7 at the creation site**: `Id = Guid.CreateVersion7()`. The BCL method *is* the seam — a
    framework wrapper (`EntityId.New()` / `ElarionIds.NewV7()`) was considered and rejected: a one-line
-   wrapper adds no invariant, no type, and no validation, and once the analyzer owns the rule it buys
-   nothing.
-4. **An analyzer instead of a hard ban.** `ELID001` (warning, in the `Elarion` package's analyzer bundle)
-   flags every `Guid.NewGuid()` invocation — "random (v4) Guid: prefer `Guid.CreateVersion7()` for entity
-   keys (time-ordered, index-friendly)" — with a code fix that rewrites the call (the fix lives in a
-   Workspaces-layer sibling assembly, `Elarion.Generators.CodeFixes`, bundled in the same
-   `analyzers/dotnet/cs` folder; the compiler must not load Workspaces dependencies, RS1038). Flagging
-   *every* `NewGuid()` — not just "entity id" positions — is deliberate: detecting "is this a key?"
-   without the EF model is heuristic and brittle, and v7 is the better default for nearly every use.
-   Warning severity is "noting", not banning: under `TreatWarningsAsErrors` it enforces, apps that want it
-   advisory dial it down in `.editorconfig`, and the rare legitimate v4 use (an id that must be
-   unpredictable) becomes a visible, suppressed-with-justification site. The rule stays silent on target
-   frameworks without `Guid.CreateVersion7()` (&lt; .NET 9).
-5. **The framework practices the doctrine.** Framework-minted ids that land in database keys or
+   wrapper adds no invariant, no type, and no validation over the BCL call.
+4. **The framework practices the doctrine.** Framework-minted ids that land in database keys or
    time-ordered streams (outbox message ids, staged-upload session ids, blob storage names, event/message
    ids, scheduler run ids) are minted with `Guid.CreateVersion7()`; framework tables already declared
    their keys `ValueGeneratedNever`.
+
+Preferring `Guid.CreateVersion7()` over `Guid.NewGuid()` is a **documented convention**, not a
+build-enforced one. A framework-shipped analyzer (ELID001) was built and then cut before shipping — see
+*Rejected alternatives*.
 
 Two caveats are part of the contract and documented rather than hidden: a v7 id **embeds its creation
 instant** (visible wherever the id is, e.g. in URLs — acceptable, but a conscious choice), and ids created
@@ -93,17 +85,31 @@ is).
 
 ## Rejected alternatives
 
-- **Database-side generation** (PostgreSQL 18 ships native `uuidv7()`): ids would not exist until
-  `INSERT`, breaking pre-save id use (FKs, soft references, links assembled inside one unit of work);
-  tests on non-Postgres providers cannot run SQL defaults; and store-generated keys re-introduce exactly
-  the insert-vs-update heuristic this ADR removes.
+- **Database-side generation** — even though PostgreSQL 18 ships native `uuidv7()`: the id would not
+  exist until `INSERT`, which defeats the whole point of client-assigned identity — pre-save id use
+  (wiring FKs, soft references, and links inside one unit of work, and returning the id from a create
+  handler). And a store-generated key re-introduces exactly the insert-vs-update heuristic this ADR
+  removes: a set value on a store-generated key trips the same misclassification. Both reasons are about
+  *when the id exists* and *who owns it*, so they hold on any provider and under any test strategy — this
+  is not an argument about what a given test harness can execute.
 - **An EF `ValueGenerator`** (centralize v7 in the model): keeps `ValueGeneratedOnAdd` semantics, so any
   explicitly-set id — imports, tests, seeding — walks straight back into the misclassification trap, and
   it makes identity an infrastructure concern instead of a domain one.
-- **A `Guid` wrapper API** (`EntityId.New()`): no invariant, no type, no validation; the analyzer owns the
-  rule (see Decision 3/4).
-- **`BannedApiAnalyzers` + `BannedSymbols.txt`** (the adopter's interim solution): app-side plumbing, a
-  hard ban with no code fix and no TFM awareness. The framework analyzer is the right home.
+- **A `Guid` wrapper API** (`EntityId.New()`): no invariant, no type, and no validation over the BCL call
+  — it buys nothing.
+- **A framework-shipped analyzer (ELID001) — for now.** An `Elarion`-bundled diagnostic flagging every
+  `Guid.NewGuid()`, with a `Guid.CreateVersion7()` code fix, was built and then cut before shipping. It is
+  decoupled from the bug this ADR fixes — the model pass prevents the phantom UPDATE regardless of v4 vs v7,
+  so the analyzer is pure index/ordering hygiene — and *currently* the friction outweighs the payoff:
+  flagging every `NewGuid()` is broad by design (detecting "is this a key?" without the EF model is brittle),
+  yet a real share of sites are v4-neutral (lease, correlation, ephemeral in-memory ids) or v4-*preferred*
+  (unpredictable tokens, where v7 would leak a timestamp); and as a warning under the common
+  `TreatWarningsAsErrors` posture it is a mandatory rewrite, not the advisory nudge it reads as. The
+  convention is documented instead; a targeted, non-breaking analyzer can be revisited if adopters mint v4
+  keys in practice.
+- **`BannedApiAnalyzers` + `BannedSymbols.txt`** (the adopter's interim solution): a hard ban with no code
+  fix and no TFM awareness. An adopter who wants build-time enforcement can add it themselves; the framework
+  does not impose it.
 - **An opt-in flag** (`[GenerateDbSets(ClientAssignedGuidKeys = true)]` or
   `UseClientAssignedGuidKeys()`): contradicts the happy-path convention — the framework must not teach an
   idiom whose default model misdeclares it.
@@ -123,5 +129,6 @@ is).
 - The InMemory provider cannot catch misclassified writes; replace-children behavior needs a real-database
   integration test. Documented on the entity-authoring page; the framework's own pin lives in
   `ClientAssignedGuidKeyTests`.
-- ELID001 fires on every `Guid.NewGuid()` in analyzer-covered code, including tests compiled with the
-  bundle — by design (v7 is the better default there too); `.editorconfig` scoping is the escape hatch.
+- Minting a key as v4 is not caught at build time — the `Guid.CreateVersion7()` preference is a documented
+  convention, not enforced. That is a missed index-ordering optimization, never a correctness bug: the model
+  pass prevents the phantom UPDATE regardless of v4 vs v7.

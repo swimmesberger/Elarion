@@ -46,7 +46,6 @@
     <Project Path="src/Elarion.FeatureFlags.FeatureManagement/Elarion.FeatureFlags.FeatureManagement.csproj" />
     <Project Path="src/Elarion.FeatureFlags.OpenFeature/Elarion.FeatureFlags.OpenFeature.csproj" />
     <Project Path="src/Elarion.Generators/Elarion.Generators.csproj" />
-    <Project Path="src/Elarion.Generators.CodeFixes/Elarion.Generators.CodeFixes.csproj" />
     <Project Path="src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <Project Path="src/Elarion.Validation/Elarion.Validation.csproj" />
     <Project Path="src/Elarion/Elarion.csproj" />

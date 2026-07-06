@@ -2,7 +2,6 @@
 
 Rule ID | Category | Severity | Notes
 --------|----------|----------|------
-ELID001 | Elarion.Identifiers | Warning | Prefer Guid.CreateVersion7() over Guid.NewGuid()
 ELPIPE001 | Elarion.Generators | Error | Decorator AppliesTo predicate must be public
 ELPIPE002 | Elarion.Generators | Error | Decorator AppliesTo predicate has an unsupported signature
 ELPIPE003 | Elarion.Abstractions.Resilience | Error | Domain-event consumer cannot be resilient
