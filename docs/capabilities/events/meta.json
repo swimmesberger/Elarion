@@ -1,4 +1,4 @@
 {
   "title": "Events & messaging",
-  "pages": ["consuming-events", "backends"]
+  "pages": ["consuming-events", "backends", "client-events"]
 }

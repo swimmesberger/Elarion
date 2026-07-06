@@ -62,3 +62,5 @@ designs that are not yet implemented.
 - [ADR-0039: File payloads — the in-memory `ElarionFile` tier and the staged-blob tier](0039-binary-file-responses.md)
 - [ADR-0040: Host-declared module endpoint hooks (`[ModuleEndpoints]`)](0040-host-declared-module-endpoints.md)
 - [ADR-0041: Blob streaming connections clone the context connection](0041-blob-streaming-connections-clone-the-context-connection.md)
+- [ADR-0042: Client events — after-commit facts projected to the browser over SSE — Proposed](0042-client-events.md)
+- [ADR-0043: Streaming requests and responses — deferred, with the design pre-decided — Proposed](0043-streaming-requests-and-responses.md)

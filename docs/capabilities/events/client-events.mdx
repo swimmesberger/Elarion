@@ -1,0 +1,160 @@
+---
+title: Client events (near-realtime)
+description: Push after-commit facts to connected browsers as invalidation hints — server-sent events composed from the shipped seams.
+---
+
+A browser showing a list should update when the data changes — without polling on a timer, and without
+pretending the browser is a reliable message consumer. Elarion's model for this is deliberate:
+
+- **Push is a hint, not a source of truth.** A client event is *light* — an id or ref, never state. The
+  client reacts by re-running the normal query handlers, which carry the real authorization gates. A missed
+  event is therefore never corruption, just staleness until the next re-query.
+- **Delivery is at-most-once.** A closed laptop misses events, period. Anything that must not be missed
+  belongs in an [integration event](/docs/capabilities/events) consumed server-side with at-least-once
+  delivery — not on a socket to a browser.
+- **The internal event is not the wire contract.** What crosses the trust boundary is a separate, deliberate
+  payload; the projection from the internal integration event is one hand-written line, which is exactly
+  where you review what leaks.
+
+<Callout title="First-class support is on the roadmap">
+  Typed client-event topics (`IClientEvent` + `IClientEventPublisher`), scoped subscriptions with
+  subscribe-time authorization, cross-node fan-out over PostgreSQL `LISTEN/NOTIFY`, and a generated
+  TypeScript subscription client are proposed in
+  [ADR-0042](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0042-client-events.md).
+  The recipe below composes the same semantics from shipped seams today, and is designed so adopting the
+  packages later is a mechanical swap.
+</Callout>
+
+## The recipe
+
+Four pieces: a light wire contract, an in-process stream, a projection consumer, and an SSE endpoint.
+The command handler that causes the change is **not** on the list — it publishes its integration event
+exactly as before and never learns the client tier exists.
+
+### 1. The wire contract
+
+```csharp
+// Modules/Invoicing/Client/InvoiceChanged.cs — what the browser sees. An id, not state.
+public sealed record InvoiceChanged {
+    public required Guid InvoiceId { get; init; }
+}
+```
+
+### 2. The in-process stream
+
+A singleton holding one bounded channel per connected subscriber. `DropOldest` is the honest policy for a
+hint: a slow client loses old hints, never stalls delivery to others.
+
+```csharp
+using System.Runtime.CompilerServices;
+using System.Threading.Channels;
+
+[Service(Scope = ServiceScope.Singleton)]
+internal sealed class InvoiceEventStream {
+    private readonly ConcurrentDictionary<Guid, (Guid CustomerId, Channel<InvoiceChanged> Channel)> _subscriptions = new();
+
+    public void Publish(Guid customerId, InvoiceChanged evt) {
+        foreach (var (_, subscription) in _subscriptions) {
+            if (subscription.CustomerId == customerId) {
+                subscription.Channel.Writer.TryWrite(evt);
+            }
+        }
+    }
+
+    public async IAsyncEnumerable<InvoiceChanged> Subscribe(
+        Guid customerId, [EnumeratorCancellation] CancellationToken ct) {
+        var id = Guid.CreateVersion7();
+        var channel = Channel.CreateBounded<InvoiceChanged>(
+            new BoundedChannelOptions(capacity: 64) { FullMode = BoundedChannelFullMode.DropOldest });
+        _subscriptions[id] = (customerId, channel);
+        try {
+            await foreach (var evt in channel.Reader.ReadAllAsync(ct)) {
+                yield return evt;
+            }
+        }
+        finally {
+            _subscriptions.TryRemove(id, out _);
+        }
+    }
+}
+```
+
+### 3. The projection
+
+A [method-form consumer](/docs/capabilities/events/consuming-events) on a `[Service]` — integration
+consumers run **after commit** on a separate scope, so a rolled-back command can never push a ghost update.
+Note what the mapping drops: amounts, emails — internal fields never cross the boundary.
+
+```csharp
+[Service]
+internal sealed class InvoicingClientProjections(InvoiceEventStream stream) {
+    [ConsumeEvent]
+    public void On(InvoicePaid evt) =>
+        stream.Publish(evt.CustomerId, new InvoiceChanged { InvoiceId = evt.InvoiceId });
+}
+```
+
+### 4. The SSE endpoint
+
+Declared on the module's endpoint hook (or via
+[`[ModuleEndpoints]`](/docs/concepts/modules) from a web companion assembly if the module assembly is
+web-free), so it disappears with the module's feature gate. Authorize the subscription **fail-closed**
+before streaming — a caller who can't read the customer gets a 404, not an empty stream.
+
+```csharp
+public static void MapEndpoints(IEndpointRouteBuilder endpoints) {
+    endpoints.MapGet("/invoicing/events", async (
+        Guid customerId,
+        InvoiceEventStream stream,
+        AppDbContext db,
+        ICurrentUser user,
+        CancellationToken ct) => {
+        var isMember = await db.CustomerMembers.AnyAsync(
+            m => m.CustomerId == customerId && m.UserId == user.Id, ct);
+        if (!isMember) {
+            return Results.NotFound();
+        }
+
+        return TypedResults.ServerSentEvents(
+            stream.Subscribe(customerId, ct)
+                .Select(evt => new SseItem<InvoiceChanged>(evt, eventType: "invoicing.invoiceChanged")));
+    }).RequireAuthorization();
+}
+```
+
+`TypedResults.ServerSentEvents` serializes items with the host's `Http.Json` options — with
+[`AddElarionHttpJson()`](/docs/capabilities/serialization) that is the canonical JSON, so the wire shape
+matches every other transport.
+
+### 5. The browser
+
+`EventSource` reconnects automatically; treat every (re)open as "you may have missed events" and re-query.
+With TanStack Query the whole client story is invalidation:
+
+```ts
+const source = new EventSource(`/invoicing/events?customerId=${customerId}`);
+
+source.addEventListener("invoicing.invoiceChanged", (e) => {
+  const evt = JSON.parse(e.data);
+  queryClient.invalidateQueries({ queryKey: ["invoices", evt.invoiceId] });
+});
+
+// Fires on connect and every automatic reconnect — converge by re-querying.
+source.addEventListener("open", () => {
+  queryClient.invalidateQueries({ queryKey: ["invoices"] });
+});
+```
+
+## Limits of the recipe
+
+- **Single node.** The stream is in-process; an event published on node A never reaches a browser connected
+  to node B. Use sticky sessions, or bridge nodes yourself with the
+  [`LISTEN/NOTIFY` pattern](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0024-postgres-listen-notify-settings-changes.md)
+  the settings subsystem ships — cross-node fan-out is exactly what the proposed `Elarion.ClientEvents.PostgreSql`
+  package packages up.
+- **Proxy idle timeouts.** Long-lived quiet connections can be dropped by intermediaries; the browser's
+  `EventSource` reconnects and the `open` handler re-syncs, so this degrades to a brief delay rather than
+  missed state. Emit periodic keep-alive comments if your infrastructure is aggressive.
+- **The humble alternative.** For dashboards where seconds of staleness are fine, polling a
+  [keyset-paginated query](/docs/capabilities/pagination) on an interval is less machinery and often enough
+  at this tier.
