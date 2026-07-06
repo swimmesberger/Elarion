@@ -64,14 +64,14 @@ internal sealed class InMemoryDomainEventBus(
                     await descriptor.InvokeAsync!(serviceProvider, @event, context, ct).ConfigureAwait(false);
                     EventTelemetry.RecordConsumer(
                         eventName, descriptor.ServiceType.Name, "ok",
-                        Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                        Stopwatch.GetElapsedTime(startTimestamp));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) {
                     // Run every subscriber, then surface all failures so one publish fails atomically.
                     (failures ??= []).Add(ex);
                     EventTelemetry.RecordConsumer(
                         eventName, descriptor.ServiceType.Name, "exception",
-                        Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                        Stopwatch.GetElapsedTime(startTimestamp));
                     activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
                         { "exception.type", ex.GetType().FullName },
                         { "exception.message", ex.Message },

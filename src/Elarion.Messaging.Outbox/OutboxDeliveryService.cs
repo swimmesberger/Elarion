@@ -131,7 +131,7 @@ public sealed class OutboxDeliveryService(
                 }
 
                 EventTelemetry.RecordDelivery(
-                    message.EventType, "unresolvable", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                    message.EventType, "unresolvable", Stopwatch.GetElapsedTime(startTimestamp));
                 return;
             }
 
@@ -141,7 +141,7 @@ public sealed class OutboxDeliveryService(
             }
 
             EventTelemetry.RecordDelivery(
-                message.EventType, "delivered", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                message.EventType, "delivered", Stopwatch.GetElapsedTime(startTimestamp));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -156,7 +156,7 @@ public sealed class OutboxDeliveryService(
             }));
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             EventTelemetry.RecordDelivery(
-                message.EventType, "failed", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                message.EventType, "failed", Stopwatch.GetElapsedTime(startTimestamp));
             logger.LogError(
                 ex,
                 "Delivery of outbox message {MessageId} ({EventType}, correlation {CorrelationId}) failed on attempt {Attempt}.",

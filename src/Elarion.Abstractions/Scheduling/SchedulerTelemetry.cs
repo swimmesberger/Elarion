@@ -18,25 +18,33 @@ public static class SchedulerTelemetry {
 
     private static readonly Meter MeterInstance = new(MeterName);
 
+    // OTel semconv duration buckets (seconds). Without explicit advice the SDK's default
+    // boundaries are millisecond-scaled and useless for second-valued histograms.
+    private static readonly InstrumentAdvice<double> DurationAdvice = new() {
+        HistogramBucketBoundaries = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]
+    };
+
     /// <summary>Counts scheduled job executions by job and status.</summary>
     public static readonly Counter<long> JobRunCount =
         MeterInstance.CreateCounter<long>(
             "scheduler.job.run.count",
             description: "Total number of scheduled job runs");
 
-    /// <summary>Records scheduled job execution duration in milliseconds.</summary>
+    /// <summary>Records scheduled job execution duration in seconds.</summary>
     public static readonly Histogram<double> JobRunDuration =
         MeterInstance.CreateHistogram<double>(
             "scheduler.job.run.duration",
-            unit: "ms",
-            description: "Duration of scheduled job runs");
+            unit: "s",
+            description: "Duration of scheduled job runs",
+            advice: DurationAdvice);
 
-    /// <summary>Records scheduling lag in milliseconds.</summary>
+    /// <summary>Records scheduling lag in seconds.</summary>
     public static readonly Histogram<double> JobRunLag =
         MeterInstance.CreateHistogram<double>(
             "scheduler.job.run.lag",
-            unit: "ms",
-            description: "Delay between due time and actual start time");
+            unit: "s",
+            description: "Delay between due time and actual start time",
+            advice: DurationAdvice);
 
     /// <summary>Tracks the number of currently executing scheduled jobs.</summary>
     public static readonly UpDownCounter<int> ActiveJobRuns =
@@ -50,20 +58,21 @@ public static class SchedulerTelemetry {
             "scheduler.operation.count",
             description: "Total number of scheduler control-plane operations");
 
-    /// <summary>Records scheduler control-plane operation duration in milliseconds.</summary>
+    /// <summary>Records scheduler control-plane operation duration in seconds.</summary>
     public static readonly Histogram<double> OperationDuration =
         MeterInstance.CreateHistogram<double>(
             "scheduler.operation.duration",
-            unit: "ms",
-            description: "Duration of scheduler control-plane operations");
+            unit: "s",
+            description: "Duration of scheduler control-plane operations",
+            advice: DurationAdvice);
 
     /// <summary>Records a scheduler control-plane operation metric.</summary>
-    public static void RecordOperation(string operation, string outcome, double elapsedMilliseconds) {
+    public static void RecordOperation(string operation, string outcome, TimeSpan elapsed) {
         var tags = new TagList {
             { "scheduler.operation", operation },
             { "scheduler.operation.outcome", outcome }
         };
         OperationCount.Add(1, tags);
-        OperationDuration.Record(elapsedMilliseconds, tags);
+        OperationDuration.Record(elapsed.TotalSeconds, tags);
     }
 }

@@ -214,17 +214,17 @@ Metrics (all tagged `elarion.actor`; message-level ones also `elarion.actor.meth
 | Metric | Instrument | Meaning |
 | --- | --- | --- |
 | `actor.message.count` | counter | Processed messages by outcome (`timeout` = the deadlock backstop fired). |
-| `actor.message.duration` | histogram (ms) | Execution time, excluding queue wait. |
-| `actor.message.queue_wait` | histogram (ms) | Time from enqueue to execution start — rising values mean a hot mailbox. |
+| `actor.message.duration` | histogram (s) | Execution time, excluding queue wait. |
+| `actor.message.queue_wait` | histogram (s) | Time from enqueue to execution start — rising values mean a hot mailbox. |
 | `actor.mailbox.pending` | up-down counter | Messages enqueued or executing right now — the backpressure signal to alert on. |
 | `actor.activations.active` | up-down counter | Live activations. |
 | `actor.activations.count` | counter | Total activations (re-activation churn shows up here). |
 | `actor.activations.failed` | counter | Activations whose constructor or `OnActivateAsync` threw (each failure also failed its queued calls). |
 
 This deliberately matches the signal set actor operators expect from Proto.Actor's metrics or Akka.NET's
-Phobos (mailbox depth, processing time, activation/failure counts, per-instance span identity), with two
-knowing deviations: durations are **milliseconds** for consistency with the `Elarion.Handlers` meters
-(OTel semconv prefers seconds — if you normalize units in your pipeline, normalize both), and there are
+Phobos (mailbox depth, processing time, activation/failure counts, per-instance span identity). Durations
+follow the OTel semantic conventions — **seconds**, with the standard bucket boundaries supplied as
+instrument advice — like every Elarion duration histogram. The one knowing deviation: there are
 **no dead-letter or restart metrics** because the model has neither — no message can be dropped (every
 call is request/reply; rejected calls throw to their caller) and activations are never restarted behind
 your back (a failed activation fails its calls; the next call re-activates).

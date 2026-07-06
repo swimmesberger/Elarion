@@ -129,7 +129,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         }
 
         ActorTelemetry.RecordQueueWait(
-            _actorName, MethodName, _timeProvider.GetElapsedTime(_enqueuedTimestamp).TotalMilliseconds);
+            _actorName, MethodName, _timeProvider.GetElapsedTime(_enqueuedTimestamp));
         using var activity = ActorTelemetry.StartProcess(_actorName, MethodName, _key, _callerContext);
         var startTimestamp = _timeProvider.GetTimestamp();
         var outcome = "ok";
@@ -177,7 +177,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         finally {
             Cleanup();
             ActorTelemetry.RecordMessage(
-                _actorName, MethodName, outcome, _timeProvider.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                _actorName, MethodName, outcome, _timeProvider.GetElapsedTime(startTimestamp));
         }
     }
 

@@ -42,6 +42,12 @@ builder.Services
 
 ## First-party surfaces
 
+Every Elarion duration histogram follows the OTel semantic conventions: values in **seconds**
+(unit `s`), with the semconv-recommended bucket boundaries supplied as instrument advice so
+exporters don't fall back to millisecond-scaled defaults. The JSON-RPC/MCP duration metric is named
+`rpc.server.call.duration` per the current RPC conventions (the retired experimental
+`rpc.server.duration`, which was defined in milliseconds, is not emitted).
+
 | Surface | Source / meter | Coverage |
 | --- | --- | --- |
 | JSON-RPC | `JsonRpcTelemetry` (`JsonRpc`) | Every request dispatch creates a span: single calls, notifications, batch items, invalid versions, unknown methods, invalid params, application errors, unhandled exceptions, invalid envelopes, parse errors, and batch-level failures. Registered methods use their canonical name; invalid/unregistered ones use bounded sentinels to avoid unbounded metric cardinality. Tags are bounded: method, response/error code, version, and batch index/size. |

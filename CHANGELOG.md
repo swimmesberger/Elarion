@@ -104,6 +104,18 @@ minor releases may include breaking changes.
   [ADR-0036](docs/decisions/0036-blob-listing-virtual-hierarchy.md).
 
 ### Changed
+- **Breaking (telemetry): all duration metrics are now seconds (OTel semantic conventions).** Every Elarion
+  duration histogram (`handler.execution.duration`, `actor.message.duration`/`actor.message.queue_wait`,
+  `scheduler.job.run.duration`/`scheduler.job.run.lag`, `scheduler.operation.duration`,
+  `messaging.consumer.invocation.duration`, `messaging.delivery.duration`, `handler.cache.operation.duration`,
+  `resilience.policy.execution.duration`, and the RPC request duration) now records **seconds** (unit `s`)
+  instead of milliseconds, and supplies the semconv-recommended bucket boundaries as instrument advice so
+  exporters don't fall back to millisecond-scaled default buckets. The JSON-RPC/MCP duration metric is renamed
+  `rpc.server.duration` → **`rpc.server.call.duration`** per the current OTel RPC conventions (the retired
+  experimental name was defined in milliseconds). The public `Record*` helpers on the telemetry classes now
+  take a `TimeSpan` instead of `double elapsedMilliseconds`. Span attributes with an explicit `_ms` suffix
+  (e.g. `scheduler.job.duration_ms`) are unchanged — they are self-describing. Update dashboards and alerts
+  accordingly.
 - **Breaking (blob storage wiring):** `PostgreSqlBlobStore<T>` no longer depends on an injected
   `NpgsqlDataSource`. Its dedicated streaming-read connection is now **cloned from the blob `DbContext`'s own
   connection** (`ICloneable.Clone()` → the connection's owning data source), so it shares the context's pool,
