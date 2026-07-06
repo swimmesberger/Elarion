@@ -9,6 +9,23 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Client events — near-realtime browser updates (ADR-0043).** After-commit facts projected to connected
+  browsers as **at-most-once hints**: declare an `IClientEvent` wire contract in a module (topic registration
+  is **generated** — `{module}.{name}`, `[ClientEvent("…")]` overrides, contract-level `[RequirePermission]`/
+  `[RequireRole]` become subscribe-time requirements; diagnostics `ELCEV001`–`ELCEV003`), project the
+  integration event onto it with a method-form `[ConsumeEvent]` (post-commit for free), and the browser
+  converges by re-query — payloads are ids/refs, never state. `Elarion.ClientEvents` owns the opt-in topic
+  catalog, canonical-JSON publisher, and the in-process registry behind the replaceable
+  `IClientEventBroadcaster` seam; `Elarion.ClientEvents.AspNetCore` maps the SSE endpoint
+  (`MapElarionClientEvents`, native `TypedResults.ServerSentEvents`, fail-closed subscribe-time authorization,
+  `elarion.connected`/`elarion.keepAlive` control events); `Elarion.ClientEvents.PostgreSql` adds cross-node
+  fan-out over `LISTEN/NOTIFY` (`AddElarionPostgreSqlClientEvents`) with an `elarion.connected` re-query
+  signal after reconnect gaps. The schema exporter emits declared topics as the schema's `events` block, and
+  the TypeScript client generator turns it into `events-client.ts` — a topic-typed subscription client with
+  Zod-validated payloads over one `EventSource`. See the
+  [client events doc](docs/capabilities/events/client-events.mdx) and
+  [ADR-0043](docs/decisions/0043-client-events.md); streaming request/response support was evaluated and
+  deferred in [ADR-0044](docs/decisions/0044-streaming-requests-and-responses.md).
 - **In-memory actors — `Elarion.Actors` (ADR-0042).** Plain classes marked `[Actor]` become keyed,
   mailbox-protected state machines with **source-generated typed facades**: public async methods are the
   message surface, a generated `I{Name}` facade enqueues each call as a statically-typed work item (no

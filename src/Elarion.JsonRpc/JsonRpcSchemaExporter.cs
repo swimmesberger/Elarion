@@ -82,7 +82,35 @@ public static class JsonRpcSchemaExporter {
             schema["capabilities"] = capabilities;
         }
 
+        var events = BuildEventsNode(exportOptions, options);
+        if (events is not null) {
+            schema["events"] = events;
+        }
+
         return schema.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    /// <summary>
+    /// Builds the <c>events</c> block — each declared client-event topic with its payload schema (ADR-0043),
+    /// in deterministic ordinal topic order — or <see langword="null"/> when no topics were supplied, keeping
+    /// event-free schemas byte-identical.
+    /// </summary>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static JsonObject? BuildEventsNode(
+        JsonRpcSchemaExportOptions? exportOptions, JsonSerializerOptions options) {
+        if (exportOptions?.ClientEventTopics is not { Topics.Count: > 0 } manifest) {
+            return null;
+        }
+
+        var events = new JsonObject();
+        foreach (var topic in manifest.Topics.OrderBy(static t => t.Name, StringComparer.Ordinal)) {
+            events[topic.Name] = new JsonObject {
+                ["payload"] = BuildSchemaNode(topic.EventType, options, InjectReflectedAnnotations),
+            };
+        }
+
+        return events;
     }
 
     /// <summary>

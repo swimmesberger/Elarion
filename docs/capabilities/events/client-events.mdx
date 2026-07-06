@@ -1,0 +1,215 @@
+---
+title: Client events (near-realtime)
+description: Push after-commit facts to connected browsers as invalidation hints — typed topics, fail-closed subscriptions, and a generated TypeScript client over Server-Sent Events.
+---
+
+A browser showing a list should update when the data changes — without polling on a timer, and without
+pretending the browser is a reliable message consumer. Elarion's model for this is deliberate:
+
+- **Push is a hint, not a source of truth.** A client event is *light* — an id or ref, never state. The
+  client reacts by re-running the normal query handlers, which carry the real authorization gates. A missed
+  event is therefore never corruption, just staleness until the next re-query.
+- **Delivery is at-most-once.** A closed laptop misses events, period. Anything that must not be missed
+  belongs in an [integration event](/docs/capabilities/events) consumed server-side with at-least-once
+  delivery — not on a socket to a browser.
+- **The internal event is not the wire contract.** What crosses the trust boundary is a separate, deliberate
+  payload; the projection from the internal integration event is one hand-written line, which is exactly
+  where you review what leaks.
+
+Three packages ship the machinery — `Elarion.ClientEvents` (topic catalog, publisher, in-process fan-out),
+`Elarion.ClientEvents.AspNetCore` (the SSE endpoint), and `Elarion.ClientEvents.PostgreSql` (cross-node
+fan-out, when you run more than one node) — so what you write is only the policy: the contract, the topic
+declaration, the projection, and the resource authorization. The command handler that causes the change is
+**not** on the list — it publishes its integration event exactly as before and never learns the client tier
+exists.
+
+## When to reach for it
+
+Client events are one tier in the event story; pick by *who must see the fact and how reliably*:
+
+| You need | Reach for |
+| --- | --- |
+| Browsers to refresh within ~a second of a committed change | **Client events** (this page) |
+| A server-side reaction that must not be missed (email, billing, sync) | An [integration event](/docs/capabilities/events) — at-least-once, inboxed |
+| A change that must commit atomically with the command | A [domain event](/docs/capabilities/events) — same transaction |
+| Live progress of one long-running command | Client events, [the ephemeral tier](#progress-the-ephemeral-tier) |
+| A dashboard where seconds of staleness are fine | Polling a [keyset query](/docs/capabilities/pagination) — less machinery |
+| Config/settings values that reload live | [`ISettingsManager.Watch`](/docs/concepts/settings) — not an event topic |
+
+The line to hold: a client event may be **dropped** (closed laptop, full buffer, reconnect gap) and the
+system must stay correct because the client re-queries. The moment a fact must not be missed, it belongs on
+the integration plane consumed server-side — push the *consequence* to browsers as a hint afterwards.
+
+**The happy path**, end to end: declare an `IClientEvent` contract in the module (topic registration is
+generated), project the integration event onto it in a `[ConsumeEvent]` method, map
+`MapElarionClientEvents("/events")`, and let the generated TypeScript client drive cache invalidation.
+Running more than one node? Add the one `AddElarionPostgreSqlClientEvents(...)` line. Each step is below.
+
+## 1. Declare the wire contract
+
+```csharp
+// Modules/Invoicing/Client/InvoiceChanged.cs — what the browser sees. An id, not state.
+public sealed record InvoiceChanged : IClientEvent {
+    public required Guid InvoiceId { get; init; }
+}
+```
+
+`IClientEvent` marks a topic schema at the trust boundary — the client-side analogue of `[ModuleContract]`.
+An internal integration event must never implement it directly; publish a separate contract so internal
+renames cannot break deployed frontends.
+
+## 2. Register the topic
+
+Under `[assembly: UseElarion]` (or the standalone `[assembly: GenerateClientEventTopics]`), registration is
+**generated**: every `IClientEvent` contract under an `[AppModule]` becomes a topic named `{module}.{name}`
+— both parts camel-cased, a trailing `Event` suffix stripped, so `InvoiceChanged` in the Invoicing module is
+`"invoicing.invoiceChanged"`. Attributes on the contract become subscribe-time requirements, and
+`[ClientEvent("…")]` pins the full wire name across a type rename:
+
+```csharp
+[RequirePermission("invoices", Verbs.Read)]   // evaluated when a client subscribes
+public sealed record InvoiceChanged : IClientEvent {
+    public required Guid InvoiceId { get; init; }
+}
+```
+
+The generated `Add{Module}ClientEvents` is wired into the module's `ConfigureDefaultServices`, so a
+disabled module's topics simply don't exist. A contract outside every module warns (`ELCEV001`), colliding
+topic names are a compile error (`ELCEV002`), and contracts without an `Elarion.ClientEvents` reference
+warn (`ELCEV003`). The manual path remains for hosts without the bootstrapper or for custom vocabularies:
+
+```csharp
+builder.Services.AddElarionClientEvents(events => events
+    .AddTopic<InvoiceChanged>("invoicing.invoiceChanged", t => t.RequirePermission("invoices", Verbs.Read)));
+```
+
+Either way, nothing reaches the wire without a declaration — opt-in by enumeration. Publishing an
+unregistered type fails loud; subscribing an unknown topic reads as 404, and a denied topic is
+indistinguishable from a nonexistent one.
+
+## 3. Project the integration event
+
+A [method-form consumer](/docs/capabilities/events/consuming-events) on a `[Service]` — integration
+consumers run **after commit** on a separate scope, so a rolled-back command can never push a ghost update.
+Note what the mapping drops: amounts, emails — internal fields never cross the boundary.
+
+```csharp
+[Service]
+internal sealed class InvoicingClientProjections(IClientEventPublisher clientEvents) {
+    [ConsumeEvent]
+    public ValueTask On(InvoicePaid evt, CancellationToken ct) =>
+        clientEvents.PublishAsync(
+            new InvoiceChanged { InvoiceId = evt.InvoiceId },
+            ClientEventScope.Resource($"customer:{evt.CustomerId}"), ct);
+}
+```
+
+The scope is the audience of this publish: `ClientEventScope.Global` (every subscriber of the topic),
+`ClientEventScope.User(id)` (one user), or `ClientEventScope.Resource(key)` (an application-defined group).
+Delivery fans out through bounded per-subscriber buffers that drop oldest on overflow — a slow client loses
+old hints, never stalls delivery to others.
+
+## 4. Map the endpoint
+
+```csharp
+app.MapElarionClientEvents("/events");
+```
+
+One SSE `GET` multiplexes a connection's subscriptions, with **fail-closed** subscribe-time authorization:
+unauthenticated → 401; an unknown topic, a failed topic requirement, or a resource scope without a passing
+authorizer → 404, so a topic's existence never leaks. User scope is always derived from the authenticated
+caller — a client cannot ask for someone else's. Control signals are named events: `elarion.connected` when
+the stream opens (every occurrence means "you may have missed events" — re-query) and `elarion.keepAlive`
+on idle so proxies keep the connection open.
+
+Resource scopes need one policy class — without it, every resource subscription is denied:
+
+```csharp
+// "May the current user observe customer:42?" — resolved from the request scope like any scoped service.
+internal sealed class CustomerScopeAuthorizer(AppDbContext db, ICurrentUser user)
+    : IClientEventSubscriptionAuthorizer {
+    public async ValueTask<bool> AuthorizeAsync(ClientEventSubscription subscription, CancellationToken ct) =>
+        TryParseCustomerKey(subscription.Scope.Value, out var customerId)
+        && await db.CustomerMembers.AnyAsync(m => m.CustomerId == customerId && m.UserId == user.Id, ct);
+}
+```
+
+Subscribe-time checks are a UX projection, never the security boundary — the data itself is only ever
+fetched through handlers carrying the real `[Require*]` gates.
+
+## 5. The browser
+
+The schema exporter emits the declared topics as the schema's `events` block, and the
+[TypeScript client generator](/docs/capabilities/transports/json-rpc) turns it into `events-client.ts`: a
+topic-typed subscription client (a typo'd topic is a compile error, payloads are Zod-validated on receipt)
+that multiplexes every subscription over one `EventSource`. With TanStack Query the whole client story is
+invalidation:
+
+```ts
+import { createElarionEvents } from './generated/events-client.js'
+
+const events = createElarionEvents({ url: '/events' })
+
+events.invoicing.invoiceChanged.subscribe(
+  { resource: `customer:${customerId}` },
+  (evt) => queryClient.invalidateQueries({ queryKey: ['invoices', evt.invoiceId] }),
+)
+
+// Fires on connect and every automatic reconnect — converge by re-querying.
+events.$client.onConnected(() => queryClient.invalidateQueries({ queryKey: ['invoices'] }))
+```
+
+Without the generator, a plain `EventSource` works too: pass the subscription set as the `subscriptions`
+query parameter (a URL-encoded JSON array of `{"topic":"…","resource":"…?"}`) and listen for the topic name
+as the event type.
+
+## Progress: the ephemeral tier
+
+The projection consumer is the recommended path because it inherits commit-gating. Calling the publisher
+**directly from inside a handler** is the deliberate exception — progress of a long-running command, where
+there is no committed fact yet and hints about the ongoing attempt are exactly what you want:
+
+```csharp
+await clientEvents.PublishAsync(
+    new ImportProgress { Processed = processed, Total = total },
+    ClientEventScope.User(user.Id), ct);
+```
+
+If the command later rolls back, the progress events were still sent — fine for status, wrong for facts.
+The guarantee is stated by where the call sits, mirroring how the two event planes state theirs.
+
+## Going multi-node
+
+The in-process broadcaster is single-node correct: an event published on node A does not reach a browser
+connected to node B. The moment you run a second node, add `Elarion.ClientEvents.PostgreSql` — cross-node
+fan-out over PostgreSQL `LISTEN/NOTIFY`, on the database the application already runs (no broker, no Redis):
+
+```csharp
+builder.Services.AddElarionPostgreSqlClientEvents(connectionString);
+```
+
+Every publish becomes a `pg_notify` on one channel; every node holds a dedicated `LISTEN` connection and
+hands received envelopes to its own connected browsers. The publishing node receives its own events through
+the same loop-back, so there is exactly one delivery path to reason about. Everything else — topics,
+projections, the endpoint, the TypeScript client — is unchanged.
+
+The at-most-once contract does the heavy lifting on failures: PostgreSQL does not queue notifications for
+absent listeners, so after a dropped listen connection the node delivers `elarion.connected` to **every**
+subscriber it holds — the generated client's `$client.onConnected` fires and the UI re-queries, converging
+instead of trusting a stream with a hole in it. Payloads must fit NOTIFY's ~8 KB cap; light events (ids and
+refs) never get close, and an oversized publish fails loud on the publishing node rather than delivering on
+some nodes and not others.
+
+This default follows the [scale positioning](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0025-distributed-scheduler-coordination.md)
+of every Elarion default: correct for ~1–10 nodes on the one PostgreSQL. Past that tier, replace the
+`IClientEventBroadcaster` seam with a dedicated backend (Redis pub/sub, a broker) — the seam is one method.
+
+## Limits
+
+- **Scope-blind topic handlers.** The wire frame carries the topic, not the scope — handlers on the same
+  topic see every event the connection's subscriptions match. Subscribe distinct concerns as distinct topics.
+- **At-most-once, always.** No transport tier changes this: buffers drop oldest under pressure, reconnects
+  lose the gap. Design every consumer as "hint received → re-query", and it is impossible to be wrong.
+- **The humble alternative.** For dashboards where seconds of staleness are fine, polling a
+  [keyset-paginated query](/docs/capabilities/pagination) on an interval is less machinery and often enough
+  at this tier.

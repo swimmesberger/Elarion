@@ -1,3 +1,4 @@
+import { generateEventsClientSource } from './events-client-source.js'
 import { jsonSchemaToTypeScript } from './json-schema-to-ts.js'
 import { jsonSchemaToZod } from './json-schema-to-zod.js'
 import { collectFilePaths, stripNullable, type SchemaContext } from './json-schema.js'
@@ -14,6 +15,7 @@ const DEFAULT_CLIENT_FILE = 'rpc-client.ts'
 const DEFAULT_SESSION_CLIENT_FILE = 'session-client.ts'
 const DEFAULT_SESSION_OPERATION = 'elarion.session'
 const DEFAULT_START_ADAPTER_FILE = 'start-adapter.ts'
+const DEFAULT_EVENTS_CLIENT_FILE = 'events-client.ts'
 
 export { UnsupportedJsonSchemaError } from './json-schema.js'
 export type { GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema } from './schema.js'
@@ -97,6 +99,26 @@ export function generateRpcClientFiles(
   schemasLines.push('export type RpcResultSchemas = typeof rpcResultSchemas')
   schemasLines.push('')
 
+  // Client-event payload schemas (ADR-0043), emitted only when the schema declares events so event-free
+  // schemas keep producing byte-identical output.
+  const eventTopics = Object.keys(schema.events ?? {}).sort()
+  if (eventTopics.length > 0) {
+    schemasLines.push('export const rpcEventPayloadSchemas = {')
+    for (const topic of eventTopics) {
+      const definition = (schema.events as NonNullable<RpcSchema['events']>)[topic]
+      const zodSchema = jsonSchemaToZod(
+        stripNullable(definition.payload),
+        createContext(definition.payload, `events.${topic}.payload`),
+        1
+      )
+      schemasLines.push(`  ${JSON.stringify(topic)}: ${zodSchema},`)
+    }
+    schemasLines.push('} as const')
+    schemasLines.push('')
+    schemasLines.push('export type RpcEventPayloadSchemas = typeof rpcEventPayloadSchemas')
+    schemasLines.push('')
+  }
+
   const idempotentMethods = methods.filter((method) => schema.methods[method].idempotent === true)
 
   // Where each method carries file payloads (x-elarion-file nodes), so the client can convert between
@@ -148,6 +170,18 @@ export function generateRpcClientFiles(
       })
     : undefined
 
+  // The typed client-event subscription client (ADR-0043) is emitted only when the schema declares an
+  // `events` block, so event-free schemas produce byte-identical output.
+  const eventsClientFileName = options.eventsClientFileName ?? DEFAULT_EVENTS_CLIENT_FILE
+  const eventsClientSource = eventTopics.length > 0
+    ? generateEventsClientSource({
+        generatedBy,
+        sourceLabel,
+        schemasFileName,
+        topics: eventTopics,
+      })
+    : undefined
+
   // The framework adapter (ADR-boundary: kept opt-in so the core client stays framework-neutral) is emitted only
   // when a framework is requested, so an unopted schema produces byte-identical output.
   const frameworkAdapterFileName = options.frameworkAdapterFileName ?? DEFAULT_START_ADAPTER_FILE
@@ -167,6 +201,8 @@ export function generateRpcClientFiles(
     sessionClientSource,
     frameworkAdapterFileName: frameworkAdapterSource === undefined ? undefined : frameworkAdapterFileName,
     frameworkAdapterSource,
+    eventsClientFileName: eventsClientSource === undefined ? undefined : eventsClientFileName,
+    eventsClientSource,
   }
 }
 

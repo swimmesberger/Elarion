@@ -1,4 +1,5 @@
 using Elarion.Abstractions.Authorization;
+using Elarion.Abstractions.ClientEvents;
 using Elarion.Abstractions.Modules;
 
 namespace Elarion.JsonRpc;
@@ -22,4 +23,11 @@ public sealed record JsonRpcSchemaExportOptions {
 
     /// <summary>The aggregated permission/role catalog declared by handler attributes.</summary>
     public IPermissionCatalog? PermissionCatalog { get; init; }
+
+    /// <summary>
+    /// The declared client-event topics (<c>AddElarionClientEvents</c>), exported as the schema's
+    /// <c>events</c> block so the TypeScript generator can emit a typed subscription client (ADR-0043).
+    /// Absent or empty, the block is omitted and the schema stays byte-identical.
+    /// </summary>
+    public ClientEventTopicManifest? ClientEventTopics { get; init; }
 }

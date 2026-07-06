@@ -54,9 +54,19 @@ export interface RpcSchemaCapabilities {
   roles?: string[]
 }
 
+/**
+ * One client-event topic from the schema's `events` block (ADR-0043): the payload contract published on the
+ * topic. Delivery is at-most-once (SSE) — payloads are hints carrying ids/refs, not state.
+ */
+export interface RpcEventSchema {
+  payload: JsonSchema
+}
+
 export interface RpcSchema {
   methods: Record<string, RpcMethodSchema>
   capabilities?: RpcSchemaCapabilities
+  /** Client-event topics by name, emitted by the server exporter when the host declares any (ADR-0043). */
+  events?: Record<string, RpcEventSchema>
 }
 
 export interface GenerateRpcClientOptions {
@@ -69,6 +79,8 @@ export interface GenerateRpcClientOptions {
   sessionClientFileName?: string
   /** The operation name the client-capability snapshot is served under (default `elarion.session`). */
   sessionOperationName?: string
+  /** Output filename for the client-event subscription client (default `events-client.ts`; emitted only when the schema declares events). */
+  eventsClientFileName?: string
   /**
    * Emit an opt-in framework adapter alongside the neutral core client. `tanstack-start` produces
    * `start-adapter.ts` (request-scoped cookie forwarding via `@tanstack/react-start`). Omitted → no adapter,
@@ -99,4 +111,10 @@ export interface GeneratedRpcClientFiles {
    */
   frameworkAdapterFileName?: string
   frameworkAdapterSource?: string
+  /**
+   * The typed client-event subscription client (ADR-0043). Present only when the schema declares an `events`
+   * block; otherwise both fields are `undefined` and every other output stays byte-identical.
+   */
+  eventsClientFileName?: string
+  eventsClientSource?: string
 }

@@ -216,6 +216,7 @@ High-value pages (paths under `/docs/`, same layout in the repo's `docs/`):
 | Validation / authorization | `concepts/validation`, `concepts/authorization`, `concepts/resource-authorization` |
 | EF, transactions, pagination | `capabilities/entity-framework`, `concepts/persistence-and-transactions`, `capabilities/pagination` |
 | Events, outbox, idempotency | `capabilities/events/`, `concepts/idempotency` |
+| Client events (browser push / SSE) | `capabilities/events/client-events` |
 | Errors | `concepts/results-and-errors` |
 | Actors (stateful in-memory) | `concepts/actors` |
 | Attribute / diagnostic / package tables | `reference/attributes`, `reference/diagnostics`, `reference/packages` |

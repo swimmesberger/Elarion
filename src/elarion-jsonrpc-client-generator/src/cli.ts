@@ -11,6 +11,7 @@ interface CliOptions {
   schemasFileName?: string
   clientFileName?: string
   sessionClientFileName?: string
+  eventsClientFileName?: string
   frameworkAdapterFileName?: string
   framework?: 'tanstack-start'
   sourceLabel?: string
@@ -77,6 +78,11 @@ function parseArgs(argv: string[]): CliOptions {
       index += 1
       continue
     }
+    if (arg === '--events-client') {
+      options.eventsClientFileName = next
+      index += 1
+      continue
+    }
     if (arg === '--framework') {
       if (!(SUPPORTED_FRAMEWORKS as readonly string[]).includes(next)) {
         throw new Error(`Unsupported framework ${next}. Supported: ${SUPPORTED_FRAMEWORKS.join(', ')}`)
@@ -113,6 +119,8 @@ Options:
   --client <file>       Fetch client filename (default: rpc-client.ts)
   --session-client <file> Client-capability snapshot client + OpenFeature provider (default: session-client.ts;
                           emitted only when the schema exposes the elarion.session operation)
+  --events-client <file>  Typed client-event subscription client (default: events-client.ts;
+                          emitted only when the schema declares an events block)
   --framework <name>    Emit an opt-in framework adapter alongside the neutral core client.
                           Supported: tanstack-start (needs the @tanstack/react-start peer dependency)
   --framework-adapter <file> Framework adapter filename (default: start-adapter.ts)
@@ -155,6 +163,7 @@ function generateOnce(options: CliOptions): boolean {
     schemasFileName: options.schemasFileName,
     clientFileName: options.clientFileName,
     sessionClientFileName: options.sessionClientFileName,
+    eventsClientFileName: options.eventsClientFileName,
     framework: options.framework,
     frameworkAdapterFileName: options.frameworkAdapterFileName,
   })
@@ -168,6 +177,10 @@ function generateOnce(options: CliOptions): boolean {
   if (generated.sessionClientFileName !== undefined && generated.sessionClientSource !== undefined) {
     writeFileSync(resolve(outDir, generated.sessionClientFileName), generated.sessionClientSource, 'utf-8')
     extraNotes.push(generated.sessionClientFileName)
+  }
+  if (generated.eventsClientFileName !== undefined && generated.eventsClientSource !== undefined) {
+    writeFileSync(resolve(outDir, generated.eventsClientFileName), generated.eventsClientSource, 'utf-8')
+    extraNotes.push(generated.eventsClientFileName)
   }
   if (generated.frameworkAdapterFileName !== undefined && generated.frameworkAdapterSource !== undefined) {
     writeFileSync(resolve(outDir, generated.frameworkAdapterFileName), generated.frameworkAdapterSource, 'utf-8')

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Server-Sent Events endpoint for Elarion client events: MapElarionClientEvents streams subscribed topics to browsers with fail-closed subscribe-time authorization (ADR-0043).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.ClientEvents\Elarion.ClientEvents.csproj" />
+  </ItemGroup>
+
+</Project>

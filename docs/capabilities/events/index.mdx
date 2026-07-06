@@ -110,6 +110,11 @@ When in doubt: if the side effect should be undone when the command rolls back, 
 if it should be retried until it succeeds *after* the command is durably committed, it is an
 **integration** event.
 
+A third audience sits past both planes: the **browser**. When a committed fact should nudge connected UIs
+to refresh, project the integration event onto a [client event](/docs/capabilities/events/client-events) —
+an at-most-once hint carrying ids/refs, pushed over Server-Sent Events, with the client converging by
+re-query. It is deliberately not a plane: no delivery guarantee crosses the trust boundary to a browser.
+
 ## Module gating
 
 When the host opts into `[GenerateModuleBootstrapper]`, event consumers are associated with their owning
@@ -126,6 +131,9 @@ whose namespace falls under no module is reported (`ELEVT003`, warning) so it is
   </Card>
   <Card title="Event backends" href="/docs/capabilities/events/backends">
     Choose between the best-effort in-memory integration bus and the durable EF Core outbox, and wire it.
+  </Card>
+  <Card title="Client events (near-realtime)" href="/docs/capabilities/events/client-events">
+    Push after-commit facts to connected browsers as invalidation hints over Server-Sent Events.
   </Card>
   <Card title="Tutorial: Background work" href="/docs/tutorial/background-work">
     Publish an integration event on invoice creation and deliver it durably through the outbox.

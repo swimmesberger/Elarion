@@ -1,5 +1,6 @@
 using System.Text;
 using Elarion.Abstractions.Authorization;
+using Elarion.Abstractions.ClientEvents;
 using Elarion.Abstractions.Modules;
 using Elarion.JsonRpc;
 
@@ -56,6 +57,8 @@ internal static class Program {
         var exportOptions = new JsonRpcSchemaExportOptions {
             ClientCapabilities = host.Services.GetService(typeof(ClientCapabilityManifest)) as ClientCapabilityManifest,
             PermissionCatalog = host.Services.GetService(typeof(IPermissionCatalog)) as IPermissionCatalog,
+            // Present when the host calls AddElarionClientEvents; absent, the schema carries no events block.
+            ClientEventTopics = host.Services.GetService(typeof(ClientEventTopicManifest)) as ClientEventTopicManifest,
         };
 
         var schemaJson = JsonRpcSchemaExporter.Generate(dispatcher, dispatcher.JsonOptions, exportOptions);
