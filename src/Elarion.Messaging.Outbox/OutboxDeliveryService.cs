@@ -79,7 +79,7 @@ public sealed class OutboxDeliveryService(
         await using var pollScope = scopeFactory.CreateAsyncScope();
         var store = pollScope.ServiceProvider.GetRequiredService<IOutboxStore>();
 
-        var lockId = Guid.NewGuid();
+        var lockId = Guid.CreateVersion7();
         var leaseUntil = timeProvider.GetUtcNow() + options.LeaseDuration;
         var claimed = await store.ClaimPendingAsync(lockId, leaseUntil, options.BatchSize, ct).ConfigureAwait(false);
 

@@ -141,7 +141,7 @@ public static class BlobUploadEndpointsExtensions {
     }
 
     private static string BuildStorageName(string ownerId, string clientName) =>
-        $"{ownerId}/{Guid.NewGuid():N}/{SanitizeFileName(clientName)}";
+        $"{ownerId}/{Guid.CreateVersion7():N}/{SanitizeFileName(clientName)}";
 
     private static string SanitizeFileName(string name) {
         if (string.IsNullOrWhiteSpace(name)) {

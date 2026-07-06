@@ -47,7 +47,7 @@ public sealed class AzureStagedUploadStore(
 
         await EnsureStagingContainerAsync(cancellationToken);
 
-        var id = Guid.NewGuid().ToString("N");
+        var id = Guid.CreateVersion7().ToString("N");
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal) {
             [AzureBlobMetadata.ContainerKey] = AzureBlobMetadata.Encode(creation.Container),
             [AzureBlobMetadata.NameKey] = AzureBlobMetadata.Encode(creation.Name),

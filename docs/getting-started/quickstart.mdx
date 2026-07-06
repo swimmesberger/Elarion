@@ -233,8 +233,11 @@ app.Run();
 ```
 
 <Callout type="warn">
-  `UseInMemoryDatabase` is for demos and tests only — it is not a real database. Swap in a persistent
-  provider such as `Npgsql`, SQL Server, or SQLite for an actual application.
+  `UseInMemoryDatabase` is a **demo shortcut** so this quickstart runs without Docker — it is not a real
+  database, and its behavior diverges from one. A real application uses PostgreSQL (`UseNpgsql`). Do **not**
+  test database behavior on it either: a green InMemory test is false confidence (it skips constraints, real
+  transactions, and provider SQL). [Test against a real database](/docs/concepts/persistence-and-transactions#testing-persistence)
+  with Testcontainers instead.
 </Callout>
 
 </Step>

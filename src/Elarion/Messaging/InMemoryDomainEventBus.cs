@@ -56,7 +56,7 @@ internal sealed class InMemoryDomainEventBus(
                 activity.SetTag("messaging.subscriber.count", subscribers.Length);
             }
 
-            var context = new EventContext<TEvent>(@event, Guid.NewGuid(), EventPlane.Domain);
+            var context = new EventContext<TEvent>(@event, Guid.CreateVersion7(), EventPlane.Domain);
             List<Exception>? failures = null;
             foreach (var descriptor in subscribers) {
                 var startTimestamp = Stopwatch.GetTimestamp();

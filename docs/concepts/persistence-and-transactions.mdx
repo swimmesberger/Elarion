@@ -142,3 +142,74 @@ Two things intentionally run **after** your transaction commits rather than insi
   The durable [outbox](../decisions/0001-event-transaction-phase.md) tier commit-gates
   through its own `SaveChanges` interceptor instead.
 </Callout>
+
+## Testing persistence
+
+Test persistence against a **real PostgreSQL** — a disposable [Testcontainers](https://testcontainers.com/)
+instance — not the EF Core **InMemory** provider. InMemory is LINQ over dictionaries, not a relational
+database: it silently diverges from Postgres in exactly the places a persistence test exists to cover, so a
+green InMemory test is false confidence. It does **not**:
+
+- enforce `SaveChanges`' affected-rows check — an `UPDATE` that matches zero rows *passes* on InMemory but
+  throws `DbUpdateConcurrencyException` on Postgres. This is the trap behind
+  [client-assigned keys](/docs/capabilities/entity-framework#entity-identity) (SQLite skips the check too);
+- run real transactions, savepoints, `lock_timeout`, or concurrency tokens;
+- execute provider SQL — keyset paging's row-value seek, `COLLATE "C"` ordering, `ExecuteUpdate`, raw SQL,
+  `ON CONFLICT`, or unique-index violations;
+- apply your migrations or database constraints.
+
+Use a Docker-gated fixture that **skips** (never fails) when Docker is absent, so the suite still runs on a
+machine without it:
+
+```csharp
+public sealed class PostgresFixture : IAsyncLifetime {
+    private PostgreSqlContainer? _container;
+    public bool IsAvailable { get; private set; }
+    public string SkipReason { get; private set; } = "";
+    public string ConnectionString { get; private set; } = "";
+
+    public async ValueTask InitializeAsync() {
+        try {
+            var container = new PostgreSqlBuilder("postgres:17-alpine").Build();
+            await container.StartAsync();               // validates the Docker endpoint
+            _container = container;
+            ConnectionString = container.GetConnectionString();
+            await using var db = CreateContext();
+            await db.Database.EnsureCreatedAsync();      // or MigrateAsync() to exercise migrations
+            IsAvailable = true;
+        }
+        catch (Exception ex) {
+            SkipReason = $"Docker required: {ex.Message}";   // skip, don't fail
+        }
+    }
+
+    public AppDbContext CreateContext() =>
+        new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(ConnectionString).Options);
+
+    public async ValueTask DisposeAsync() {
+        if (_container is not null) await _container.DisposeAsync();
+    }
+}
+```
+
+```csharp
+public sealed class InvoiceTests(PostgresFixture fixture) : IClassFixture<PostgresFixture> {
+    [Fact]
+    public async Task ReplacingLineItems_Persists() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var db = fixture.CreateContext();   // each test owns its own context
+        // … exercise the handler against real Postgres, then assert on a fresh context …
+    }
+}
+```
+
+<Callout type="info">
+  A test that only inspects the **model** (mappings, keys, indexes) needs no container: build the context
+  with `UseNpgsql(...)` and a throwaway connection string and read `context.Model` — the provider shapes the
+  model without opening a connection. It is still the real provider, not InMemory.
+</Callout>
+
+The one legitimate use of InMemory is a **demo that must run without Docker** — the
+[quickstart](/docs/getting-started/quickstart) uses it so you can try Elarion in five minutes. Anything that
+asserts database *behavior* uses a real database; the framework's own persistence tests are all
+Testcontainers-backed.

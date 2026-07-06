@@ -1,0 +1,200 @@
+---
+name: elarion
+description: >-
+  Build application features on the Elarion .NET framework the intended way: business logic in
+  [Handler] classes inside modules, REST/JSON-RPC/MCP exposed via attributes, wiring emitted by
+  source generators. Use this skill whenever the solution references Elarion packages (Elarion,
+  Elarion.Abstractions, Elarion.AspNetCore, Elarion.EntityFrameworkCore, @swimmesberger/elarion-*)
+  and you are adding or changing features, endpoints, handlers, entities, events, scheduled jobs,
+  validation, authorization, or host wiring — even when the user doesn't say "Elarion". Elarion is
+  newer than your training data and its API moves fast: read this first and verify against the
+  current docs instead of writing Elarion code from memory.
+---
+
+# Building on Elarion
+
+Elarion is a modular .NET application framework: vertical feature modules, handler-based CQRS,
+`Result<T>` error flow, source-generated wiring, and three parallel transports (JSON-RPC, REST, MCP)
+projected from the same handler. Two things follow for you:
+
+1. **Don't write Elarion code from memory.** The API is newer than your training data and changes
+   between versions. Verify names and signatures against the docs/package the app actually
+   references (see [Research the current API](#research-the-current-api--dont-guess)).
+2. **The framework already does the plumbing.** If you are hand-writing registration, endpoint
+   mapping, serializer config, or transaction management, you are usually duplicating (and
+   fighting) generated code.
+
+## Where code goes
+
+Business logic lives in **handlers inside modules** (typically an `Application` project). The
+host/Api project owns only infrastructure: `Program.cs` composition, DB provider, auth middleware.
+
+The most common agent mistake looks like this — don't do it:
+
+```csharp
+// MyApp.Api/Program.cs (or an Endpoints/ folder in the host) — WRONG
+app.MapPost("/clients", async (AppDbContext db, CreateClientDto dto) => {
+    // ...validation + business logic inline...
+});
+```
+
+Instead, write a handler in the module and declare the transport with an attribute. If a route
+genuinely can't be expressed by `[HttpEndpoint]`, use the module's `MapEndpoints` escape hatch
+(below) — and even there the lambda stays thin and calls a handler.
+
+## A feature, end to end
+
+A module is a class marked `[AppModule]`; everything under its namespace prefix belongs to it:
+
+```csharp
+namespace MyApp.Application.Modules.Clients;
+
+[AppModule("Clients")]
+public static partial class ClientsModule { }
+```
+
+A handler is the unit of work. One class serves JSON-RPC, MCP, and (opt-in) REST:
+
+```csharp
+namespace MyApp.Application.Modules.Clients.Handlers;
+
+[Handler("clients.get")]            // JSON-RPC method + MCP tool (name optional: {module}.{operation})
+[HttpEndpoint("clients/{id}")]      // REST opt-in: GET inferred from IQuery, ICommand → POST
+public sealed class GetClient(AppDbContext db)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> {
+
+    public sealed record Query : IQuery {
+        public required Guid Id { get; init; }
+    }
+
+    public sealed record Response(Guid Id, string Name);
+
+    public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.Id == query.Id, ct);
+        return client is null
+            ? AppError.NotFound($"Client {query.Id} not found.")   // implicit → Result<Response>
+            : new Response(client.Id, client.Name);
+    }
+}
+```
+
+**Register nothing.** Source generators discover handlers, services (`[Service]`), validators,
+jobs, and event consumers, and gate all of it per module (`Modules:{Name}:Enabled`). If a handler
+"isn't found" at runtime, the cause is its namespace not being under a module, the module being
+disabled, or a build diagnostic you skipped — never a missing `AddScoped`.
+
+Host wiring is a few generated calls (copy the current form from the quickstart doc — these names
+have evolved before):
+
+```csharp
+[assembly: GenerateModuleBootstrapper]                              // once, in the host
+
+builder.Services.AddElarion(builder.Configuration);                 // modules + canonical JSON
+builder.Services.AddElarionJsonRpc(ElarionBootstrapper.RegisterHandlers);
+app.MapElarionEndpoints(app.Configuration);                         // all [HttpEndpoint] routes, gated
+app.MapElarionJsonRpc();
+```
+
+## Custom endpoints — the escape hatch
+
+For routes `[HttpEndpoint]` can't express (streaming, SSE, file download, third-party webhooks),
+the **module** declares hooks — never the host, so the routes stay module-owned and feature-gated:
+
+```csharp
+[AppModule("Clients")]
+public static partial class ClientsModule {
+    // Optional: one group (prefix/policy/conventions) for ALL module routes, generated + hand-written.
+    public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder endpoints) =>
+        endpoints.MapGroup("").RequireAuthorization();
+
+    // Hand-written minimal-API routes. Keep the lambda thin: resolve the handler, call it,
+    // translate the Result — the logic itself still lives in the handler.
+    public static void MapEndpoints(IEndpointRouteBuilder endpoints) {
+        endpoints.MapPost("clients/{id}/archive", async (
+            Guid id,
+            IHandler<ArchiveClient.Command, Result<ArchiveClient.Response>> handler,
+            CancellationToken ct) =>
+            ElarionHttpResults.ToResult(await handler.HandleAsync(new(id), ct)));
+    }
+}
+```
+
+`ElarionHttpResults.ToResult` / `.ToNoContentResult` / `.ToProblem` produce the same RFC 7807
+responses as generated routes; `.ProducesElarionErrors()` adds the OpenAPI failure metadata.
+
+## Rules that don't change
+
+- **Errors are values.** Return `Result<T>`; fail with `AppError.Validation / NotFound / Conflict /
+  Forbidden / Unauthorized / BusinessRule / Internal`. Implicit conversions accept both the response
+  and the error. Exceptions are for bugs; every transport translates `AppError` itself.
+- **Validation is two-tier.** Standard `System.ComponentModel.DataAnnotations` on the request DTO
+  (enforced at runtime *and* exported to OpenAPI/JSON-RPC/Zod schemas). Cross-field, async, or DB
+  checks belong in the handler, inside its transaction. No FluentValidation, no pre-handler async
+  validator.
+- **Authorization sits on the handler.** `[RequirePermission("resource", "verb")]`,
+  `[RequireRole]`, `[RequirePolicy]`, `[FeatureGate]` — class-level, enforced identically on every
+  transport. ASP.NET `[Authorize]`/policies are host-level extras (middleware or
+  `ConfigureEndpointGroup`), never the business gate.
+- **Inject the concrete `DbContext`.** No repository layer, no `IAppDbContext`. Entities pair an
+  `IEntityTypeConfiguration<T>` marked `[EntityConfiguration]` with `[GenerateDbSets]` on the
+  DbContext. Commands already run in a framework transaction — don't open your own.
+- **In-process calls are typed.** Inject `IHandler<TReq, Result<TRes>>` (or `IHandlerSender`) so a
+  rename is a compile error; never dispatch by string name. Cross-module calls go through a
+  `[ModuleContract]` — the analyzer (ELMOD002) flags reaching into another module's internals.
+- **Two event planes.** Same-transaction reaction → domain event (inline, a failure rolls the
+  command back). After-commit side effect → integration event (outbox, retried, deduped). Pub/sub
+  only — no request/reply over the bus.
+- **One canonical serializer.** JSON comes from source-generated contexts composed via
+  `ConfigureElarionJson`; never register a bare `JsonSerializerOptions` in DI. Reflection
+  serialization is off by default — a "type not supported" JSON error means a missing
+  `[JsonSerializable]` context entry, not a reason to enable reflection.
+- **Frontend calls the generated client.** `rpc-schema.json` (exported at build) →
+  `@swimmesberger/elarion-jsonrpc-client-generator` → typed client with Zod validation. Don't
+  hand-write fetch wrappers for RPC methods.
+
+## Research the current API — don't guess
+
+Before writing or reviewing Elarion code:
+
+1. **Pin the version.** Check `Directory.Packages.props` / the `.csproj` for the referenced
+   Elarion package versions.
+2. **Read the docs — they are LLM-friendly.**
+   - Index of all pages: <https://elarion.wimmesberger.dev/llms.txt>
+   - Whole docs in one file: <https://elarion.wimmesberger.dev/llms-full.txt>
+   - Single page as raw markdown: `https://elarion.wimmesberger.dev/llms.mdx/docs/<path>/content.md`,
+     e.g. `/llms.mdx/docs/concepts/handlers/content.md`
+   - Source of truth is `docs/` in <https://github.com/swimmesberger/Elarion> (ADRs under
+     `docs/decisions/` explain the *why*); a local checkout may exist — worth a quick look.
+3. **Read the shipped XML docs for the exact referenced version** when the site might be ahead:
+   `ls ~/.nuget/packages | grep -i elarion`, then the `.xml` beside the dll.
+4. **Build early and trust the diagnostics.** `dotnet build` surfaces `EL*` diagnostics (ELHTTP*,
+   ELRPC*, ELVAL*, ELAUTH*, ELMOD002, …) — the generators enforcing these conventions. Look the id
+   up in `reference/diagnostics` and fix the cause; never suppress.
+
+High-value pages (paths under `/docs/`, same layout in the repo's `docs/`):
+
+| Topic | Page |
+| --- | --- |
+| Host wiring, first feature | `getting-started/quickstart`, `getting-started/project-structure` |
+| Handlers, pipeline, services | `concepts/handlers`, `concepts/decorator-pipelines`, `concepts/services` |
+| Modules, hooks, gating | `concepts/modules`, `capabilities/hosting` |
+| REST / JSON-RPC / MCP / OpenAPI | `capabilities/transports/` |
+| Validation / authorization | `concepts/validation`, `concepts/authorization`, `concepts/resource-authorization` |
+| EF, transactions, pagination | `capabilities/entity-framework`, `concepts/persistence-and-transactions`, `capabilities/pagination` |
+| Events, outbox, idempotency | `capabilities/events/`, `concepts/idempotency` |
+| Errors | `concepts/results-and-errors` |
+| Attribute / diagnostic / package tables | `reference/attributes`, `reference/diagnostics`, `reference/packages` |
+| TS client, frontend modules | `capabilities/transports/typescript-client`, `concepts/frontend-modules` |
+
+## You're off the rails if…
+
+- an `Endpoints/`/`Controllers/` folder or a fat `MapPost` lambda is growing in the host project;
+- you're writing `services.AddScoped<SomeHandler>()`, MediatR/`IRequestHandler`, or any manual
+  handler registration;
+- a repository interface, `IAppDbContext`, or hand-rolled unit-of-work is wrapping EF;
+- FluentValidation just appeared in a `.csproj`;
+- a handler carries `[Authorize]` instead of `[RequirePermission]`;
+- a `try/catch` returns an error DTO instead of a failed `Result<T>`.
+
+Each of these has a framework-intended counterpart described above — use it, and check the docs
+page from the table when the exact signature matters.

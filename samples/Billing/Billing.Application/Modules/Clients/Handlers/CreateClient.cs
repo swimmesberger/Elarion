@@ -54,7 +54,7 @@ public sealed class CreateClient(
         }
 
         var client = new Client {
-            Id = Guid.NewGuid(),
+            Id = Guid.CreateVersion7(),
             OwnerId = user.UserId,
             Number = await numbers.NextAsync(user.UserId, ct),
             Name = command.Name,

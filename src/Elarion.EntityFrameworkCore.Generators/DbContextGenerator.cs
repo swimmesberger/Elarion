@@ -349,6 +349,13 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             sb.AppendLine(string.Format("        {0}(modelBuilder);", hook));
         }
 
+        if (!entities.IsEmpty)
+        {
+            sb.AppendLine();
+            sb.AppendLine("        // Last, so it also covers entities the seams above added (and their navigation-discovered children).");
+            sb.AppendLine("        ApplyElarionClientAssignedGuidKeys(modelBuilder);");
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    /// <summary>");
@@ -362,11 +369,86 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             sb.AppendLine(string.Format("    partial void {0}(ModelBuilder modelBuilder);", hook));
         }
 
+        if (!entities.IsEmpty)
+        {
+            AppendClientAssignedGuidKeys(sb, entities);
+        }
+
         sb.AppendLine("}");
 
         context.AddSource(
             string.Format("{0}.DbSets.g.cs", target.Name),
             SourceText.From(sb.ToString(), Encoding.UTF8));
+    }
+
+    // The application idiom assigns entity identity in code (Id = Guid.CreateVersion7()), but EF Core's
+    // convention declares a Guid PK ValueGeneratedOnAdd — and the insert-vs-update heuristic is defined on
+    // that claim, so a new child with a set id added to a *tracked* parent is misread as Modified and
+    // SaveChanges issues an UPDATE that hits zero rows (DbUpdateConcurrencyException on a real database;
+    // the InMemory provider skips the affected-rows check, so tests stay green). The generated pass declares
+    // reality for the discovered domain entities. Scoping is by the *assemblies* of the discovered
+    // [EntityConfiguration] entity types — not the type list itself — so navigation-discovered children
+    // (exactly where the heuristic detonates) are covered, while Identity/framework entities in other
+    // assemblies are never touched. All configuration-source guards run at model-build time, so explicit or
+    // data-annotation configuration, custom value generators, and store defaults always win.
+    private static void AppendClientAssignedGuidKeys(StringBuilder sb, ImmutableArray<EntityInfo> entities)
+    {
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>");
+        sb.AppendLine("    /// Declares each domain entity's single-property <c>Guid</c> primary key as client-assigned");
+        sb.AppendLine("    /// (<c>ValueGenerated.Never</c>): Elarion entities own their ids and mint them in code (for example");
+        sb.AppendLine("    /// <c>Guid.CreateVersion7()</c>), so the model must not claim generation — a set value on a \"generated\"");
+        sb.AppendLine("    /// key makes EF Core's insert-vs-update heuristic treat a new child added to a tracked parent as an");
+        sb.AppendLine("    /// update (UPDATE … 0 rows → DbUpdateConcurrencyException). Scoped to the assemblies of the discovered");
+        sb.AppendLine("    /// [EntityConfiguration] entities, so navigation-discovered children are covered while Identity and");
+        sb.AppendLine("    /// framework entities keep their packaged generation. Explicit or data-annotation configuration, a");
+        sb.AppendLine("    /// custom value generator, and store defaults all win over this pass.");
+        sb.AppendLine("    /// </summary>");
+        sb.AppendLine("    private static void ApplyElarionClientAssignedGuidKeys(ModelBuilder modelBuilder) {");
+        sb.AppendLine("        var domainAssemblies = new global::System.Collections.Generic.HashSet<global::System.Reflection.Assembly> {");
+        foreach (var entity in entities)
+        {
+            sb.AppendLine(string.Format("            typeof(global::{0}).Assembly,", entity.FullName));
+        }
+
+        sb.AppendLine("        };");
+        sb.AppendLine();
+        sb.AppendLine("        foreach (var entityType in global::System.Linq.Enumerable.ToList(modelBuilder.Model.GetEntityTypes())) {");
+        sb.AppendLine("            // Derived types share the root's key; owned/keyless and composite keys are out of scope.");
+        sb.AppendLine("            if (entityType.BaseType is not null || !domainAssemblies.Contains(entityType.ClrType.Assembly)) {");
+        sb.AppendLine("                continue;");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+        sb.AppendLine("            var primaryKey = entityType.FindPrimaryKey();");
+        sb.AppendLine("            if (primaryKey is null || primaryKey.Properties.Count != 1) {");
+        sb.AppendLine("                continue;");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+        sb.AppendLine("            var property = primaryKey.Properties[0];");
+        sb.AppendLine("            if (property.ClrType != typeof(global::System.Guid)) {");
+        sb.AppendLine("                continue;");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+        sb.AppendLine("            // Only override EF's convention claim: explicit or data-annotation configuration wins.");
+        sb.AppendLine("            var valueGeneratedSource =");
+        sb.AppendLine("                ((global::Microsoft.EntityFrameworkCore.Metadata.IConventionProperty)property).GetValueGeneratedConfigurationSource();");
+        sb.AppendLine("            if (valueGeneratedSource is not null &&");
+        sb.AppendLine("                valueGeneratedSource != global::Microsoft.EntityFrameworkCore.Metadata.ConfigurationSource.Convention) {");
+        sb.AppendLine("                continue;");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+        sb.AppendLine("            // A configured value generator or store default is a deliberate generation choice — leave it alone.");
+        sb.AppendLine("            if (property.FindAnnotation(\"ValueGeneratorFactory\") is not null ||");
+        sb.AppendLine("                property.FindAnnotation(\"ValueGeneratorFactoryType\") is not null ||");
+        sb.AppendLine("                property.FindAnnotation(\"Relational:DefaultValueSql\") is not null ||");
+        sb.AppendLine("                property.FindAnnotation(\"Relational:DefaultValue\") is not null ||");
+        sb.AppendLine("                property.FindAnnotation(\"Relational:ComputedColumnSql\") is not null) {");
+        sb.AppendLine("                continue;");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+        sb.AppendLine("            property.ValueGenerated = global::Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.Never;");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
     }
 
     private static string Pluralize(string name)

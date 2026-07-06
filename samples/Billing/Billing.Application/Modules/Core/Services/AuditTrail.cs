@@ -16,7 +16,7 @@ namespace Billing.Application.Modules.Core.Services;
 internal sealed class AuditTrail(BillingDbContext db, ICurrentUser user, TimeProvider clock) : IAuditTrail {
     public async ValueTask RecordAsync(string action, string subjectId, CancellationToken ct = default) {
         db.AuditEntries.Add(new AuditEntry {
-            Id = Guid.NewGuid(),
+            Id = Guid.CreateVersion7(),
             ActorId = user.UserId,
             Action = action,
             SubjectId = subjectId,
