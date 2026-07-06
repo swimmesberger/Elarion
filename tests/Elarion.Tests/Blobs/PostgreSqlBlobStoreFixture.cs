@@ -1,6 +1,5 @@
 using Elarion.Blobs.PostgreSql;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -23,9 +22,6 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
     /// <summary>Gets the container connection string, for tests that open their own data sources.</summary>
     public string ConnectionString { get; private set; } = "";
 
-    /// <summary>Gets the shared data source the store draws streaming-read connections from.</summary>
-    public NpgsqlDataSource DataSource { get; private set; } = null!;
-
     public async ValueTask InitializeAsync() {
         PostgreSqlContainer container;
         try {
@@ -41,17 +37,12 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
 
         _container = container;
         ConnectionString = container.GetConnectionString();
-        DataSource = NpgsqlDataSource.Create(ConnectionString);
         await using var context = CreateContext();
         await context.Database.EnsureCreatedAsync();
         IsAvailable = true;
     }
 
     public async ValueTask DisposeAsync() {
-        if (DataSource is not null) {
-            await DataSource.DisposeAsync();
-        }
-
         if (_container is not null) {
             await _container.DisposeAsync();
         }

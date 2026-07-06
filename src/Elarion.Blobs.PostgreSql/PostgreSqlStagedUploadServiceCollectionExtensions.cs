@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Npgsql;
 
 namespace Elarion.Blobs.PostgreSql;
 
@@ -52,30 +51,5 @@ public static class PostgreSqlStagedUploadServiceCollectionExtensions {
         services.AddElarionPostgreSqlBlobLifecycle<TDbContext>(configureBlobGc);
 
         return services;
-    }
-
-    /// <summary>
-    /// The <c>connectionString</c> overload of
-    /// <see cref="AddElarionPostgreSqlStagedUploads{TDbContext}(IServiceCollection, Action{StagedUploadGcOptions}?, Action{BlobGcOptions}?)"/>:
-    /// also registers a shared <c>NpgsqlDataSource</c> (via <c>TryAdd</c>) that the blob store's streaming
-    /// reads draw dedicated connections from.
-    /// </summary>
-    /// <typeparam name="TDbContext">The context whose model includes <see cref="StagedUploadRow"/> via <c>UseElarionStagedUploads</c>.</typeparam>
-    /// <param name="services">The service collection.</param>
-    /// <param name="connectionString">The connection string of the database the staging and blob tables live in.</param>
-    /// <param name="configureGc">Optional configuration of the session <see cref="StagedUploadGcOptions"/>.</param>
-    /// <param name="configureBlobGc">Optional configuration of the pending-blob <see cref="BlobGcOptions"/>.</param>
-    /// <returns>The same service collection for chaining.</returns>
-    public static IServiceCollection AddElarionPostgreSqlStagedUploads<TDbContext>(
-        this IServiceCollection services,
-        string connectionString,
-        Action<StagedUploadGcOptions>? configureGc = null,
-        Action<BlobGcOptions>? configureBlobGc = null)
-        where TDbContext : DbContext {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-
-        services.TryAddSingleton(_ => NpgsqlDataSource.Create(connectionString));
-        return services.AddElarionPostgreSqlStagedUploads<TDbContext>(configureGc, configureBlobGc);
     }
 }

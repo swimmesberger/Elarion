@@ -160,6 +160,6 @@ public sealed class PostgreSqlBlobListingIntegrationTests(PostgreSqlBlobStoreFix
             ContentType = "application/octet-stream",
         };
 
-    private PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, fixture.DataSource, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
+        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
 }
