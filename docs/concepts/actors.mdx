@@ -201,10 +201,33 @@ the previous attempt's claim expiry rules.
 ## Observability
 
 Register the `Elarion.Actors` ActivitySource and Meter with your OpenTelemetry providers. Each facade call
-emits a caller-side `actor.call` span that parents the actor-side `actor.process` span, so a trace crosses
-the mailbox like an RPC hop; metrics cover message count/duration, queue wait, and activation counts.
-Exceptions are never wrapped: the caller's `await` rethrows the actor-side exception with its original
-stack trace, followed by the caller's own frames.
+emits a caller-side `actor.call {Actor}.{Method}` span (kind `Client`) that parents the actor-side
+`actor.process` span (kind `Internal`), so a trace crosses the mailbox like an RPC hop. Both spans carry
+`elarion.actor`, `elarion.actor.method`, and `elarion.actor.key` — the key rides on **spans only**, never
+on metrics, because span attributes tolerate high cardinality and metric tags don't. Exceptions are never
+wrapped: the caller's `await` rethrows the actor-side exception with its original stack trace, the span
+records it (`AddException` + error status, per OTel conventions), and nothing is retried behind your back.
+
+Metrics (all tagged `elarion.actor`; message-level ones also `elarion.actor.method`, and the counter an
+`elarion.actor.outcome` of `ok`/`error`/`canceled`/`timeout`/`abandoned`):
+
+| Metric | Instrument | Meaning |
+| --- | --- | --- |
+| `actor.message.count` | counter | Processed messages by outcome (`timeout` = the deadlock backstop fired). |
+| `actor.message.duration` | histogram (ms) | Execution time, excluding queue wait. |
+| `actor.message.queue_wait` | histogram (ms) | Time from enqueue to execution start — rising values mean a hot mailbox. |
+| `actor.mailbox.pending` | up-down counter | Messages enqueued or executing right now — the backpressure signal to alert on. |
+| `actor.activations.active` | up-down counter | Live activations. |
+| `actor.activations.count` | counter | Total activations (re-activation churn shows up here). |
+| `actor.activations.failed` | counter | Activations whose constructor or `OnActivateAsync` threw (each failure also failed its queued calls). |
+
+This deliberately matches the signal set actor operators expect from Proto.Actor's metrics or Akka.NET's
+Phobos (mailbox depth, processing time, activation/failure counts, per-instance span identity), with two
+knowing deviations: durations are **milliseconds** for consistency with the `Elarion.Handlers` meters
+(OTel semconv prefers seconds — if you normalize units in your pipeline, normalize both), and there are
+**no dead-letter or restart metrics** because the model has neither — no message can be dropped (every
+call is request/reply; rejected calls throw to their caller) and activations are never restarted behind
+your back (a failed activation fails its calls; the next call re-activates).
 
 ## Routing and worker pools (the Akka router patterns)
 

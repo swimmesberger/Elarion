@@ -38,8 +38,8 @@ public sealed class ActorHandle<TActor> where TActor : class {
     public ValueTask<TResult> InvokeAsync<TResult>(
         ActorWorkItem<TActor, TResult> item,
         CancellationToken cancellationToken = default) {
-        var callActivity = ActorTelemetry.StartCall(_actorName, item.MethodName);
-        item.Initialize(_actorName, _options.CallTimeout, _cancellationPool, _timeProvider, cancellationToken);
+        var callActivity = ActorTelemetry.StartCall(_actorName, item.MethodName, _key);
+        item.Initialize(_actorName, _key, _options.CallTimeout, _cancellationPool, _timeProvider, cancellationToken);
         var enqueue = _router.EnqueueAsync(_key, item, cancellationToken);
 
         // Fast path (ADR-0042 roadmap): the unbounded-mailbox enqueue completes synchronously, so

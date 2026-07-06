@@ -58,21 +58,39 @@ public static class ActorTelemetry {
             "actor.activations.count",
             description: "Total number of actor activations");
 
-    internal static Activity? StartCall(string actor, string method) {
+    /// <summary>Counts activations that failed to start (constructor or OnActivateAsync threw).</summary>
+    public static readonly Counter<long> ActivationFailureCount =
+        MeterInstance.CreateCounter<long>(
+            "actor.activations.failed",
+            description: "Total number of actor activations that failed to start");
+
+    /// <summary>Tracks messages currently enqueued or executing per actor (mailbox depth — the backpressure signal).</summary>
+    public static readonly UpDownCounter<long> MailboxPending =
+        MeterInstance.CreateUpDownCounter<long>(
+            "actor.mailbox.pending",
+            description: "Number of actor messages currently enqueued or executing");
+
+    // The key rides on spans only, never on metrics: span attributes tolerate high cardinality,
+    // metric tags do not.
+    internal static Activity? StartCall(string actor, string method, object key) {
         var activity = Source.StartActivity($"actor.call {actor}.{method}", ActivityKind.Client);
         if (activity is not null) {
             activity.SetTag("elarion.actor", actor);
             activity.SetTag("elarion.actor.method", method);
+            activity.SetTag("elarion.actor.key", key.ToString());
         }
 
         return activity;
     }
 
-    internal static Activity? StartProcess(string actor, string method, ActivityContext parent) {
+    internal static Activity? StartProcess(string actor, string method, object? key, ActivityContext parent) {
         var activity = Source.StartActivity($"actor.process {actor}.{method}", ActivityKind.Internal, parent);
         if (activity is not null) {
             activity.SetTag("elarion.actor", actor);
             activity.SetTag("elarion.actor.method", method);
+            if (key is not null) {
+                activity.SetTag("elarion.actor.key", key.ToString());
+            }
         }
 
         return activity;
@@ -105,5 +123,20 @@ public static class ActorTelemetry {
     internal static void RecordDeactivation(string actor) {
         var tags = new TagList { { "elarion.actor", actor } };
         ActiveActivations.Add(-1, tags);
+    }
+
+    internal static void RecordActivationFailure(string actor) {
+        var tags = new TagList { { "elarion.actor", actor } };
+        ActivationFailureCount.Add(1, tags);
+    }
+
+    internal static void RecordEnqueued(string actor) {
+        var tags = new TagList { { "elarion.actor", actor } };
+        MailboxPending.Add(1, tags);
+    }
+
+    internal static void RecordDequeued(string actor) {
+        var tags = new TagList { { "elarion.actor", actor } };
+        MailboxPending.Add(-1, tags);
     }
 }

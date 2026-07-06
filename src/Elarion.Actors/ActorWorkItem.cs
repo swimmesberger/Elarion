@@ -18,6 +18,7 @@ public abstract class ActorWorkItem<TActor> where TActor : class {
 
     internal abstract void Initialize(
         string actorName,
+        object key,
         TimeSpan? callTimeout,
         ActorCancellationPool cancellationPool,
         TimeProvider timeProvider,
@@ -54,6 +55,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private string _actorName = string.Empty;
+    private object? _key;
     private TimeProvider _timeProvider = TimeProvider.System;
     private ActorCancellationPool? _cancellationPool;
     private ActivityContext _callerContext;
@@ -73,11 +75,13 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
 
     internal override void Initialize(
         string actorName,
+        object key,
         TimeSpan? callTimeout,
         ActorCancellationPool cancellationPool,
         TimeProvider timeProvider,
         CancellationToken callerToken) {
         _actorName = actorName;
+        _key = key;
         _timeProvider = timeProvider;
         _callerToken = callerToken;
         _callerContext = Activity.Current?.Context ?? default;
@@ -126,7 +130,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
 
         ActorTelemetry.RecordQueueWait(
             _actorName, MethodName, _timeProvider.GetElapsedTime(_enqueuedTimestamp).TotalMilliseconds);
-        using var activity = ActorTelemetry.StartProcess(_actorName, MethodName, _callerContext);
+        using var activity = ActorTelemetry.StartProcess(_actorName, MethodName, _key, _callerContext);
         var startTimestamp = _timeProvider.GetTimestamp();
         var outcome = "ok";
         try {

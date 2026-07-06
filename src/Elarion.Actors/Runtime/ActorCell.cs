@@ -93,6 +93,8 @@ internal sealed class ActorCell<TActor> where TActor : class {
             _pending++;
         }
 
+        ActorTelemetry.RecordEnqueued(_actorName);
+
         if (_mailbox.Writer.TryWrite(item)) {
             return true;
         }
@@ -158,6 +160,7 @@ internal sealed class ActorCell<TActor> where TActor : class {
         catch (Exception ex) {
             _logger.LogError(
                 ex, "Activation of actor {Actor} ({ActorKey}) failed; failing queued calls.", _actorName, _keyText);
+            ActorTelemetry.RecordActivationFailure(_actorName);
             await FailAllAsync(ex, scope).ConfigureAwait(false);
             return;
         }
@@ -237,6 +240,7 @@ internal sealed class ActorCell<TActor> where TActor : class {
         _mailbox.Writer.TryComplete();
         while (_mailbox.Reader.TryRead(out var item)) {
             item.TryFail(exception);
+            ActorTelemetry.RecordDequeued(_actorName);
         }
 
         await scope.DisposeAsync().ConfigureAwait(false);
@@ -282,5 +286,7 @@ internal sealed class ActorCell<TActor> where TActor : class {
                 _idleTimer?.Change(idle, Timeout.InfiniteTimeSpan);
             }
         }
+
+        ActorTelemetry.RecordDequeued(_actorName);
     }
 }
