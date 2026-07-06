@@ -2,7 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-07-06
-- Related: [ADR-0042](0042-client-events.md) (server-push of facts; the ephemeral progress tier),
+- Related: [ADR-0043](0043-client-events.md) (server-push of facts; the ephemeral progress tier),
   [ADR-0035](0035-protocol-neutral-staged-upload-seam.md)/[ADR-0039](0039-binary-file-responses.md)
   (streaming bytes into the system — the staged-blob tier), [ADR-0010](0010-event-bus-is-pub-sub-only.md)
   (the bus never returns values; request/reply is dispatch), [ADR-0021](0021-idempotency.md) (per-request
@@ -17,8 +17,8 @@ design so the topic is not relitigated per feature request:
 
 1. **Streaming bytes in** (uploads): answered by the staged-blob tier — `IStagedUploadStore`, tus,
    resumability (ADR-0035/0039). A raw stream parameter would give up resume for nothing.
-2. **Server-push of facts** (data changed, notify browsers): answered by client events (ADR-0042).
-3. **Progress of an operation**: answered by the ephemeral client-event tier (ADR-0042). The
+2. **Server-push of facts** (data changed, notify browsers): answered by client events (ADR-0043).
+3. **Progress of an operation**: answered by the ephemeral client-event tier (ADR-0043). The
    design-relevant subtlety: progress-as-streamed-response ties progress to one held connection — a page
    reload loses it, a second tab never sees it, a retry restarts it. Progress-as-client-event is
    addressable by scope, survives reloads, reaches every tab. Progress therefore does **not** motivate
@@ -35,7 +35,7 @@ Two structural facts constrain any design:
   channel of a streaming response is structurally different: upfront `Result` for
   authorization/validation/not-found, then a terminal error frame mid-stream. Bolting
   `Result<IAsyncEnumerable<T>>` onto `IHandler` would misrepresent that contract the same way routing
-  client events through `IIntegrationEventBus` would have misrepresented Plane B's guarantee (ADR-0042).
+  client events through `IIntegrationEventBus` would have misrepresented Plane B's guarantee (ADR-0043).
 - **The decorator pipeline is per-request.** Authorization, feature gating, validation, idempotency, and
   the transaction all attach to one request with one outcome. Any streaming shape must state what "one
   request" means, or the pipeline cannot be composed honestly.

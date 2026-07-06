@@ -99,7 +99,7 @@ export function generateRpcClientFiles(
   schemasLines.push('export type RpcResultSchemas = typeof rpcResultSchemas')
   schemasLines.push('')
 
-  // Client-event payload schemas (ADR-0042), emitted only when the schema declares events so event-free
+  // Client-event payload schemas (ADR-0043), emitted only when the schema declares events so event-free
   // schemas keep producing byte-identical output.
   const eventTopics = Object.keys(schema.events ?? {}).sort()
   if (eventTopics.length > 0) {
@@ -170,7 +170,7 @@ export function generateRpcClientFiles(
       })
     : undefined
 
-  // The typed client-event subscription client (ADR-0042) is emitted only when the schema declares an
+  // The typed client-event subscription client (ADR-0043) is emitted only when the schema declares an
   // `events` block, so event-free schemas produce byte-identical output.
   const eventsClientFileName = options.eventsClientFileName ?? DEFAULT_EVENTS_CLIENT_FILE
   const eventsClientSource = eventTopics.length > 0

@@ -293,7 +293,7 @@ public static class JsonRpcEndpoint {
             batchActivity.SetStatus(ActivityStatusCode.Error, description);
         }
 
-        JsonRpcTelemetry.RecordRequest("_batch", statusCode, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+        JsonRpcTelemetry.RecordRequest("_batch", statusCode, Stopwatch.GetElapsedTime(startTimestamp));
     }
 
     private static bool IsInvalidBatchEnvelope(JsonRpcRequest request) =>

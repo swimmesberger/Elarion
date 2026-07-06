@@ -17,7 +17,7 @@ namespace Elarion.Abstractions.ClientEvents;
 /// Delivery to a client is <b>at-most-once, a hint</b>: keep the payload light (ids and refs, never state) and
 /// let the client converge by re-running normal query handlers, which carry the real authorization gates. An
 /// internal integration event must never implement this interface directly — publish a separate, deliberate
-/// contract so internal renames cannot break deployed frontends (ADR-0042).
+/// contract so internal renames cannot break deployed frontends (ADR-0043).
 /// </para>
 /// </remarks>
 public interface IClientEvent;

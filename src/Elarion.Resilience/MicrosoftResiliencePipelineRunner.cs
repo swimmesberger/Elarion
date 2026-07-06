@@ -130,7 +130,7 @@ internal sealed class MicrosoftResiliencePipelineRunner(
         ResilienceTelemetry.RecordExecution(
             policyName,
             outcome,
-            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            Stopwatch.GetElapsedTime(started));
     }
 
     private static void RecordException(Activity? activity, Exception exception) {

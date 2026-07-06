@@ -135,14 +135,14 @@ public sealed class OutboxEventDispatcher
                 await descriptor.InvokeAsync!(serviceProvider, instance, context, ct).ConfigureAwait(false);
                 EventTelemetry.RecordConsumer(
                     eventType.Name, descriptor.ServiceType.Name, "ok",
-                    Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                    Stopwatch.GetElapsedTime(startTimestamp));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // The exception still propagates so the worker marks the message failed and retries it.
                 EventTelemetry.RecordConsumer(
                     eventType.Name, descriptor.ServiceType.Name, "exception",
-                    Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                    Stopwatch.GetElapsedTime(startTimestamp));
                 throw;
             }
         }

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Client events for Elarion: after-commit facts projected to connected clients as at-most-once hints — topic catalog, canonical-JSON publisher, and the in-process subscription registry behind the replaceable broadcaster seam (ADR-0042).</Description>
+    <Description>Client events for Elarion: after-commit facts projected to connected clients as at-most-once hints — topic catalog, canonical-JSON publisher, and the in-process subscription registry behind the replaceable broadcaster seam (ADR-0043).</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

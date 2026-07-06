@@ -7,7 +7,7 @@ using Xunit;
 namespace Elarion.Tests.Generators;
 
 /// <summary>
-/// Covers <see cref="ClientEventRegistrationGenerator"/> (ADR-0042): per-module topic registration inferred
+/// Covers <see cref="ClientEventRegistrationGenerator"/> (ADR-0043): per-module topic registration inferred
 /// from <c>IClientEvent</c> contracts ({module}.{name}, trailing <c>Event</c> stripped, <c>[ClientEvent]</c>
 /// override), subscribe-time requirements read from <c>[RequirePermission]</c>/<c>[RequireRole]</c>, the
 /// <c>ConfigureDefaultServices</c> filler wiring, the ELCEV diagnostics, and pipeline cacheability.

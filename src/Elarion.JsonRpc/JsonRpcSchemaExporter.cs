@@ -91,7 +91,7 @@ public static class JsonRpcSchemaExporter {
     }
 
     /// <summary>
-    /// Builds the <c>events</c> block — each declared client-event topic with its payload schema (ADR-0042),
+    /// Builds the <c>events</c> block — each declared client-event topic with its payload schema (ADR-0043),
     /// in deterministic ordinal topic order — or <see langword="null"/> when no topics were supplied, keeping
     /// event-free schemas byte-identical.
     /// </summary>

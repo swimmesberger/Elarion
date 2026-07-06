@@ -137,7 +137,7 @@ public static class RpcToolInvoker {
         }
 
         JsonRpcTelemetry.RecordRequest(
-            route.Name, "OK", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds, system: "mcp");
+            route.Name, "OK", Stopwatch.GetElapsedTime(startTimestamp), system: "mcp");
         return new RpcToolResult { IsError = false, Text = text };
     }
 
@@ -159,6 +159,6 @@ public static class RpcToolInvoker {
         }
 
         JsonRpcTelemetry.RecordRequest(
-            method, statusCode, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds, system: "mcp");
+            method, statusCode, Stopwatch.GetElapsedTime(startTimestamp), system: "mcp");
     }
 }

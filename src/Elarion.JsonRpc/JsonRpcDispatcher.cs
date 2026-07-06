@@ -159,7 +159,7 @@ public sealed class JsonRpcDispatcher {
                 activity.SetStatus(ActivityStatusCode.Error, ex.Message);
             }
 
-            JsonRpcTelemetry.RecordRequest(method, "-32603", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+            JsonRpcTelemetry.RecordRequest(method, "-32603", Stopwatch.GetElapsedTime(startTimestamp));
 #if DEBUG
             // In DEBUG builds, include the actual exception message for easier debugging
             return JsonRpcResponse.FromError(request, RpcError.InternalError($"Internal error: {ex.Message}"));
@@ -277,7 +277,7 @@ public sealed class JsonRpcDispatcher {
     }
 
     private static void RecordMetrics(string method, string statusCode, long startTimestamp) {
-        var elapsed = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+        var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
         JsonRpcTelemetry.RecordRequest(method, statusCode, elapsed);
     }
 }

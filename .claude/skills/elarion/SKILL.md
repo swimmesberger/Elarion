@@ -122,6 +122,40 @@ public static partial class ClientsModule {
 `ElarionHttpResults.ToResult` / `.ToNoContentResult` / `.ToProblem` produce the same RFC 7807
 responses as generated routes; `.ProducesElarionErrors()` adds the OpenAPI failure metadata.
 
+## Stateful in-memory work — actors
+
+Handlers are stateless. When a feature needs **in-memory state that survives across calls and must be
+mutated sequentially** (live session/connection state, a per-entity workflow between persisted
+transitions, per-key rate/flow control), don't hand-roll a `Channel` + loop or a lock-guarded
+singleton — that's `Elarion.Actors`:
+
+```csharp
+[Actor]                              // requires [assembly: GenerateActors] (or [UseElarion])
+public sealed class OrderFulfillmentActor(IActorContext<Guid> context, IEmailSender email) {
+    private FulfillmentState _state;                        // plain fields, never locked
+
+    public async Task<Result<Unit>> Ship(ShipmentInfo info, CancellationToken ct) { ... }
+}
+
+// callers — usually a handler; the handler stays the transport-facing/authorization gate:
+var order = actors.Get<IOrderFulfillment>(orderId);         // IActorSystem; facade is generated
+var result = await order.Ship(info, ct);                    // mailbox-serialized, no locks
+```
+
+- The `IActorContext<TKey>` constructor parameter makes the actor **keyed** (one activation per key,
+  activated on first message, passivated after ~5 min idle — state drops; load/flush in
+  `IActorLifecycle.OnActivateAsync/OnDeactivateAsync`). No context parameter → process singleton.
+- The generated facade is `I{ClassName-minus-Actor}`; methods must return
+  `Task`/`Task<T>`/`ValueTask`/`ValueTask<T>` (ELACT002 otherwise). Actors are module-scoped like
+  handlers — outside a module they warn (ELACT003) and are not registered.
+- Default is **non-reentrant** (one message start-to-finish; an actor→actor call cycle fails with a
+  `TimeoutException` after ~30 s — that's the deadlock backstop, treat it as a design smell).
+  `[Reentrant]` opts into Orleans-style interleaving at await points (never parallel); don't use
+  `ConfigureAwait(false)` inside a reentrant actor.
+- **Single-node by design**: in-memory activations on N nodes are N independent states. Fine for
+  node-local state; for cluster-authoritative actors move to Orleans/Akka.NET/Proto.Actor instead of
+  bending this. Stateless parallelism never belongs in actors — that's handlers + `Task.WhenAll`.
+
 ## Rules that don't change
 
 - **Errors are values.** Return `Result<T>`; fail with `AppError.Validation / NotFound / Conflict /
@@ -183,6 +217,7 @@ High-value pages (paths under `/docs/`, same layout in the repo's `docs/`):
 | EF, transactions, pagination | `capabilities/entity-framework`, `concepts/persistence-and-transactions`, `capabilities/pagination` |
 | Events, outbox, idempotency | `capabilities/events/`, `concepts/idempotency` |
 | Errors | `concepts/results-and-errors` |
+| Actors (stateful in-memory) | `concepts/actors` |
 | Attribute / diagnostic / package tables | `reference/attributes`, `reference/diagnostics`, `reference/packages` |
 | TS client, frontend modules | `capabilities/transports/typescript-client`, `concepts/frontend-modules` |
 
@@ -192,6 +227,8 @@ High-value pages (paths under `/docs/`, same layout in the repo's `docs/`):
 - you're writing `services.AddScoped<SomeHandler>()`, MediatR/`IRequestHandler`, or any manual
   handler registration;
 - a repository interface, `IAppDbContext`, or hand-rolled unit-of-work is wrapping EF;
+- a singleton service is growing locks/`SemaphoreSlim`/`Channel` plumbing around mutable state —
+  that's an `[Actor]`;
 - FluentValidation just appeared in a `.csproj`;
 - a handler carries `[Authorize]` instead of `[RequirePermission]`;
 - a `try/catch` returns an error DTO instead of a failed `Result<T>`.

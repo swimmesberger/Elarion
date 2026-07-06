@@ -1178,7 +1178,7 @@ function jsonResponse(body: unknown): Response {
   })
 }
 
-describe('client events (ADR-0042)', () => {
+describe('client events (ADR-0043)', () => {
   it('emits the events client and payload schemas when the schema declares events', () => {
     const generated = generateRpcClientFiles(eventsTestSchema())
 

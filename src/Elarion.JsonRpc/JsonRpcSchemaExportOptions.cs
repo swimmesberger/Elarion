@@ -26,7 +26,7 @@ public sealed record JsonRpcSchemaExportOptions {
 
     /// <summary>
     /// The declared client-event topics (<c>AddElarionClientEvents</c>), exported as the schema's
-    /// <c>events</c> block so the TypeScript generator can emit a typed subscription client (ADR-0042).
+    /// <c>events</c> block so the TypeScript generator can emit a typed subscription client (ADR-0043).
     /// Absent or empty, the block is omitted and the schema stays byte-identical.
     /// </summary>
     public ClientEventTopicManifest? ClientEventTopics { get; init; }

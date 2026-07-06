@@ -1,4 +1,4 @@
-# ADR-0042: Client events — after-commit facts projected to the browser over SSE
+# ADR-0043: Client events — after-commit facts projected to the browser over SSE
 
 - Status: Proposed
 - Date: 2026-07-06

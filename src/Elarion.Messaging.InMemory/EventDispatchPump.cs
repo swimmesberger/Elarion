@@ -160,7 +160,7 @@ internal sealed class EventDispatchPump : BackgroundService {
                     .ConfigureAwait(false);
                 EventTelemetry.RecordConsumer(
                     eventName, descriptor.ServiceType.Name, "ok",
-                    Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                    Stopwatch.GetElapsedTime(startTimestamp));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) {
                 throw;
@@ -168,7 +168,7 @@ internal sealed class EventDispatchPump : BackgroundService {
             catch (Exception ex) {
                 EventTelemetry.RecordConsumer(
                     eventName, descriptor.ServiceType.Name, "exception",
-                    Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                    Stopwatch.GetElapsedTime(startTimestamp));
                 activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
                     { "exception.type", ex.GetType().FullName },
                     { "exception.message", ex.Message },

@@ -14,7 +14,7 @@ interface TopicTreeNode {
 }
 
 /**
- * Generates the typed client-event subscription client (ADR-0042) from the schema's `events` block: topic
+ * Generates the typed client-event subscription client (ADR-0043) from the schema's `events` block: topic
  * literal types, `z.infer` payload types over the Zod payload schemas (emitted into the schemas file), and
  * an `EventSource` wrapper that multiplexes the authorized subscriptions over one connection. Emitted only
  * when the schema declares events, so event-free schemas produce byte-identical output.

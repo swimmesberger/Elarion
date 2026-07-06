@@ -160,7 +160,7 @@ The guarantee is stated by where the call sits, mirroring how the two event plan
 - **Single node by default.** The in-process broadcaster is single-node correct; an event published on node
   A does not reach a browser connected to node B. Use sticky sessions, or replace the
   `IClientEventBroadcaster` seam — a PostgreSQL `LISTEN/NOTIFY` backend is the planned sibling package (see
-  [ADR-0042](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0042-client-events.md)).
+  [ADR-0043](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0043-client-events.md)).
 - **Scope-blind topic handlers.** The wire frame carries the topic, not the scope — handlers on the same
   topic see every event the connection's subscriptions match. Subscribe distinct concerns as distinct topics.
 - **The humble alternative.** For dashboards where seconds of staleness are fine, polling a

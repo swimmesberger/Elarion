@@ -33,6 +33,7 @@ internal static class ModuleDefaultsEmitter
     public const string AddAuthorizationPoliciesMethod = "AddAuthorizationPolicies";
     public const string AddPermissionsMethod = "AddPermissions";
     public const string AddModuleApiMethod = "AddModuleApi";
+    public const string AddActorsMethod = "AddActors";
     public const string AddClientEventsMethod = "AddClientEvents";
 
     public const string ServiceCollectionFqn =
@@ -50,6 +51,7 @@ internal static class ModuleDefaultsEmitter
         AddAuthorizationPoliciesMethod,
         AddPermissionsMethod,
         AddModuleApiMethod,
+        AddActorsMethod,
         AddClientEventsMethod
     ];
 

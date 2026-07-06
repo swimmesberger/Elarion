@@ -8,7 +8,7 @@ using Microsoft.CodeAnalysis.Text;
 namespace Elarion.Generators;
 
 /// <summary>
-/// Generates per-module client-event topic registration (ADR-0042). Discovers every non-abstract type
+/// Generates per-module client-event topic registration (ADR-0043). Discovers every non-abstract type
 /// implementing <c>IClientEvent</c>, groups it under its owning <c>[AppModule]</c> by longest-prefix
 /// namespace match, infers the topic name <c>{module}.{name}</c> (camel-cased, a trailing <c>Event</c>
 /// suffix stripped; <c>[ClientEvent("name")]</c> overrides the full name), reads the contract's

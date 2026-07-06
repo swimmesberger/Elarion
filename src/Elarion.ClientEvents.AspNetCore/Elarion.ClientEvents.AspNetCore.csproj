@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Server-Sent Events endpoint for Elarion client events: MapElarionClientEvents streams subscribed topics to browsers with fail-closed subscribe-time authorization (ADR-0042).</Description>
+    <Description>Server-Sent Events endpoint for Elarion client events: MapElarionClientEvents streams subscribed topics to browsers with fail-closed subscribe-time authorization (ADR-0043).</Description>
   </PropertyGroup>
 
   <ItemGroup>
