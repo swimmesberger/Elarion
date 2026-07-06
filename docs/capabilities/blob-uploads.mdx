@@ -269,7 +269,7 @@ public async ValueTask<Result<ExportPointer>> HandleAsync(Command command, Cance
     await using var artifact = await _exporter.BuildAsync(command.List, ct);   // a stream, never buffered
     var blobRef = await _blobs.SaveAsync(new BlobUploadRequest {
         Container = "uploads",                       // the download endpoint's configured container
-        Name = $"{_currentUser.UserId}/{Guid.NewGuid():N}/{command.List}.xlsx",
+        Name = $"{_currentUser.UserId}/{Guid.CreateVersion7():N}/{command.List}.xlsx",
         ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         InitialState = BlobLifecycleState.Pending,   // temp: GC reclaims it if never downloaded/committed
         ExpiresAt = _timeProvider.GetUtcNow() + TimeSpan.FromMinutes(30),
