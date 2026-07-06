@@ -141,8 +141,47 @@ method, linked with the call timeout and the activation's stopping token (`IActo
 host shutdown the runtime drains every mailbox, cancels in-flight work once the host's shutdown deadline
 fires, and runs `OnDeactivateAsync` per live activation.
 
-Attribute knobs: `Name`, `KeyType`, `MailboxCapacity`, `MailboxFullMode`, `IdleTimeoutSeconds`
-(`-1` = never passivate), `CallTimeoutSeconds` (`-1` = no timeout).
+## Configuring an actor
+
+Most actors need no options — `[Actor]` with the defaults is the common case. Each knob exists for a
+specific pressure; reach for one only when you have the matching problem.
+
+| Option | Default | Reach for it when |
+| --- | --- | --- |
+| `Name` | class name minus `Actor` | You want a telemetry/facade name decoupled from the class name (rename the class without moving dashboards), or two actors would otherwise derive the same `I{Name}` facade. |
+| `KeyType` | inferred from `IActorContext<TKey>` | Rarely — only to make an actor keyed when its constructor does **not** take the context (it never needs the key inside the body). Declaring the context parameter is the idiomatic route; if both are present they must agree (`ELACT004`). |
+| `MailboxCapacity` | `0` (unbounded) | A single key could accumulate a backlog faster than the actor drains it and memory is a real risk; a bound caps in-flight work per activation. |
+| `MailboxFullMode` | `Wait` | The mailbox is bounded and you need load-shedding rather than backpressure (see below). |
+| `IdleTimeoutSeconds` | `0` (→ 5 min) | You want to trade the default memory-reclamation behaviour for something else (see below). |
+| `CallTimeoutSeconds` | `0` (→ 30 s) | A single call is legitimately long, or you must disable the deadlock backstop (see below). |
+
+The three that need real judgment:
+
+**`MailboxFullMode` — backpressure vs. load-shedding.** On a bounded mailbox, `Wait` (default) makes a
+caller await space, so a slow actor naturally slows its callers — the right default, and the only safe
+choice when the caller has no fallback. `Fail` rejects immediately with `ActorMailboxFullException`;
+pick it when a queued call would be worthless by the time it ran (an interactive request with a tight
+deadline, or a path with a fallback) and shedding load beats letting the queue grow.
+
+**`IdleTimeoutSeconds` — passivation.** The 5-minute default suits **high-cardinality keyed actors**
+(per-order, per-session, per-device) where most keys go cold and their memory + DI scope should be
+reclaimed; the next message re-activates and reloads state via `OnActivateAsync`. Set **`-1` (never
+passivate)** for a singleton or a small fixed set of long-lived actors — a coordinator, a bounded worker
+pool — where re-activation churn costs more than staying resident, or where in-memory state is expensive
+to rebuild and nothing backs it in storage. Shorten it under memory pressure when state is cheap to
+reload; lengthen it when reload is expensive and traffic is bursty. Remember passivation **drops
+in-memory state**: if it must survive, flush it in `OnDeactivateAsync` — otherwise accept the loss for
+cache-like actors.
+
+**`CallTimeoutSeconds` — the deadlock backstop.** 30 seconds catches the actor→actor cycle (A awaits B
+awaits A) that would otherwise hang a mailbox forever. Raise it only for an actor with a genuinely long
+single call — better, move long work out of the message. Set **`-1` (no timeout)** only when you are
+certain no call cycle exists **and** the caller supplies its own cancellation (e.g. a supervised
+long-running loop message), because a real deadlock then never surfaces.
+
+Concurrency is a separate, class-level decision — the
+[`[Reentrant]`](#execution-model-single-threaded-non-reentrant-by-default) attribute, not an `[Actor]`
+option.
 
 ## Wiring
 
