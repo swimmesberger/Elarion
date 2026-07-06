@@ -21,18 +21,20 @@ namespace Elarion.Blobs.PostgreSql;
 /// the caller supplies a <see cref="BlobUploadRequest.ContentLength"/> hint (the protocol requires the
 /// length up front; the actual bytes are verified against the hint so the recorded size stays
 /// truthful); without a hint it is buffered first only to learn its length. Reads <b>stream</b> as
-/// well: <see cref="OpenReadAsync"/> opens a dedicated connection from the injected
-/// <see cref="NpgsqlDataSource"/> and reads through <see cref="CommandBehavior.SequentialAccess"/> +
+/// well: <see cref="OpenReadAsync"/> opens a dedicated connection <b>cloned from the context's own
+/// connection</b> and reads through <see cref="CommandBehavior.SequentialAccess"/> +
 /// <c>NpgsqlDataReader.GetStream</c>, with the reader, command, and connection owned by the returned
 /// <see cref="BlobDownload"/> so they live exactly as long as the caller reads. The scoped context's
 /// shared connection cannot host such a reader (it would outlive the call and block other context
-/// work), which is why the store takes its own data source. The one exception is a read inside a
-/// caller-owned ambient transaction: it must share that transaction's connection to see the caller's
-/// own uncommitted writes, so it stays buffered.
+/// work), so the store clones a sibling: <see cref="ICloneable.Clone"/> on an
+/// <see cref="NpgsqlConnection"/> reuses the connection's owning <see cref="NpgsqlDataSource"/> —
+/// same pool, same type mapping, same auth callbacks, and the same database by construction — so no
+/// separately configured data source can drift from the context (ADR-0041). The one exception is a
+/// read inside a caller-owned ambient transaction: it must share that transaction's connection to see
+/// the caller's own uncommitted writes, so it stays buffered.
 /// </remarks>
 public sealed class PostgreSqlBlobStore<TDbContext>(
     TDbContext dbContext,
-    NpgsqlDataSource dataSource,
     ILogger<PostgreSqlBlobStore<TDbContext>> logger,
     TimeProvider timeProvider) : IBlobStore, IBlobLifecycle
     where TDbContext : DbContext {
@@ -125,7 +127,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
 
         // Streaming path: a dedicated connection whose lifetime is owned by the returned BlobDownload, so
         // the content flows straight from the wire without materializing the blob in memory.
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        var connection = await OpenStreamingConnectionAsync(cancellationToken);
         NpgsqlCommand? command = null;
         NpgsqlDataReader? reader = null;
         var transferred = false;
@@ -598,6 +600,31 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             Select: $"SELECT {data} FROM {table} WHERE {blobId} = $1",
             Upsert: $"INSERT INTO {table} ({blobId}, {data}) VALUES ($1, $2) " +
                 $"ON CONFLICT ({blobId}) DO UPDATE SET {data} = EXCLUDED.{data}");
+    }
+
+    /// <summary>
+    /// Opens the dedicated connection a streaming read hands to <see cref="BlobDownload"/>, cloned from
+    /// the context's own connection.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ICloneable.Clone"/> on an <see cref="NpgsqlConnection"/> creates the sibling from the
+    /// connection's owning <see cref="NpgsqlDataSource"/> (Npgsql builds one internally even for a plain
+    /// connection string), so the clone shares the context's pool, type mapping, and auth callbacks —
+    /// and targets the same database by construction. The context connection is opened first so its
+    /// data source is resolved before cloning (mirroring <see cref="GetOpenNpgsqlConnectionAsync"/>,
+    /// which the write path already relies on).
+    /// </remarks>
+    private async Task<NpgsqlConnection> OpenStreamingConnectionAsync(CancellationToken cancellationToken) {
+        var contextConnection = await GetOpenNpgsqlConnectionAsync(cancellationToken);
+        var connection = (NpgsqlConnection)((ICloneable)contextConnection).Clone();
+        try {
+            await connection.OpenAsync(cancellationToken);
+            return connection;
+        }
+        catch {
+            await connection.DisposeAsync();
+            throw;
+        }
     }
 
     private async Task<NpgsqlConnection> GetOpenNpgsqlConnectionAsync(CancellationToken cancellationToken) {

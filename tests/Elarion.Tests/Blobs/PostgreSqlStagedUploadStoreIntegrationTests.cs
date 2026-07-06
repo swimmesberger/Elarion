@@ -223,12 +223,11 @@ public sealed class PostgreSqlStagedUploadStoreIntegrationTests(PostgreSqlStaged
         (await blobStore.GetMetadataAsync(completed.BlobRef!.Value, ct))!.OwnerId.Should().Be("user-1");
     }
 
-    private PostgreSqlStagedUploadStore<StagedUploadBlobDbContext> CreateStore(
+    private static PostgreSqlStagedUploadStore<StagedUploadBlobDbContext> CreateStore(
         StagedUploadBlobDbContext context,
         out PostgreSqlBlobStore<StagedUploadBlobDbContext> blobStore) {
         blobStore = new PostgreSqlBlobStore<StagedUploadBlobDbContext>(
             context,
-            fixture.DataSource,
             NullLogger<PostgreSqlBlobStore<StagedUploadBlobDbContext>>.Instance,
             TimeProvider.System);
         return new PostgreSqlStagedUploadStore<StagedUploadBlobDbContext>(context, blobStore, TimeProvider.System);
@@ -265,9 +264,6 @@ public sealed class PostgreSqlStagedUploadFixture : IAsyncLifetime {
 
     private string ConnectionString { get; set; } = "";
 
-    /// <summary>Gets the shared data source the blob store draws streaming-read connections from.</summary>
-    public NpgsqlDataSource DataSource { get; private set; } = null!;
-
     public async ValueTask InitializeAsync() {
         PostgreSqlContainer container;
         try {
@@ -281,17 +277,12 @@ public sealed class PostgreSqlStagedUploadFixture : IAsyncLifetime {
 
         _container = container;
         ConnectionString = container.GetConnectionString();
-        DataSource = NpgsqlDataSource.Create(ConnectionString);
         await using var context = CreateContext();
         await context.Database.EnsureCreatedAsync();
         IsAvailable = true;
     }
 
     public async ValueTask DisposeAsync() {
-        if (DataSource is not null) {
-            await DataSource.DisposeAsync();
-        }
-
         if (_container is not null) {
             await _container.DisposeAsync();
         }

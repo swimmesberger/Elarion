@@ -210,8 +210,8 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
             .State.Should().Be(BlobLifecycleState.Committed);
     }
 
-    private PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, fixture.DataSource, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
+        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
 
     private static Task<bool> BlobExistsByName(
         IntegrationBlobDbContext context,
@@ -244,13 +244,14 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var ct = TestContext.Current.CancellationToken;
 
-        // A single-connection pool with a short exhaustion timeout: if disposing a half-read download
+        // A two-connection pool with a short exhaustion timeout: one slot hosts the context's own
+        // connection, leaving exactly one for the streaming clone. If disposing a half-read download
         // leaked its connection, the next read could not open one and would throw on pool exhaustion.
-        await using var dataSource = NpgsqlDataSource.Create(
-            fixture.ConnectionString + ";Maximum Pool Size=1;Timeout=5");
-        await using var context = fixture.CreateContext();
-        var store = new PostgreSqlBlobStore<IntegrationBlobDbContext>(
-            context, dataSource, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+        await using var context = new IntegrationBlobDbContext(
+            new DbContextOptionsBuilder<IntegrationBlobDbContext>()
+                .UseNpgsql(fixture.ConnectionString + ";Maximum Pool Size=2;Timeout=5")
+                .Options);
+        var store = CreateStore(context);
         var content = Bytes(2 * 1024 * 1024);
         var blobRef = await store.SaveAsync(NewRequest(), new MemoryStream(content), ct);
 
@@ -261,6 +262,29 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
 
         await using var second = await store.OpenReadAsync(blobRef, ct);
         (await ReadAllAsync(second!, ct)).Should().Equal(content);
+    }
+
+    [Fact]
+    public async Task OpenReadAsync_DataSourceConfiguredContext_StreamsFromTheSameDataSource() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+
+        // A context bound to a host-owned NpgsqlDataSource: the streaming clone must come from that
+        // same data source (ADR-0041), so the round-trip needs no other connection configuration.
+        await using var dataSource = NpgsqlDataSource.Create(fixture.ConnectionString);
+        await using var context = new IntegrationBlobDbContext(
+            new DbContextOptionsBuilder<IntegrationBlobDbContext>()
+                .UseNpgsql(dataSource)
+                .Options);
+        var store = CreateStore(context);
+        var content = Bytes(1024 * 1024);
+        var blobRef = await store.SaveAsync(NewRequest(), new MemoryStream(content), ct);
+
+        await using var download = await store.OpenReadAsync(blobRef, ct);
+
+        download.Should().NotBeNull();
+        download!.Content.Should().NotBeOfType<MemoryStream>();
+        (await ReadAllAsync(download, ct)).Should().Equal(content);
     }
 
     [Fact]

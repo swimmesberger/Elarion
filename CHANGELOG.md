@@ -85,6 +85,16 @@ minor releases may include breaking changes.
   [ADR-0036](docs/decisions/0036-blob-listing-virtual-hierarchy.md).
 
 ### Changed
+- **Breaking (blob storage wiring):** `PostgreSqlBlobStore<T>` no longer depends on an injected
+  `NpgsqlDataSource`. Its dedicated streaming-read connection is now **cloned from the blob `DbContext`'s own
+  connection** (`ICloneable.Clone()` → the connection's owning data source), so it shares the context's pool,
+  type mapping, auth callbacks, and target database by construction — under every EF connection shape
+  (`UseNpgsql(connectionString)`, `UseNpgsql(dataSource)`, `AddNpgsqlDataSource` + `UseNpgsql()`). The
+  `connectionString` overloads of `AddElarionPostgreSqlBlobStore`, `AddElarionPostgreSqlBlobLifecycle`, and
+  `AddElarionPostgreSqlStagedUploads` are **removed**; the context registration is the only connection wiring.
+  **Migration:** drop the connection-string argument from those calls; an `NpgsqlDataSource` registered solely
+  for the blob store can be deleted (one kept for EF binding is unaffected). See
+  [ADR-0041](docs/decisions/0041-blob-streaming-connections-clone-the-context-connection.md).
 - **Behavior:** the generated `ConfigureEntities` declares domain `Guid` primary keys `ValueGeneratedNever`
   (ADR-0038, see *Added*). An app that left `Id` unset and relied on EF's client-side Guid generator now
   inserts `Guid.Empty` (failing loudly on the second row): set ids in code (`Guid.CreateVersion7()`,

@@ -94,8 +94,8 @@ public sealed class PostgreSqlBlobStoreTransactionTests(PostgreSqlBlobStoreFixtu
         (await ContentRowCount(verifyContext, blobRef.Value, Ct)).Should().Be(1);
     }
 
-    private PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, fixture.DataSource, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
+        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
 
     // Probes the raw content table directly, so the assertion is independent of the store's read path.
     private static async Task<long> ContentRowCount(

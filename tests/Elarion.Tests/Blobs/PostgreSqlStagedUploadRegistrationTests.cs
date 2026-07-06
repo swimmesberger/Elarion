@@ -27,7 +27,7 @@ public sealed class PostgreSqlStagedUploadRegistrationTests {
         // AddElarionResumableBlobUploads registers the in-memory staging default (and its collector) first.
         services.AddElarionResumableBlobUploads();
 
-        services.AddElarionPostgreSqlStagedUploads<TestStagedDbContext>("Host=localhost;Database=elarion;Username=elarion;Password=elarion");
+        services.AddElarionPostgreSqlStagedUploads<TestStagedDbContext>();
 
         // The session collector is registered exactly once even though both registrations wire it.
         services.Should().ContainSingle(descriptor =>

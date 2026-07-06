@@ -60,8 +60,8 @@ after its TTL (see [temp-file flows](#streaming-downloads-and-temp-file-flows)).
 Register the PostgreSQL lifecycle and its background collector:
 
 ```csharp
-services.AddElarionPostgreSqlBlobLifecycle<AppDbContext>(connectionString); // store + lifecycle + GC sweeper
-// (the connection string / an NpgsqlDataSource backs the store's streaming reads)
+services.AddElarionPostgreSqlBlobLifecycle<AppDbContext>(); // store + lifecycle + GC sweeper
+// (streaming reads clone the context's connection — no other wiring, ADR-0041)
 // in OnModelCreating:
 modelBuilder.UseElarionBlobStorage();
 ```
@@ -134,7 +134,7 @@ past a retention window:
 
 ```csharp
 services.AddElarionResumableBlobUploads();
-services.AddElarionPostgreSqlStagedUploads<AppDbContext>(connectionString);
+services.AddElarionPostgreSqlStagedUploads<AppDbContext>();
 modelBuilder.UseElarionBlobStorage();  // blob tables, in OnModelCreating
 modelBuilder.UseElarionStagedUploads(); // staging table, in OnModelCreating
 ```

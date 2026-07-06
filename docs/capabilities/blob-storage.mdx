@@ -162,14 +162,16 @@ using Elarion.Blobs.PostgreSql;
 var connectionString = builder.Configuration.GetConnectionString("Database")!;
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
-builder.Services.AddElarionPostgreSqlBlobStore<AppDbContext>(connectionString);
+builder.Services.AddElarionPostgreSqlBlobStore<AppDbContext>();
 ```
 
-The connection string (or an `NpgsqlDataSource`, if you prefer the parameterless overload and register
-one yourself — a host-registered data source always wins) backs the store's **streaming reads**: each
+The context registration is the only connection wiring. The store's **streaming reads** — each
 `OpenReadAsync` draws a dedicated connection whose lifetime is owned by the returned `BlobDownload`,
-which the scoped `DbContext` connection cannot provide. It must target the same database as the blob
-context.
+which the scoped `DbContext` connection cannot provide — clone that dedicated connection from the
+context's own connection, so it comes from the same pool, with the same type mapping and auth
+callbacks, and targets the same database by construction. Every EF connection shape works unchanged:
+`UseNpgsql(connectionString)`, `UseNpgsql(dataSource)`, or `AddNpgsqlDataSource` + `UseNpgsql()`
+(ADR-0041).
 
 `UseElarionBlobStorage()` adds two tables to the EF Core model:
 
@@ -213,8 +215,8 @@ The store talks to PostgreSQL directly for content bytes (it casts the context's
 registration above. That raw SQL is built from the EF model (`ISqlGenerationHelper` plus the resolved
 table/column names), so table, schema, and naming overrides apply to the raw Npgsql content path too.
 Writes stream a seekable source (a file, an in-memory buffer) straight into the
-`bytea` column without buffering. Reads stream too: `OpenReadAsync` opens a dedicated connection from
-the registered `NpgsqlDataSource` and reads through `CommandBehavior.SequentialAccess` +
+`bytea` column without buffering. Reads stream too: `OpenReadAsync` opens a dedicated connection
+cloned from the context's connection and reads through `CommandBehavior.SequentialAccess` +
 `NpgsqlDataReader.GetStream`, so the content flows from the wire without materializing the blob in
 memory; the reader, command, and connection are owned by the returned `BlobDownload` and released on
 its disposal (double-dispose safe). The one exception is a read inside a caller-owned ambient
