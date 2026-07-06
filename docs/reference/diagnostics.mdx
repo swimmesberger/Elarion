@@ -321,3 +321,14 @@ Blob-table generation for `[GenerateElarionBlobStorage]` and staged-upload-table
 | --- | --- | --- | --- |
 | ELBLB001 | Error | A context is annotated with `[GenerateElarionBlobStorage]` but not `[GenerateDbSets]`, so the blob `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionBlobStorage]`. |
 | ELBLB002 | Error | A context is annotated with `[GenerateElarionStagedUploads]` but not `[GenerateDbSets]`, so the staged-upload `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionStagedUploads]`. |
+
+## ELCEV — Client events
+
+Generated client-event topic registration for `IClientEvent` contracts. See
+[Client events](/docs/capabilities/events/client-events).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELCEV001 | Warning | An `IClientEvent` contract's namespace is not under any `[AppModule]`, so no topic is registered for it. | Move the contract under an `[AppModule]` namespace, or register the topic manually via `AddElarionClientEvents`. |
+| ELCEV002 | Error | Two `IClientEvent` contracts resolve to the same topic name; the colliding topics are withheld. | Rename one contract, or disambiguate with an explicit `[ClientEvent("…")]` name. |
+| ELCEV003 | Warning | The compilation declares `IClientEvent` contracts but does not reference `Elarion.ClientEvents`, so no topics are registered. | Reference `Elarion.ClientEvents` (and map the endpoint from `Elarion.ClientEvents.AspNetCore`), or remove the contracts. |

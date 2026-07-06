@@ -37,15 +37,32 @@ renames cannot break deployed frontends.
 
 ## 2. Register the topic
 
+Under `[assembly: UseElarion]` (or the standalone `[assembly: GenerateClientEventTopics]`), registration is
+**generated**: every `IClientEvent` contract under an `[AppModule]` becomes a topic named `{module}.{name}`
+— both parts camel-cased, a trailing `Event` suffix stripped, so `InvoiceChanged` in the Invoicing module is
+`"invoicing.invoiceChanged"`. Attributes on the contract become subscribe-time requirements, and
+`[ClientEvent("…")]` pins the full wire name across a type rename:
+
+```csharp
+[RequirePermission("invoices", Verbs.Read)]   // evaluated when a client subscribes
+public sealed record InvoiceChanged : IClientEvent {
+    public required Guid InvoiceId { get; init; }
+}
+```
+
+The generated `Add{Module}ClientEvents` is wired into the module's `ConfigureDefaultServices`, so a
+disabled module's topics simply don't exist. A contract outside every module warns (`ELCEV001`), colliding
+topic names are a compile error (`ELCEV002`), and contracts without an `Elarion.ClientEvents` reference
+warn (`ELCEV003`). The manual path remains for hosts without the bootstrapper or for custom vocabularies:
+
 ```csharp
 builder.Services.AddElarionClientEvents(events => events
     .AddTopic<InvoiceChanged>("invoicing.invoiceChanged", t => t.RequirePermission("invoices", Verbs.Read)));
 ```
 
-Nothing reaches the wire without this declaration — opt-in by enumeration. Publishing an unregistered type
-fails loud; subscribing an unknown topic reads as 404. Requirements beyond "authenticated" (permissions,
-roles) are evaluated when a client subscribes, and a denied topic is indistinguishable from a nonexistent
-one. Registration is additive, so each module can declare its own topics.
+Either way, nothing reaches the wire without a declaration — opt-in by enumeration. Publishing an
+unregistered type fails loud; subscribing an unknown topic reads as 404, and a denied topic is
+indistinguishable from a nonexistent one.
 
 ## 3. Project the integration event
 

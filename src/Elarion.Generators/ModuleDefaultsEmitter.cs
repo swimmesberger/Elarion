@@ -33,6 +33,7 @@ internal static class ModuleDefaultsEmitter
     public const string AddAuthorizationPoliciesMethod = "AddAuthorizationPolicies";
     public const string AddPermissionsMethod = "AddPermissions";
     public const string AddModuleApiMethod = "AddModuleApi";
+    public const string AddClientEventsMethod = "AddClientEvents";
 
     public const string ServiceCollectionFqn =
         "global::Microsoft.Extensions.DependencyInjection.IServiceCollection";
@@ -48,7 +49,8 @@ internal static class ModuleDefaultsEmitter
         AddEventConsumersMethod,
         AddAuthorizationPoliciesMethod,
         AddPermissionsMethod,
-        AddModuleApiMethod
+        AddModuleApiMethod,
+        AddClientEventsMethod
     ];
 
     public static string SiblingClassName(string moduleTypeName) => moduleTypeName + ClassSuffix;

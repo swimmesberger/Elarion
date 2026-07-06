@@ -58,12 +58,15 @@ machinery from the design.
 
 - `IClientEvent` — marker interface on the contract DTO (immutable record). It marks what the type *is*: a
   topic schema at the trust boundary. The topic name follows the `{module}.{name}` shape (camelCase, like
-  handler names). **v1 ships explicit registration** — `AddElarionClientEvents(e => e.AddTopic<T>("module.event"))`,
-  the `AddElarionVariantCatalog` pattern: the host/module seeds the catalog, an unregistered publish fails
-  loud, and an unknown topic does not exist on the wire. Generator-driven inference (per-module
-  `Add{Module}ClientEvents`, an optional `[ClientEvent("name")]` name override, `ELCEV001` for a client event
-  under no module, `ELCEV002` for colliding topic names) is the follow-up layer; the catalog already rejects
-  duplicate names/types at composition.
+  handler names; a trailing `Event` suffix stripped). Under `[UseElarion]`/`[GenerateClientEventTopics]` the
+  registration is **generated per module** (`Add{Module}ClientEvents`, wired into `ConfigureDefaultServices`
+  so topics disappear with the module's feature gate): the optional `[ClientEvent("name")]` attribute
+  overrides the full topic name, and the contract's `[RequirePermission]`/`[RequireRole]` attributes become
+  subscribe-time requirements. Diagnostics: `ELCEV001` (client event under no module), `ELCEV002` (colliding
+  topic names), `ELCEV003` (contracts declared without referencing `Elarion.ClientEvents`). Explicit
+  `AddElarionClientEvents(e => e.AddTopic<T>("module.event"))` remains the manual path (the
+  `AddElarionVariantCatalog` pattern) — either way an unregistered publish fails loud and an unknown topic
+  does not exist on the wire; the catalog rejects duplicate names/types at composition.
 - `IClientEventPublisher.PublishAsync(evt, scope, ct)` — interface publishing, symmetric with the two buses.
 - `ClientEventScope` — data, not behavior: `Global`, `User(id)`, `Resource(key)`.
 - Subscribe-time authorization is declared **on the contract type** with the existing attributes
@@ -211,7 +214,7 @@ polling a keyset query remains the humble alternative at this tier.
   plane that promises otherwise; `IIntegrationEventBus` remains implementable by any backend that delivers
   events, unmodified.
 - Costs accepted: one small projection class per module (the ADR-0002 price), a reconnect when the
-  subscription set changes, and two new diagnostics (`ELCEV001`, `ELCEV002`).
+  subscription set changes, and three new diagnostics (`ELCEV001`–`ELCEV003`).
 - Rollout is bottom-up stacked PRs, each independently useful: Abstractions contracts → `Elarion.ClientEvents`
   core → SSE endpoint → schema/TS chain → PostgreSQL fan-out (single-node works before the Postgres package
   exists).
