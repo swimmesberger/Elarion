@@ -15,7 +15,7 @@ real PostgreSQL database.
 | `Billing.Infrastructure` | Intent-only mechanism adapters only: the SMTP email sender behind the module's port. The database is **not** here — it is application logic and lives in `Billing.Application.Persistence`. |
 | `Billing.Api` | The ASP.NET Core host: `[GenerateModuleBootstrapper]`, JSON-RPC + MCP transports, the scheduler/resilience/cache runtimes, current-user, and OpenTelemetry. |
 | `Billing.AppHost` | The .NET Aspire app host: provisions PostgreSQL, runs the API and the web frontend, and wires them together. |
-| `web` | A Vite + React 19 + Tailwind v4 + shadcn/ui + TanStack Query/Router frontend that calls the API through the **generated** JSON-RPC client (`rpc-schema.json` → `src/generated/`), structured as **frontend modules** with the ADR-0032 contribution model (see below). |
+| `Billing.Web` | A Vite + React 19 + Tailwind v4 + shadcn/ui + TanStack Query/Router frontend that calls the API through the **generated** JSON-RPC client (`rpc-schema.json` → `src/generated/`), structured as **frontend modules** with the ADR-0032 contribution model (see below). |
 
 Entities live in a shared-kernel **namespace** and the whole persistence layer (configuration, the
 `BillingDbContext`, and migrations) in a shared `Persistence` namespace (both under no `[AppModule]`), not
@@ -47,7 +47,7 @@ for when each would graduate to its own assembly.
 
 ## Frontend modules
 
-`web/src` mirrors the backend's modular-monolith rule — *a module only touches its own code* — using the
+`Billing.Web/src` mirrors the backend's modular-monolith rule — *a module only touches its own code* — using the
 contribution model of
 [ADR-0032](../../docs/decisions/0032-frontend-contribution-model.md):
 
@@ -104,7 +104,7 @@ dashboard with traces and metrics:
 
 ```bash
 npm ci --prefix src/elarion-contributions        # builds the contribution package the web app links
-npm install --prefix samples/Billing/web
+npm install --prefix samples/Billing/Billing.Web
 dotnet run --project samples/Billing/Billing.AppHost
 ```
 
@@ -125,7 +125,7 @@ mapped from `AppError.Conflict`. The MCP server is live at `/mcp`, exposing `cli
 
 ## Regenerating the contract
 
-`rpc-schema.json` and the TypeScript client under `web/src/generated/` are committed. Regenerate them
+`rpc-schema.json` and the TypeScript client under `Billing.Web/src/generated/` are committed. Regenerate them
 when a handler's request/response shape changes:
 
 ```bash
@@ -136,7 +136,7 @@ dotnet run --project src/Elarion.AspNetCore.SchemaGeneration.Tool -- \
   --output samples/Billing/rpc-schema.json
 
 # 2. Regenerate the typed client
-npm --prefix samples/Billing/web run gen:rpc
+npm --prefix samples/Billing/Billing.Web run gen:rpc
 ```
 
 > The tutorial wires this as a build-time step (`Elarion.AspNetCore.SchemaGeneration` on the host); the

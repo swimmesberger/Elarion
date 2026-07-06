@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.Build.NoTargets/3.7.134">
+
+  <!--
+    Wrapper for the Billing sample's Vite + React frontend. It surfaces the web app in the .NET solution
+    (IDE visibility, grouping alongside the other Billing.* projects) but produces no .NET assembly and is
+    not packed. The TypeScript/Vite build is driven by npm (see package.json), not by `dotnet build`;
+    .NET Aspire runs `npm run dev` for local orchestration (see Billing.AppHost).
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <!-- Not a C# project: opt out of the implicit global usings inherited from Directory.Build.props,
+         which would otherwise emit a GlobalUsings.g.cs the IDE flags (no framework references behind it). -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!--
+      Opt-in: build the frontend as part of `dotnet build` (requires Node/npm on PATH). Off by default so a
+      normal .NET build needs no Node. Enable per build with `-p:BuildJsClient=true`.
+    -->
+    <BuildJsClient Condition="'$(BuildJsClient)' == ''">false</BuildJsClient>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="package.json" />
+    <None Include="package-lock.json" />
+    <None Include="index.html" />
+    <None Include="vite.config.ts" />
+    <None Include="tsconfig.json" />
+    <None Include="tsconfig.app.json" />
+    <None Include="tsconfig.node.json" />
+    <None Include="components.json" />
+    <None Include="src/**/*.ts" />
+    <None Include="src/**/*.tsx" />
+    <None Include="src/**/*.css" />
+  </ItemGroup>
+
+  <!-- Install dependencies once (clean, lockfile-based) when opted in and node_modules is absent. -->
+  <Target Name="RestoreJsWeb"
+          Condition="'$(BuildJsClient)' == 'true' and !Exists('$(MSBuildProjectDirectory)/node_modules')">
+    <Message Importance="high" Text="Billing.Web: npm ci" />
+    <Exec Command="npm ci" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <!-- Build the frontend (tsc + vite build) after the (no-op) .NET build when opted in. -->
+  <Target Name="BuildJsWeb"
+          Condition="'$(BuildJsClient)' == 'true'"
+          DependsOnTargets="RestoreJsWeb"
+          AfterTargets="Build"
+          Inputs="@(None)"
+          Outputs="$(MSBuildProjectDirectory)/dist/index.html">
+    <Message Importance="high" Text="Billing.Web: npm run build" />
+    <Exec Command="npm run build" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+</Project>
