@@ -63,7 +63,7 @@ public sealed class CreateInvoice(
 
         var count = await db.Invoices.CountAsync(i => i.OwnerId == user.UserId, ct);
         var invoice = new Invoice {
-            Id = Guid.NewGuid(),
+            Id = Guid.CreateVersion7(),
             OwnerId = user.UserId,
             ClientId = command.ClientId,
             Number = $"INV-{count + 1:D6}",

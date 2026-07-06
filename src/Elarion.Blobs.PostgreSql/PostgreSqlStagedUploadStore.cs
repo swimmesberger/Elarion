@@ -27,7 +27,7 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
         ArgumentNullException.ThrowIfNull(creation);
 
         var row = new StagedUploadRow {
-            Id = Guid.NewGuid().ToString("N"),
+            Id = Guid.CreateVersion7().ToString("N"),
             Container = creation.Container,
             Name = creation.Name,
             Length = creation.Length,

@@ -9,6 +9,23 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Client-assigned entity identity (ADR-0038).** Elarion's stance is now enforced end to end: the
+  application owns entity identity, mints ids in code with `Guid.CreateVersion7()` (UUIDv7 — time-ordered,
+  index-friendly), and the model says so. The `[GenerateDbSets]` `ConfigureEntities` now ends with a
+  generated **client-assigned Guid key pass** that declares the discovered domain entities'
+  single-property `Guid` primary keys `ValueGeneratedNever` — scoped to the discovered entities'
+  *assemblies*, so navigation-discovered children (where EF's insert-vs-update heuristic misreads a set id
+  on a "generated" key and a replace-children update dies with `DbUpdateConcurrencyException` on a real
+  database, dotnet/efcore#35090) are covered while Identity/framework entities keep their packaged
+  generation; explicit or data-annotation configuration, custom value generators, and store defaults always
+  win. Schema-neutral: adopting it produces one *empty* migration to re-sync the snapshot. Minting a Guid
+  id with `Guid.CreateVersion7()` (UUIDv7) is the documented convention (framework code and docs updated
+  to match); the model pass prevents the phantom UPDATE regardless of v4 vs v7.
+  `ApplyElarionIdentity` now declares `ValueGeneratedOnAdd` explicitly for a `Guid` `TKey`, so no app-level
+  key convention can reinterpret Identity's keys. A Testcontainers pin test proves the replace-children
+  pattern both ways (the EF InMemory provider skips the affected-rows check and cannot catch it). See
+  [ADR-0038](docs/decisions/0038-client-assigned-entity-identity.md) and
+  [Entity identity](docs/capabilities/entity-framework.mdx).
 - **Protocol-neutral staged (resumable) uploads + Azure Blob Storage backend (ADR-0035).** The tus staging seam
   is promoted into `Elarion.Blobs` as **`IStagedUploadStore`** — offset-guarded `AppendAsync`, an **explicit,
   idempotent `CompleteAsync`** that seals the staged bytes into a pending blob, nullable declared length
@@ -41,6 +58,16 @@ minor releases may include breaking changes.
   [ADR-0036](docs/decisions/0036-blob-listing-virtual-hierarchy.md).
 
 ### Changed
+- **Behavior:** the generated `ConfigureEntities` declares domain `Guid` primary keys `ValueGeneratedNever`
+  (ADR-0038, see *Added*). An app that left `Id` unset and relied on EF's client-side Guid generator now
+  inserts `Guid.Empty` (failing loudly on the second row): set ids in code (`Guid.CreateVersion7()`,
+  recommended) or configure `ValueGeneratedOnAdd()` explicitly on that entity — explicit configuration
+  always wins. Add one (empty) migration to re-sync the model snapshot.
+- Framework-minted ids are UUIDv7 now (`Guid.CreateVersion7()`): outbox message and correlation ids,
+  delivery lease tokens, in-memory event/message ids, scheduler job/run ids, PostgreSQL blob ids,
+  staged-upload session ids (PostgreSQL/in-memory/Azure), and the upload endpoints' storage-name segments.
+  Ids remain opaque Guids on every contract; only their version bits changed (b-tree-friendly ordering,
+  and storage names now list in upload order within an owner prefix).
 - **Breaking:** `ITusUploadStore`/`TusUpload`/`TusUploadCreation`/`TusOffsetConflictException` are replaced by
   the `IStagedUploadStore` family in `Elarion.Blobs`; the `Elarion.Blobs.Tus.PostgreSql` package dissolves into
   `Elarion.Blobs.PostgreSql`. **Migration:** `AddElarionTusPostgreSql<T>` → `AddElarionPostgreSqlStagedUploads<T>`,

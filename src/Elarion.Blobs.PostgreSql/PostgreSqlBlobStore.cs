@@ -528,7 +528,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             return existing.Id;
         }
 
-        var blobId = Guid.NewGuid().ToString();
+        var blobId = Guid.CreateVersion7().ToString();
         dbContext.Set<StoredBlob>().Add(new StoredBlob {
             Id = blobId,
             Container = request.Container,

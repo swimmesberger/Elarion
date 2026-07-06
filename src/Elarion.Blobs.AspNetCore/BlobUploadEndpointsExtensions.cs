@@ -141,7 +141,7 @@ public static class BlobUploadEndpointsExtensions {
     }
 
     private static string BuildStorageName(string ownerId, string clientName) =>
-        $"{ownerId}/{Guid.NewGuid():N}/{SanitizeFileName(clientName)}";
+        $"{ownerId}/{Guid.CreateVersion7():N}/{SanitizeFileName(clientName)}";
 
     // Ownership is compared against the recorded owner id exactly, not parsed from the storage name, so an
     // owner id that happens to contain the naming separator cannot be forged. A blob with no recorded owner

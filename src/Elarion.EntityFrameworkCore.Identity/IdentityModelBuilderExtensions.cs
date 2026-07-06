@@ -52,6 +52,7 @@ public static class IdentityModelBuilderExtensions {
 
         modelBuilder.Entity<TUser>(b => {
             b.HasKey(user => user.Id);
+            ApplyGuidKeyGeneration<TUser, TKey>(b, user => user.Id);
             b.HasIndex(user => user.NormalizedUserName).HasDatabaseName(userNameIndex).IsUnique();
             b.HasIndex(user => user.NormalizedEmail).HasDatabaseName(emailIndex);
             b.ToTable(userTable, schema);
@@ -89,6 +90,7 @@ public static class IdentityModelBuilderExtensions {
 
         modelBuilder.Entity<TRole>(b => {
             b.HasKey(role => role.Id);
+            ApplyGuidKeyGeneration<TRole, TKey>(b, role => role.Id);
             b.HasIndex(role => role.NormalizedName).HasDatabaseName(roleNameIndex).IsUnique();
             b.ToTable(roleTable, schema);
             b.Property(role => role.ConcurrencyStamp).IsConcurrencyToken();
@@ -114,6 +116,20 @@ public static class IdentityModelBuilderExtensions {
         });
 
         return modelBuilder;
+    }
+
+    // Identity's UserManager never assigns a Guid key — it relies on EF's client-side generator on Add — so
+    // for a Guid TKey that packaged contract is declared explicitly (not left to convention). TUser/TRole are
+    // app-owned CLR types that may live beside the app's domain entities, and an app-level key convention
+    // (such as the [GenerateDbSets] client-assigned-Guid-keys pass) must never reinterpret Identity's keys.
+    // String keys are untouched: IdentityUser's constructor assigns them, matching EF's convention already.
+    private static void ApplyGuidKeyGeneration<TEntity, TKey>(
+        EntityTypeBuilder<TEntity> builder, System.Linq.Expressions.Expression<Func<TEntity, TKey>> key)
+        where TEntity : class
+        where TKey : IEquatable<TKey> {
+        if (typeof(TKey) == typeof(Guid)) {
+            builder.Property(key).ValueGeneratedOnAdd();
+        }
     }
 
     // Explicit snake_case column names so the mapping is self-contained (no naming-convention dependency).

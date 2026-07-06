@@ -132,7 +132,7 @@ var client = await db.Clients
     .FirstOrDefaultAsync(ct);
 
 // Write: add/modify entities and persist
-db.Clients.Add(new Client { Id = Guid.NewGuid(), Name = command.Name });
+db.Clients.Add(new Client { Id = Guid.CreateVersion7(), Name = command.Name });
 await db.SaveChangesAsync(ct);
 ```
 
