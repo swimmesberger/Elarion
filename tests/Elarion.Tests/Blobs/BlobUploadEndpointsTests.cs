@@ -77,6 +77,29 @@ public sealed class BlobUploadEndpointsTests {
     }
 
     [Fact]
+    public async Task Cancel_Unauthenticated_Returns401() {
+        // The auth guard runs before the ownership check, so an anonymous DELETE is a clean 401 — even for
+        // the recorded owner — rather than reaching (and, with the shipped ICurrentUser, throwing on) the id.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct, user: new FakeCurrentUser("user-1", isAuthenticated: false));
+        host.Store.Seed(new BlobMetadata {
+            Id = "owned",
+            Container = "uploads",
+            Name = "user-1/abc/file.bin",
+            ContentType = "application/octet-stream",
+            Size = 1,
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            State = BlobLifecycleState.Pending,
+            OwnerId = "user-1"
+        });
+
+        var response = await host.Client.DeleteAsync("/_elarion/blobs/owned", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        host.Store.Deleted.Should().NotContain("owned");
+    }
+
+    [Fact]
     public async Task Upload_DisallowedContentType_Returns400() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct, configure: options =>

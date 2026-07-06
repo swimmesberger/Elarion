@@ -6,6 +6,7 @@ using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Modules;
 using Elarion.Abstractions.Serialization;
+using Elarion.Identity;
 using Elarion.Session;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -69,6 +70,24 @@ public sealed class SessionHandlerTests {
         result.Value!.Flags.Should().BeEmpty();
         result.Value!.Variants.Should().BeEmpty();
         result.Value!.User.IsAuthenticated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task HandleAsync_WithAnonymousShippedCurrentUser_ProjectsEmptyIdWithoutThrowing() {
+        var manifest = new ClientCapabilityManifest {
+            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = [] }],
+        };
+        // The shipped ICurrentUser: unseeded, it is an anonymous caller whose UserId *throws* (the contract is
+        // non-nullable and there is no id). Session bootstrap must consult IsAuthenticated first — reading UserId
+        // unconditionally would surface "User id claim 'sub' is not set." for every anonymous session request.
+        var user = new ClaimsPrincipalCurrentUser(new ClaimsCurrentUserOptions());
+
+        var handler = new SessionHandler(user, manifest);
+        var result = await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.User.IsAuthenticated.Should().BeFalse();
+        result.Value!.User.Id.Should().BeEmpty();
     }
 
     [Fact]

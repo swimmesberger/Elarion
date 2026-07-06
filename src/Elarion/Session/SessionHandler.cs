@@ -53,7 +53,10 @@ public sealed class SessionHandler(
 
         var permissionClaimType = authorizationOptions?.PermissionClaimType ?? "permission";
         var user = new SessionUser {
-            Id = currentUser.UserId,
+            // An anonymous caller has no id, and the contract is non-nullable: ICurrentUser.UserId is documented to be
+            // consulted only after IsAuthenticated (the shipped ClaimsPrincipalCurrentUser throws for an unauthenticated
+            // principal). Session bootstrap is anonymous-friendly, so project the empty id SessionUser.Id promises.
+            Id = currentUser.IsAuthenticated ? currentUser.UserId : string.Empty,
             Email = currentUser.Email,
             IsAuthenticated = currentUser.IsAuthenticated,
             Roles = currentUser.Roles,
