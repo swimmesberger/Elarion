@@ -250,6 +250,16 @@ alloc).
   remain undetectable and are covered by documentation only.
 - The runtime's single-threaded guarantee is "one turn at a time with happens-before via await", not
   thread affinity — thread-affine native resources need a dedicated scheduler, which is out of scope.
+- **Events reach actors through relay consumers, not `[ConsumeEvent]` on the actor (`ELACT007`).**
+  First-class event consumption on actors was considered and rejected: a generator cannot emit a
+  handler-form consumer for another generator to pipeline (generators never see each other's output),
+  so any direct-consumption sugar would bypass the handler pipeline and **silently lose the default-on
+  inbox dedupe** — at-least-once redelivery would mutate actor state twice. A hand-written handler-form
+  relay (`[ConsumeEvent]` handler that calls the facade) composes the guarantees in the right order
+  (inbox → mailbox), keeps key extraction explicit, and confines actors to integration events (a Plane A
+  consumer shares the emitting command's transaction, which an actor structurally cannot). `ELACT007`
+  rejects `[ConsumeEvent]` on `[Actor]` classes with that guidance, and the event-consumer generator
+  yields to it instead of reporting a misleading "not a [Service]".
 - **Adjacent idea, recorded but deliberately not in scope: a `[Sequential]` handler decorator.** The
   keyed-mailbox cells could serialize *handler* executions per request-derived key (e.g.
   `[Sequential(Key = nameof(Request.OrderId))]`) — "one command per order at a time" without moving any
