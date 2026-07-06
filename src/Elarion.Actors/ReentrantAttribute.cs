@@ -12,7 +12,8 @@ namespace Elarion.Actors;
 /// interleaved turns is exactly the complexity the non-reentrant default removes. Caveat: an
 /// <c>await</c> using <c>ConfigureAwait(false)</c> <em>in the actor's own methods</em> escapes the
 /// exclusive scheduler and forfeits the single-threaded guarantee for the rest of that method —
-/// don't use it in code that touches actor state. Libraries the actor calls may freely use
+/// don't use it in code that touches actor state (flagged by <c>ELACT006</c>). Libraries the actor
+/// calls may freely use
 /// <c>ConfigureAwait(false)</c> internally (context capture is per-method; the actor method still
 /// resumes on its scheduler), but a state-mutating delegate passed into a library runs wherever the
 /// library invokes it and escapes regardless.

@@ -243,7 +243,11 @@ alloc).
   `OnActivateAsync`-loaded storage. A first-class persistence seam (`IPersistentState<T>`-style, Postgres
   sibling) is the obvious phase 2 and nothing in the contracts precludes it.
 - A reentrant actor buys liveness with interleaving complexity, and `ConfigureAwait(false)` inside one is
-  a real footgun (documented; not analyzer-enforced yet — a future `ELACT` analyzer could flag it).
+  a real footgun — latent (it only escapes when the await actually suspends) and scoped to actor-owned
+  code (libraries called by the actor may use it freely; context capture is per-method). It is therefore
+  analyzer-enforced: `ELACT006` flags `ConfigureAwait(false)`/capture-free `ConfigureAwaitOptions` inside
+  `[Reentrant]` classes, including lambdas and nested types. State-mutating delegates handed to libraries
+  remain undetectable and are covered by documentation only.
 - The runtime's single-threaded guarantee is "one turn at a time with happens-before via await", not
   thread affinity — thread-affine native resources need a dedicated scheduler, which is out of scope.
 - **Adjacent idea, recorded but deliberately not in scope: a `[Sequential]` handler decorator.** The

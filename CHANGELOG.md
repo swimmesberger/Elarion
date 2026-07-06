@@ -20,7 +20,8 @@ minor releases may include breaking changes.
   timeout backstop (default 30 s) so actor→actor call cycles fail diagnosably instead of hanging. Exceptions
   cross the mailbox unwrapped with their actor-side stack traces; `Elarion.Actors` ActivitySource/Meter spans
   make a call look like an RPC hop. Actors are module-scoped like handlers (`AddActors` hook in
-  `ConfigureDefaultServices`; `[assembly: GenerateActors]`/`[UseElarion]`; diagnostics `ELACT001`–`ELACT005`)
+  `ConfigureDefaultServices`; `[assembly: GenerateActors]`/`[UseElarion]`; diagnostics `ELACT001`–`ELACT006`,
+  including an analyzer flagging `ConfigureAwait(false)` inside `[Reentrant]` actors)
   and deliberately **single-node** — clustering is a non-goal (swap to Orleans/Akka.NET/Proto.Actor per the
   ADR-0025 seam philosophy). The call path is benchmarked (`tests/Elarion.Benchmarks`, BenchmarkDotNet) and
   optimized step-by-step (pooled per-call cancellation, sync-enqueue fast path, pass-through facades:

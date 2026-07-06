@@ -198,7 +198,7 @@ See [Consuming events](/docs/capabilities/events/consuming-events) and [Backends
 ### `[Reentrant]`
 
 - **Package:** `Elarion.Actors` · **Applies to:** class (alongside `[Actor]`)
-- **Triggers:** opts the actor into Orleans-style turn-based interleaving: while one message awaits, the mailbox may start another, but turns never run in parallel (an exclusive scheduler serializes every continuation). State observed across an `await` may have been changed by an interleaved message; `ConfigureAwait(false)` inside a reentrant actor escapes the scheduler and forfeits the guarantee.
+- **Triggers:** opts the actor into Orleans-style turn-based interleaving: while one message awaits, the mailbox may start another, but turns never run in parallel (an exclusive scheduler serializes every continuation). State observed across an `await` may have been changed by an interleaved message; `ConfigureAwait(false)` in the actor's own code escapes the scheduler and forfeits the guarantee (flagged by `ELACT006`; libraries the actor calls may use it internally without harm).
 
 See [Actors](/docs/concepts/actors).
 

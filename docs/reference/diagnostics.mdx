@@ -67,6 +67,7 @@ Actor facade generation for `[Actor]` classes. See [Actors](/docs/concepts/actor
 | ELACT003 | Warning | An `[Actor]` class's namespace is not under any `[AppModule]`, so it will not be registered. | Move the actor under a module's namespace so it is wired by that module's `Add{Module}Actors`. |
 | ELACT004 | Error | An `[Actor]` class declares conflicting keys — multiple `IActorContext<TKey>` constructor parameters with different key types, or an `[Actor(KeyType = ...)]` that contradicts the context parameter. | Declare a single `IActorContext<TKey>` constructor parameter (the idiomatic way to make an actor keyed), or make `KeyType` match it. |
 | ELACT005 | Error | An `[Actor]` class does not have exactly one public constructor, so the generator cannot emit its activator. | Keep one public constructor carrying the activation dependencies (context + services). |
+| ELACT006 | Warning | `ConfigureAwait(false)` (or a `ConfigureAwaitOptions` value without `ContinueOnCapturedContext`) inside a `[Reentrant]` actor escapes the exclusive scheduler: the rest of the method resumes off the actor's single-threaded context — and only when the await actually suspends, so the escape is latent. | Remove `ConfigureAwait(false)` from the actor's own methods, helpers, and lambdas. Libraries the actor calls may use it internally without harm (context capture is per-method). Non-reentrant actors are exempt — their guarantee comes from the mailbox loop, not a scheduler. |
 
 ## ELMOD — Module boundaries
 
