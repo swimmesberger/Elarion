@@ -42,11 +42,21 @@ builder.Services
 
 ## First-party surfaces
 
-Every Elarion duration histogram follows the OTel semantic conventions: values in **seconds**
-(unit `s`), with the semconv-recommended bucket boundaries supplied as instrument advice so
-exporters don't fall back to millisecond-scaled defaults. The JSON-RPC/MCP duration metric is named
-`rpc.server.call.duration` per the current RPC conventions (the retired experimental
-`rpc.server.duration`, which was defined in milliseconds, is not emitted).
+Elarion telemetry follows the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/)
+wherever one exists, and applies their spirit where none does:
+
+- **Durations** are histograms recording *"seconds as a floating point number with the highest precision
+  available"* (unit `s`), per the OTel instrument guidance — never milliseconds — with the
+  semconv-recommended bucket boundaries supplied as instrument advice so exporters don't fall back to
+  millisecond-scaled defaults. (Span attributes with an explicit unit suffix like
+  `scheduler.job.duration_ms` are self-describing and exempt.)
+- **Semconv names are adopted, not paralleled**: the JSON-RPC/MCP duration metric is
+  `rpc.server.call.duration` per the current RPC conventions (the retired experimental
+  `rpc.server.duration`, which was defined in milliseconds, is not emitted). Where no convention exists,
+  names and attributes use a namespaced prefix (`elarion.*`, `handler.*`, `actor.*`, …).
+- **Cardinality discipline**: metric tags stay bounded (type/operation/outcome names — never keys,
+  payloads, or user identity); high-cardinality identity (an actor key, the current user) appears on
+  **spans and log scopes only**.
 
 | Surface | Source / meter | Coverage |
 | --- | --- | --- |

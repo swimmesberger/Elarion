@@ -395,6 +395,17 @@ Applies to `**/*.cs` (Copilot scopes this section via `.github/instructions/csha
   documented reason). Long-lived/background work is owned by a host-managed abstraction (`IHostedService`, scheduler, explicit
   queue/loop), not hidden in a helper. Handle `OperationCanceledException` deliberately — do not log expected cancellation as error.
 
+### Telemetry
+- **Follow the OTel semantic conventions wherever one exists.** Duration histograms record "seconds as a floating
+  point number with the highest precision available" (unit `s`) — never milliseconds — with the semconv bucket
+  boundaries supplied via `InstrumentAdvice<double>` (the SDK's default buckets are ms-scaled and useless for
+  second-valued histograms). Telemetry `Record*` helpers take `TimeSpan`, so the unit decision lives in one place
+  per meter class. When semconv defines a name (e.g. `rpc.server.call.duration`), adopt it instead of minting a
+  parallel one; custom names/attributes use a namespaced prefix (`elarion.*`). Metric tags stay **bounded**
+  (type/operation/outcome names — never keys, payloads, or user identity); high-cardinality identity (actor key,
+  user id) goes on **spans only**. Explicitly unit-suffixed span tags (`*_ms`) are exempt from the seconds rule —
+  they are self-describing.
+
 ## Testing
 
 - Add regression tests when fixing bugs. Follow nearby naming/capitalization; no `Arrange`/`Act`/`Assert` comments.
