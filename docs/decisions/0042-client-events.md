@@ -125,16 +125,20 @@ two planes explain themselves.
 
 ### Schema and TypeScript chain
 
-`IClientEvent` types flow into `rpc-schema.json` as an `events` block (omitted when empty → byte-identical
-schemas, the ADR-0032 precedent). The TS generator emits typed topic constants, Zod-validated payloads, and
-an `EventSource` wrapper with reconnect and resync handling:
+The declared topics flow into `rpc-schema.json` as an `events` block — each topic with its payload schema,
+supplied to the exporter via the DI-resolved `ClientEventTopicManifest` (the `ClientCapabilityManifest`
+pattern; omitted when empty → byte-identical schemas, the ADR-0032 precedent). The TS generator emits
+`events-client.ts`: topic-typed accessors, Zod-validated payloads (schemas in `rpc-schemas.ts`), and an
+`EventSource` wrapper multiplexing the subscriptions over one connection:
 
 ```ts
+const events = createElarionEvents({ url: "/events" });
 events.invoicing.invoiceChanged.subscribe(
   { resource: `customer:${customerId}` },
   (evt) => queryClient.invalidateQueries({ queryKey: ["invoices", evt.invoiceId] }),
 );
-events.onResync(() => queryClient.invalidateQueries());
+// elarion.connected fires on every (re)connect — the "you may have missed events" re-query hint.
+events.$client.onConnected(() => queryClient.invalidateQueries());
 ```
 
 ### Package layout

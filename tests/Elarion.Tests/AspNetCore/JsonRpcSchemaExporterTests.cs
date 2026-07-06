@@ -3,6 +3,7 @@ using System.Text.Json;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Authorization;
+using Elarion.Abstractions.ClientEvents;
 using Elarion.Abstractions.Modules;
 using Elarion.JsonRpc;
 using Xunit;
@@ -246,7 +247,53 @@ public sealed class JsonRpcSchemaExporterTests {
         var withEmptyOptions = JsonRpcSchemaExporter.Generate(dispatcher, options, new JsonRpcSchemaExportOptions());
 
         plain.Should().NotContain("\"capabilities\"");
+        plain.Should().NotContain("\"events\"");
         withEmptyOptions.Should().Be(plain);
+    }
+
+    private sealed record InvoiceChangedEvent {
+        public required Guid InvoiceId { get; init; }
+    }
+
+    private sealed record ImportProgressEvent {
+        public required int Processed { get; init; }
+        public required int Total { get; init; }
+    }
+
+    [Fact]
+    public void Generate_EmitsEventsBlock_TopicsSortedWithPayloadSchemas() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, PingResponse>(
+                "sample.ping",
+                (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)))
+            .Freeze();
+
+        var exportOptions = new JsonRpcSchemaExportOptions {
+            ClientEventTopics = new ClientEventTopicManifest {
+                Topics = [
+                    new ClientEventTopicManifestEntry {
+                        Name = "invoicing.importProgress", EventType = typeof(ImportProgressEvent),
+                    },
+                    new ClientEventTopicManifestEntry {
+                        Name = "invoicing.invoiceChanged", EventType = typeof(InvoiceChangedEvent),
+                    },
+                ],
+            },
+        };
+
+        var schema = JsonRpcSchemaExporter.Generate(dispatcher, options, exportOptions);
+
+        using var doc = JsonDocument.Parse(schema);
+        var events = doc.RootElement.GetProperty("events");
+
+        // Topics in ordinal order, each carrying its payload schema with wire-named properties.
+        events.EnumerateObject().Select(static p => p.Name)
+            .Should().Equal("invoicing.importProgress", "invoicing.invoiceChanged");
+        var payload = events.GetProperty("invoicing.invoiceChanged").GetProperty("payload");
+        payload.GetProperty("properties").TryGetProperty("invoiceId", out _).Should().BeTrue();
+        events.GetProperty("invoicing.importProgress").GetProperty("payload")
+            .GetProperty("properties").TryGetProperty("processed", out _).Should().BeTrue();
     }
 
     private sealed class FakePermissionCatalog(

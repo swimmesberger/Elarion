@@ -1177,3 +1177,220 @@ function jsonResponse(body: unknown): Response {
     headers: { 'Content-Type': 'application/json' },
   })
 }
+
+describe('client events (ADR-0042)', () => {
+  it('emits the events client and payload schemas when the schema declares events', () => {
+    const generated = generateRpcClientFiles(eventsTestSchema())
+
+    expect(generated.eventsClientFileName).toBe('events-client.ts')
+    const source = generated.eventsClientSource as string
+    expect(source).toContain('ElarionEventTopicApi<"invoicing.invoiceChanged">')
+    expect(source).toContain('"invoicing.invoiceChanged",')
+    expect(generated.schemasSource).toContain('export const rpcEventPayloadSchemas = {')
+    expect(generated.schemasSource).toContain('"invoicing.invoiceChanged"')
+  })
+
+  it('omits the events client and stays byte-identical when the schema declares no events', () => {
+    const without = generateRpcClientFiles(rpcClientTestSchema())
+    const withEmptyEvents = generateRpcClientFiles({ ...rpcClientTestSchema(), events: {} })
+
+    expect(without.eventsClientSource).toBeUndefined()
+    expect(withEmptyEvents.eventsClientSource).toBeUndefined()
+    expect(withEmptyEvents.typesSource).toBe(without.typesSource)
+    expect(withEmptyEvents.schemasSource).toBe(without.schemasSource)
+    expect(withEmptyEvents.clientSource).toBe(without.clientSource)
+  })
+
+  it('subscribes over one EventSource, validates payloads, and dispatches to typed handlers', async () => {
+    const generated = generateRpcClientFiles(eventsTestSchema())
+    const eventsModule = await loadGeneratedEventsClient(generated.eventsClientSource as string)
+    const sources: FakeEventSource[] = []
+    const events = eventsModule.createElarionEvents({
+      url: '/events',
+      eventSource: (url) => {
+        const source = new FakeEventSource(url)
+        sources.push(source)
+        return source
+      },
+    })
+
+    const received: unknown[] = []
+    let connectedCount = 0
+    events.$client.onConnected(() => {
+      connectedCount += 1
+    })
+    const unsubscribe = events['invoicing']['invoiceChanged'].subscribe((payload) => received.push(payload))
+
+    await microtasks()
+    expect(sources).toHaveLength(1)
+    const decodedUrl = decodeURIComponent(sources[0].url)
+    expect(decodedUrl).toContain('subscriptions=')
+    expect(decodedUrl).toContain('"topic":"invoicing.invoiceChanged"')
+
+    sources[0].emit('elarion.connected', '{}')
+    expect(connectedCount).toBe(1)
+
+    sources[0].emit('invoicing.invoiceChanged', JSON.stringify({ invoiceId: 'inv-1' }))
+    expect(received).toEqual([{ invoiceId: 'inv-1' }])
+
+    // Dropping the last subscription closes the connection without opening a new one.
+    unsubscribe()
+    await microtasks()
+    expect(sources[0].closed).toBe(true)
+    expect(sources).toHaveLength(1)
+  })
+
+  it('drops invalid payloads and reports them via onEventError', async () => {
+    const generated = generateRpcClientFiles(eventsTestSchema())
+    const eventsModule = await loadGeneratedEventsClient(generated.eventsClientSource as string)
+    const sources: FakeEventSource[] = []
+    const errors: Array<{ topic: string; error: unknown }> = []
+    const events = eventsModule.createElarionEvents({
+      url: '/events',
+      eventSource: (url) => {
+        const source = new FakeEventSource(url)
+        sources.push(source)
+        return source
+      },
+      onEventError: (topic, error) => errors.push({ topic, error }),
+    })
+
+    const received: unknown[] = []
+    events['invoicing']['invoiceChanged'].subscribe((payload) => received.push(payload))
+    await microtasks()
+
+    sources[0].emit('invoicing.invoiceChanged', JSON.stringify({ wrong: true }))
+
+    expect(received).toEqual([])
+    expect(errors).toHaveLength(1)
+    expect(errors[0].topic).toBe('invoicing.invoiceChanged')
+  })
+
+  it('reconnects with the resource scope when a resource subscription is added', async () => {
+    const generated = generateRpcClientFiles(eventsTestSchema())
+    const eventsModule = await loadGeneratedEventsClient(generated.eventsClientSource as string)
+    const sources: FakeEventSource[] = []
+    const events = eventsModule.createElarionEvents({
+      url: '/events',
+      eventSource: (url) => {
+        const source = new FakeEventSource(url)
+        sources.push(source)
+        return source
+      },
+    })
+
+    events['invoicing']['invoiceChanged'].subscribe(() => {})
+    await microtasks()
+    expect(sources).toHaveLength(1)
+
+    events.$client.subscribe('invoicing.invoiceChanged', { resource: 'customer:42' }, () => {})
+    await microtasks()
+
+    expect(sources).toHaveLength(2)
+    expect(sources[0].closed).toBe(true)
+    expect(decodeURIComponent(sources[1].url)).toContain('"resource":"customer:42"')
+  })
+})
+
+class FakeEventSource {
+  readonly listeners = new Map<string, Array<(event: { data?: unknown }) => void>>()
+  closed = false
+
+  constructor(readonly url: string) {}
+
+  addEventListener(type: string, listener: (event: { data?: unknown }) => void): void {
+    const list = this.listeners.get(type) ?? []
+    list.push(listener)
+    this.listeners.set(type, list)
+  }
+
+  close(): void {
+    this.closed = true
+  }
+
+  emit(type: string, data: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ data })
+    }
+  }
+}
+
+interface EventsTopicApiForTests {
+  subscribe(handler: (payload: unknown) => void): () => void
+  subscribe(options: { resource?: string }, handler: (payload: unknown) => void): () => void
+}
+
+interface EventsClientForTests {
+  subscribe(topic: string, handler: (payload: unknown) => void): () => void
+  subscribe(topic: string, options: { resource?: string }, handler: (payload: unknown) => void): () => void
+  onConnected(handler: () => void): () => void
+  close(): void
+}
+
+interface EventsClientModule {
+  createElarionEvents(options: {
+    url: string
+    eventSource?: (url: string) => FakeEventSource
+    validateEvents?: boolean
+    onEventError?: (topic: string, error: unknown) => void
+  }): { $client: EventsClientForTests } & Record<string, Record<string, EventsTopicApiForTests>>
+}
+
+function eventsTestSchema(): RpcSchema {
+  return {
+    methods: {
+      'math.add': {
+        params: {
+          type: 'object',
+          properties: {
+            left: { type: 'number' },
+            right: { type: 'number' },
+          },
+          required: ['left', 'right'],
+        },
+        result: { type: 'number' },
+      },
+    },
+    events: {
+      'invoicing.invoiceChanged': {
+        payload: {
+          type: 'object',
+          properties: {
+            invoiceId: { type: 'string' },
+          },
+          required: ['invoiceId'],
+        },
+      },
+    },
+  }
+}
+
+async function loadGeneratedEventsClient(eventsClientSource: string): Promise<EventsClientModule> {
+  const dir = mkdtempSync(join(tmpdir(), 'elarion-events-client-'))
+  const jsSource = ts.transpileModule(eventsClientSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+
+  writeFileSync(join(dir, 'events-client.mjs'), jsSource, 'utf-8')
+  // The payload-schema stub mirrors what the generated rpc-schemas.ts exports for the events block.
+  writeFileSync(join(dir, 'rpc-schemas.js'), [
+    'export const rpcEventPayloadSchemas = {',
+    "  'invoicing.invoiceChanged': {",
+    '    parse(value) {',
+    "      if (typeof value !== 'object' || value === null || typeof value.invoiceId !== 'string') throw new Error('Expected invoiceId string')",
+    '      return value',
+    '    }',
+    '  },',
+    '}',
+    '',
+  ].join('\n'), 'utf-8')
+
+  return await import(pathToFileURL(join(dir, 'events-client.mjs')).href) as EventsClientModule
+}
+
+function microtasks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
