@@ -246,3 +246,17 @@ alloc).
   a real footgun (documented; not analyzer-enforced yet — a future `ELACT` analyzer could flag it).
 - The runtime's single-threaded guarantee is "one turn at a time with happens-before via await", not
   thread affinity — thread-affine native resources need a dedicated scheduler, which is out of scope.
+- **Adjacent idea, recorded but deliberately not in scope: a `[Sequential]` handler decorator.** The
+  keyed-mailbox cells could serialize *handler* executions per request-derived key (e.g.
+  `[Sequential(Key = nameof(Request.OrderId))]`) — "one command per order at a time" without moving any
+  state in-memory: the handler stays stateless and the database stays authoritative, only execution is
+  serialized. It was kept out of v1 for three reasons: (1) the current answer to concurrent same-entity
+  commands is already shipped and stronger where it matters — the transaction boundary plus optimistic
+  concurrency, and `[Idempotent]` for duplicates; (2) it inherits the same single-node truthfulness
+  problem as actors, but on a surface (handlers) that *is* expected to run on every node — per-key
+  serialization that silently holds on one node only is a correctness trap, so the honest multi-node
+  shape is a claim/lock seam, which is a different design; (3) it risks becoming a lock-shaped crutch
+  that hides contention better modeled as either an aggregate check inside the transaction or a real
+  actor. If real demand appears, it should arrive as its own ADR reusing the cell/mailbox runtime — the
+  attribute surface is cheap, the semantics (queue depth, timeout, gating placement in the decorator
+  order, multi-node story) are the actual decision.
