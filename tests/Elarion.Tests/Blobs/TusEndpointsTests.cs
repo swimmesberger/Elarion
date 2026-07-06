@@ -243,7 +243,7 @@ public sealed class TusEndpointsTests {
 
     private static async Task<TestHost> StartAsync(
         CancellationToken cancellationToken,
-        Action<TusOptions>? configure = null,
+        Action<ResumableBlobUploadOptions>? configure = null,
         MutableCurrentUser? user = null) {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -252,10 +252,10 @@ public sealed class TusEndpointsTests {
         var store = new RecordingBlobStore();
         builder.Services.AddSingleton<IBlobStore>(store);
         builder.Services.AddSingleton<ICurrentUser>(user ?? new MutableCurrentUser { UserId = "user-1", IsAuthenticated = true });
-        builder.Services.AddElarionTus(configure);
+        builder.Services.AddElarionResumableBlobUploads(configure);
 
         var app = builder.Build();
-        app.MapElarionTus();
+        app.MapElarionResumableBlobUploads();
         await app.StartAsync(cancellationToken);
 
         var baseAddress = app.Services.GetRequiredService<IServer>()

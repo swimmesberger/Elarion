@@ -156,6 +156,39 @@ dispatcher.Map<CreateClient.Command, CreateClient.Response>("clients.create");
 dispatcher.MapDelegate<Ping.Request, Ping.Response>("diagnostics.ping", (req, ct) => /* ... */);
 ```
 
+## File payloads
+
+`ElarionFile` — the in-memory small-file payload shared with the
+[HTTP transport](/docs/capabilities/transports/http-endpoints#files-downloads-and-uploads) — is a
+first-class citizen here too, **both directions**. On every JSON surface it rides a fixed base64 envelope
+(canonical, independent of the host's naming policy):
+
+```json
+{ "contentType": "text/csv", "fileName": "clients.csv", "data": "aWQ7bmFtZQ==" }
+```
+
+A `Result<ElarionFile>` handler returns the envelope as its result; an `ElarionFile` **property in a
+request DTO is an upload** — the client sends the same envelope and the handler receives decoded bytes.
+No registration needed: the type is seeded into the canonical serializer's framework context
+([ADR-0038](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0038-binary-file-responses.md)).
+
+The exported schema marks the envelope with `x-elarion-file`, and the
+[generated TypeScript client](/docs/capabilities/transports/typescript-client) turns that into a **native
+`File`** — callers never see base64:
+
+```ts
+// Upload: pass a File (e.g. from an <input type="file">); the client encodes the envelope.
+const receipt = await rpc.documents.import({ container: 'invoices', file: input.files[0] })
+
+// Download: the result is a real File, ready for URL.createObjectURL or a save dialog.
+const exported: File = await rpc.exports.get({ list: 'clients' })
+```
+
+The trade against HTTP is buffering: base64 adds ~33% and the payload sits in memory on both ends. That is
+the deliberate scope of `ElarionFile` — small files, up to a few megabytes. Past that, switch to the
+[staged-blob tier](/docs/capabilities/blob-storage): upload into the pending area and pass the handler a
+blob reference; export as a pending blob and return its reference for a streamed download.
+
 ## Errors are mapped by the host
 
 Each host provides the bridge from Elarion application results to JSON-RPC errors, so different

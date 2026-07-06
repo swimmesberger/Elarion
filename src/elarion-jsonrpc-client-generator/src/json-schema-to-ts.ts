@@ -15,6 +15,12 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
   const nullable = isNullable(resolved)
   const base = baseType(resolved)
 
+  // The Elarion file envelope surfaces as a native File; the generated client converts to/from the
+  // base64 wire shape at the call boundary, so callers never see the envelope.
+  if (resolved['x-elarion-file'] === true) {
+    return nullable ? 'File | null | undefined' : 'File'
+  }
+
   if (resolved.enum) {
     const values = resolved.enum
       .filter((value) => value !== null)

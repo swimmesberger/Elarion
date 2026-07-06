@@ -52,6 +52,69 @@ public sealed class HttpEndpointMappingEndToEndTests {
                 : ValueTask.FromResult<Result<CreateWidgetResponse>>(new CreateWidgetResponse(Guid.NewGuid()));
     }
 
+    private sealed record ExportQuery {
+        public required string Kind { get; init; }
+    }
+
+    private sealed class ExportHandler : IHandler<ExportQuery, Result<ElarionFile>> {
+        public ValueTask<Result<ElarionFile>> HandleAsync(ExportQuery request, CancellationToken ct) =>
+            request.Kind switch {
+                "named" => ValueTask.FromResult<Result<ElarionFile>>(
+                    new ElarionFile("id;name"u8.ToArray(), "text/csv") { FileName = "clients.csv" }),
+                "inline" => ValueTask.FromResult<Result<ElarionFile>>(
+                    new ElarionFile("inline-content"u8.ToArray(), "application/octet-stream")),
+                _ => ValueTask.FromResult<Result<ElarionFile>>(AppError.NotFound("no such export")),
+            };
+    }
+
+    [Fact]
+    public async Task GeneratedFileEndpointShape_WritesDownloadsAndMapsErrors() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        builder.Services.AddProblemDetails();
+        builder.Services.AddScoped<IHandler<ExportQuery, Result<ElarionFile>>, ExportHandler>();
+
+        await using var app = builder.Build();
+
+        // Mirrors the file-endpoint lambda emitted by AppModuleDiscoveryGenerator for a Result<ElarionFile> handler.
+        app.MapGet("/exports/{kind}", static async (
+            [AsParameters] ExportQuery request,
+            [FromServices] IHandler<ExportQuery, Result<ElarionFile>> handler,
+            CancellationToken token) => ElarionHttpResults.ToFileResult(await handler.HandleAsync(request, token)));
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var named = await client.GetAsync("/exports/named", ct);
+            named.StatusCode.Should().Be(HttpStatusCode.OK);
+            named.Content.Headers.ContentType!.MediaType.Should().Be("text/csv");
+            named.Content.Headers.ContentDisposition!.ToString()
+                .Should().Contain("attachment").And.Contain("clients.csv");
+            (await named.Content.ReadAsStringAsync(ct)).Should().Be("id;name");
+
+            // A payload without a file name is served inline (no Content-Disposition).
+            var inline = await client.GetAsync("/exports/inline", ct);
+            inline.StatusCode.Should().Be(HttpStatusCode.OK);
+            inline.Content.Headers.ContentType!.MediaType.Should().Be("application/octet-stream");
+            inline.Content.Headers.ContentDisposition.Should().BeNull();
+            (await inline.Content.ReadAsStringAsync(ct)).Should().Be("inline-content");
+
+            var missing = await client.GetAsync("/exports/none", ct);
+            missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            missing.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+            (await missing.Content.ReadAsStringAsync(ct)).Should().Contain("no such export");
+        } finally {
+            await app.StopAsync(ct);
+        }
+    }
+
     [Fact]
     public async Task GeneratedEndpointShape_BindsRequestsAndMapsErrors() {
         var ct = TestContext.Current.CancellationToken;

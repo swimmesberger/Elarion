@@ -77,7 +77,9 @@ See [Serialization](/docs/capabilities/serialization) for the canonical `IElario
 resolves `IConfiguration` when the dispatcher singleton is built and registers only the enabled modules'
 handlers. The JSON-RPC adapter then serves only the operations flagged `HandlerTransports.JsonRpc`.
 `MapElarionEndpoints` does the same gating for module `MapEndpoints`
-and generated `[HttpEndpoint]` routes. To expose the same handlers over MCP (a thin adapter over the same
+and generated `[HttpEndpoint]` routes — including hooks the host declares on behalf of a web-free module
+assembly with [`[ModuleEndpoints]`](/docs/concepts/modules#declaring-the-hooks-outside-the-module-moduleendpoints).
+To expose the same handlers over MCP (a thin adapter over the same
 handler bus, equally gated), pair `builder.Configuration.GetMcpMetadata()` with the same
 `ElarionBootstrapper.RegisterHandlers` registry via `AddElarionMcp` — see [MCP server](/docs/capabilities/transports/mcp).
 

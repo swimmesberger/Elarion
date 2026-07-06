@@ -14,15 +14,15 @@ namespace Elarion.Blobs.Tus;
 /// <c>HEAD</c>); the client passes that reference when creating the owning entity, and an uncommitted
 /// upload is reclaimed by garbage collection.
 /// </summary>
-public static class TusEndpointsExtensions {
+public static class ResumableBlobUploadEndpointsExtensions {
     /// <summary>
     /// Maps the tus endpoints under the configured route prefix and returns the route group so the host can
     /// apply conventions (most importantly <c>.RequireAuthorization(...)</c>).
     /// </summary>
-    public static RouteGroupBuilder MapElarionTus(this IEndpointRouteBuilder endpoints) {
+    public static RouteGroupBuilder MapElarionResumableBlobUploads(this IEndpointRouteBuilder endpoints) {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var options = endpoints.ServiceProvider.GetRequiredService<TusOptions>();
+        var options = endpoints.ServiceProvider.GetRequiredService<ResumableBlobUploadOptions>();
         var group = endpoints.MapGroup(options.RoutePrefix);
 
         group.MapMethods("", ["OPTIONS"], OptionsAsync);
@@ -35,7 +35,7 @@ public static class TusEndpointsExtensions {
         return group;
     }
 
-    private static Task OptionsAsync(HttpContext context, TusOptions options) {
+    private static Task OptionsAsync(HttpContext context, ResumableBlobUploadOptions options) {
         var response = context.Response;
         response.Headers[TusProtocol.Resumable] = TusProtocol.Version;
         response.Headers[TusProtocol.VersionHeader] = TusProtocol.Version;
@@ -52,7 +52,7 @@ public static class TusEndpointsExtensions {
         HttpContext context,
         ICurrentUser currentUser,
         IStagedUploadStore store,
-        TusOptions options,
+        ResumableBlobUploadOptions options,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) {
         var response = context.Response;
@@ -110,7 +110,7 @@ public static class TusEndpointsExtensions {
         string id,
         ICurrentUser currentUser,
         IStagedUploadStore store,
-        TusOptions options,
+        ResumableBlobUploadOptions options,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) {
         var response = context.Response;
@@ -159,7 +159,7 @@ public static class TusEndpointsExtensions {
         string id,
         ICurrentUser currentUser,
         IStagedUploadStore store,
-        TusOptions options,
+        ResumableBlobUploadOptions options,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) {
         var response = context.Response;
@@ -241,7 +241,7 @@ public static class TusEndpointsExtensions {
     private static Task<StagedUpload> CompleteAsync(
         IStagedUploadStore store,
         string id,
-        TusOptions options,
+        ResumableBlobUploadOptions options,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) {
         var now = timeProvider.GetUtcNow();

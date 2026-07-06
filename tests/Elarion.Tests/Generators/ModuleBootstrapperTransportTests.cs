@@ -262,6 +262,195 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_MapsFileResponseEndpointThroughFileTranslation() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Files {
+                [AppModule("Files", Kind = AppModuleKind.Core)]
+                public static class FilesModule { }
+
+                [HttpEndpoint("files/{id}")]
+                public sealed class DownloadFile : IHandler<DownloadFile.Query, Result<ElarionFile>> {
+                    public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
+                    public ValueTask<Result<ElarionFile>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<ElarionFile>>(
+                            new ElarionFile(new byte[] { 1 }, "application/octet-stream"));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        // A Result<ElarionFile> endpoint goes through the file translation and advertises a binary payload
+        // (plus the marker the OpenAPI package upgrades into type: string, format: binary).
+        generated.Should().Contain("app.MapGet(\"files/{id}\",");
+        generated.Should().Contain(".ToFileResult(await handler.HandleAsync(request, ct)))");
+        generated.Should().Contain(".Produces(200, null, \"application/octet-stream\")");
+        generated.Should().Contain(".WithMetadata(global::Elarion.AspNetCore.ElarionFileEndpointMetadata.Instance)");
+        generated.Should().NotContain(".Produces<global::Elarion.Abstractions.ElarionFile>");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_CallsHostDeclaredModuleEndpointsInsideModuleGate() {
+        const string hostSource =
+            """
+            using Elarion.AspNetCore;
+            using Microsoft.AspNetCore.Routing;
+
+            [assembly: GenerateModuleBootstrapper]
+
+            namespace Host.Web {
+                [ModuleEndpoints("Shipping")]
+                internal static class ShippingWebEndpoints {
+                    public static void MapEndpoints(IEndpointRouteBuilder endpoints) { }
+                    public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder endpoints) => endpoints;
+                }
+            }
+            """;
+
+        var modulesReference = CompileToImage(ModulesSource, "Sample.Modules");
+        var generated = RunGenerator(hostSource, [modulesReference], out var compilationWithGenerated);
+
+        // The host-declared hooks run inside the feature module's gate, and the generated [HttpEndpoint] routes
+        // map onto the builder the contributor's group hook returns — no hand-written IsModuleEnabled re-check.
+        generated.Should().Contain("if (IsModuleEnabled(configuration, \"Shipping\"))");
+        generated.Should().Contain(
+            "var ShippingEndpoints = global::Host.Web.ShippingWebEndpoints.ConfigureEndpointGroup(endpoints);");
+        generated.Should().Contain("global::Host.Web.ShippingWebEndpoints.MapEndpoints(ShippingEndpoints);");
+        generated.Should().Contain("MapShippingHttp(ShippingEndpoints);");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_ChainsContributorGroupHookOntoModuleGroupHook() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Microsoft.AspNetCore.Routing;
+
+            namespace Sample.Billing {
+                [AppModule("Billing", Kind = AppModuleKind.Core)]
+                public static class BillingModule {
+                    public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder root) => root;
+                }
+
+                [HttpEndpoint("invoices/{id}")]
+                public sealed class GetInvoice : IHandler<GetInvoice.Query, Result<GetInvoice.Response>> {
+                    public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
+                    public sealed record Response(string Number);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("INV"));
+                }
+            }
+            """;
+
+        const string hostSource =
+            """
+            using Elarion.AspNetCore;
+            using Microsoft.AspNetCore.Routing;
+
+            [assembly: GenerateModuleBootstrapper]
+
+            namespace Host.Web {
+                [ModuleEndpoints("Billing")]
+                internal static class BillingExtraEndpoints {
+                    public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder endpoints) => endpoints;
+                }
+            }
+            """;
+
+        var modulesReference = CompileToImage(modulesSource, "Sample.Modules");
+        var generated = RunGenerator(hostSource, [modulesReference], out var compilationWithGenerated);
+
+        // The module's own group hook wraps first; the contributor's chains onto the result.
+        generated.Should().Contain(
+            "var BillingEndpoints = global::Sample.Billing.BillingModule.ConfigureEndpointGroup(endpoints);");
+        generated.Should().Contain(
+            "BillingEndpoints = global::Host.Web.BillingExtraEndpoints.ConfigureEndpointGroup(BillingEndpoints);");
+        generated.Should().Contain("MapBillingHttp(BillingEndpoints);");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_ConsumesModuleEndpointsFromReferencedManifest() {
+        // A web companion assembly publishes its [ModuleEndpoints] contributor through the manifest; the host
+        // bootstrapper calls it without the companion being part of the host compilation.
+        var module = EncodeFields(
+            "Manifest", "ManifestOnly", "global::ManifestOnly.ManifestModule", null, "0", "0", "0", "0", "0", "");
+        var hooks = EncodeFields("Manifest", "global::ManifestOnly.ManifestWebEndpoints", "1", "0");
+
+        var librarySource = $$"""
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ModuleEndpoints.v1", "{{hooks}}")]
+
+            namespace ManifestOnly;
+
+            public static class ManifestModule { }
+
+            public static class ManifestWebEndpoints {
+                public static void MapEndpoints(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+            }
+            """;
+
+        var libraryReference = CompileToImage(librarySource, "Sample.ManifestOnly");
+        var generated = RunGenerator([libraryReference], out var compilationWithGenerated);
+
+        generated.Should().Contain("if (IsModuleEnabled(configuration, \"Manifest\"))");
+        generated.Should().Contain("global::ManifestOnly.ManifestWebEndpoints.MapEndpoints(endpoints);");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_WarnsAndSkipsModuleEndpointsNamingUnknownModule() {
+        const string hostSource =
+            """
+            using Elarion.AspNetCore;
+            using Microsoft.AspNetCore.Routing;
+
+            [assembly: GenerateModuleBootstrapper]
+
+            namespace Host.Web {
+                [ModuleEndpoints("Nowhere")]
+                internal static class NowhereEndpoints {
+                    public static void MapEndpoints(IEndpointRouteBuilder endpoints) { }
+                }
+            }
+            """;
+
+        var result = RunGeneratorRun(hostSource, ModulesSource);
+
+        result.Diagnostics.Should().Contain(d => d.Id == "ELMOD004" && d.Severity == DiagnosticSeverity.Warning);
+        var generated = result.GeneratedTrees
+            .Single(tree => string.Equals(
+                Path.GetFileName(tree.FilePath), "ElarionBootstrapper.g.cs", StringComparison.Ordinal))
+            .GetText(TestContext.Current.CancellationToken)
+            .ToString();
+        generated.Should().NotContain("NowhereEndpoints");
+    }
+
+    [Fact]
     public void Bootstrapper_RoutesModuleEndpointsThroughConfigureEndpointGroupHook() {
         const string modulesSource =
             """
@@ -558,9 +747,15 @@ public sealed class ModuleBootstrapperTransportTests {
         return RunGenerator([modulesReference], out compilationWithGenerated);
     }
 
-    private static string RunGenerator(IReadOnlyList<MetadataReference> moduleReferences, out Compilation compilationWithGenerated) {
+    private static string RunGenerator(IReadOnlyList<MetadataReference> moduleReferences, out Compilation compilationWithGenerated) =>
+        RunGenerator(HostSource, moduleReferences, out compilationWithGenerated);
+
+    private static string RunGenerator(
+        string hostSource,
+        IReadOnlyList<MetadataReference> moduleReferences,
+        out Compilation compilationWithGenerated) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
-        var hostTree = CSharpSyntaxTree.ParseText(HostSource, parseOptions);
+        var hostTree = CSharpSyntaxTree.ParseText(hostSource, parseOptions);
         var references = CreateMetadataReferences().Concat(moduleReferences).ToArray();
         var hostCompilation = CSharpCompilation.Create(
             "Host",
@@ -702,11 +897,14 @@ public sealed class ModuleBootstrapperTransportTests {
         return result.ToString();
     }
 
-    private static IReadOnlyList<Diagnostic> RunGeneratorDiagnostics(string modulesSource) {
+    private static IReadOnlyList<Diagnostic> RunGeneratorDiagnostics(string modulesSource) =>
+        RunGeneratorRun(HostSource, modulesSource).Diagnostics;
+
+    private static GeneratorDriverRunResult RunGeneratorRun(string hostSource, string modulesSource) {
         var modulesReference = CompileToImage(modulesSource, "Sample.Modules");
 
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
-        var hostTree = CSharpSyntaxTree.ParseText(HostSource, parseOptions);
+        var hostTree = CSharpSyntaxTree.ParseText(hostSource, parseOptions);
         var references = CreateMetadataReferences().Append(modulesReference).ToArray();
         var hostCompilation = CSharpCompilation.Create(
             "Host",
@@ -719,7 +917,7 @@ public sealed class ModuleBootstrapperTransportTests {
             parseOptions: parseOptions);
         driver = driver.RunGenerators(hostCompilation, TestContext.Current.CancellationToken);
 
-        return driver.GetRunResult().Diagnostics;
+        return driver.GetRunResult();
     }
 
     private static MetadataReference CompileToImage(string source, string assemblyName) {

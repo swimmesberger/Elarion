@@ -17,7 +17,7 @@ public static class StagedUploadServiceCollectionExtensions {
     /// <param name="configureGc">Optional configuration of <see cref="StagedUploadGcOptions"/>.</param>
     /// <returns>The same service collection for chaining.</returns>
     /// <remarks>
-    /// Upload transports (for example tus via <c>AddElarionTus</c>) call this themselves; a durable
+    /// Upload transports (for example tus via <c>AddElarionResumableBlobUploads</c>) call this themselves; a durable
     /// backend replaces the store with <c>AddElarionPostgreSqlStagedUploads</c> or
     /// <c>AddElarionAzureStagedUploads</c>. Completion additionally requires an <see cref="IBlobStore"/>
     /// from the host.

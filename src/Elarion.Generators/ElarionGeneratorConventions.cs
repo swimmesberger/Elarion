@@ -23,6 +23,13 @@ internal static class ElarionGeneratorConventions
     /// </summary>
     public const string ClientFeaturesAttribute = "Elarion.Abstractions.Modules.ClientFeaturesAttribute";
 
+    /// <summary>
+    /// <c>[ModuleEndpoints("Name")]</c> — declared on a static class contributing endpoint hooks to a module from
+    /// outside its assembly; read by the manifest generator (which publishes the contributor) <b>and</b> the
+    /// bootstrapper generator (which calls the hooks inside the module's feature gate).
+    /// </summary>
+    public const string ModuleEndpointsAttribute = "Elarion.AspNetCore.ModuleEndpointsAttribute";
+
     /// <summary><c>[GenerateDbSets]</c> — required by the EF DbContext, Identity, and resource-grants generators.</summary>
     public const string GenerateDbSetsAttribute = "Elarion.EntityFrameworkCore.GenerateDbSetsAttribute";
 
@@ -31,6 +38,15 @@ internal static class ElarionGeneratorConventions
     /// <b>and</b> the manifest generator (which publishes the descriptor the host bootstrapper registers).
     /// </summary>
     public const string ResourceFilterAttribute = "Elarion.Paging.ResourceFilterAttribute`1";
+
+    // --- Transport response types -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The binary file response payload (<c>Result&lt;ElarionFile&gt;</c>), fully qualified. The HTTP emission
+    /// switches to the file translation (<c>ToFileResult</c>, streamed) for exactly this type; the name-routed
+    /// transports serialize it through its canonical base64 JSON envelope and need no special emission.
+    /// </summary>
+    public const string FileResponseTypeFqn = "global::Elarion.Abstractions.ElarionFile";
 
     // --- EF model-configuration seam naming ---------------------------------------------------------------
 

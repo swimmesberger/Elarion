@@ -9,6 +9,33 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **File payloads — the in-memory `ElarionFile` tier and the staged-blob tier (ADR-0038).** A handler declares
+  "I receive/return a file" once and every transport carries it the way that suits it best. **`ElarionFile`**
+  (in `Elarion.Abstractions`, next to `Result<T>`) is the **small-file tier** — deliberately bytes-only
+  (content + content type + optional file name, rule of thumb ≲ 4 MB). A `Result<ElarionFile>` response is
+  served as a streamed file download over HTTP (`ElarionHttpResults.ToFileResult`; `application/octet-stream`
+  with `type: string, format: binary` in the OpenAPI document via an inert endpoint marker), and rides a fixed
+  base64 JSON envelope (`{ contentType, fileName?, data }`, `ElarionFileJsonConverter`, seeded into
+  `ElarionFrameworkJsonContext` so it resolves under the AOT-strict serializer with no app registration) over
+  JSON-RPC/MCP — **both directions**, so an `ElarionFile` request property is an upload. The exported schema
+  marks the envelope `x-elarion-file`, and the TypeScript client generator maps it to a **native `File`**
+  (params accept a `File` validated with `z.instanceof(File)`, results materialize one; base64 conversion at the
+  call boundary, file-free schemas byte-identical). For **large files**, the staged-blob tier: uploads land in
+  the pending area (`MapElarionResumableBlobUploads`/`MapElarionBlobUploads`) and the handler receives a blob reference to stream
+  from; exports write a pending owner-scoped blob and return its `BlobRef`, streamed down from the new
+  **`MapElarionBlobDownloads`** (`GET {prefix}/{blobId}`, exact-owner fail-closed → 404) — never-committed blobs
+  expire via GC, giving temp-file semantics for free. `IFormFile` remains the HTTP-multipart escape hatch. See
+  [ADR-0038](docs/decisions/0038-binary-file-responses.md).
+- **Host-declared module endpoint hooks — `[ModuleEndpoints]` (ADR-0039).** A module whose assembly is
+  deliberately web-free (no shared-framework reference) cannot declare the `MapEndpoints`/`ConfigureEndpointGroup`
+  hooks itself, since both take `IEndpointRouteBuilder`. **`[ModuleEndpoints("Name")]`** (in `Elarion.AspNetCore`)
+  marks a static class that declares those same hooks *on behalf of* a module — typically in the host, or a web
+  companion assembly discovered via the per-assembly Elarion manifest. `AppModuleDiscoveryGenerator` calls them
+  inside the named module's feature gate in `MapElarionEndpoints`, composed with the module's own hooks (module
+  first, contributors in stable type-name order, group hooks chained), so a disabled module's contributed
+  endpoints disappear with it — no hand-duplicated `IsModuleEnabled` check. An unknown module name warns
+  `ELMOD004` (hooks skipped); a class with no recognized hook warns `ELMOD005`. See
+  [ADR-0039](docs/decisions/0039-host-declared-module-endpoints.md).
 - **Protocol-neutral staged (resumable) uploads + Azure Blob Storage backend (ADR-0035).** The tus staging seam
   is promoted into `Elarion.Blobs` as **`IStagedUploadStore`** — offset-guarded `AppendAsync`, an **explicit,
   idempotent `CompleteAsync`** that seals the staged bytes into a pending blob, nullable declared length
@@ -16,7 +43,7 @@ minor releases may include breaking changes.
   `StagedUploadCompletion.SessionExpiresAt`/`BlobExpiresAt`). This is the shape of the IETF *Resumable Uploads*
   draft ("tus 2.0"): when it stabilizes it becomes a second endpoint adapter over the same seam, and every
   staging backend lights up unchanged. `Elarion.Blobs.Tus` is now a **pure protocol adapter** (policy in
-  `TusOptions`, including the new `CompletedSessionRetention`), completes uploads explicitly (no more
+  `ResumableBlobUploadOptions`, including the new `CompletedSessionRetention`), completes uploads explicitly (no more
   zero-byte-append finalize hack), and **self-heals** the append-versus-completion crash window on the next
   `HEAD`. The provider-neutral collectors (`StagedUploadGarbageCollector`, and `BlobGarbageCollector`, moved up
   from `Elarion.Blobs.PostgreSql`) live beside the seam, so the in-memory staging default is now swept too.
@@ -47,9 +74,14 @@ minor releases may include breaking changes.
   `UseElarionTusStorage()` → `UseElarionStagedUploads()`, `[GenerateElarionTusStorage]` →
   `[GenerateElarionStagedUploads]` (diagnostic `ELTUS001` → `ELBLB002`), staging table default `tus_uploads` →
   `staged_uploads` (declared length column is now nullable), and `TusGcOptions` → the provider-neutral
-  `StagedUploadGcOptions` with completed-session retention moving to `TusOptions.CompletedSessionRetention`.
+  `StagedUploadGcOptions` with completed-session retention moving to `ResumableBlobUploadOptions.CompletedSessionRetention`.
   The tus wire behavior is unchanged. `Elarion.Blobs` now references the `Microsoft.Extensions.*` abstractions
-  packages (DI/Hosting/Logging) to host the seam's default and collectors.
+  packages (DI/Hosting/Logging) to host the seam's default and collectors. The tus adapter's host-facing API
+  also drops the protocol name so the resumable-upload protocol is swappable without touching wiring:
+  `AddElarionTus` → `AddElarionResumableBlobUploads`, `MapElarionTus` → `MapElarionResumableBlobUploads`,
+  `TusOptions` → `ResumableBlobUploadOptions` (the package `Elarion.Blobs.Tus`, its namespace, the internal
+  tus protocol helpers, and the wire behavior are unchanged — the tus identity lives in the package, not the
+  host-facing verbs).
 - **`@swimmesberger/elarion-contributions` — adoption-feedback revisions (ADR-0032 addendum).** Two production
   adoptions ([#71](https://github.com/swimmesberger/Elarion/issues/71) — a Vite SPA with no auth;
   [#72](https://github.com/swimmesberger/Elarion/issues/72) — a TanStack Start SSR app) surfaced framework

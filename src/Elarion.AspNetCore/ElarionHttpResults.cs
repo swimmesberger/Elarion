@@ -31,6 +31,20 @@ public static class ElarionHttpResults {
     public static IResult ToNoContentResult<T>(Result<T> result) =>
         result.IsSuccess ? TypedResults.NoContent() : ToProblem(result.Error);
 
+    /// <summary>
+    /// Returns the file content of a successful <see cref="ElarionFile"/> result as a real file response (the
+    /// payload's bytes with its content type, and a <c>Content-Disposition: attachment</c> download name when
+    /// set), otherwise a ProblemDetails failure. Used when the handler's response type is <see cref="ElarionFile"/>.
+    /// </summary>
+    public static IResult ToFileResult(Result<ElarionFile> result) {
+        if (!result.IsSuccess) {
+            return ToProblem(result.Error);
+        }
+
+        var file = result.Value;
+        return TypedResults.Bytes(file.Bytes, file.ContentType, file.FileName);
+    }
+
     /// <summary>Converts an <see cref="AppError"/> into an RFC 7807 ProblemDetails <see cref="IResult"/>.</summary>
     public static IResult ToProblem(AppError error) {
         var statusCode = HttpAppErrorMapper.MapToStatusCode(error.Kind);

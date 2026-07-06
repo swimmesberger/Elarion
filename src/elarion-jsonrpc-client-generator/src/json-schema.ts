@@ -83,6 +83,36 @@ export function formatPropertyName(key: string): string {
   return JSON.stringify(key)
 }
 
+/**
+ * Collects the property paths of every `x-elarion-file` node in a params/result schema (`[]` when the
+ * schema itself is the file, `'*'` for array items), so the generated client knows where to convert
+ * between native `File` values and the base64 wire envelope. Deterministic: property order follows the
+ * schema document.
+ */
+export function collectFilePaths(schema: JsonSchema, ctx: SchemaContext): string[][] {
+  const paths: string[][] = []
+  visitFileNodes(schema, ctx, [], paths)
+  return paths
+}
+
+function visitFileNodes(schema: JsonSchema, ctx: SchemaContext, prefix: string[], paths: string[][]): void {
+  const resolved = resolveSchema(schema, ctx)
+  if (resolved['x-elarion-file'] === true) {
+    paths.push(prefix)
+    return
+  }
+
+  if (resolved.items) {
+    visitFileNodes(stripNullable(resolved.items), childContext(ctx, 'items'), [...prefix, '*'], paths)
+  }
+
+  if (resolved.properties) {
+    for (const [key, property] of Object.entries(resolved.properties)) {
+      visitFileNodes(property, childContext(ctx, `properties.${key}`), [...prefix, key], paths)
+    }
+  }
+}
+
 function assertSupportedComposition(schema: JsonSchema, path: string) {
   if (schema.oneOf) {
     throw new UnsupportedJsonSchemaError(path, 'oneOf is not supported')

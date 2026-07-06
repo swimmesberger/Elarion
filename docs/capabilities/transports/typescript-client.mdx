@@ -76,6 +76,27 @@ const client = await rpc.clients.get({ id }, { signal: abort.signal })
 The client uses `globalThis.fetch` in browsers and modern Node.js. The lower-level
 `createRpcClient(...)` generic transport is also exported for advanced cases.
 
+## File payloads map to native `File`
+
+A handler parameter or result typed [`ElarionFile`](/docs/capabilities/transports/json-rpc#file-payloads)
+is exported with an `x-elarion-file` marker, and the generated client surfaces it as a **native `File`**
+on both sides — the base64 wire envelope never leaks into application code:
+
+```ts
+// Upload: pass the File from an <input type="file"> straight through.
+const receipt = await rpc.documents.import({ container: 'invoices', file: input.files[0] })
+
+// Download: the result is a real File (name, type, bytes) — hand it to URL.createObjectURL.
+const exported = await rpc.exports.get({ list: 'clients' })
+window.open(URL.createObjectURL(exported))
+```
+
+Params validate the `File` instance (Zod `z.instanceof(File)`); the client encodes it to the base64
+envelope after validation and decodes result envelopes back into `File` objects before validation — so
+the conversion also runs when validation is disabled. Everything used is standard in browsers and Node
+20+; schemas without file payloads generate byte-identical output. Remember `ElarionFile` is the
+small-file tier — for large transfers use the [staged-blob flows](/docs/capabilities/blob-uploads#streaming-downloads-and-temp-file-flows).
+
 ## Batching
 
 Batch requests are built through generated `$request` helpers and preserve input order even when the

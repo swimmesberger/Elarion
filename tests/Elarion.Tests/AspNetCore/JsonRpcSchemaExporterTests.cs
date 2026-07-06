@@ -52,6 +52,57 @@ public sealed class JsonRpcSchemaExporterTests {
             .WithMessage("*no registered methods*");
     }
 
+    private sealed record UploadCommand {
+        public required string Container { get; init; }
+        public required ElarionFile File { get; init; }
+    }
+
+    [Fact]
+    public void Generate_FileResponse_EmitsBase64Envelope() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, ElarionFile>(
+                "files.download",
+                (_, _, _) => ValueTask.FromResult<Result<ElarionFile>>(
+                    new ElarionFile(new byte[] { 1 }, "text/csv")))
+            .Freeze();
+
+        var schema = JsonRpcSchemaExporter.Generate(dispatcher, options);
+
+        using var doc = JsonDocument.Parse(schema);
+        var result = doc.RootElement.GetProperty("methods").GetProperty("files.download").GetProperty("result");
+
+        // The converter-backed type would export as an opaque schema; the exporter substitutes the fixed
+        // envelope, so generated clients get a real contract (data rides format: byte like [Base64String]),
+        // marked x-elarion-file so the TypeScript generator maps it to a native File.
+        result.GetProperty("x-elarion-file").GetBoolean().Should().BeTrue();
+        var properties = result.GetProperty("properties");
+        properties.GetProperty("contentType").GetProperty("type").GetString().Should().Be("string");
+        properties.GetProperty("data").GetProperty("format").GetString().Should().Be("byte");
+        result.GetProperty("required").EnumerateArray().Select(static e => e.GetString())
+            .Should().BeEquivalentTo("contentType", "data");
+    }
+
+    [Fact]
+    public void Generate_FilePropertyInParams_EmitsBase64Envelope() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<UploadCommand, PingResponse>(
+                "files.upload",
+                (_, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse("ok")))
+            .Freeze();
+
+        var schema = JsonRpcSchemaExporter.Generate(dispatcher, options);
+
+        using var doc = JsonDocument.Parse(schema);
+        var file = doc.RootElement.GetProperty("methods").GetProperty("files.upload")
+            .GetProperty("params").GetProperty("properties").GetProperty("file");
+
+        file.GetProperty("properties").GetProperty("data").GetProperty("format").GetString().Should().Be("byte");
+        file.GetProperty("required").EnumerateArray().Select(static e => e.GetString())
+            .Should().BeEquivalentTo("contentType", "data");
+    }
+
     [Fact]
     public void Generate_InjectsPropertyDescriptions_FromDescriptionAttribute() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };

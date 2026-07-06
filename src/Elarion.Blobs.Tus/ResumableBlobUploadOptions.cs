@@ -1,10 +1,10 @@
 namespace Elarion.Blobs.Tus;
 
 /// <summary>
-/// Configures the tus 1.0 resumable-upload endpoints mapped by <c>MapElarionTus</c>. All upload policy
-/// lives here — the staging store receives the resulting instants as data.
+/// Configures the resumable blob-upload endpoints mapped by <c>MapElarionResumableBlobUploads</c> (the
+/// tus 1.0 adapter). All upload policy lives here — the staging store receives the resulting instants as data.
 /// </summary>
-public sealed class TusOptions {
+public sealed class ResumableBlobUploadOptions {
     /// <summary>The route prefix the tus endpoints are mapped under. Defaults to <c>/_elarion/blobs/tus</c>.</summary>
     public string RoutePrefix { get; set; } = "/_elarion/blobs/tus";
 

@@ -224,6 +224,70 @@ public sealed partial class ElarionOpenApiEndToEndTests {
         }
     }
 
+    private sealed record ExportQuery {
+        public required string Kind { get; init; }
+    }
+
+    private sealed class ExportHandler : IHandler<ExportQuery, Result<ElarionFile>> {
+        public ValueTask<Result<ElarionFile>> HandleAsync(ExportQuery request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<ElarionFile>>(
+                new ElarionFile("id;name"u8.ToArray(), "text/csv") { FileName = "export.csv" });
+    }
+
+    [Fact]
+    public async Task FileEndpoint_AdvertisesBinaryResponseInOpenApiDocument() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+
+        builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(OpenApiTestJsonContext.Default));
+        builder.Services.AddProblemDetails();
+        builder.Services.AddElarionOpenApi();
+        builder.Services.AddScoped<IHandler<ExportQuery, Result<ElarionFile>>, ExportHandler>();
+
+        await using var app = builder.Build();
+
+        // Mirrors the file-endpoint metadata AppModuleDiscoveryGenerator emits for a Result<ElarionFile> handler.
+        app.MapGet("/exports/{kind}", static async (
+                [AsParameters] ExportQuery request,
+                [FromServices] IHandler<ExportQuery, Result<ElarionFile>> handler,
+                CancellationToken token) => ElarionHttpResults.ToFileResult(await handler.HandleAsync(request, token)))
+            .WithName("Sample.Exports.GetExport")
+            .WithTags("Exports")
+            .Produces(200, null, "application/octet-stream")
+            .ProducesElarionErrors()
+            .WithMetadata(ElarionFileEndpointMetadata.Instance);
+
+        app.MapOpenApi();
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var response = await client.GetAsync("/openapi/v1.json", ct);
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+            // The file transformer upgrades the marked operation's 200 response into an explicit binary payload,
+            // so off-the-shelf client generators produce a blob/stream return instead of an empty object.
+            var schema = doc.RootElement.GetProperty("paths").GetProperty("/exports/{kind}").GetProperty("get")
+                .GetProperty("responses").GetProperty("200")
+                .GetProperty("content").GetProperty("application/octet-stream")
+                .GetProperty("schema");
+            schema.GetProperty("type").GetString().Should().Be("string");
+            schema.GetProperty("format").GetString().Should().Be("binary");
+        } finally {
+            await app.StopAsync(ct);
+        }
+    }
+
     private static bool HasHeaderParameter(JsonElement operation, string name) {
         if (!operation.TryGetProperty("parameters", out var parameters)) {
             return false;

@@ -1,10 +1,12 @@
 namespace Elarion.Blobs.AspNetCore;
 
 /// <summary>
-/// Configures the direct blob-upload endpoints mapped by <c>MapElarionBlobUploads</c>.
+/// Configures the direct blob-transfer endpoints: the upload/cancel surface mapped by
+/// <c>MapElarionBlobUploads</c> and the owner-scoped download mapped by <c>MapElarionBlobDownloads</c>
+/// (which shares the prefix and container; the upload-specific limits do not apply to downloads).
 /// </summary>
 public sealed class BlobUploadEndpointOptions {
-    /// <summary>The route prefix the upload and delete endpoints are mapped under. Defaults to <c>/_elarion/blobs</c>.</summary>
+    /// <summary>The route prefix the transfer endpoints are mapped under. Defaults to <c>/_elarion/blobs</c>.</summary>
     public string RoutePrefix { get; set; } = "/_elarion/blobs";
 
     /// <summary>The blob container uploads are stored in. Defaults to <c>uploads</c>.</summary>

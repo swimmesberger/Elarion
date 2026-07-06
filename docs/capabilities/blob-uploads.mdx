@@ -29,7 +29,7 @@ protocol lives only at the HTTP layer.
 | `Elarion.Blobs` | Application | `BlobLifecycleState`, `IBlobLifecycle` (`CommitAsync`/`DeleteExpiredPendingAsync`), the additive `BlobUploadRequest.InitialState`/`ExpiresAt`, and the protocol-neutral **staged-upload seam** (`IStagedUploadStore`) with its in-memory default and the garbage collectors. |
 | `Elarion.Blobs.PostgreSql` | Infrastructure / host | The lifecycle on the PostgreSQL store (`state`/`expires_at` columns with a partial index, `AddElarionPostgreSqlBlobLifecycle`) and durable staged-upload staging (`UseElarionStagedUploads`, `AddElarionPostgreSqlStagedUploads`) so in-progress uploads survive restarts. |
 | `Elarion.Blobs.Azure` | Infrastructure / host | The same two roles on Azure Blob Storage: blob store + lifecycle over blob metadata, and native staging over append blobs (`AddElarionAzureBlobLifecycle`, `AddElarionAzureStagedUploads`). |
-| `Elarion.Blobs.Tus` | Host | The tus 1.0 resumable transport (`MapElarionTus`, `AddElarionTus`) — a pure protocol adapter over the staging seam. |
+| `Elarion.Blobs.Tus` | Host | The tus 1.0 resumable transport (`MapElarionResumableBlobUploads`, `AddElarionResumableBlobUploads`) — a pure protocol adapter over the staging seam. |
 | `Elarion.Blobs.AspNetCore` | Host | The minimal direct-upload endpoint (`MapElarionBlobUploads`, `AddElarionBlobUploads`). |
 
 ```xml
@@ -104,11 +104,11 @@ browser close mid-upload**, and is supported natively by Uppy (`@uppy/tus`) and 
 the recommended transport for new frontends.
 
 ```csharp
-services.AddElarionTus();              // in-memory staging by default
-app.MapElarionTus().RequireAuthorization();
+services.AddElarionResumableBlobUploads();              // in-memory staging by default
+app.MapElarionResumableBlobUploads().RequireAuthorization();
 ```
 
-`MapElarionTus` implements Creation, Core, Expiration, and Termination: `OPTIONS` advertises
+`MapElarionResumableBlobUploads` implements Creation, Core, Expiration, and Termination: `OPTIONS` advertises
 capabilities, `POST` creates an upload (baking the current user's id), `PATCH`/`HEAD` stream and resume,
 `DELETE` aborts. When an upload completes, the staged bytes are written as a `Pending` blob and its
 reference is returned in the `Elarion-Blob-Ref` response header (also available on `HEAD`) — the handle
@@ -118,7 +118,7 @@ Under the endpoints sits the protocol-neutral **`IStagedUploadStore`** seam: off
 explicit idempotent completion (so a crash between the last chunk and completion self-heals on the next
 status probe), and deferred-length sessions — the shape of the IETF *Resumable Uploads* draft ("tus 2.0"),
 which will be a second adapter over the same seam. All policy (upload expiry, pending-blob TTL, completed-
-session retention) lives in `TusOptions` and reaches the store as data, so staging backends are
+session retention) lives in `ResumableBlobUploadOptions` and reaches the store as data, so staging backends are
 protocol-free and interchangeable.
 
 <Callout type="info">
@@ -128,7 +128,7 @@ incomplete sessions (the analog of S3's *abort incomplete multipart upload*) and
 past a retention window:
 
 ```csharp
-services.AddElarionTus();
+services.AddElarionResumableBlobUploads();
 services.AddElarionPostgreSqlStagedUploads<AppDbContext>(connectionString);
 modelBuilder.UseElarionBlobStorage();  // blob tables, in OnModelCreating
 modelBuilder.UseElarionStagedUploads(); // staging table, in OnModelCreating
@@ -146,7 +146,7 @@ append) is built from the EF model, so the overrides apply there too. On a `[Gen
 `SnakeCase`/`TableName`/`Schema` — the blob attribute also takes `ContentTableName`) replace the
 hand-written calls: the bundled generators emit the `DbSet`s and apply the same configuration through the
 EF generator's model-config seam (`ELBLB001`/`ELBLB002` if `[GenerateDbSets]` is missing). A completed
-session row is retained for `TusOptions.CompletedSessionRetention` (default 1 hour) so a client `HEAD`
+session row is retained for `ResumableBlobUploadOptions.CompletedSessionRetention` (default 1 hour) so a client `HEAD`
 can still fetch the reference, then reclaimed; the session collector applies a
 `StagedUploadGcOptions.SafetyMargin` (default 1 minute) to the expiry cutoff, mirroring the blob
 collector.
@@ -189,11 +189,57 @@ Both transports bake the current user's id into the upload, so the host must reg
 
 ### Client adapters
 
-- **Uppy** — `@uppy/tus` against `MapElarionTus` (recommended), or `@uppy/aws-s3`'s
+- **Uppy** — `@uppy/tus` against `MapElarionResumableBlobUploads` (recommended), or `@uppy/aws-s3`'s
   `getUploadParameters` / `@uppy/xhr-upload` against the direct endpoint.
 - **FilePond** — `server.process` → `POST` the direct endpoint (the response body is the file id);
   `server.revert` → `DELETE /{id}`. FilePond's chunked mode is tus-derived but not identical, so its
   resumable path needs a small client adapter.
+
+## Streaming downloads and temp-file flows
+
+The staging area is also the framework's answer for **large files in handler flows** — the tier above the
+in-memory [`ElarionFile` payload](/docs/capabilities/transports/http-endpoints#files-downloads-and-uploads)
+(which buffers and is the right default only up to a few megabytes). Handlers never carry big payloads;
+they carry **pointers into the staging area**, and the pending state doubles as temp-file semantics: what
+is never committed is garbage-collected after its TTL.
+
+The read side is the owner-scoped streaming download endpoint:
+
+```csharp
+app.MapElarionBlobDownloads().RequireAuthorization();   // GET {prefix}/{blobId}
+```
+
+`GET /{blobId}` streams the blob with its content type and leaf file name (`Content-Disposition:
+attachment`), applying the same exact-owner, fail-closed check as cancel — a missing, foreign-container,
+unowned, or someone else's blob is `404`, so ownership is never leaked.
+
+**Import (large upload → processing handler):**
+
+1. The client uploads via tus (or the direct endpoint) into the staging area → gets a pending blob reference.
+2. It calls the processing handler (any transport) with that reference as a plain string field.
+3. The handler streams from `IBlobStore.OpenReadAsync(...)` and processes; it commits the blob only if it
+   should be kept. An abandoned or fully-consumed import is swept by the garbage collector.
+
+**Export (handler-produced artifact → streaming download):**
+
+```csharp
+public async ValueTask<Result<ExportPointer>> HandleAsync(Command command, CancellationToken ct) {
+    await using var artifact = await _exporter.BuildAsync(command.List, ct);   // a stream, never buffered
+    var blobRef = await _blobs.SaveAsync(new BlobUploadRequest {
+        Container = "uploads",                       // the download endpoint's configured container
+        Name = $"{_currentUser.UserId}/{Guid.NewGuid():N}/{command.List}.xlsx",
+        ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        InitialState = BlobLifecycleState.Pending,   // temp: GC reclaims it if never downloaded/committed
+        ExpiresAt = _timeProvider.GetUtcNow() + TimeSpan.FromMinutes(30),
+        OwnerId = _currentUser.UserId,               // only the requesting user may download it
+    }, artifact, ct);
+
+    return new ExportPointer(blobRef.Value);         // the client GETs {prefix}/{id} to stream it
+}
+```
+
+The response DTO carries only the blob id — small, cacheable, schema-friendly — and the actual bytes move
+once, streamed, over the download endpoint.
 
 ## Not S3 on the wire
 

@@ -14,6 +14,12 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
   const nullable = isNullable(resolved)
   const base = baseType(resolved)
 
+  // Schemas validate the user-facing shape: a file field is a native File on both sides of a call (the
+  // client encodes params after validation and decodes results before validation).
+  if (resolved['x-elarion-file'] === true) {
+    return nullish('z.instanceof(File)', nullable)
+  }
+
   if (resolved.enum) {
     const values = resolved.enum.filter((value) => value !== null)
     const allStrings = values.every((value) => typeof value === 'string')

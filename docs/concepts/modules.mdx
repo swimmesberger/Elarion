@@ -228,6 +228,38 @@ group (`MapGroup("")`) adds policy without a prefix, while `MapGroup("/billing")
 into a prefix. The generator never reads `[Authorize]`/`[AllowAnonymous]` from handlers; per-endpoint
 authorization is the host's or the module's job.
 
+### Declaring the hooks outside the module: `[ModuleEndpoints]`
+
+Both endpoint hooks take `IEndpointRouteBuilder`, a shared-framework type — which a deliberately
+**web-free** module assembly (no `Microsoft.AspNetCore.App` reference) cannot declare. Instead of
+re-importing the framework or hand-mapping routes in the host (and hand-duplicating the module's feature
+gate), declare the hooks **on behalf of the module** with `[ModuleEndpoints]` from `Elarion.AspNetCore`,
+typically in the host:
+
+```csharp
+[ModuleEndpoints("ImportExport")]
+internal static class ImportExportEndpoints {
+    public static IEndpointRouteBuilder ConfigureEndpointGroup(IEndpointRouteBuilder endpoints) =>
+        endpoints.MapGroup("").RequireAuthorization();
+
+    public static void MapEndpoints(IEndpointRouteBuilder endpoints) {
+        // hand-written routes for the ImportExport module
+    }
+}
+```
+
+The class declares the same convention hooks a module type may declare (either or both — a class with
+neither warns `ELMOD005`). The bootstrapper calls them **inside the named module's feature gate**,
+composed with the module's own hooks: group hooks chain (the module's first, then contributors in stable
+type-name order), then every `MapEndpoints`, then the module's generated `[HttpEndpoint]` routes — all
+onto the builder the group chain returns. Disabling the module drops the contributed endpoints with it,
+with no hand-written `IsModuleEnabled` re-check. A contributor naming a module no discovery produced
+warns `ELMOD004` and is skipped.
+
+Contributors are discovered in the host compilation and — through the per-assembly Elarion manifest — in
+referenced assemblies, so a web companion assembly beside a web-free module assembly works the same way.
+See [ADR-0039](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0039-host-declared-module-endpoints.md).
+
 ## Convention-based hooks
 
 Every module hook is optional and discovered structurally by signature:
@@ -238,6 +270,10 @@ Every module hook is optional and discovered structurally by signature:
 | `MapEndpoints(IEndpointRouteBuilder)` | Declare module-owned Minimal API endpoints. |
 | `ConfigureEndpointGroup(IEndpointRouteBuilder) → IEndpointRouteBuilder` | Return a route group (prefix, policy, conventions) onto which the module's endpoints are mapped. |
 | `GetJsonTypeInfoResolver() → IJsonTypeInfoResolver` | Contribute the module's source-generated `System.Text.Json` metadata. |
+
+The two endpoint hooks may also be declared outside the module type on a
+[`[ModuleEndpoints]`](#declaring-the-hooks-outside-the-module-moduleendpoints) contributor class, for
+module assemblies that stay web-free.
 
 ## What stays in the host
 

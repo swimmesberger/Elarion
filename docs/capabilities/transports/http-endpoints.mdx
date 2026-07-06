@@ -51,7 +51,8 @@ public sealed class DeleteClient : IHandler<DeleteClient.Command, Result<DeleteC
 The generator reads the request and response from the `IHandler<TRequest, Result<TResponse>>`
 interface (the success type is unwrapped from `Result<T>`); the types may be nested or top-level. A
 `Response` with no properties returns
-`204 No Content`; otherwise success returns `200 OK` with the response body.
+`204 No Content`; a [`Result<ElarionFile>`](#files-downloads-and-uploads) response is served as a binary
+file download; otherwise success returns `200 OK` with the JSON response body.
 
 ## Hosting
 
@@ -178,6 +179,63 @@ public sealed record Command {
 
 This opt-in is the deliberate tradeoff: the DTO references an ASP.NET abstraction package only when it
 needs HTTP-specific binding, and only then.
+
+## Files: downloads and uploads
+
+A **small** file (an `.xlsx` export, a generated PDF, an avatar — as a rule of thumb, up to ~4 MB) is
+plain handler data: `ElarionFile` in `Elarion.Abstractions` carries the content bytes, the content type,
+and an optional file name. Declaring it says "this handler receives/returns a file" once, and every
+transport does its best with it — HTTP serves a file response, the JSON surfaces carry a
+[base64 envelope](/docs/capabilities/transports/json-rpc#file-payloads), and the generated TypeScript
+client speaks native `File`. Authorization, feature gating, and module scoping apply exactly like every
+other handler; failures still map to RFC 7807:
+
+```csharp
+[HttpEndpoint("exports/{list}")]
+[RequirePermission("exports", "read")]
+public sealed class GetExport(IMasterDataExporter exporter)
+    : IHandler<GetExport.Query, Result<ElarionFile>> {
+    public sealed record Query : IQuery {
+        public required string List { get; init; }
+    }
+
+    public async ValueTask<Result<ElarionFile>> HandleAsync(Query query, CancellationToken ct) {
+        var bytes = await exporter.BuildXlsxAsync(query.List, ct);
+        if (bytes is null)
+            return AppError.NotFound($"unknown export '{query.List}'");
+
+        return new ElarionFile(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+            FileName = $"{query.List}.xlsx",    // Content-Disposition: attachment; omit for inline content
+        };
+    }
+}
+```
+
+Uploads are the same type on the request side: an `ElarionFile` property binds from the JSON body's
+base64 envelope, so one client code path covers every transport. When you specifically want HTTP
+**multipart** binding (a plain `<form>`, FilePond), keep using `IFormFile` in the DTO
+([customizing binding](#customizing-binding)) — that is the HTTP-native escape hatch; `ElarionFile` is the
+transport-neutral default.
+
+In the OpenAPI document a file response advertises `application/octet-stream` with
+`type: string, format: binary` (the concrete content type is per-payload at run time), so off-the-shelf
+generated clients return a blob.
+
+### Large files: the staged-blob tier
+
+`ElarionFile` is deliberately in-memory — the payload is buffered end to end (and base64-inflated on JSON
+transports), which is wrong past a few megabytes. Large files move through the
+[staging blob area](/docs/capabilities/blob-storage) instead, and the handler only sees a **pointer**:
+
+- **Import**: the client uploads through `MapElarionResumableBlobUploads` (resumable) or `MapElarionBlobUploads` into the
+  pending area, then passes the returned blob reference to the handler, which streams from
+  `IBlobStore.OpenReadAsync`. A blob the handler never commits is garbage-collected after its TTL.
+- **Export**: the handler streams the artifact into the store as a pending blob owned by the current user
+  and returns its `BlobRef`; the client streams it down from `MapElarionBlobDownloads`. An export nobody
+  downloads expires on its own — the pending state doubles as temp-file semantics.
+
+See [ADR-0038](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0038-binary-file-responses.md)
+for the full two-tier rationale.
 
 ## Errors map once, centrally
 
