@@ -31,8 +31,8 @@ namespace Elarion.ClientEvents.AspNetCore;
 /// </para>
 /// </remarks>
 public static class ClientEventEndpointsExtensions {
-    private const string ConnectedEventType = "elarion.connected";
-    private const string KeepAliveEventType = "elarion.keepAlive";
+    private const string ConnectedEventType = ClientEventControlEvents.Connected;
+    private const string KeepAliveEventType = ClientEventControlEvents.KeepAlive;
 
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
 

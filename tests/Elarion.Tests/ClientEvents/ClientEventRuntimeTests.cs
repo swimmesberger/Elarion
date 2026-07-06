@@ -38,6 +38,26 @@ public sealed partial class ClientEventRuntimeTests {
         new() { Topic = topic, Scope = scope };
 
     [Fact]
+    public async Task DeliverToAll_ReachesEverySubscriberRegardlessOfSubscriptions() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var provider = BuildProvider();
+        var source = provider.GetRequiredService<IClientEventSubscriptionSource>();
+        var delivery = provider.GetRequiredService<IClientEventLocalDelivery>();
+        using var userScoped = source.Subscribe([Subscription("test.invoiceChanged", ClientEventScope.User("user-1"))]);
+        using var global = source.Subscribe([Subscription("test.invoiceChanged", ClientEventScope.Global)]);
+
+        delivery.DeliverToAll(new ClientEventEnvelope {
+            Id = Guid.CreateVersion7(),
+            Topic = ClientEventControlEvents.Connected,
+            Scope = ClientEventScope.Global,
+            Payload = "{}",
+        });
+
+        (await userScoped.Events.ReadAsync(ct)).Topic.Should().Be(ClientEventControlEvents.Connected);
+        (await global.Events.ReadAsync(ct)).Topic.Should().Be(ClientEventControlEvents.Connected);
+    }
+
+    [Fact]
     public async Task Publish_ReachesMatchingUserScopeSubscriber_WithSerializedPayload() {
         var ct = TestContext.Current.CancellationToken;
         await using var provider = BuildProvider();

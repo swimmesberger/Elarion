@@ -45,5 +45,12 @@ internal sealed class ClientEventSubscriberRegistry : IClientEventLocalDelivery,
         }
     }
 
+    public void DeliverToAll(ClientEventEnvelope envelope) {
+        ArgumentNullException.ThrowIfNull(envelope);
+        foreach (var (_, entry) in _subscribers) {
+            entry.Channel.Writer.TryWrite(envelope);
+        }
+    }
+
     private sealed record Entry(HashSet<ClientEventSubscription> Subscriptions, Channel<ClientEventEnvelope> Channel);
 }

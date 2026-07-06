@@ -34,6 +34,7 @@
     <ProjectReference Include="../../src/Elarion.Blobs.Tus/Elarion.Blobs.Tus.csproj" />
     <ProjectReference Include="../../src/Elarion.ClientEvents/Elarion.ClientEvents.csproj" />
     <ProjectReference Include="../../src/Elarion.ClientEvents.AspNetCore/Elarion.ClientEvents.AspNetCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.ClientEvents.PostgreSql/Elarion.ClientEvents.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.OpenApi/Elarion.AspNetCore.OpenApi.csproj" />
     <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj" />

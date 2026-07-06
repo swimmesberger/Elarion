@@ -9,4 +9,12 @@ public interface IClientEventLocalDelivery {
     /// <summary>Delivers <paramref name="envelope"/> to every matching local subscription. Non-blocking: a
     /// slow subscriber drops its oldest buffered events rather than stalling delivery (hints, not a queue).</summary>
     void Deliver(ClientEventEnvelope envelope);
+
+    /// <summary>
+    /// Delivers <paramref name="envelope"/> to <em>every</em> local subscriber regardless of its subscriptions —
+    /// the control path a cross-node broadcaster uses after a delivery gap (e.g.
+    /// <see cref="ClientEventControlEvents.Connected"/> once its listen connection is re-established, so every
+    /// connected client re-queries instead of trusting a stream with a hole in it).
+    /// </summary>
+    void DeliverToAll(ClientEventEnvelope envelope);
 }
