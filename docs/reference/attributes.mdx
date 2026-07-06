@@ -179,6 +179,29 @@ See [Scheduling](/docs/capabilities/scheduling), [Schedules](/docs/capabilities/
 
 See [Consuming events](/docs/capabilities/events/consuming-events) and [Backends](/docs/capabilities/events/backends).
 
+## Actors
+
+### `[Actor]`
+
+- **Package:** `Elarion.Actors` · **Applies to:** class
+- **Triggers:** marks a plain class as an in-memory actor: its public async methods (`Task`/`Task<T>`/`ValueTask`/`ValueTask<T>`) become the message surface of a source-generated typed facade (`I{Name}`, class name minus the `Actor` suffix), and every call runs sequentially on the activation's mailbox. Keyed when the constructor takes an `IActorContext<TKey>` (one activation per key, activated on first message, passivated when idle) or `KeyType` is set; otherwise a process singleton. Registered per module via the generated `Add{Module}Actors`; requires the assembly opt-in `[assembly: GenerateActors]` (or `[UseElarion]`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Name` | `string?` (init) | class name minus `Actor` | Logical actor name used in telemetry, logging, and the registration. |
+| `KeyType` | `Type?` (init) | `null` | Explicit key type for a keyed actor whose constructor does not take an `IActorContext<TKey>`; must match the context parameter when both are present (`ELACT004`). |
+| `MailboxCapacity` | `int` (init) | `0` (unbounded) | Bounded mailbox capacity. |
+| `MailboxFullMode` | `ActorMailboxFullMode` (init) | `Wait` | Full-mailbox behaviour: `Wait` (async backpressure) or `Fail` (`ActorMailboxFullException`). No drop modes — facade calls are request/reply. |
+| `IdleTimeoutSeconds` | `double` (init) | `0` (5 min) | Inactivity window before passivation; `-1` disables passivation. |
+| `CallTimeoutSeconds` | `double` (init) | `0` (30 s) | End-to-end facade call timeout (queue wait + execution) failing with `TimeoutException` — the deadlock backstop for actor→actor call cycles; `-1` disables it. |
+
+### `[Reentrant]`
+
+- **Package:** `Elarion.Actors` · **Applies to:** class (alongside `[Actor]`)
+- **Triggers:** opts the actor into Orleans-style turn-based interleaving: while one message awaits, the mailbox may start another, but turns never run in parallel (an exclusive scheduler serializes every continuation). State observed across an `await` may have been changed by an interleaved message; `ConfigureAwait(false)` in the actor's own code escapes the scheduler and forfeits the guarantee (flagged by `ELACT006`; libraries the actor calls may use it internally without harm).
+
+See [Actors](/docs/concepts/actors).
+
 ## Caching
 
 ### `[Cacheable]`

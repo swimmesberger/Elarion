@@ -14,6 +14,7 @@
     <Project Path="src/Elarion.AspNetCore.OpenApi/Elarion.AspNetCore.OpenApi.csproj" />
     <Project Path="src/Elarion.AspNetCore.SchemaGeneration/Elarion.AspNetCore.SchemaGeneration.csproj" />
     <Project Path="src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" />
+    <Project Path="src/Elarion.Actors/Elarion.Actors.csproj" />
     <Project Path="src/Elarion.Authorization.EntityFrameworkCore/Elarion.Authorization.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Authorization.EntityFrameworkCore.Generators/Elarion.Authorization.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.Blobs/Elarion.Blobs.csproj" />
@@ -60,6 +61,7 @@
     <Project Path="samples/Billing/Billing.AppHost/Billing.AppHost.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Elarion.Benchmarks/Elarion.Benchmarks.csproj" />
     <Project Path="tests/Elarion.Tests/Elarion.Tests.csproj" />
   </Folder>
 </Solution>

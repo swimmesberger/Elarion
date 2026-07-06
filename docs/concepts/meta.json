@@ -19,6 +19,7 @@
     "persistence-and-transactions",
     "variable-substitution",
     "cross-module-communication",
+    "actors",
     "transports",
     "solution-structure"
   ]

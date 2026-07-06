@@ -27,6 +27,12 @@ public static class EventTelemetry {
 
     private static readonly Meter MeterInstance = new(MeterName);
 
+    // OTel semconv duration buckets (seconds). Without explicit advice the SDK's default
+    // boundaries are millisecond-scaled and useless for second-valued histograms.
+    private static readonly InstrumentAdvice<double> DurationAdvice = new() {
+        HistogramBucketBoundaries = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]
+    };
+
     /// <summary>Counts published events by event type and plane.</summary>
     public static readonly Counter<long> PublishCount =
         MeterInstance.CreateCounter<long>(
@@ -39,12 +45,13 @@ public static class EventTelemetry {
             "messaging.consumer.invocation.count",
             description: "Total number of event consumer invocations");
 
-    /// <summary>Records consumer invocation duration in milliseconds.</summary>
+    /// <summary>Records consumer invocation duration in seconds.</summary>
     public static readonly Histogram<double> ConsumerDuration =
         MeterInstance.CreateHistogram<double>(
             "messaging.consumer.invocation.duration",
-            unit: "ms",
-            description: "Duration of event consumer invocations");
+            unit: "s",
+            description: "Duration of event consumer invocations",
+            advice: DurationAdvice);
 
     /// <summary>Counts outbox message deliveries by event type and outcome.</summary>
     public static readonly Counter<long> DeliveryCount =
@@ -52,12 +59,13 @@ public static class EventTelemetry {
             "messaging.delivery.count",
             description: "Total number of after-commit message deliveries");
 
-    /// <summary>Records outbox message delivery duration in milliseconds.</summary>
+    /// <summary>Records outbox message delivery duration in seconds.</summary>
     public static readonly Histogram<double> DeliveryDuration =
         MeterInstance.CreateHistogram<double>(
             "messaging.delivery.duration",
-            unit: "ms",
-            description: "Duration of after-commit message deliveries");
+            unit: "s",
+            description: "Duration of after-commit message deliveries",
+            advice: DurationAdvice);
 
     /// <summary>Records one published event tagged with bounded event type and plane names.</summary>
     public static void RecordPublish(string eventType, EventPlane plane) {
@@ -68,23 +76,23 @@ public static class EventTelemetry {
     }
 
     /// <summary>Records one consumer invocation tagged with bounded event type, consumer, and outcome names.</summary>
-    public static void RecordConsumer(string eventType, string consumer, string outcome, double elapsedMilliseconds) {
+    public static void RecordConsumer(string eventType, string consumer, string outcome, TimeSpan elapsed) {
         var tags = new TagList {
             { "messaging.event.type", eventType },
             { "messaging.consumer", consumer },
             { "messaging.consumer.outcome", outcome }
         };
         ConsumerCount.Add(1, tags);
-        ConsumerDuration.Record(elapsedMilliseconds, tags);
+        ConsumerDuration.Record(elapsed.TotalSeconds, tags);
     }
 
     /// <summary>Records one after-commit message delivery tagged with bounded event type and outcome names.</summary>
-    public static void RecordDelivery(string eventType, string outcome, double elapsedMilliseconds) {
+    public static void RecordDelivery(string eventType, string outcome, TimeSpan elapsed) {
         var tags = new TagList {
             { "messaging.event.type", eventType },
             { "messaging.delivery.outcome", outcome }
         };
         DeliveryCount.Add(1, tags);
-        DeliveryDuration.Record(elapsedMilliseconds, tags);
+        DeliveryDuration.Record(elapsed.TotalSeconds, tags);
     }
 }

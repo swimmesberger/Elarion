@@ -42,7 +42,7 @@ public sealed class TracingDecorator<TRequest, TResponse>(
             }
 
             HandlerTelemetry.RecordExecution(
-                handlerName, outcome, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                handlerName, outcome, Stopwatch.GetElapsedTime(startTimestamp));
             return response;
         } catch (Exception ex) {
             if (activity is not null) {
@@ -55,7 +55,7 @@ public sealed class TracingDecorator<TRequest, TResponse>(
             }
 
             HandlerTelemetry.RecordExecution(
-                handlerName, "exception", Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
+                handlerName, "exception", Stopwatch.GetElapsedTime(startTimestamp));
             throw;
         }
     }

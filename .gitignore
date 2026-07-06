@@ -52,6 +52,7 @@ dist/
 
 # Test results
 TestResults/
+BenchmarkDotNet.Artifacts/
 coverage/
 *.trx
 

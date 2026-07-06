@@ -216,7 +216,7 @@ public sealed class HybridHandlerCache(
         HandlerCacheTelemetry.RecordOperation(
             operation,
             outcome,
-            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            Stopwatch.GetElapsedTime(started));
     }
 
     private static void RecordException(Activity? activity, Exception exception) {

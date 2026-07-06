@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>In-memory actor runtime for Elarion: plain classes marked [Actor] become keyed, mailbox-protected state machines with source-generated typed facades (Orleans-style single-threaded execution, opt-in [Reentrant] interleaving, idle passivation, per-activation DI scopes). Single-node vertical concurrency primitive — clustering is deliberately out of scope (use Orleans/Akka.NET/Proto.Actor when you need a cluster).</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

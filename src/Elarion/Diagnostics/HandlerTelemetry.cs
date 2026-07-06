@@ -24,18 +24,25 @@ public static class HandlerTelemetry {
 
     private static readonly Meter MeterInstance = new(MeterName);
 
+    // OTel semconv duration buckets (seconds). Without explicit advice the SDK's default
+    // boundaries are millisecond-scaled and useless for second-valued histograms.
+    private static readonly InstrumentAdvice<double> DurationAdvice = new() {
+        HistogramBucketBoundaries = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]
+    };
+
     /// <summary>Counts traced handler executions by handler and outcome.</summary>
     public static readonly Counter<long> ExecutionCount =
         MeterInstance.CreateCounter<long>(
             "handler.execution.count",
             description: "Total number of traced handler executions");
 
-    /// <summary>Records traced handler execution duration in milliseconds.</summary>
+    /// <summary>Records traced handler execution duration in seconds.</summary>
     public static readonly Histogram<double> ExecutionDuration =
         MeterInstance.CreateHistogram<double>(
             "handler.execution.duration",
-            unit: "ms",
-            description: "Duration of traced handler executions");
+            unit: "s",
+            description: "Duration of traced handler executions",
+            advice: DurationAdvice);
 
     /// <summary>Counts authorization denials by handler and outcome (<c>unauthorized</c>/<c>forbidden</c>).</summary>
     public static readonly Counter<long> AuthorizationDeniedCount =
@@ -56,13 +63,13 @@ public static class HandlerTelemetry {
             description: "Total number of idempotent handler executions by key outcome");
 
     /// <summary>Records a traced handler execution metric tagged with bounded handler name and outcome.</summary>
-    public static void RecordExecution(string handler, string outcome, double elapsedMilliseconds) {
+    public static void RecordExecution(string handler, string outcome, TimeSpan elapsed) {
         var tags = new TagList {
             { "elarion.handler", handler },
             { "elarion.handler.outcome", outcome }
         };
         ExecutionCount.Add(1, tags);
-        ExecutionDuration.Record(elapsedMilliseconds, tags);
+        ExecutionDuration.Record(elapsed.TotalSeconds, tags);
     }
 
     /// <summary>Records one authorization denial tagged with the bounded handler name and outcome.</summary>

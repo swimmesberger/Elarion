@@ -1191,7 +1191,7 @@ public sealed class InMemoryScheduler(
             }
 
             SchedulerTelemetry.ActiveJobRuns.Add(-1, CreateTags(descriptor, "active"));
-            SchedulerTelemetry.JobRunLag.Record(Math.Max(0, lag.TotalMilliseconds), CreateTags(descriptor, status));
+            SchedulerTelemetry.JobRunLag.Record(Math.Max(0, lag.TotalSeconds), CreateTags(descriptor, status));
             if (activity?.IsAllDataRequested == true) {
                 activity.SetTag("scheduler.job.status", status);
                 activity.SetTag("scheduler.job.duration_ms", elapsed.TotalMilliseconds);
@@ -1521,7 +1521,7 @@ public sealed class InMemoryScheduler(
         TimeSpan elapsed) {
         var tags = CreateTags(descriptor, status);
         SchedulerTelemetry.JobRunCount.Add(1, tags);
-        SchedulerTelemetry.JobRunDuration.Record(elapsed.TotalMilliseconds, tags);
+        SchedulerTelemetry.JobRunDuration.Record(elapsed.TotalSeconds, tags);
     }
 
     private void RecordOutcome(
@@ -1588,7 +1588,7 @@ public sealed class InMemoryScheduler(
             activity.SetTag("scheduler.operation.outcome", "queued");
         }
 
-        SchedulerTelemetry.RecordOperation("enqueue", "queued", 0);
+        SchedulerTelemetry.RecordOperation("enqueue", "queued", TimeSpan.Zero);
     }
 
     private static void RecordPreExecutionOutcome(ScheduledJobWorkItem item, string status, string reason) {
@@ -1624,7 +1624,7 @@ public sealed class InMemoryScheduler(
         SchedulerTelemetry.RecordOperation(
             operation,
             outcome,
-            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            Stopwatch.GetElapsedTime(started));
     }
 
     private static void RecordException(Activity? activity, Exception exception) {

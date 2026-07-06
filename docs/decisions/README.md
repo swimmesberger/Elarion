@@ -62,3 +62,4 @@ designs that are not yet implemented.
 - [ADR-0039: File payloads — the in-memory `ElarionFile` tier and the staged-blob tier](0039-binary-file-responses.md)
 - [ADR-0040: Host-declared module endpoint hooks (`[ModuleEndpoints]`)](0040-host-declared-module-endpoints.md)
 - [ADR-0041: Blob streaming connections clone the context connection](0041-blob-streaming-connections-clone-the-context-connection.md)
+- [ADR-0042: In-memory actors — mailbox-protected state machines with generated typed facades](0042-in-memory-actors.md)
