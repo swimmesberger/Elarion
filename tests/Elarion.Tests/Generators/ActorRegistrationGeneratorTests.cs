@@ -199,6 +199,61 @@ public sealed class ActorRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateActors_ConsumeEventOnActorMethod_EmitsGuidanceDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Actors.Actor]
+                public sealed class OrderFulfillmentActor {
+                    public OrderFulfillmentActor(Elarion.Actors.IActorContext<System.Guid> context) { }
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.Task OnShipped(OrderShipped e) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """,
+            assemblyTrigger: """
+            [assembly: Elarion.Abstractions.GenerateActors]
+            [assembly: Elarion.Abstractions.GenerateEventConsumers]
+            """);
+
+        var result = Generate(source, allowedDiagnosticIds: ["ELACT007"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELACT007" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+        // The event-consumer generator yields to ELACT007 instead of reporting a misleading
+        // "not a [Service]" for the same method.
+        result.Diagnostics.Should().NotContain(d => d.Id == "ELEVT001" || d.Id == "ELEVT005");
+    }
+
+    [Fact]
+    public void GenerateActors_ConsumeEventOnActorClass_EmitsGuidanceDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                [Elarion.Actors.Actor]
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class OrderFulfillmentActor {
+                    public System.Threading.Tasks.Task Ping() => System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """,
+            assemblyTrigger: """
+            [assembly: Elarion.Abstractions.GenerateActors]
+            [assembly: Elarion.Abstractions.GenerateEventConsumers]
+            """);
+
+        var result = Generate(source, allowedDiagnosticIds: ["ELACT007"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELACT007" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+        result.Diagnostics.Should().NotContain(d => d.Id == "ELEVT001" || d.Id == "ELEVT005");
+    }
+
+    [Fact]
     public void GenerateActors_NoTrigger_EmitsNothing() {
         var source = CreateSource(
             """
@@ -283,7 +338,10 @@ public sealed class ActorRegistrationGeneratorTests {
             .Should().BeEmpty();
 
         GeneratorDriver driver = CSharpGeneratorDriver
-            .Create(new ActorRegistrationGenerator(), new ModuleDefaultServicesGenerator())
+            .Create(
+                new ActorRegistrationGenerator(),
+                new EventConsumerRegistrationGenerator(),
+                new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             compilation,

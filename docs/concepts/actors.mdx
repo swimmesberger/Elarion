@@ -163,6 +163,41 @@ Actors are module-internal like any implementation type: expose one to another m
 no `[RequirePermission]`, `[FeatureGate]`, or validation. An actor is internal machinery invoked by an
 already-gated handler; the handler remains the transport-facing gate.
 
+## Actors and events
+
+Feeding events into an actor is common — and the intended route is a small **relay consumer**, not
+`[ConsumeEvent]` on the actor (which is rejected with `ELACT007`):
+
+```csharp
+[ConsumeEvent]
+public sealed class OrderShippedRelay(IActorSystem actors) : IHandler<OrderShipped> {
+    public async ValueTask<Result<Unit>> HandleAsync(OrderShipped e, CancellationToken ct) {
+        await actors.Get<IOrderFulfillment>(e.OrderId).OnShipped(e.TrackingCode, ct);
+        return Result.Success();
+    }
+}
+```
+
+This is not boilerplate for its own sake — the relay is where three things live that an actor cannot
+provide for itself:
+
+- **Dedupe before the mailbox.** Handler-form integration consumers get the default-on
+  [inbox](idempotency.mdx) (keyed by consumer identity + `MessageId`), so at-least-once outbox
+  redelivery is swallowed *before* anything reaches the actor. Sugar that bypassed the consumer
+  pipeline would silently deliver duplicates into actor state.
+- **Key extraction.** The relay states explicitly which event property addresses which actor — the
+  routing decision stays visible, ordinary code.
+- **The plane boundary.** Only route **integration events** into actors. A domain-event consumer runs
+  inside the emitting command's transaction and scope; an actor runs in its own scope on its own
+  schedule — awaiting an actor from a Plane A consumer abandons the same-transaction contract that
+  plane exists for. If actor state must react to a domain change, publish an integration event and
+  relay that (after commit), or have the command's handler call the actor directly after its own
+  transaction completes.
+
+The relay's failure semantics compose correctly too: if the actor call fails (or times out), the
+relay's `Result` fails, and the outbox retries the delivery — which the inbox then dedupes against
+the previous attempt's claim expiry rules.
+
 ## Observability
 
 Register the `Elarion.Actors` ActivitySource and Meter with your OpenTelemetry providers. Each facade call

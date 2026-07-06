@@ -198,6 +198,13 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var consumeAttribute = ctx.Attributes[0];
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
+        // [ConsumeEvent] on an [Actor] class is owned by the actor generator, which reports the
+        // actionable ELACT007 (write a relay consumer that calls the facade) instead of a
+        // misleading "not a [Service]" here.
+        if (IsOnActorClass(ctx.TargetSymbol)) {
+            return null;
+        }
+
         if (ctx.TargetSymbol is IMethodSymbol method) {
             var location = (ctx.TargetNode as MethodDeclarationSyntax)?.Identifier.GetLocation();
             var containingType = method.ContainingType;
@@ -217,6 +224,21 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         }
 
         return null;
+    }
+
+    private static bool IsOnActorClass(ISymbol targetSymbol) {
+        var type = targetSymbol as INamedTypeSymbol ?? targetSymbol.ContainingType;
+        if (type is null) {
+            return false;
+        }
+
+        foreach (var attribute in type.GetAttributes()) {
+            if (attribute.AttributeClass?.ToDisplayString() == "Elarion.Actors.ActorAttribute") {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void EmitPerModule(

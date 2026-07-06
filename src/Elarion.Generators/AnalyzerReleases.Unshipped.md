@@ -21,6 +21,7 @@ ELACT003 | Elarion.Generators | Warning | Actor is not in any module
 ELACT004 | Elarion.Generators | Error | Ambiguous actor key
 ELACT005 | Elarion.Generators | Error | Invalid actor constructor
 ELACT006 | Elarion.Generators | Warning | ConfigureAwait(false) inside a [Reentrant] actor
+ELACT007 | Elarion.Generators | Error | [ConsumeEvent] is not supported on an [Actor]
 ELEVT001 | Elarion.Generators | Error | Event consumer must be declared on a [Service] class
 ELEVT002 | Elarion.Generators | Error | Invalid event consumer signature
 ELEVT003 | Elarion.Generators | Warning | Event consumer is not in any module

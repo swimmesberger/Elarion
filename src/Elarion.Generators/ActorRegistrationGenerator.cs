@@ -16,6 +16,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
     private const string TriggerAttributeMetadataName = "Elarion.Abstractions.GenerateActorsAttribute";
     private const string ActorAttributeMetadataName = "Elarion.Actors.ActorAttribute";
     private const string ReentrantAttributeDisplayName = "Elarion.Actors.ReentrantAttribute";
+    private const string ConsumeEventAttributeDisplayName = "Elarion.Abstractions.Messaging.ConsumeEventAttribute";
     private const string ActorContextMetadataName = "Elarion.Actors.IActorContext";
     private const string ActorContextGenericMetadataName = "Elarion.Actors.IActorContext`1";
     private const string CancellationTokenMetadataName = "System.Threading.CancellationToken";
@@ -76,6 +77,19 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         title: "Invalid actor constructor",
         messageFormat:
         "Actor '{0}' must have exactly one public constructor so the generator can emit its activator",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ActorCannotConsumeEvents = new(
+        id: "ELACT007",
+        title: "[ConsumeEvent] is not supported on an [Actor]",
+        messageFormat:
+        "Actor '{0}' cannot consume events directly: write a handler-form [ConsumeEvent] consumer that "
+        + "calls the actor's facade (e.g. actors.Get<I{1}>(e.Key).Method(...)). That relay preserves both "
+        + "guarantees in the right order — the consumer pipeline's inbox dedupe runs before the call enters "
+        + "the actor's mailbox — and keeps domain events out of actors (a Plane A consumer shares the "
+        + "caller's transaction; an actor runs in its own scope and cannot).",
         category: "Elarion.Generators",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -235,9 +249,13 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
         var reentrant = false;
         foreach (var attribute in type.GetAttributes()) {
-            if (attribute.AttributeClass?.ToDisplayString() == ReentrantAttributeDisplayName) {
+            var attributeName = attribute.AttributeClass?.ToDisplayString();
+            if (attributeName == ReentrantAttributeDisplayName) {
                 reentrant = true;
-                break;
+            }
+            else if (attributeName == ConsumeEventAttributeDisplayName) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    ActorCannotConsumeEvents, location, typeDisplay, DeriveActorName(type.Name)));
             }
         }
 
@@ -303,6 +321,14 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
             if (method.Name is "OnActivateAsync" or "OnDeactivateAsync") {
                 continue;
+            }
+
+            foreach (var attribute in method.GetAttributes()) {
+                if (attribute.AttributeClass?.ToDisplayString() == ConsumeEventAttributeDisplayName) {
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        ActorCannotConsumeEvents, LocationInfo.From(method), typeDisplay, DeriveActorName(type.Name)));
+                    break;
+                }
             }
 
             ReturnShape shape;
