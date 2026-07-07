@@ -4,17 +4,49 @@ description: Declarative, transport-neutral audit records — who performed whic
 ---
 
 Auditing in Elarion answers the question every application eventually gets asked: **who did what?** You
-annotate a handler with `[Auditable]`; generated decorators record one structured `AuditRecord` per
-invocation — actor, action, resource, outcome, timestamp, correlation — and the EF Core sink captures
-**field-level changes** (old → new values) for opted-in entities automatically. A successful command's
-record commits **atomically with the handler's business writes**; denied and failed attempts are recorded on
-a detached path that survives the rollback. Under every transport identically.
+annotate a handler with `[Auditable]` and it records one structured `AuditRecord` per invocation — actor,
+action, resource, outcome, timestamp, correlation. **That is the whole feature, and it needs nothing on your
+entities.** A successful command's record commits **atomically with the handler's business writes**; denied
+and failed attempts are recorded on a detached path that survives the rollback. Under every transport
+identically.
+
+Automatic **field-level change capture** (`Street: "Old" → "New"` in the record) is a *separate, optional*
+layer you turn on per entity — it is not required for auditing to work.
 
 It is the same declarative shape as [authorization](authorization.mdx) and
 [idempotency](idempotency.mdx): a class-level attribute, generated decorators, a seam-in-Abstractions /
 impl-in-package split ([ADR-0045](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0045-handler-action-audit-trail.md)).
 
+## The two layers
+
+They are independent — the record works alone; the diffs are an upgrade on top of it.
+
+| Layer | Gives you | Needs |
+| --- | --- | --- |
+| **Action record** | who · what action · which resource · outcome · when · correlation | `[Auditable]` on the handler + the sink registered. **Nothing on your entities.** |
+| **Field-level diffs** *(optional)* | `Street: "Old" → "New"` in the record's `Changes` | `[Audited]` on the entity (`[AuditIgnore]` to exclude columns) — **or** hand-written via `IAuditScope.AddChange` |
+
+Start with the record; add `[Audited]` only on the entities where "which fields changed" actually matters.
+
 ## Usage
+
+The minimum is a single attribute — the record writes itself, with no `IAuditScope` and no entity annotation:
+
+```csharp
+[Auditable(Resource = "property")]
+public sealed class UpdatePropertyHandler(AppDbContext db)
+    : IHandler<UpdatePropertyCommand, Result<PropertyResponse>> {
+    public async ValueTask<Result<PropertyResponse>> HandleAsync(UpdatePropertyCommand request, CancellationToken ct) {
+        var property = await db.Properties.SingleAsync(p => p.Id == request.Id, ct);
+        property.Street = request.Street;
+        return Result<PropertyResponse>.Success(new() { Id = property.Id });
+    }
+}
+```
+
+That already records *"user X performed `properties.update` on a property, succeeded, at T"*. To pin **which**
+property (an id, not just the type), inject `IAuditScope` and name the resource — `[Auditable(Resource = …)]`
+supplies only the type as a fallback:
 
 ```csharp
 [Auditable(Resource = "property")]
@@ -23,13 +55,15 @@ public sealed class UpdatePropertyHandler(AppDbContext db, IAuditScope audit)
     public async ValueTask<Result<PropertyResponse>> HandleAsync(UpdatePropertyCommand request, CancellationToken ct) {
         var property = await db.Properties.SingleAsync(p => p.Id == request.Id, ct);
         property.Street = request.Street;
-        audit.SetResource("property", property.Id.ToString());   // which one (optional but recommended)
+        audit.SetResource("property", property.Id.ToString());   // records ResourceId (and optionally a parent)
         return Result<PropertyResponse>.Success(new() { Id = property.Id });
     }
 }
 ```
 
-Wire the durable sink over your `DbContext`, and let the generator map the table:
+Neither handler mentions field diffs — those arrive only once you mark `Property` with `[Audited]`
+([below](#automatic-change-capture-optional)). Wire the durable sink over your `DbContext`, and let the
+generator map the table:
 
 ```csharp
 // Host
@@ -68,16 +102,18 @@ One append-only row per audited invocation, with the searchable facts as structu
 | `ParentResourceType` / `ParentResourceId` | Optional aggregate reference — "fire extinguisher X **on property Y**" — so the record surfaces on the parent's audit view without joining domain tables. |
 | `Outcome` / `ErrorKind` | `Succeeded`, `Failed`, or `Denied` (unauthorized/forbidden), plus the error kind. |
 | `CorrelationId` | The current trace id, linking the record to its span. |
-| `Changes` | Field-level `{entity, entityId, property, oldValue, newValue, kind}` diffs (JSON). |
+| `Changes` | Field-level `{entity, entityId, property, oldValue, newValue, kind}` diffs (JSON). Empty unless the entity is `[Audited]` or the handler adds them — the [optional layer below](#automatic-change-capture-optional). |
 | `Details` | App-supplied string facts (display names, rule ids — keep values free of secrets). |
 
 The classic search — *"alle Änderungen an Feuerlöschern durch Max, letzte Woche"* — is a plain indexed
 `WHERE` over those columns plus [keyset pagination](../capabilities/pagination.mdx); querying and display
 stay app-owned (the framework never renders audit UI).
 
-## Automatic change capture
+## Automatic change capture (optional)
 
-Opt an entity in with `[Audited]`, exclude sensitive columns with `[AuditIgnore]`:
+Everything above works without this section. This layer only **populates the `Changes` column** — turn it on
+where a record needs "which fields changed," leave it off everywhere else. Opt an entity in with `[Audited]`,
+exclude sensitive columns with `[AuditIgnore]`:
 
 ```csharp
 [Audited]
