@@ -65,6 +65,7 @@
     <Project Path="samples/Billing/Billing.Api/Billing.Api.csproj" />
     <Project Path="samples/Billing/Billing.AppHost/Billing.AppHost.csproj" />
     <Project Path="samples/Billing/Billing.Web/Billing.Web.csproj" />
+    <Project Path="samples/Billing/Billing.Tests/Billing.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Elarion.Benchmarks/Elarion.Benchmarks.csproj" />

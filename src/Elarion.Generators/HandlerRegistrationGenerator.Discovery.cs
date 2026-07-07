@@ -188,6 +188,9 @@ public sealed partial class HandlerRegistrationGenerator {
             idempotent,
             audit,
             variantContractDeps,
+            // Event consumers register keyed by their own FQN so N of them coexist for one event; a command/query
+            // stays unkeyed (exactly one handler per request, resolvable typed-direct).
+            isEventConsumer ? handlerFqn : null,
             diagnostics.ToImmutable());
     }
 

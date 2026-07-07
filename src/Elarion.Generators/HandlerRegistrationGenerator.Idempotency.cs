@@ -163,23 +163,33 @@ public sealed partial class HandlerRegistrationGenerator {
         if (!ResponseSupportsFailure(responseType, compilation))
             return null;
 
-        return new IdempotentInfo(
+        return CreateInboxInfo(ComputeConsumerOwner(classSymbol), TryGetResultValueFqn(responseType, fmt));
+    }
+
+    // The canonical inbox policy (ADR-0022), built in one place so every emitter — the handler generator's
+    // structural discovery and the actor generator's synthesized relay (ADR-0046) — produces the same
+    // Consumer-scoped dedupe. Only the owner discriminator and the stored result-value type vary per consumer.
+    internal static IdempotentInfo CreateInboxInfo(string owner, string? resultValueFqn) =>
+        new(
             InboxRetentionHours,
             KeyRequired: false,
             ScopeValue: 2, // IdempotencyScope.Consumer
             Fingerprint: false,
             ConflictBehaviorValue: 1, // IdempotencyConflictBehavior.WaitThenReplay
             StoreFailuresValue: 0, // IdempotencyFailureStorage.None — a failed consumer retries
-            TryGetResultValueFqn(responseType, fmt),
-            Owner: ComputeConsumerOwner(classSymbol));
-    }
+            resultValueFqn,
+            Owner: owner);
 
     // The Consumer-scope owner discriminator: the handler's fully qualified name, verbatim while it fits the
     // store's 128-char owner column, else truncated with a stable SHA-256 suffix so two long names never collide.
     // Computed at generation time — deterministic across builds, no runtime hashing.
-    private static string ComputeConsumerOwner(INamedTypeSymbol classSymbol) {
+    private static string ComputeConsumerOwner(INamedTypeSymbol classSymbol) =>
+        TruncateOwner(classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+
+    // Truncation of the owner discriminator, shared with the actor generator (ADR-0046), which computes it
+    // from the relay's fully qualified name string (the relay class has no symbol at discovery time).
+    internal static string TruncateOwner(string fullName) {
         const int maxOwnerLength = 128;
-        var fullName = classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         if (fullName.StartsWith("global::", StringComparison.Ordinal))
             fullName = fullName.Substring("global::".Length);
 

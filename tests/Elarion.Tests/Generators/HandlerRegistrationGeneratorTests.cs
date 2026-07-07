@@ -582,6 +582,41 @@ public sealed class HandlerRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateRegistration_EventConsumer_RegistersKeyed_CommandStaysUnkeyed() {
+        // ADR-0046: an event consumer registers its decorated pipeline KEYED by its FQN so multiple consumers
+        // of one event coexist; a command/query stays UNKEYED — exactly one handler per request, injectable
+        // typed-direct as IHandler<TReq, TResp>.
+        var source = """
+            namespace Sample.Modules.Sales.Handlers {
+                public sealed record OrderPlaced(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+                public sealed record DoThing(int Id) : Elarion.Abstractions.ICommand;
+
+                public sealed class OnOrderPlaced : Elarion.Abstractions.IHandler<OrderPlaced> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                        OrderPlaced request, System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                }
+
+                public sealed class DoThingHandler : Elarion.Abstractions.IHandler<DoThing, Elarion.Abstractions.Result> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                        DoThing request, System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+
+        var consumer = GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_OnOrderPlaced.g.cs");
+        consumer.Should().Contain("\"global::Sample.Modules.Sales.Handlers.OnOrderPlaced\",");
+        consumer.Should().Contain("(sp, __key) => BuildPipeline(sp),");
+
+        var command = GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_DoThingHandler.g.cs");
+        command.Should().Contain("sp => BuildPipeline(sp),");
+        command.Should().NotContain("(sp, __key) =>");
+    }
+
+    [Fact]
     public void GenerateRegistration_OpenGenericHandler_IsSkippedAndEmitsCompilableCode() {
         // An open-generic handler-shaped type (a common generic test double) cannot be registered as a concrete
         // service: emitting a registration would reference its own type parameters as concrete types (CS0246).

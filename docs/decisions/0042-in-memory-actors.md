@@ -251,6 +251,10 @@ alloc).
 - The runtime's single-threaded guarantee is "one turn at a time with happens-before via await", not
   thread affinity — thread-affine native resources need a dedicated scheduler, which is out of scope.
 - **Events reach actors through relay consumers, not `[ConsumeEvent]` on the actor (`ELACT007`).**
+  *(Superseded by [ADR-0046](0046-actor-event-consumers.md): `[ConsumeEvent]` is now allowed on an actor
+  method and the relay is generated — a single generator owning both the relay and its decorated
+  registration sidesteps the isolation argument below, and the mailbox never routed through the facade.
+  `ELACT007` is removed.)*
   First-class event consumption on actors was considered and rejected: a generator cannot emit a
   handler-form consumer for another generator to pipeline (generators never see each other's output),
   so any direct-consumption sugar would bypass the handler pipeline and **silently lose the default-on

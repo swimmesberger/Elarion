@@ -204,38 +204,59 @@ already-gated handler; the handler remains the transport-facing gate.
 
 ## Actors and events
 
-Feeding events into an actor is common — and the intended route is a small **relay consumer**, not
-`[ConsumeEvent]` on the actor (which is rejected with `ELACT007`):
+Feeding integration events into an actor is common — put `[ConsumeEvent]` directly on an actor method
+and the generator emits the relay that routes the event into the actor's mailbox:
 
 ```csharp
-[ConsumeEvent]
-public sealed class OrderShippedRelay(IActorSystem actors) : IHandler<OrderShipped> {
-    public async ValueTask<Result<Unit>> HandleAsync(OrderShipped e, CancellationToken ct) {
-        await actors.Get<IOrderFulfillment>(e.OrderId).OnShipped(e.TrackingCode, ct);
-        return Result.Success();
+[Actor]
+public sealed class OrderFulfillmentActor(IActorContext<Guid> context) {
+    // OrderShipped carries exactly one Guid → the key is inferred. The method is public (the relay
+    // reaches it through the facade), so it is also directly callable — an honest, dual-purpose op.
+    [ConsumeEvent]
+    public async Task OnShipped(OrderShipped e) {
+        // ordinary actor code — mutate state, call siblings via `this`, never via the facade.
     }
 }
 ```
 
-This is not boilerplate for its own sake — the relay is where three things live that an actor cannot
-provide for itself:
+The method's single event-typed parameter is the consumed event. Because the emitted relay is a real
+handler-form integration consumer, it composes the guarantees in the right order — the three things a
+hand-written relay used to carry are now generated:
 
-- **Dedupe before the mailbox.** Handler-form integration consumers get the default-on
-  [inbox](idempotency.mdx) (keyed by consumer identity + `MessageId`), so at-least-once outbox
-  redelivery is swallowed *before* anything reaches the actor. Sugar that bypassed the consumer
-  pipeline would silently deliver duplicates into actor state.
-- **Key extraction.** The relay states explicitly which event property addresses which actor — the
-  routing decision stays visible, ordinary code.
-- **The plane boundary.** Only route **integration events** into actors. A domain-event consumer runs
-  inside the emitting command's transaction and scope; an actor runs in its own scope on its own
-  schedule — awaiting an actor from a Plane A consumer abandons the same-transaction contract that
-  plane exists for. If actor state must react to a domain change, publish an integration event and
-  relay that (after commit), or have the command's handler call the actor directly after its own
-  transaction completes.
+- **Dedupe before the mailbox.** The relay gets the default-on [inbox](idempotency.mdx) (keyed by
+  consumer identity + `MessageId`), so at-least-once outbox redelivery is swallowed *before* anything
+  reaches the actor. Its inbox decorator runs before its body enqueues to the mailbox, so ordering
+  (inbox → mailbox) holds by construction.
+- **Key extraction.** The actor's key type is known at generation time. When the event has exactly one
+  property assignable to it, the key is inferred; otherwise name the property with
+  `[ActorKey(nameof(OrderShipped.OrderId))]`. A singleton actor needs no key. When the generator can
+  neither infer nor read a valid `[ActorKey]`, it reports `ELACT008`.
+- **The plane boundary.** Only **integration events** may reach an actor — a domain-event parameter is
+  rejected with `ELACT010`. A domain-event consumer runs inside the emitting command's transaction and
+  scope; an actor runs in its own scope on its own schedule, so awaiting an actor from a Plane A
+  consumer abandons the same-transaction contract that plane exists for. To react to a domain change,
+  publish an integration event and consume that (after commit), or have the command's handler call the
+  actor directly after its own transaction completes.
 
-The relay's failure semantics compose correctly too: if the actor call fails (or times out), the
-relay's `Result` fails, and the outbox retries the delivery — which the inbox then dedupes against
-the previous attempt's claim expiry rules.
+Failure semantics compose correctly: if the actor call fails (or times out), the relay's `Result`
+fails and the outbox retries the delivery — which the inbox then dedupes against the previous attempt.
+
+**The consumed method is `public`.** The generated relay is exactly what you'd hand-write — it injects
+`IActorSystem` and calls `actors.Get<IOrderFulfillment>(key).OnShipped(e)` through the public facade —
+so the method must be `public` (and is thus on the facade). Non-public + `[ConsumeEvent]` is rejected
+(`ELACT009`). Routing through the facade is deliberate: the generator only automates a call you could
+type yourself, rather than unlocking a private enqueue path no hand-written relay could reproduce.
+
+<Callout type="warn">
+Inside any actor method, reuse a sibling method by calling it on `this` — a direct, in-turn local
+call. Never route through the facade (`actors.Get<IOrderFulfillment>(key).Other()`): that re-enqueues
+onto the actor's own mailbox and self-deadlocks a non-reentrant actor (the call-timeout backstop
+fires).
+</Callout>
+
+A hand-written relay — a separate `[ConsumeEvent]` class implementing `IHandler<TEvent>` that calls
+`actors.Get<…>(key).Method(…)` — remains valid for cases the attribute form can't express (fan-out to
+several actors from one event, non-trivial key derivation).
 
 ## Observability
 
