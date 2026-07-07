@@ -125,7 +125,11 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         ReturnShape Return,
         EquatableArray<ParameterKind> Parameters,
         string HintName,
-        bool IsHandler);
+        bool IsHandler,
+        // The DI service key a handler-form consumer is registered under (its FQN, matching the handler
+        // generator's keyed registration) so multiple consumers of one event resolve distinctly; null for
+        // method-form consumers, which resolve their concrete [Service] type and never collide.
+        string? ConsumerKey);
 
     /// <summary>A discovered consumer: either a registration model or the diagnostics that rejected it.</summary>
     private sealed record ConsumerResult(EventConsumerInfo? Consumer, EquatableArray<DiagnosticInfo> Diagnostics);
@@ -198,9 +202,9 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var consumeAttribute = ctx.Attributes[0];
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
-        // [ConsumeEvent] on an [Actor] class is owned by the actor generator, which reports the
-        // actionable ELACT007 (write a relay consumer that calls the facade) instead of a
-        // misleading "not a [Service]" here.
+        // [ConsumeEvent] on an [Actor] method is owned by the actor generator (ADR-0046: it emits the
+        // integration-event relay). Yield here so this generator neither double-registers it nor reports a
+        // misleading "not a [Service]".
         if (IsOnActorClass(ctx.TargetSymbol)) {
             return null;
         }
@@ -409,7 +413,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             returnShape,
             parameters,
             hintName,
-            IsHandler: false);
+            IsHandler: false,
+            ConsumerKey: null);
     }
 
     private static EventConsumerInfo? TryCreateHandlerConsumer(
@@ -484,7 +489,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         var hintName = $"{GetHintName(type)}__HandleAsync__{GetHintName(eventType!)}";
 
         return new EventConsumerInfo(
-            // The descriptor resolves the IHandler<,> interface so DI yields the decorated chain.
+            // The descriptor resolves the IHandler<,> interface so DI yields the decorated chain, keyed by the
+            // consumer's own FQN (ConsumerKey below) so multiple consumers of one event resolve distinctly.
             handlerFqn,
             typeNamespace,
             "HandleAsync",
@@ -494,7 +500,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             ReturnShape.SubscriberValueTask,
             ImmutableArray<ParameterKind>.Empty,
             hintName,
-            IsHandler: true);
+            IsHandler: true,
+            ConsumerKey: type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
     }
 
     private static bool TryResolveParameters(
@@ -723,12 +730,12 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
     }
 
     private static void AppendHandlerSubscriberInvoke(StringBuilder sb, EventConsumerInfo consumer) {
-        // ServiceTypeFqn is the IHandler<TEvent, Result<T>> interface, so DI yields the decorated
-        // handler. A handler subscriber has no return channel, so a failed Result is surfaced as an
-        // EventConsumerFailedException for the publishing plane to handle.
+        // ServiceTypeFqn is the IHandler<TEvent, Result<T>> interface, resolved keyed by the consumer's FQN so
+        // DI yields THIS consumer's decorated chain even when several consumers share the event. A handler
+        // subscriber has no return channel, so a failed Result is surfaced as an EventConsumerFailedException.
         sb.AppendLine("            InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
         sb.AppendLine("            {");
-        sb.AppendLine($"                var handler = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+        sb.AppendLine($"                var handler = serviceProvider.GetRequiredKeyedService<{consumer.ServiceTypeFqn}>({FormatStringLiteral(consumer.ConsumerKey!)});");
         sb.AppendLine($"                var result = await handler.HandleAsync(({consumer.EventTypeFqn})@event, ct).ConfigureAwait(false);");
         sb.AppendLine("                if (!result.IsSuccess)");
         sb.AppendLine("                {");
@@ -765,6 +772,9 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
 
         return defaultValue;
     }
+
+    private static string FormatStringLiteral(string value) =>
+        Microsoft.CodeAnalysis.CSharp.SymbolDisplay.FormatLiteral(value, quote: true);
 
     private static bool IsAccessible(Accessibility accessibility) =>
         accessibility is Accessibility.Public or Accessibility.Internal;

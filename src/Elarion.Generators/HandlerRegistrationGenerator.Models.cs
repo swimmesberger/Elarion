@@ -32,7 +32,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string DomainEventMetadataName = "Elarion.Abstractions.Messaging.IDomainEvent";
     private const string IntegrationEventMetadataName = "Elarion.Abstractions.Messaging.IIntegrationEvent";
 
-    private sealed record HandlerInfo(
+    internal sealed record HandlerInfo(
         string HandlerFqn,
         string HandlerName,
         string RequestFqn,
@@ -50,20 +50,24 @@ public sealed partial class HandlerRegistrationGenerator {
         IdempotentInfo? Idempotent,
         AuditInfo? Audit,
         EquatableArray<string> VariantContractDeps,
+        // The DI service key for event-consumer handlers (their FQN); null for commands/queries, which stay
+        // registered unkeyed so exactly one handler resolves per request. Keying event consumers lets multiple
+        // consumers (incl. actor relays) coexist for one event without colliding on IHandler<TEvent, Result<Unit>>.
+        string? EventConsumerKey,
         EquatableArray<DiagnosticInfo> Diagnostics
     );
 
     // Audit attachment (ADR-0045): Action is the compile-resolved wire name ("{module}.{operation}" — an
     // explicit [Handler("…")] name verbatim, else inferred exactly like the RPC map so audit records and the
     // schema agree); Module is the owning module's name (null when unscoped).
-    private sealed record AuditInfo(
+    internal sealed record AuditInfo(
         string Action,
         string? Module
     );
 
     // Owner is the Consumer-scope owner discriminator (the consuming handler's identity) baked into the generated
     // policy for the inbox (ADR-0022); null for command idempotency, whose owner derives from the caller.
-    private sealed record IdempotentInfo(
+    internal sealed record IdempotentInfo(
         int RetentionHours,
         bool KeyRequired,
         int ScopeValue,
@@ -76,14 +80,14 @@ public sealed partial class HandlerRegistrationGenerator {
 
     // A [RequireResource] binding: the resource type, the operation, and the compile-checked request path the
     // generator validated and emits as a typed accessor (ADR-0012, Tier 1).
-    private sealed record ResourceBindingInfo(
+    internal sealed record ResourceBindingInfo(
         string ResourceTypeFqn,
         string Operation,
         string IdPath,
         string? ResourceTypeName
     );
 
-    private sealed record DecoratorInfo(
+    internal sealed record DecoratorInfo(
         string DecoratorFqn,
         string OpenGenericFqn,
         EquatableArray<DecoratorDependency> ExtraDependencies,
@@ -93,12 +97,12 @@ public sealed partial class HandlerRegistrationGenerator {
     // A constructor dependency of a pipeline decorator (besides the inner handler). A regular service is
     // resolved from DI; HandlerMetadata is supplied by the generator with the concrete handler type, so
     // attribute-driven decorators see the true handler regardless of their position in the chain.
-    private sealed record DecoratorDependency(
+    internal sealed record DecoratorDependency(
         string Fqn,
         bool IsHandlerMetadata
     );
 
-    private sealed record CacheableInfo(
+    internal sealed record CacheableInfo(
         EquatableArray<string> Tags,
         int DurationSeconds,
         int ScopeValue,
@@ -106,12 +110,12 @@ public sealed partial class HandlerRegistrationGenerator {
         string? ResultValueFqn
     );
 
-    private sealed record CacheInvalidationInfo(
+    internal sealed record CacheInvalidationInfo(
         EquatableArray<string> Tags,
         int ScopeValue
     );
 
-    private sealed record CacheKeyPropertyInfo(string Name);
+    internal sealed record CacheKeyPropertyInfo(string Name);
 
     private static readonly DiagnosticDescriptor CacheableAndInvalidatingDescriptor = new(
         "ELCACHE001",

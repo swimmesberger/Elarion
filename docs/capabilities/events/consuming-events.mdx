@@ -44,7 +44,9 @@ subscribers; `Order` ascends, and equal-order consumers run in a stable, generat
 ### Every consumer is a fan-out subscriber
 
 The event bus is **pub/sub-only**, so a handler-form consumer always returns `Result<Unit>` — use the
-`IHandler<TEvent>` sugar, or the explicit `IHandler<TEvent, Result<Unit>>`. Every matching consumer runs.
+`IHandler<TEvent>` sugar, or the explicit `IHandler<TEvent, Result<Unit>>`. Every matching consumer runs —
+**any number of handler-form consumers may subscribe to one event** (each registers keyed by its own
+identity, so they never shadow one another), interleaved with method-form consumers by `Order`.
 A failed `Result` has no return channel to the publisher, so it surfaces as an
 `EventConsumerFailedException`, which each backend handles per its plane (the in-memory domain bus
 aggregates and rethrows, failing the command; the in-memory integration pump logs and isolates; the

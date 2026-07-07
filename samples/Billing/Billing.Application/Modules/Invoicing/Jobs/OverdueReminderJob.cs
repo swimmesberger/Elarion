@@ -1,5 +1,7 @@
 using Billing.Application.Domain;
+using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Persistence;
+using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Resilience;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;
@@ -9,9 +11,12 @@ namespace Billing.Application.Modules.Invoicing.Jobs;
 
 /// <summary>A recurring job that flags sent-but-unpaid invoices as overdue every morning. Uses inline
 /// resilience (<c>[Resilient]</c>) — short, idempotent work where one occurrence owns its retries —
-/// and config placeholders so operators can retune the schedule without a redeploy.</summary>
+/// and config placeholders so operators can retune the schedule without a redeploy. Each newly-overdue
+/// invoice is announced as an <see cref="InvoiceOverdue"/> integration event so the per-client
+/// <see cref="Actors.ClientDunningActor"/> can coordinate escalation.</summary>
 public sealed class OverdueReminderJob(
     BillingDbContext db,
+    IIntegrationEventBus integrationEvents,
     TimeProvider clock,
     ILogger<OverdueReminderJob> logger
 ) {
@@ -29,6 +34,9 @@ public sealed class OverdueReminderJob(
 
         foreach (var invoice in overdue) {
             invoice.Status = InvoiceStatus.Overdue;
+            // Recorded in this job's unit of work — delivered after the status change commits. The
+            // per-client dunning actor consumes it via [ConsumeEvent] (ADR-0046).
+            await integrationEvents.PublishAsync(new InvoiceOverdue(invoice.Id, invoice.ClientId), ct);
         }
 
         await db.SaveChangesAsync(ct);

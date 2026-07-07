@@ -199,7 +199,7 @@ public sealed class ActorRegistrationGeneratorTests {
     }
 
     [Fact]
-    public void GenerateActors_ConsumeEventOnActorMethod_EmitsGuidanceDiagnostic() {
+    public void GenerateActors_ConsumeEventOnActorMethod_EmitsInboxDedupedRelay() {
         var source = CreateSource(
             """
             namespace Sample.Orders {
@@ -220,24 +220,38 @@ public sealed class ActorRegistrationGeneratorTests {
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
 
-        var result = Generate(source, allowedDiagnosticIds: ["ELACT007"]);
+        var result = Generate(source);
+        var generated = AllGenerated(result);
 
-        result.Diagnostics.Any(d => d.Id == "ELACT007" && d.Severity == DiagnosticSeverity.Error)
-            .Should().BeTrue();
-        // The event-consumer generator yields to ELACT007 instead of reporting a misleading
-        // "not a [Service]" for the same method.
-        result.Diagnostics.Should().NotContain(d => d.Id == "ELEVT001" || d.Id == "ELEVT005");
+        result.Diagnostics.Should().NotContain(d =>
+            d.Id == "ELACT007" || d.Id == "ELACT008" || d.Id == "ELACT009" || d.Id == "ELACT010"
+            || d.Id == "ELACT011" || d.Id == "ELEVT001" || d.Id == "ELEVT005");
+
+        // The relay resolves the facade by the inferred key and calls the method through the public facade.
+        generated.Should().Contain("class OrderFulfillment_OnShipped_EventRelay");
+        generated.Should().Contain(
+            "_actors.GetByKey<global::Sample.Orders.IOrderFulfillment, global::System.Guid>(request.OrderId)");
+        generated.Should().Contain("await facade.OnShipped(request).ConfigureAwait(false)");
+
+        // The reused handler-registration emit attaches the Consumer-scoped inbox, and the module wires the
+        // integration subscription.
+        generated.Should().Contain("global::Elarion.Pipeline.IdempotencyDecorator<global::Sample.Orders.OrderShipped");
+        generated.Should().Contain("global::Elarion.Abstractions.Messaging.EventPlane.Integration");
+        generated.Should().Contain("OrderFulfillment_OnShipped_EventRelayRegistration.AddOrderFulfillment_OnShipped_EventRelay(services)");
     }
 
     [Fact]
-    public void GenerateActors_ConsumeEventOnActorClass_EmitsGuidanceDiagnostic() {
+    public void GenerateActors_ConsumeEventOnSingletonActor_ResolvesWithoutKey() {
         var source = CreateSource(
             """
             namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
                 [Elarion.Actors.Actor]
-                [Elarion.Abstractions.Messaging.ConsumeEvent]
                 public sealed class OrderFulfillmentActor {
-                    public System.Threading.Tasks.Task Ping() => System.Threading.Tasks.Task.CompletedTask;
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.Task OnShipped(OrderShipped e, System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.Task.CompletedTask;
                 }
             }
             """,
@@ -246,11 +260,171 @@ public sealed class ActorRegistrationGeneratorTests {
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
 
-        var result = Generate(source, allowedDiagnosticIds: ["ELACT007"]);
+        var result = Generate(source);
+        var generated = AllGenerated(result);
 
-        result.Diagnostics.Any(d => d.Id == "ELACT007" && d.Severity == DiagnosticSeverity.Error)
+        generated.Should().Contain("_actors.Get<global::Sample.Orders.IOrderFulfillment>()");
+        generated.Should().Contain("await facade.OnShipped(request, cancellationToken).ConfigureAwait(false)");
+    }
+
+    [Fact]
+    public void GenerateActors_ConsumeEventAmbiguousKey_EmitsDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId, System.Guid CustomerId)
+                    : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Actors.Actor]
+                public sealed class OrderFulfillmentActor {
+                    public OrderFulfillmentActor(Elarion.Actors.IActorContext<System.Guid> context) { }
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.Task OnShipped(OrderShipped e) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """,
+            assemblyTrigger: """
+            [assembly: Elarion.Abstractions.GenerateActors]
+            [assembly: Elarion.Abstractions.GenerateEventConsumers]
+            """);
+
+        var result = Generate(source, allowedDiagnosticIds: ["ELACT008"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELACT008" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
-        result.Diagnostics.Should().NotContain(d => d.Id == "ELEVT001" || d.Id == "ELEVT005");
+    }
+
+    [Fact]
+    public void GenerateActors_ConsumeEventActorKeyDisambiguates_EmitsRelay() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId, System.Guid CustomerId)
+                    : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Actors.Actor]
+                public sealed class OrderFulfillmentActor {
+                    public OrderFulfillmentActor(Elarion.Actors.IActorContext<System.Guid> context) { }
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    [Elarion.Actors.ActorKey(nameof(OrderShipped.OrderId))]
+                    public System.Threading.Tasks.Task OnShipped(OrderShipped e) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """,
+            assemblyTrigger: """
+            [assembly: Elarion.Abstractions.GenerateActors]
+            [assembly: Elarion.Abstractions.GenerateEventConsumers]
+            """);
+
+        var result = Generate(source);
+
+        AllGenerated(result).Should().Contain(
+            "_actors.GetByKey<global::Sample.Orders.IOrderFulfillment, global::System.Guid>(request.OrderId)");
+    }
+
+    [Fact]
+    public void GenerateActors_ConsumeEventOnNonPublicMethod_EmitsDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Actors.Actor]
+                public sealed class OrderFulfillmentActor {
+                    public OrderFulfillmentActor(Elarion.Actors.IActorContext<System.Guid> context) { }
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    internal System.Threading.Tasks.Task OnShipped(OrderShipped e) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """,
+            assemblyTrigger: """
+            [assembly: Elarion.Abstractions.GenerateActors]
+            [assembly: Elarion.Abstractions.GenerateEventConsumers]
+            """);
+
+        var result = Generate(source, allowedDiagnosticIds: ["ELACT009"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELACT009" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateActors_ConsumeEventDomainEvent_EmitsDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId) : Elarion.Abstractions.Messaging.IDomainEvent;
+
+                [Elarion.Actors.Actor]
+                public sealed class OrderFulfillmentActor {
+                    public OrderFulfillmentActor(Elarion.Actors.IActorContext<System.Guid> context) { }
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.Task OnShipped(OrderShipped e) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """,
+            assemblyTrigger: """
+            [assembly: Elarion.Abstractions.GenerateActors]
+            [assembly: Elarion.Abstractions.GenerateEventConsumers]
+            """);
+
+        var result = Generate(source, allowedDiagnosticIds: ["ELACT010"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELACT010" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateActors_TwoActorsConsumeSameEvent_BothRelaysResolveByKey() {
+        // Two actors consuming one event no longer collide: each relay is registered and resolved keyed by
+        // its own FQN, so both actors receive the event (ADR-0046 — replaces the former ELACT011).
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Actors.Actor]
+                public sealed class InventoryActor {
+                    public InventoryActor(Elarion.Actors.IActorContext<System.Guid> context) { }
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.Task OnShipped(OrderShipped e) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+
+                [Elarion.Actors.Actor]
+                public sealed class ShippingActor {
+                    public ShippingActor(Elarion.Actors.IActorContext<System.Guid> context) { }
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.Task OnShipped(OrderShipped e) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """,
+            assemblyTrigger: """
+            [assembly: Elarion.Abstractions.GenerateActors]
+            [assembly: Elarion.Abstractions.GenerateEventConsumers]
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "ELACT011");
+        generated.Should().Contain("class Inventory_OnShipped_EventRelay");
+        generated.Should().Contain("class Shipping_OnShipped_EventRelay");
+        generated.Should().Contain(
+            "GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Orders.OrderShipped, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Orders.Inventory_OnShipped_EventRelay\")");
+        generated.Should().Contain(
+            "GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Orders.OrderShipped, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Orders.Shipping_OnShipped_EventRelay\")");
     }
 
     [Fact]
@@ -276,12 +450,18 @@ public sealed class ActorRegistrationGeneratorTests {
         var source = CreateSource(
             """
             namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
                 [Elarion.Actors.Actor]
                 public sealed class OrderFulfillmentActor {
                     public OrderFulfillmentActor(Elarion.Actors.IActorContext<System.Guid> context) { }
 
                     public System.Threading.Tasks.Task<int> Count() =>
                         System.Threading.Tasks.Task.FromResult(0);
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.Task OnShipped(OrderShipped e) =>
+                        System.Threading.Tasks.Task.CompletedTask;
                 }
             }
             """);

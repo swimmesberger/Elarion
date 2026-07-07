@@ -367,8 +367,9 @@ public sealed class EventConsumerRegistrationGeneratorTests {
         generated.Should().Contain(
             "ServiceType = typeof(global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>)");
         generated.Should().Contain("InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
+        // Resolved keyed by the consumer's FQN so multiple consumers of one event resolve distinctly (ADR-0046).
         generated.Should().Contain(
-            "var handler = serviceProvider.GetRequiredService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>();");
+            "var handler = serviceProvider.GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Events.ProjectInvoice\");");
         generated.Should().Contain(
             "var result = await handler.HandleAsync((global::Sample.Events.InvoiceCreated)@event, ct).ConfigureAwait(false);");
         generated.Should().Contain(
@@ -376,6 +377,43 @@ public sealed class EventConsumerRegistrationGeneratorTests {
         // The handler is registered by the handler generator, not re-registered here.
         generated.Should().NotContain("TryAddScoped<global::Elarion.Abstractions.IHandler");
         generated.Should().NotContain("TryAddScoped<global::Sample.Events.ProjectInvoice>");
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_TwoHandlerFormConsumersOfSameEvent_ResolveDistinctlyByKey() {
+        // Regression: two handler-form consumers of one event used to collide on the shared
+        // IHandler<TEvent, Result<Unit>> registration (GetRequiredService returned the last, so one silently
+        // never ran). Each is now registered and resolved keyed by its own FQN (ADR-0046).
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record InvoiceCreated(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class NotifyBilling : Elarion.Abstractions.IHandler<InvoiceCreated> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                        InvoiceCreated request, System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                }
+
+                [Elarion.Abstractions.Messaging.ConsumeEvent]
+                public sealed class ReindexInvoice : Elarion.Abstractions.IHandler<InvoiceCreated> {
+                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                        InvoiceCreated request, System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        // Both descriptors resolve their own consumer, keyed by FQN — neither shadows the other. (The keyed
+        // registration side is emitted by the handler generator; see HandlerRegistrationGeneratorTests.)
+        generated.Should().Contain(
+            "serviceProvider.GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Events.NotifyBilling\");");
+        generated.Should().Contain(
+            "serviceProvider.GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Events.ReindexInvoice\");");
     }
 
     [Fact]

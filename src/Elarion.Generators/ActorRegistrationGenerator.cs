@@ -17,6 +17,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
     private const string ActorAttributeMetadataName = "Elarion.Actors.ActorAttribute";
     private const string ReentrantAttributeDisplayName = "Elarion.Actors.ReentrantAttribute";
     private const string ConsumeEventAttributeDisplayName = "Elarion.Abstractions.Messaging.ConsumeEventAttribute";
+    private const string ActorKeyAttributeDisplayName = "Elarion.Actors.ActorKeyAttribute";
+    private const string IntegrationEventMetadataName = "Elarion.Abstractions.Messaging.IIntegrationEvent";
     private const string ActorContextMetadataName = "Elarion.Actors.IActorContext";
     private const string ActorContextGenericMetadataName = "Elarion.Actors.IActorContext`1";
     private const string CancellationTokenMetadataName = "System.Threading.CancellationToken";
@@ -27,6 +29,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
     private const string ActorSingletonKeyFqn = "global::Elarion.Actors.ActorSingletonKey";
     private const string UnitFqn = "global::Elarion.Abstractions.Results.Unit";
+    private const string RelayResponseFqn = "global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>";
     private const string CancellationTokenFqn = "global::System.Threading.CancellationToken";
     private const string TaskFqn = "global::System.Threading.Tasks.Task";
     private const string ValueTaskFqn = "global::System.Threading.Tasks.ValueTask";
@@ -81,15 +84,35 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
-    private static readonly DiagnosticDescriptor ActorCannotConsumeEvents = new(
-        id: "ELACT007",
-        title: "[ConsumeEvent] is not supported on an [Actor]",
+    private static readonly DiagnosticDescriptor ActorEventKeyUnresolved = new(
+        id: "ELACT008",
+        title: "Actor event-consumer key cannot be resolved",
         messageFormat:
-        "Actor '{0}' cannot consume events directly: write a handler-form [ConsumeEvent] consumer that "
-        + "calls the actor's facade (e.g. actors.Get<I{1}>(e.Key).Method(...)). That relay preserves both "
-        + "guarantees in the right order — the consumer pipeline's inbox dedupe runs before the call enters "
-        + "the actor's mailbox — and keeps domain events out of actors (a Plane A consumer shares the "
-        + "caller's transaction; an actor runs in its own scope and cannot).",
+        "The [ConsumeEvent] method '{0}' on keyed actor '{1}' needs an actor key the generator cannot "
+        + "determine: event '{2}' has {3} propert(y/ies) assignable to the key type. Add "
+        + "[ActorKey(nameof({2}.KeyProperty))] naming the event property whose type is the actor's key type.",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ActorConsumeMethodNotPublic = new(
+        id: "ELACT009",
+        title: "Actor [ConsumeEvent] method must be public",
+        messageFormat:
+        "The [ConsumeEvent] method '{0}' on actor '{1}' is not public. The generated relay reaches the actor "
+        + "through its public facade (the same call a hand-written relay makes), so the method must be public.",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ActorConsumeNotIntegrationEvent = new(
+        id: "ELACT010",
+        title: "Actor [ConsumeEvent] method must take one integration event",
+        messageFormat:
+        "The [ConsumeEvent] method '{0}' on actor '{1}' must take exactly one IIntegrationEvent parameter "
+        + "(optionally with a CancellationToken). A domain event, or zero/multiple event parameters, is not a "
+        + "valid actor consumer: a domain-event consumer shares the emitting command's transaction, which an "
+        + "actor cannot. Consume an IIntegrationEvent, or call the actor from the command's handler after commit.",
         category: "Elarion.Generators",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -117,6 +140,16 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         EquatableArray<MethodParameterInfo> Parameters,
         string WorkItemClassName);
 
+    // A [ConsumeEvent] method on an actor (ADR-0046): the generator emits a handler-form relay that
+    // deduplicates the integration event through the inbox and calls this facade method by the resolved key.
+    private sealed record ActorConsumerInfo(
+        string MethodName,
+        string EventTypeFqn,
+        int Order,
+        string? KeyExpression, // "request.OrderId" for a keyed actor; null for a singleton
+        EquatableArray<string> CallArguments, // the facade call args in declared order ("request"/"cancellationToken")
+        string RelayClassName);
+
     private sealed record ActorInfo(
         string ActorTypeFqn,
         string ActorNamespace,
@@ -131,6 +164,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         double CallTimeoutSeconds,
         EquatableArray<CtorParameterInfo> CtorParameters,
         EquatableArray<ActorMethodInfo> Methods,
+        EquatableArray<ActorConsumerInfo> Consumers,
         string HintName);
 
     /// <summary>A discovered actor: either an emission model or the diagnostics that rejected it.</summary>
@@ -186,6 +220,18 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
             foreach (var actor in actors) {
                 spc.AddSource($"{actor.HintName}.Actor.g.cs", SourceText.From(GenerateFacade(actor), Encoding.UTF8));
+                foreach (var consumer in actor.Consumers) {
+                    if (actor.ActorNamespace.Length == 0) {
+                        continue; // a relay needs a namespace (an actor under a module always has one)
+                    }
+
+                    spc.AddSource(
+                        $"{actor.HintName}__{consumer.MethodName}__EventRelay.g.cs",
+                        SourceText.From(GenerateRelayClass(actor, consumer), Encoding.UTF8));
+                    spc.AddSource(
+                        $"{actor.HintName}__{consumer.MethodName}__EventRelayRegistration.g.cs",
+                        SourceText.From(HandlerRegistrationGenerator.GenerateRegistration(BuildRelayHandlerInfo(actor, consumer)), Encoding.UTF8));
+                }
             }
 
             EmitPerModule(spc, modules, actors);
@@ -214,6 +260,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var cancellationTokenSymbol = compilation.GetTypeByMetadataName(CancellationTokenMetadataName);
         var contextSymbol = compilation.GetTypeByMetadataName(ActorContextMetadataName);
         var contextGenericSymbol = compilation.GetTypeByMetadataName(ActorContextGenericMetadataName);
+        var integrationEventSymbol = compilation.GetTypeByMetadataName(IntegrationEventMetadataName);
 
         var diagnostics = new List<DiagnosticInfo>();
 
@@ -249,13 +296,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
         var reentrant = false;
         foreach (var attribute in type.GetAttributes()) {
-            var attributeName = attribute.AttributeClass?.ToDisplayString();
-            if (attributeName == ReentrantAttributeDisplayName) {
+            if (attribute.AttributeClass?.ToDisplayString() == ReentrantAttributeDisplayName) {
                 reentrant = true;
-            }
-            else if (attributeName == ConsumeEventAttributeDisplayName) {
-                diagnostics.Add(DiagnosticInfo.Create(
-                    ActorCannotConsumeEvents, location, typeDisplay, DeriveActorName(type.Name)));
             }
         }
 
@@ -304,15 +346,17 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         }
 
         var keyType = attributeKeyType ?? contextKeyType;
+        var actorName = explicitName ?? DeriveActorName(type.Name);
 
-        // Public instance methods become facade methods; lifecycle hooks stay off the facade.
+        // Public instance methods become facade methods; lifecycle hooks stay off the facade. A method carrying
+        // [ConsumeEvent] additionally gets a generated integration-event relay (ADR-0046).
         var methods = new List<ActorMethodInfo>();
+        var consumers = new List<ActorConsumerInfo>();
         var workItemNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var member in type.GetMembers()) {
             cancellationToken.ThrowIfCancellationRequested();
             if (member is not IMethodSymbol method ||
                 method.MethodKind != MethodKind.Ordinary ||
-                method.DeclaredAccessibility != Accessibility.Public ||
                 method.IsStatic ||
                 method.IsOverride ||
                 method.IsImplicitlyDeclared) {
@@ -323,12 +367,17 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                 continue;
             }
 
-            foreach (var attribute in method.GetAttributes()) {
-                if (attribute.AttributeClass?.ToDisplayString() == ConsumeEventAttributeDisplayName) {
+            var consumeAttribute = GetAttribute(method, ConsumeEventAttributeDisplayName);
+
+            // Non-public methods are off the facade. The relay reaches the actor through its public facade, so a
+            // non-public [ConsumeEvent] method is an error; other non-public methods are simply not facade methods.
+            if (method.DeclaredAccessibility != Accessibility.Public) {
+                if (consumeAttribute is not null) {
                     diagnostics.Add(DiagnosticInfo.Create(
-                        ActorCannotConsumeEvents, LocationInfo.From(method), typeDisplay, DeriveActorName(type.Name)));
-                    break;
+                        ActorConsumeMethodNotPublic, LocationInfo.From(method), method.Name, typeDisplay));
                 }
+
+                continue;
             }
 
             ReturnShape shape;
@@ -395,12 +444,21 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                 resultTypeFqn,
                 parameters.ToEquatableArray(),
                 workItemName));
+
+            if (consumeAttribute is not null) {
+                var consumer = TryCreateConsumer(
+                    method, consumeAttribute, keyType, actorName,
+                    integrationEventSymbol, cancellationTokenSymbol,
+                    typeDisplay, diagnostics);
+                if (consumer is not null) {
+                    consumers.Add(consumer);
+                }
+            }
         }
 
         var actorNamespace = type.ContainingNamespace is { IsGlobalNamespace: false } containing
             ? containing.ToDisplayString()
             : string.Empty;
-        var actorName = explicitName ?? DeriveActorName(type.Name);
         var actor = new ActorInfo(
             type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             actorNamespace,
@@ -415,9 +473,141 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             callTimeoutSeconds,
             ctorParameters.ToEquatableArray(),
             methods.ToEquatableArray(),
+            consumers.ToEquatableArray(),
             GetHintName(type));
 
         return new ActorResult(actor, diagnostics.ToEquatableArray());
+    }
+
+    // Builds the relay model for a [ConsumeEvent] actor method: the single integration-event parameter, the
+    // resolved actor key, and the facade call arguments in declared order. Reports ELACT008/ELACT010 on failure.
+    private static ActorConsumerInfo? TryCreateConsumer(
+        IMethodSymbol method,
+        AttributeData consumeAttribute,
+        ITypeSymbol? keyType,
+        string actorName,
+        INamedTypeSymbol? integrationEventSymbol,
+        INamedTypeSymbol? cancellationTokenSymbol,
+        string typeDisplay,
+        List<DiagnosticInfo> diagnostics) {
+        var nonTokenParameters = method.Parameters
+            .Where(parameter => !IsCancellationToken(parameter.Type, cancellationTokenSymbol))
+            .ToList();
+
+        // Exactly one integration-event parameter; a domain event / zero / multiple is not a valid actor consumer.
+        var eventType = nonTokenParameters.Count == 1 ? nonTokenParameters[0].Type : null;
+        if (eventType is null ||
+            integrationEventSymbol is null ||
+            !Implements(eventType, integrationEventSymbol)) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                ActorConsumeNotIntegrationEvent, LocationInfo.From(method), method.Name, typeDisplay));
+            return null;
+        }
+
+        string? keyExpression = null;
+        if (keyType is not null) {
+            keyExpression = ResolveKeyExpression(method, eventType, keyType, actorName, typeDisplay, diagnostics);
+            if (keyExpression is null) {
+                return null; // ELACT008 already reported
+            }
+        }
+
+        var callArguments = method.Parameters
+            .Select(parameter => IsCancellationToken(parameter.Type, cancellationTokenSymbol)
+                ? "cancellationToken"
+                : "request")
+            .ToEquatableArray();
+
+        return new ActorConsumerInfo(
+            method.Name,
+            eventType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            GetIntNamedArgument(consumeAttribute, "Order", 0),
+            keyExpression,
+            callArguments,
+            $"{actorName}_{method.Name}_EventRelay");
+    }
+
+    // Resolves the "request.{Property}" key accessor: an explicit [ActorKey] wins, else the event's single
+    // property whose type is the actor key type. Reports ELACT008 (and returns null) when neither resolves.
+    private static string? ResolveKeyExpression(
+        IMethodSymbol method,
+        ITypeSymbol eventType,
+        ITypeSymbol keyType,
+        string actorName,
+        string typeDisplay,
+        List<DiagnosticInfo> diagnostics) {
+        var eventDisplay = eventType.ToDisplayString();
+        var candidates = GetKeyCandidateProperties(eventType, keyType);
+
+        var actorKey = GetAttribute(method, ActorKeyAttributeDisplayName);
+        if (actorKey is not null) {
+            var propertyName = actorKey.ConstructorArguments.Length > 0
+                ? actorKey.ConstructorArguments[0].Value as string
+                : null;
+            var match = propertyName is null
+                ? null
+                : candidates.FirstOrDefault(property =>
+                    string.Equals(property.Name, propertyName, StringComparison.Ordinal));
+            if (match is null) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    ActorEventKeyUnresolved, LocationInfo.From(method), method.Name, actorName, eventDisplay,
+                    candidates.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                return null;
+            }
+
+            return $"request.{match.Name}";
+        }
+
+        if (candidates.Count == 1) {
+            return $"request.{candidates[0].Name}";
+        }
+
+        diagnostics.Add(DiagnosticInfo.Create(
+            ActorEventKeyUnresolved, LocationInfo.From(method), method.Name, actorName, eventDisplay,
+            candidates.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        return null;
+    }
+
+    // Public instance properties (of the event and its base types) whose type is exactly the actor key type.
+    private static List<IPropertySymbol> GetKeyCandidateProperties(ITypeSymbol eventType, ITypeSymbol keyType) {
+        var result = new List<IPropertySymbol>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var current = eventType; current is not null && current.SpecialType != SpecialType.System_Object; current = current.BaseType) {
+            foreach (var member in current.GetMembers()) {
+                if (member is IPropertySymbol {
+                        DeclaredAccessibility: Accessibility.Public,
+                        IsStatic: false,
+                        GetMethod: not null,
+                        IsIndexer: false
+                    } property
+                    && seen.Add(property.Name)
+                    && SymbolEqualityComparer.Default.Equals(property.Type, keyType)) {
+                    result.Add(property);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsCancellationToken(ITypeSymbol type, INamedTypeSymbol? cancellationTokenSymbol) =>
+        cancellationTokenSymbol is not null && SymbolEqualityComparer.Default.Equals(type, cancellationTokenSymbol);
+
+    private static bool Implements(ITypeSymbol type, INamedTypeSymbol interfaceType) =>
+        type.AllInterfaces.Any(implemented => SymbolEqualityComparer.Default.Equals(implemented, interfaceType));
+
+    private static AttributeData? GetAttribute(ISymbol symbol, string attributeDisplayName) =>
+        symbol.GetAttributes()
+            .FirstOrDefault(attribute => attribute.AttributeClass?.ToDisplayString() == attributeDisplayName);
+
+    private static int GetIntNamedArgument(AttributeData attribute, string name, int defaultValue) {
+        foreach (var argument in attribute.NamedArguments) {
+            if (argument.Key == name && argument.Value.Value is int value) {
+                return value;
+            }
+        }
+
+        return defaultValue;
     }
 
     private static string DeriveActorName(string typeName) =>
@@ -627,10 +817,112 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             AppendActorRegistration(sb, actor);
         }
 
+        // Actor event relays (ADR-0046) register alongside their actor's module, so they share its feature gate:
+        // a disabled module's relays disappear like its actors.
+        foreach (var actor in actors) {
+            foreach (var consumer in actor.Consumers) {
+                if (actor.ActorNamespace.Length == 0) {
+                    continue;
+                }
+
+                AppendConsumerRegistration(sb, actor, consumer);
+            }
+        }
+
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");
         sb.AppendLine("}");
         return sb.ToString();
+    }
+
+    // The relay: a handler-form IHandler<TEvent, Result<Unit>> that resolves the actor facade by the extracted
+    // key and calls the [ConsumeEvent] method through the public facade — the same call a hand-written relay
+    // makes (ADR-0046). Its inbox is attached by the reused handler-registration emit (BuildRelayHandlerInfo).
+    private static string GenerateRelayClass(ActorInfo actor, ActorConsumerInfo consumer) {
+        var facadeFqn = $"global::{actor.ActorNamespace}.{actor.FacadeInterfaceName}";
+        var callArguments = string.Join(", ", consumer.CallArguments);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("// Source: Elarion.Generators.ActorRegistrationGenerator");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {actor.ActorNamespace};");
+        sb.AppendLine();
+        sb.AppendLine($"// Relays the {consumer.EventTypeFqn} integration event into the {actor.ActorName} actor (ADR-0046).");
+        sb.AppendLine($"internal sealed class {consumer.RelayClassName}");
+        sb.AppendLine($"    : global::Elarion.Abstractions.IHandler<{consumer.EventTypeFqn}, {RelayResponseFqn}>");
+        sb.AppendLine("{");
+        sb.AppendLine("    private readonly global::Elarion.Actors.IActorSystem _actors;");
+        sb.AppendLine();
+        sb.AppendLine($"    public {consumer.RelayClassName}(global::Elarion.Actors.IActorSystem actors) => _actors = actors;");
+        sb.AppendLine();
+        sb.AppendLine($"    public async global::System.Threading.Tasks.ValueTask<{RelayResponseFqn}> HandleAsync(");
+        sb.AppendLine($"        {consumer.EventTypeFqn} request,");
+        sb.AppendLine("        global::System.Threading.CancellationToken cancellationToken)");
+        sb.AppendLine("    {");
+        sb.AppendLine(consumer.KeyExpression is null
+            ? $"        var facade = _actors.Get<{facadeFqn}>();"
+            : $"        var facade = _actors.GetByKey<{facadeFqn}, {actor.KeyTypeFqn}>({consumer.KeyExpression});");
+        sb.AppendLine($"        await facade.{consumer.MethodName}({callArguments}).ConfigureAwait(false);");
+        sb.AppendLine($"        return {RelayResponseFqn}.Success(global::Elarion.Abstractions.Results.Unit.Value);");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    // Synthesizes the HandlerInfo the handler-registration emit consumes, so the relay's decorator chain — the
+    // Consumer-scoped inbox in particular — is the same code path as a hand-written consumer's (ADR-0046).
+    private static HandlerRegistrationGenerator.HandlerInfo BuildRelayHandlerInfo(ActorInfo actor, ActorConsumerInfo consumer) {
+        var relayFqn = $"global::{actor.ActorNamespace}.{consumer.RelayClassName}";
+        var owner = HandlerRegistrationGenerator.TruncateOwner($"{actor.ActorNamespace}.{consumer.RelayClassName}");
+        return new HandlerRegistrationGenerator.HandlerInfo(
+            HandlerFqn: relayFqn,
+            HandlerName: consumer.RelayClassName,
+            RequestFqn: consumer.EventTypeFqn,
+            ResponseFqn: RelayResponseFqn,
+            Namespace: actor.ActorNamespace,
+            Decorators: EquatableArray<HandlerRegistrationGenerator.DecoratorInfo>.Empty,
+            ResiliencePolicyName: null,
+            Cacheable: null,
+            CacheInvalidation: null,
+            HasAuthorization: false,
+            RequireAuthenticatedByDefault: false,
+            ResourceBindings: EquatableArray<HandlerRegistrationGenerator.ResourceBindingInfo>.Empty,
+            HasFeatureGates: false,
+            HasValidation: false,
+            Idempotent: HandlerRegistrationGenerator.CreateInboxInfo(owner, UnitFqn),
+            Audit: null,
+            VariantContractDeps: EquatableArray<string>.Empty,
+            // Keyed by the relay's own FQN so it coexists with any other consumer of the same event (ADR-0046).
+            EventConsumerKey: relayFqn,
+            Diagnostics: EquatableArray<DiagnosticInfo>.Empty);
+    }
+
+    // Wires a relay into the module's Add{Module}Actors: register its decorated pipeline, then the integration
+    // subscription pointing at the IHandler<TEvent, Result<Unit>> interface (matches the event-consumer emit).
+    private static void AppendConsumerRegistration(StringBuilder sb, ActorInfo actor, ActorConsumerInfo consumer) {
+        var interfaceFqn = $"global::Elarion.Abstractions.IHandler<{consumer.EventTypeFqn}, {RelayResponseFqn}>";
+        var registrationFqn = $"global::{actor.ActorNamespace}.{consumer.RelayClassName}Registration";
+        var relayFqn = $"global::{actor.ActorNamespace}.{consumer.RelayClassName}";
+        sb.AppendLine();
+        sb.AppendLine($"        {registrationFqn}.Add{consumer.RelayClassName}(services);");
+        sb.AppendLine("        services.AddSingleton(new global::Elarion.Abstractions.Messaging.EventSubscriptionDescriptor");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            EventType = typeof({consumer.EventTypeFqn}),");
+        sb.AppendLine("            Plane = global::Elarion.Abstractions.Messaging.EventPlane.Integration,");
+        sb.AppendLine($"            ServiceType = typeof({interfaceFqn}),");
+        sb.AppendLine($"            Order = {consumer.Order},");
+        sb.AppendLine("            InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
+        sb.AppendLine("            {");
+        sb.AppendLine($"                var handler = serviceProvider.GetRequiredKeyedService<{interfaceFqn}>(\"{relayFqn}\");");
+        sb.AppendLine($"                var result = await handler.HandleAsync(({consumer.EventTypeFqn})@event, ct).ConfigureAwait(false);");
+        sb.AppendLine("                if (!result.IsSuccess)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        });");
     }
 
     private static void AppendActorRegistration(StringBuilder sb, ActorInfo actor) {

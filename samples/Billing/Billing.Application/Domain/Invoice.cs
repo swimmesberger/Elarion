@@ -18,6 +18,7 @@ public sealed class Invoice {
     public DateOnly DueDate { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? SentAt { get; set; }
+    public DateTimeOffset? OverdueNoticeSentAt { get; set; }
 }
 
 public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Cancelled }
