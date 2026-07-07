@@ -109,6 +109,11 @@ internal sealed class MicrosoftResiliencePipelineRunner(
         };
 
     private static Activity? StartActivity(ResiliencePolicyReference policy) {
+        // Guard before interpolating: with no listener the name string would still be built each call.
+        if (!ResilienceTelemetry.Source.HasListeners()) {
+            return null;
+        }
+
         var activity = ResilienceTelemetry.Source.StartActivity(
             $"resilience {policy.Name}",
             ActivityKind.Internal);

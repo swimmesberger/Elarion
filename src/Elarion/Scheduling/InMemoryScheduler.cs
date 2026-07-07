@@ -137,9 +137,9 @@ public sealed class InMemoryScheduler(
             0,
             null);
 
-        using var activity = SchedulerTelemetry.Source.StartActivity(
-            $"scheduler schedule {descriptor.Name}",
-            ActivityKind.Internal);
+        using var activity = SchedulerTelemetry.Source.HasListeners()
+            ? SchedulerTelemetry.Source.StartActivity($"scheduler schedule {descriptor.Name}", ActivityKind.Internal)
+            : null;
         var started = Stopwatch.GetTimestamp();
         var outcome = "success";
         if (activity?.IsAllDataRequested == true) {
@@ -1091,9 +1091,10 @@ public sealed class InMemoryScheduler(
         string? outcomeMessage = null;
         var retryScheduled = false;
 
-        using var activity = item.TraceParent is { } traceParent
-            ? SchedulerTelemetry.Source.StartActivity($"scheduled {descriptor.Name}", ActivityKind.Internal, traceParent)
-            : SchedulerTelemetry.Source.StartActivity($"scheduled {descriptor.Name}", ActivityKind.Internal);
+        using var activity = !SchedulerTelemetry.Source.HasListeners() ? null
+            : item.TraceParent is { } traceParent
+                ? SchedulerTelemetry.Source.StartActivity($"scheduled {descriptor.Name}", ActivityKind.Internal, traceParent)
+                : SchedulerTelemetry.Source.StartActivity($"scheduled {descriptor.Name}", ActivityKind.Internal);
         if (activity?.IsAllDataRequested == true) {
             SetJobTags(activity, item);
             activity.SetTag("scheduler.job.scheduling_lag_ms", Math.Max(0, lag.TotalMilliseconds));
@@ -1501,9 +1502,10 @@ public sealed class InMemoryScheduler(
     }
 
     private static void RecordSkipped(ScheduledJobWorkItem item, string reason) {
-        using var activity = item.TraceParent is { } traceParent
-            ? SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} skipped", ActivityKind.Internal, traceParent)
-            : SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} skipped", ActivityKind.Internal);
+        using var activity = !SchedulerTelemetry.Source.HasListeners() ? null
+            : item.TraceParent is { } traceParent
+                ? SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} skipped", ActivityKind.Internal, traceParent)
+                : SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} skipped", ActivityKind.Internal);
         if (activity?.IsAllDataRequested == true) {
             SetJobTags(activity, item);
             activity.SetTag("scheduler.job.status", "skipped");
@@ -1579,9 +1581,9 @@ public sealed class InMemoryScheduler(
         };
 
     private static void RecordEnqueue(ScheduledJobWorkItem item) {
-        using var activity = SchedulerTelemetry.Source.StartActivity(
-            $"scheduler enqueue {item.Descriptor.Name}",
-            ActivityKind.Internal);
+        using var activity = SchedulerTelemetry.Source.HasListeners()
+            ? SchedulerTelemetry.Source.StartActivity($"scheduler enqueue {item.Descriptor.Name}", ActivityKind.Internal)
+            : null;
         if (activity?.IsAllDataRequested == true) {
             activity.SetTag("scheduler.operation", "enqueue");
             SetJobTags(activity, item);
@@ -1592,9 +1594,10 @@ public sealed class InMemoryScheduler(
     }
 
     private static void RecordPreExecutionOutcome(ScheduledJobWorkItem item, string status, string reason) {
-        using var activity = item.TraceParent is { } traceParent
-            ? SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} {status}", ActivityKind.Internal, traceParent)
-            : SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} {status}", ActivityKind.Internal);
+        using var activity = !SchedulerTelemetry.Source.HasListeners() ? null
+            : item.TraceParent is { } traceParent
+                ? SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} {status}", ActivityKind.Internal, traceParent)
+                : SchedulerTelemetry.Source.StartActivity($"scheduled {item.Descriptor.Name} {status}", ActivityKind.Internal);
         if (activity?.IsAllDataRequested == true) {
             SetJobTags(activity, item);
             activity.SetTag("scheduler.job.status", status);

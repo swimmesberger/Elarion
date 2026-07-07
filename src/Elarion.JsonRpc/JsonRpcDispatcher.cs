@@ -227,6 +227,12 @@ public sealed class JsonRpcDispatcher {
     }
 
     private static Activity? StartRequestActivity(JsonRpcRequest request, string method) {
+        // Guard before interpolating: with no listener the name string would still be built on every
+        // dispatched request (the hot path). Tags already carry the method.
+        if (!JsonRpcTelemetry.Source.HasListeners()) {
+            return null;
+        }
+
         var activity = JsonRpcTelemetry.Source.StartActivity(
             $"jsonrpc {method}",
             ActivityKind.Server);

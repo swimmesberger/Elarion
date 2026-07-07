@@ -28,8 +28,12 @@ public sealed class TracingDecorator<TRequest, TResponse>(
 
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        using var activity = HandlerTelemetry.Source.StartActivity(
-            $"handle {handlerName}", ActivityKind.Internal);
+        // Interpolate the span name only when a listener is attached — otherwise a string would be built
+        // on every handler call (the hot path) despite StartActivity returning null. HasListeners rather
+        // than a cached name because two handlers sharing TRequest/TResponse share this closed generic.
+        using var activity = HandlerTelemetry.Source.HasListeners()
+            ? HandlerTelemetry.Source.StartActivity($"handle {handlerName}", ActivityKind.Internal)
+            : null;
         if (activity is not null) {
             activity.SetTag("elarion.handler", handlerName);
             activity.SetTag("elarion.handler.request_type", typeof(TRequest).Name);

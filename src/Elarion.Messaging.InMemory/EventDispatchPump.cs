@@ -136,8 +136,9 @@ internal sealed class EventDispatchPump : BackgroundService {
         // Parent the consume span on the trace context captured at publish time, so the after-commit
         // consumers stay in the publishing operation's trace despite running on the pump's thread.
         var eventName = envelope.EventType.Name;
-        using var activity = EventTelemetry.Source.StartActivity(
-            $"consume {eventName}", ActivityKind.Internal, envelope.TraceParent);
+        using var activity = EventTelemetry.Source.HasListeners()
+            ? EventTelemetry.Source.StartActivity($"consume {eventName}", ActivityKind.Internal, envelope.TraceParent)
+            : null;
         if (activity is not null) {
             activity.SetTag("messaging.event.type", eventName);
             activity.SetTag("messaging.event.plane", "integration");
