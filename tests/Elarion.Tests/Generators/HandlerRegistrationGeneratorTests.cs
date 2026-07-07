@@ -290,7 +290,10 @@ public sealed class HandlerRegistrationGeneratorTests {
             "private static readonly global::Elarion.Abstractions.Pipeline.HandlerMetadata __handlerMetadata =");
         generated.Should().Contain(
             "new(typeof(global::Sample.App.DoThing), typeof(global::Sample.App.DoThingCommand), "
-            + "typeof(global::Elarion.Abstractions.Result<global::Sample.App.DoThingResponse>));");
+            + "typeof(global::Elarion.Abstractions.Result<global::Sample.App.DoThingResponse>),");
+        // ...plus a late-bound accessor onto the resolved-pipeline cache.
+        generated.Should().Contain(
+            "static () => __pipeline ?? global::System.Array.Empty<global::Elarion.Abstractions.Pipeline.PipelineStep>());");
         // ...and passes it to the (outermost) decorator instead of resolving it from DI.
         generated.Should().Contain("global::Sample.App.AuthorizationDecorator<");
         generated.Should().Contain("(handler, __handlerMetadata)");

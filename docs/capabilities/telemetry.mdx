@@ -79,6 +79,17 @@ no opt-in attribute required. The handler span adds the application-operation bo
 parent of the decorator chain, so JSON-RPC, scheduler, cache, and resilience child spans all appear
 inside it.
 
+The span carries `elarion.handler`, `elarion.handler.request_type`, `elarion.handler.outcome`
+(`ok`/`error`/`exception`), and **`elarion.handler.pipeline`** — the decorators actually wrapping this
+handler in this process, in execution order (e.g. `Tracing,Authorization,Validation,Transaction,Audit?`).
+A trailing `?` marks a decorator that attached through a runtime gate — a soft-attached one whose presence
+depends on a registered service (the audit trail, the idempotency inbox) or a `[DecoratorList]` decorator
+with an `AppliesTo` predicate — so it answers "why didn't caching/auditing apply here?" straight from a
+trace. The same list is available programmatically as
+[`HandlerMetadata.Pipeline`](/docs/concepts/decorator-pipelines) (`IHandlerPipeline` — its `Steps` and
+`Contains(typeof(SomeDecorator<,>))`), populated once the handler is first resolved. All tags are bounded
+(one constant value per handler type), so they are span-safe and never carry payloads or identity.
+
 ## User & request context
 
 Every handler span is enriched with **who made the call**, and a matching logging scope carries that

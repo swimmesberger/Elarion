@@ -79,34 +79,21 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     private static void AppendHandlerMetadataField(StringBuilder sb, HandlerInfo handler) {
-        // Only emit the metadata singleton when a pipeline decorator actually asks for it (or the auto-attached
-        // authorization decorator needs it). It captures the concrete handler type so an attribute-reading
-        // decorator sees the true handler regardless of its position in the chain (the inner.GetType() approach
-        // only works when innermost — a fail-open footgun).
-        var wantsMetadata = handler.HasAuthorization || handler.HasFeatureGates || handler.Audit is not null;
-        foreach (var dec in handler.Decorators) {
-            // An `AppliesTo(HandlerMetadata)` predicate or a constructor HandlerMetadata dependency both need it.
-            if (dec.HasAppliesTo) {
-                wantsMetadata = true;
-                break;
-            }
+        // The resolved-pipeline cache: BuildPipeline publishes the decorators it actually attached in this
+        // process here on first resolution, and HandlerMetadata.Pipeline reads it. `volatile` so the publish is
+        // visible across threads (a concurrent first resolution just recomputes the identical list — benign).
+        sb.AppendLine(
+            "    private static volatile global::System.Collections.Generic.IReadOnlyList<global::Elarion.Abstractions.Pipeline.PipelineStep>? __pipeline;");
+        sb.AppendLine();
 
-            foreach (var dep in dec.ExtraDependencies) {
-                if (dep.IsHandlerMetadata) {
-                    wantsMetadata = true;
-                    break;
-                }
-            }
-
-            if (wantsMetadata)
-                break;
-        }
-
-        if (!wantsMetadata)
-            return;
-
+        // The metadata singleton is always emitted now: TracingDecorator (always the outermost decorator) reads
+        // it to surface the pipeline, and it captures the concrete handler type so an attribute-reading decorator
+        // sees the true handler regardless of its position (the inner.GetType() approach only works when innermost
+        // — a fail-open footgun). The pipeline accessor is late-bound (a static lambda over the cache above), so
+        // it reads empty until first resolution and the composed list after, without mutable state on the singleton.
         sb.AppendLine("    private static readonly global::Elarion.Abstractions.Pipeline.HandlerMetadata __handlerMetadata =");
-        sb.AppendLine($"        new(typeof({handler.HandlerFqn}), typeof({handler.RequestFqn}), typeof({handler.ResponseFqn}));");
+        sb.AppendLine($"        new(typeof({handler.HandlerFqn}), typeof({handler.RequestFqn}), typeof({handler.ResponseFqn}),");
+        sb.AppendLine("            static () => __pipeline ?? global::System.Array.Empty<global::Elarion.Abstractions.Pipeline.PipelineStep>());");
     }
 
     private static void AppendRegistrationMethod(StringBuilder sb, HandlerInfo handler) {
@@ -153,6 +140,11 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("    {");
         sb.AppendLine($"                {ifaceFqn} handler =");
         sb.AppendLine($"                    sp.GetRequiredService<{handler.HandlerFqn}>();");
+        // Collect the decorators actually attached, but only on the first resolution (the composition is constant
+        // per process); after the cache is published every later resolution skips collection and allocates nothing.
+        sb.AppendLine("                var __steps = __pipeline is null");
+        sb.AppendLine("                    ? new global::System.Collections.Generic.List<global::Elarion.Abstractions.Pipeline.PipelineStep>()");
+        sb.AppendLine("                    : null;");
 
         AppendCacheDecorator(sb, handler);
         // The audit success recorder sits inside the transaction owners (the [DecoratorList] TransactionDecorator
@@ -191,6 +183,9 @@ public sealed partial class HandlerRegistrationGenerator {
         // any cache/resilience/pipeline child spans.
         AppendTracingDecorator(sb, handler);
 
+        // Steps were collected innermost-first (each decorator wraps the previous); reverse to execution order
+        // (outermost-first) and publish once. Later resolutions found __pipeline non-null and skipped collection.
+        sb.AppendLine("                if (__steps is not null) { __steps.Reverse(); __pipeline = __steps; }");
         sb.AppendLine("                return handler;");
         sb.AppendLine("    }");
 
@@ -221,6 +216,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Caching.IHandlerCache>(),");
         sb.AppendLine($"                    new {handler.HandlerName}CachePolicy());");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.CacheDecorator<,>", conditional: false);
     }
 
     private static void AppendPipelineDecorators(StringBuilder sb, ImmutableArray<DecoratorInfo> decorators) {
@@ -230,7 +226,9 @@ public sealed partial class HandlerRegistrationGenerator {
             var indent = "                ";
             if (dec.HasAppliesTo) {
                 // Attach only when the decorator's AppliesTo(HandlerMetadata) predicate returned true (cached above).
+                // Braced so the pipeline-step record is added inside the same conditional as the attachment.
                 sb.AppendLine($"{indent}if (__pipelineApplies{i})");
+                sb.AppendLine($"{indent}{{");
                 indent += "    ";
             }
 
@@ -241,7 +239,19 @@ public sealed partial class HandlerRegistrationGenerator {
                     : $", sp.GetRequiredService<{dep.Fqn}>()");
             }
             sb.AppendLine(");");
+            // An AppliesTo custom attaches through a runtime gate, so it is a conditional pipeline step.
+            AppendPipelineStep(sb, indent, dec.OpenGenericFqn, dec.HasAppliesTo);
+
+            if (dec.HasAppliesTo)
+                sb.AppendLine("                }");
         }
+    }
+
+    // Records one attached decorator into the resolved-pipeline collector (null after the first resolution).
+    // `conditional` is true when attachment went through a runtime gate (AppliesTo or a soft service check).
+    private static void AppendPipelineStep(StringBuilder sb, string indent, string openGenericFqn, bool conditional) {
+        sb.AppendLine(
+            $"{indent}__steps?.Add(new global::Elarion.Abstractions.Pipeline.PipelineStep(typeof({openGenericFqn}), {(conditional ? "true" : "false")}));");
     }
 
     private static void AppendResilienceDecorator(StringBuilder sb, HandlerInfo handler) {
@@ -252,6 +262,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Resilience.IResiliencePipelineRunner>(),");
         sb.AppendLine($"                    new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference {{ Name = {FormatStringLiteral(handler.ResiliencePolicyName)} }});");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.ResilienceDecorator<,>", conditional: false);
     }
 
     private static void AppendIdempotencyDecorator(StringBuilder sb, HandlerInfo handler) {
@@ -284,6 +295,8 @@ public sealed partial class HandlerRegistrationGenerator {
             ? $"{indent}    sp.GetService<global::Elarion.Abstractions.Identity.ICurrentUser>(),"
             : $"{indent}    sp.GetRequiredService<global::Elarion.Abstractions.Identity.ICurrentUser>(),");
         sb.AppendLine($"{indent}    sp.GetRequiredService<global::Elarion.Abstractions.Serialization.IElarionJsonSerialization>().Options);");
+        // The inbox attaches softly (runtime service check), so it is conditional; explicit [Idempotent] always attaches.
+        AppendPipelineStep(sb, indent, "global::Elarion.Pipeline.IdempotencyDecorator<,>", conditional: isInbox);
 
         if (isInbox)
             sb.AppendLine("                }");
@@ -426,6 +439,7 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         sb.AppendLine(");");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.AuthorizationDecorator<,>", conditional: false);
     }
 
     private static void AppendValidationDecorator(StringBuilder sb, HandlerInfo handler) {
@@ -435,6 +449,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"                handler = new global::Elarion.Pipeline.ValidationDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Validation.IRequestValidator>());");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.ValidationDecorator<,>", conditional: false);
     }
 
     private static void AppendFeatureGateDecorator(StringBuilder sb, HandlerInfo handler) {
@@ -445,6 +460,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    __handlerMetadata,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Features.IFeatureFlagService>());");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.FeatureGateDecorator<,>", conditional: false);
     }
 
     // Both audit decorators attach softly (ADR-0045): a host without an IAuditTrail — no auditing package, a
@@ -460,6 +476,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                        handler,");
         sb.AppendLine("                        sp.GetRequiredService<global::Elarion.Auditing.AuditScope>(),");
         sb.AppendLine("                        __auditCommitTrail);");
+        AppendPipelineStep(sb, "                    ", "global::Elarion.Pipeline.AuditCommitDecorator<,>", conditional: true);
         sb.AppendLine("                }");
     }
 
@@ -479,13 +496,16 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                        sp.GetRequiredService<global::Elarion.Auditing.AuditScope>(),");
         sb.AppendLine("                        __auditTrail,");
         sb.AppendLine("                        sp.GetService<global::Elarion.Abstractions.Identity.ICurrentUser>());");
+        AppendPipelineStep(sb, "                    ", "global::Elarion.Pipeline.AuditDecorator<,>", conditional: true);
         sb.AppendLine("                }");
     }
 
     private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {
         sb.AppendLine($"                handler = new global::Elarion.Pipeline.TracingDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
-        sb.AppendLine($"                    {FormatStringLiteral(handler.HandlerName)});");
+        sb.AppendLine($"                    {FormatStringLiteral(handler.HandlerName)},");
+        sb.AppendLine("                    __handlerMetadata);");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.TracingDecorator<,>", conditional: false);
     }
 
     // Runs every registered IHandlerContextEnricher (the built-in UserContextEnricher is on by default with
@@ -496,6 +516,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>(),");
         sb.AppendLine("                    sp.GetService<global::Microsoft.Extensions.Logging.ILoggerFactory>());");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.HandlerContextEnrichmentDecorator<,>", conditional: false);
     }
 
     private static void AppendCacheInvalidationDecorator(StringBuilder sb, HandlerInfo handler) {
@@ -506,6 +527,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Caching.IHandlerCache>(),");
         sb.AppendLine($"                    new {handler.HandlerName}CacheInvalidationPolicy());");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.CacheInvalidationDecorator<,>", conditional: false);
     }
 
     private static void AppendCachePolicy(StringBuilder sb, HandlerInfo handler) {

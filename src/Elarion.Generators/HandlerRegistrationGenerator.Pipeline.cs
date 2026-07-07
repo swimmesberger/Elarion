@@ -173,9 +173,13 @@ public sealed partial class HandlerRegistrationGenerator {
 
             var closedType = definition.Construct(requestType, responseType);
             var decoratorFqn = closedType.ToDisplayString(fmt);
+            // The open generic definition for `typeof(Foo<,>)` — pipeline decorators are always arity-2
+            // (IHandler<TRequest, TResponse>), so strip the closed type arguments and re-add the unbound `<,>`.
+            var openGenericFqn = decoratorFqn.Substring(0, decoratorFqn.IndexOf('<')) + "<,>";
 
             builder.Add(new DecoratorInfo(
                 decoratorFqn,
+                openGenericFqn,
                 GetDecoratorExtraDependencies(closedType, fmt),
                 predicate == DecoratorPredicate.Result.Conditional));
         }

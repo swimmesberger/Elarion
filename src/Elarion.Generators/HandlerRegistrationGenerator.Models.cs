@@ -85,6 +85,7 @@ public sealed partial class HandlerRegistrationGenerator {
 
     private sealed record DecoratorInfo(
         string DecoratorFqn,
+        string OpenGenericFqn,
         EquatableArray<DecoratorDependency> ExtraDependencies,
         bool HasAppliesTo
     );

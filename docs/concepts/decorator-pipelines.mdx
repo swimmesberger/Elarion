@@ -201,6 +201,18 @@ auto-attached gates keep a fixed position *outside* your list — tracing →
 validation failure never reaches your decorators or opens a transaction, denied attempts are still
 audited, and a success audit record commits atomically with the handler's writes.
 
+## Inspecting the resolved pipeline
+
+The decorators that actually wrapped a handler in the current process are available at run time on
+[`HandlerMetadata.Pipeline`](/docs/concepts/handlers) — an `IHandlerPipeline` exposing `Steps` (each a
+`PipelineStep(Type Decorator, bool Conditional)`, outermost first) and `Contains(typeof(SomeDecorator<,>))`.
+It reflects the *resolved* pipeline, including decorators that attach only when a backing service is
+registered (audit, the idempotency inbox) or when an `AppliesTo` predicate matched — those are flagged
+`Conditional`. It is empty until the handler is first resolved from DI (the composition is only known then),
+and reflects one composition per process. The framework surfaces the same list on every handler span as the
+`elarion.handler.pipeline` [tag](/docs/capabilities/telemetry#handler-tracing), so "why didn't caching apply
+here?" is answerable from a trace.
+
 ## Reading the handler's attributes (do not use `inner.GetType()`)
 
 A common need is a decorator that reads an attribute off the handler — for example an

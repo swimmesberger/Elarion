@@ -58,10 +58,19 @@ public sealed class HandlerMetadata {
     /// <param name="handlerType">The concrete handler type at the bottom of the pipeline.</param>
     /// <param name="requestType">The handler's request type (<c>TRequest</c>).</param>
     /// <param name="responseType">The handler's response type (<c>TResponse</c>, typically a <c>Result&lt;T&gt;</c>).</param>
-    public HandlerMetadata(Type handlerType, Type requestType, Type responseType) {
+    /// <param name="pipelineAccessor">
+    /// Optional late-bound accessor onto the resolved pipeline for <see cref="Pipeline"/> (the generator supplies
+    /// one reading its per-handler cache). When omitted, <see cref="Pipeline"/> reports an empty pipeline.
+    /// </param>
+    public HandlerMetadata(
+        Type handlerType,
+        Type requestType,
+        Type responseType,
+        Func<IReadOnlyList<PipelineStep>>? pipelineAccessor = null) {
         HandlerType = handlerType ?? throw new ArgumentNullException(nameof(handlerType));
         RequestType = requestType ?? throw new ArgumentNullException(nameof(requestType));
         ResponseType = responseType ?? throw new ArgumentNullException(nameof(responseType));
+        Pipeline = new HandlerPipeline(pipelineAccessor);
     }
 
     /// <summary>The concrete handler type, independent of the decorator's position in the chain.</summary>
@@ -72,6 +81,14 @@ public sealed class HandlerMetadata {
 
     /// <summary>The handler's response type (the <c>TResponse</c>; typically a <c>Result&lt;T&gt;</c>).</summary>
     public Type ResponseType { get; }
+
+    /// <summary>
+    /// The decorators actually wrapping this handler in the current process, in execution order. Unlike the
+    /// members above, this is <b>runtime-resolved</b>: empty until the handler is first resolved from DI, then
+    /// the composed pipeline (see <see cref="IHandlerPipeline"/> for its caveats). Surfaced on the handler span
+    /// as <c>elarion.handler.pipeline</c>.
+    /// </summary>
+    public IHandlerPipeline Pipeline { get; }
 
     /// <summary>
     /// Returns the single attribute of type <typeparamref name="TAttribute"/> declared on the handler,

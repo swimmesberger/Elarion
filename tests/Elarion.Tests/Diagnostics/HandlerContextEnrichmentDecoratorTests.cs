@@ -160,7 +160,8 @@ public sealed class HandlerContextEnrichmentDecoratorTests {
     // so Activity.Current during enrichment is the handler span the tags land on.
     private static IHandler<Request, Result<int>> Trace(
         IEnumerable<IHandlerContextEnricher> enrichers, ILoggerFactory? loggerFactory = null) =>
-        new TracingDecorator<Request, Result<int>>(Build(enrichers, loggerFactory), "H");
+        new TracingDecorator<Request, Result<int>>(Build(enrichers, loggerFactory), "H",
+            new global::Elarion.Abstractions.Pipeline.HandlerMetadata(typeof(Request), typeof(Request), typeof(Result<int>)));
 
     private static UserContextEnricher UserEnricher(ICurrentUser user, UserContextEnrichmentOptions? options = null) =>
         new(user, options ?? new UserContextEnrichmentOptions());
