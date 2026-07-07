@@ -97,7 +97,7 @@ builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbConte
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
 builder.Services.AddElarionOutbox<BillingDbContext>();
 
-// Infrastructure capability: the concrete email sender behind the module's port. (The audit trail is a
+// Infrastructure capability: the concrete email sender behind the module's port. (The activity log is a
 // Core module capability — a [ModuleContract] with a Core-internal [Service] impl — so it self-registers.)
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 

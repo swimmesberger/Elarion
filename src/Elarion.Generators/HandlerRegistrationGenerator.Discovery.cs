@@ -21,8 +21,9 @@ public sealed partial class HandlerRegistrationGenerator {
         if (candidates.IsEmpty)
             return EquatableArray<HandlerInfo>.Empty;
 
-        var (moduleDecoratorLists, moduleAuthDefaults) = BuildModuleMaps(compilation, modules, ct);
+        var (moduleDecoratorLists, moduleAuthDefaults, moduleAuditDefaults) = BuildModuleMaps(compilation, modules, ct);
         var assemblyRequireAuthenticated = ResolveAssemblyAuthorizationDefault(compilation);
+        var assemblyAuditDefault = ResolveAssemblyAuditDefault(compilation);
         var variantContractSet = variantContracts.IsEmpty
             ? null
             : new HashSet<string>(variantContracts.AsImmutableArray, StringComparer.Ordinal);
@@ -47,7 +48,8 @@ public sealed partial class HandlerRegistrationGenerator {
 
             var info = GetHandlerInfo(
                 classDecl, classSymbol, compilation, moduleDecoratorLists, moduleAuthDefaults,
-                assemblyRequireAuthenticated, variantContractSet, validationWalk, ct);
+                assemblyRequireAuthenticated, moduleAuditDefaults, assemblyAuditDefault, modules,
+                variantContractSet, validationWalk, ct);
             if (info is not null)
                 builder.Add(info);
         }
@@ -104,6 +106,9 @@ public sealed partial class HandlerRegistrationGenerator {
         IReadOnlyList<(string Namespace, AttributeData DecoratorList)> moduleDecoratorLists,
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated,
+        IReadOnlyList<string> moduleAuditDefaults,
+        bool assemblyAuditDefault,
+        EquatableArray<ModuleScanner.Module> modules,
         HashSet<string>? variantContracts,
         ValidatableTypeWalker.Context? validationWalk,
         CancellationToken ct) {
@@ -159,6 +164,10 @@ public sealed partial class HandlerRegistrationGenerator {
         idempotent ??= ParseInbox(
             classDecl, classSymbol, requestType, responseType, compilation, fmt, diagnostics);
 
+        var audit = ParseAudit(
+            classSymbol, requestType, compilation, moduleAuditDefaults, assemblyAuditDefault,
+            isEventConsumer, modules);
+
         var variantContractDeps = GetVariantContractDeps(classSymbol, variantContracts, fmt);
 
         return new HandlerInfo(
@@ -177,6 +186,7 @@ public sealed partial class HandlerRegistrationGenerator {
             hasFeatureGates,
             hasValidation,
             idempotent,
+            audit,
             variantContractDeps,
             diagnostics.ToImmutable());
     }
@@ -520,6 +530,95 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         return hasModule ? bestValue : assemblyRequireAuthenticated;
+    }
+
+    // Decides whether the audit decorators attach (ADR-0045). Attachment is a compile-time presence decision
+    // like authorization: an explicit [Auditable] (unless Enabled = false), or [ElarionAuditDefaults] at
+    // module/assembly scope — under which every ICommand handler is audited (queries and event consumers stay
+    // explicit-only; a consumer runs on a delivery scope with no caller, so default-driven attachment would
+    // only produce actor-less noise). No IResultFailureFactory guard is needed: the decorators never
+    // short-circuit, they only observe. Attachment is additionally soft at runtime (no IAuditTrail => no-op),
+    // so no diagnostic fires for a missing sink.
+    private static AuditInfo? ParseAudit(
+        INamedTypeSymbol classSymbol,
+        ITypeSymbol requestType,
+        Compilation compilation,
+        IReadOnlyList<string> moduleAuditDefaults,
+        bool assemblyAuditDefault,
+        bool isEventConsumer,
+        EquatableArray<ModuleScanner.Module> modules) {
+        AttributeData? auditable = null;
+        // [Auditable] declares Inherited = false, but mirror the other gates' base-chain walk deliberately: a
+        // shared audited base handler is a reasonable shape, and the runtime HandlerMetadata read is inherit-aware.
+        foreach (var attribute in EnumerateInheritedAttributes(classSymbol)) {
+            if (attribute.AttributeClass?.ToDisplayString() == AuditableAttributeMetadataName) {
+                auditable = attribute;
+                break;
+            }
+        }
+
+        if (auditable is not null) {
+            foreach (var named in auditable.NamedArguments) {
+                if (named.Key == "Enabled" && named.Value.Value is false)
+                    return null;
+            }
+        } else {
+            if (isEventConsumer ||
+                !RequestImplementsMarker(requestType, compilation, CommandMarkerMetadataName) ||
+                !ResolveAuditDefault(classSymbol, moduleAuditDefaults, assemblyAuditDefault)) {
+                return null;
+            }
+        }
+
+        var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
+        var module = ModuleScanner.FindBest(handlerNamespace, modules.AsImmutableArray);
+        return new AuditInfo(ResolveAuditAction(classSymbol, module?.Name), module?.Name);
+    }
+
+    private static bool ResolveAuditDefault(
+        INamedTypeSymbol classSymbol,
+        IReadOnlyList<string> moduleAuditDefaults,
+        bool assemblyAuditDefault) {
+        if (assemblyAuditDefault)
+            return true;
+
+        var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
+        foreach (var moduleNamespace in moduleAuditDefaults) {
+            if (IsNamespaceInScope(handlerNamespace, moduleNamespace))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ResolveAssemblyAuditDefault(Compilation compilation) {
+        var defaultsAttr = compilation.GetTypeByMetadataName(AuditDefaultsAttributeMetadataName);
+        if (defaultsAttr is null)
+            return false;
+
+        return compilation.Assembly.GetAttributes()
+            .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, defaultsAttr));
+    }
+
+    // The audit record's action name, resolved exactly like the RPC map resolves a wire name (an explicit
+    // [Handler("…")] verbatim, else "{camelCasedModule}.{inferredOperation}") so audit records and the exported
+    // schema agree on names. A handler with no [Handler] attribute still gets the name it WOULD have.
+    private static string ResolveAuditAction(INamedTypeSymbol classSymbol, string? moduleName) {
+        foreach (var attribute in classSymbol.GetAttributes()) {
+            if (attribute.AttributeClass?.ToDisplayString() != RpcMethodEmission.HandlerAttributeMetadataName)
+                continue;
+
+            if (attribute.ConstructorArguments.Length > 0 &&
+                attribute.ConstructorArguments[0].Value is string explicitName &&
+                explicitName.Length > 0) {
+                return explicitName;
+            }
+
+            break;
+        }
+
+        var operation = RpcMethodEmission.InferOperationName(classSymbol.Name);
+        return moduleName is null ? operation : $"{RpcMethodEmission.CamelCaseModule(moduleName)}.{operation}";
     }
 
     private static bool ResolveAssemblyAuthorizationDefault(Compilation compilation) {

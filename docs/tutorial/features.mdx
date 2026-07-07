@@ -106,22 +106,30 @@ using Elarion.Abstractions;
 
 <Step>
 
-### Add the audit trail (a Core module capability)
+### Add the activity log (a Core module capability)
 
-Command handlers should record *who* did *what* — and audit history is something users **read back**, so
-those records are **queryable domain data**, not a write-only log. That makes audit a domain capability the
+Command handlers should record *who* did *what* — and activity history is something users **read back**, so
+those records are **queryable domain data**, not a write-only log. That makes it a domain capability the
 foundation **Core** module owns and publishes as a
 [`[ModuleContract]`](/docs/concepts/cross-module-communication), which other modules consume to record. (A
 write-only sink would instead be a platform *port* in infrastructure — the deciding test is whether the app
 queries the data as domain.)
 
-The record is an ordinary shared-kernel entity, with its `[EntityConfiguration]` added in `Persistence`
-beside the others (it drives the generated `DbSet<AuditEntry>`):
+<Callout type="info">
+  This section builds a small *domain-owned* activity log as the tutorial's teaching example for module
+  contracts and services. For compliance-grade auditing — outcome records committed atomically with the
+  transaction, denied-attempt capture, automatic field-level diffs — use the framework's
+  [audit trail](/docs/concepts/auditing) (`[Auditable]` + `Elarion.Auditing.EntityFrameworkCore`) instead of
+  hand-rolling one.
+</Callout>
 
-```csharp title="src/Billing.Application/Domain/AuditEntry.cs"
+The record is an ordinary shared-kernel entity, with its `[EntityConfiguration]` added in `Persistence`
+beside the others (it drives the generated `DbSet<ActivityEntry>`):
+
+```csharp title="src/Billing.Application/Domain/ActivityEntry.cs"
 namespace Billing.Application.Domain;
 
-public sealed class AuditEntry {
+public sealed class ActivityEntry {
     public Guid Id { get; set; }
     public required string ActorId { get; set; }
     public required string Action { get; set; }
@@ -134,18 +142,18 @@ Core publishes the capability as a contract and keeps the implementation `intern
 [`ICurrentUser`](/docs/capabilities/current-user) — a transport-neutral view of the caller, so application
 code never touches `HttpContext` — and persists through the shared `BillingDbContext`:
 
-```csharp title="src/Billing.Application/Modules/Core/Contracts/IAuditTrail.cs"
+```csharp title="src/Billing.Application/Modules/Core/Contracts/IActivityLog.cs"
 using Elarion.Abstractions.Modules;
 
 namespace Billing.Application.Modules.Core.Contracts;
 
 [ModuleContract]
-public interface IAuditTrail {
+public interface IActivityLog {
     ValueTask RecordAsync(string action, string subjectId, CancellationToken ct = default);
 }
 ```
 
-```csharp title="src/Billing.Application/Modules/Core/Services/AuditTrail.cs"
+```csharp title="src/Billing.Application/Modules/Core/Services/ActivityLog.cs"
 using Billing.Application.Domain;
 using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Persistence;
@@ -154,10 +162,10 @@ using Elarion.Abstractions.Identity;
 
 namespace Billing.Application.Modules.Core.Services;
 
-[Service(typeof(IAuditTrail))]
-internal sealed class AuditTrail(BillingDbContext db, ICurrentUser user, TimeProvider clock) : IAuditTrail {
+[Service(typeof(IActivityLog))]
+internal sealed class ActivityLog(BillingDbContext db, ICurrentUser user, TimeProvider clock) : IActivityLog {
     public async ValueTask RecordAsync(string action, string subjectId, CancellationToken ct = default) {
-        db.AuditEntries.Add(new AuditEntry {
+        db.ActivityEntries.Add(new ActivityEntry {
             Id = Guid.CreateVersion7(), ActorId = user.UserId, Action = action,
             SubjectId = subjectId, At = clock.GetUtcNow(),
         });
@@ -166,10 +174,10 @@ internal sealed class AuditTrail(BillingDbContext db, ICurrentUser user, TimePro
 }
 ```
 
-`[Service(typeof(IAuditTrail))]` registers the internal impl against the contract in Core's generated
-`ConfigureDefaultServices` — no host wiring. `Clients` and `Invoicing` inject `IAuditTrail` (a contract, so
+`[Service(typeof(IActivityLog))]` registers the internal impl against the contract in Core's generated
+`ConfigureDefaultServices` — no host wiring. `Clients` and `Invoicing` inject `IActivityLog` (a contract, so
 `ELMOD002` allows the cross-module dependency) and call `RecordAsync`; the entry persists in the same
-transaction as the command. If you later back audit onto Grafana instead, that goes behind its *own* port
+transaction as the command. If you later back the log onto Grafana instead, that goes behind its *own* port
 (`IGrafanaClient`, adapter in `Billing.Infrastructure`) — the contract is unchanged.
 
 </Step>
@@ -235,7 +243,7 @@ public sealed class CreateClient(
     BillingDbContext db,
     ICurrentUser user,
     IClientNumberGenerator numbers,
-    IAuditTrail audit,
+    IActivityLog activityLog,
     TimeProvider clock
 ) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
     public sealed record Command : ICommand {
@@ -268,7 +276,7 @@ public sealed class CreateClient(
 
         db.Clients.Add(client);
         await db.SaveChangesAsync(ct);
-        await audit.RecordAsync("client.created", client.Id.ToString(), ct);
+        await activityLog.RecordAsync("client.created", client.Id.ToString(), ct);
 
         return new Response(client.Id, client.Number);
     }

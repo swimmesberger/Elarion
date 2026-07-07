@@ -83,7 +83,7 @@ public sealed partial class HandlerRegistrationGenerator {
         // authorization decorator needs it). It captures the concrete handler type so an attribute-reading
         // decorator sees the true handler regardless of its position in the chain (the inner.GetType() approach
         // only works when innermost — a fail-open footgun).
-        var wantsMetadata = handler.HasAuthorization || handler.HasFeatureGates;
+        var wantsMetadata = handler.HasAuthorization || handler.HasFeatureGates || handler.Audit is not null;
         foreach (var dec in handler.Decorators) {
             // An `AppliesTo(HandlerMetadata)` predicate or a constructor HandlerMetadata dependency both need it.
             if (dec.HasAppliesTo) {
@@ -155,6 +155,11 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"                    sp.GetRequiredService<{handler.HandlerFqn}>();");
 
         AppendCacheDecorator(sb, handler);
+        // The audit success recorder sits inside the transaction owners (the [DecoratorList] TransactionDecorator
+        // and IdempotencyDecorator below), so its RecordAsync write enlists in the caller's unit of work and the
+        // success record commits atomically with the handler's business writes (ADR-0045). It wraps the cache so
+        // an [Auditable] cached query still records the read on a cache hit.
+        AppendAuditCommitDecorator(sb, handler);
         AppendPipelineDecorators(sb, handler.Decorators);
         // Idempotency owns the unit-of-work transaction for [Idempotent] commands, so it wraps the handler and
         // the inner custom decorators — inside validation/resilience/cache-invalidation/feature-gate/authorization
@@ -173,6 +178,10 @@ public sealed partial class HandlerRegistrationGenerator {
         // Authorization is the outermost functional gate (just inside tracing): a denied request never touches
         // caching, the pipeline (validation/transaction), or the handler, yet the denial is still traced.
         AppendAuthorizationDecorator(sb, handler);
+        // The outer audit decorator wraps authorization so denied attempts are observed and recorded on the
+        // detached path (their transaction — if any — is gone by the time a failure surfaces here). It sits
+        // inside enrichment/tracing so Activity.Current supplies the record's correlation id (ADR-0045).
+        AppendAuditDecorator(sb, handler);
         // Context enrichment sits just inside tracing so it tags the handler span (Activity.Current) and its log
         // scope wraps authorization/validation/handler — a denied or invalid request is still attributed to its
         // caller. Runs the built-in user-context enricher plus any host IHandlerContextEnricher; on by default across
@@ -436,6 +445,41 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                    handler,");
         sb.AppendLine("                    __handlerMetadata,");
         sb.AppendLine("                    sp.GetRequiredService<global::Elarion.Abstractions.Features.IFeatureFlagService>());");
+    }
+
+    // Both audit decorators attach softly (ADR-0045): a host without an IAuditTrail — no auditing package, a
+    // bare test host — degrades to the un-audited pipeline rather than failing resolution. When a trail IS
+    // registered, AddElarionAuditing has registered the AuditScope alongside it, so that resolve stays hard.
+    private static void AppendAuditCommitDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (handler.Audit is null)
+            return;
+
+        sb.AppendLine("                if (sp.GetService<global::Elarion.Abstractions.Auditing.IAuditTrail>() is { } __auditCommitTrail)");
+        sb.AppendLine("                {");
+        sb.AppendLine($"                    handler = new global::Elarion.Pipeline.AuditCommitDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                        handler,");
+        sb.AppendLine("                        sp.GetRequiredService<global::Elarion.Auditing.AuditScope>(),");
+        sb.AppendLine("                        __auditCommitTrail);");
+        sb.AppendLine("                }");
+    }
+
+    private static void AppendAuditDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (handler.Audit is null)
+            return;
+
+        sb.AppendLine("                if (sp.GetService<global::Elarion.Abstractions.Auditing.IAuditTrail>() is { } __auditTrail)");
+        sb.AppendLine("                {");
+        sb.AppendLine($"                    handler = new global::Elarion.Pipeline.AuditDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+        sb.AppendLine("                        handler,");
+        sb.AppendLine("                        __handlerMetadata,");
+        sb.AppendLine($"                        {FormatStringLiteral(handler.Audit.Action)},");
+        sb.AppendLine(handler.Audit.Module is null
+            ? "                        null,"
+            : $"                        {FormatStringLiteral(handler.Audit.Module)},");
+        sb.AppendLine("                        sp.GetRequiredService<global::Elarion.Auditing.AuditScope>(),");
+        sb.AppendLine("                        __auditTrail,");
+        sb.AppendLine("                        sp.GetService<global::Elarion.Abstractions.Identity.ICurrentUser>());");
+        sb.AppendLine("                }");
     }
 
     private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {

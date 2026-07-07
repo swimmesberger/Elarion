@@ -179,8 +179,8 @@ resolver and any extra, non-generated wiring in `ConfigureServices`. See
 [Conventions](/docs/reference/conventions).
 
 **Core** is a foundation module — `Kind = AppModuleKind.Core` keeps it always enabled and initialized
-before feature modules. It owns always-on *domain* capabilities other modules build on — such as the audit
-trail you add next, which Core publishes as a `[ModuleContract]` so `Clients` and `Invoicing` can record
+before feature modules. It owns always-on *domain* capabilities other modules build on — such as the activity
+log you add next, which Core publishes as a `[ModuleContract]` so `Clients` and `Invoicing` can record
 through it.
 
 ```csharp title="src/Billing.Application/Modules/Core/CoreModule.cs"

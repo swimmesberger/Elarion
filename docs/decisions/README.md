@@ -65,3 +65,4 @@ designs that are not yet implemented.
 - [ADR-0042: In-memory actors — mailbox-protected state machines with generated typed facades](0042-in-memory-actors.md)
 - [ADR-0043: Client events — after-commit facts projected to the browser over SSE — Proposed](0043-client-events.md)
 - [ADR-0044: Streaming requests and responses — deferred, with the design pre-decided — Proposed](0044-streaming-requests-and-responses.md)
+- [ADR-0045: Handler-action audit trail — `[Auditable]`, `IAuditScope`, and the transactional EF sink](0045-handler-action-audit-trail.md)

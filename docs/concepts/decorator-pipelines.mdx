@@ -194,9 +194,12 @@ Decorators run in the order listed in `[DecoratorList]`, outermost first. A pipe
 `[Logging, DbConstraint]` logs outermost and translates constraint violations closest to the handler.
 Choose the order deliberately; the generated code makes it explicit and inspectable. The framework's
 auto-attached gates keep a fixed position *outside* your list — tracing →
-[context enrichment](/docs/capabilities/telemetry#user--request-context) → authorization → feature gate
-→ [validation](/docs/concepts/validation) → your `[DecoratorList]` decorators → handler — so a
-validation failure never reaches your decorators or opens a transaction.
+[context enrichment](/docs/capabilities/telemetry#user--request-context) →
+[audit](/docs/concepts/auditing) (outcome observer) → authorization → feature gate
+→ [validation](/docs/concepts/validation) → your `[DecoratorList]` decorators →
+[audit](/docs/concepts/auditing) (success recorder, inside your transaction decorator) → handler — so a
+validation failure never reaches your decorators or opens a transaction, denied attempts are still
+audited, and a success audit record commits atomically with the handler's writes.
 
 ## Reading the handler's attributes (do not use `inner.GetType()`)
 
@@ -254,22 +257,20 @@ that is meaningful for exactly one request kind, using the
 [`ICommand`/`IQuery` markers](/docs/concepts/handlers#command-vs-query):
 
 ```csharp
-// Compile-time filtered: only command handlers ever get an audit entry; queries skip it entirely.
-public sealed class AuditDecorator<TRequest, TResponse>(
+// Compile-time filtered: only command handlers are throttled; queries skip it entirely.
+public sealed class ThrottleDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
-    IAuditTrail audit
+    ICommandThrottle throttle
 ) : IHandler<TRequest, TResponse>
     where TRequest : ICommand {
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        var response = await inner.HandleAsync(request, ct);
-        if (response is IResultLike { IsSuccess: true })
-            await audit.RecordAsync(typeof(TRequest).Name, request.GetType().Name, ct);
-        return response;
+        using var lease = await throttle.AcquireAsync(typeof(TRequest).Name, ct);
+        return await inner.HandleAsync(request, ct);
     }
 }
 ```
 
-A query handler never has `AuditDecorator` in its generated chain — the filtering is resolved when the
+A query handler never has `ThrottleDecorator` in its generated chain — the filtering is resolved when the
 pipeline is emitted. Decorators with no constraints (the common case) apply to every handler.
 
 A `where` clause expresses a single bound (an AND of "implements X"). When attachment is a **union** or
@@ -307,7 +308,7 @@ public static bool AppliesTo(HandlerMetadata handler) =>
 
 ```csharp
 public static bool AppliesTo(HandlerMetadata handler) =>
-    handler.GetAttribute<AuditableAttribute>() is not null;
+    handler.GetAttribute<ThrottledAttribute>() is not null;
 ```
 
 There is a single supported signature on purpose. It must be `public static bool AppliesTo(HandlerMetadata)`;

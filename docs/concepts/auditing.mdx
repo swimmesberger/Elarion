@@ -1,0 +1,155 @@
+---
+title: Audit trail
+description: Declarative, transport-neutral audit records — who performed which action on which resource, with field-level change capture, success records committed atomically with the business transaction.
+---
+
+Auditing in Elarion answers the question every application eventually gets asked: **who did what?** You
+annotate a handler with `[Auditable]`; generated decorators record one structured `AuditRecord` per
+invocation — actor, action, resource, outcome, timestamp, correlation — and the EF Core sink captures
+**field-level changes** (old → new values) for opted-in entities automatically. A successful command's
+record commits **atomically with the handler's business writes**; denied and failed attempts are recorded on
+a detached path that survives the rollback. Under every transport identically.
+
+It is the same declarative shape as [authorization](authorization.mdx) and
+[idempotency](idempotency.mdx): a class-level attribute, generated decorators, a seam-in-Abstractions /
+impl-in-package split ([ADR-0045](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0045-handler-action-audit-trail.md)).
+
+## Usage
+
+```csharp
+[Auditable(Resource = "property")]
+public sealed class UpdatePropertyHandler(AppDbContext db, IAuditScope audit)
+    : IHandler<UpdatePropertyCommand, Result<PropertyResponse>> {
+    public async ValueTask<Result<PropertyResponse>> HandleAsync(UpdatePropertyCommand request, CancellationToken ct) {
+        var property = await db.Properties.SingleAsync(p => p.Id == request.Id, ct);
+        property.Street = request.Street;
+        audit.SetResource("property", property.Id.ToString());   // which one (optional but recommended)
+        return Result<PropertyResponse>.Success(new() { Id = property.Id });
+    }
+}
+```
+
+Wire the durable sink over your `DbContext`, and let the generator map the table:
+
+```csharp
+// Host
+services.AddElarionAuditingEntityFrameworkCore<AppDbContext>();
+
+// Data layer — the generator emits the DbSet and table mapping (ELAUD001 without [GenerateDbSets])
+[GenerateDbSets]
+[GenerateElarionAuditing]
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+```
+
+Attachment is **soft**: without a registered `IAuditTrail` the decorators never attach and the pipeline is
+unchanged, so a module using `[Auditable]` runs fine in a host without auditing.
+
+To flip a whole assembly to audited-by-default, opt in once — every **command** handler in scope is audited
+unless it opts out; queries stay explicit-only (read auditing is a deliberate, per-handler decision):
+
+```csharp
+[assembly: ElarionAuditDefaults]
+
+[Auditable(Enabled = false)]   // the per-handler opt-out under defaults
+public sealed class ImportLegacyDataHandler : IHandler<…> { … }
+```
+
+## What a record contains
+
+One append-only row per audited invocation, with the searchable facts as structured, indexed columns:
+
+| Field | Content |
+| --- | --- |
+| `Action` / `Module` | The handler's wire name (`properties.update`) — resolved at compile time exactly like the RPC schema name, so audit records and the exported schema agree. |
+| `UserId` | The actor from `ICurrentUser` (`null` for anonymous/system callers). |
+| `ResourceType` / `ResourceId` | What was acted on, from `IAuditScope.SetResource` (falling back to `[Auditable(Resource = …)]`). |
+| `ParentResourceType` / `ParentResourceId` | Optional aggregate reference — "fire extinguisher X **on property Y**" — so the record surfaces on the parent's audit view without joining domain tables. |
+| `Outcome` / `ErrorKind` | `Succeeded`, `Failed`, or `Denied` (unauthorized/forbidden), plus the error kind. |
+| `CorrelationId` | The current trace id, linking the record to its span. |
+| `Changes` | Field-level `{entity, entityId, property, oldValue, newValue, kind}` diffs (JSON). |
+| `Details` | App-supplied string facts (display names, rule ids — keep values free of secrets). |
+
+The classic search — *"alle Änderungen an Feuerlöschern durch Max, letzte Woche"* — is a plain indexed
+`WHERE` over those columns plus [keyset pagination](../capabilities/pagination.mdx); querying and display
+stay app-owned (the framework never renders audit UI).
+
+## Automatic change capture
+
+Opt an entity in with `[Audited]`, exclude sensitive columns with `[AuditIgnore]`:
+
+```csharp
+[Audited]
+public sealed class Property {
+    public required Guid Id { get; init; }
+    public required string Street { get; set; }
+
+    [AuditIgnore]                       // never captured, even when it changes
+    public string? InternalNote { get; set; }
+}
+```
+
+While an audited handler runs, a `SaveChangesInterceptor` invokes the registered
+`IAuditChangeContributor`s at **every flush** — the only point where EF still holds original values (a
+mid-handler `SaveChangesAsync` resets them, so a single "read the change tracker before commit" would be
+lossy. The sink also flushes pending writes before materializing the record, so the common
+"mutate and let the commit flush persist" handler still gets its diffs). The default contributor diffs
+`[Audited]` entities: modified properties as old → new pairs, creations and deletions as entity-level facts.
+
+Capture is **opt-in per entity** on purpose: auto-capturing every column is how password hashes end up in
+audit logs, and opt-in keeps framework tables (outbox, idempotency, the audit log itself) out of capture.
+
+Contributors are **additive** (`IEnumerable<>` multi-registration, like `IHandlerContextEnricher`) — the
+composition levers are plain DI:
+
+```csharp
+services.AddElarionAuditChangeContributor<JsonDocumentDiffContributor>();  // add a specialist
+// …or remove the default IAuditChangeContributor descriptor for action-records-only auditing.
+```
+
+**The known hole:** `ExecuteUpdate`/`ExecuteDelete`/raw SQL bypass the change tracker, so the interceptor
+never sees them. The handler covers those paths itself — same scope, same record:
+
+```csharp
+var moved = await db.Properties.Where(p => p.PortfolioId == source)
+    .ExecuteUpdateAsync(s => s.SetProperty(p => p.PortfolioId, target), ct);
+audit.AddChange(new AuditChange {
+    Entity = "Property", Property = "PortfolioId",
+    OldValue = source.ToString(), NewValue = target.ToString(),
+    Kind = AuditChangeKind.Modified,
+});
+audit.AddDetail("affectedRows", moved.ToString());
+```
+
+## Outcome semantics
+
+The transaction makes the outcome paths physically asymmetric, so two thin decorators cooperate:
+
+- **Success** — recorded *inside* the unit of work: the row commits atomically with the business writes.
+  A record can never claim an action that rolled back, and a committed action can never lose its record.
+- **Failure / denial** — recorded *detached* (own scope and connection): the caller's transaction is gone
+  or rolling back, and the record must survive it. Denials (`Unauthorized`/`Forbidden`) are observed
+  outside the authorization gate, so rejected attempts are audited too. Failure records carry the changes
+  from flushes that actually happened — attempted, not applied; the `Outcome` says which.
+- **Idempotent replay** — deliberately records nothing: the action executed once, the trail says so once.
+- **Cancellation** — cooperative cancellation is not an auditable outcome.
+
+## Retention
+
+**Off by default** — an audit trail that silently deletes itself is a compliance bug. Opt in deliberately:
+
+```csharp
+services.AddElarionAuditingEntityFrameworkCore<AppDbContext>(o => {
+    o.RetainFor = TimeSpan.FromDays(365 * 2);
+});
+```
+
+A hosted worker then purges older rows on an indexed probe (idempotent; safe on every node).
+
+## Scale and non-goals
+
+The append-only one-Postgres table serves the framework's 1–10-node tier. Past that — or for SIEM
+shipping, tamper-evidence chains, long-term archival — replace the `IAuditTrail` registration; the
+attributes, scope, and capture seams are unchanged. Full temporal entity history (point-in-time
+reconstruction, undo) is a non-goal: the trail records *actions with their diffs*, not versioned state.

@@ -464,14 +464,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         var name = moduleName is null
             ? entry.MethodName
-            : $"{CamelCaseModule(moduleName)}.{entry.MethodName}";
+            : $"{RpcMethodEmission.CamelCaseModule(moduleName)}.{entry.MethodName}";
         return entry with { MethodName = name, IsNameInferred = false };
     }
-
-    private static string CamelCaseModule(string moduleName) =>
-        moduleName.Length > 0 && char.IsUpper(moduleName[0])
-            ? char.ToLowerInvariant(moduleName[0]) + moduleName.Substring(1)
-            : moduleName;
 
     private static List<T> Bucket<T>(Dictionary<string, List<T>> map, string key)
     {

@@ -22,6 +22,10 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
     private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string IdempotentAttributeMetadataName = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
+    private const string AuditableAttributeMetadataName = "Elarion.Abstractions.Auditing.AuditableAttribute";
+    private const string AuditDefaultsAttributeMetadataName = "Elarion.Abstractions.Auditing.ElarionAuditDefaultsAttribute";
+    private const string AuditTrailMetadataName = "Elarion.Abstractions.Auditing.IAuditTrail";
+    private const string CommandMarkerMetadataName = "Elarion.Abstractions.ICommand";
     private const string AllowDuplicatesAttributeMetadataName = "Elarion.Abstractions.Messaging.AllowDuplicatesAttribute";
     private const string ElarionValidationExtensionsMetadataName = "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
@@ -44,8 +48,17 @@ public sealed partial class HandlerRegistrationGenerator {
         bool HasFeatureGates,
         bool HasValidation,
         IdempotentInfo? Idempotent,
+        AuditInfo? Audit,
         EquatableArray<string> VariantContractDeps,
         EquatableArray<DiagnosticInfo> Diagnostics
+    );
+
+    // Audit attachment (ADR-0045): Action is the compile-resolved wire name ("{module}.{operation}" — an
+    // explicit [Handler("…")] name verbatim, else inferred exactly like the RPC map so audit records and the
+    // schema agree); Module is the owning module's name (null when unscoped).
+    private sealed record AuditInfo(
+        string Action,
+        string? Module
     );
 
     // Owner is the Consumer-scope owner discriminator (the consuming handler's identity) baked into the generated

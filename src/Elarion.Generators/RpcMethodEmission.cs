@@ -190,6 +190,15 @@ internal static class RpcMethodEmission
         return char.IsUpper(name[0]) ? char.ToLowerInvariant(name[0]) + name.Substring(1) : name;
     }
 
+    /// <summary>
+    /// Camel-cases a module name for use as a wire-name prefix ("Clients" -&gt; "clients"), the counterpart of
+    /// <see cref="InferOperationName"/> when composing "{module}.{operation}".
+    /// </summary>
+    public static string CamelCaseModule(string moduleName) =>
+        moduleName.Length > 0 && char.IsUpper(moduleName[0])
+            ? char.ToLowerInvariant(moduleName[0]) + moduleName.Substring(1)
+            : moduleName;
+
     // HandlerTransports flags: JsonRpc = 1, Mcp = 2, All = 3 (default when the named argument is absent).
     private static (bool OnJsonRpc, bool OnMcp) ReadTransports(AttributeData attr)
     {

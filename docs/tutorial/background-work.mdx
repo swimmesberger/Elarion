@@ -259,7 +259,7 @@ public sealed class CreateInvoice(
     ICurrentUser user,
     IJobScheduler scheduler,
     IIntegrationEventBus integrationEvents,
-    IAuditTrail audit,
+    IActivityLog activityLog,
     TimeProvider clock
 ) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
     public sealed record Command : ICommand {
@@ -308,7 +308,7 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        await audit.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
+        await activityLog.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }

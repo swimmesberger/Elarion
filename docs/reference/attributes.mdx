@@ -384,6 +384,41 @@ See [Idempotency](/docs/concepts/idempotency).
 
 See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
 
+## Auditing
+
+### `[Auditable]`
+
+- **Package:** `Elarion.Abstractions` (Auditing) · **Applies to:** class (single, not inherited)
+- **Triggers:** marks a handler for audit recording (ADR-0045) — every invocation produces one structured `AuditRecord` (actor, action, resource, outcome, correlation, field-level changes). The handler-registration generator auto-attaches two decorators: the outer observer (just outside authorization, recording denials/failures on a detached path that survives the rollback) and the inner success recorder (inside the transaction, so the success record commits atomically with the business writes). Attachment is soft — no registered `IAuditTrail`, no change to the pipeline. Declarative, transport-neutral, and provider-agnostic — the same shape as `[Idempotent]`/`[FeatureGate]`.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Enabled` | `bool` (init) | `true` | Set `false` to opt a handler out under `[ElarionAuditDefaults]`. |
+| `Resource` | `string?` (init) | `null` | The resource type recorded when the handler does not call `IAuditScope.SetResource` at runtime. |
+
+See [Audit trail](/docs/concepts/auditing).
+
+### `[ElarionAuditDefaults]`
+
+- **Package:** `Elarion.Abstractions` (Auditing) · **Applies to:** assembly or module class (single, not inherited)
+- **Triggers:** opts the scope into audit-by-default: every **command** handler is audited as if it carried `[Auditable]`, unless it opts out with `[Auditable(Enabled = false)]`. Queries and event consumers are never audited by defaults (read auditing is per-handler; a delivery scope has no caller). Mirrors `[ElarionAuthorizationDefaults]`.
+
+See [Audit trail](/docs/concepts/auditing).
+
+### `[Audited]`
+
+- **Package:** `Elarion.Abstractions` (Auditing) · **Applies to:** entity class (single, not inherited)
+- **Triggers:** opts an entity into automatic change capture: while an audited handler runs, the EF change-capture interceptor records field-level `{property, oldValue, newValue}` diffs for this entity on every flush, attached to the invocation's record. Opt-in on purpose (fail-closed PII stance; keeps framework tables out of capture). `ExecuteUpdate`/raw-SQL writes bypass the change tracker — the handler records those via `IAuditScope.AddChange`.
+
+See [Audit trail](/docs/concepts/auditing).
+
+### `[AuditIgnore]`
+
+- **Package:** `Elarion.Abstractions` (Auditing) · **Applies to:** property (single, not inherited)
+- **Triggers:** excludes a property of an `[Audited]` entity from automatic change capture — its values never appear in a record. For sensitive columns (password hashes, tokens, personal data) and noisy technical columns.
+
+See [Audit trail](/docs/concepts/auditing).
+
 ## Validation
 
 There is **no Elarion validation attribute**. Request validation is declared with the standard
@@ -571,6 +606,19 @@ See [Resource authorization](/docs/concepts/resource-authorization) and [Identit
 | `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
 See [Idempotency](/docs/concepts/idempotency).
+
+### `[GenerateElarionAuditing]`
+
+- **Package:** `Elarion.Auditing.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<AuditLogEntry>` and applies the audit-log model configuration through the EF generator's model-config seam — the append-only table backing the durable `IAuditTrail`. The hand-written equivalent is `modelBuilder.UseElarionAuditing()`. Mirrors `[GenerateElarionIdempotencyKeys]`. Requires `[GenerateDbSets]` (else `ELAUD001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_audit_log` / `ElarionAuditLog` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Audit trail](/docs/concepts/auditing).
 
 ### `[GenerateElarionOutbox]`
 
