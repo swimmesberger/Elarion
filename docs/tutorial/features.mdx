@@ -262,7 +262,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 
 [Handler("clients.create")]
 [CacheInvalidate("clients")]
-[Auditable(Resource = "client")]   // framework audit trail: one compliance record per invocation
+[Auditable]   // framework audit trail: one compliance record per invocation (SetResource pins which client)
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(
     BillingDbContext db,

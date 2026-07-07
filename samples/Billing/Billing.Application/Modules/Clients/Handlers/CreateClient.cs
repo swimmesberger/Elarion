@@ -22,7 +22,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 [HttpEndpoint("clients")]
 [RequirePermission("clients", Verbs.Write)]
 [CacheInvalidate("clients")]
-[Auditable(Resource = "client")]   // framework audit trail: one compliance record per invocation (ADR-0045)
+[Auditable]   // framework audit trail (ADR-0045): one compliance record per invocation; SetResource below pins the resource
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(
     BillingDbContext db,

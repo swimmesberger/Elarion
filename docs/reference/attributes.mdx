@@ -394,7 +394,7 @@ See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-du
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `Enabled` | `bool` (init) | `true` | Set `false` to opt a handler out under `[ElarionAuditDefaults]`. |
-| `Resource` | `string?` (init) | `null` | The resource type recorded when the handler does not call `IAuditScope.SetResource` at runtime. |
+| `Resource` | `string?` (init) | `null` | Fallback resource **type** only (the record's `ResourceType`) — used when the handler does not call `IAuditScope.SetResource`. It never sets the resource *id*; `SetResource(type, id)` supplies both and its type wins, so don't set `Resource` when the handler calls `SetResource`. |
 
 See [Audit trail](/docs/concepts/auditing).
 

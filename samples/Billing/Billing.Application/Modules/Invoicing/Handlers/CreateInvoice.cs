@@ -23,7 +23,7 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 [Handler("invoices.create")]
 [RequirePermission("invoices", Verbs.Write)]
 [CacheInvalidate("invoices")]
-[Auditable(Resource = "invoice")]   // framework audit trail (ADR-0045): one compliance record per invocation
+[Auditable]   // framework audit trail (ADR-0045): one compliance record per invocation; SetResource below pins the resource
 [Description("Creates a draft invoice and sends it to the client in the background.")]
 public sealed class CreateInvoice(
     BillingDbContext db,

@@ -17,20 +17,39 @@ It is the same declarative shape as [authorization](authorization.mdx) and
 [idempotency](idempotency.mdx): a class-level attribute, generated decorators, a seam-in-Abstractions /
 impl-in-package split ([ADR-0045](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0045-handler-action-audit-trail.md)).
 
-## The two layers
+## The three axes
 
-They are independent — the record works alone; the diffs are an upgrade on top of it.
+Auditing has three **independent** switches — turn on only what a handler needs. None depends on the others:
+you can capture field changes without naming a resource, name a resource without capturing changes, or record
+nothing but the bare who/what/outcome.
 
-| Layer | Gives you | Needs |
+| Axis | Question it answers | Turn on with |
 | --- | --- | --- |
-| **Action record** | who · what action · which resource · outcome · when · correlation | `[Auditable]` on the handler + the sink registered. **Nothing on your entities.** |
-| **Field-level diffs** *(optional)* | `Street: "Old" → "New"` in the record's `Changes` | `[Audited]` on the entity (`[AuditIgnore]` to exclude columns) — **or** hand-written via `IAuditScope.AddChange` |
+| **The record** | *who did which action, with what outcome?* | `[Auditable]` on the handler (or assembly-wide `[ElarionAuditDefaults]`) — **always**, nothing on your entities |
+| **The resource** | *which thing was the action about?* (the indexed "browse by resource" view) | `[Auditable(Resource = "property")]` (type only) and/or `IAuditScope.SetResource("property", id)` (type + id) |
+| **The changes** | *which fields changed, old → new?* | `[Audited]` on the entity (automatic), or `IAuditScope.AddChange(…)` (manual) |
 
-Start with the record; add `[Audited]` only on the entities where "which fields changed" actually matters.
+### The resource: type vs. id
+
+This is the part that trips people up. The record has **two** resource columns, filled from **two** places —
+and `Resource` on the attribute only fills the first:
+
+| Column | Filled by | Example |
+| --- | --- | --- |
+| `ResourceType` | `[Auditable(Resource = "property")]` **or** `SetResource(type, …)` | `"property"` |
+| `ResourceId` | **only** `SetResource(type, id)` | `"42"` |
+
+- `[Auditable(Resource = "property")]` **alone** → *"someone updated **a** property"* — a resource *type* label
+  with zero handler code and no `IAuditScope`, so the log is filterable as "all property actions" but the record
+  isn't tied to a specific row.
+- `audit.SetResource("property", "42")` → *"…property **#42**"* — type **and** id, so it appears on that one
+  property's history. `SetResource`'s type argument wins, so **don't repeat `Resource` on the attribute when you
+  call `SetResource`** — the attribute's `Resource` is purely the fallback type for handlers that *don't* call it.
 
 ## Usage
 
-The minimum is a single attribute — the record writes itself, with no `IAuditScope` and no entity annotation:
+The minimum is one attribute — the record writes itself, no `IAuditScope`, nothing on your entities. `Resource`
+tags it with a resource *type*:
 
 ```csharp
 [Auditable(Resource = "property")]
@@ -44,26 +63,37 @@ public sealed class UpdatePropertyHandler(AppDbContext db)
 }
 ```
 
-That already records *"user X performed `properties.update` on a property, succeeded, at T"*. To pin **which**
-property (an id, not just the type), inject `IAuditScope` and name the resource — `[Auditable(Resource = …)]`
-supplies only the type as a fallback:
+That records *"user X performed `properties.update` on a property, succeeded, at T"* — searchable by action and
+by resource type, but not tied to a specific row. To pin **which** property *and* capture the changed fields,
+inject `IAuditScope`, call `SetResource` with the id, and mark the entity `[Audited]`:
 
 ```csharp
-[Auditable(Resource = "property")]
+[Auditable]   // no Resource — SetResource below supplies the type (and the id)
 public sealed class UpdatePropertyHandler(AppDbContext db, IAuditScope audit)
     : IHandler<UpdatePropertyCommand, Result<PropertyResponse>> {
     public async ValueTask<Result<PropertyResponse>> HandleAsync(UpdatePropertyCommand request, CancellationToken ct) {
         var property = await db.Properties.SingleAsync(p => p.Id == request.Id, ct);
-        property.Street = request.Street;
-        audit.SetResource("property", property.Id.ToString());   // records ResourceId (and optionally a parent)
+        property.Street = request.Street;                        // captured old → new automatically ([Audited] on Property)
+        audit.SetResource("property", property.Id.ToString());   // ResourceType + ResourceId (optionally a parent)
         return Result<PropertyResponse>.Success(new() { Id = property.Id });
     }
 }
 ```
 
-Neither handler mentions field diffs — those arrive only once you mark `Property` with `[Audited]`
-([below](#automatic-change-capture-optional)). Wire the durable sink over your `DbContext`, and let the
-generator map the table:
+## When to use what
+
+- **Just `[Auditable]`** — you need who/action/outcome and nothing more (e.g. *"someone exported the report"*).
+- **`[Auditable(Resource = "x")]`** — add a resource *type* so the log filters as "all x actions", when you
+  don't have (or don't need) a specific id, or don't want to inject `IAuditScope`.
+- **`[Auditable]` + `SetResource("x", id)`** — you want *"everything done to **this** x"* on x's own history
+  screen. Add a parent — `SetResource("equipment", id, parentType: "property", parentId: propertyId)` — to also
+  surface the record on the parent aggregate's audit tab.
+- **`[Audited]` on the entity** — you want the before/after field values, and the write goes through the EF
+  change tracker. **Independent of the resource axis** — diffs are captured whether or not you named a resource.
+- **`audit.AddChange(…)`** — the write bypasses the change tracker (`ExecuteUpdate`/`ExecuteDelete`/raw SQL), so
+  auto-capture can't see it; the handler records the change explicitly.
+
+Wire the durable sink over your `DbContext`, and let the generator map the table:
 
 ```csharp
 // Host
