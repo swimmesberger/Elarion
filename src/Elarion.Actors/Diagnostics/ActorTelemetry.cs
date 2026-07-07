@@ -81,6 +81,12 @@ public static class ActorTelemetry {
     // The key rides on spans only, never on metrics: span attributes tolerate high cardinality,
     // metric tags do not.
     internal static Activity? StartCall(string actor, string method, object key) {
+        // Guard before interpolating the span name: with no listener StartActivity returns null, but
+        // the name string would still be built on every call — the actor/method already ride as tags.
+        if (!Source.HasListeners()) {
+            return null;
+        }
+
         var activity = Source.StartActivity($"actor.call {actor}.{method}", ActivityKind.Client);
         if (activity is not null) {
             activity.SetTag("elarion.actor", actor);
@@ -92,6 +98,10 @@ public static class ActorTelemetry {
     }
 
     internal static Activity? StartProcess(string actor, string method, object? key, ActivityContext parent) {
+        if (!Source.HasListeners()) {
+            return null;
+        }
+
         var activity = Source.StartActivity($"actor.process {actor}.{method}", ActivityKind.Internal, parent);
         if (activity is not null) {
             activity.SetTag("elarion.actor", actor);

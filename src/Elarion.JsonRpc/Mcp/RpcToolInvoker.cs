@@ -142,6 +142,11 @@ public static class RpcToolInvoker {
     }
 
     private static Activity? StartToolActivity(string method) {
+        // Guard before interpolating: with no listener the name string would still be built every call.
+        if (!JsonRpcTelemetry.Source.HasListeners()) {
+            return null;
+        }
+
         var activity = JsonRpcTelemetry.Source.StartActivity($"mcp {method}", ActivityKind.Server);
         if (activity?.IsAllDataRequested == true) {
             activity.SetTag("rpc.system.name", "mcp");

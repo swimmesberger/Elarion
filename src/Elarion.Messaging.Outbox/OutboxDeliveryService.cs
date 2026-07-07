@@ -97,8 +97,9 @@ public sealed class OutboxDeliveryService(
         // Parent the consume span on the traceparent persisted at publish time, so delivery stays in the
         // publishing operation's trace even on another worker instance or after a restart.
         ActivityContext.TryParse(message.TraceParent, null, isRemote: true, out var traceParent);
-        using var activity = EventTelemetry.Source.StartActivity(
-            $"consume {message.EventType}", ActivityKind.Internal, traceParent);
+        using var activity = EventTelemetry.Source.HasListeners()
+            ? EventTelemetry.Source.StartActivity($"consume {message.EventType}", ActivityKind.Internal, traceParent)
+            : null;
         if (activity is not null)
         {
             activity.SetTag("messaging.event.type", message.EventType);

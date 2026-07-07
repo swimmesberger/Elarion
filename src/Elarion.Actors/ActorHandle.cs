@@ -40,6 +40,10 @@ public sealed class ActorHandle<TActor> where TActor : class {
         CancellationToken cancellationToken = default) {
         var callActivity = ActorTelemetry.StartCall(_actorName, item.MethodName, _key);
         item.Initialize(_actorName, _key, _options.CallTimeout, _cancellationPool, _timeProvider, cancellationToken);
+        // Capture the completion Task BEFORE enqueue. Once enqueued, the pump owns the item and may
+        // run it to completion and recycle it (pooled work items) before this method reads anything
+        // off it again — so everything after enqueue uses this captured Task, never `item`.
+        var completion = item.Completion;
         var enqueue = _router.EnqueueAsync(_key, item, cancellationToken);
 
         // Fast path (ADR-0042 roadmap): the unbounded-mailbox enqueue completes synchronously, so
@@ -47,10 +51,10 @@ public sealed class ActorHandle<TActor> where TActor : class {
         // completion task directly, with no async state machine in this frame. A Task-shaped facade
         // calling .AsTask() on this ValueTask gets the underlying task back allocation-free.
         if (callActivity is null && enqueue.IsCompletedSuccessfully) {
-            return new ValueTask<TResult>(item.Completion);
+            return new ValueTask<TResult>(completion);
         }
 
-        return AwaitAsync(item, enqueue, callActivity);
+        return AwaitAsync(item, completion, enqueue, callActivity);
     }
 
     /// <summary>Enqueues a void-shaped call (a <c>Unit</c> work item) and awaits its completion.</summary>
@@ -63,6 +67,7 @@ public sealed class ActorHandle<TActor> where TActor : class {
 
     private static async ValueTask<TResult> AwaitAsync<TResult>(
         ActorWorkItem<TActor, TResult> item,
+        Task<TResult> completion,
         ValueTask enqueue,
         Activity? callActivity) {
         try {
@@ -70,13 +75,16 @@ public sealed class ActorHandle<TActor> where TActor : class {
                 await enqueue.ConfigureAwait(false);
             }
             catch (Exception ex) {
+                // Enqueue failed, so the item never reached the pump and was not recycled — touching
+                // it here to complete the caller is safe.
                 callActivity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 item.Abandon();
                 throw;
             }
 
             try {
-                return await item.Completion.ConfigureAwait(false);
+                // Enqueue succeeded: the item may already be recycled, so await the captured Task.
+                return await completion.ConfigureAwait(false);
             }
             catch (Exception ex) when (MarkFailed(callActivity, ex)) {
                 throw; // unreachable: MarkFailed always returns false

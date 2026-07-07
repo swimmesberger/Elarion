@@ -49,7 +49,10 @@ internal sealed class InMemoryDomainEventBus(
         PublishDepth.Value = depth;
         try {
             // The publish span parents each inline consumer's own handler span (same scope, same trace).
-            using var activity = EventTelemetry.Source.StartActivity($"publish {eventName}", ActivityKind.Internal);
+            // Interpolate the name only when a listener is attached — publishing continues regardless.
+            using var activity = EventTelemetry.Source.HasListeners()
+                ? EventTelemetry.Source.StartActivity($"publish {eventName}", ActivityKind.Internal)
+                : null;
             if (activity is not null) {
                 activity.SetTag("messaging.event.type", eventName);
                 activity.SetTag("messaging.event.plane", "domain");

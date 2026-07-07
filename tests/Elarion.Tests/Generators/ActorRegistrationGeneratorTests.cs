@@ -43,13 +43,21 @@ public sealed class ActorRegistrationGeneratorTests {
         generated.Should().Contain(
             "global::System.Threading.Tasks.Task<int> Ship(global::Sample.Orders.ShipmentInfo info, global::System.Threading.CancellationToken cancellationToken = default);");
         generated.Should().Contain("internal sealed class OrderFulfillmentActorFacade : IOrderFulfillment");
-        // Facade methods are pass-through (no async wrapper): Task shapes bridge via AsTask(),
-        // ValueTask shapes return the handle's ValueTask directly (ADR-0042 call-path roadmap).
-        generated.Should().Contain("_handle.InvokeAsync(new ShipWorkItem(info), cancellationToken).AsTask();");
-        generated.Should().Contain("_handle.InvokeAsync(new ResetWorkItem(), cancellationToken);");
+        // Facade methods are pass-through (no async wrapper) over a pooled, rented work item: Task
+        // shapes bridge via AsTask(), ValueTask shapes return the handle's ValueTask directly
+        // (ADR-0042 call-path roadmap).
+        generated.Should().Contain("_handle.InvokeAsync(ShipWorkItem.Rent(info), cancellationToken).AsTask();");
+        generated.Should().Contain("_handle.InvokeAsync(ResetWorkItem.Rent(), cancellationToken);");
         generated.Should().NotContain("public async");
         generated.Should().Contain(
             "private sealed class ShipWorkItem : global::Elarion.Actors.ActorWorkItem<global::Sample.Orders.OrderFulfillmentActor, int>");
+        // Pooled work item: a static Rent over the runtime pool, arguments cleared on Recycle.
+        generated.Should().Contain(
+            "public static ShipWorkItem Rent(global::Sample.Orders.ShipmentInfo info)");
+        generated.Should().Contain(
+            "global::Elarion.Actors.Runtime.ActorWorkItemPool<ShipWorkItem>.Rent(static () => new ShipWorkItem());");
+        generated.Should().Contain("protected override void Recycle()");
+        generated.Should().Contain("global::Elarion.Actors.Runtime.ActorWorkItemPool<ShipWorkItem>.Return(this);");
         generated.Should().Contain("return await actor.Ship(_info, cancellationToken).ConfigureAwait(false);");
         // The void-shaped method rides a Unit work item.
         generated.Should().Contain("global::Elarion.Abstractions.Results.Unit");

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using AwesomeAssertions;
 using Elarion.Actors;
@@ -219,6 +220,102 @@ public sealed class ActorSystemTests {
     }
 
     [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task PooledWorkItems_UnderConcurrentReuse_ReturnEachCallersOwnResult() {
+        // Recycle-safety guard: PooledEchoItem returns itself to a pool after each call (what the
+        // generated facade would do). With thousands of distinct-valued calls churning the pool, the
+        // capture-the-Task-before-enqueue contract must hold — a recycled item re-initialized for a
+        // new caller must never surface its value to the previous caller. Cross-talk shows up as a
+        // result multiset that is not exactly {0..n-1}.
+        await using var provider = CreateProvider();
+        var echo = provider.GetRequiredService<IActorSystem>().Get<IPooledEcho>("p");
+
+        const int n = 5000;
+        var results = await Task.WhenAll(
+            Enumerable.Range(0, n).Select(i => echo.Echo(i, TestToken).AsTask()));
+
+        results.Should().BeEquivalentTo(Enumerable.Range(0, n));
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task CallerCancellation_RacingCompletion_ResolvesExactlyOnce() {
+        // Ahead-of-change guard for the value-task-source completion rework: the caller-cancel
+        // registration and the actor setting the result fire near-simultaneously. Today's
+        // TaskCompletionSource.TrySet* is idempotent; a value-task source's SetResult/SetException
+        // throw on a second set, so the completion must be claimed by exactly one racer. A broken
+        // guard surfaces here as an InvalidOperationException escaping the OCE catch, or as a call
+        // that never resolves (successes + cancellations would not add up).
+        await using var provider = CreateProvider();
+        var actors = provider.GetRequiredService<IActorSystem>();
+        var counter = actors.Get<ICounter>("hot");
+
+        const int iterations = 2000;
+        var successes = 0;
+        var cancellations = 0;
+        for (var i = 0; i < iterations; i++) {
+            using var cts = new CancellationTokenSource();
+            var call = counter.Increment(cts.Token).AsTask();
+            var cancel = Task.Run(() => cts.Cancel(), TestToken);
+            try {
+                await call;
+                successes++;
+            }
+            catch (OperationCanceledException) {
+                cancellations++;
+            }
+
+            await cancel;
+        }
+
+        (successes + cancellations).Should().Be(iterations, "every call resolves exactly once");
+        // The actor survives the barrage and still serves calls.
+        await counter.Current(TestToken);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task ConcurrentCalls_RacingRapidPassivation_ExecuteExactlyOnce() {
+        // Directly stresses the lock-free mailbox: a tiny idle timeout makes the cell passivate in
+        // every gap between call bursts, so enqueues constantly race the idle timer closing the
+        // cell. The packed closed/pending word must make "reserve a slot" and "close only when zero
+        // pending" mutually exclusive — otherwise a call is dropped (tally too low), double-run
+        // (too high), or a caller observes a spurious failure. The tally survives passivation; the
+        // actor's in-memory count does not, so it is the sink we assert on.
+        var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(TimeProvider.System);
+        var recorder = new LifecycleRecorder();
+        services.AddSingleton(recorder);
+        services.AddElarionActorSystem();
+        services.AddElarionActor(new ActorRegistration<CounterActor, string, ICounter> {
+            Name = "Counter",
+            Options = new ActorOptions { IdleTimeout = TimeSpan.FromMilliseconds(1) },
+            Activator = static (sp, context) => new CounterActor(context, sp.GetRequiredService<LifecycleRecorder>()),
+            Facade = static handle => new CounterFacade(handle)
+        });
+        await using var provider = services.BuildServiceProvider();
+        var counter = provider.GetRequiredService<IActorSystem>().Get<ICounter>("hot");
+
+        const int rounds = 150;
+        const int batch = 8;
+        for (var round = 0; round < rounds; round++) {
+            var calls = Enumerable.Range(0, batch)
+                .Select(_ => counter.Increment(TestToken).AsTask())
+                .ToArray();
+            await Task.WhenAll(calls).WaitAsync(WaitTimeout, TestToken);
+            // Let the 1 ms idle timer fire in the gap so the next burst races a fresh passivation.
+            await Task.Delay(2, TestToken);
+        }
+
+        recorder.Executions.Should().Be(rounds * batch);
+        // The run only proves the race window was exercised if passivation actually happened.
+        recorder.Deactivations.Should().BeGreaterThan(0);
+        // Every passivation is followed by a reactivation; the final activation may or may not have
+        // passivated yet by the time we read, so activations is deactivations or one more.
+        recorder.Activations.Should().BeInRange(recorder.Deactivations, recorder.Deactivations + 1);
+    }
+
+    [Fact]
     public async Task Activation_ResolvesDependenciesFromOwnScope() {
         await using var provider = CreateProvider();
         var actors = provider.GetRequiredService<IActorSystem>();
@@ -279,6 +376,12 @@ public sealed class ActorSystemTests {
             Activator = static (sp, _) => new ScopeProbeActor(sp.GetRequiredService<ScopedProbeDependency>()),
             Facade = static handle => new ScopeProbeFacade(handle)
         });
+        services.AddElarionActor(new ActorRegistration<PooledEchoActor, string, IPooledEcho> {
+            Name = "PooledEcho",
+            Options = new ActorOptions(),
+            Activator = static (_, _) => new PooledEchoActor(),
+            Facade = static handle => new PooledEchoFacade(handle)
+        });
         return services.BuildServiceProvider();
     }
 
@@ -297,12 +400,18 @@ public sealed class ActorSystemTests {
     public sealed class LifecycleRecorder {
         private int _activations;
         private int _deactivations;
+        private int _executions;
 
         public int Activations => Volatile.Read(ref _activations);
         public int Deactivations => Volatile.Read(ref _deactivations);
 
+        // A sink that survives passivation (unlike the actor's in-memory count), so a stress test
+        // can assert every queued call ran exactly once even as activations come and go.
+        public int Executions => Volatile.Read(ref _executions);
+
         public void RecordActivation() => Interlocked.Increment(ref _activations);
         public void RecordDeactivation() => Interlocked.Increment(ref _deactivations);
+        public void RecordExecution() => Interlocked.Increment(ref _executions);
     }
 
     public sealed class GateService {
@@ -348,6 +457,7 @@ public sealed class ActorSystemTests {
             var read = _count;
             await Task.Yield();
             _count = read + 1;
+            recorder.RecordExecution();
             return _count;
         }
 
@@ -374,6 +484,46 @@ public sealed class ActorSystemTests {
             protected override async ValueTask<int> InvokeAsync(CounterActor actor, CancellationToken cancellationToken) =>
                 await actor.Current(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    // --- PooledEcho (exercises pooled/recycled work items) ---
+
+    public interface IPooledEcho : IActorFacade<string> {
+        ValueTask<int> Echo(int value, CancellationToken cancellationToken = default);
+    }
+
+    public sealed class PooledEchoActor {
+        public async Task<int> Echo(int value) {
+            await Task.Yield();
+            return value;
+        }
+    }
+
+    private sealed class PooledEchoFacade(ActorHandle<PooledEchoActor> handle) : IPooledEcho {
+        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
+            handle.InvokeAsync(PooledEchoItem.Rent(value), cancellationToken);
+    }
+
+    // Mirrors what a pooling generator would emit: rented per call, self-returned via the Recycle hook.
+    private sealed class PooledEchoItem : ActorWorkItem<PooledEchoActor, int> {
+        private static readonly ConcurrentQueue<PooledEchoItem> Pool = new();
+        private int _value;
+
+        public override string MethodName => "Echo";
+
+        public static PooledEchoItem Rent(int value) {
+            if (!Pool.TryDequeue(out var item)) {
+                item = new PooledEchoItem();
+            }
+
+            item._value = value;
+            return item;
+        }
+
+        protected override void Recycle() => Pool.Enqueue(this);
+
+        protected override async ValueTask<int> InvokeAsync(PooledEchoActor actor, CancellationToken cancellationToken) =>
+            await actor.Echo(_value).ConfigureAwait(false);
     }
 
     // --- Greeter (singleton) ---

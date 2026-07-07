@@ -735,7 +735,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var arguments = string.Join(", ", method.Parameters
             .Where(static p => !p.IsCancellationToken)
             .Select(static p => p.Name));
-        var invoke = $"_handle.InvokeAsync(new {method.WorkItemClassName}({arguments}), {tokenName})";
+        var invoke = $"_handle.InvokeAsync({method.WorkItemClassName}.Rent({arguments}), {tokenName})";
         // Pass-through instead of an async/await wrapper (ADR-0042 roadmap): ValueTask shapes
         // return the handle's ValueTask directly; Task shapes call AsTask(), which on the handle's
         // sync-enqueue fast path returns the underlying completion task allocation-free.
@@ -752,23 +752,42 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             : method.ResultTypeFqn;
         var dataParameters = method.Parameters.Where(static p => !p.IsCancellationToken).ToList();
 
+        var poolFqn = $"global::Elarion.Actors.Runtime.ActorWorkItemPool<{method.WorkItemClassName}>";
         sb.AppendLine($"    private sealed class {method.WorkItemClassName} : global::Elarion.Actors.ActorWorkItem<{actor.ActorTypeFqn}, {resultFqn}>");
         sb.AppendLine("    {");
+        // Fields are mutable and the item is pooled: Rent reuses a recycled instance and overwrites
+        // the arguments, so a completed call allocates no work item. The caller captures the
+        // completion task before enqueue, so recycling never disturbs an in-flight await. The
+        // default! initializer satisfies nullable analysis for the parameterless pooled ctor; Rent
+        // always assigns before the item is used.
         foreach (var parameter in dataParameters) {
-            sb.AppendLine($"        private readonly {parameter.TypeFqn} _{parameter.Name};");
+            sb.AppendLine($"        private {parameter.TypeFqn} _{parameter.Name} = default!;");
         }
 
         if (dataParameters.Count > 0) {
             sb.AppendLine();
         }
 
-        var ctorParameters = string.Join(", ", dataParameters.Select(static p => $"{p.TypeFqn} {p.Name}"));
-        sb.AppendLine($"        public {method.WorkItemClassName}({ctorParameters})");
+        var rentParameters = string.Join(", ", dataParameters.Select(static p => $"{p.TypeFqn} {p.Name}"));
+        sb.AppendLine($"        public static {method.WorkItemClassName} Rent({rentParameters})");
         sb.AppendLine("        {");
+        sb.AppendLine($"            var item = {poolFqn}.Rent(static () => new {method.WorkItemClassName}());");
         foreach (var parameter in dataParameters) {
-            sb.AppendLine($"            _{parameter.Name} = {parameter.Name};");
+            sb.AppendLine($"            item._{parameter.Name} = {parameter.Name};");
         }
 
+        sb.AppendLine("            return item;");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine("        protected override void Recycle()");
+        sb.AppendLine("        {");
+        // Clear the arguments before pooling so a reference-typed argument is not retained by the
+        // idle item (value-typed args reset harmlessly).
+        foreach (var parameter in dataParameters) {
+            sb.AppendLine($"            _{parameter.Name} = default!;");
+        }
+
+        sb.AppendLine($"            {poolFqn}.Return(this);");
         sb.AppendLine("        }");
         sb.AppendLine();
         sb.AppendLine($"        public override string MethodName => \"{method.Name}\";");

@@ -30,13 +30,25 @@ internal sealed class ActorCell<TActor> where TActor : class {
     // registration's Cancel call.
     private readonly CancellationTokenSource _stoppingCts;
     private readonly Action<ActorCell<TActor>> _onClosed;
-    private readonly object _gate = new();
 
-    private bool _closed;
-    private int _pending;
+    // Mailbox coordination packed into one word so enqueue, completion, and idle passivation
+    // synchronize with a single interlocked op instead of a shared lock (that lock was the hottest
+    // contended frame on the actor call path). Bit 63 = closed; bits 0..62 = the pending count
+    // (items reserved but not yet completed). Reserving a pending slot before the mailbox write and
+    // re-checking closed under the same word is what stops the idle timer from closing the cell
+    // underneath an in-flight enqueue — the invariant the old lock enforced.
+    private const long ClosedFlag = long.MinValue;
+    private const long PendingMask = long.MaxValue;
+    private long _state;
     private int _started;
     private Task? _loop;
-    private ITimer? _idleTimer;
+    // Touched off-lock now: created on the pump thread before the loop, re-armed from
+    // OnItemCompleted (a different thread under [Reentrant]), disposed after the loop drains. Timer
+    // ops are thread-safe and a post-dispose Change/fire is a benign no-op, so volatile suffices.
+    private volatile ITimer? _idleTimer;
+
+    private static bool IsClosed(long state) => (state & ClosedFlag) != 0;
+    private static long Pending(long state) => state & PendingMask;
 
     internal ActorCell(
         string actorName,
@@ -77,20 +89,37 @@ internal sealed class ActorCell<TActor> where TActor : class {
         }
     }
 
+    // Atomically increments the pending count unless the cell is closed. The closed check and the
+    // increment happen on one word, so OnIdleTimerFired (which only closes when it observes zero
+    // pending on that same word) can never race in between and passivate a cell that is about to
+    // receive an item.
+    private bool TryReservePending() {
+        var state = Volatile.Read(ref _state);
+        while (true) {
+            if (IsClosed(state)) {
+                return false;
+            }
+
+            var prev = Interlocked.CompareExchange(ref _state, state + 1, state);
+            if (prev == state) {
+                return true;
+            }
+
+            state = prev;
+        }
+    }
+
+    private void Close() => Interlocked.Or(ref _state, ClosedFlag);
+
     /// <summary>
     /// Enqueues a work item. Returns <see langword="false"/> when the cell has closed (the caller
     /// retries against a fresh cell); throws <see cref="ActorMailboxFullException"/> for a full
     /// fail-fast mailbox.
     /// </summary>
     internal async ValueTask<bool> TryEnqueueAsync(ActorWorkItem<TActor> item, CancellationToken cancellationToken) {
-        lock (_gate) {
-            if (_closed) {
-                return false;
-            }
-
-            // Counted before the write: a non-zero pending count is what blocks idle passivation,
-            // so the idle timer can never close the cell underneath an in-progress enqueue.
-            _pending++;
+        // Reserve a pending slot (blocks passivation) unless the cell has already closed.
+        if (!TryReservePending()) {
+            return false;
         }
 
         ActorTelemetry.RecordEnqueued(_actorName);
@@ -102,10 +131,8 @@ internal sealed class ActorCell<TActor> where TActor : class {
         // TryWrite failed: bounded mailbox full, or the writer completed by shutdown.
         if (_options.MailboxFullMode == ActorMailboxFullMode.Fail) {
             OnItemCompleted();
-            lock (_gate) {
-                if (_closed) {
-                    return false;
-                }
+            if (IsClosed(Volatile.Read(ref _state))) {
+                return false;
             }
 
             throw new ActorMailboxFullException(
@@ -127,10 +154,7 @@ internal sealed class ActorCell<TActor> where TActor : class {
     }
 
     internal async Task StopAsync(CancellationToken cancellationToken) {
-        lock (_gate) {
-            _closed = true;
-        }
-
+        Close();
         _mailbox.Writer.TryComplete();
         var loop = _loop;
         if (loop is null) {
@@ -175,10 +199,12 @@ internal sealed class ActorCell<TActor> where TActor : class {
             }
         }
         finally {
-            lock (_gate) {
-                _idleTimer?.Dispose();
-                _idleTimer = null;
-            }
+            // The pending count is drained (writer completed, mailbox empty) and every
+            // OnItemCompleted has run (sequential: same thread; reentrant: awaited via WhenAll), so
+            // no concurrent Change can race this dispose.
+            var timer = _idleTimer;
+            _idleTimer = null;
+            timer?.Dispose();
 
             try {
                 if (instance is IActorLifecycle deactivating) {
@@ -233,10 +259,7 @@ internal sealed class ActorCell<TActor> where TActor : class {
     }
 
     private async Task FailAllAsync(Exception exception, AsyncServiceScope scope) {
-        lock (_gate) {
-            _closed = true;
-        }
-
+        Close();
         _mailbox.Writer.TryComplete();
         while (_mailbox.Reader.TryRead(out var item)) {
             item.TryFail(exception);
@@ -252,27 +275,34 @@ internal sealed class ActorCell<TActor> where TActor : class {
             return;
         }
 
-        lock (_gate) {
-            if (_closed) {
-                return;
-            }
-
-            _idleTimer = _timeProvider.CreateTimer(
-                static state => ((ActorCell<TActor>)state!).OnIdleTimerFired(),
-                this,
-                idle,
-                Timeout.InfiniteTimeSpan);
+        // Runs once on the pump thread before the loop reads, so this store precedes both the
+        // re-arm reads in OnItemCompleted and the dispose in the loop's finally. A cell that closed
+        // between the check and the create still gets its timer disposed by that finally.
+        if (IsClosed(Volatile.Read(ref _state))) {
+            return;
         }
+
+        _idleTimer = _timeProvider.CreateTimer(
+            static state => ((ActorCell<TActor>)state!).OnIdleTimerFired(),
+            this,
+            idle,
+            Timeout.InfiniteTimeSpan);
     }
 
     private void OnIdleTimerFired() {
-        lock (_gate) {
-            if (_closed || _pending > 0) {
-                // Still busy: the timer re-arms when the pending count drops to zero.
+        var state = Volatile.Read(ref _state);
+        while (true) {
+            if (IsClosed(state) || Pending(state) != 0) {
+                // Still busy or already closing: the timer re-arms when pending drops back to zero.
                 return;
             }
 
-            _closed = true;
+            var prev = Interlocked.CompareExchange(ref _state, state | ClosedFlag, state);
+            if (prev == state) {
+                break;
+            }
+
+            state = prev;
         }
 
         // The loop drains (the mailbox is empty), deactivates, and removes the cell from the host.
@@ -280,11 +310,11 @@ internal sealed class ActorCell<TActor> where TActor : class {
     }
 
     private void OnItemCompleted() {
-        lock (_gate) {
-            _pending--;
-            if (!_closed && _pending == 0 && _options.IdleTimeout is { } idle) {
-                _idleTimer?.Change(idle, Timeout.InfiniteTimeSpan);
-            }
+        // Pending is >= 1 here (an item was reserved), so decrementing the word never borrows into
+        // the closed bit. Re-arm the idle timer only on the transition back to zero pending.
+        var state = Interlocked.Decrement(ref _state);
+        if (Pending(state) == 0 && !IsClosed(state) && _options.IdleTimeout is { } idle) {
+            _idleTimer?.Change(idle, Timeout.InfiniteTimeSpan);
         }
 
         ActorTelemetry.RecordDequeued(_actorName);

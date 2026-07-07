@@ -8,6 +8,27 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **Actor call path allocates ~70% less per call (ADR-0042 perf round).** Three profiling-driven
+  optimizations on the actor hot path, allocation-neutral for the public API: the per-cell mailbox lock
+  is replaced by a packed atomic state word (closed flag + pending count in one `long`, coordinated by
+  interlocked ops — the `_gate` Monitor was the hottest contended frame); generated work items are now
+  **pooled** — a rented, recycled instance backed by the new bounded `ActorWorkItemPool<T>`, so a
+  completed call allocates no work-item object (the caller captures the completion `Task` before enqueue,
+  so reuse is recycle-safe and — unlike an `IValueTaskSource` — keeps `AsTask()`/fan-out allocation-free);
+  and actor telemetry no longer builds its span-name string when no trace listener is attached. Benchmarks:
+  `Ask` 456→136 B, `Ask_Pipelined` 501→181 B, `PingPong` 488→168 B, with a ~14% faster single call.
+- **Telemetry no longer allocates a span-name string when no listener is attached.** Every
+  `ActivitySource.StartActivity` call across the framework interpolated its span name eagerly, before the
+  listener check — allocating a string on every handler invocation, JSON-RPC/MCP dispatch, event
+  publish/consume, scheduled run, and resilience-wrapped call even with tracing off. Each site now guards
+  on `Source.HasListeners()` first; span names and tags are unchanged when a listener is present.
+
+### Added
+- **Opt-in cross-platform profiling for `tests/Elarion.Benchmarks`.** `--profiler EP` exports a speedscope
+  flamegraph (EventPipe, no extra tooling); `ELARION_BENCH_DOTTRACE=1` emits a dotTrace snapshot. Both are
+  off by default and macOS-friendly; usage is documented in `Program.cs`.
+
 ## [0.2.3] - 2026-07-07
 
 ### Added
