@@ -51,7 +51,13 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     // The actor-side exception is set with TrySetException, so the caller's await rethrows it with
     // the original actor-side stack trace ("end of stack trace from previous location" + caller
     // frames) — the cross-mailbox stack-trace story needs no wrapper exception.
-    private readonly TaskCompletionSource<TResult> _completion =
+    //
+    // Reassigned per call (in Initialize) so a *pooled* work item hands each caller a fresh
+    // completion. The caller captures this Task before the item is enqueued, so the result lives
+    // independently of the work item and recycling the item after the actor finishes can never
+    // disturb an in-flight await — which is why pooling here needs no IValueTaskSource and keeps
+    // AsTask() allocation-free (unlike a source-backed ValueTask).
+    private TaskCompletionSource<TResult> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private string _actorName = string.Empty;
@@ -80,6 +86,11 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         ActorCancellationPool cancellationPool,
         TimeProvider timeProvider,
         CancellationToken callerToken) {
+        // Reset the per-call state a pooled reuse would otherwise inherit (a fresh completion, and
+        // no leftover timeout/cancellation wiring). Registrations are already default after Cleanup.
+        _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _invocationCts = null;
+        _timeoutArmed = false;
         _actorName = actorName;
         _key = key;
         _timeProvider = timeProvider;
@@ -175,9 +186,12 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             _completion.TrySetException(ex);
         }
         finally {
-            Cleanup();
+            // Record telemetry off this item's fields BEFORE Cleanup, because Cleanup recycles the
+            // item and another caller may immediately re-Initialize it (overwriting _actorName /
+            // _timeProvider). Cleanup must be the last touch of this instance on every path.
             ActorTelemetry.RecordMessage(
                 _actorName, MethodName, outcome, _timeProvider.GetElapsedTime(startTimestamp));
+            Cleanup();
         }
     }
 
@@ -217,5 +231,16 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             _invocationCts = null;
             _cancellationPool!.Return(source);
         }
+
+        // The actor is done with this item and the caller already holds its Task, so a pooling
+        // subclass may return itself for reuse now. Runs on every terminal path (result, cancel,
+        // timeout, abandon, fail).
+        Recycle();
     }
+
+    /// <summary>
+    /// Hook for a pooling work-item subclass to return itself to its pool. Called once the item is
+    /// fully done. The default keeps the item as plain garbage (no pooling).
+    /// </summary>
+    protected virtual void Recycle() { }
 }

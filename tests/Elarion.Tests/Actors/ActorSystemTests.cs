@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using AwesomeAssertions;
 using Elarion.Actors;
@@ -220,6 +221,24 @@ public sealed class ActorSystemTests {
 
     [Fact]
     [Trait("Category", "Concurrency")]
+    public async Task PooledWorkItems_UnderConcurrentReuse_ReturnEachCallersOwnResult() {
+        // Recycle-safety guard: PooledEchoItem returns itself to a pool after each call (what the
+        // generated facade would do). With thousands of distinct-valued calls churning the pool, the
+        // capture-the-Task-before-enqueue contract must hold — a recycled item re-initialized for a
+        // new caller must never surface its value to the previous caller. Cross-talk shows up as a
+        // result multiset that is not exactly {0..n-1}.
+        await using var provider = CreateProvider();
+        var echo = provider.GetRequiredService<IActorSystem>().Get<IPooledEcho>("p");
+
+        const int n = 5000;
+        var results = await Task.WhenAll(
+            Enumerable.Range(0, n).Select(i => echo.Echo(i, TestToken).AsTask()));
+
+        results.Should().BeEquivalentTo(Enumerable.Range(0, n));
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
     public async Task CallerCancellation_RacingCompletion_ResolvesExactlyOnce() {
         // Ahead-of-change guard for the value-task-source completion rework: the caller-cancel
         // registration and the actor setting the result fire near-simultaneously. Today's
@@ -357,6 +376,12 @@ public sealed class ActorSystemTests {
             Activator = static (sp, _) => new ScopeProbeActor(sp.GetRequiredService<ScopedProbeDependency>()),
             Facade = static handle => new ScopeProbeFacade(handle)
         });
+        services.AddElarionActor(new ActorRegistration<PooledEchoActor, string, IPooledEcho> {
+            Name = "PooledEcho",
+            Options = new ActorOptions(),
+            Activator = static (_, _) => new PooledEchoActor(),
+            Facade = static handle => new PooledEchoFacade(handle)
+        });
         return services.BuildServiceProvider();
     }
 
@@ -459,6 +484,46 @@ public sealed class ActorSystemTests {
             protected override async ValueTask<int> InvokeAsync(CounterActor actor, CancellationToken cancellationToken) =>
                 await actor.Current(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    // --- PooledEcho (exercises pooled/recycled work items) ---
+
+    public interface IPooledEcho : IActorFacade<string> {
+        ValueTask<int> Echo(int value, CancellationToken cancellationToken = default);
+    }
+
+    public sealed class PooledEchoActor {
+        public async Task<int> Echo(int value) {
+            await Task.Yield();
+            return value;
+        }
+    }
+
+    private sealed class PooledEchoFacade(ActorHandle<PooledEchoActor> handle) : IPooledEcho {
+        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
+            handle.InvokeAsync(PooledEchoItem.Rent(value), cancellationToken);
+    }
+
+    // Mirrors what a pooling generator would emit: rented per call, self-returned via the Recycle hook.
+    private sealed class PooledEchoItem : ActorWorkItem<PooledEchoActor, int> {
+        private static readonly ConcurrentQueue<PooledEchoItem> Pool = new();
+        private int _value;
+
+        public override string MethodName => "Echo";
+
+        public static PooledEchoItem Rent(int value) {
+            if (!Pool.TryDequeue(out var item)) {
+                item = new PooledEchoItem();
+            }
+
+            item._value = value;
+            return item;
+        }
+
+        protected override void Recycle() => Pool.Enqueue(this);
+
+        protected override async ValueTask<int> InvokeAsync(PooledEchoActor actor, CancellationToken cancellationToken) =>
+            await actor.Echo(_value).ConfigureAwait(false);
     }
 
     // --- Greeter (singleton) ---

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using BenchmarkDotNet.Attributes;
 using Elarion.Actors;
 using Microsoft.Extensions.DependencyInjection;
@@ -133,24 +134,41 @@ public class ActorCallBenchmarks {
 
     private sealed class EchoFacade(ActorHandle<EchoActor> handle) : IEcho {
         public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new EchoItem(value), cancellationToken);
+            handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
     }
 
     private sealed class EchoNoTimeoutFacade(ActorHandle<EchoActor> handle) : IEchoNoTimeout {
         public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new EchoItem(value), cancellationToken);
+            handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
     }
 
     private sealed class EchoReentrantFacade(ActorHandle<EchoActor> handle) : IEchoReentrant {
         public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new EchoItem(value), cancellationToken);
+            handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
     }
 
-    private sealed class EchoItem(int value) : ActorWorkItem<EchoActor, int> {
+    // Prototype of a pooled work item (what the generator would emit): rented per call, returned to
+    // the pool on the Recycle hook. The caller captures the completion Task before enqueue, so reuse
+    // is safe. Measures the work-item-object allocation this pooling removes.
+    private sealed class EchoItem : ActorWorkItem<EchoActor, int> {
+        private static readonly ConcurrentQueue<EchoItem> Pool = new();
+        private int _value;
+
         public override string MethodName => "Echo";
 
+        public static EchoItem Rent(int value) {
+            if (!Pool.TryDequeue(out var item)) {
+                item = new EchoItem();
+            }
+
+            item._value = value;
+            return item;
+        }
+
+        protected override void Recycle() => Pool.Enqueue(this);
+
         protected override async ValueTask<int> InvokeAsync(EchoActor actor, CancellationToken cancellationToken) =>
-            await actor.Echo(value).ConfigureAwait(false);
+            await actor.Echo(_value).ConfigureAwait(false);
     }
 
     private sealed class RelayFacade(ActorHandle<RelayActor> handle) : IRelay {
