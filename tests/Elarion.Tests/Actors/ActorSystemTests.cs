@@ -220,6 +220,42 @@ public sealed class ActorSystemTests {
 
     [Fact]
     [Trait("Category", "Concurrency")]
+    public async Task CallerCancellation_RacingCompletion_ResolvesExactlyOnce() {
+        // Ahead-of-change guard for the value-task-source completion rework: the caller-cancel
+        // registration and the actor setting the result fire near-simultaneously. Today's
+        // TaskCompletionSource.TrySet* is idempotent; a value-task source's SetResult/SetException
+        // throw on a second set, so the completion must be claimed by exactly one racer. A broken
+        // guard surfaces here as an InvalidOperationException escaping the OCE catch, or as a call
+        // that never resolves (successes + cancellations would not add up).
+        await using var provider = CreateProvider();
+        var actors = provider.GetRequiredService<IActorSystem>();
+        var counter = actors.Get<ICounter>("hot");
+
+        const int iterations = 2000;
+        var successes = 0;
+        var cancellations = 0;
+        for (var i = 0; i < iterations; i++) {
+            using var cts = new CancellationTokenSource();
+            var call = counter.Increment(cts.Token).AsTask();
+            var cancel = Task.Run(() => cts.Cancel(), TestToken);
+            try {
+                await call;
+                successes++;
+            }
+            catch (OperationCanceledException) {
+                cancellations++;
+            }
+
+            await cancel;
+        }
+
+        (successes + cancellations).Should().Be(iterations, "every call resolves exactly once");
+        // The actor survives the barrage and still serves calls.
+        await counter.Current(TestToken);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
     public async Task ConcurrentCalls_RacingRapidPassivation_ExecuteExactlyOnce() {
         // Directly stresses the lock-free mailbox: a tiny idle timeout makes the cell passivate in
         // every gap between call bursts, so enqueues constantly race the idle timer closing the
