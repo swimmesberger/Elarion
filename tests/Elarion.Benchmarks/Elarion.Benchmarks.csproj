@@ -10,6 +10,10 @@
 
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" />
+    <!-- Cross-platform profiling (opt-in via the "profiler DT" CLI switch, macOS-friendly): auto-downloads
+         the JetBrains dotTrace CLI on first run and emits a .dtt snapshot. The speedscope/flamegraph path
+         (the "profiler EP" switch) needs no package; EventPipeProfiler ships in the core package. See Program.cs. -->
+    <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
 
