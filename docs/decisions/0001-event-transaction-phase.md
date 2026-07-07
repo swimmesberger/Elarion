@@ -273,9 +273,9 @@ Decisions:
 
 ## Recommended pattern
 
-> The API below is the planned design and is **not yet implemented**. When the bus
-> ships, this pattern graduates into the published docs
-> (`docs/concepts/decorator-pipelines.mdx` or a dedicated events page).
+> This pattern shipped: `IDomainEventBus`/`IIntegrationEventBus` and `[ConsumeEvent]` are
+> implemented, with the in-memory and durable-outbox integration backends. See the
+> [events capability docs](../capabilities/events/index.mdx).
 
 The handler raises both planes' events within the unit of work; it does **not** decide
 delivery timing — that is the bus + host configuration. The injected interface names the

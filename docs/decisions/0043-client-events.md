@@ -1,6 +1,6 @@
 # ADR-0043: Client events — after-commit facts projected to the browser over SSE
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-06
 - Related: [ADR-0001](0001-event-transaction-phase.md) (the two event planes this deliberately does **not**
   extend), [ADR-0002](0002-cross-module-communication.md) (published contracts at boundaries — the client is
