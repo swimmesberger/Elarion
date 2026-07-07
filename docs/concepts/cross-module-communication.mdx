@@ -46,12 +46,14 @@ is flagged, while a `[ModuleContract]` is allowed. It inspects only the dependen
 parameters, fields, properties). Resolve a flag one of three ways:
 
 - **A `[ModuleContract]`** — for a genuine cross-module *domain* call (e.g. a foundation module publishing
-  an audit-recording capability whose records are queryable domain data). Use it sparingly and
-  deliberately; it is a published surface, not a default reach.
+  an account-standing/credit policy another module consults before invoicing). Use it sparingly and
+  deliberately; it is a published surface, not a default reach. It is *not* for cross-cutting concerns the
+  framework already solves (auditing via `[Auditable]`, validation, authorization) — those attach in the
+  handler pipeline, with no contract to publish.
 - **A platform-capability port** — an intent-only abstraction (sending email, storing a blob) that lives
   *outside* the modules with its adapter in infrastructure (the port/adapter pattern). Shared by location,
-  not by contract. (A write-only audit *sink* would belong here; a *queryable* audit history is domain, so
-  it is the contract above instead.)
+  not by contract. (A write-only external *sink* — a webhook, a log shipper — belongs here; a decision the
+  app's own domain owns, like the credit policy above, is the contract instead.)
 - **The shared kernel** — data and value types (entities, `Money`) live outside every module and are
   freely referenceable. A shared-kernel entity is shareable because of *where it lives*, not because
   entities are special: place an entity inside a module and it becomes module-owned and flagged.

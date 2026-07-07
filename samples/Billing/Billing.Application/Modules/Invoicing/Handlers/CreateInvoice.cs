@@ -23,14 +23,14 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 [Handler("invoices.create")]
 [RequirePermission("invoices", Verbs.Write)]
 [CacheInvalidate("invoices")]
-[Auditable(Resource = "invoice")]   // framework audit trail (ADR-0045); see CreateClient for the trail-vs-activity-log split
+[Auditable(Resource = "invoice")]   // framework audit trail (ADR-0045): one compliance record per invocation
 [Description("Creates a draft invoice and sends it to the client in the background.")]
 public sealed class CreateInvoice(
     BillingDbContext db,
     ICurrentUser user,
     IJobScheduler scheduler,
     IIntegrationEventBus integrationEvents,
-    IActivityLog activityLog,
+    IAccountStanding accountStanding,
     IAuditScope audit,
     TimeProvider clock
 ) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
@@ -64,6 +64,14 @@ public sealed class CreateInvoice(
             return AppError.NotFound($"Client {command.ClientId} was not found.");
         }
 
+        // Cross-module domain call (ADR-0002): ask the Core module's published account-standing policy whether
+        // this customer may be invoiced, through its [ModuleContract] — not by reaching into Core's internals
+        // or reimplementing the credit rule here.
+        var standing = await accountStanding.EnsureCanInvoiceAsync(command.ClientId, command.AmountCents, ct);
+        if (!standing.IsSuccess) {
+            return standing.Error;
+        }
+
         var count = await db.Invoices.CountAsync(i => i.OwnerId == user.UserId, ct);
         var invoice = new Invoice {
             Id = Guid.CreateVersion7(),
@@ -91,8 +99,7 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        audit.SetResource("invoice", invoice.Id.ToString());               // framework audit trail: pin the resource
-        await activityLog.RecordAsync("invoice.created", invoice.Id.ToString(), ct);   // app's own domain activity log
+        audit.SetResource("invoice", invoice.Id.ToString());   // framework audit trail: pin the resource
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }

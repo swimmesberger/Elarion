@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Billing.Application.Domain;
 using Billing.Application.Modules.Clients.Services;
-using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Auditing;
@@ -29,7 +28,6 @@ public sealed class CreateClient(
     BillingDbContext db,
     ICurrentUser user,
     IClientNumberGenerator numbers,
-    IActivityLog activityLog,
     IAuditScope audit,
     TimeProvider clock
 ) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
@@ -68,13 +66,10 @@ public sealed class CreateClient(
         db.Clients.Add(client);
         await db.SaveChangesAsync(ct);
 
-        // Two records, on purpose — the worked example of the split in the "audit trail" concept doc:
-        //  • the framework AUDIT TRAIL already captured this whole invocation ([Auditable] above); SetResource
-        //    only pins WHICH client, so the compliance record is queryable by resource. It commits atomically
-        //    with the transaction — and [Audited] on Client (below) adds the created row's field snapshot.
-        //  • the ACTIVITY LOG is the app's OWN queryable domain history, recorded through a [ModuleContract].
+        // The framework audit trail captured this whole invocation automatically ([Auditable] above);
+        // SetResource just pins WHICH client, so the compliance record is queryable by resource. The record
+        // commits atomically with the transaction, and [Audited] on Client adds the created row's snapshot.
         audit.SetResource("client", client.Id.ToString());
-        await activityLog.RecordAsync("client.created", client.Id.ToString(), ct);
 
         return new Response(client.Id, client.Number);
     }

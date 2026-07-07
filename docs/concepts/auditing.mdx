@@ -189,3 +189,10 @@ The append-only one-Postgres table serves the framework's 1–10-node tier. Past
 shipping, tamper-evidence chains, long-term archival — replace the `IAuditTrail` registration; the
 attributes, scope, and capture seams are unchanged. Full temporal entity history (point-in-time
 reconstruction, undo) is a non-goal: the trail records *actions with their diffs*, not versioned state.
+
+It is also **not an application activity log.** The audit trail is a compliance record — framework-owned,
+write-once, read by operators. When *the app itself* needs to show users a queryable history (a "recent
+activity" feed on a screen), that is ordinary **domain data your module owns and reads back** — a different
+concern that only looks similar. Use the audit trail for compliance; model an activity log as domain data
+(recorded and queried through your own handlers, published cross-module via a `[ModuleContract]` if another
+module records into it) when the history is a product feature.

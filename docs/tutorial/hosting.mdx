@@ -99,12 +99,11 @@ builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbConte
 builder.Services.AddElarionOutbox<BillingDbContext>();
 
 // Framework audit trail (ADR-0045): the durable EF sink over the billing context, so [Auditable] handlers
-// record one compliance AuditRecord per invocation (committed with the transaction; denials included). This
-// is distinct from the app's own IActivityLog domain history — see the audit-trail concept doc for the split.
+// record one compliance AuditRecord per invocation (committed with the transaction; denials included).
 builder.Services.AddElarionAuditingEntityFrameworkCore<BillingDbContext>();
 
-// Infrastructure capability: the concrete email sender behind the module's port. (The activity log is a
-// Core module capability — a [ModuleContract] with a Core-internal [Service] impl — so it self-registers.)
+// Infrastructure capability: the concrete email sender behind the module's port. (The account-standing
+// policy is a Core [ModuleContract] with a Core-internal [Service] impl — so it self-registers.)
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
 // Scheduler runtime. Job descriptors and event consumers are composed per module by the

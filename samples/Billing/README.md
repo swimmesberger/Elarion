@@ -11,7 +11,7 @@ real PostgreSQL database.
 
 | Project | Role |
 | --- | --- |
-| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice`/`ActivityEntry` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox and the framework audit-log table), whose schema is created from the model at startup with `EnsureCreated` — a sample simplification, so there are no migration files (a production app keeps EF migrations; the [tutorial](../../docs/tutorial) shows that setup); the `Core`, `Clients`, and `Invoicing` modules with their handlers, services, jobs, events, and resilience policy — including the Core module's `IActivityLog` `[ModuleContract]` (a domain history `Clients`/`Invoicing` record through, backed by the `ActivityEntry` entity) *and*, alongside it, the framework **audit trail** (`[Auditable]` handlers + `Elarion.Auditing.EntityFrameworkCore`) as the worked example of the two-being-different; the decorator pipeline; and the `[GenerateDbSets]`-annotated `BillingDbContext` (handlers inject it directly — no context interface). |
+| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox and the framework audit-log table), whose schema is created from the model at startup with `EnsureCreated` — a sample simplification, so there are no migration files (a production app keeps EF migrations; the [tutorial](../../docs/tutorial) shows that setup); the `Core`, `Clients`, and `Invoicing` modules with their handlers, services, jobs, events, and resilience policy — including the Core module's `IAccountStanding` `[ModuleContract]` (a cross-module credit policy `Invoicing` consults before raising an invoice) and the framework **audit trail** (`[Auditable]` handlers + `Elarion.Auditing.EntityFrameworkCore`); the decorator pipeline; and the `[GenerateDbSets]`-annotated `BillingDbContext` (handlers inject it directly — no context interface). |
 | `Billing.Infrastructure` | Intent-only mechanism adapters only: the SMTP email sender behind the module's port. The database is **not** here — it is application logic and lives in `Billing.Application.Persistence`. |
 | `Billing.Api` | The ASP.NET Core host: `[GenerateModuleBootstrapper]`, JSON-RPC + MCP transports, the scheduler/resilience/cache runtimes, current-user, and OpenTelemetry. |
 | `Billing.AppHost` | The .NET Aspire app host: provisions PostgreSQL, runs the API and the web frontend, and wires them together. |
@@ -19,9 +19,9 @@ real PostgreSQL database.
 
 Entities live in a shared-kernel **namespace** and the whole persistence layer (configuration and the
 `BillingDbContext`) in a shared `Persistence` namespace (both under no `[AppModule]`), not
-separate projects; the Core module publishes its activity-log capability as an `IActivityLog`
-`[ModuleContract]` (distinct from the framework audit trail — see below),
-while `Infrastructure` holds only the intent-only SMTP adapter. See
+separate projects; the Core module publishes its credit policy as an `IAccountStanding`
+`[ModuleContract]` (a genuine cross-module domain call — distinct from the framework audit trail, which
+needs no contract), while `Infrastructure` holds only the intent-only SMTP adapter. See
 [Solution structure](../../docs/concepts/solution-structure) for the reasoning and
 for when each would graduate to its own assembly.
 
@@ -31,12 +31,13 @@ for when each would graduate to its own assembly.
   ELMOD002, with their `[EntityConfiguration]` schema in a shared `Persistence` layer (configuration is
   part of the shared data layer, not feature-owned — the config drives the entity's `DbSet` and schema,
   and there is no separate entity marker).
-- **Two kinds of "audit"** — the Core module's app-owned **activity log** (`IActivityLog`, a queryable
-  `[ModuleContract]` domain history) sits beside the framework **audit trail** (`[Auditable]` on
-  `CreateClient`/`CreateInvoice` + `[Audited]` on the entities + `Elarion.Auditing.EntityFrameworkCore`),
-  which records a compliance entry per invocation — committed atomically, denials included, with automatic
-  field capture. The worked example of the split drawn in the [audit-trail concept doc](../../docs/concepts/auditing).
-- **Vertical-slice modules** — `Core` (always-on, `ICurrentUser` activity log), `Clients`, and `Invoicing`,
+- **Cross-module contracts** — `Invoicing` consults Core's `IAccountStanding` `[ModuleContract]` (a credit
+  policy) before raising an invoice, rather than reaching into Core or duplicating the rule (ADR-0002).
+- **Framework audit trail** — `[Auditable]` on `CreateClient`/`CreateInvoice` + `[Audited]` on the entities
+  (`Elarion.Auditing.EntityFrameworkCore`) records a compliance entry per invocation, committed atomically,
+  denials included, with automatic field capture — no hand-rolled logging. See the
+  [audit-trail concept doc](../../docs/concepts/auditing).
+- **Vertical-slice modules** — `Core` (always-on foundation, publishes the credit policy), `Clients`, and `Invoicing`,
   each auto-registered and feature-gated; no hand-written `Add{Module}…()` calls.
 - **The full cross-cutting machinery** — a one-line decorator pipeline (logging → transaction, attached
   by compile-time predicate) with declarative request validation auto-attached from the DataAnnotations
