@@ -219,6 +219,48 @@ public sealed class ActorSystemTests {
     }
 
     [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task ConcurrentCalls_RacingRapidPassivation_ExecuteExactlyOnce() {
+        // Directly stresses the lock-free mailbox: a tiny idle timeout makes the cell passivate in
+        // every gap between call bursts, so enqueues constantly race the idle timer closing the
+        // cell. The packed closed/pending word must make "reserve a slot" and "close only when zero
+        // pending" mutually exclusive — otherwise a call is dropped (tally too low), double-run
+        // (too high), or a caller observes a spurious failure. The tally survives passivation; the
+        // actor's in-memory count does not, so it is the sink we assert on.
+        var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(TimeProvider.System);
+        var recorder = new LifecycleRecorder();
+        services.AddSingleton(recorder);
+        services.AddElarionActorSystem();
+        services.AddElarionActor(new ActorRegistration<CounterActor, string, ICounter> {
+            Name = "Counter",
+            Options = new ActorOptions { IdleTimeout = TimeSpan.FromMilliseconds(1) },
+            Activator = static (sp, context) => new CounterActor(context, sp.GetRequiredService<LifecycleRecorder>()),
+            Facade = static handle => new CounterFacade(handle)
+        });
+        await using var provider = services.BuildServiceProvider();
+        var counter = provider.GetRequiredService<IActorSystem>().Get<ICounter>("hot");
+
+        const int rounds = 150;
+        const int batch = 8;
+        for (var round = 0; round < rounds; round++) {
+            var calls = Enumerable.Range(0, batch)
+                .Select(_ => counter.Increment(TestToken).AsTask())
+                .ToArray();
+            await Task.WhenAll(calls).WaitAsync(WaitTimeout, TestToken);
+            // Let the 1 ms idle timer fire in the gap so the next burst races a fresh passivation.
+            await Task.Delay(2, TestToken);
+        }
+
+        recorder.Executions.Should().Be(rounds * batch);
+        // The run only proves the race window was exercised if passivation actually happened.
+        recorder.Deactivations.Should().BeGreaterThan(0);
+        // Every passivation is followed by a reactivation; the final activation may or may not have
+        // passivated yet by the time we read, so activations is deactivations or one more.
+        recorder.Activations.Should().BeInRange(recorder.Deactivations, recorder.Deactivations + 1);
+    }
+
+    [Fact]
     public async Task Activation_ResolvesDependenciesFromOwnScope() {
         await using var provider = CreateProvider();
         var actors = provider.GetRequiredService<IActorSystem>();
@@ -297,12 +339,18 @@ public sealed class ActorSystemTests {
     public sealed class LifecycleRecorder {
         private int _activations;
         private int _deactivations;
+        private int _executions;
 
         public int Activations => Volatile.Read(ref _activations);
         public int Deactivations => Volatile.Read(ref _deactivations);
 
+        // A sink that survives passivation (unlike the actor's in-memory count), so a stress test
+        // can assert every queued call ran exactly once even as activations come and go.
+        public int Executions => Volatile.Read(ref _executions);
+
         public void RecordActivation() => Interlocked.Increment(ref _activations);
         public void RecordDeactivation() => Interlocked.Increment(ref _deactivations);
+        public void RecordExecution() => Interlocked.Increment(ref _executions);
     }
 
     public sealed class GateService {
@@ -348,6 +396,7 @@ public sealed class ActorSystemTests {
             var read = _count;
             await Task.Yield();
             _count = read + 1;
+            recorder.RecordExecution();
             return _count;
         }
 
