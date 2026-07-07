@@ -85,10 +85,10 @@ per-layer contributions, exposed through a dedicated accessor — never a bare `
    needed). The context is named for the *category*, not "errors", so when the framework introduces another such
    type its `[JsonSerializable]` goes here and neither the seeding logic nor the type's name changes.
 
-### Consuming-side migration (the shape follow-ups implement)
+### Consuming-side migration (completed in follow-ups)
 
 This ADR ships the foundations (the options, the accessor, `AddElarionJson`/`ConfigureElarionJson`, the ADR, and
-tests). Wiring the subsystems is deferred but fixed in shape:
+tests); follow-ups wired the subsystems onto them, in this shape:
 
 - **Generated `AddElarion(configuration)`** contributes the module resolvers via
   `ConfigureElarionJson(o => o.TypeInfoResolvers.AddRange(configuration.GetAllJsonTypeInfoResolvers()))`.
