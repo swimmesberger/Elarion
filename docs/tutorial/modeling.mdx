@@ -179,9 +179,9 @@ resolver and any extra, non-generated wiring in `ConfigureServices`. See
 [Conventions](/docs/reference/conventions).
 
 **Core** is a foundation module — `Kind = AppModuleKind.Core` keeps it always enabled and initialized
-before feature modules. It owns always-on *domain* capabilities other modules build on — such as the audit
-trail you add next, which Core publishes as a `[ModuleContract]` so `Clients` and `Invoicing` can record
-through it.
+before feature modules. It owns always-on *domain* capabilities other modules build on — such as the
+account-standing (credit) policy you add next, which Core publishes as a `[ModuleContract]` so `Invoicing`
+can consult it before raising an invoice.
 
 ```csharp title="src/Billing.Application/Modules/Core/CoreModule.cs"
 using Elarion.Abstractions.Modules;

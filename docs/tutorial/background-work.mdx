@@ -259,7 +259,7 @@ public sealed class CreateInvoice(
     ICurrentUser user,
     IJobScheduler scheduler,
     IIntegrationEventBus integrationEvents,
-    IAuditTrail audit,
+    IAccountStanding accountStanding,
     TimeProvider clock
 ) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
     public sealed record Command : ICommand {
@@ -279,6 +279,13 @@ public sealed class CreateInvoice(
             .AnyAsync(c => c.OwnerId == user.UserId && c.Id == command.ClientId, ct);
         if (!clientExists) {
             return AppError.NotFound($"Client {command.ClientId} was not found.");
+        }
+
+        // Cross-module domain call: Core's published account-standing policy decides if this customer
+        // may be invoiced (ADR-0002) — Invoicing depends on the contract, not on Core's internals.
+        var standing = await accountStanding.EnsureCanInvoiceAsync(command.ClientId, command.AmountCents, ct);
+        if (!standing.IsSuccess) {
+            return standing.Error;
         }
 
         var count = await db.Invoices.CountAsync(i => i.OwnerId == user.UserId, ct);
@@ -308,7 +315,6 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        await audit.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }

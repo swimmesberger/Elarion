@@ -45,6 +45,8 @@
     <Project Path="src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj" />
     <Project Path="src/Elarion.Idempotency.EntityFrameworkCore/Elarion.Idempotency.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Idempotency.EntityFrameworkCore.Generators/Elarion.Idempotency.EntityFrameworkCore.Generators.csproj" />
+    <Project Path="src/Elarion.Auditing.EntityFrameworkCore/Elarion.Auditing.EntityFrameworkCore.csproj" />
+    <Project Path="src/Elarion.Auditing.EntityFrameworkCore.Generators/Elarion.Auditing.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.Identity.Generators/Elarion.EntityFrameworkCore.Identity.Generators.csproj" />
     <Project Path="src/Elarion.FeatureFlags.FeatureManagement/Elarion.FeatureFlags.FeatureManagement.csproj" />

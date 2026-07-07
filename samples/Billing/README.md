@@ -11,16 +11,17 @@ real PostgreSQL database.
 
 | Project | Role |
 | --- | --- |
-| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice`/`AuditEntry` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox), the design-time factory, and the EF migrations; the `Core`, `Clients`, and `Invoicing` modules with their handlers, services, jobs, events, and resilience policy — including the Core module's `IAuditTrail` `[ModuleContract]` (a domain capability `Clients`/`Invoicing` record through, backed by the `AuditEntry` entity); the decorator pipeline; and the `[GenerateDbSets]`-annotated `BillingDbContext` (handlers inject it directly — no context interface). |
+| `Billing.Application` | The shared-kernel `Billing.Application.Domain` namespace (the `Client`/`Invoice` entities + enums, under no `[AppModule]`); the shared `Billing.Application.Persistence` layer — the database is application logic, so it holds each entity's `[EntityConfiguration]`, the concrete `BillingDbContext` (with the EF Core outbox and the framework audit-log table), whose schema is created from the model at startup with `EnsureCreated` — a sample simplification, so there are no migration files (a production app keeps EF migrations; the [tutorial](../../docs/tutorial) shows that setup); the `Core`, `Clients`, and `Invoicing` modules with their handlers, services, jobs, events, and resilience policy — including the Core module's `IAccountStanding` `[ModuleContract]` (a cross-module credit policy `Invoicing` consults before raising an invoice) and the framework **audit trail** (`[Auditable]` handlers + `Elarion.Auditing.EntityFrameworkCore`); the decorator pipeline; and the `[GenerateDbSets]`-annotated `BillingDbContext` (handlers inject it directly — no context interface). |
 | `Billing.Infrastructure` | Intent-only mechanism adapters only: the SMTP email sender behind the module's port. The database is **not** here — it is application logic and lives in `Billing.Application.Persistence`. |
 | `Billing.Api` | The ASP.NET Core host: `[GenerateModuleBootstrapper]`, JSON-RPC + MCP transports, the scheduler/resilience/cache runtimes, current-user, and OpenTelemetry. |
 | `Billing.AppHost` | The .NET Aspire app host: provisions PostgreSQL, runs the API and the web frontend, and wires them together. |
 | `Billing.Web` | A Vite + React 19 + Tailwind v4 + shadcn/ui + TanStack Query/Router frontend that calls the API through the **generated** JSON-RPC client (`rpc-schema.json` → `src/generated/`), structured as **frontend modules** with the ADR-0032 contribution model (see below). |
 
-Entities live in a shared-kernel **namespace** and the whole persistence layer (configuration, the
-`BillingDbContext`, and migrations) in a shared `Persistence` namespace (both under no `[AppModule]`), not
-separate projects; the Core module publishes its audit capability as an `IAuditTrail` `[ModuleContract]`,
-while `Infrastructure` holds only the intent-only SMTP adapter. See
+Entities live in a shared-kernel **namespace** and the whole persistence layer (configuration and the
+`BillingDbContext`) in a shared `Persistence` namespace (both under no `[AppModule]`), not
+separate projects; the Core module publishes its credit policy as an `IAccountStanding`
+`[ModuleContract]` (a genuine cross-module domain call — distinct from the framework audit trail, which
+needs no contract), while `Infrastructure` holds only the intent-only SMTP adapter. See
 [Solution structure](../../docs/concepts/solution-structure) for the reasoning and
 for when each would graduate to its own assembly.
 
@@ -30,7 +31,13 @@ for when each would graduate to its own assembly.
   ELMOD002, with their `[EntityConfiguration]` schema in a shared `Persistence` layer (configuration is
   part of the shared data layer, not feature-owned — the config drives the entity's `DbSet` and schema,
   and there is no separate entity marker).
-- **Vertical-slice modules** — `Core` (always-on, `ICurrentUser` audit trail), `Clients`, and `Invoicing`,
+- **Cross-module contracts** — `Invoicing` consults Core's `IAccountStanding` `[ModuleContract]` (a credit
+  policy) before raising an invoice, rather than reaching into Core or duplicating the rule (ADR-0002).
+- **Framework audit trail** — `[Auditable]` on `CreateClient`/`CreateInvoice` + `[Audited]` on the entities
+  (`Elarion.Auditing.EntityFrameworkCore`) records a compliance entry per invocation, committed atomically,
+  denials included, with automatic field capture — no hand-rolled logging. See the
+  [audit-trail concept doc](../../docs/concepts/auditing).
+- **Vertical-slice modules** — `Core` (always-on foundation, publishes the credit policy), `Clients`, and `Invoicing`,
   each auto-registered and feature-gated; no hand-written `Add{Module}…()` calls.
 - **The full cross-cutting machinery** — a one-line decorator pipeline (logging → transaction, attached
   by compile-time predicate) with declarative request validation auto-attached from the DataAnnotations
@@ -39,7 +46,7 @@ for when each would graduate to its own assembly.
   background jobs with a resilience policy, and a nightly cron.
 - **Every transport from one definition** — `[Handler]` handlers map onto one shared `HandlerDispatcher`,
   with JSON-RPC **and** MCP as thin adapters over it (each surface chosen via the handler's `Transports` flag).
-- **Real persistence** — PostgreSQL via EF Core, migrations applied on startup, all provisioned by Aspire.
+- **Real persistence** — PostgreSQL via EF Core (snake_case tables), schema created on startup with `EnsureCreated`, all provisioned by Aspire.
 - **The full chain** — a C# handler becomes a JSON-RPC method, an exported `rpc-schema.json`, a generated
   TypeScript client, and a typed React call, all driven by the same contract.
 - **Frontend modules with the contribution model (ADR-0032)** — the review-isolation property extended to
@@ -98,7 +105,7 @@ The kernel's unit tests live with the package: `npm --prefix src/elarion-contrib
 ## Run it
 
 Requires a container runtime (Docker or Podman) for PostgreSQL and Node.js for the frontend. Install the
-web dependencies once, then run the Aspire app host — it provisions the database, applies migrations,
+web dependencies once, then run the Aspire app host — it provisions the database, creates the schema,
 starts the API and the Vite dev server (injecting the API URL as `VITE_API_URL`), and opens the Aspire
 dashboard with traces and metrics:
 

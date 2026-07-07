@@ -1,0 +1,238 @@
+---
+title: Audit trail
+description: Declarative, transport-neutral audit records — who performed which action on which resource, with field-level change capture, success records committed atomically with the business transaction.
+---
+
+Auditing in Elarion answers the question every application eventually gets asked: **who did what?** You
+annotate a handler with `[Auditable]` and it records one structured `AuditRecord` per invocation — actor,
+action, resource, outcome, timestamp, correlation. **That is the whole feature, and it needs nothing on your
+entities.** A successful command's record commits **atomically with the handler's business writes**; denied
+and failed attempts are recorded on a detached path that survives the rollback. Under every transport
+identically.
+
+Automatic **field-level change capture** (`Street: "Old" → "New"` in the record) is a *separate, optional*
+layer you turn on per entity — it is not required for auditing to work.
+
+It is the same declarative shape as [authorization](authorization.mdx) and
+[idempotency](idempotency.mdx): a class-level attribute, generated decorators, a seam-in-Abstractions /
+impl-in-package split ([ADR-0045](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0045-handler-action-audit-trail.md)).
+
+## The three axes
+
+Auditing has three **independent** switches — turn on only what a handler needs. None depends on the others:
+you can capture field changes without naming a resource, name a resource without capturing changes, or record
+nothing but the bare who/what/outcome.
+
+| Axis | Question it answers | Turn on with |
+| --- | --- | --- |
+| **The record** | *who did which action, with what outcome?* | `[Auditable]` on the handler (or assembly-wide `[ElarionAuditDefaults]`) — **always**, nothing on your entities |
+| **The resource** | *which thing was the action about?* (the indexed "browse by resource" view) | `[Auditable(Resource = "properties")]` (type only) and/or `IAuditScope.SetResource("properties", id)` (type + id) |
+| **The changes** | *which fields changed, old → new?* | `[Audited]` on the entity (automatic), or `IAuditScope.AddChange(…)` (manual) |
+
+### The resource: type vs. id
+
+This is the part that trips people up. The record has **two** resource columns, filled from **two** places —
+and `Resource` on the attribute only fills the first:
+
+| Column | Filled by | Example |
+| --- | --- | --- |
+| `ResourceType` | `[Auditable(Resource = "properties")]` **or** `SetResource(type, …)` | `"properties"` |
+| `ResourceId` | **only** `SetResource(type, id)` | `"42"` |
+
+- `[Auditable(Resource = "properties")]` **alone** → *"someone updated **a** property"* — a resource *type* label
+  with zero handler code and no `IAuditScope`, so the log is filterable as "all property actions" but the record
+  isn't tied to a specific row.
+- `audit.SetResource("properties", "42")` → *"…property **#42**"* — type **and** id, so it appears on that one
+  property's history. `SetResource`'s type argument wins, so **don't repeat `Resource` on the attribute when you
+  call `SetResource`** — the attribute's `Resource` is purely the fallback type for handlers that *don't* call it.
+
+**What do you put for the type?** Use the **same resource string your handler already declares in
+`[RequirePermission(resource, …)]`** — so *who may act on `properties`* and *who did* speak one vocabulary.
+Elarion permissions follow K8s-RBAC, so it is the plural resource name (`clients`, `invoices`, `properties`),
+and the audit type should match it exactly. Keep it **stable** (it is a search key over historical records)
+and **identical across every handler** that touches that resource, and use the **aggregate** the record is
+about — even when the write touched child rows (editing an invoice's line item is `resourceType: "invoices"`,
+with the line item showing up in `Changes`), not the C# class or table name.
+
+## Usage
+
+The minimum is one attribute — the record writes itself, no `IAuditScope`, nothing on your entities. `Resource`
+tags it with a resource *type*:
+
+```csharp
+[Auditable(Resource = "properties")]   // same word as the handler's [RequirePermission("properties", …)]
+public sealed class UpdatePropertyHandler(AppDbContext db)
+    : IHandler<UpdatePropertyCommand, Result<PropertyResponse>> {
+    public async ValueTask<Result<PropertyResponse>> HandleAsync(UpdatePropertyCommand request, CancellationToken ct) {
+        var property = await db.Properties.SingleAsync(p => p.Id == request.Id, ct);
+        property.Street = request.Street;
+        return Result<PropertyResponse>.Success(new() { Id = property.Id });
+    }
+}
+```
+
+That records *"user X performed `properties.update` on a property, succeeded, at T"* — searchable by action and
+by resource type, but not tied to a specific row. To pin **which** property *and* capture the changed fields,
+inject `IAuditScope`, call `SetResource` with the id, and mark the entity `[Audited]` — note the resource type
+is the same `"properties"` the handler already uses for authorization:
+
+```csharp
+[RequirePermission("properties", Verbs.Write)]   // who may act on properties
+[Auditable]                                       // no Resource — SetResource below supplies the type (and id)
+public sealed class UpdatePropertyHandler(AppDbContext db, IAuditScope audit)
+    : IHandler<UpdatePropertyCommand, Result<PropertyResponse>> {
+    public async ValueTask<Result<PropertyResponse>> HandleAsync(UpdatePropertyCommand request, CancellationToken ct) {
+        var property = await db.Properties.SingleAsync(p => p.Id == request.Id, ct);
+        property.Street = request.Street;                          // captured old → new automatically ([Audited] on Property)
+        audit.SetResource("properties", property.Id.ToString());   // ResourceType + ResourceId (optionally a parent)
+        return Result<PropertyResponse>.Success(new() { Id = property.Id });
+    }
+}
+```
+
+## When to use what
+
+- **Just `[Auditable]`** — you need who/action/outcome and nothing more (e.g. *"someone exported the report"*).
+- **`[Auditable(Resource = "x")]`** — add a resource *type* so the log filters as "all x actions", when you
+  don't have (or don't need) a specific id, or don't want to inject `IAuditScope`.
+- **`[Auditable]` + `SetResource("x", id)`** — you want *"everything done to **this** x"* on x's own history
+  screen. Add a parent — `SetResource("equipment", id, parentType: "properties", parentId: propertyId)` — to also
+  surface the record on the parent aggregate's audit tab.
+- **`[Audited]` on the entity** — you want the before/after field values, and the write goes through the EF
+  change tracker. **Independent of the resource axis** — diffs are captured whether or not you named a resource.
+- **`audit.AddChange(…)`** — the write bypasses the change tracker (`ExecuteUpdate`/`ExecuteDelete`/raw SQL), so
+  auto-capture can't see it; the handler records the change explicitly.
+
+Wire the durable sink over your `DbContext`, and let the generator map the table:
+
+```csharp
+// Host
+services.AddElarionAuditingEntityFrameworkCore<AppDbContext>();
+
+// Data layer — the generator emits the DbSet and table mapping (ELAUD001 without [GenerateDbSets])
+[GenerateDbSets]
+[GenerateElarionAuditing]
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+```
+
+Attachment is **soft**: without a registered `IAuditTrail` the decorators never attach and the pipeline is
+unchanged, so a module using `[Auditable]` runs fine in a host without auditing.
+
+To flip a whole assembly to audited-by-default, opt in once — every **command** handler in scope is audited
+unless it opts out; queries stay explicit-only (read auditing is a deliberate, per-handler decision):
+
+```csharp
+[assembly: ElarionAuditDefaults]
+
+[Auditable(Enabled = false)]   // the per-handler opt-out under defaults
+public sealed class ImportLegacyDataHandler : IHandler<…> { … }
+```
+
+## What a record contains
+
+One append-only row per audited invocation, with the searchable facts as structured, indexed columns:
+
+| Field | Content |
+| --- | --- |
+| `Action` / `Module` | The handler's wire name (`properties.update`) — resolved at compile time exactly like the RPC schema name, so audit records and the exported schema agree. |
+| `UserId` | The actor from `ICurrentUser` (`null` for anonymous/system callers). |
+| `ResourceType` / `ResourceId` | What was acted on, from `IAuditScope.SetResource` (falling back to `[Auditable(Resource = …)]`). |
+| `ParentResourceType` / `ParentResourceId` | Optional aggregate reference — "fire extinguisher X **on property Y**" — so the record surfaces on the parent's audit view without joining domain tables. |
+| `Outcome` / `ErrorKind` | `Succeeded`, `Failed`, or `Denied` (unauthorized/forbidden), plus the error kind. |
+| `CorrelationId` | The current trace id, linking the record to its span. |
+| `Changes` | Field-level `{entity, entityId, property, oldValue, newValue, kind}` diffs (JSON). Empty unless the entity is `[Audited]` or the handler adds them — the [optional layer below](#automatic-change-capture-optional). |
+| `Details` | App-supplied string facts (display names, rule ids — keep values free of secrets). |
+
+The classic search — *"alle Änderungen an Feuerlöschern durch Max, letzte Woche"* — is a plain indexed
+`WHERE` over those columns plus [keyset pagination](../capabilities/pagination.mdx); querying and display
+stay app-owned (the framework never renders audit UI).
+
+## Automatic change capture (optional)
+
+Everything above works without this section. This layer only **populates the `Changes` column** — turn it on
+where a record needs "which fields changed," leave it off everywhere else. Opt an entity in with `[Audited]`,
+exclude sensitive columns with `[AuditIgnore]`:
+
+```csharp
+[Audited]
+public sealed class Property {
+    public required Guid Id { get; init; }
+    public required string Street { get; set; }
+
+    [AuditIgnore]                       // never captured, even when it changes
+    public string? InternalNote { get; set; }
+}
+```
+
+While an audited handler runs, a `SaveChangesInterceptor` invokes the registered
+`IAuditChangeContributor`s at **every flush** — the only point where EF still holds original values (a
+mid-handler `SaveChangesAsync` resets them, so a single "read the change tracker before commit" would be
+lossy. The sink also flushes pending writes before materializing the record, so the common
+"mutate and let the commit flush persist" handler still gets its diffs). The default contributor diffs
+`[Audited]` entities: modified properties as old → new pairs, creations and deletions as entity-level facts.
+
+Capture is **opt-in per entity** on purpose: auto-capturing every column is how password hashes end up in
+audit logs, and opt-in keeps framework tables (outbox, idempotency, the audit log itself) out of capture.
+
+Contributors are **additive** (`IEnumerable<>` multi-registration, like `IHandlerContextEnricher`) — the
+composition levers are plain DI:
+
+```csharp
+services.AddElarionAuditChangeContributor<JsonDocumentDiffContributor>();  // add a specialist
+// …or remove the default IAuditChangeContributor descriptor for action-records-only auditing.
+```
+
+**The known hole:** `ExecuteUpdate`/`ExecuteDelete`/raw SQL bypass the change tracker, so the interceptor
+never sees them. The handler covers those paths itself — same scope, same record:
+
+```csharp
+var moved = await db.Properties.Where(p => p.PortfolioId == source)
+    .ExecuteUpdateAsync(s => s.SetProperty(p => p.PortfolioId, target), ct);
+audit.AddChange(new AuditChange {
+    Entity = "Property", Property = "PortfolioId",
+    OldValue = source.ToString(), NewValue = target.ToString(),
+    Kind = AuditChangeKind.Modified,
+});
+audit.AddDetail("affectedRows", moved.ToString());
+```
+
+## Outcome semantics
+
+The transaction makes the outcome paths physically asymmetric, so two thin decorators cooperate:
+
+- **Success** — recorded *inside* the unit of work: the row commits atomically with the business writes.
+  A record can never claim an action that rolled back, and a committed action can never lose its record.
+- **Failure / denial** — recorded *detached* (own scope and connection): the caller's transaction is gone
+  or rolling back, and the record must survive it. Denials (`Unauthorized`/`Forbidden`) are observed
+  outside the authorization gate, so rejected attempts are audited too. Failure records carry the changes
+  from flushes that actually happened — attempted, not applied; the `Outcome` says which.
+- **Idempotent replay** — deliberately records nothing: the action executed once, the trail says so once.
+- **Cancellation** — cooperative cancellation is not an auditable outcome.
+
+## Retention
+
+**Off by default** — an audit trail that silently deletes itself is a compliance bug. Opt in deliberately:
+
+```csharp
+services.AddElarionAuditingEntityFrameworkCore<AppDbContext>(o => {
+    o.RetainFor = TimeSpan.FromDays(365 * 2);
+});
+```
+
+A hosted worker then purges older rows on an indexed probe (idempotent; safe on every node).
+
+## Scale and non-goals
+
+The append-only one-Postgres table serves the framework's 1–10-node tier. Past that — or for SIEM
+shipping, tamper-evidence chains, long-term archival — replace the `IAuditTrail` registration; the
+attributes, scope, and capture seams are unchanged. Full temporal entity history (point-in-time
+reconstruction, undo) is a non-goal: the trail records *actions with their diffs*, not versioned state.
+
+It is also **not an application activity log.** The audit trail is a compliance record — framework-owned,
+write-once, read by operators. When *the app itself* needs to show users a queryable history (a "recent
+activity" feed on a screen), that is ordinary **domain data your module owns and reads back** — a different
+concern that only looks similar. Use the audit trail for compliance; model an activity log as domain data
+(recorded and queried through your own handlers, published cross-module via a `[ModuleContract]` if another
+module records into it) when the history is a product feature.

@@ -26,16 +26,19 @@ public sealed partial class HandlerRegistrationGenerator {
     /// module's own tree would go stale when that class changes.
     /// </summary>
     private static (List<(string Namespace, AttributeData DecoratorList)> DecoratorLists,
-        List<(string Namespace, bool RequireAuthenticated)> AuthDefaults) BuildModuleMaps(
+        List<(string Namespace, bool RequireAuthenticated)> AuthDefaults,
+        List<string> AuditDefaultNamespaces) BuildModuleMaps(
         Compilation compilation,
         EquatableArray<ModuleScanner.Module> modules,
         CancellationToken ct) {
         var decoratorLists = new List<(string, AttributeData)>();
         var authDefaults = new List<(string, bool)>();
+        var auditDefaults = new List<string>();
         var decoratorListMeta = compilation.GetTypeByMetadataName(DecoratorListAttributeMetadataName);
         var defaultsAttr = compilation.GetTypeByMetadataName(AuthorizationDefaultsAttributeMetadataName);
-        if (decoratorListMeta is null && defaultsAttr is null)
-            return (decoratorLists, authDefaults);
+        var auditDefaultsAttr = compilation.GetTypeByMetadataName(AuditDefaultsAttributeMetadataName);
+        if (decoratorListMeta is null && defaultsAttr is null && auditDefaultsAttr is null)
+            return (decoratorLists, authDefaults, auditDefaults);
 
         // Deterministic order: modules sorted by namespace then name, matching ELMOD001's documented
         // "alphabetically first" ownership tie-break for modules sharing a namespace.
@@ -58,9 +61,14 @@ public sealed partial class HandlerRegistrationGenerator {
                 if (defaults is not null)
                     authDefaults.Add((module.Namespace, ReadRequireAuthenticated(defaults)));
             }
+
+            if (auditDefaultsAttr is not null &&
+                attributes.Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, auditDefaultsAttr))) {
+                auditDefaults.Add(module.Namespace);
+            }
         }
 
-        return (decoratorLists, authDefaults);
+        return (decoratorLists, authDefaults, auditDefaults);
     }
 
     private static AttributeData? FindModuleDecoratorList(

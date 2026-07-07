@@ -6,6 +6,7 @@ using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Auditing;
 using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -22,13 +23,15 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 [Handler("invoices.create")]
 [RequirePermission("invoices", Verbs.Write)]
 [CacheInvalidate("invoices")]
+[Auditable]   // framework audit trail (ADR-0045): one compliance record per invocation; SetResource below pins the resource
 [Description("Creates a draft invoice and sends it to the client in the background.")]
 public sealed class CreateInvoice(
     BillingDbContext db,
     ICurrentUser user,
     IJobScheduler scheduler,
     IIntegrationEventBus integrationEvents,
-    IAuditTrail audit,
+    IAccountStanding accountStanding,
+    IAuditScope audit,
     TimeProvider clock
 ) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
     /// <summary>Tier-1 wire-shape constraints live here as DataAnnotations (ADR-0027); the "due date must be
@@ -61,6 +64,14 @@ public sealed class CreateInvoice(
             return AppError.NotFound($"Client {command.ClientId} was not found.");
         }
 
+        // Cross-module domain call (ADR-0002): ask the Core module's published account-standing policy whether
+        // this customer may be invoiced, through its [ModuleContract] — not by reaching into Core's internals
+        // or reimplementing the credit rule here.
+        var standing = await accountStanding.EnsureCanInvoiceAsync(command.ClientId, command.AmountCents, ct);
+        if (!standing.IsSuccess) {
+            return standing.Error;
+        }
+
         var count = await db.Invoices.CountAsync(i => i.OwnerId == user.UserId, ct);
         var invoice = new Invoice {
             Id = Guid.CreateVersion7(),
@@ -88,7 +99,8 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        await audit.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
+        // Same "invoices" resource vocabulary as [RequirePermission("invoices", …)] above, so auth and audit agree.
+        audit.SetResource("invoices", invoice.Id.ToString());
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }

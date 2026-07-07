@@ -299,6 +299,14 @@ Idempotency-keys generation for `[GenerateElarionIdempotencyKeys]`. See [Idempot
 | --- | --- | --- | --- |
 | ELIDEMEF001 | Error | A context is annotated with `[GenerateElarionIdempotencyKeys]` but not `[GenerateDbSets]`, so the idempotency-keys `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionIdempotencyKeys]`. |
 
+## ELAUD — Audit trail (EF Core)
+
+Audit-log generation for `[GenerateElarionAuditing]`. See [Audit trail](/docs/concepts/auditing).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELAUD001 | Error | A context is annotated with `[GenerateElarionAuditing]` but not `[GenerateDbSets]`, so the audit-log `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionAuditing]`. |
+
 ## ELOBX — Transactional outbox
 
 Outbox-table generation for `[GenerateElarionOutbox]`. See

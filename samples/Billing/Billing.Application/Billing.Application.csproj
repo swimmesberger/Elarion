@@ -10,6 +10,9 @@
     <!-- The persistence layer (DbContext, migrations, outbox table config) lives in the application,
          because the database is application logic, not an infrastructure detail. -->
     <ProjectReference Include="..\..\..\src\Elarion.Messaging.Outbox\Elarion.Messaging.Outbox.csproj" />
+    <!-- Framework audit trail (ADR-0045): the durable EF sink + the audit-log table config
+         (modelBuilder.UseElarionAuditing() in BillingDbContext). Handlers opt in with [Auditable]. -->
+    <ProjectReference Include="..\..\..\src\Elarion.Auditing.EntityFrameworkCore\Elarion.Auditing.EntityFrameworkCore.csproj" />
     <!-- Declarative request validation (ADR-0027): referencing Elarion.Validation is what activates the
          resolver generator, which turns the DataAnnotations on handler request DTOs into per-module
          IValidatableInfoResolvers wired through each module's ConfigureDefaultServices. -->
@@ -32,13 +35,10 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
-    <!-- The concrete DbContext + migrations live here, so the provider and design-time tooling do too.
-         Provider *registration* (UseNpgsql + connection string) stays in the host. -->
+    <!-- The concrete DbContext lives here, so the Npgsql provider does too. Provider *registration*
+         (UseNpgsql + connection string) stays in the host. This sample builds its schema from the model on
+         startup (EnsureCreated), so it needs no EF migrations and no Microsoft.EntityFrameworkCore.Design. -->
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
   </ItemGroup>
 
 </Project>

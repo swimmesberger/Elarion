@@ -15,6 +15,7 @@
     "client-capabilities",
     "frontend-modules",
     "idempotency",
+    "auditing",
     "settings",
     "persistence-and-transactions",
     "variable-substitution",

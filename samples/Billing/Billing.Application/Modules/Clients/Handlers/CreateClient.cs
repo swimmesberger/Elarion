@@ -2,9 +2,9 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Billing.Application.Domain;
 using Billing.Application.Modules.Clients.Services;
-using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Auditing;
 using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -22,12 +22,13 @@ namespace Billing.Application.Modules.Clients.Handlers;
 [HttpEndpoint("clients")]
 [RequirePermission("clients", Verbs.Write)]
 [CacheInvalidate("clients")]
+[Auditable]   // framework audit trail (ADR-0045): one compliance record per invocation; SetResource below pins the resource
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(
     BillingDbContext db,
     ICurrentUser user,
     IClientNumberGenerator numbers,
-    IAuditTrail audit,
+    IAuditScope audit,
     TimeProvider clock
 ) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
     /// <summary>Wire-shape constraints are declarative DataAnnotations (ADR-0027): one source feeds the
@@ -64,7 +65,12 @@ public sealed class CreateClient(
 
         db.Clients.Add(client);
         await db.SaveChangesAsync(ct);
-        await audit.RecordAsync("client.created", client.Id.ToString(), ct);
+
+        // The framework audit trail captured this whole invocation automatically ([Auditable] above);
+        // SetResource just pins WHICH client, so the compliance record is queryable by resource. The record
+        // commits atomically with the transaction, and [Audited] on Client adds the created row's snapshot.
+        // The resource type is the same "clients" vocabulary as [RequirePermission("clients", …)] above.
+        audit.SetResource("clients", client.Id.ToString());
 
         return new Response(client.Id, client.Number);
     }
