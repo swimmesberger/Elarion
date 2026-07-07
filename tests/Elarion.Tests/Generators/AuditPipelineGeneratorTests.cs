@@ -88,6 +88,29 @@ public sealed class AuditPipelineGeneratorTests {
     }
 
     [Fact]
+    public void EmitsResolvedPipelineCache_WithConditionalFlags() {
+        var generated = Generate(CreateSource(
+            assemblyAttributes: "",
+            handlerAttributes: "[Elarion.Abstractions.Auditing.Auditable]",
+            requestMarker: ": Elarion.Abstractions.ICommand"));
+
+        // The per-handler cache + first-resolution collector + publish.
+        generated.Should().Contain(
+            "private static volatile global::System.Collections.Generic.IReadOnlyList<global::Elarion.Abstractions.Pipeline.PipelineStep>? __pipeline;");
+        generated.Should().Contain("var __steps = __pipeline is null");
+        generated.Should().Contain("if (__steps is not null) { __steps.Reverse(); __pipeline = __steps; }");
+
+        // Soft-attached audit is a conditional step; always-on tracing is not.
+        generated.Should().Contain(
+            "__steps?.Add(new global::Elarion.Abstractions.Pipeline.PipelineStep(typeof(global::Elarion.Pipeline.AuditDecorator<,>), true));");
+        generated.Should().Contain(
+            "__steps?.Add(new global::Elarion.Abstractions.Pipeline.PipelineStep(typeof(global::Elarion.Pipeline.TracingDecorator<,>), false));");
+        // The metadata singleton feeds the accessor into HandlerMetadata.
+        generated.Should().Contain(
+            "static () => __pipeline ?? global::System.Array.Empty<global::Elarion.Abstractions.Pipeline.PipelineStep>());");
+    }
+
+    [Fact]
     public void IrrelevantEdit_ReusesHandlerOutputs() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new HandlerRegistrationGenerator(),

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Diagnostics;
+using Elarion.Abstractions.Pipeline;
 using Xunit;
 
 using Elarion.Pipeline;
@@ -9,12 +10,15 @@ using Elarion.Diagnostics;
 namespace Elarion.Tests.Services;
 
 public sealed class TracingDecoratorTests {
+    private static readonly HandlerMetadata Metadata =
+        new(typeof(Request), typeof(Request), typeof(Result<int>));
+
     [Fact]
     public async Task HandleAsync_SuccessResult_EmitsSpanAndMetricWithOkOutcome() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
         var decorator = new TracingDecorator<Request, Result<int>>(
-            new SuccessHandler(), "SuccessHandler");
+            new SuccessHandler(), "SuccessHandler", Metadata);
 
         var result = await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -37,7 +41,7 @@ public sealed class TracingDecoratorTests {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
         var decorator = new TracingDecorator<Request, Result<int>>(
-            new FailureHandler(), "FailureHandler");
+            new FailureHandler(), "FailureHandler", Metadata);
 
         var result = await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -57,7 +61,7 @@ public sealed class TracingDecoratorTests {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
         var decorator = new TracingDecorator<Request, Result<int>>(
-            new ThrowingHandler(), "ThrowingHandler");
+            new ThrowingHandler(), "ThrowingHandler", Metadata);
 
         var act = async () => await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -77,7 +81,7 @@ public sealed class TracingDecoratorTests {
     public async Task HandleAsync_NoActivityListener_StillRecordsMetric() {
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
         var decorator = new TracingDecorator<Request, Result<int>>(
-            new SuccessHandler(), "MetricOnlyHandler");
+            new SuccessHandler(), "MetricOnlyHandler", Metadata);
 
         await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
