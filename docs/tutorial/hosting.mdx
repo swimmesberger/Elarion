@@ -74,6 +74,7 @@ using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
+using Elarion.Auditing.EntityFrameworkCore;
 using Elarion.Caching;
 using Elarion.Messaging.Outbox;
 using Elarion.JsonRpc;
@@ -96,6 +97,11 @@ builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbConte
 
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
 builder.Services.AddElarionOutbox<BillingDbContext>();
+
+// Framework audit trail (ADR-0045): the durable EF sink over the billing context, so [Auditable] handlers
+// record one compliance AuditRecord per invocation (committed with the transaction; denials included). This
+// is distinct from the app's own IActivityLog domain history — see the audit-trail concept doc for the split.
+builder.Services.AddElarionAuditingEntityFrameworkCore<BillingDbContext>();
 
 // Infrastructure capability: the concrete email sender behind the module's port. (The activity log is a
 // Core module capability — a [ModuleContract] with a Core-internal [Service] impl — so it self-registers.)

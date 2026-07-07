@@ -13,6 +13,7 @@ using Elarion.AspNetCore.Identity;
 using Elarion.Session;
 using Elarion.AspNetCore.Mcp;
 using Elarion.AspNetCore.OpenApi;
+using Elarion.Auditing.EntityFrameworkCore;
 using Elarion.Authorization;
 using Elarion.Caching;
 using Elarion.Caching.PostgreSql;
@@ -43,7 +44,14 @@ builder.Services.AddElarionUnitOfWork<BillingDbContext>();
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
 builder.Services.AddElarionOutbox<BillingDbContext>();
 
-// Infrastructure capability: the concrete email sender behind the module's port. (The audit trail is a
+// Framework audit trail (ADR-0045): the durable EF sink over the billing context. [Auditable] handlers
+// (CreateClient, CreateInvoice) then record one compliance AuditRecord per invocation — committed atomically
+// with the transaction, denied attempts included — and [Audited] entities add automatic field-level change
+// capture. This is distinct from the app's own IActivityLog domain history (a Core [ModuleContract]); the two
+// coexist here to show the split (see the "audit trail" concept doc). Retention is off by default.
+builder.Services.AddElarionAuditingEntityFrameworkCore<BillingDbContext>();
+
+// Infrastructure capability: the concrete email sender behind the module's port. (The activity log is a
 // Core module capability — a [ModuleContract] with a Core-internal [Service] impl — so it self-registers.)
 builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 
@@ -154,10 +162,12 @@ builder.Services.AddOpenTelemetry()
 
 var app = builder.Build();
 
-// Apply migrations on startup so the sample runs against a fresh Aspire-provisioned database.
+// Create the schema from the model on startup. This sample is a demo against a fresh Aspire-provisioned
+// database, so it uses EnsureCreated rather than EF migrations — no migration files to maintain. A real
+// application keeps migrations (db.Database.MigrateAsync()) for versioned, incremental schema changes.
 using (var scope = app.Services.CreateScope()) {
     var db = scope.ServiceProvider.GetRequiredService<BillingDbContext>();
-    await db.Database.MigrateAsync();
+    await db.Database.EnsureCreatedAsync();
 }
 
 app.UseCors(DevCorsPolicy);

@@ -184,6 +184,53 @@ transaction as the command. If you later back the log onto Grafana instead, that
 
 <Step>
 
+### …and the framework audit trail (compliance)
+
+The activity log you just built is *domain data the app queries*. A different need — a **compliance** record
+of *who performed which action, with what outcome* — is what the framework
+[audit trail](/docs/concepts/auditing) provides, and you should not hand-roll it. This app uses both, so the
+distinction is worth seeing side by side:
+
+| | Activity log (just built) | Framework audit trail |
+| --- | --- | --- |
+| **What** | domain history a feature lists | compliance record of every audited action |
+| **How** | inject `IActivityLog`, call `RecordAsync` | tag the handler `[Auditable]` — the record writes itself |
+| **Outcome** | the successes you chose to log | success **and** denied/failed attempts, automatically |
+| **Fields** | whatever you pass | automatic `old → new` diffs for `[Audited]` entities |
+| **Home** | a `[ModuleContract]` you own | `Elarion.Auditing.EntityFrameworkCore` |
+
+Turn it on with one host line — the durable EF sink over the same `BillingDbContext` (the `elarion_audit_log`
+table is mapped like the outbox and created by a migration):
+
+```csharp title="src/Billing.Api/Program.cs (excerpt)"
+builder.Services.AddElarionAuditingEntityFrameworkCore<BillingDbContext>();
+```
+```csharp title="src/Billing.Application/Persistence/BillingDbContext.cs (excerpt)"
+modelBuilder.UseElarionAuditing();   // maps the elarion_audit_log table
+```
+
+A handler then opts in with `[Auditable]` (you'll see it on `CreateClient` next). An entity opts into
+automatic field capture with `[Audited]`, excluding sensitive columns with `[AuditIgnore]` — nothing on your
+entities is needed for the record *itself*; `[Audited]` only adds the diffs:
+
+```csharp title="src/Billing.Application/Domain/Client.cs (excerpt)"
+[Audited]
+public sealed class Client {
+    public Guid Id { get; set; }
+    // …
+    [AuditIgnore]   // PII kept out of the audit trail's change capture
+    public required string Email { get; set; }
+}
+```
+
+The record commits **atomically** with the handler's transaction — a rolled-back command leaves no
+misleading "success" row — while denied attempts are still captured on their own path. See
+[Audit trail](/docs/concepts/auditing) for the full model.
+
+</Step>
+
+<Step>
+
 ### Add a module-owned service
 
 Clients get a human-friendly number like `C-000123`. A `[Service]` keeps that policy in one place.
@@ -216,7 +263,9 @@ public sealed class ClientNumberGenerator(BillingDbContext db) : IClientNumberGe
 
 `CreateClient` is a state change, so its request is a nested `Command`. It runs through the pipeline
 (the framework's validation gate, then logging → transaction), scopes the row to the current user, invalidates the
-clients cache on success, and is exposed over JSON-RPC. `[Handler]` names the operation; the name is
+clients cache on success, and is exposed over JSON-RPC. `[Auditable]` records the compliance audit trail
+automatically (`audit.SetResource` just pins *which* client); the `activityLog` call is the app's own domain
+history — the two from the previous step, side by side. `[Handler]` names the operation; the name is
 optional, and when omitted Elarion infers `{module}.{operation}` by convention (here `clients.createClient`
 from module `Clients` and the handler type name minus its `Handler`/`Command`/`Query`/`Request` suffix,
 camelCased). An explicit name like `"clients.create"` is recommended for stable public/wire contracts. The
@@ -230,6 +279,7 @@ using Billing.Application.Modules.Clients.Services;
 using Billing.Application.Modules.Core.Contracts;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Auditing;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -238,12 +288,14 @@ namespace Billing.Application.Modules.Clients.Handlers;
 
 [Handler("clients.create")]
 [CacheInvalidate("clients")]
+[Auditable(Resource = "client")]   // framework audit trail: one compliance record per invocation
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(
     BillingDbContext db,
     ICurrentUser user,
     IClientNumberGenerator numbers,
     IActivityLog activityLog,
+    IAuditScope audit,
     TimeProvider clock
 ) : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
     public sealed record Command : ICommand {
@@ -276,7 +328,9 @@ public sealed class CreateClient(
 
         db.Clients.Add(client);
         await db.SaveChangesAsync(ct);
-        await activityLog.RecordAsync("client.created", client.Id.ToString(), ct);
+
+        audit.SetResource("client", client.Id.ToString());               // framework audit trail: pin the resource
+        await activityLog.RecordAsync("client.created", client.Id.ToString(), ct);   // app's own domain activity log
 
         return new Response(client.Id, client.Number);
     }

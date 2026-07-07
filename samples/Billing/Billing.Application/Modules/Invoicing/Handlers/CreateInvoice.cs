@@ -6,6 +6,7 @@ using Billing.Application.Modules.Invoicing.Events;
 using Billing.Application.Modules.Invoicing.Jobs;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Auditing;
 using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
@@ -22,13 +23,15 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 [Handler("invoices.create")]
 [RequirePermission("invoices", Verbs.Write)]
 [CacheInvalidate("invoices")]
+[Auditable(Resource = "invoice")]   // framework audit trail (ADR-0045); see CreateClient for the trail-vs-activity-log split
 [Description("Creates a draft invoice and sends it to the client in the background.")]
 public sealed class CreateInvoice(
     BillingDbContext db,
     ICurrentUser user,
     IJobScheduler scheduler,
     IIntegrationEventBus integrationEvents,
-    IAuditTrail audit,
+    IActivityLog activityLog,
+    IAuditScope audit,
     TimeProvider clock
 ) : IHandler<CreateInvoice.Command, Result<CreateInvoice.Response>> {
     /// <summary>Tier-1 wire-shape constraints live here as DataAnnotations (ADR-0027); the "due date must be
@@ -88,7 +91,8 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        await audit.RecordAsync("invoice.created", invoice.Id.ToString(), ct);
+        audit.SetResource("invoice", invoice.Id.ToString());               // framework audit trail: pin the resource
+        await activityLog.RecordAsync("invoice.created", invoice.Id.ToString(), ct);   // app's own domain activity log
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }
