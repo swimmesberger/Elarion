@@ -99,7 +99,8 @@ public sealed class CreateInvoice(
             },
             ct);
 
-        audit.SetResource("invoice", invoice.Id.ToString());   // framework audit trail: pin the resource
+        // Same "invoices" resource vocabulary as [RequirePermission("invoices", …)] above, so auth and audit agree.
+        audit.SetResource("invoices", invoice.Id.ToString());
         return new Response(invoice.Id, invoice.Number, handle.JobId);
     }
 }

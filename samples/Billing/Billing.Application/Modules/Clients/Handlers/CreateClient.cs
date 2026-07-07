@@ -69,7 +69,8 @@ public sealed class CreateClient(
         // The framework audit trail captured this whole invocation automatically ([Auditable] above);
         // SetResource just pins WHICH client, so the compliance record is queryable by resource. The record
         // commits atomically with the transaction, and [Audited] on Client adds the created row's snapshot.
-        audit.SetResource("client", client.Id.ToString());
+        // The resource type is the same "clients" vocabulary as [RequirePermission("clients", …)] above.
+        audit.SetResource("clients", client.Id.ToString());
 
         return new Response(client.Id, client.Number);
     }

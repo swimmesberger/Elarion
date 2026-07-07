@@ -26,7 +26,7 @@ nothing but the bare who/what/outcome.
 | Axis | Question it answers | Turn on with |
 | --- | --- | --- |
 | **The record** | *who did which action, with what outcome?* | `[Auditable]` on the handler (or assembly-wide `[ElarionAuditDefaults]`) — **always**, nothing on your entities |
-| **The resource** | *which thing was the action about?* (the indexed "browse by resource" view) | `[Auditable(Resource = "property")]` (type only) and/or `IAuditScope.SetResource("property", id)` (type + id) |
+| **The resource** | *which thing was the action about?* (the indexed "browse by resource" view) | `[Auditable(Resource = "properties")]` (type only) and/or `IAuditScope.SetResource("properties", id)` (type + id) |
 | **The changes** | *which fields changed, old → new?* | `[Audited]` on the entity (automatic), or `IAuditScope.AddChange(…)` (manual) |
 
 ### The resource: type vs. id
@@ -36,15 +36,23 @@ and `Resource` on the attribute only fills the first:
 
 | Column | Filled by | Example |
 | --- | --- | --- |
-| `ResourceType` | `[Auditable(Resource = "property")]` **or** `SetResource(type, …)` | `"property"` |
+| `ResourceType` | `[Auditable(Resource = "properties")]` **or** `SetResource(type, …)` | `"properties"` |
 | `ResourceId` | **only** `SetResource(type, id)` | `"42"` |
 
-- `[Auditable(Resource = "property")]` **alone** → *"someone updated **a** property"* — a resource *type* label
+- `[Auditable(Resource = "properties")]` **alone** → *"someone updated **a** property"* — a resource *type* label
   with zero handler code and no `IAuditScope`, so the log is filterable as "all property actions" but the record
   isn't tied to a specific row.
-- `audit.SetResource("property", "42")` → *"…property **#42**"* — type **and** id, so it appears on that one
+- `audit.SetResource("properties", "42")` → *"…property **#42**"* — type **and** id, so it appears on that one
   property's history. `SetResource`'s type argument wins, so **don't repeat `Resource` on the attribute when you
   call `SetResource`** — the attribute's `Resource` is purely the fallback type for handlers that *don't* call it.
+
+**What do you put for the type?** Use the **same resource string your handler already declares in
+`[RequirePermission(resource, …)]`** — so *who may act on `properties`* and *who did* speak one vocabulary.
+Elarion permissions follow K8s-RBAC, so it is the plural resource name (`clients`, `invoices`, `properties`),
+and the audit type should match it exactly. Keep it **stable** (it is a search key over historical records)
+and **identical across every handler** that touches that resource, and use the **aggregate** the record is
+about — even when the write touched child rows (editing an invoice's line item is `resourceType: "invoices"`,
+with the line item showing up in `Changes`), not the C# class or table name.
 
 ## Usage
 
@@ -52,7 +60,7 @@ The minimum is one attribute — the record writes itself, no `IAuditScope`, not
 tags it with a resource *type*:
 
 ```csharp
-[Auditable(Resource = "property")]
+[Auditable(Resource = "properties")]   // same word as the handler's [RequirePermission("properties", …)]
 public sealed class UpdatePropertyHandler(AppDbContext db)
     : IHandler<UpdatePropertyCommand, Result<PropertyResponse>> {
     public async ValueTask<Result<PropertyResponse>> HandleAsync(UpdatePropertyCommand request, CancellationToken ct) {
@@ -65,16 +73,18 @@ public sealed class UpdatePropertyHandler(AppDbContext db)
 
 That records *"user X performed `properties.update` on a property, succeeded, at T"* — searchable by action and
 by resource type, but not tied to a specific row. To pin **which** property *and* capture the changed fields,
-inject `IAuditScope`, call `SetResource` with the id, and mark the entity `[Audited]`:
+inject `IAuditScope`, call `SetResource` with the id, and mark the entity `[Audited]` — note the resource type
+is the same `"properties"` the handler already uses for authorization:
 
 ```csharp
-[Auditable]   // no Resource — SetResource below supplies the type (and the id)
+[RequirePermission("properties", Verbs.Write)]   // who may act on properties
+[Auditable]                                       // no Resource — SetResource below supplies the type (and id)
 public sealed class UpdatePropertyHandler(AppDbContext db, IAuditScope audit)
     : IHandler<UpdatePropertyCommand, Result<PropertyResponse>> {
     public async ValueTask<Result<PropertyResponse>> HandleAsync(UpdatePropertyCommand request, CancellationToken ct) {
         var property = await db.Properties.SingleAsync(p => p.Id == request.Id, ct);
-        property.Street = request.Street;                        // captured old → new automatically ([Audited] on Property)
-        audit.SetResource("property", property.Id.ToString());   // ResourceType + ResourceId (optionally a parent)
+        property.Street = request.Street;                          // captured old → new automatically ([Audited] on Property)
+        audit.SetResource("properties", property.Id.ToString());   // ResourceType + ResourceId (optionally a parent)
         return Result<PropertyResponse>.Success(new() { Id = property.Id });
     }
 }
@@ -86,7 +96,7 @@ public sealed class UpdatePropertyHandler(AppDbContext db, IAuditScope audit)
 - **`[Auditable(Resource = "x")]`** — add a resource *type* so the log filters as "all x actions", when you
   don't have (or don't need) a specific id, or don't want to inject `IAuditScope`.
 - **`[Auditable]` + `SetResource("x", id)`** — you want *"everything done to **this** x"* on x's own history
-  screen. Add a parent — `SetResource("equipment", id, parentType: "property", parentId: propertyId)` — to also
+  screen. Add a parent — `SetResource("equipment", id, parentType: "properties", parentId: propertyId)` — to also
   surface the record on the parent aggregate's audit tab.
 - **`[Audited]` on the entity** — you want the before/after field values, and the write goes through the EF
   change tracker. **Independent of the resource axis** — diffs are captured whether or not you named a resource.

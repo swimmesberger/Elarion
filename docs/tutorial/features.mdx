@@ -302,7 +302,7 @@ public sealed class CreateClient(
         db.Clients.Add(client);
         await db.SaveChangesAsync(ct);
 
-        audit.SetResource("client", client.Id.ToString());   // framework audit trail: pin the resource
+        audit.SetResource("clients", client.Id.ToString());   // audit resource type = the [RequirePermission] vocabulary
 
         return new Response(client.Id, client.Number);
     }
