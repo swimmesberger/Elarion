@@ -16,7 +16,7 @@
     <!-- Pin past the transitive 2.0.0 pulled by Microsoft.AspNetCore.OpenApi: GHSA-v5pm-xwqc-g5wc is fixed in 2.7.5.
          Stay on the 2.x line: Microsoft.AspNetCore.OpenApi 10.0.9's XML-comment source generator assigns
          IOpenApiMediaType.Example, which 3.x made read-only (CS0200). Bump only when AspNetCore.OpenApi ships built against 3.x. -->
-    <PackageVersion Include="Microsoft.OpenApi" Version="2.7.5" />
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.10.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.6.0" />
@@ -36,7 +36,7 @@
     <PackageVersion Include="Microsoft.Extensions.Validation" Version="10.0.9" />
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.300" />
-    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.8.0" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.9.0" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
     <PackageVersion Include="OpenFeature" Version="2.14.0" />
