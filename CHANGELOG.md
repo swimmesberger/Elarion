@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-08
+
 ### Changed
 - **Actor call path allocates ~70% less per call (ADR-0042 perf round).** Three profiling-driven
   optimizations on the actor hot path, allocation-neutral for the public API: the per-cell mailbox lock
@@ -913,7 +915,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.4
 [0.2.3]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.3
 [0.2.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.2
 [0.2.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.0
