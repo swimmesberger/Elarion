@@ -1054,10 +1054,10 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             else
             {
                 sb.AppendLine(
-                    $"            {SourceString(entry.ModuleName)} => global::Microsoft.Extensions.Configuration.ConfigurationBinder.GetValue<bool>(configuration, \"Modules:{entry.ModuleName}:Enabled\", true),");
+                    $"            {SourceString(entry.ModuleName)} => ReadModuleEnabled(configuration, \"Modules:{entry.ModuleName}:Enabled\"),");
             }
         }
-        sb.AppendLine("            _ => global::Microsoft.Extensions.Configuration.ConfigurationBinder.GetValue<bool>(configuration, $\"Modules:{moduleName}:Enabled\", true),");
+        sb.AppendLine("            _ => ReadModuleEnabled(configuration, $\"Modules:{moduleName}:Enabled\"),");
         sb.AppendLine("        };");
         sb.AppendLine("    }");
         sb.AppendLine();
@@ -1092,6 +1092,26 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         AppendHandlersMethods(sb, entries, transport);
         AppendMcpMetadataMethods(sb, entries, transport);
         AppendResourceFilterMethods(sb, entries, transport);
+
+        // Reads a module's "Enabled" flag off raw configuration and parses it directly, rather than calling
+        // ConfigurationBinder.GetValue<bool> (which is annotated [RequiresUnreferencedCode]/[RequiresDynamicCode]
+        // for its general TypeConverter path). bool needs none of that, so the manual parse stays trim/AOT-clean
+        // with no suppression. Absent/blank value defaults to enabled; a non-boolean value fails loud.
+        sb.AppendLine("    private static bool ReadModuleEnabled(global::Microsoft.Extensions.Configuration.IConfiguration configuration, string key)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        var value = configuration[key];");
+        sb.AppendLine("        if (string.IsNullOrWhiteSpace(value))");
+        sb.AppendLine("        {");
+        sb.AppendLine("            return true;");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine("        if (bool.TryParse(value, out var parsed))");
+        sb.AppendLine("        {");
+        sb.AppendLine("            return parsed;");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine("        throw new global::System.InvalidOperationException($\"Configuration value '{key}' must be a boolean.\");");
+        sb.AppendLine("    }");
 
         sb.AppendLine("}");
 
