@@ -38,11 +38,8 @@ public sealed class AppModuleDiscoveryGeneratorTests {
             }
 
             namespace Microsoft.Extensions.Configuration {
-                public interface IConfiguration;
-
-                public static class ConfigurationBinder {
-                    public static T GetValue<T>(this IConfiguration configuration, string key, T defaultValue) =>
-                        defaultValue;
+                public interface IConfiguration {
+                    string? this[string key] { get; set; }
                 }
             }
 
