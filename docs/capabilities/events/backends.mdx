@@ -117,13 +117,15 @@ builder.Services.AddElarionOutbox<BillingDbContext>(o => {
     // o.BaseRetryDelay     = TimeSpan.FromSeconds(5);   // backoff base: a failed message is invisible for BaseRetryDelay × 2^(attempts-1)
     // o.MaxRetryDelay      = TimeSpan.FromHours(1);     // ceiling on the exponential retry backoff
     // o.RetentionPeriod    = TimeSpan.FromDays(7);     // null = keep delivered rows forever
+    // o.RunDeliveryWorker  = true;                      // false = publish-only node; another instance runs delivery
 });
 ```
 
 This registers the durable `IIntegrationEventBus` (`OutboxIntegrationEventBus`), the storage
 (`IOutboxStore` / `EfCoreOutboxStore<TDbContext>`), the dispatcher (`OutboxEventDispatcher`), and the
-hosted `OutboxDeliveryService`. The bus is registered last-wins, so the outbox is authoritative even if an
-in-memory integration bus was registered for the domain plane's sake.
+hosted `OutboxDeliveryService` (skipped when `RunDeliveryWorker` is `false` — see
+[Where the worker runs](#where-the-worker-runs)). The bus is registered last-wins, so the outbox is
+authoritative even if an in-memory integration bus was registered for the domain plane's sake.
 
 </Step>
 
@@ -198,6 +200,32 @@ registered consumer (for example after an event-type rename or a removed consume
 deserializes to `null`, the message can never be delivered. Rather than silently finalizing it as delivered,
 the dispatcher logs at `Error` (with the message id and stored type name) and the worker **parks** it —
 kept pending-but-unclaimable for inspection — so a rename never silently discards in-flight events.
+
+### Where the worker runs
+
+Every instance that calls `AddElarionOutbox` runs the delivery worker by default — fine when all instances
+are identical, because each one registers every consumer and any of them can deliver any message. In a
+**heterogeneous topology** that assumption breaks: the worker claims *whatever* is pending, so an instance
+that does not register a message's consumers (for example a web node with a feature module disabled via
+`Modules:{Name}:Enabled`, while a worker-role node hosts that module's consumers or actors) resolves the
+event type to nothing and **parks the message as unresolvable** even though another node could have
+delivered it.
+
+Set `RunDeliveryWorker = false` on publish-only instances. They keep the durable bus and the outbox
+storage — publishing stays atomic with their business data — but never claim messages; only the instance(s)
+registering **all** integration consumers run delivery:
+
+```csharp title="Program.cs (web node)"
+builder.Services.AddElarionOutbox<BillingDbContext>(o =>
+    o.RunDeliveryWorker = builder.Configuration.GetValue("Outbox:RunDeliveryWorker", true));
+```
+
+```jsonc title="appsettings.json (web node)"
+{ "Outbox": { "RunDeliveryWorker": false } }   // the worker-role instance leaves the default (true)
+```
+
+This is the shape single-homed actor topologies need: web nodes publish integration events, and only the
+worker instance hosting the actors (and their `[ConsumeEvent]` relays) delivers them.
 
 The `UseElarionOutbox` pending index is a **partial (filtered) index** (`processed_on_utc IS NULL`, or
 `"ProcessedOnUtc" IS NULL` with `snakeCase: false`), so the
