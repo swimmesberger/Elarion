@@ -77,6 +77,15 @@ public sealed class OutboxDeliveryService(
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
         await using var pollScope = scopeFactory.CreateAsyncScope();
+
+        // Dynamic delivery gate (e.g. "only the actor home delivers", ADR-0048): a closed gate skips
+        // the whole cycle before anything is claimed, so messages stay pending for an open instance.
+        if (options.DeliveryGate is { } gate &&
+            !await gate(pollScope.ServiceProvider, ct).ConfigureAwait(false))
+        {
+            return 0;
+        }
+
         var store = pollScope.ServiceProvider.GetRequiredService<IOutboxStore>();
 
         var lockId = Guid.CreateVersion7();

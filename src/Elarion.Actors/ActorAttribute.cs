@@ -64,4 +64,13 @@ public sealed class ActorAttribute : Attribute {
     /// <c>0</c> (default) uses the runtime default of 30 seconds; <c>-1</c> disables the timeout.
     /// </summary>
     public double CallTimeoutSeconds { get; init; }
+
+    /// <summary>
+    /// Declares that this actor must only run on the instance holding the actor home lease
+    /// (ADR-0048). Enforced when an <see cref="IActorHomeLease"/> is registered (e.g.
+    /// <c>AddElarionPostgreSqlActorHome&lt;TDbContext&gt;()</c>): calls on any other instance fail
+    /// with <see cref="ActorNotHomedException"/>. Without a registered lease the declaration is not
+    /// enforced — the single-instance / local-dev case.
+    /// </summary>
+    public bool SingleHomed { get; init; }
 }

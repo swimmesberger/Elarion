@@ -346,6 +346,24 @@ Blob-table generation for `[GenerateElarionBlobStorage]` and staged-upload-table
 | ELBLB001 | Error | A context is annotated with `[GenerateElarionBlobStorage]` but not `[GenerateDbSets]`, so the blob `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionBlobStorage]`. |
 | ELBLB002 | Error | A context is annotated with `[GenerateElarionStagedUploads]` but not `[GenerateDbSets]`, so the staged-upload `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionStagedUploads]`. |
 
+## ELASN — Actor snapshots (PostgreSQL)
+
+Snapshot-table generation for `[GenerateElarionActorSnapshots]`. See
+[Actors](/docs/concepts/actors#durable-state-snapshots).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELASN001 | Error | A context is annotated with `[GenerateElarionActorSnapshots]` but not `[GenerateDbSets]`, so the actor-snapshot `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionActorSnapshots]`. |
+
+## ELROLE — Role leases (PostgreSQL)
+
+Role-lease-table generation for `[GenerateElarionRoleLeases]` (ADR-0049). See
+[Actors — single-homed actors](/docs/concepts/actors#single-homed-actors-the-home-lease).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELROLE001 | Error | A context is annotated with `[GenerateElarionRoleLeases]` but not `[GenerateDbSets]`, so the role-lease `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionRoleLeases]`. |
+
 ## ELCEV — Client events
 
 Generated client-event topic registration for `IClientEvent` contracts. See

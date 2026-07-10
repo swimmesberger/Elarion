@@ -21,6 +21,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
     private const string IntegrationEventMetadataName = "Elarion.Abstractions.Messaging.IIntegrationEvent";
     private const string ActorContextMetadataName = "Elarion.Actors.IActorContext";
     private const string ActorContextGenericMetadataName = "Elarion.Actors.IActorContext`1";
+    private const string ActorStateGenericMetadataName = "Elarion.Actors.IActorState`1";
     private const string CancellationTokenMetadataName = "System.Threading.CancellationToken";
     private const string TaskMetadataName = "System.Threading.Tasks.Task";
     private const string TaskGenericMetadataName = "System.Threading.Tasks.Task`1";
@@ -126,9 +127,11 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
     private enum CtorParameterKind {
         Context,
+        State,
         Service
     }
 
+    // For State the TypeFqn is the persisted state type (IActorState<T>'s argument), not the parameter type.
     private sealed record CtorParameterInfo(CtorParameterKind Kind, string TypeFqn);
 
     private sealed record MethodParameterInfo(string Name, string TypeFqn, bool IsCancellationToken);
@@ -162,6 +165,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         bool MailboxFailFast,
         double IdleTimeoutSeconds,
         double CallTimeoutSeconds,
+        bool SingleHomed,
         EquatableArray<CtorParameterInfo> CtorParameters,
         EquatableArray<ActorMethodInfo> Methods,
         EquatableArray<ActorConsumerInfo> Consumers,
@@ -260,6 +264,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var cancellationTokenSymbol = compilation.GetTypeByMetadataName(CancellationTokenMetadataName);
         var contextSymbol = compilation.GetTypeByMetadataName(ActorContextMetadataName);
         var contextGenericSymbol = compilation.GetTypeByMetadataName(ActorContextGenericMetadataName);
+        var stateGenericSymbol = compilation.GetTypeByMetadataName(ActorStateGenericMetadataName);
         var integrationEventSymbol = compilation.GetTypeByMetadataName(IntegrationEventMetadataName);
 
         var diagnostics = new List<DiagnosticInfo>();
@@ -271,6 +276,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var mailboxFailFast = false;
         double idleTimeoutSeconds = 0;
         double callTimeoutSeconds = 0;
+        var singleHomed = false;
         foreach (var named in ctx.Attributes[0].NamedArguments) {
             switch (named.Key) {
                 case "Name":
@@ -290,6 +296,9 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                     break;
                 case "CallTimeoutSeconds":
                     callTimeoutSeconds = named.Value.Value is double call ? call : 0;
+                    break;
+                case "SingleHomed":
+                    singleHomed = named.Value.Value is true;
                     break;
             }
         }
@@ -329,6 +338,14 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             else if (contextSymbol is not null &&
                      SymbolEqualityComparer.Default.Equals(parameter.Type, contextSymbol)) {
                 ctorParameters.Add(new CtorParameterInfo(CtorParameterKind.Context, string.Empty));
+            }
+            else if (parameter.Type is INamedTypeSymbol namedState && stateGenericSymbol is not null &&
+                     SymbolEqualityComparer.Default.Equals(namedState.OriginalDefinition, stateGenericSymbol)) {
+                // Snapshot-backed state (ADR-0047): the activator creates it via ActorStateFactory,
+                // bound to this activation's identity, instead of resolving it from DI.
+                ctorParameters.Add(new CtorParameterInfo(
+                    CtorParameterKind.State,
+                    namedState.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
             }
             else {
                 ctorParameters.Add(new CtorParameterInfo(
@@ -471,6 +488,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             mailboxFailFast,
             idleTimeoutSeconds,
             callTimeoutSeconds,
+            singleHomed,
             ctorParameters.ToEquatableArray(),
             methods.ToEquatableArray(),
             consumers.ToEquatableArray(),
@@ -953,10 +971,12 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             ? $"global::{actor.ActorNamespace}.{actor.FacadeImplName}"
             : $"global::{actor.FacadeImplName}";
 
-        var activatorArguments = string.Join(", ", actor.CtorParameters.Select(static parameter =>
-            parameter.Kind == CtorParameterKind.Context
-                ? "context"
-                : $"serviceProvider.GetRequiredService<{parameter.TypeFqn}>()"));
+        var activatorArguments = string.Join(", ", actor.CtorParameters.Select(parameter => parameter.Kind switch {
+            CtorParameterKind.Context => "context",
+            CtorParameterKind.State =>
+                $"global::Elarion.Actors.ActorStateFactory.Create<{parameter.TypeFqn}, {keyFqn}>(serviceProvider, context)",
+            _ => $"serviceProvider.GetRequiredService<{parameter.TypeFqn}>()"
+        }));
 
         sb.AppendLine();
         sb.AppendLine($"        global::Elarion.Actors.ActorServiceCollectionExtensions.AddElarionActor(services, new global::Elarion.Actors.ActorRegistration<{actor.ActorTypeFqn}, {keyFqn}, {facadeFqn}>");
@@ -968,7 +988,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"                MailboxFullMode = global::Elarion.Actors.ActorMailboxFullMode.{(actor.MailboxFailFast ? "Fail" : "Wait")},");
         sb.AppendLine($"                IdleTimeout = {TimeoutExpression(actor.IdleTimeoutSeconds, "DefaultIdleTimeout")},");
         sb.AppendLine($"                CallTimeout = {TimeoutExpression(actor.CallTimeoutSeconds, "DefaultCallTimeout")},");
-        sb.AppendLine($"                Reentrant = {(actor.Reentrant ? "true" : "false")}");
+        sb.AppendLine($"                Reentrant = {(actor.Reentrant ? "true" : "false")},");
+        sb.AppendLine($"                SingleHomed = {(actor.SingleHomed ? "true" : "false")}");
         sb.AppendLine("            },");
         sb.AppendLine($"            Activator = static (serviceProvider, context) => new {actor.ActorTypeFqn}({activatorArguments}),");
         sb.AppendLine($"            Facade = static handle => new {facadeImplFqn}(handle)");

@@ -194,6 +194,7 @@ See [Consuming events](/docs/capabilities/events/consuming-events) and [Backends
 | `MailboxFullMode` | `ActorMailboxFullMode` (init) | `Wait` | Full-mailbox behaviour: `Wait` (async backpressure) or `Fail` (`ActorMailboxFullException`). No drop modes — facade calls are request/reply. |
 | `IdleTimeoutSeconds` | `double` (init) | `0` (5 min) | Inactivity window before passivation; `-1` disables passivation. |
 | `CallTimeoutSeconds` | `double` (init) | `0` (30 s) | End-to-end facade call timeout (queue wait + execution) failing with `TimeoutException` — the deadlock backstop for actor→actor call cycles; `-1` disables it. |
+| `SingleHomed` | `bool` (init) | `false` | The actor only runs on the instance holding the actor home lease (ADR-0048); calls elsewhere fail with `ActorNotHomedException`. Enforced only when an `IActorHomeLease` is registered (e.g. `AddElarionPostgreSqlActorHome<TDbContext>()`). |
 
 ### `[Reentrant]`
 
@@ -690,6 +691,32 @@ See [Blob storage](/docs/capabilities/blob-storage).
 | `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
 See [Blob uploads](/docs/capabilities/blob-uploads).
+
+### `[GenerateElarionActorSnapshots]`
+
+- **Package:** `Elarion.Actors.PostgreSql` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<ActorSnapshotEntity>` and applies the actor snapshot model configuration through the EF generator's model-config seam — the table backing the `IActorSnapshotStore` behind every `IActorState<TState>` (ADR-0047). The hand-written equivalent is `modelBuilder.UseElarionActorSnapshots()`. Mirrors `[GenerateElarionSettings]`/`[GenerateElarionIdempotencyKeys]`. Requires `[GenerateDbSets]` (else `ELASN001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_actor_snapshots` / `ElarionActorSnapshots` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Actors — durable state](/docs/concepts/actors#durable-state-snapshots).
+
+### `[GenerateElarionRoleLeases]`
+
+- **Package:** `Elarion.Coordination.PostgreSql` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<RoleLeaseEntity>` and applies the role-lease model configuration through the EF generator's model-config seam — the leader-election table behind `IRoleLease` (ADR-0049) and therefore behind `[Actor(SingleHomed = true)]` (ADR-0048). The hand-written equivalent is `modelBuilder.UseElarionRoleLeases()`. Requires `[GenerateDbSets]` (else `ELROLE001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_role_leases` / `ElarionRoleLeases` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Actors — single-homed actors](/docs/concepts/actors#single-homed-actors-the-home-lease).
 
 ### `[Keyset<TEntity>]`
 

@@ -241,7 +241,9 @@ alloc).
   events or short non-cyclic calls, and `[Reentrant]` exists for the legitimate cycles.
 - Passivation drops state by design; anything that must survive belongs in `OnDeactivateAsync`-flushed /
   `OnActivateAsync`-loaded storage. A first-class persistence seam (`IPersistentState<T>`-style, Postgres
-  sibling) is the obvious phase 2 and nothing in the contracts precludes it.
+  sibling) is the obvious phase 2 and nothing in the contracts precludes it. *(Delivered by
+  [ADR-0047](0047-actor-state-snapshotting.md): `IActorState<TState>` + `IActorSnapshotStore` with the
+  `Elarion.Actors.PostgreSql` default.)*
 - A reentrant actor buys liveness with interleaving complexity, and `ConfigureAwait(false)` inside one is
   a real footgun — latent (it only escapes when the await actually suspends) and scoped to actor-owned
   code (libraries called by the actor may use it freely; context capture is per-method). It is therefore

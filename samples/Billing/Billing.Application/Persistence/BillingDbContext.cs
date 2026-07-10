@@ -1,4 +1,5 @@
 using System.Text;
+using Elarion.Actors.PostgreSql;
 using Elarion.Auditing.EntityFrameworkCore;
 using Elarion.EntityFrameworkCore;
 using Elarion.Messaging.Outbox;
@@ -24,8 +25,9 @@ public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> 
         // entities; the framework tables (outbox, audit log) set their own explicit snake_case names.
         ApplySnakeCaseNames(modelBuilder);
 
-        modelBuilder.UseElarionOutbox();   // integration-event outbox table (Elarion.Messaging.Outbox)
-        modelBuilder.UseElarionAuditing(); // framework audit-log table (Elarion.Auditing.EntityFrameworkCore, ADR-0045)
+        modelBuilder.UseElarionOutbox();          // integration-event outbox table (Elarion.Messaging.Outbox)
+        modelBuilder.UseElarionAuditing();        // framework audit-log table (Elarion.Auditing.EntityFrameworkCore, ADR-0045)
+        modelBuilder.UseElarionActorSnapshots();  // actor state snapshot table (Elarion.Actors.PostgreSql, ADR-0047)
     }
 
     private static void ApplySnakeCaseNames(ModelBuilder modelBuilder) {

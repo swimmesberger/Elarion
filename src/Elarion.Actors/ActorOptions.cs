@@ -32,4 +32,10 @@ public sealed class ActorOptions {
 
     /// <summary>Orleans-style turn interleaving (see <see cref="ReentrantAttribute"/>).</summary>
     public bool Reentrant { get; init; }
+
+    /// <summary>
+    /// Whether this actor only runs on the instance holding the actor home lease (ADR-0048);
+    /// enforced when an <see cref="IActorHomeLease"/> is registered.
+    /// </summary>
+    public bool SingleHomed { get; init; }
 }

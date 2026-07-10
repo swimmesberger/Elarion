@@ -9,6 +9,44 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Actor state snapshotting (ADR-0047).** Declaring an `IActorState<TState>` constructor parameter gives
+  an `[Actor]` durable, snapshot-persisted state: loaded before `OnActivateAsync`, persisted only by
+  explicit `WriteStateAsync` (passivation never flushes), cleared by `ClearStateAsync`, refreshed by
+  `ReadStateAsync` — the members deliberately mirror Orleans' `IPersistentState<T>` so state call sites
+  survive a migration unchanged. Snapshots are canonical-JSON text behind the provider-neutral
+  `IActorSnapshotStore` seam; the shipped backend is the new **`Elarion.Actors.PostgreSql`** package: an
+  EF-mapped `elarion_actor_snapshots` table (`jsonb` payload — actor state stays SQL-inspectable; a
+  `version` column as the ETag), change-tracker-free version-guarded writes,
+  `[GenerateElarionActorSnapshots]`/`UseElarionActorSnapshots` model wiring (`ELASN001`), and the
+  `IActorStateReader` query-side companion (read the latest snapshot on any instance without activating).
+  Snapshot **concurrency conflicts self-heal**: a conflicted turn passivates its stale activation and
+  transparently re-runs once on the winning snapshot; only a second consecutive conflict surfaces
+  `ActorSnapshotConcurrencyException` (every conflict logs and counts `actor.snapshot.conflicts`). The
+  docs state the mandatory state-design rules (the record is the query contract; interpretation and pure
+  transitions live on `TState`; side effects after the write; shape-tolerant evolution).
+- **Single-homed actors (ADR-0048).** `[Actor(SingleHomed = true)]` declares that an actor runs on exactly
+  one instance app-wide; enforcement is the **actor home** — calls on any other instance fail immediately
+  with `ActorNotHomedException` naming the holder (no call forwarding, deliberately: needing it is the
+  Orleans trigger). Unenforced (with a warning) when no `IActorHomeLease` is registered, so local dev
+  needs no wiring. Event delivery follows the home via the new dynamic
+  **`OutboxOptions.DeliveryGate`** (per-cycle sibling of `RunDeliveryWorker`): a closed gate skips the
+  cycle before anything is claimed, so a homogeneous fleet self-organizes — every instance publishes, the
+  home delivers events and hosts the single-homed actors, failover moves both together.
+- **Role leases — leader election on PostgreSQL (ADR-0049).** The new **`Elarion.Coordination.PostgreSql`**
+  package elects exactly one instance per named role ("which instance *is* X right now") with one
+  heartbeat-renewed conditional-upsert row per role (`elarion_role_leases` — the row is the whole
+  membership protocol; application clock only; `IsHeld` undershoots expiry by a safety margin so the old
+  holder stops before a new one can start; release-on-shutdown makes failover immediate; a database outage
+  fails closed to "nobody holds"). Contract: the keyed `IRoleLease` in `Elarion.Abstractions.Coordination`;
+  registration: `AddElarionPostgreSqlRoleLease<TDbContext>(o => o.RoleName = "…")` once per role;
+  model wiring: `[GenerateElarionRoleLeases]`/`UseElarionRoleLeases` (`ELROLE001`). Deliberately **not** a
+  distributed-lock API — coarse roles only. The actor home is its first consumer
+  (`AddElarionPostgreSqlActorHome<TDbContext>()` = the `"actors"` role lease + the `IActorHomeLease`
+  binding via `AddElarionActorHome`).
+- **Billing sample: durable dunning.** `ClientDunningActor` dogfoods the full model — snapshot-backed
+  escalation latch (survives passivation/restarts, e2e-tested), the rich-state reference shape
+  (threshold/interpretation/pure transition/`SnapshotKey` on the record), and the `GetClientDunning`
+  query handler reading via `IActorStateReader` without touching the actor system.
 - **Outbox delivery worker is now opt-out per node (`OutboxOptions.RunDeliveryWorker`, default `true`).**
   `AddElarionOutbox<T>` previously always registered the hosted `OutboxDeliveryService`, so in a
   heterogeneous topology (e.g. web nodes with a feature module disabled plus a worker-role node hosting

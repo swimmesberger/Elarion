@@ -15,10 +15,20 @@ internal sealed class ActorSystem : IActorSystem {
         IEnumerable<ActorRegistration> registrations,
         IServiceScopeFactory scopeFactory,
         TimeProvider timeProvider,
-        ILoggerFactory loggerFactory) {
+        ILoggerFactory loggerFactory,
+        IActorHomeLease? homeLease = null) {
         var runtime = new ActorRuntime(
-            scopeFactory, timeProvider, loggerFactory, new ActorCancellationPool(timeProvider));
+            scopeFactory, timeProvider, loggerFactory, new ActorCancellationPool(timeProvider), homeLease);
         foreach (var registration in registrations) {
+            if (registration.Options.SingleHomed && homeLease is null) {
+                // Declared intent without enforcement (single-instance / local dev) is legal but
+                // worth one loud line: on a multi-instance deployment this is the misconfiguration.
+                loggerFactory.CreateLogger("Elarion.Actors." + registration.Name).LogWarning(
+                    "Actor {Actor} is declared SingleHomed but no IActorHomeLease is registered; "
+                    + "single-homing is not enforced on this instance.",
+                    registration.Name);
+            }
+
             var host = registration.CreateHost(runtime);
             if (!_hostsByFacade.TryAdd(host.FacadeType, host)) {
                 throw new InvalidOperationException(

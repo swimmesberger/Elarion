@@ -12,6 +12,7 @@ using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.Session;
 using Elarion.AspNetCore.Mcp;
+using Elarion.Actors.PostgreSql;
 using Elarion.AspNetCore.OpenApi;
 using Elarion.Auditing.EntityFrameworkCore;
 using Elarion.Authorization;
@@ -49,6 +50,10 @@ builder.Services.AddElarionOutbox<BillingDbContext>();
 // with the transaction, denied attempts included — and [Audited] entities add automatic field-level change
 // capture. Retention is off by default.
 builder.Services.AddElarionAuditingEntityFrameworkCore<BillingDbContext>();
+
+// Actor state snapshotting (ADR-0047): the dunning actor's IActorState<ClientDunningState> persists as a
+// jsonb row per client on the billing database, so the escalation latch survives passivation and restarts.
+builder.Services.AddElarionPostgreSqlActorSnapshots<BillingDbContext>();
 
 // Infrastructure capability: the concrete email sender behind the module's port. (The account-standing
 // credit policy is a Core [ModuleContract] with a Core-internal [Service] impl — so it self-registers.)
