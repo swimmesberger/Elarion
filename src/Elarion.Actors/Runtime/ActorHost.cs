@@ -82,6 +82,7 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
             _runtime.TimeProvider,
             _logger,
             stoppingCts,
-            onClosed: cell => _cells.TryRemove(new KeyValuePair<TKey, ActorCell<TActor>>(key, cell)));
+            onClosed: cell => _cells.TryRemove(new KeyValuePair<TKey, ActorCell<TActor>>(key, cell)),
+            reEnqueue: item => EnqueueAsync(key, item, CancellationToken.None));
     }
 }

@@ -30,6 +30,12 @@ internal sealed class ActorCell<TActor> where TActor : class {
     // registration's Cancel call.
     private readonly CancellationTokenSource _stoppingCts;
     private readonly Action<ActorCell<TActor>> _onClosed;
+    // Routes a snapshot-conflicted item back through the host once this cell has closed, so its
+    // single transparent retry runs on a fresh activation that loaded the winning snapshot.
+    private readonly Func<ActorWorkItem<TActor>, ValueTask> _reEnqueue;
+    // Items whose turn conflicted and still owe their retry; drained after _onClosed. Guarded by
+    // its own lock only because reentrant completions can race (rare path, no hot-path cost).
+    private List<ActorWorkItem<TActor>>? _retryItems;
 
     // Mailbox coordination packed into one word so enqueue, completion, and idle passivation
     // synchronize with a single interlocked op instead of a shared lock (that lock was the hottest
@@ -41,6 +47,11 @@ internal sealed class ActorCell<TActor> where TActor : class {
     private const long PendingMask = long.MaxValue;
     private long _state;
     private int _started;
+    // Set when a turn fails with ActorSnapshotConcurrencyException (ADR-0047): the activation's
+    // in-memory state and ETag are stale, so it drain-closes once pending work reaches zero — the
+    // next activation reloads the latest snapshot (the Orleans deactivate-on-InconsistentState
+    // recovery). Int for Interlocked; only the 0 → 1 transition logs.
+    private int _snapshotConflicted;
     private Task? _loop;
     // Touched off-lock now: created on the pump thread before the loop, re-armed from
     // OnItemCompleted (a different thread under [Reentrant]), disposed after the loop drains. Timer
@@ -59,7 +70,8 @@ internal sealed class ActorCell<TActor> where TActor : class {
         TimeProvider timeProvider,
         ILogger logger,
         CancellationTokenSource stoppingCts,
-        Action<ActorCell<TActor>> onClosed) {
+        Action<ActorCell<TActor>> onClosed,
+        Func<ActorWorkItem<TActor>, ValueTask> reEnqueue) {
         _actorName = actorName;
         _keyText = keyText;
         _activator = activator;
@@ -69,6 +81,7 @@ internal sealed class ActorCell<TActor> where TActor : class {
         _logger = logger;
         _stoppingCts = stoppingCts;
         _onClosed = onClosed;
+        _reEnqueue = reEnqueue;
         _mailbox = options.MailboxCapacity is { } capacity
             ? Channel.CreateBounded<ActorWorkItem<TActor>>(new BoundedChannelOptions(capacity) {
                 SingleReader = true,
@@ -174,6 +187,14 @@ internal sealed class ActorCell<TActor> where TActor : class {
         TActor instance;
         try {
             instance = _activator(scope.ServiceProvider);
+            // Load persisted snapshots (ADR-0047) before OnActivateAsync so the hook and the first
+            // message both observe durable state; a load failure fails the activation like any
+            // other activation error.
+            var states = scope.ServiceProvider.GetService<ActorStateTracker>();
+            if (states is { HasStates: true }) {
+                await states.LoadAllAsync(_stoppingCts.Token).ConfigureAwait(false);
+            }
+
             if (instance is IActorLifecycle activating) {
                 await activating.OnActivateAsync(_stoppingCts.Token).ConfigureAwait(false);
             }
@@ -220,12 +241,38 @@ internal sealed class ActorCell<TActor> where TActor : class {
             ActorTelemetry.RecordDeactivation(_actorName);
             _logger.LogDebug("Deactivated actor {Actor} ({ActorKey}).", _actorName, _keyText);
             _onClosed(this);
+
+            // After the host forgot this cell: conflicted turns re-enter the mailbox path and land
+            // on a fresh activation that loads the winning snapshot (their single retry).
+            await ReEnqueueConflictedItemsAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask ReEnqueueConflictedItemsAsync() {
+        List<ActorWorkItem<TActor>>? items;
+        lock (_mailbox) {
+            items = _retryItems;
+            _retryItems = null;
+        }
+
+        if (items is null) {
+            return;
+        }
+
+        foreach (var item in items) {
+            try {
+                await _reEnqueue(item).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                // System stopping or a fail-fast full mailbox: the caller gets the enqueue failure.
+                item.TryFail(ex);
+            }
         }
     }
 
     private async Task RunSequentialAsync(TActor instance) {
         await foreach (var item in _mailbox.Reader.ReadAllAsync().ConfigureAwait(false)) {
-            await item.RunAsync(instance, _stoppingCts.Token).ConfigureAwait(false);
+            OnTurnFinished(item, await item.RunAsync(instance, _stoppingCts.Token).ConfigureAwait(false));
             OnItemCompleted();
         }
     }
@@ -242,8 +289,16 @@ internal sealed class ActorCell<TActor> where TActor : class {
                 CancellationToken.None,
                 TaskCreationOptions.DenyChildAttach,
                 schedulerPair.ExclusiveScheduler).Unwrap();
+            var currentItem = item;
             var tracked = run.ContinueWith(
-                static (_, state) => ((ActorCell<TActor>)state!).OnItemCompleted(),
+                (task, state) => {
+                    var cell = (ActorCell<TActor>)state!;
+                    if (task.Status == TaskStatus.RanToCompletion) {
+                        cell.OnTurnFinished(currentItem, task.Result);
+                    }
+
+                    cell.OnItemCompleted();
+                },
                 this,
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
@@ -289,11 +344,17 @@ internal sealed class ActorCell<TActor> where TActor : class {
             Timeout.InfiniteTimeSpan);
     }
 
-    private void OnIdleTimerFired() {
+    private void OnIdleTimerFired() => TryCloseWhenIdle();
+
+    // Closes the cell iff nothing is pending — the shared invariant of idle passivation and
+    // snapshot-conflict passivation: closing only at zero pending means the mailbox is empty and no
+    // enqueue is in flight, so the replacement activation the host creates can never process a
+    // message concurrently with this one.
+    private void TryCloseWhenIdle() {
         var state = Volatile.Read(ref _state);
         while (true) {
             if (IsClosed(state) || Pending(state) != 0) {
-                // Still busy or already closing: the timer re-arms when pending drops back to zero.
+                // Still busy or already closing: re-attempted when pending drops back to zero.
                 return;
             }
 
@@ -309,12 +370,39 @@ internal sealed class ActorCell<TActor> where TActor : class {
         _mailbox.Writer.TryComplete();
     }
 
+    private void OnTurnFinished(ActorWorkItem<TActor> item, ActorTurnOutcome outcome) {
+        if (outcome == ActorTurnOutcome.Completed) {
+            return;
+        }
+
+        if (outcome == ActorTurnOutcome.SnapshotConflictRetry) {
+            lock (_mailbox) {
+                (_retryItems ??= []).Add(item);
+            }
+        }
+
+        if (Interlocked.Exchange(ref _snapshotConflicted, 1) == 0) {
+            _logger.LogWarning(
+                "Actor {Actor} ({ActorKey}) hit a snapshot concurrency conflict; passivating this "
+                + "activation and re-running the conflicted turn on a fresh one that reloads the "
+                + "latest snapshot.",
+                _actorName, _keyText);
+        }
+    }
+
     private void OnItemCompleted() {
         // Pending is >= 1 here (an item was reserved), so decrementing the word never borrows into
-        // the closed bit. Re-arm the idle timer only on the transition back to zero pending.
+        // the closed bit. On the transition back to zero pending: a snapshot-conflicted activation
+        // passivates immediately (its state/ETag are stale — ADR-0047), otherwise the idle timer
+        // re-arms.
         var state = Interlocked.Decrement(ref _state);
-        if (Pending(state) == 0 && !IsClosed(state) && _options.IdleTimeout is { } idle) {
-            _idleTimer?.Change(idle, Timeout.InfiniteTimeSpan);
+        if (Pending(state) == 0 && !IsClosed(state)) {
+            if (Volatile.Read(ref _snapshotConflicted) != 0) {
+                TryCloseWhenIdle();
+            }
+            else if (_options.IdleTimeout is { } idle) {
+                _idleTimer?.Change(idle, Timeout.InfiniteTimeSpan);
+            }
         }
 
         ActorTelemetry.RecordDequeued(_actorName);

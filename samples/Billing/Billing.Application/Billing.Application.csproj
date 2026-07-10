@@ -9,6 +9,10 @@
     <!-- In-memory actors (ADR-0042): the Invoicing module's per-client dunning coordinator is an [Actor]
          fed by the InvoiceOverdue integration event (ADR-0046). -->
     <ProjectReference Include="..\..\..\src\Elarion.Actors\Elarion.Actors.csproj" />
+    <!-- Actor state snapshotting (ADR-0047): the dunning actor's escalation latch persists as a jsonb
+         snapshot row (modelBuilder.UseElarionActorSnapshots() in BillingDbContext), so it survives idle
+         passivation and restarts. -->
+    <ProjectReference Include="..\..\..\src\Elarion.Actors.PostgreSql\Elarion.Actors.PostgreSql.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore\Elarion.EntityFrameworkCore.csproj" />
     <!-- The persistence layer (DbContext, migrations, outbox table config) lives in the application,
          because the database is application logic, not an infrastructure detail. -->

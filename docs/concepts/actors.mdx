@@ -90,11 +90,117 @@ Without a key declaration the actor is a **process singleton**, resolved with `G
 
 Optional lifecycle hooks come from `IActorLifecycle`: `OnActivateAsync` runs before the first message
 (load state), `OnDeactivateAsync` after the mailbox drains on passivation or shutdown (flush state). Both
-run under the single-threaded guarantee. Anything that must survive passivation belongs in storage loaded
-and flushed by these hooks — in-memory actor state is deliberately ephemeral.
+run under the single-threaded guarantee. In-memory actor state is deliberately ephemeral — anything that
+must survive passivation belongs either in [snapshot-backed `IActorState<TState>`](#durable-state-snapshots)
+(the declarative route) or in storage the actor loads and flushes through these hooks by hand.
 
 Every activation owns a **DI scope**: constructor parameters beyond the context resolve from it via
 generated `GetRequiredService` calls, and the scope is disposed on passivation.
+
+## Durable state (snapshots)
+
+Declaring a constructor parameter `IActorState<TState>` gives the activation **snapshot-persisted
+state** (ADR-0047) — the Orleans `IPersistentState<T>` shape:
+
+```csharp
+public sealed record FulfillmentState {
+    public required string Stage { get; init; }
+    public int Attempts { get; init; }
+}
+
+[Actor]
+public sealed class OrderFulfillmentActor(
+    IActorContext<Guid> context,
+    IActorState<FulfillmentState> state) {
+
+    public async Task Ship(ShippingInfo info, CancellationToken ct) {
+        state.State = (state.State ?? new FulfillmentState { Stage = "new" }) with { Stage = "shipped" };
+        await state.WriteStateAsync(ct);     // the explicit durability point
+    }
+}
+```
+
+The member surface deliberately mirrors Orleans' `IPersistentState<TState>`
+(`State`/`RecordExists`/`Etag`/`ReadStateAsync`/`WriteStateAsync`/`ClearStateAsync`), so when an app
+outgrows the single-node runtime, every state call site compiles against Orleans unchanged — migrating
+an actor means swapping the constructor parameter type, nothing inside the methods. The deltas are
+call-site-compatible improvements: `ValueTask` returns, optional `CancellationToken`s, and a nullable
+`State` (no parameterless-constructor requirement, so `required`-property records work).
+
+- **Loaded before the first turn.** The runtime reads the latest snapshot after construction and before
+  `OnActivateAsync`, so the hook and every message observe durable state; a passivated actor re-reads its
+  snapshot on the next activation. A load failure fails the activation loudly — an actor never runs
+  against half-loaded state. (`ReadStateAsync` is that same read, exposed for deliberate refreshes.)
+- **Written only when you say so.** `WriteStateAsync` persists the whole snapshot; `ClearStateAsync`
+  deletes it. Passivation never flushes implicitly — write after every mutation that must survive, and
+  batch several mutations into one write when the actor is hot. `State` is `null` until first assigned
+  when no snapshot exists (`RecordExists` tells you which case you are in); the actor constructs the
+  initial value.
+- **Conflicts never lose updates — and the runtime absorbs them once.** Every write is ETag-guarded: a
+  snapshot changing underneath an activation (another process hosting the same key, or an out-of-band
+  edit) makes the write conflict instead of silently clobbering. The conflicted turn is not surfaced to
+  its caller: the stale activation **passivates and the whole turn re-runs once on a fresh activation**
+  that loaded the winning snapshot, under the same call timeout. Only a second consecutive conflict —
+  live contention, i.e. sustained double-hosting — reaches the caller as
+  `ActorSnapshotConcurrencyException`; every conflict also logs a warning and increments the
+  `actor.snapshot.conflicts` counter, so the misconfiguration stays visible. Two consequences: a
+  conflicted turn executes **twice** (write your turn as a reapplyable function of the loaded state),
+  and side effects before the successful write are at-least-once on the conflict path — side effects
+  that must not repeat belong after the write, or must be idempotent.
+- **Canonical JSON.** Snapshots serialize through Elarion's canonical serialization, so `TState` must be
+  registered in a source-generated `JsonSerializerContext` that participates in the canonical options
+  (like any other module type). Under reflection-off serialization a missing registration fails the
+  activation with a clear error.
+- **Not transactional with business writes.** A snapshot write is its own commit. If a piece of state
+  must change atomically with business data, it belongs in regular entities written by a handler inside
+  its transaction — the actor is then a coordinator over that data, not its store.
+
+The store behind the seam is `IActorSnapshotStore`. The shipped implementation is
+`Elarion.Actors.PostgreSql`: one `elarion_actor_snapshots` table on the app's existing Postgres, `jsonb`
+payload (actor state stays inspectable with plain SQL), version-guarded change-tracker-free writes.
+Wire it with the marker on your `[GenerateDbSets]` context and one registration:
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionActorSnapshots]
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options);
+
+services.AddElarionPostgreSqlActorSnapshots<AppDbContext>();
+```
+
+(Hand-written contexts call `modelBuilder.UseElarionActorSnapshots()` instead of the marker.) A different
+backend implements `IActorSnapshotStore` and replaces the registration — the actor code never changes.
+
+## Running on multiple instances
+
+There is no placement and no forwarding: `IActorSystem.Get<T>(key)` always resolves an activation **on
+the calling instance**. Five instances calling the same key means up to five independent activations —
+each with its own mailbox; the single-threaded guarantee holds per instance. What snapshot state adds is
+one shared row: the ETag becomes the *cross-instance* serialization point (whoever writes first wins;
+every other activation's turn passivates its instance's activation and transparently re-runs once on the
+reloaded snapshot). Cross-instance, the guarantee is therefore optimistic concurrency on writes, not
+one-turn-at-a-time — a conflicted turn executes twice, so side effects before the write are
+at-least-once. Pick a topology per actor:
+
+1. **Per-instance actors** (caches, per-node rate limiters, batchers — usually no `IActorState`):
+   independent activations per instance are the point. Nothing to do.
+2. **Single-homed actors** (per-entity coordinators like an escalation latch) — **the recommended
+   shape**: route *the work that feeds the actor* to one instance instead of routing actor calls.
+   Deploy a worker instance with the actor's module enabled and disable the module on the web
+   instances (`Modules:{Name}:Enabled=false`) — the actor, facade, and generated event relay simply
+   don't exist there. Web instances publish integration events as usual and ask about actor state
+   through a normal handler call to the worker (or read the snapshot row — it is queryable `jsonb`).
+   A brief double-worker overlap during a rolling deploy is safe: conflicts fail loudly, the losing
+   activation passivates, and outbox redelivery converges. Caveat: today the outbox delivery worker
+   runs on every instance that calls `AddElarionOutbox` and parks claimed messages that have no
+   locally registered consumer, so this topology requires every instance running delivery to host the
+   full consumer set — keep consumer modules homogeneous, or run delivery only on the worker.
+3. **Multi-writer everywhere** (no topology work): keep mutations reapplyable and side effects
+   idempotent (or after the write), and let the runtime's conflict handling converge — a losing turn
+   re-runs once on the reloaded snapshot; only sustained contention surfaces errors. Fine for
+   low-contention keys; a hot shared key or true placement/forwarding is the signal to move to
+   Orleans (its ADO.NET clustering runs membership on the PostgreSQL you already have — and the
+   facade/`IActorState` surfaces are deliberately shaped so that migration is mechanical).
 
 ## Execution model: single-threaded, non-reentrant by default
 
@@ -170,8 +276,8 @@ passivate)** for a singleton or a small fixed set of long-lived actors — a coo
 pool — where re-activation churn costs more than staying resident, or where in-memory state is expensive
 to rebuild and nothing backs it in storage. Shorten it under memory pressure when state is cheap to
 reload; lengthen it when reload is expensive and traffic is bursty. Remember passivation **drops
-in-memory state**: if it must survive, flush it in `OnDeactivateAsync` — otherwise accept the loss for
-cache-like actors.
+in-memory state**: if it must survive, keep it in [`IActorState<TState>`](#durable-state-snapshots) (and
+`WriteStateAsync` after mutations) — otherwise accept the loss for cache-like actors.
 
 **`CallTimeoutSeconds` — the deadlock backstop.** 30 seconds catches the actor→actor cycle (A awaits B
 awaits A) that would otherwise hang a mailbox forever. Raise it only for an actor with a genuinely long
@@ -280,6 +386,7 @@ Metrics (all tagged `elarion.actor`; message-level ones also `elarion.actor.meth
 | `actor.activations.active` | up-down counter | Live activations. |
 | `actor.activations.count` | counter | Total activations (re-activation churn shows up here). |
 | `actor.activations.failed` | counter | Activations whose constructor or `OnActivateAsync` threw (each failure also failed its queued calls). |
+| `actor.snapshot.conflicts` | counter | Snapshot concurrency conflicts (ADR-0047). A steady rate means two processes host the same actor keys — alert on it. |
 
 This deliberately matches the signal set actor operators expect from Proto.Actor's metrics or Akka.NET's
 Phobos (mailbox depth, processing time, activation/failure counts, per-instance span identity). Durations
@@ -354,6 +461,7 @@ concept at the **call site** has a one-line Orleans equivalent:
 | `Task`/`Task<T>` facade methods | grain interface methods (identical signatures) |
 | `[Reentrant]` | `[Reentrant]` (same turn-based interleaving semantics) |
 | `IActorLifecycle.OnActivateAsync` / `OnDeactivateAsync` | `Grain.OnActivateAsync` / `OnDeactivateAsync` |
+| `IActorState<TState>` ctor param (`State`/`RecordExists`/`Etag`/`ReadStateAsync`/`WriteStateAsync`/`ClearStateAsync`) | `[PersistentState] IPersistentState<TState>` (same member names — state call sites compile unchanged) |
 | Call timeout (default 30 s, `TimeoutException`) | response timeout (default 30 s) |
 | Idle passivation (`IdleTimeoutSeconds`) | activation collection age |
 

@@ -15,6 +15,8 @@
     <Project Path="src/Elarion.AspNetCore.SchemaGeneration/Elarion.AspNetCore.SchemaGeneration.csproj" />
     <Project Path="src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" />
     <Project Path="src/Elarion.Actors/Elarion.Actors.csproj" />
+    <Project Path="src/Elarion.Actors.PostgreSql/Elarion.Actors.PostgreSql.csproj" />
+    <Project Path="src/Elarion.Actors.PostgreSql.Generators/Elarion.Actors.PostgreSql.Generators.csproj" />
     <Project Path="src/Elarion.Authorization.EntityFrameworkCore/Elarion.Authorization.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Authorization.EntityFrameworkCore.Generators/Elarion.Authorization.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.Blobs/Elarion.Blobs.csproj" />

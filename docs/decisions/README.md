@@ -67,3 +67,4 @@ designs that are not yet implemented.
 - [ADR-0044: Streaming requests and responses — deferred, with the design pre-decided — Proposed](0044-streaming-requests-and-responses.md)
 - [ADR-0045: Handler-action audit trail — `[Auditable]`, `IAuditScope`, and the transactional EF sink](0045-handler-action-audit-trail.md)
 - [ADR-0046: Actor event consumers — `[ConsumeEvent]` on `[Actor]` methods → generated relay](0046-actor-event-consumers.md)
+- [ADR-0047: Actor state snapshotting — `IActorState<TState>` + `IActorSnapshotStore`, PostgreSQL default](0047-actor-state-snapshotting.md)

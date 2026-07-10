@@ -691,6 +691,19 @@ See [Blob storage](/docs/capabilities/blob-storage).
 
 See [Blob uploads](/docs/capabilities/blob-uploads).
 
+### `[GenerateElarionActorSnapshots]`
+
+- **Package:** `Elarion.Actors.PostgreSql` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<ActorSnapshotEntity>` and applies the actor snapshot model configuration through the EF generator's model-config seam — the table backing the `IActorSnapshotStore` behind every `IActorState<TState>` (ADR-0047). The hand-written equivalent is `modelBuilder.UseElarionActorSnapshots()`. Mirrors `[GenerateElarionSettings]`/`[GenerateElarionIdempotencyKeys]`. Requires `[GenerateDbSets]` (else `ELASN001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_actor_snapshots` / `ElarionActorSnapshots` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Actors — durable state](/docs/concepts/actors#durable-state-snapshots).
+
 ### `[Keyset<TEntity>]`
 
 - **Package:** `Elarion.Paging` · **Applies to:** class (generic attribute, `where TEntity : class`)

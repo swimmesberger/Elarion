@@ -143,8 +143,19 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
 ```
 
 - The `IActorContext<TKey>` constructor parameter makes the actor **keyed** (one activation per key,
-  activated on first message, passivated after ~5 min idle — state drops; load/flush in
-  `IActorLifecycle.OnActivateAsync/OnDeactivateAsync`). No context parameter → process singleton.
+  activated on first message, passivated after ~5 min idle — in-memory state drops). No context
+  parameter → process singleton.
+- **Durable state**: declare an `IActorState<TState>` constructor parameter — the snapshot loads before
+  `OnActivateAsync`, `state.State` is the in-memory copy (`null` until assigned when no snapshot exists),
+  and only explicit `state.WriteStateAsync(ct)` persists (passivation never flushes; `ClearStateAsync`
+  deletes, `RecordExists` reports — the members mirror Orleans' `IPersistentState<T>`). On a concurrent
+  snapshot change the stale activation passivates and the turn transparently re-runs once on the
+  reloaded snapshot (so write turns as reapplyable mutations; side effects before the write are
+  at-least-once); only sustained conflicts surface as `ActorSnapshotConcurrencyException`. Backend: reference
+  `Elarion.Actors.PostgreSql`, put `[GenerateElarionActorSnapshots]` on the `[GenerateDbSets]` context,
+  and call `services.AddElarionPostgreSqlActorSnapshots<AppDbContext>()`; register `TState` in the
+  module's `JsonSerializerContext`. Manual load/flush via `IActorLifecycle.OnActivateAsync/OnDeactivateAsync`
+  remains the escape hatch for storage the seam doesn't fit.
 - The generated facade is `I{ClassName-minus-Actor}`; methods must return
   `Task`/`Task<T>`/`ValueTask`/`ValueTask<T>` (ELACT002 otherwise). Actors are module-scoped like
   handlers — outside a module they warn (ELACT003) and are not registered.

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>PostgreSQL actor state snapshotting for Elarion actors (ADR-0047): an EF-mapped snapshot table behind the IActorSnapshotStore seam, so [Actor] state declared as IActorState&lt;TState&gt; survives passivation and restarts. Change-tracker-free reads/writes with optimistic version guarding on the one PostgreSQL the app already runs.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Actors\Elarion.Actors.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+  <!-- Bundle the source generator's analyzer into this package. NuGet analyzer assets are not
+       transitive, so the generator lives in the package each annotated assembly references directly.
+       ReferenceOutputAssembly=false keeps it off the runtime surface; PrivateAssets=all keeps it from
+       becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Actors.PostgreSql.Generators\Elarion.Actors.PostgreSql.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="_BundleElarionActorSnapshotsGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.Actors.PostgreSql.Generators\Elarion.Actors.PostgreSql.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionActorSnapshotsGeneratorAnalyzer" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_ElarionActorSnapshotsGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>

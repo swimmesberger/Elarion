@@ -71,6 +71,65 @@ public sealed class ActorRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateActors_ActorStateParameter_EmitsFactoryBoundActivator() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record FulfillmentState {
+                    public required string Stage { get; init; }
+                }
+
+                [Elarion.Actors.Actor]
+                public sealed class OrderFulfillmentActor {
+                    public OrderFulfillmentActor(
+                        Elarion.Actors.IActorContext<System.Guid> context,
+                        Elarion.Actors.IActorState<FulfillmentState> state) { }
+
+                    public System.Threading.Tasks.Task Ship(System.Threading.CancellationToken cancellationToken) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        // The state parameter is created through ActorStateFactory bound to this activation's
+        // identity (ADR-0047), never resolved from DI like an ordinary service.
+        generated.Should().Contain(
+            "Activator = static (serviceProvider, context) => new global::Sample.Orders.OrderFulfillmentActor(context, "
+            + "global::Elarion.Actors.ActorStateFactory.Create<global::Sample.Orders.FulfillmentState, global::System.Guid>(serviceProvider, context))");
+        generated.Should().NotContain("GetRequiredService<global::Elarion.Actors.IActorState");
+    }
+
+    [Fact]
+    public void GenerateActors_SingletonActorState_BindsTheSingletonKey() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record GaugeState {
+                    public required int Value { get; init; }
+                }
+
+                [Elarion.Actors.Actor]
+                public sealed class GaugeActor {
+                    public GaugeActor(Elarion.Actors.IActorState<GaugeState> state) { }
+
+                    public System.Threading.Tasks.Task Bump(System.Threading.CancellationToken cancellationToken) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        generated.Should().Contain(
+            "Activator = static (serviceProvider, context) => new global::Sample.Orders.GaugeActor("
+            + "global::Elarion.Actors.ActorStateFactory.Create<global::Sample.Orders.GaugeState, global::Elarion.Actors.ActorSingletonKey>(serviceProvider, context))");
+    }
+
+    [Fact]
     public void GenerateActors_ModuleScoped_EmitsDefaultServicesFiller() {
         var source = CreateSource(
             """

@@ -18,6 +18,9 @@ public static class ActorServiceCollectionExtensions {
     /// </summary>
     public static IServiceCollection AddElarionActorSystem(this IServiceCollection services) {
         services.TryAddSingleton(TimeProvider.System);
+        // One tracker per activation scope collects the IActorState<T> instances the activator
+        // creates, so the cell can load their snapshots before the first turn (ADR-0047).
+        services.TryAddScoped<ActorStateTracker>();
         services.TryAddSingleton(static serviceProvider => new ActorSystem(
             serviceProvider.GetServices<ActorRegistration>(),
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),

@@ -72,6 +72,15 @@ public static class ActorTelemetry {
             "actor.activations.failed",
             description: "Total number of actor activations that failed to start");
 
+    /// <summary>
+    /// Counts snapshot concurrency conflicts (ADR-0047). A steady rate means two processes host the
+    /// same actor keys — the single-node runtime's deployment misconfiguration signal.
+    /// </summary>
+    public static readonly Counter<long> SnapshotConflictCount =
+        MeterInstance.CreateCounter<long>(
+            "actor.snapshot.conflicts",
+            description: "Total number of actor snapshot concurrency conflicts");
+
     /// <summary>Tracks messages currently enqueued or executing per actor (mailbox depth — the backpressure signal).</summary>
     public static readonly UpDownCounter<long> MailboxPending =
         MeterInstance.CreateUpDownCounter<long>(
@@ -146,6 +155,11 @@ public static class ActorTelemetry {
     internal static void RecordActivationFailure(string actor) {
         var tags = new TagList { { "elarion.actor", actor } };
         ActivationFailureCount.Add(1, tags);
+    }
+
+    internal static void RecordSnapshotConflict(string actor) {
+        var tags = new TagList { { "elarion.actor", actor } };
+        SnapshotConflictCount.Add(1, tags);
     }
 
     internal static void RecordEnqueued(string actor) {

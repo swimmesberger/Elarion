@@ -4,6 +4,25 @@ using Elarion.Actors.Runtime;
 
 namespace Elarion.Actors;
 
+/// <summary>How a turn ended, as observed by the cell (the caller's completion is handled inside the item).</summary>
+internal enum ActorTurnOutcome {
+    /// <summary>The turn completed (result, error, or cancellation delivered to the caller).</summary>
+    Completed,
+
+    /// <summary>
+    /// The turn failed with <see cref="ActorSnapshotConcurrencyException"/> and the caller has NOT
+    /// been completed: the cell passivates this stale activation and re-enqueues the item, so the
+    /// turn re-runs once against a fresh activation that loaded the winning snapshot (ADR-0047).
+    /// </summary>
+    SnapshotConflictRetry,
+
+    /// <summary>
+    /// The retried turn conflicted again (live contention / sustained double-hosting): the caller
+    /// got the exception; the cell still passivates so the next activation reloads.
+    /// </summary>
+    SnapshotConflictFailed
+}
+
 /// <summary>
 /// A single queued actor call. Generated facade implementations subclass the result-typed
 /// <see cref="ActorWorkItem{TActor, TResult}"/> per method; application code never touches work
@@ -24,7 +43,7 @@ public abstract class ActorWorkItem<TActor> where TActor : class {
         TimeProvider timeProvider,
         CancellationToken callerToken);
 
-    internal abstract ValueTask RunAsync(TActor actor, CancellationToken stopping);
+    internal abstract ValueTask<ActorTurnOutcome> RunAsync(TActor actor, CancellationToken stopping);
 
     internal abstract void TryFail(Exception exception);
 
@@ -73,6 +92,9 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     private CancellationTokenRegistration _attributionRegistration;
     private CancellationTokenRegistration _callerRegistration;
     private CancellationTokenRegistration _stoppingRegistration;
+    // Set when a snapshot conflict already consumed this item's one transparent retry. Reset in
+    // Initialize (pooled reuse), NOT between the two attempts of one call.
+    private bool _snapshotRetryAttempted;
 
     internal Task<TResult> Completion => _completion.Task;
 
@@ -91,6 +113,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _invocationCts = null;
         _timeoutArmed = false;
+        _snapshotRetryAttempted = false;
         _actorName = actorName;
         _key = key;
         _timeProvider = timeProvider;
@@ -126,17 +149,17 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         }
     }
 
-    internal override async ValueTask RunAsync(TActor actor, CancellationToken stopping) {
+    internal override async ValueTask<ActorTurnOutcome> RunAsync(TActor actor, CancellationToken stopping) {
         // Canceled or timed out while queued: skip execution entirely.
         if (_completion.Task.IsCompleted) {
             Cleanup();
-            return;
+            return ActorTurnOutcome.Completed;
         }
 
         if (stopping.IsCancellationRequested) {
             _completion.TrySetCanceled(stopping);
             Cleanup();
-            return;
+            return ActorTurnOutcome.Completed;
         }
 
         ActorTelemetry.RecordQueueWait(
@@ -144,6 +167,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         using var activity = ActorTelemetry.StartProcess(_actorName, MethodName, _key, _callerContext);
         var startTimestamp = _timeProvider.GetTimestamp();
         var outcome = "ok";
+        var turnOutcome = ActorTurnOutcome.Completed;
         try {
             CancellationToken token;
             if (_invocationCts is null) {
@@ -151,6 +175,9 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             }
             else {
                 _stoppingToken = stopping;
+                // A retried turn runs on a NEW activation with a new stopping token: drop the
+                // previous attempt's registration before wiring the current one (no-op first time).
+                _stoppingRegistration.Dispose();
                 if (stopping.CanBeCanceled) {
                     _stoppingRegistration = stopping.UnsafeRegister(static state =>
                         ((ActorWorkItem<TActor, TResult>)state!)._invocationCts?.Cancel(), this);
@@ -177,13 +204,34 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             activity?.SetStatus(ActivityStatusCode.Error, outcome);
         }
         catch (Exception ex) {
-            outcome = "error";
             if (activity is not null) {
                 activity.SetStatus(ActivityStatusCode.Error, ex.Message);
                 activity.AddException(ex);
             }
 
-            _completion.TrySetException(ex);
+            if (ex is ActorSnapshotConcurrencyException) {
+                ActorTelemetry.RecordSnapshotConflict(_actorName);
+                if (!_snapshotRetryAttempted && !_completion.Task.IsCompleted) {
+                    // Greenfield conflict semantics (ADR-0047): the caller is NOT completed. The
+                    // cell passivates this stale activation and re-enqueues the item, so the turn
+                    // re-runs once against a fresh activation that loaded the winning snapshot.
+                    // The call timeout stays armed across both attempts, bounding the whole call.
+                    _snapshotRetryAttempted = true;
+                    outcome = "snapshot_conflict";
+                    turnOutcome = ActorTurnOutcome.SnapshotConflictRetry;
+                }
+                else {
+                    // Second consecutive conflict: live contention or sustained double-hosting —
+                    // now the caller sees it.
+                    outcome = "error";
+                    turnOutcome = ActorTurnOutcome.SnapshotConflictFailed;
+                    _completion.TrySetException(ex);
+                }
+            }
+            else {
+                outcome = "error";
+                _completion.TrySetException(ex);
+            }
         }
         finally {
             // Record telemetry off this item's fields BEFORE Cleanup, because Cleanup recycles the
@@ -191,8 +239,17 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             // _timeProvider). Cleanup must be the last touch of this instance on every path.
             ActorTelemetry.RecordMessage(
                 _actorName, MethodName, outcome, _timeProvider.GetElapsedTime(startTimestamp));
-            Cleanup();
+            if (turnOutcome == ActorTurnOutcome.SnapshotConflictRetry) {
+                // The item lives on into its retry: no Cleanup/Recycle, and the queue-wait clock
+                // restarts so the second attempt measures its own re-queue time.
+                _enqueuedTimestamp = _timeProvider.GetTimestamp();
+            }
+            else {
+                Cleanup();
+            }
         }
+
+        return turnOutcome;
     }
 
     internal override void TryFail(Exception exception) {
