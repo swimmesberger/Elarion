@@ -7,6 +7,20 @@ namespace Elarion.Messaging.Outbox;
 /// </summary>
 public sealed class OutboxOptions
 {
+    /// <summary>
+    /// Whether this instance runs the background delivery worker (<c>OutboxDeliveryService</c>).
+    /// Defaults to <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// Set to <see langword="false"/> on instances that should only <em>publish</em> to the outbox. In a
+    /// heterogeneous topology — for example web nodes with a feature module disabled plus a worker-role node
+    /// hosting that module's consumers (or its actors) — a node whose delivery loop claims a message whose
+    /// consumers are not registered locally parks it as unresolvable. Run the worker only on the instance(s)
+    /// that register <em>all</em> integration consumers; publisher-only nodes keep the bus and storage but
+    /// skip the worker entirely.
+    /// </remarks>
+    public bool RunDeliveryWorker { get; set; } = true;
+
     /// <summary>How long the delivery worker waits between polls when the outbox is idle. Defaults to 1 second.</summary>
     /// <remarks>
     /// When a poll returns a full batch the worker keeps draining without waiting, so this bounds idle latency only.

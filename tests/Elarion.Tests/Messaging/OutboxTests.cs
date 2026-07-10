@@ -371,6 +371,25 @@ public sealed class OutboxServiceCollectionExtensionsTests
         provider.GetServices<IHostedService>().Should().ContainSingle(service => service is OutboxDeliveryService);
     }
 
+    [Fact]
+    public void AddElarionOutbox_RunDeliveryWorkerDisabled_RegistersPublisherWithoutTheWorker()
+    {
+        // The publisher-only shape for heterogeneous topologies: a node with a feature module disabled still
+        // publishes to the outbox, but must not claim messages whose consumers only exist on the worker node.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped(_ => new OutboxTestDbContext(new DbContextOptionsBuilder<OutboxTestDbContext>().Options));
+
+        services.AddElarionOutbox<OutboxTestDbContext>(options => options.RunDeliveryWorker = false);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IIntegrationEventBus>().Should().BeOfType<OutboxIntegrationEventBus>();
+        scope.ServiceProvider.GetRequiredService<IOutboxStore>().Should().BeOfType<EfCoreOutboxStore<OutboxTestDbContext>>();
+        provider.GetServices<IHostedService>().Should().NotContain(service => service is OutboxDeliveryService);
+    }
+
     private sealed class OutboxTestDbContext(DbContextOptions<OutboxTestDbContext> options) : DbContext(options);
 }
 

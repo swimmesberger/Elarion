@@ -157,6 +157,26 @@ retained; `PollingInterval` sets how often the worker sweeps out keys past that 
 
 See [Idempotency](/docs/concepts/idempotency).
 
+## Outbox (options, not config)
+
+`AddElarionOutbox<TDbContext>(configure => …)` (from `Elarion.Messaging.Outbox`) takes an optional
+`Action<OutboxOptions>` configured in code rather than `appsettings`. It tunes the durable integration-event
+tier and its background `OutboxDeliveryService`:
+
+| Option | Default |
+| --- | --- |
+| `RunDeliveryWorker` | `true` (set `false` on publish-only nodes in heterogeneous topologies — run delivery only where **all** integration consumers are registered) |
+| `PollingInterval` | `1 second` |
+| `BatchSize` | `100` |
+| `MaxDeliveryAttempts` | `10` |
+| `LeaseDuration` | `2 minutes` |
+| `BaseRetryDelay` | `5 seconds` (exponential backoff base; `Zero` retries on the next poll) |
+| `MaxRetryDelay` | `1 hour` |
+| `RetentionPeriod` | `7 days` (`null` keeps delivered rows forever) |
+| `SerializerOptions` | `null` (canonical `IElarionJsonSerialization`) |
+
+See [Event backends](/docs/capabilities/events/backends).
+
 ## JSON serialization (options, not config)
 
 Every subsystem shares one canonical `JsonSerializerOptions`, configured in code (not `appsettings`) via
