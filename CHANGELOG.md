@@ -8,6 +8,15 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Outbox delivery worker is now opt-out per node (`OutboxOptions.RunDeliveryWorker`, default `true`).**
+  `AddElarionOutbox<T>` previously always registered the hosted `OutboxDeliveryService`, so in a
+  heterogeneous topology (e.g. web nodes with a feature module disabled plus a worker-role node hosting
+  that module's consumers or actors) a publish-only node's delivery loop claimed messages whose consumers
+  only exist elsewhere and parked them as unresolvable. Setting `RunDeliveryWorker = false` keeps the
+  durable bus and outbox storage (publishing stays atomic with business data) but skips the worker
+  registration entirely; run delivery only on the instance(s) registering **all** integration consumers.
+
 ## [0.2.4] - 2026-07-08
 
 ### Changed

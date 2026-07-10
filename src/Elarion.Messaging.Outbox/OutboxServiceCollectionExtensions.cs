@@ -24,6 +24,8 @@ public static class OutboxServiceCollectionExtensions
     /// This replaces the in-memory integration tier; the domain plane and the generated consumer descriptors are
     /// registered separately (for example via <c>AddElarionDomainEventBus</c> for Plane A and the generated
     /// <c>Add{Assembly}EventConsumers</c>). Consumers must be idempotent because delivery is at-least-once.
+    /// Set <see cref="OutboxOptions.RunDeliveryWorker"/> to <see langword="false"/> on publisher-only instances
+    /// so another node hosting all the consumers runs the delivery worker instead.
     /// </remarks>
     public static IServiceCollection AddElarionOutbox<TDbContext>(
         this IServiceCollection services,
@@ -51,7 +53,12 @@ public static class OutboxServiceCollectionExtensions
         // integration bus was registered for the domain plane's sake.
         services.AddScoped<IIntegrationEventBus, OutboxIntegrationEventBus>();
 
-        services.AddHostedService<OutboxDeliveryService>();
+        // Publisher-only nodes (heterogeneous topologies where another instance hosts all the consumers) opt out
+        // of the delivery loop entirely — otherwise this node would claim messages it cannot resolve and park them.
+        if (options.RunDeliveryWorker)
+        {
+            services.AddHostedService<OutboxDeliveryService>();
+        }
 
         return services;
     }
