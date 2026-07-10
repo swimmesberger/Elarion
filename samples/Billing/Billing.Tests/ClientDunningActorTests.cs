@@ -5,6 +5,7 @@ using AwesomeAssertions;
 using Billing.Application.Modules.Invoicing;
 using Billing.Application.Modules.Invoicing.Actors;
 using Billing.Application.Modules.Invoicing.Events;
+using Billing.Application.Modules.Invoicing.Handlers;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Results;
 using Elarion.Abstractions.Serialization;
@@ -41,8 +42,10 @@ public sealed class ClientDunningActorTests {
 
         // The snapshot store behind IActorState<ClientDunningState> (ADR-0047). Production registers the
         // PostgreSQL store (AddElarionPostgreSqlActorSnapshots<BillingDbContext>); tests swap the seam for
-        // an in-memory fake — actor code and generated wiring are identical either way.
+        // an in-memory fake — actor code and generated wiring are identical either way. The reader is the
+        // query-side companion GetClientDunning consumes.
         services.AddSingleton<IActorSnapshotStore>(new InMemorySnapshotStore());
+        services.AddSingleton<IActorStateReader, ActorStateReader>();
         services.AddElarionJson();
         services.ConfigureElarionJson(options => options.TypeInfoResolvers.Add(InvoicingJsonContext.Default));
 
@@ -93,6 +96,52 @@ public sealed class ClientDunningActorTests {
         var quietState = await actors.Get<IClientDunning>(quiet).GetStateAsync(Ct);
         quietState.OverdueCount.Should().Be(1);
         quietState.Escalated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DunningQuery_ReadsThePublishedSnapshot_WithoutTouchingTheActor() {
+        await using var provider = BuildActorHost();
+        var relay = provider.GetRequiredKeyedService<IHandler<InvoiceOverdue, Result<Unit>>>(RelayKey);
+        var clientId = Guid.CreateVersion7();
+
+        await relay.HandleAsync(new InvoiceOverdue(Guid.CreateVersion7(), clientId), Ct);
+        await relay.HandleAsync(new InvoiceOverdue(Guid.CreateVersion7(), clientId), Ct);
+
+        // The query path (ADR-0047/0048 design rules): GetClientDunning reads the snapshot via
+        // IActorStateReader — no IActorSystem, no facade — the shape that runs on any instance,
+        // including non-home ones under single-homing. The record carries the interpretation, so the
+        // query loses nothing by skipping the actor.
+        var handler = new GetClientDunning(provider.GetRequiredService<IActorStateReader>());
+        var result = await handler.HandleAsync(new GetClientDunning.Query(clientId), Ct);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.OverdueCount.Should().Be(2);
+        result.Value.NeedsAttention.Should().BeTrue();
+        result.Value.Escalated.Should().BeFalse();
+
+        // A client with no dunning history has no snapshot: the query answers Initial, not an error.
+        var unknown = await handler.HandleAsync(new GetClientDunning.Query(Guid.CreateVersion7()), Ct);
+        unknown.IsSuccess.Should().BeTrue();
+        unknown.Value.OverdueCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void DunningState_IsTheQueryContract_InterpretationAndTransitionsLiveOnTheRecord() {
+        // The ADR-0047 design rule: the record owns the threshold, the derived flags, and the pure
+        // transition — so an IActorStateReader-based query on a non-home instance shares exactly the
+        // logic the actor runs, without running the actor.
+        var state = ClientDunningState.Initial;
+        state.NeedsAttention.Should().BeFalse();
+
+        state = state.RecordOverdue().RecordOverdue();
+        state.NeedsAttention.Should().BeTrue();
+        state.Escalated.Should().BeFalse();
+
+        state = state.RecordOverdue();
+        state.Escalated.Should().BeTrue();
+        state.NeedsAttention.Should().BeFalse();
+
+        // The latch is an event that happened, not a re-derivation: it holds past the threshold.
+        state.RecordOverdue().Escalated.Should().BeTrue();
     }
 
     [Fact]

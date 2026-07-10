@@ -21,6 +21,22 @@ public sealed class OutboxOptions
     /// </remarks>
     public bool RunDeliveryWorker { get; set; } = true;
 
+    /// <summary>
+    /// Optional per-cycle gate for the delivery worker: consulted before each claim; when it returns
+    /// <see langword="false"/> the cycle is skipped (no messages are claimed) and the worker idles
+    /// until the next tick. <see langword="null"/> (default) always delivers.
+    /// </summary>
+    /// <remarks>
+    /// The <em>dynamic</em> sibling of <see cref="RunDeliveryWorker"/>: use it when whether this
+    /// instance delivers changes at runtime — the canonical case is following the actor home lease
+    /// (ADR-0048) in a homogeneous deployment, so integration events (and the single-homed actors
+    /// they feed) are delivered on exactly the lease-holding instance:
+    /// <code>o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService&lt;IActorHomeLease&gt;().IsHeld);</code>
+    /// The service provider is the worker's poll scope. Messages published while the gate is closed
+    /// simply wait in the outbox for whichever instance's gate opens.
+    /// </remarks>
+    public Func<IServiceProvider, CancellationToken, ValueTask<bool>>? DeliveryGate { get; set; }
+
     /// <summary>How long the delivery worker waits between polls when the outbox is idle. Defaults to 1 second.</summary>
     /// <remarks>
     /// When a poll returns a full batch the worker keeps draining without waiting, so this bounds idle latency only.

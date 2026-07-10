@@ -71,6 +71,34 @@ public sealed class ActorRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateActors_SingleHomed_FlowsIntoTheRegistrationOptions() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                [Elarion.Actors.Actor(SingleHomed = true)]
+                public sealed class CoordinatorActor {
+                    public System.Threading.Tasks.Task Run(System.Threading.CancellationToken cancellationToken) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+
+                [Elarion.Actors.Actor]
+                public sealed class RoamingActor {
+                    public System.Threading.Tasks.Task Run(System.Threading.CancellationToken cancellationToken) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        generated.Should().Contain("Name = \"Coordinator\"");
+        generated.Should().Contain("SingleHomed = true");
+        // The default stays false for actors that don't opt in.
+        generated.Should().Contain("SingleHomed = false");
+    }
+
+    [Fact]
     public void GenerateActors_ActorStateParameter_EmitsFactoryBoundActivator() {
         var source = CreateSource(
             """

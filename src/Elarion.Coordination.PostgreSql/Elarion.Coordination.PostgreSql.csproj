@@ -1,13 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>PostgreSQL actor state snapshotting for Elarion actors (ADR-0047): an EF-mapped snapshot table behind the IActorSnapshotStore seam, so [Actor] state declared as IActorState&lt;TState&gt; survives passivation and restarts. Change-tracker-free reads/writes with optimistic version guarding on the one PostgreSQL the app already runs.</Description>
+    <Description>PostgreSQL role leases for Elarion (ADR-0049): heartbeat-renewed single-holder election for named roles on the one PostgreSQL the app already runs — one conditional-upsert row per role is the whole membership protocol. Backs single-homed actors, lease-gated outbox delivery, and any "exactly one instance runs this" background work.</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.Actors\Elarion.Actors.csproj" />
-    <!-- The actor home (ADR-0048) is sugar over the generic role lease (ADR-0049). -->
-    <ProjectReference Include="..\Elarion.Coordination.PostgreSql\Elarion.Coordination.PostgreSql.csproj" />
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -26,18 +24,18 @@
        ReferenceOutputAssembly=false keeps it off the runtime surface; PrivateAssets=all keeps it from
        becoming a downstream package dependency. -->
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.Actors.PostgreSql.Generators\Elarion.Actors.PostgreSql.Generators.csproj"
+    <ProjectReference Include="..\Elarion.Coordination.PostgreSql.Generators\Elarion.Coordination.PostgreSql.Generators.csproj"
                      ReferenceOutputAssembly="false"
                      PrivateAssets="all" />
   </ItemGroup>
 
-  <Target Name="_BundleElarionActorSnapshotsGenerator" BeforeTargets="_GetPackageFiles">
-    <MSBuild Projects="..\Elarion.Actors.PostgreSql.Generators\Elarion.Actors.PostgreSql.Generators.csproj"
+  <Target Name="_BundleElarionRoleLeasesGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.Coordination.PostgreSql.Generators\Elarion.Coordination.PostgreSql.Generators.csproj"
              Targets="GetTargetPath">
-      <Output TaskParameter="TargetOutputs" ItemName="_ElarionActorSnapshotsGeneratorAnalyzer" />
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionRoleLeasesGeneratorAnalyzer" />
     </MSBuild>
     <ItemGroup>
-      <None Include="@(_ElarionActorSnapshotsGeneratorAnalyzer)"
+      <None Include="@(_ElarionRoleLeasesGeneratorAnalyzer)"
             Pack="true"
             PackagePath="analyzers/dotnet/cs/"
             Visible="false" />

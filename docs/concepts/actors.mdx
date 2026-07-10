@@ -103,9 +103,18 @@ Declaring a constructor parameter `IActorState<TState>` gives the activation **s
 state** (ADR-0047) — the Orleans `IPersistentState<T>` shape:
 
 ```csharp
+// The state record is the QUERY CONTRACT: interpretation and pure transitions live on it, so
+// everything that reads the snapshot — the actor on its home, an IActorStateReader query on any
+// other instance, ops with SQL over the jsonb column — shares one set of rules.
 public sealed record FulfillmentState {
     public required string Stage { get; init; }
     public int Attempts { get; init; }
+
+    public static FulfillmentState Initial { get; } = new() { Stage = "new" };
+
+    public bool IsStuck => Attempts >= 3 && Stage != "shipped";            // derived interpretation
+
+    public FulfillmentState Shipped() => this with { Stage = "shipped" }; // pure transition
 }
 
 [Actor]
@@ -114,8 +123,9 @@ public sealed class OrderFulfillmentActor(
     IActorState<FulfillmentState> state) {
 
     public async Task Ship(ShippingInfo info, CancellationToken ct) {
-        state.State = (state.State ?? new FulfillmentState { Stage = "new" }) with { Stage = "shipped" };
-        await state.WriteStateAsync(ct);     // the explicit durability point
+        state.State = (state.State ?? FulfillmentState.Initial).Shipped();
+        await state.WriteStateAsync(ct);     // the explicit durability point — the commit
+        // side effects that must not repeat go here, AFTER the successful write
     }
 }
 ```
@@ -155,6 +165,46 @@ call-site-compatible improvements: `ValueTask` returns, optional `CancellationTo
   must change atomically with business data, it belongs in regular entities written by a handler inside
   its transaction — the actor is then a coordinator over that data, not its store.
 
+### Designing applications around snapshot state
+
+Snapshot state is a **published-state model**. These rules are not style suggestions — an application
+that ignores them gets queries that disagree with the actor, side effects that duplicate, or state
+that stops being readable off-home:
+
+1. **The state record is the query contract — interpretation lives on the record, never in actor
+   methods.** Constants (thresholds), derived flags (computed properties), and pure transitions
+   (methods returning the next state) belong on `TState`. The record is a shared type: the actor
+   deserializes it on its home, `IActorStateReader` deserializes it on any other instance, ops reads
+   it with SQL — logic *on the record* runs identically everywhere; logic in an actor method runs
+   only where the actor runs. The test: if a facade query and a reader-based query could ever
+   disagree about what the state *means*, the interpretation is in the wrong place.
+2. **Actor methods apply transitions, write, and perform side effects — nothing else.** The canonical
+   turn is three steps: `state.State = (state.State ?? TState.Initial).SomeTransition(…)`, then
+   `WriteStateAsync`, then side effects. Pure, reapplyable transitions are also exactly what conflict
+   recovery requires: a conflicted turn passivates and re-runs against the reloaded snapshot, and only
+   a mutation expressed as a function of the loaded state survives that correctly.
+3. **`WriteStateAsync` is publication.** Unwritten in-memory state is uncommitted — invisible to
+   readers and other instances, lost on a crash, by design. Decide what observers must be able to see
+   and write at those points. Side effects that must not repeat go *after* the successful write: the
+   write is the commit point, and a turn whose write conflicts re-runs once.
+4. **Queries read snapshots; commands go through the actor.** `IActorStateReader.ReadAsync<TState>`
+   (composed with regular entities in an ordinary query handler where needed) runs on any instance and
+   returns published truth carrying the record's full interpretation — rule 1 is what makes this
+   lossless. Facade calls, including facade *queries*, run only where the actor runs. A query that
+   must observe uncommitted state or be ordered against in-flight turns is home-only by construction —
+   and usually a sign the actor should publish (write) more eagerly.
+5. **Evolve the record shape-tolerantly instead of migrating in `OnActivateAsync`.** Activation-time
+   migration fixes only the home's view; readers and SQL see raw payloads. Add new properties as
+   optional/defaulted (nullable with a fallback in the computed interpretation), keep existing wire
+   names stable, and treat a breaking shape change as what it is — a new contract that needs a
+   backfill of the snapshot rows.
+
+The Billing sample is the reference implementation of both halves: `ClientDunningState` carries
+`EscalationThreshold`, the `NeedsAttention` interpretation, the `RecordOverdue()` transition, and its
+own `SnapshotKey` (so actor and queries can never disagree on identity); the actor's `[ConsumeEvent]`
+method is apply → write → log-after-write; and the `GetClientDunning` query handler is the read path —
+`IActorStateReader` plus the record's interpretation, no `IActorSystem`, runnable on any instance.
+
 The store behind the seam is `IActorSnapshotStore`. The shipped implementation is
 `Elarion.Actors.PostgreSql`: one `elarion_actor_snapshots` table on the app's existing Postgres, `jsonb`
 payload (actor state stays inspectable with plain SQL), version-guarded change-tracker-free writes.
@@ -185,22 +235,69 @@ at-least-once. Pick a topology per actor:
 1. **Per-instance actors** (caches, per-node rate limiters, batchers — usually no `IActorState`):
    independent activations per instance are the point. Nothing to do.
 2. **Single-homed actors** (per-entity coordinators like an escalation latch) — **the recommended
-   shape**: route *the work that feeds the actor* to one instance instead of routing actor calls.
-   Deploy a worker instance with the actor's module enabled and disable the module on the web
-   instances (`Modules:{Name}:Enabled=false`) — the actor, facade, and generated event relay simply
-   don't exist there. Web instances publish integration events as usual and ask about actor state
-   through a normal handler call to the worker (or read the snapshot row — it is queryable `jsonb`).
-   A brief double-worker overlap during a rolling deploy is safe: conflicts fail loudly, the losing
-   activation passivates, and outbox redelivery converges. Caveat: today the outbox delivery worker
-   runs on every instance that calls `AddElarionOutbox` and parks claimed messages that have no
-   locally registered consumer, so this topology requires every instance running delivery to host the
-   full consumer set — keep consumer modules homogeneous, or run delivery only on the worker.
+   shape**: declare `[Actor(SingleHomed = true)]` and let the **actor home lease** (ADR-0048) elect
+   exactly one instance as the home. See [Single-homed actors](#single-homed-actors-the-home-lease)
+   below.
 3. **Multi-writer everywhere** (no topology work): keep mutations reapplyable and side effects
    idempotent (or after the write), and let the runtime's conflict handling converge — a losing turn
    re-runs once on the reloaded snapshot; only sustained contention surfaces errors. Fine for
    low-contention keys; a hot shared key or true placement/forwarding is the signal to move to
    Orleans (its ADO.NET clustering runs membership on the PostgreSQL you already have — and the
    facade/`IActorState` surfaces are deliberately shaped so that migration is mechanical).
+
+## Single-homed actors: the home lease
+
+`[Actor(SingleHomed = true)]` declares that an actor must only run on one instance app-wide. The
+enforcement is the **actor home** — a [role lease](/docs/decisions) (ADR-0049): one heartbeat-renewed
+row on the app's PostgreSQL that elects exactly one instance as the holder of the `"actors"` role (the
+row is the whole membership protocol; failover is expiry, bounded by `LeaseDuration`, immediate on
+graceful shutdown):
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionActorSnapshots]
+[GenerateElarionRoleLeases]                   // the lease table (ELROLE001 without [GenerateDbSets])
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options);
+
+services.AddElarionPostgreSqlActorHome<AppDbContext>();   // "actors" role lease + heartbeat + the home binding
+services.AddElarionOutbox<AppDbContext>(o =>              // event delivery follows the lease
+    o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService<IActorHomeLease>().IsHeld));
+```
+
+(The role lease is a general leader-election primitive — `Elarion.Coordination.PostgreSql`, keyed
+`IRoleLease` per role — usable for any "exactly one instance runs this" background concern; the actor
+home is its first consumer, bound via `AddElarionActorHome("actors")`.)
+
+With those three lines a homogeneous deployment self-organizes: every instance publishes integration
+events; the lease holder delivers them and hosts the single-homed actors (the generated `[ConsumeEvent]`
+relays run where delivery runs); when the holder dies, another instance takes the lease and both move
+together. Messages published while no instance is home simply wait in the outbox — nothing is lost.
+
+The rules of the model:
+
+- **Calls are gated, never forwarded.** A facade call to a single-homed actor on a non-home instance
+  fails immediately with `ActorNotHomedException` naming the holder — a pointed error, not mystery
+  latency. Feed single-homed actors through integration events (they follow the lease); a scheduled job
+  should publish an event rather than call the facade (job claims elect a node independently of the
+  home). Transparent forwarding is deliberately out of scope — needing it is the signal to move to
+  Orleans.
+- **Reads run anywhere — because interpretation lives on the record.** `IActorStateReader.ReadAsync<TState>(key)`
+  returns the latest snapshot without activating anything — durable truth on any instance, carrying the
+  state record's full logic (rule 1 of [designing applications around snapshot
+  state](#designing-applications-around-snapshot-state); off-home reads lose nothing precisely because
+  actor *methods* hold no interpretation). Commands go through the actor; queries read snapshots (or
+  regular entities).
+- **Unenforced without a lease.** With no `IActorHomeLease` registered (local dev, a one-instance
+  deployment), `SingleHomed` is a declaration only — the actor system logs one warning per such actor so
+  a multi-instance misconfiguration is visible.
+- **Failover is honest.** The local `IsHeld` turns false a safety margin *before* the stored lease
+  expires, so the old home stops before a new one can start; pathological overlaps (GC pause, clock
+  skew) degrade to snapshot conflicts, which the ADR-0047 transparent retry absorbs losslessly. A
+  database outage means "nobody is home" — fail-closed, never two homes.
+
+The static alternative — a fixed web/worker split via module gating (`Modules:{Name}:Enabled=false` on
+web instances) plus `RunDeliveryWorker = false` on publisher-only nodes — remains valid when you prefer
+topology in configuration over self-election; the lease is for fleets of identical instances.
 
 ## Execution model: single-threaded, non-reentrant by default
 

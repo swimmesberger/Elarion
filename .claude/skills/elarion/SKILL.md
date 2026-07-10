@@ -148,7 +148,12 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
 - **Durable state**: declare an `IActorState<TState>` constructor parameter — the snapshot loads before
   `OnActivateAsync`, `state.State` is the in-memory copy (`null` until assigned when no snapshot exists),
   and only explicit `state.WriteStateAsync(ct)` persists (passivation never flushes; `ClearStateAsync`
-  deletes, `RecordExists` reports — the members mirror Orleans' `IPersistentState<T>`). On a concurrent
+  deletes, `RecordExists` reports — the members mirror Orleans' `IPersistentState<T>`).
+  **Design `TState` as the query contract (mandatory)**: constants, derived flags, and pure transition
+  methods live ON the record (it's shared — the actor, `IActorStateReader` queries on other instances,
+  and SQL all deserialize the same type); actor methods only apply a transition, `WriteStateAsync`, then
+  side effects (after the write — the write is the commit point). Evolve the shape with
+  optional/defaulted properties on the record, never by migrating in `OnActivateAsync`. On a concurrent
   snapshot change the stale activation passivates and the turn transparently re-runs once on the
   reloaded snapshot (so write turns as reapplyable mutations; side effects before the write are
   at-least-once); only sustained conflicts surface as `ActorSnapshotConcurrencyException`. Backend: reference
@@ -163,9 +168,17 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   `TimeoutException` after ~30 s — that's the deadlock backstop, treat it as a design smell).
   `[Reentrant]` opts into Orleans-style interleaving at await points (never parallel); don't use
   `ConfigureAwait(false)` inside a reentrant actor.
-- **Single-node by design**: in-memory activations on N nodes are N independent states. Fine for
-  node-local state; for cluster-authoritative actors move to Orleans/Akka.NET/Proto.Actor instead of
-  bending this. Stateless parallelism never belongs in actors — that's handlers + `Task.WhenAll`.
+- **Single-node by design**: in-memory activations on N nodes are N independent states (with
+  `IActorState` they share one ETag-guarded snapshot row — safe, but optimistic). For one
+  authoritative activation app-wide, mark it `[Actor(SingleHomed = true)]` and register the home
+  lease (`AddElarionPostgreSqlActorHome<AppDbContext>()` + `[GenerateElarionRoleLeases]` on the
+  context — the home is the `"actors"` role of the generic `IRoleLease` leader-election primitive in
+  `Elarion.Coordination.PostgreSql`): one instance is elected home, calls elsewhere fail with `ActorNotHomedException`, and
+  event delivery follows the lease via
+  `AddElarionOutbox<T>(o => o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService<IActorHomeLease>().IsHeld))`.
+  Reads from any instance use `IActorStateReader.ReadAsync<TState>(key)` (snapshot, no activation).
+  For true placement/forwarding move to Orleans/Akka.NET/Proto.Actor instead of bending this.
+  Stateless parallelism never belongs in actors — that's handlers + `Task.WhenAll`.
 
 ## Rules that don't change
 

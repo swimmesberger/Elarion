@@ -165,6 +165,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         bool MailboxFailFast,
         double IdleTimeoutSeconds,
         double CallTimeoutSeconds,
+        bool SingleHomed,
         EquatableArray<CtorParameterInfo> CtorParameters,
         EquatableArray<ActorMethodInfo> Methods,
         EquatableArray<ActorConsumerInfo> Consumers,
@@ -275,6 +276,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var mailboxFailFast = false;
         double idleTimeoutSeconds = 0;
         double callTimeoutSeconds = 0;
+        var singleHomed = false;
         foreach (var named in ctx.Attributes[0].NamedArguments) {
             switch (named.Key) {
                 case "Name":
@@ -294,6 +296,9 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                     break;
                 case "CallTimeoutSeconds":
                     callTimeoutSeconds = named.Value.Value is double call ? call : 0;
+                    break;
+                case "SingleHomed":
+                    singleHomed = named.Value.Value is true;
                     break;
             }
         }
@@ -483,6 +488,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             mailboxFailFast,
             idleTimeoutSeconds,
             callTimeoutSeconds,
+            singleHomed,
             ctorParameters.ToEquatableArray(),
             methods.ToEquatableArray(),
             consumers.ToEquatableArray(),
@@ -982,7 +988,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"                MailboxFullMode = global::Elarion.Actors.ActorMailboxFullMode.{(actor.MailboxFailFast ? "Fail" : "Wait")},");
         sb.AppendLine($"                IdleTimeout = {TimeoutExpression(actor.IdleTimeoutSeconds, "DefaultIdleTimeout")},");
         sb.AppendLine($"                CallTimeout = {TimeoutExpression(actor.CallTimeoutSeconds, "DefaultCallTimeout")},");
-        sb.AppendLine($"                Reentrant = {(actor.Reentrant ? "true" : "false")}");
+        sb.AppendLine($"                Reentrant = {(actor.Reentrant ? "true" : "false")},");
+        sb.AppendLine($"                SingleHomed = {(actor.SingleHomed ? "true" : "false")}");
         sb.AppendLine("            },");
         sb.AppendLine($"            Activator = static (serviceProvider, context) => new {actor.ActorTypeFqn}({activatorArguments}),");
         sb.AppendLine($"            Facade = static handle => new {facadeImplFqn}(handle)");

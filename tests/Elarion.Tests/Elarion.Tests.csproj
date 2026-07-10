@@ -26,6 +26,8 @@
     <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj" />
     <ProjectReference Include="../../src/Elarion.Actors.PostgreSql/Elarion.Actors.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Actors.PostgreSql.Generators/Elarion.Actors.PostgreSql.Generators.csproj" />
+    <ProjectReference Include="../../src/Elarion.Coordination.PostgreSql/Elarion.Coordination.PostgreSql.csproj" />
+    <ProjectReference Include="../../src/Elarion.Coordination.PostgreSql.Generators/Elarion.Coordination.PostgreSql.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore/Elarion.AspNetCore.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.Mcp/Elarion.AspNetCore.Mcp.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />

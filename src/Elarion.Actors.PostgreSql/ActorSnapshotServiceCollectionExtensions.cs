@@ -1,15 +1,17 @@
 using Elarion.Abstractions.Serialization;
+using Elarion.Coordination.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Elarion.Actors.PostgreSql;
 
-/// <summary>Registers the PostgreSQL actor snapshot store (ADR-0047).</summary>
+/// <summary>Registers the PostgreSQL actor snapshot store (ADR-0047) and home lease (ADR-0048).</summary>
 public static class ActorSnapshotServiceCollectionExtensions {
     /// <summary>
     /// Registers <see cref="PostgreSqlActorSnapshotStore{TDbContext}"/> as the
-    /// <see cref="IActorSnapshotStore"/> behind every <c>IActorState&lt;TState&gt;</c>.
+    /// <see cref="IActorSnapshotStore"/> behind every <c>IActorState&lt;TState&gt;</c> (plus the
+    /// <see cref="IActorStateReader"/> query-side companion).
     /// <typeparamref name="TDbContext"/> must map <see cref="ActorSnapshotEntity"/> — annotate the
     /// context with <c>[GenerateElarionActorSnapshots]</c> or call
     /// <c>modelBuilder.UseElarionActorSnapshots()</c>.
@@ -21,6 +23,28 @@ public static class ActorSnapshotServiceCollectionExtensions {
         services.TryAddSingleton(TimeProvider.System);
         services.RemoveAll<IActorSnapshotStore>();
         services.AddSingleton<IActorSnapshotStore, PostgreSqlActorSnapshotStore<TDbContext>>();
+        services.TryAddSingleton<IActorStateReader, ActorStateReader>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the PostgreSQL actor home (ADR-0048): sugar over the generic role lease (ADR-0049)
+    /// — one heartbeat-renewed <c>"actors"</c> role on the app's database elects exactly one
+    /// instance as the actor home, enforcing <c>[Actor(SingleHomed = true)]</c>.
+    /// <typeparamref name="TDbContext"/> must map the role lease table — annotate the context with
+    /// <c>[GenerateElarionRoleLeases]</c> or call <c>modelBuilder.UseElarionRoleLeases()</c>. To
+    /// make integration-event delivery follow the lease, gate the outbox: <c>o.DeliveryGate =
+    /// (sp, _) => ValueTask.FromResult(sp.GetRequiredService&lt;IActorHomeLease&gt;().IsHeld);</c>
+    /// </summary>
+    public static IServiceCollection AddElarionPostgreSqlActorHome<TDbContext>(
+        this IServiceCollection services,
+        Action<RoleLeaseOptions>? configure = null)
+        where TDbContext : DbContext {
+        ArgumentNullException.ThrowIfNull(services);
+        var options = new RoleLeaseOptions { RoleName = "actors" };
+        configure?.Invoke(options);
+        services.AddElarionPostgreSqlRoleLease<TDbContext>(options);
+        services.AddElarionActorHome(options.RoleName);
         return services;
     }
 }

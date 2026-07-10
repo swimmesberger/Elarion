@@ -301,6 +301,66 @@ public sealed class OutboxDeliveryServiceTests
         store.Processed.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task ClosedDeliveryGate_SkipsClaiming_OpenGateDelivers()
+    {
+        var store = new FakeOutboxStore();
+        store.Pending.Enqueue([Message(new OutboxTestEvent(1, "a"), out var id)]);
+        var timeProvider = new FakeTimeProvider();
+        var gateOpen = false;
+        var gateConsulted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new OutboxOptions
+        {
+            PollingInterval = TimeSpan.FromMilliseconds(20),
+            DeliveryGate = (_, _) =>
+            {
+                gateConsulted.TrySetResult();
+                return ValueTask.FromResult(Volatile.Read(ref gateOpen));
+            }
+        };
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IOutboxStore>(store);
+        await using var provider = services.BuildServiceProvider();
+        var dispatcher = new OutboxEventDispatcher(
+            [
+                new EventSubscriptionDescriptor
+                {
+                    EventType = typeof(OutboxTestEvent),
+                    Plane = EventPlane.Integration,
+                    ServiceType = typeof(object),
+                    InvokeAsync = (_, _, _, _) => ValueTask.CompletedTask
+                }
+            ],
+            options,
+            OutboxTestJson.Instance,
+            NullLogger<OutboxEventDispatcher>.Instance);
+        var service = new OutboxDeliveryService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            dispatcher,
+            options,
+            timeProvider,
+            NullLogger<OutboxDeliveryService>.Instance);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await gateConsulted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // Closed gate: the cycle ended before anything was claimed — the message stays pending
+        // for whichever instance's gate opens (e.g. the actor home lease holder, ADR-0048).
+        store.LastLockId.Should().Be(Guid.Empty);
+        store.Pending.Should().HaveCount(1);
+
+        Volatile.Write(ref gateOpen, true);
+        while (!store.Signal.Task.IsCompleted)
+        {
+            timeProvider.Advance(options.PollingInterval);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        await service.StopAsync(TestContext.Current.CancellationToken);
+        store.Processed.Should().ContainSingle().Which.Id.Should().Be(id);
+    }
+
     private static async Task RunUntilSignaledAsync(
         FakeOutboxStore store,
         OutboxOptions options,

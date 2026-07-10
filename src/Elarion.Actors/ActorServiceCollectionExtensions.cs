@@ -25,7 +25,8 @@ public static class ActorServiceCollectionExtensions {
             serviceProvider.GetServices<ActorRegistration>(),
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),
             serviceProvider.GetRequiredService<TimeProvider>(),
-            serviceProvider.GetService<ILoggerFactory>() ?? NullLoggerFactory.Instance));
+            serviceProvider.GetService<ILoggerFactory>() ?? NullLoggerFactory.Instance,
+            serviceProvider.GetService<IActorHomeLease>()));
         services.TryAddSingleton<IActorSystem>(static serviceProvider =>
             serviceProvider.GetRequiredService<ActorSystem>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ActorSystemLifecycleHost>());
@@ -35,6 +36,21 @@ public static class ActorServiceCollectionExtensions {
     /// <summary>Adds one actor registration (normally called by generated code).</summary>
     public static IServiceCollection AddElarionActor(this IServiceCollection services, ActorRegistration registration) {
         services.AddSingleton(registration);
+        return services;
+    }
+
+    /// <summary>
+    /// Makes the role lease registered under <paramref name="role"/> the actor home (ADR-0048/0049):
+    /// <c>[Actor(SingleHomed = true)]</c> actors then only run on the instance holding that role.
+    /// Provider packages call this from their sugar (e.g.
+    /// <c>AddElarionPostgreSqlActorHome&lt;TDbContext&gt;()</c>); call it directly to home actors on
+    /// a lease registered some other way.
+    /// </summary>
+    public static IServiceCollection AddElarionActorHome(this IServiceCollection services, string role = "actors") {
+        ArgumentException.ThrowIfNullOrWhiteSpace(role);
+        services.RemoveAll<IActorHomeLease>();
+        services.AddSingleton<IActorHomeLease>(serviceProvider =>
+            new RoleLeaseActorHome(serviceProvider.GetRequiredKeyedService<Abstractions.Coordination.IRoleLease>(role)));
         return services;
     }
 }

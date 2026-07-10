@@ -355,6 +355,15 @@ Snapshot-table generation for `[GenerateElarionActorSnapshots]`. See
 | --- | --- | --- | --- |
 | ELASN001 | Error | A context is annotated with `[GenerateElarionActorSnapshots]` but not `[GenerateDbSets]`, so the actor-snapshot `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionActorSnapshots]`. |
 
+## ELROLE — Role leases (PostgreSQL)
+
+Role-lease-table generation for `[GenerateElarionRoleLeases]` (ADR-0049). See
+[Actors — single-homed actors](/docs/concepts/actors#single-homed-actors-the-home-lease).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELROLE001 | Error | A context is annotated with `[GenerateElarionRoleLeases]` but not `[GenerateDbSets]`, so the role-lease `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionRoleLeases]`. |
+
 ## ELCEV — Client events
 
 Generated client-event topic registration for `IClientEvent` contracts. See

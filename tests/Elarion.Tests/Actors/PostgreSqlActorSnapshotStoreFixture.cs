@@ -1,4 +1,5 @@
 using Elarion.Actors.PostgreSql;
+using Elarion.Coordination.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -49,11 +50,16 @@ public sealed class PostgreSqlActorSnapshotStoreFixture : IAsyncLifetime {
             .Options);
 }
 
-/// <summary>Context mapping the snapshot table the way a generated context would (the seam calls
-/// <c>UseElarionActorSnapshots</c>).</summary>
+/// <summary>Context mapping the snapshot and role-lease tables the way a generated context would
+/// (the seams call <c>UseElarionActorSnapshots</c>/<c>UseElarionRoleLeases</c>).</summary>
 public sealed class ActorSnapshotIntegrationDbContext(DbContextOptions<ActorSnapshotIntegrationDbContext> options)
     : DbContext(options) {
     public DbSet<ActorSnapshotEntity> ActorSnapshots => Set<ActorSnapshotEntity>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder) => modelBuilder.UseElarionActorSnapshots();
+    public DbSet<RoleLeaseEntity> RoleLeases => Set<RoleLeaseEntity>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
+        modelBuilder.UseElarionActorSnapshots();
+        modelBuilder.UseElarionRoleLeases();
+    }
 }

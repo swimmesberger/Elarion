@@ -209,6 +209,14 @@ One EF-mapped table on the app's existing Postgres, following the established EF
 - Explicit-write semantics mean a crash loses mutations since the last `WriteStateAsync` — by design.
   The doc guidance: write after every state mutation that must survive; treat anything not yet written
   as recomputable.
+- The snapshot being readable outside the actor (SQL over `jsonb`; later `IActorStateReader`,
+  ADR-0048) imposes a **design rule the docs state explicitly**: the state record is the query
+  contract — interpretation (constants, derived flags) and pure transitions live *on the record*, so
+  every deserialization site shares the actor's logic; actor methods only apply a transition, write,
+  and perform side effects after the write. Logic left in actor methods becomes home-only and lets
+  reader-based queries silently diverge from facade queries. Shape evolution follows the same rule:
+  tolerance in the record (optional/defaulted properties), not `OnActivateAsync` migration, which
+  would fix only the home's view.
 - A snapshot read/write is one extra Postgres round trip per activation / per durability point. At the
   1–10-node tier this is noise; an actor hot enough for it to matter batches its writes (several
   mutations, one `WriteStateAsync`) — which the explicit-write model makes natural.

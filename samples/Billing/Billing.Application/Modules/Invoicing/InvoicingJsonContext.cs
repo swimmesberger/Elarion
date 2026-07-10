@@ -16,4 +16,6 @@ namespace Billing.Application.Modules.Invoicing;
 [JsonSerializable(typeof(ListInvoices.Response), TypeInfoPropertyName = "ListInvoicesResponse")]
 [JsonSerializable(typeof(GetSendStatus.Query), TypeInfoPropertyName = "GetSendStatusQuery")]
 [JsonSerializable(typeof(GetSendStatus.Response), TypeInfoPropertyName = "GetSendStatusResponse")]
+[JsonSerializable(typeof(GetClientDunning.Query), TypeInfoPropertyName = "GetClientDunningQuery")]
+[JsonSerializable(typeof(GetClientDunning.Response), TypeInfoPropertyName = "GetClientDunningResponse")]
 public sealed partial class InvoicingJsonContext : JsonSerializerContext;

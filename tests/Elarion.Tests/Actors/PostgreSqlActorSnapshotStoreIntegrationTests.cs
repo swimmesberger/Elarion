@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Elarion.Abstractions.Serialization;
 using Elarion.Actors;
 using Elarion.Actors.PostgreSql;
 using Microsoft.EntityFrameworkCore;
@@ -125,6 +126,22 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         stage.Should().Be("shipped");
     }
 
+    [Fact]
+    public async Task StateReader_ReadsTypedSnapshots_WithoutActivatingAnActor() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var provider = CreateProvider();
+        var store = provider.GetRequiredService<IActorSnapshotStore>();
+        var reader = provider.GetRequiredService<IActorStateReader>();
+        var key = NewKey();
+
+        (await reader.ReadAsync<ActorStateTests.VaultState>(key, TestToken)).Should().BeNull();
+
+        await store.WriteAsync(key, """{"balance":7}""", expectedETag: null, TestToken);
+        var state = await reader.ReadAsync<ActorStateTests.VaultState>(key, TestToken);
+        state.Should().NotBeNull();
+        state!.Balance.Should().Be(7);
+    }
+
     private static ActorSnapshotKey NewKey() =>
         new("Vault", Guid.CreateVersion7().ToString());
 
@@ -132,6 +149,7 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         var services = new ServiceCollection();
         services.AddDbContext<ActorSnapshotIntegrationDbContext>(options => options.UseNpgsql(fixture.ConnectionString));
         services.AddElarionPostgreSqlActorSnapshots<ActorSnapshotIntegrationDbContext>();
+        services.ConfigureElarionJson(options => options.TypeInfoResolvers.Add(ActorStateTestContext.Default));
         return services.BuildServiceProvider();
     }
 }
