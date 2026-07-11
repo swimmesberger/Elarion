@@ -22,6 +22,10 @@ builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub
 // Resource-scoped subscriptions ({topic, resource: symbol}) consult this seam — fail-closed without it.
 builder.Services.AddScoped<IClientEventSubscriptionAuthorizer, MarketSubscriptionAuthorizer>();
 
+// Multi-instance readiness (ADR-0050): advertise this instance's address so a role lease can publish
+// it. Costs nothing here — nothing consumes it until a lease is registered.
+builder.Services.AddElarionInstanceAddress();
+
 // Compose the Market module: its actors, the generated market.quoteChanged topic, the feed hosted
 // service, and the /quotes handlers — all gated by Modules:Market:Enabled. On a multi-node deployment
 // this switch IS the placement: enable the module on the worker, disable it on web nodes, and route
@@ -40,6 +44,14 @@ app.Use(async (context, next) => {
     await next();
 });
 app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
+
+// The role-holder proxy (ADR-0050): in this single-process sample it installs NOTHING (no role
+// lease is registered), so the pipeline is untouched. The moment you scale to a homogeneous fleet —
+// add Elarion.Coordination.PostgreSql + AddElarionPostgreSqlActorHome<AppDbContext>() — every
+// instance serves these prefixes by transparently forwarding to the actor home. Inefficient by one
+// hop and deliberately so: the prefix list below IS the ingress rule you'll eventually write; move
+// it to your load balancer and delete this line.
+app.UseElarionRoleHolderProxy("actors", "/quotes", "/events");
 
 app.UseDefaultFiles();
 app.UseStaticFiles();          // the demo dashboard (wwwroot/index.html)

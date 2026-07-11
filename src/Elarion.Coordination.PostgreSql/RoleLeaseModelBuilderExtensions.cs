@@ -31,6 +31,9 @@ public static class RoleLeaseModelBuilderExtensions {
             builder.Property(entity => entity.Owner)
                 .HasColumnName(snakeCase ? "owner" : "Owner")
                 .HasMaxLength(256);
+            builder.Property(entity => entity.Address)
+                .HasColumnName(snakeCase ? "address" : "Address")
+                .HasMaxLength(512);
             builder.Property(entity => entity.ExpiresOnUtc)
                 .HasColumnName(snakeCase ? "expires_on_utc" : "ExpiresOnUtc");
         });

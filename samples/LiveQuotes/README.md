@@ -53,16 +53,20 @@ dotnet run --project samples/LiveQuotes/LiveQuotes.Api
 The single process you just ran is the honest default. When query traffic outgrows it, split the
 roles — the module system makes it configuration, not code:
 
-1. **Worker + web nodes**: run one instance with the Market module enabled (the feed, the actors, the
-   `/quotes` endpoints live there) and N web instances with `Modules:Market:Enabled=false`. Route
-   `/quotes*` and `/events` to the worker at the ingress.
-2. **SSE from every node instead**: add `Elarion.ClientEvents.PostgreSql`
+1. **Homogeneous fleet, no ingress config (the getting-started shape)**: add
+   `Elarion.Coordination.PostgreSql` + `AddElarionPostgreSqlActorHome<AppDbContext>()` and scale
+   identical instances. The role lease elects one home; the `UseElarionRoleHolderProxy("actors",
+   "/quotes", "/events")` line already in `Program.cs` (inactive today — no lease registered) then
+   makes every instance serve those prefixes by forwarding to the home (ADR-0050). One hop slower
+   off-home, deliberately: the prefix list is the ingress rule you'll eventually write.
+2. **Worker + web nodes (the explicit shape)**: run one instance with the Market module enabled (the
+   feed, the actors, the `/quotes` endpoints live there) and N web instances with
+   `Modules:Market:Enabled=false`. Route `/quotes*` and `/events` to the worker at the ingress.
+3. **SSE from every node natively**: add `Elarion.ClientEvents.PostgreSql`
    (`AddElarionPostgreSqlClientEvents`) and browsers can hold their `/events` connection to any web
-   node — publishes fan out over `LISTEN/NOTIFY`. Mind the publish volume budget: conflation keeps it
-   in range; batch symbols per event if you widen the feed.
-3. **Belt and suspenders**: `AddElarionPostgreSqlActorHome<TDbContext>()` (the ADR-0048/0049 role
-   lease) turns "two instances accidentally run the feed" into a pointed `ActorNotHomedException`
-   instead of a mystery.
+   node — publishes fan out over `LISTEN/NOTIFY` (drop `/events` from the proxy prefixes then). Mind
+   the publish volume budget: conflation keeps it in range; batch symbols per event if you widen the
+   feed.
 
 And the honest ceiling, straight from the
 [actors concept doc](https://elarion.wimmesberger.dev/docs/concepts/actors): if you need thousands of

@@ -70,3 +70,4 @@ designs that are not yet implemented.
 - [ADR-0047: Actor state snapshotting — `IActorState<TState>` + `IActorSnapshotStore`, PostgreSQL default](0047-actor-state-snapshotting.md)
 - [ADR-0048: Single-homed actors — a PostgreSQL home lease, not a cluster](0048-single-homed-actors.md)
 - [ADR-0049: Role leases — the leader-election primitive, extracted from the actor home](0049-role-leases.md)
+- [ADR-0050: The role-holder proxy — an in-app ingress rule, not a cluster](0050-role-holder-proxy.md)

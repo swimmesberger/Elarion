@@ -9,6 +9,19 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **The role-holder proxy (ADR-0050) — an in-app ingress rule for homogeneous fleets.**
+  `app.UseElarionRoleHolderProxy("actors", "/quotes", …)` lets every instance serve the listed path
+  prefixes by transparently forwarding them to the current role-lease holder when the instance is not
+  it — so `--scale app=N` works out of the box for single-homed actors' endpoints, one hop slower
+  off-home, until a load balancer takes over (the prefix list maps 1:1 onto that ingress rule). Routing
+  happens **before** anything executes locally (no double-execution hazard), bodies and SSE stream
+  through, auth headers replay verbatim (same app on both ends), and failure modes are bounded: one hop
+  ever (`Elarion-Role-Proxied` loop guard), holder unknown/unreachable or mid-failover →
+  `503 + Retry-After`, no retries or queueing. Zero cost when unused or when no role lease is
+  registered (the call installs nothing — single-instance mode). Supporting pieces: the lease row now
+  carries the holder's advertised address (`RoleLeaseOptions.AdvertisedAddress`, or the new
+  `IInstanceAddressProvider` seam with `AddElarionInstanceAddress()` auto-detecting from the server's
+  bound endpoints), exposed as `IRoleLease.CurrentHolderAddress`.
 - **`samples/LiveQuotes` — the realtime middle-ground sample.** A simulated market-data feed (~100
   ticks/s) streamed through single-homed, per-symbol in-memory actors that conflate to human-readable
   rates and push resource-scoped client events to browsers over SSE — zero database, zero broker, one

@@ -190,7 +190,10 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   authoritative activation app-wide, mark it `[Actor(SingleHomed = true)]` and register the home
   lease (`AddElarionPostgreSqlActorHome<AppDbContext>()` + `[GenerateElarionRoleLeases]` on the
   context — the home is the `"actors"` role of the generic `IRoleLease` leader-election primitive in
-  `Elarion.Coordination.PostgreSql`): one instance is elected home, calls elsewhere fail with `ActorNotHomedException`, and
+  `Elarion.Coordination.PostgreSql`): one instance is elected home, calls elsewhere fail with
+  `ActorNotHomedException` (for HTTP endpoints, bridge with the role-holder proxy —
+  `app.UseElarionRoleHolderProxy("actors", "/live-prefixes…")` before routing + `AddElarionInstanceAddress()`
+  on every instance; installs nothing without a lease, and the prefix list is the future ingress rule), and
   event delivery follows the lease via
   `AddElarionOutbox<T>(o => o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService<IActorHomeLease>().IsHeld))`.
   Reads from any instance use `IActorStateReader.ReadAsync<TState>(key)` (snapshot, no activation).

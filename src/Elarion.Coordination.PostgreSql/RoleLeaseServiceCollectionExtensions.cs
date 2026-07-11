@@ -55,7 +55,8 @@ public static class RoleLeaseServiceCollectionExtensions {
                 serviceProvider.GetRequiredService<IServiceScopeFactory>(),
                 options,
                 serviceProvider.GetRequiredService<TimeProvider>(),
-                serviceProvider.GetRequiredService<ILogger<PostgreSqlRoleLease<TDbContext>>>()));
+                serviceProvider.GetRequiredService<ILogger<PostgreSqlRoleLease<TDbContext>>>(),
+                serviceProvider.GetService<IInstanceAddressProvider>()));
         services.AddSingleton<IHostedService>(serviceProvider => new RoleLeaseHeartbeatService<TDbContext>(
             (PostgreSqlRoleLease<TDbContext>)serviceProvider.GetRequiredKeyedService<IRoleLease>(options.RoleName),
             options,

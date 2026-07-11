@@ -302,8 +302,15 @@ The rules of the model:
   fails immediately with `ActorNotHomedException` naming the holder — a pointed error, not mystery
   latency. Feed single-homed actors through integration events (they follow the lease); a scheduled job
   should publish an event rather than call the facade (job claims elect a node independently of the
-  home). Transparent forwarding is deliberately out of scope — needing it is the signal to move to
-  Orleans.
+  home). Transparent *actor-call* forwarding is deliberately out of scope — needing it is the signal to
+  move to Orleans. What **is** available is one layer up: the **role-holder proxy** (ADR-0050) —
+  `app.UseElarionRoleHolderProxy("actors", "/quotes", …)` lets every instance serve the home's HTTP
+  endpoints by forwarding matching requests to the holder's advertised address *before* anything runs
+  locally (one hop, one `Elarion-Role-Proxied` loop guard, 503 + `Retry-After` during failover; SSE
+  streams through). It installs nothing when no lease is registered, so it ships in single-instance
+  apps at zero cost, and the prefix list is exactly the ingress rule that replaces it when you add a
+  load balancer. Advertise addresses with `AddElarionInstanceAddress()` (auto-detected) or
+  `RoleLeaseOptions.AdvertisedAddress` (NAT/HTTPS).
 - **Reads run anywhere — because interpretation lives on the record.** `IActorStateReader.ReadAsync<TState>(key)`
   returns the latest snapshot without activating anything — durable truth on any instance, carrying the
   state record's full logic (rule 1 of [designing applications around snapshot
