@@ -81,6 +81,16 @@ minor releases may include breaking changes.
   durable bus and outbox storage (publishing stays atomic with business data) but skips the worker
   registration entirely; run delivery only on the instance(s) registering **all** integration consumers.
 
+### Fixed
+- **Single-project hosts now wire their transports.** The generated bootstrapper
+  (`[GenerateModuleBootstrapper]`) built its transport maps exclusively from referenced assemblies'
+  Elarion manifests, so `[HttpEndpoint]`/`[Handler]`/`[ResourceFilter]` declarations living in the same
+  project as the bootstrapper (Program + modules in one csproj) registered in DI but were silently absent
+  from `MapElarionEndpoints`, `RegisterHandlers`, and the MCP metadata — every endpoint 404'd with no
+  diagnostic. `AppModuleDiscoveryGenerator` now discovers transport handlers and resource-filter specs in
+  the current compilation as well and merges them with the referenced manifests (current-compilation
+  entries win deduplication), so the single-project and multi-project layouts wire identically.
+
 ## [0.2.4] - 2026-07-08
 
 ### Changed

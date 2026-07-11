@@ -32,6 +32,7 @@ public sealed class AppModuleDiscoveryGeneratorCacheTests {
             public sealed record PingCommand(int Id) : ICommand;
             public sealed record PingResponse(string Name);
 
+            [HttpEndpoint("ping")]
             [Handler("app.ping")]
             public sealed class PingHandler : IHandler<PingCommand, Result<PingResponse>> {
                 public ValueTask<Result<PingResponse>> HandleAsync(PingCommand request, CancellationToken ct) =>
@@ -47,19 +48,25 @@ public sealed class AppModuleDiscoveryGeneratorCacheTests {
             Source,
             "BootstrapperModules",
             "BootstrapperModuleEndpoints",
+            "BootstrapperHttpEndpoints",
+            "BootstrapperRpcMethods",
+            "BootstrapperResourceFilters",
             "BootstrapperSiblings",
             "Bootstrapper");
 
     [Fact]
     public void BootstrapperStaysCached_WhenAnUnrelatedFileChanges() =>
         // The strict form: every input of the final model either is per-node cached (modules, manifests,
-        // [ModuleEndpoints] contributors) or projects to an equal small value (trigger, sibling probes, root
-        // namespace), so the expensive collect + topological-sort + BuildSource stage must not re-run at all
-        // for an unrelated-file edit.
+        // [ModuleEndpoints] contributors, transport handlers, resource filters) or projects to an equal small
+        // value (trigger, sibling probes, root namespace), so the expensive collect + topological-sort +
+        // BuildSource stage must not re-run at all for an unrelated-file edit.
         GeneratorCacheAssert.ReusesDiscoveryAfterUnrelatedFileEdit(
             new AppModuleDiscoveryGenerator(),
             Source,
             "BootstrapperModules",
             "BootstrapperModuleEndpoints",
+            "BootstrapperHttpEndpoints",
+            "BootstrapperRpcMethods",
+            "BootstrapperResourceFilters",
             "Bootstrapper");
 }
