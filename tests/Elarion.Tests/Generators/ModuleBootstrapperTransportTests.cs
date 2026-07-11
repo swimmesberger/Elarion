@@ -570,6 +570,257 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_DiscoversTransportHandlersInHostCompilation() {
+        // The single-project layout: Program, [AppModule], and every handler live in one compilation with
+        // [assembly: GenerateModuleBootstrapper] — there is no referenced manifest, so the bootstrapper must
+        // discover the transport handlers directly from the current compilation.
+        const string hostSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.AspNetCore;
+
+            [assembly: GenerateModuleBootstrapper]
+
+            namespace Host.App {
+                [AppModule("App", Kind = AppModuleKind.Core)]
+                public static class AppModule { }
+
+                [HttpEndpoint("things/{id}")]
+                [Handler]
+                public sealed class GetThing : IHandler<GetThing.Query, Result<GetThing.Response>> {
+                    public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
+                    public sealed record Response(string Name);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("thing"));
+                }
+
+                [Handler("things.archive", Transports = HandlerTransports.Mcp)]
+                public sealed class ArchiveThing : IHandler<ArchiveThing.Command, Result<ArchiveThing.Response>> {
+                    public sealed record Command { public required System.Guid Id { get; init; } }
+                    public sealed record Response(bool Ok);
+                    public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+            }
+
+            namespace Host.Shipping {
+                [AppModule("Shipping")]
+                public static class ShippingModule { }
+
+                [HttpEndpoint("shipments")]
+                public sealed class CreateShipment : IHandler<CreateShipment.Command, Result<CreateShipment.Response>> {
+                    public sealed record Command : ICommand { public required string Address { get; init; } }
+                    public sealed record Response(System.Guid Id);
+                    public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(System.Guid.Empty));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(hostSource, [], out var compilationWithGenerated);
+
+        // All three transports are wired from the host compilation alone.
+        generated.Should().Contain("MapAppHttp(endpoints);");
+        generated.Should().Contain("app.MapGet(\"things/{id}\",");
+        generated.Should().Contain(
+            "dispatcher.Map<global::Host.App.GetThing.Query, global::Host.App.GetThing.Response>(\"app.getThing\", global::Elarion.Abstractions.HandlerTransports.All);");
+        generated.Should().Contain(
+            "dispatcher.Map<global::Host.App.ArchiveThing.Command, global::Host.App.ArchiveThing.Response>(\"things.archive\", global::Elarion.Abstractions.HandlerTransports.Mcp);");
+        generated.Should().Contain("GetAppMcpMetadata()");
+
+        // Feature-module gating applies to host-compilation handlers exactly like referenced ones.
+        generated.Should().Contain("if (IsModuleEnabled(configuration, \"Shipping\"))");
+        generated.Should().Contain("MapShippingHttp(endpoints);");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_WarnsOnHostCompilationHandlerUnderNoModule() {
+        const string hostSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.AspNetCore;
+
+            [assembly: GenerateModuleBootstrapper]
+
+            namespace Host.Orphan {
+                [HttpEndpoint("orphans")]
+                [Handler("orphans.list")]
+                public sealed class ListOrphans : IHandler<ListOrphans.Query, Result<ListOrphans.Response>> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(int Count);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(0));
+                }
+            }
+            """;
+
+        var result = RunGeneratorRun(hostSource, ModulesSource);
+
+        // A host-compilation handler outside every module is mapped ungated and warned, mirroring manifests.
+        result.Diagnostics.Should().Contain(d => d.Id == "ELHTTP003" && d.Severity == DiagnosticSeverity.Warning);
+        result.Diagnostics.Should().Contain(d => d.Id == "ELRPC001" && d.Severity == DiagnosticSeverity.Warning);
+        var generated = result.GeneratedTrees
+            .Single(tree => string.Equals(
+                Path.GetFileName(tree.FilePath), "ElarionBootstrapper.g.cs", StringComparison.Ordinal))
+            .GetText(TestContext.Current.CancellationToken)
+            .ToString();
+        generated.Should().Contain("app.MapGet(\"orphans\",");
+        generated.Should().Contain("\"orphans.list\", global::Elarion.Abstractions.HandlerTransports.All");
+    }
+
+    [Fact]
+    public void Bootstrapper_MergesHostCompilationHandlersWithReferencedManifests() {
+        // Two-project layout with extra handlers in the host itself: both sources contribute to the maps.
+        const string hostSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.AspNetCore;
+
+            [assembly: GenerateModuleBootstrapper]
+
+            namespace Sample.Billing.Extras {
+                [Handler("invoices.export")]
+                public sealed class ExportInvoices : IHandler<ExportInvoices.Query, Result<ExportInvoices.Response>> {
+                    public sealed record Query;
+                    public sealed record Response(string Url);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("u"));
+                }
+            }
+            """;
+
+        var modulesReference = CompileToImage(ModulesSource, "Sample.Modules");
+        var generated = RunGenerator(hostSource, [modulesReference], out var compilationWithGenerated);
+
+        // The host-declared handler lands in the referenced [AppModule]'s bucket by namespace prefix.
+        var handlers = Slice(generated, "HandlerDispatcher AddBillingHandlers(");
+        handlers.Should().Contain("\"invoices.export\"");
+        handlers.Should().Contain("\"invoices.get\"");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_DeduplicatesHandlerPresentInBothCompilationAndManifest() {
+        // A manifest entry naming the same operation and types as a host-compilation handler collapses to one
+        // registration (the local entry wins, mirroring module deduplication).
+        var rpc = EncodeFields(
+            "things.get",
+            "Host.App",
+            "global::Host.App.GetThing.Query",
+            "global::Host.App.GetThing.Response",
+            null,
+            "1",
+            "1",
+            null,
+            string.Empty,
+            "0",
+            "0");
+        var librarySource = $$"""
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
+
+            namespace ManifestOnly { public static class Placeholder { } }
+            """;
+
+        const string hostSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.AspNetCore;
+
+            [assembly: GenerateModuleBootstrapper]
+
+            namespace Host.App {
+                [AppModule("App", Kind = AppModuleKind.Core)]
+                public static class AppModule { }
+
+                [Handler("things.get")]
+                public sealed class GetThing : IHandler<GetThing.Query, Result<GetThing.Response>> {
+                    public sealed record Query { public required System.Guid Id { get; init; } }
+                    public sealed record Response(string Name);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("thing"));
+                }
+            }
+            """;
+
+        var libraryReference = CompileToImage(librarySource, "Sample.ManifestDuplicate");
+        var result = RunGeneratorRunWithReferences(hostSource, [libraryReference]);
+
+        var generated = result.GeneratedTrees
+            .Single(tree => string.Equals(
+                Path.GetFileName(tree.FilePath), "ElarionBootstrapper.g.cs", StringComparison.Ordinal))
+            .GetText(TestContext.Current.CancellationToken)
+            .ToString();
+
+        // One registration, no ELRPC003 duplicate-name warning.
+        generated.Split("dispatcher.Map<global::Host.App.GetThing.Query").Length.Should().Be(2);
+        result.Diagnostics.Should().NotContain(d => d.Id == "ELRPC003");
+    }
+
+    [Fact]
+    public void Bootstrapper_RegistersResourceFiltersFromHostCompilation_Gated() {
+        const string hostSource =
+            """
+            using System;
+            using System.Linq.Expressions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Identity;
+            using Elarion.Abstractions.Modules;
+            using Elarion.AspNetCore;
+
+            [assembly: GenerateModuleBootstrapper]
+
+            namespace Host.Contacts {
+                [AppModule("Contacts")]
+                public static class ContactsModule { }
+
+                public sealed class Contact {
+                    public Guid Id { get; set; }
+                    public Guid OwnerId { get; set; }
+                }
+
+                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                public sealed class ContactAccess : IQueryAuthorizer<Contact> {
+                    public static ContactAccess Specification { get; } = new();
+                    private ContactAccess() { }
+                    public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+                }
+            }
+            """;
+
+        var generated = RunGenerator(hostSource, [], out var compilationWithGenerated);
+
+        // The host-compilation spec registers through AddElarion, gated by its module flag.
+        Slice(generated, "public static void AddElarion(")
+            .Should().Contain("if (IsModuleEnabled(configuration, \"Contacts\"))")
+            .And.Contain("AddContactsResourceFilters(services);");
+        Slice(generated, "IServiceCollection AddContactsResourceFilters(")
+            .Should().Contain(
+                "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::Host.Contacts.Contact>>(services, global::Host.Contacts.ContactAccess.Specification);");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_GeneratedCodeCompiles() {
         RunGenerator(out var compilationWithGenerated);
 
@@ -763,8 +1014,10 @@ public sealed class ModuleBootstrapperTransportTests {
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
+        // The module-services skeleton generator always runs alongside the bootstrapper in a real build; a
+        // host-compilation [AppModule] needs its generated ConfigureDefaultServices sibling to compile.
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            [new AppModuleDiscoveryGenerator().AsSourceGenerator()],
+            [new AppModuleDiscoveryGenerator().AsSourceGenerator(), new ModuleDefaultServicesGenerator().AsSourceGenerator()],
             parseOptions: parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             hostCompilation, out compilationWithGenerated, out var diagnostics, TestContext.Current.CancellationToken);
@@ -900,12 +1153,15 @@ public sealed class ModuleBootstrapperTransportTests {
     private static IReadOnlyList<Diagnostic> RunGeneratorDiagnostics(string modulesSource) =>
         RunGeneratorRun(HostSource, modulesSource).Diagnostics;
 
-    private static GeneratorDriverRunResult RunGeneratorRun(string hostSource, string modulesSource) {
-        var modulesReference = CompileToImage(modulesSource, "Sample.Modules");
+    private static GeneratorDriverRunResult RunGeneratorRun(string hostSource, string modulesSource) =>
+        RunGeneratorRunWithReferences(hostSource, [CompileToImage(modulesSource, "Sample.Modules")]);
 
+    private static GeneratorDriverRunResult RunGeneratorRunWithReferences(
+        string hostSource,
+        IReadOnlyList<MetadataReference> moduleReferences) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var hostTree = CSharpSyntaxTree.ParseText(hostSource, parseOptions);
-        var references = CreateMetadataReferences().Append(modulesReference).ToArray();
+        var references = CreateMetadataReferences().Concat(moduleReferences).ToArray();
         var hostCompilation = CSharpCompilation.Create(
             "Host",
             [hostTree],

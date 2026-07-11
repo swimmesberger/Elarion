@@ -113,3 +113,16 @@ sharing one fragile partial-method signature.
   generators agree by *calling the same code*, not by copying literals. New cross-package conventions are added
   here. The drift is caught by integration tests that run the cooperating generators together and assert the
   merged output compiles (e.g. the DbContext-seam-declares / feature-generator-implements compose test).
+
+## Addendum (2026-07-11): the bootstrapper also discovers the current compilation
+
+The manifest channel only covers *references* — the bootstrapper compilation's own manifest is emitted as
+source into that same compilation and is never read back. Originally the bootstrapper read modules (and
+`[ModuleEndpoints]` contributors) directly from the current compilation but transport handlers exclusively
+from manifests, so a single-project host (Program + modules in one csproj) silently produced empty transport
+maps: DI registration worked, but every `[HttpEndpoint]` 404'd and `RegisterHandlers` mapped nothing, with no
+diagnostic. `AppModuleDiscoveryGenerator` now mirrors the manifest generator's per-node discovery for
+`[HttpEndpoint]`/`[Handler]`/`[ResourceFilter]` in the current compilation and merges it with the referenced
+manifests (current-compilation entries win deduplication; shape diagnostics stay owned by
+`ElarionManifestGenerator`, which always runs alongside). The manifest remains the only *cross-assembly*
+channel; this closes the same-assembly gap.

@@ -99,7 +99,37 @@ internal static class RpcMethodEmission
         return $"{ns}.JsonRpc";
     }
 
-    public static bool TryCreateModel(
+    /// <summary>
+    /// Reads one discovered <c>[Handler]</c> operation from its attribute-provider context. Shared by
+    /// <see cref="ElarionManifestGenerator"/> (which publishes the model and reports the shape diagnostics) and
+    /// <see cref="AppModuleDiscoveryGenerator"/> (which registers current-compilation handlers and passes
+    /// <paramref name="report"/> <c>null</c> — the manifest generator always runs alongside and owns the
+    /// diagnostics), so the two discoveries cannot drift.
+    /// </summary>
+    public static Model? CreateModel(
+        GeneratorAttributeSyntaxContext ctx,
+        Action<Diagnostic>? report,
+        CancellationToken ct)
+    {
+        if (ctx.TargetSymbol is not INamedTypeSymbol type)
+            return null;
+
+        var compilation = ctx.SemanticModel.Compilation;
+        var mcpMethodType = compilation.GetTypeByMetadataName(McpHandlerAttributeMetadataName);
+        var descriptionType = compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
+        foreach (var attr in ctx.Attributes)
+        {
+            if (TryCreateModel(type, attr, mcpMethodType, descriptionType, SymbolDisplayFormat.FullyQualifiedFormat, report, ct, out var model)
+                && model is not null)
+            {
+                return model;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryCreateModel(
         INamedTypeSymbol type,
         AttributeData attr,
         INamedTypeSymbol? mcpMethodType,

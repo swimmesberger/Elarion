@@ -16,8 +16,6 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
 {
     private const string AppModuleAttributeMetadataName = ElarionGeneratorConventions.AppModuleAttribute;
     private const string ModuleEndpointsAttributeMetadataName = ElarionGeneratorConventions.ModuleEndpointsAttribute;
-    private const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
-    private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
     private const string ResourceFilterAttributeMetadataName = ElarionGeneratorConventions.ResourceFilterAttribute;
 
     /// <summary>
@@ -44,7 +42,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataName(
                 AppModuleAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, _) => CreateModule(ctx))
+                static (ctx, _) => AppModuleDiscovery.CreateModule(ctx))
             .Where(static module => module is not null)
             .Select(static (module, _) => module!)
             .Collect();
@@ -77,7 +75,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataName(
                 ResourceFilterAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, _) => CreateResourceFilter(ctx))
+                static (ctx, _) => ResourceFilterDiscovery.CreateResourceFilter(ctx))
             .Where(static filter => filter is not null)
             .Select(static (filter, _) => filter!)
             .Collect();
@@ -128,141 +126,32 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
     }
 
     // Variant discovery (one manifest entry per service contract) is shared with the variant-catalog
-    // generator via VariantDiscovery, so the manifest and the registry cannot drift.
-
-    private static ElarionManifest.ResourceFilter? CreateResourceFilter(GeneratorAttributeSyntaxContext ctx)
-    {
-        if (ctx.TargetSymbol is not INamedTypeSymbol specType)
-            return null;
-
-        if (ctx.Attributes.Length == 0 ||
-            ctx.Attributes[0].AttributeClass is not { TypeArguments.Length: 1 } attributeClass ||
-            attributeClass.TypeArguments[0] is not INamedTypeSymbol entity)
-        {
-            return null;
-        }
-
-        var shared = false;
-        foreach (var named in ctx.Attributes[0].NamedArguments)
-        {
-            if (named.Key == "Shared" && named.Value.Value is true)
-                shared = true;
-        }
-
-        return new ElarionManifest.ResourceFilter(
-            specType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            entity.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            specType.ContainingNamespace?.ToDisplayString() ?? string.Empty,
-            shared);
-    }
-
-    private static ElarionManifest.Module? CreateModule(GeneratorAttributeSyntaxContext ctx)
-    {
-        if (ctx.TargetSymbol is not INamedTypeSymbol type)
-            return null;
-
-        var clientFeaturesType =
-            ctx.SemanticModel.Compilation.GetTypeByMetadataName(ElarionGeneratorConventions.ClientFeaturesAttribute);
-
-        foreach (var attr in ctx.Attributes)
-        {
-            if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Value is not string moduleName)
-                continue;
-
-            string? dependsOn = null;
-            var isCore = false;
-            foreach (var named in attr.NamedArguments)
-            {
-                if (named.Key == "DependsOn" && named.Value.Value is string deps)
-                    dependsOn = deps;
-                else if (named.Key == "Kind")
-                    isCore = IsCoreModuleKind(named.Value);
-            }
-
-            return new ElarionManifest.Module(
-                moduleName,
-                type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
-                type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                dependsOn,
-                isCore,
-                HasStaticMethod(type, "ConfigureServices", 2),
-                HasStaticMethod(type, "MapEndpoints", 1),
-                HasStaticMethod(type, "GetJsonTypeInfoResolver", 0),
-                HasStaticMethod(type, "ConfigureEndpointGroup", 1),
-                ReadClientFeatures(type, clientFeaturesType));
-        }
-
-        return null;
-    }
-
-    /// <summary>Reads the names listed by a module's <c>[ClientFeatures(...)]</c> attribute (empty when absent).</summary>
-    private static EquatableArray<string> ReadClientFeatures(INamedTypeSymbol type, INamedTypeSymbol? clientFeaturesType)
-    {
-        if (clientFeaturesType is null)
-            return EquatableArray<string>.Empty;
-
-        foreach (var attr in type.GetAttributes())
-        {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, clientFeaturesType))
-                continue;
-            if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Kind != TypedConstantKind.Array)
-                return EquatableArray<string>.Empty;
-
-            var names = new List<string>();
-            foreach (var value in attr.ConstructorArguments[0].Values)
-            {
-                if (value.Value is string name && name.Length > 0)
-                    names.Add(name);
-            }
-
-            return names.ToEquatableArray();
-        }
-
-        return EquatableArray<string>.Empty;
-    }
+    // generator via VariantDiscovery, so the manifest and the registry cannot drift. Resource-filter
+    // discovery is shared with the bootstrapper via ResourceFilterDiscovery for the same reason.
 
     // A [ModuleEndpoints] contributor: the named module plus which convention hooks the class declares. A class
     // with no usable hook is reported (ELMOD005) and not published — an empty entry could never map anything.
     private static ManifestItem<ElarionManifest.ModuleEndpoints> CreateModuleEndpoints(
         GeneratorAttributeSyntaxContext ctx)
     {
-        if (ctx.TargetSymbol is not INamedTypeSymbol type)
+        var hooks = AppModuleDiscovery.CreateModuleEndpoints(ctx);
+        if (hooks is null)
             return new ManifestItem<ElarionManifest.ModuleEndpoints>(null, ImmutableArray<Diagnostic>.Empty);
 
-        foreach (var attr in ctx.Attributes)
+        if (!hooks.HasMapEndpoints && !hooks.HasConfigureEndpointGroup)
         {
-            if (attr.ConstructorArguments.Length == 0 ||
-                attr.ConstructorArguments[0].Value is not string moduleName ||
-                moduleName.Length == 0)
-            {
-                continue;
-            }
-
-            var hasMapEndpoints = HasStaticMethod(type, "MapEndpoints", 1);
-            var hasConfigureEndpointGroup = HasStaticMethod(type, "ConfigureEndpointGroup", 1);
-            if (!hasMapEndpoints && !hasConfigureEndpointGroup)
-            {
-                return new ManifestItem<ElarionManifest.ModuleEndpoints>(
-                    null,
-                    [
-                        Diagnostic.Create(
-                            ModuleEndpointsWithoutHooks,
-                            type.Locations.FirstOrDefault() ?? Location.None,
-                            type.ToDisplayString(),
-                            moduleName),
-                    ]);
-            }
-
             return new ManifestItem<ElarionManifest.ModuleEndpoints>(
-                new ElarionManifest.ModuleEndpoints(
-                    moduleName,
-                    type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                    hasMapEndpoints,
-                    hasConfigureEndpointGroup),
-                ImmutableArray<Diagnostic>.Empty);
+                null,
+                [
+                    Diagnostic.Create(
+                        ModuleEndpointsWithoutHooks,
+                        ctx.TargetSymbol.Locations.FirstOrDefault() ?? Location.None,
+                        ctx.TargetSymbol.ToDisplayString(),
+                        hooks.ModuleName),
+                ]);
         }
 
-        return new ManifestItem<ElarionManifest.ModuleEndpoints>(null, ImmutableArray<Diagnostic>.Empty);
+        return new ManifestItem<ElarionManifest.ModuleEndpoints>(hooks, ImmutableArray<Diagnostic>.Empty);
     }
 
     private static ManifestItem<HttpEndpointEmission.Model> CreateHttpEndpoint(
@@ -270,26 +159,8 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         CancellationToken ct)
     {
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
-        if (ctx.TargetSymbol is not INamedTypeSymbol type)
-            return new ManifestItem<HttpEndpointEmission.Model>(null, diagnostics.ToImmutable());
-
-        var descriptionType = ctx.SemanticModel.Compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
-        foreach (var attr in ctx.Attributes)
-        {
-            if (HttpEndpointEmission.TryCreateModel(
-                    type,
-                    attr,
-                    descriptionType,
-                    SymbolDisplayFormat.FullyQualifiedFormat,
-                    diagnostics.Add,
-                    ct,
-                    out var model) && model is not null)
-            {
-                return new ManifestItem<HttpEndpointEmission.Model>(model, diagnostics.ToImmutable());
-            }
-        }
-
-        return new ManifestItem<HttpEndpointEmission.Model>(null, diagnostics.ToImmutable());
+        var model = HttpEndpointEmission.CreateModel(ctx, diagnostics.Add, ct);
+        return new ManifestItem<HttpEndpointEmission.Model>(model, diagnostics.ToImmutable());
     }
 
     private static ManifestItem<RpcMethodEmission.Model> CreateRpcMethod(
@@ -297,29 +168,8 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         CancellationToken ct)
     {
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
-        if (ctx.TargetSymbol is not INamedTypeSymbol type)
-            return new ManifestItem<RpcMethodEmission.Model>(null, diagnostics.ToImmutable());
-
-        var compilation = ctx.SemanticModel.Compilation;
-        var mcpMethodType = compilation.GetTypeByMetadataName(McpHandlerAttributeMetadataName);
-        var descriptionType = compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
-        foreach (var attr in ctx.Attributes)
-        {
-            if (RpcMethodEmission.TryCreateModel(
-                    type,
-                    attr,
-                    mcpMethodType,
-                    descriptionType,
-                    SymbolDisplayFormat.FullyQualifiedFormat,
-                    diagnostics.Add,
-                    ct,
-                    out var model) && model is not null)
-            {
-                return new ManifestItem<RpcMethodEmission.Model>(model, diagnostics.ToImmutable());
-            }
-        }
-
-        return new ManifestItem<RpcMethodEmission.Model>(null, diagnostics.ToImmutable());
+        var model = RpcMethodEmission.CreateModel(ctx, diagnostics.Add, ct);
+        return new ManifestItem<RpcMethodEmission.Model>(model, diagnostics.ToImmutable());
     }
 
     private static void EmitManifest(
@@ -464,28 +314,4 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator
         sb.AppendLine(")]");
     }
 
-    private static bool HasStaticMethod(INamedTypeSymbol type, string name, int paramCount)
-    {
-        foreach (var member in type.GetMembers(name))
-        {
-            if (member is IMethodSymbol { IsStatic: true } method && method.Parameters.Length == paramCount)
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsCoreModuleKind(TypedConstant value)
-    {
-        if (value.Type is not INamedTypeSymbol enumType)
-            return false;
-
-        foreach (var member in enumType.GetMembers("Core"))
-        {
-            if (member is IFieldSymbol { HasConstantValue: true } field && Equals(field.ConstantValue, value.Value))
-                return true;
-        }
-
-        return false;
-    }
 }

@@ -274,7 +274,10 @@ Two-tier; the line is **what a wire contract can express**, not "simple vs compl
 
 All three transports become **module-scoped + feature-flag-gated** under `[assembly: GenerateModuleBootstrapper]`, which
 emits the fixed-name `ElarionBootstrapper` static (framework-owned name, ADR-0018 — never declare a partial).
-`AppModuleDiscoveryGenerator` matches each handler to a module by longest-prefix namespace and emits:
+`AppModuleDiscoveryGenerator` discovers modules, transport handlers, and `[ResourceFilter]` specs from referenced
+assemblies' Elarion manifests **and from the bootstrapper compilation itself** (a single-project host — Program +
+modules in one csproj — wires transports the same way; current-compilation entries win deduplication), matches each
+handler to a module by longest-prefix namespace, and emits:
 
 - per-module `Map{Module}Http`, `Add{Module}Handlers` (with transport flags), `Get{Module}McpMetadata`;
 - aggregates `services.AddElarion(config)`, `endpoints.MapElarion(config)`, `dispatcher.RegisterHandlers(config)` (builds the

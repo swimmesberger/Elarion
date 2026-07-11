@@ -31,8 +31,10 @@ namespace Elarion.Generators;
 /// <para>
 /// Trigger: <c>[assembly: GenerateModuleBootstrapper]</c> in the host project. The generator emits the
 /// fixed-name <c>ElarionBootstrapper</c> static into the host's root namespace (ADR-0018), consumes per-assembly
-/// Elarion manifests from references, directly reads modules in the current compilation, and topologically sorts
-/// discovered modules by declared dependencies.
+/// Elarion manifests from references, directly reads modules, transport handlers, and resource filters declared
+/// in the current compilation (so a single-project host — Program and modules in one csproj — wires its
+/// transports without a referenced module assembly), and topologically sorts discovered modules by declared
+/// dependencies.
 /// </para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
@@ -44,8 +46,6 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private const string AppModuleAttributeMetadataName = ElarionGeneratorConventions.AppModuleAttribute;
 
     private const string ModuleEndpointsAttributeMetadataName = ElarionGeneratorConventions.ModuleEndpointsAttribute;
-
-    private const string ClientFeaturesAttributeMetadataName = ElarionGeneratorConventions.ClientFeaturesAttribute;
 
     private const string UnmatchedModuleName = "<Unmatched>";
 
@@ -195,6 +195,53 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
                 .ToEquatableArray())
             .WithTrackingName("BootstrapperModuleEndpoints");
 
+        // Current-compilation transport handlers ([HttpEndpoint]/[Handler]) and [ResourceFilter] specs. A
+        // single-project host (Program + modules in one csproj) has no manifest to consume them from — its own
+        // manifest is emitted into this same compilation, and manifests are only read off references — so the
+        // bootstrapper discovers them per node here and merges them with the referenced manifests. Shape
+        // diagnostics (ELHTTP001/ELHTTP004/ELRPC002/ELMCP003) are deliberately not re-reported: the manifest
+        // generator always runs alongside this one and owns them.
+        var currentHttpEndpoints = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                HttpEndpointEmission.HttpEndpointAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, ct) => HttpEndpointEmission.CreateModel(ctx, report: null, ct))
+            .Where(static model => model is not null)
+            .Select(static (model, _) => model!)
+            .Collect()
+            .Select(static (models, _) => models
+                .OrderBy(static m => m.EndpointName, StringComparer.Ordinal)
+                .ThenBy(static m => m.RequestTypeFqn, StringComparer.Ordinal)
+                .ToEquatableArray())
+            .WithTrackingName("BootstrapperHttpEndpoints");
+
+        var currentRpcMethods = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                RpcMethodEmission.HandlerAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, ct) => RpcMethodEmission.CreateModel(ctx, report: null, ct))
+            .Where(static model => model is not null)
+            .Select(static (model, _) => model!)
+            .Collect()
+            .Select(static (models, _) => models
+                .OrderBy(static m => m.MethodName, StringComparer.Ordinal)
+                .ThenBy(static m => m.RequestTypeFqn, StringComparer.Ordinal)
+                .ToEquatableArray())
+            .WithTrackingName("BootstrapperRpcMethods");
+
+        var currentResourceFilters = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ElarionGeneratorConventions.ResourceFilterAttribute,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => ResourceFilterDiscovery.CreateResourceFilter(ctx))
+            .Where(static filter => filter is not null)
+            .Select(static (filter, _) => filter!)
+            .Collect()
+            .Select(static (filters, _) => filters
+                .OrderBy(static f => f.SpecFqn, StringComparer.Ordinal)
+                .ToEquatableArray())
+            .WithTrackingName("BootstrapperResourceFilters");
+
         // Deliberately compilation-fresh, cheap per-keystroke probes (symbol-table lookups only): the assembly
         // trigger, and which referenced modules' generated ConfigureDefaultServices siblings exist. Both project
         // to small equatable values, so downstream stays cached when they don't change.
@@ -208,13 +255,18 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         var model = manifestProvider
             .Combine(currentModules)
             .Combine(currentModuleEndpoints)
+            .Combine(currentHttpEndpoints)
+            .Combine(currentRpcMethods)
+            .Combine(currentResourceFilters)
             .Combine(referencedSiblings)
             .Combine(trigger)
             .Combine(rootNamespace)
             .Select(static (source, ct) =>
             {
-                var (((((manifests, modules), moduleEndpoints), siblings), hasTrigger), rootNs) = source;
-                return BuildBootstrapperOutput(manifests, modules, moduleEndpoints, siblings, hasTrigger, rootNs, ct);
+                var ((((((((manifests, modules), moduleEndpoints), httpEndpoints), rpcMethods), resourceFilters), siblings), hasTrigger), rootNs) = source;
+                return BuildBootstrapperOutput(
+                    manifests, modules, moduleEndpoints, httpEndpoints, rpcMethods, resourceFilters,
+                    siblings, hasTrigger, rootNs, ct);
             })
             .WithTrackingName("Bootstrapper");
 
@@ -232,6 +284,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         ImmutableArray<ManifestReadResult> manifests,
         EquatableArray<ModuleEntry> currentModules,
         EquatableArray<ModuleEndpointsEntry> currentModuleEndpoints,
+        EquatableArray<HttpEndpointEmission.Model> currentHttpEndpoints,
+        EquatableArray<RpcMethodEmission.Model> currentRpcMethods,
+        EquatableArray<ElarionManifest.ResourceFilter> currentResourceFilters,
         EquatableArray<string> referencedSiblings,
         bool hasTrigger,
         string rootNs,
@@ -253,7 +308,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         var sorted = TopologicalSort(entries);
         ct.ThrowIfCancellationRequested();
 
-        var transport = CollectTransportMaps(manifest, entries, diagnostics);
+        var transport = CollectTransportMaps(
+            manifest, currentHttpEndpoints, currentRpcMethods, currentResourceFilters, entries, diagnostics);
         var contributors = CollectModuleEndpointContributors(
             currentModuleEndpoints, manifest.ModuleEndpointHooks, entries, diagnostics);
 
@@ -346,12 +402,17 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
     private static TransportMaps CollectTransportMaps(
         ElarionManifest.Data manifest,
+        EquatableArray<HttpEndpointEmission.Model> currentHttpEndpoints,
+        EquatableArray<RpcMethodEmission.Model> currentRpcMethods,
+        EquatableArray<ElarionManifest.ResourceFilter> currentResourceFilters,
         List<ModuleEntry> modules,
         List<DiagnosticInfo> diagnostics)
     {
+        // Current-compilation entries first (mirrors CollectModuleEntries): a handler that somehow also appears
+        // in a referenced manifest deduplicates to the local entry.
         var httpByModule = new Dictionary<string, List<HttpEndpointEmission.Model>>(StringComparer.Ordinal);
         var unmatchedHttp = new List<HttpEndpointEmission.Model>();
-        var httpEntries = manifest.HttpEndpoints.ToList();
+        var httpEntries = currentHttpEndpoints.AsImmutableArray.Concat(manifest.HttpEndpoints).ToList();
         httpEntries = DeduplicateHttpEndpoints(httpEntries);
         httpEntries.Sort(static (a, b) =>
         {
@@ -378,7 +439,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         var rpcByModule = new Dictionary<string, List<RpcMethodEmission.Model>>(StringComparer.Ordinal);
         var unmatchedRpc = new List<RpcMethodEmission.Model>();
-        var rpcEntries = manifest.RpcMethods.ToList();
+        var rpcEntries = currentRpcMethods.AsImmutableArray.Concat(manifest.RpcMethods).ToList();
         rpcEntries = DeduplicateRpcMethods(rpcEntries);
         rpcEntries.Sort(static (a, b) => string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal));
         foreach (var entry in rpcEntries)
@@ -409,7 +470,10 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         var resourceFiltersByModule = new Dictionary<string, List<ElarionManifest.ResourceFilter>>(StringComparer.Ordinal);
         var unmatchedResourceFilters = new List<ElarionManifest.ResourceFilter>();
-        var resourceFilterEntries = manifest.ResourceFilters.ToList();
+        var resourceFilterEntries = currentResourceFilters.AsImmutableArray
+            .Concat(manifest.ResourceFilters)
+            .Distinct()
+            .ToList();
         resourceFilterEntries.Sort(static (a, b) => string.Compare(a.SpecFqn, b.SpecFqn, StringComparison.Ordinal));
         foreach (var entry in resourceFilterEntries)
         {
@@ -624,141 +688,38 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         }
     }
 
-    // The per-node [AppModule] transform (cached per tree). Top-level types only, matching the old walk over
-    // namespace type members; everything read here — the attribute arguments and the convention-hook probes —
-    // lives on the module type itself, so a stale cache entry is impossible without editing the module's file.
+    // The per-node [AppModule] transform (cached per tree), sharing the full-fidelity read with the manifest
+    // generator via AppModuleDiscovery. Top-level types only, matching the old walk over namespace type members;
+    // everything read lives on the module type itself, so a stale cache entry is impossible without editing the
+    // module's file.
     private static ModuleEntry? CreateModuleEntry(GeneratorAttributeSyntaxContext ctx)
     {
-        if (ctx.TargetSymbol is not INamedTypeSymbol type || type.ContainingType is not null)
+        if (ctx.TargetSymbol is not INamedTypeSymbol { ContainingType: null })
             return null;
 
-        var clientFeaturesType =
-            ctx.SemanticModel.Compilation.GetTypeByMetadataName(ClientFeaturesAttributeMetadataName);
+        var module = AppModuleDiscovery.CreateModule(ctx);
+        if (module is null)
+            return null;
 
-        foreach (var attr in ctx.Attributes)
-        {
-            if (attr.ConstructorArguments.Length == 0 ||
-                attr.ConstructorArguments[0].Value is not string moduleName)
-            {
-                continue;
-            }
-
-            string? dependsOn = null;
-            var isCore = false;
-            foreach (var named in attr.NamedArguments)
-            {
-                if (named.Key == "DependsOn" && named.Value.Value is string deps)
-                {
-                    dependsOn = deps;
-                }
-                else if (named.Key == "Kind")
-                {
-                    isCore = IsCoreModuleKind(named.Value);
-                }
-            }
-
-            var hasConfigureServices = HasStaticMethod(type, "ConfigureServices", 2);
-            var hasMapEndpoints = HasStaticMethod(type, "MapEndpoints", 1);
-            var hasGetJsonTypeInfoResolver = HasStaticMethod(type, "GetJsonTypeInfoResolver", 0);
-            var hasConfigureEndpointGroup = HasStaticMethod(type, "ConfigureEndpointGroup", 1);
-
-            var fqn = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            var moduleNamespace = type.ContainingNamespace?.ToDisplayString() ?? string.Empty;
-
-            return new ModuleEntry(
-                moduleName, moduleNamespace, fqn, dependsOn,
-                isCore,
-                hasConfigureServices, hasMapEndpoints, hasGetJsonTypeInfoResolver, hasConfigureEndpointGroup,
-                // Current-compilation modules: the ConfigureDefaultServices skeleton is generated in the same pass.
-                EmitDefaultServices: true,
-                ReadClientFeatures(type, clientFeaturesType));
-        }
-
-        return null;
+        // Current-compilation modules: the ConfigureDefaultServices skeleton is generated in the same pass.
+        return ToModuleEntry(module, emitDefaultServices: true);
     }
 
-    // The per-node [ModuleEndpoints] transform (cached per tree). Everything read here — the module name and the
-    // convention-hook probes — lives on the annotated class itself. A class with no usable hook is dropped
-    // silently; the manifest generator (which always runs alongside this one) reports it as ELMOD005.
+    // The per-node [ModuleEndpoints] transform (cached per tree), sharing the read with the manifest generator.
+    // A class with no usable hook is dropped silently; the manifest generator (which always runs alongside this
+    // one) reports it as ELMOD005.
     private static ModuleEndpointsEntry? CreateModuleEndpointsEntry(GeneratorAttributeSyntaxContext ctx)
     {
-        if (ctx.TargetSymbol is not INamedTypeSymbol type)
+        var hooks = AppModuleDiscovery.CreateModuleEndpoints(ctx);
+        if (hooks is null || (!hooks.HasMapEndpoints && !hooks.HasConfigureEndpointGroup))
             return null;
 
-        foreach (var attr in ctx.Attributes)
-        {
-            if (attr.ConstructorArguments.Length == 0 ||
-                attr.ConstructorArguments[0].Value is not string moduleName ||
-                moduleName.Length == 0)
-            {
-                continue;
-            }
-
-            var hasMapEndpoints = HasStaticMethod(type, "MapEndpoints", 1);
-            var hasConfigureEndpointGroup = HasStaticMethod(type, "ConfigureEndpointGroup", 1);
-            if (!hasMapEndpoints && !hasConfigureEndpointGroup)
-                return null;
-
-            return new ModuleEndpointsEntry(
-                moduleName,
-                type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                hasMapEndpoints,
-                hasConfigureEndpointGroup,
-                LocationInfo.From(type));
-        }
-
-        return null;
-    }
-
-    /// <summary>Reads the names listed by a module's <c>[ClientFeatures(...)]</c> attribute (empty when absent).</summary>
-    private static EquatableArray<string> ReadClientFeatures(INamedTypeSymbol type, INamedTypeSymbol? clientFeaturesType)
-    {
-        if (clientFeaturesType is null)
-            return EquatableArray<string>.Empty;
-
-        foreach (var attr in type.GetAttributes())
-        {
-            if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, clientFeaturesType))
-                continue;
-            if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Kind != TypedConstantKind.Array)
-                return EquatableArray<string>.Empty;
-
-            var names = new List<string>();
-            foreach (var value in attr.ConstructorArguments[0].Values)
-            {
-                if (value.Value is string name && name.Length > 0)
-                    names.Add(name);
-            }
-
-            return names.ToEquatableArray();
-        }
-
-        return EquatableArray<string>.Empty;
-    }
-
-    private static bool HasStaticMethod(INamedTypeSymbol type, string name, int paramCount)
-    {
-        foreach (var member in type.GetMembers(name))
-            if (member is IMethodSymbol { IsStatic: true } method
-                && method.Parameters.Length == paramCount)
-                return true;
-
-        return false;
-    }
-
-    private static bool IsCoreModuleKind(TypedConstant value)
-    {
-        if (value.Type is not INamedTypeSymbol enumType)
-            return false;
-
-        foreach (var member in enumType.GetMembers("Core"))
-        {
-            if (member is IFieldSymbol { HasConstantValue: true } field
-                && Equals(field.ConstantValue, value.Value))
-                return true;
-        }
-
-        return false;
+        return new ModuleEndpointsEntry(
+            hooks.ModuleName,
+            hooks.TypeFqn,
+            hooks.HasMapEndpoints,
+            hooks.HasConfigureEndpointGroup,
+            LocationInfo.From(ctx.TargetSymbol));
     }
 
     /// <summary>
