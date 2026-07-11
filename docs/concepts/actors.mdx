@@ -198,6 +198,29 @@ that stops being readable off-home:
    optional/defaulted (nullable with a fallback in the computed interpretation), keep existing wire
    names stable, and treat a breaking shape change as what it is — a new contract that needs a
    backfill of the snapshot rows.
+6. **Choose the write cadence deliberately — it decides what queries mean.** There are three cadences,
+   and they must not be mixed up:
+   - **Write-through** (write after every mutation — the coordinator shape): the snapshot always
+     reflects the last completed turn, so `IActorStateReader` is as fresh as any database query
+     (read-committed semantics — an in-flight turn hasn't published yet, same as an uncommitted
+     transaction). This is the only cadence where the reader is a first-class query path. It is also
+     the cadence closest to "just a table with a version column" — apply the shape-3 honesty test
+     before choosing it.
+   - **Checkpointing** (mostly in-memory, periodic or milestone writes): the snapshot is a
+     **warm-restart checkpoint, not a query mechanism**. The reader returns bounded-stale data (up to
+     one checkpoint interval old) — fine for after-the-fact reporting, wrong for anything presented as
+     current. Use it to make hot shape-2 state survive restarts cheaply; never point a "live" view at
+     it.
+   - **No snapshot** (pure hot/ephemeral state): the reader has no role — there is nothing durable to
+     read.
+   **Real-time observation of hot in-memory state is a push problem, not a pull problem.** No node can
+   query another node's memory (there is deliberately no forwarding), and polling the reader against a
+   checkpoint is a staleness bug waiting to be filed. The actor — on its home — publishes
+   [client events](/docs/capabilities/events/client-events) (throttled, small current-value payloads);
+   the PostgreSQL fan-out delivers them to **every** instance's connected browsers, so observers get
+   real-time data without knowing or caring where the actor lives. A *service* (not a browser) that
+   needs pull-based real-time reads of live actor memory from arbitrary nodes has crossed the
+   placement/forwarding line — that is the Orleans trigger, not a reason to stretch the reader.
 
 The Billing sample is the reference implementation of both halves: `ClientDunningState` carries
 `EscalationThreshold`, the `NeedsAttention` interpretation, the `RecordOverdue()` transition, and its
@@ -285,7 +308,10 @@ The rules of the model:
   returns the latest snapshot without activating anything — durable truth on any instance, carrying the
   state record's full logic (rule 1 of [designing applications around snapshot
   state](#designing-applications-around-snapshot-state); off-home reads lose nothing precisely because
-  actor *methods* hold no interpretation). Commands go through the actor; queries read snapshots (or
+  actor *methods* hold no interpretation). How fresh that is equals the actor's **write cadence**
+  (rule 6): write-through → as fresh as any database query; checkpointing → bounded-stale, never a
+  "live" view. Real-time observation of the home's in-memory state is push — client events fanned out
+  to every instance — not reader polling. Commands go through the actor; queries read snapshots (or
   regular entities).
 - **Unenforced without a lease.** With no `IActorHomeLease` registered (local dev, a one-instance
   deployment), `SingleHomed` is a declaration only — the actor system logs one warning per such actor so
@@ -586,6 +612,7 @@ once."
 | One TCP/API session per device or tenant, calls must be ordered | **Actor per resource** (shape 1) | Row locks |
 | Live readings from hundreds of machines, dashboards read current values, restart resets | **Actor per machine** (shape 2, no snapshot) | A hot-loop `UPDATE` per reading |
 | Presence / live progress pushed to browsers | **Actor** (shape 2) + client events | Polling a table |
+| Real-time view of an actor's live in-memory state from any instance | **Client events pushed by the actor** (the Postgres fan-out reaches every instance's browsers) | Polling `IActorStateReader` (checkpoint staleness) |
 | Escalate to collections exactly once after N overdue events | **Actor + snapshot** (shape 3) — or a state row if it stays one `UPDATE` | `SELECT FOR UPDATE` across an email send |
 
 Everything else stays with the default building blocks: request/response work is a

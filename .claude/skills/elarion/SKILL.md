@@ -160,7 +160,12 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   methods live ON the record (it's shared — the actor, `IActorStateReader` queries on other instances,
   and SQL all deserialize the same type); actor methods only apply a transition, `WriteStateAsync`, then
   side effects (after the write — the write is the commit point). Evolve the shape with
-  optional/defaulted properties on the record, never by migrating in `OnActivateAsync`. On a concurrent
+  optional/defaulted properties on the record, never by migrating in `OnActivateAsync`.
+  **Write cadence decides query meaning**: write-through → the reader is DB-fresh (the only cadence where
+  it's a first-class query path); periodic checkpointing → the reader is bounded-stale (warm-restart
+  mechanism, never a "live" view). Real-time views of hot in-memory state are **push** — the actor
+  publishes client events from its home and the Postgres fan-out reaches every instance's browsers —
+  never `IActorStateReader` polling. On a concurrent
   snapshot change the stale activation passivates and the turn transparently re-runs once on the
   reloaded snapshot (so write turns as reapplyable mutations; side effects before the write are
   at-least-once); only sustained conflicts surface as `ActorSnapshotConcurrencyException`. Backend: reference
