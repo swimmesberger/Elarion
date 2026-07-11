@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Elarion.Abstractions.Authorization;
 
 namespace Elarion.ClientEvents;
@@ -23,4 +24,16 @@ public sealed record ClientEventTopic {
     /// subscriptions skip the <c>IClientEventSubscriptionAuthorizer</c> seam once the topic's requirements
     /// pass. Defaults to <see langword="false"/> (fail-closed).</summary>
     public bool AllowAnyResource { get; init; }
+
+    /// <summary>The topic's <c>IClientEventSubscriptionObserver</c> implementation, or <see langword="null"/>
+    /// when the topic does not observe its subscriptions. Resolved from a fresh DI scope per callback.</summary>
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+    public Type? ObserverType { get; init; }
+
+    /// <summary>The last-subscriber linger before the observer sees interest go inactive (the
+    /// reload-debounce). Defaults to 5 seconds.</summary>
+    public TimeSpan InterestLinger { get; init; } = DefaultInterestLinger;
+
+    /// <summary>The default <see cref="InterestLinger"/>.</summary>
+    public static TimeSpan DefaultInterestLinger { get; } = TimeSpan.FromSeconds(5);
 }

@@ -44,8 +44,8 @@ function render(q) {
   row.seq.textContent = q.seq;
 }
 
-// Converge: fetch current values (the pull path — served by the actor-hosting instance)…
-async function converge() {
+// Discover the symbols once (the pull path — served by the actor-hosting instance)…
+async function listSymbols() {
   const res = await fetch('/quotes');
   if (!res.ok) return [];
   const body = await res.json();
@@ -54,13 +54,15 @@ async function converge() {
 }
 
 // …then stream: one SSE connection, one subscription per symbol, events named by topic.
+// The stream is self-converging: the topic's subscription observer greets every (re)subscribe with the
+// symbol's current value, so there is no re-fetch on reconnect — "last known value + everything since"
+// on one connection. The seq guard in render() resolves greeting-vs-live-push ordering.
 async function start() {
-  const symbols = await converge();
+  const symbols = await listSymbols();
   const subscriptions = symbols.map(s => ({ topic: 'market.quoteChanged', resource: s }));
   const es = new EventSource(`/events?subscriptions=${encodeURIComponent(JSON.stringify(subscriptions))}`);
   es.addEventListener('market.quoteChanged', e => render(JSON.parse(e.data)));
-  // The reconnect contract: on (re)connect, re-fetch current values, then keep applying pushes.
-  es.addEventListener('elarion.connected', () => { converge(); status.textContent = 'live'; });
+  es.addEventListener('elarion.connected', () => { status.textContent = 'live'; });
   es.onerror = () => { status.textContent = 'reconnecting…'; };
 }
 start();

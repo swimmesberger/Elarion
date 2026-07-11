@@ -121,6 +121,34 @@ public sealed class ClientEventGeneratorTests {
     }
 
     [Fact]
+    public void SubscriptionObserverAttributeEmitsTheOptionsCalls() {
+        const string source = Preamble +
+            """
+
+            namespace Sample.Market {
+                [AppModule("Market")]
+                public static partial class MarketModule { }
+
+                internal sealed class QuoteObserver : IClientEventSubscriptionObserver;
+
+                [AllowAnyResource]
+                [SubscriptionObserver<QuoteObserver>(InterestLingerSeconds = 30)]
+                public sealed record QuoteChanged : IClientEvent {
+                    public required string Symbol { get; init; }
+                }
+            }
+            """;
+
+        var extensions = GetGenerated(Generate(source), "MarketClientEventExtensions.g.cs");
+
+        extensions.Should().Contain(
+            "events.AddTopic<global::Sample.Market.QuoteChanged>(\"market.quoteChanged\", static topic => topic");
+        extensions.Should().Contain(".AllowAnyResource()");
+        extensions.Should().Contain(".ObserveSubscriptions<global::Sample.Market.QuoteObserver>()");
+        extensions.Should().Contain(".WithInterestLinger(global::System.TimeSpan.FromSeconds(30)));");
+    }
+
+    [Fact]
     public void ReportsElcev001WhenEventNotInAnyModule() {
         const string source = Preamble +
             """

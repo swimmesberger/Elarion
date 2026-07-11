@@ -11,18 +11,26 @@ public sealed record QuoteTick(long Seq, decimal Price, DateTimeOffset At);
 public sealed record Quote(string Symbol, decimal Price, decimal ChangePercent, long Seq, DateTimeOffset At);
 
 /// <summary>
-/// The realtime push contract, topic <c>market.quoteChanged</c> (inferred from module + type name).
-/// Published <b>resource-scoped per symbol</b>, so a browser subscribes to exactly the symbols it
-/// displays. <c>[AllowAnyResource]</c> declares the symbol a routing key, not an entitlement: any
-/// authenticated user may watch any symbol, and no <c>IClientEventSubscriptionAuthorizer</c> is needed —
-/// that seam stays reserved for topics whose resource genuinely gates access (per-tenant data).
-/// This is the ephemeral client-event tier: the payload carries the value itself, because
-/// there is deliberately nothing in a database to re-query — a missed event is superseded by the next
-/// one (at-most-once by design). On (re)connect the client fetches current values from
-/// <c>GET /quotes</c> and then applies pushes: converge, then stream.
+/// The realtime push contract. Published <b>resource-scoped per symbol</b>, so a browser subscribes to
+/// exactly the symbols it displays. <c>[AllowAnyResource]</c> declares the symbol a routing key, not an
+/// entitlement: any authenticated user may watch any symbol, and no
+/// <c>IClientEventSubscriptionAuthorizer</c> is needed — that seam stays reserved for topics whose
+/// resource genuinely gates access (per-tenant data). <c>[SubscriptionObserver]</c> wires the
+/// producer-side lifecycle: every new subscriber is greeted with the symbol's current value (the stream
+/// is self-converging — "last known value + everything since", including after a reconnect), and the
+/// actor's publish path checks <c>IClientEventInterest</c> so unwatched symbols cost nothing on the wire.
+/// This is the ephemeral client-event tier: the payload carries the value itself; a missed event is
+/// superseded by the next one (at-most-once by design), and the <c>Seq</c> the client guards on resolves
+/// any greeting-vs-live-push interleaving.
 /// </summary>
+[ClientEvent(Topic)]
 [AllowAnyResource]
+[SubscriptionObserver<MarketSubscriptionObserver>]
 public sealed record QuoteChanged : IClientEvent {
+    /// <summary>The wire topic; the <c>[ClientEvent]</c> override pins it to this const so the actor's
+    /// interest check and the generated registration can never drift apart.</summary>
+    public const string Topic = "market.quoteChanged";
+
     public required string Symbol { get; init; }
 
     public required decimal Price { get; init; }

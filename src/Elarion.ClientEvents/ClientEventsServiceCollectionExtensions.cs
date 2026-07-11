@@ -41,6 +41,9 @@ public static class ClientEventsServiceCollectionExtensions {
                 .OrderBy(static t => t.Name, StringComparer.Ordinal)
                 .Select(static t => new ClientEventTopicManifestEntry { Name = t.Name, EventType = t.EventType })],
         });
+        services.TryAddSingleton<ClientEventSubscriptionLifecycle>();
+        services.TryAddSingleton<IClientEventInterest>(
+            static sp => sp.GetRequiredService<ClientEventSubscriptionLifecycle>());
         services.TryAddSingleton<ClientEventSubscriberRegistry>();
         services.TryAddSingleton<IClientEventLocalDelivery>(
             static sp => sp.GetRequiredService<ClientEventSubscriberRegistry>());

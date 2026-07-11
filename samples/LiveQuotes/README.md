@@ -23,7 +23,7 @@ StockQuoteActor per symbol   [Actor(SingleHomed = true)], keyed by symbol
 IClientEventPublisher        topic market.quoteChanged, resource-scoped per symbol
         ▼
 GET /events (SSE)            browsers subscribe to exactly the symbols they display
-GET /quotes, /quotes/{symbol}  the pull path: initial load + reconnect converge
+GET /quotes, /quotes/{symbol}  the pull path: symbol discovery + ad-hoc queries
 ```
 
 ## Run it
@@ -36,15 +36,22 @@ dotnet run --project samples/LiveQuotes/LiveQuotes.Api
 ## What to look at
 
 - **`StockQuoteActor`** — actor "shape 2" (hot, ephemeral, loss-tolerant): plain fields, no locks, no
-  `IActorState` (restart loss is the contract; the feed re-primes in one tick interval), and the
-  conflation window that bounds push volume no matter how hot the feed runs.
+  `IActorState` (restart loss is the contract; the feed re-primes in one tick interval), the
+  conflation window that bounds push volume no matter how hot the feed runs, and the
+  `IClientEventInterest` pull check — a symbol nobody watches keeps its value current but never
+  touches the wire.
+- **`MarketSubscriptionObserver`** — the producer-side lifecycle (`[SubscriptionObserver<T>]` on the
+  contract): every new subscriber is greeted with the symbol's current value through a per-subscriber
+  sink, so the stream is self-converging — "last known value + everything since", reconnects included —
+  and skipping unwatched publishes is safe.
 - **`MarketFeedService`** — the one file a real system would change: replace the random walk with the
   proprietary TCP/vendor client. Note what it does *not* do: publish integration events. The outbox is
   a database write per event — market ticks are neither durable nor business facts.
 - **`GetQuote`/`ListQuotes`** — the pull path reads through the facade (mailbox-serialized with the
   feed). Queries and pushes carry the same `Quote` shape.
-- **`wwwroot/index.html`** — converge-then-stream: fetch `/quotes`, open one `EventSource` with one
-  subscription per symbol, re-fetch on the `elarion.connected` reconnect hint.
+- **`wwwroot/index.html`** — discover-then-stream: fetch `/quotes` once for the symbol list, open one
+  `EventSource` with one subscription per symbol; the greeting converges every (re)connect, and a
+  `seq` guard resolves greeting-vs-live-push ordering.
 - **`LiveQuotes.Tests`** — the whole slice is clock-deterministic and Docker-free: conflation and the
   sequence guard are tested against a `FakeTimeProvider` through the *generated* actor registration.
 

@@ -48,6 +48,28 @@ public sealed class StockQuoteActorTests {
     }
 
     [Fact]
+    public async Task UnwatchedSymbol_KeepsItsValue_ButPublishesNothing() {
+        var time = new FakeTimeProvider();
+        var published = new RecordingPublisher();
+        var interest = new FakeInterest { Watched = false };
+        await using var provider = BuildHost(time, published, interest);
+        var quote = provider.GetRequiredService<IActorSystem>().Get<IStockQuote>("ELN");
+
+        await quote.Apply(new QuoteTick(1, 100m, time.GetUtcNow()), Ct);
+        time.Advance(StockQuoteActor.PublishInterval + TimeSpan.FromMilliseconds(1));
+        await quote.Apply(new QuoteTick(2, 110m, time.GetUtcNow()), Ct);
+
+        // Nobody watching: the wire stays silent, the in-memory value stays current.
+        published.Events.Should().BeEmpty();
+        (await quote.GetQuote(Ct))!.Price.Should().Be(110m);
+
+        // A watcher appears (the observer greets it with the current value out-of-band); publishes resume.
+        interest.Watched = true;
+        await quote.Apply(new QuoteTick(3, 120m, time.GetUtcNow()), Ct);
+        published.Events.Should().ContainSingle().Which.Price.Should().Be(120m);
+    }
+
+    [Fact]
     public async Task OutOfOrderTicks_AreDroppedBySequenceGuard() {
         var time = new FakeTimeProvider();
         await using var provider = BuildHost(time, new RecordingPublisher());
@@ -82,13 +104,21 @@ public sealed class StockQuoteActorTests {
         list.Value.Quotes.Should().ContainSingle().Which.Symbol.Should().Be("ELN");
     }
 
-    private static ServiceProvider BuildHost(FakeTimeProvider time, RecordingPublisher publisher) {
+    private static ServiceProvider BuildHost(
+        FakeTimeProvider time, RecordingPublisher publisher, FakeInterest? interest = null) {
         var services = new ServiceCollection();
         services.AddSingleton<TimeProvider>(time);
         services.AddSingleton<IClientEventPublisher>(publisher);
+        services.AddSingleton<IClientEventInterest>(interest ?? new FakeInterest { Watched = true });
         // The generated per-module registration — the same wiring the host's AddElarion composes.
         MarketActorExtensions.AddMarketActors(services);
         return services.BuildServiceProvider();
+    }
+
+    private sealed class FakeInterest : IClientEventInterest {
+        public bool Watched { get; set; }
+
+        public bool HasSubscribers(string topic, ClientEventScope scope) => Watched;
     }
 
     private sealed class RecordingPublisher : IClientEventPublisher {

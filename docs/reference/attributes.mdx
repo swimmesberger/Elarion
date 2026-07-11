@@ -820,6 +820,22 @@ public sealed record QuoteChanged : IClientEvent { /* … */ }
 
 See [Client events](/docs/capabilities/events/client-events).
 
+### `[SubscriptionObserver<TObserver>]`
+
+- **Package:** `Elarion.Abstractions` (ClientEvents) · **Applies to:** class (single, not inherited)
+- **Triggers:** declares the topic's `IClientEventSubscriptionObserver` — the producer-side subscription lifecycle. `TObserver` is called with a **per-subscriber sink** when a client subscribes (`OnSubscribedAsync` — the producer-controlled initial value: greet the new subscriber with the current value, so the stream is self-converging) and on **debounced interest transitions** (`OnInterestChangedAsync` — `true` on the first watcher of a (topic, scope), `false` only after the last one leaves and the linger elapses, so a browser reload never bounces the producer). Resolved from a fresh DI scope per callback, detached from the subscribe path; the pull sibling is `IClientEventInterest.HasSubscribers`. Imperative form: `ObserveSubscriptions<TObserver>()` (+ `WithInterestLinger(...)`) on the topic options.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `InterestLingerSeconds` | `double` (init) | `5` | The last-watcher departure debounce before `OnInterestChangedAsync(active: false)` fires. |
+
+```csharp
+[SubscriptionObserver<QuoteSubscriptionObserver>(InterestLingerSeconds = 30)]
+public sealed record QuoteChanged : IClientEvent { /* … */ }
+```
+
+See [Client events](/docs/capabilities/events/client-events).
+
 ### `[GenerateVariantCatalog]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly

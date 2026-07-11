@@ -28,6 +28,8 @@ public sealed class ClientEventsBuilder {
             EventType = typeof(TEvent),
             Requirements = options.BuildRequirements(),
             AllowAnyResource = options.AllowsAnyResource,
+            ObserverType = options.ObserverType,
+            InterestLinger = options.InterestLinger ?? ClientEventTopic.DefaultInterestLinger,
         });
         return this;
     }

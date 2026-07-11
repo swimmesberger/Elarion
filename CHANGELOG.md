@@ -9,6 +9,19 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Producer-side subscription lifecycle for client events — initial values and interest.** A topic can
+  now declare an `IClientEventSubscriptionObserver` (`[SubscriptionObserver<T>]` on the contract, or
+  `ObserveSubscriptions<T>()` on the topic options) with deliberately Rx-shaped semantics:
+  `OnSubscribedAsync` hands the producer a **per-subscriber sink** — greet the new subscriber with the
+  current value (the `BehaviorSubject` pattern, producer-controlled) and the stream becomes
+  self-converging: "last known value + everything since", on one connection, re-greeted on every
+  reconnect; `OnInterestChangedAsync` is `RefCount` with a linger-debounced last-watcher departure
+  (default 5 s — a browser reload never bounces an upstream connection). The pull sibling
+  `IClientEventInterest.HasSubscribers(topic, scope)` lets producers (actors especially) skip work nobody
+  observes — safe because the greeting covers late arrivals. Interest is node-local by design and
+  authoritative for actor-fed topics via the ADR-0050 home routing. `samples/LiveQuotes` dogfoods it:
+  unwatched symbols publish nothing, new subscribers converge from the greeting, and the dashboard drops
+  its reconnect re-fetch.
 - **`[AllowAnyResource]` — declare a client-event topic's resource segment a routing key.** Resource-scoped
   subscriptions stay fail-closed by default, but a topic whose resource merely selects which events to
   receive (a stock symbol, a public room id — not an entitlement) now declares that on the contract

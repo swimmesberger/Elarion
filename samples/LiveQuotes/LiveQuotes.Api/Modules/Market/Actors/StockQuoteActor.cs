@@ -35,6 +35,7 @@ namespace LiveQuotes.Api.Modules.Market.Actors;
 public sealed class StockQuoteActor(
     IActorContext<string> context,
     IClientEventPublisher clientEvents,
+    IClientEventInterest interest,
     TimeProvider timeProvider) {
     /// <summary>Minimum spacing between pushed updates per symbol (the conflation window).</summary>
     public static readonly TimeSpan PublishInterval = TimeSpan.FromMilliseconds(250);
@@ -62,6 +63,14 @@ public sealed class StockQuoteActor(
             _sessionOpen = tick.Price;
         }
 
+        // Lazy on the wire: nobody watching this symbol → keep the value, publish nothing. Safe to skip
+        // because the subscription observer greets every new watcher with the current value — a skipped
+        // publish is never a missed one. (The pull check is the simple form; the observer's
+        // OnInterestChangedAsync transitions are for producers that must start/stop real work.)
+        if (!interest.HasSubscribers(QuoteChanged.Topic, ClientEventScope.Resource(context.Key))) {
+            return;
+        }
+
         // Conflate: always keep the current value, push at most every PublishInterval.
         var now = timeProvider.GetTimestamp();
         if (_lastPublishTimestamp != 0 &&
@@ -75,7 +84,8 @@ public sealed class StockQuoteActor(
         await clientEvents.PublishAsync(ToQuoteChanged(tick.At), ClientEventScope.Resource(context.Key), cancellationToken);
     }
 
-    /// <summary>The current value, for the pull-based query path (initial page load / reconnect converge).</summary>
+    /// <summary>The current value: the query path (<c>GET /quotes</c>) and the subscription observer's
+    /// greeting both read it through this turn.</summary>
     public Task<Quote?> GetQuote() =>
         Task.FromResult(_hasValue
             ? new Quote(context.Key, _price, ChangePercent, _seq, timeProvider.GetUtcNow())

@@ -13,7 +13,8 @@ namespace Elarion.Generators;
 /// namespace match, infers the topic name <c>{module}.{name}</c> (camel-cased, a trailing <c>Event</c>
 /// suffix stripped; <c>[ClientEvent("name")]</c> overrides the full name), reads the contract's
 /// <c>[RequirePermission]</c>/<c>[RequireRole]</c> attributes as subscribe-time requirements (plus
-/// <c>[AllowAnyResource]</c> as the routing-key declaration for the resource segment), and emits
+/// <c>[AllowAnyResource]</c> as the routing-key declaration for the resource segment and
+/// <c>[SubscriptionObserver&lt;T&gt;]</c> as the producer-side lifecycle hook), and emits
 /// <c>Add{Module}ClientEvents(this IServiceCollection)</c> — wired into the module's
 /// <c>ConfigureDefaultServices</c> like the other categories, so a topic exists just by declaring the
 /// contract, and disappears with its module's feature gate.
@@ -27,6 +28,7 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
     private const string RequirePermissionAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
     private const string RequireRoleAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireRoleAttribute";
     private const string AllowAnyResourceAttributeMetadataName = "Elarion.Abstractions.ClientEvents.AllowAnyResourceAttribute";
+    private const string SubscriptionObserverAttributeMetadataName = "Elarion.Abstractions.ClientEvents.SubscriptionObserverAttribute`1";
     private const string ClientEventsBuilderMetadataName = "Elarion.ClientEvents.ClientEventsBuilder";
     private const string TriggerAttributeMetadataName = "Elarion.Abstractions.GenerateClientEventTopicsAttribute";
 
@@ -64,6 +66,8 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
         EquatableArray<PermissionRequirement> Permissions,
         EquatableArray<string> Roles,
         bool AllowAnyResource,
+        string? ObserverFqn,
+        double? InterestLingerSeconds,
         bool BuilderAvailable,
         LocationInfo Location);
 
@@ -123,12 +127,15 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
 
         string? nameOverride = null;
         var allowAnyResource = false;
+        string? observerFqn = null;
+        double? interestLingerSeconds = null;
         var permissions = ImmutableArray.CreateBuilder<PermissionRequirement>();
         var roles = ImmutableArray.CreateBuilder<string>();
         var overrideAttribute = compilation.GetTypeByMetadataName(ClientEventAttributeMetadataName);
         var permissionAttribute = compilation.GetTypeByMetadataName(RequirePermissionAttributeMetadataName);
         var roleAttribute = compilation.GetTypeByMetadataName(RequireRoleAttributeMetadataName);
         var allowAnyResourceAttribute = compilation.GetTypeByMetadataName(AllowAnyResourceAttributeMetadataName);
+        var observerAttribute = compilation.GetTypeByMetadataName(SubscriptionObserverAttributeMetadataName);
 
         foreach (var attribute in type.GetAttributes())
         {
@@ -162,6 +169,20 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
             {
                 allowAnyResource = true;
             }
+            else if (attributeClass.IsGenericType &&
+                SymbolEqualityComparer.Default.Equals(attributeClass.ConstructedFrom, observerAttribute) &&
+                attributeClass.TypeArguments.Length == 1 &&
+                attributeClass.TypeArguments[0] is INamedTypeSymbol observerSymbol)
+            {
+                observerFqn = observerSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                foreach (var named in attribute.NamedArguments)
+                {
+                    if (named.Key == "InterestLingerSeconds" && named.Value.Value is double linger)
+                    {
+                        interestLingerSeconds = linger;
+                    }
+                }
+            }
         }
 
         var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing
@@ -175,6 +196,8 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
             permissions.ToImmutable(),
             roles.ToImmutable(),
             allowAnyResource,
+            observerFqn,
+            interestLingerSeconds,
             compilation.GetTypeByMetadataName(ClientEventsBuilderMetadataName) is not null,
             LocationInfo.From(type));
     }
@@ -276,7 +299,8 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
             foreach (var (fqn, topic, clientEvent) in kvp.Value.OrderBy(static x => x.Topic, StringComparer.Ordinal))
             {
                 var topicLiteral = SymbolDisplay.FormatLiteral(topic, quote: true);
-                if (clientEvent.Permissions.Count == 0 && clientEvent.Roles.Count == 0 && !clientEvent.AllowAnyResource)
+                if (clientEvent.Permissions.Count == 0 && clientEvent.Roles.Count == 0 &&
+                    !clientEvent.AllowAnyResource && clientEvent.ObserverFqn is null)
                 {
                     sb.AppendLine($"            events.AddTopic<{fqn}>({topicLiteral});");
                     continue;
@@ -297,6 +321,16 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
                 if (clientEvent.AllowAnyResource)
                 {
                     requirementLines.Add("                .AllowAnyResource()");
+                }
+                if (clientEvent.ObserverFqn is not null)
+                {
+                    requirementLines.Add($"                .ObserveSubscriptions<{clientEvent.ObserverFqn}>()");
+                    if (clientEvent.InterestLingerSeconds is { } lingerSeconds)
+                    {
+                        requirementLines.Add(
+                            "                .WithInterestLinger(global::System.TimeSpan.FromSeconds(" +
+                            lingerSeconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "))");
+                    }
                 }
                 for (var index = 0; index < requirementLines.Count; index += 1)
                 {

@@ -157,6 +157,55 @@ internal sealed class CustomerScopeAuthorizer(AppDbContext db, ICurrentUser user
 Subscribe-time checks are a UX projection, never the security boundary — the data itself is only ever
 fetched through handlers carrying the real `[Require*]` gates.
 
+## Producer-side lifecycle: initial values and interest
+
+A topic can declare a **subscription observer** — the producer's view of its audience. The semantics are
+the proven Rx ones (`BehaviorSubject` + `RefCount`), minus backpressure, because client events stay a hot
+at-most-once stream:
+
+```csharp
+[AllowAnyResource]
+[SubscriptionObserver<QuoteSubscriptionObserver>]   // or topic options: .ObserveSubscriptions<T>()
+public sealed record QuoteChanged : IClientEvent { /* … */ }
+
+public sealed class QuoteSubscriptionObserver(IActorSystem actors) : IClientEventSubscriptionObserver {
+    // "This is your subscriber" — the sink delivers to exactly that subscriber. Greet it with the
+    // current value (a normal request/reply turn on the owning actor) and the stream is self-converging:
+    // "last known value + everything since", on one connection, re-greeted on every reconnect.
+    public async ValueTask OnSubscribedAsync(
+        ClientEventSubscription sub, IClientEventSubscriberSink sink, CancellationToken ct) {
+        if (sub.Scope is { Kind: ClientEventScopeKind.Resource, Value: { } symbol } &&
+            await actors.Get<IStockQuote>(symbol).GetQuote(ct) is { } quote) {
+            await sink.PublishAsync(ToEvent(quote), ct);
+        }
+    }
+
+    // RefCount with a disconnect delay: true on the first watcher of a (topic, scope), false only after
+    // the last one leaves AND the linger elapses (default 5 s) — a browser reload never bounces the
+    // upstream. Implement when the producer must start/stop real work (open a feed, run a poll loop).
+    public ValueTask OnInterestChangedAsync(ClientEventSubscription sub, bool active, CancellationToken ct)
+        => /* start/stop the per-resource upstream */ default;
+}
+```
+
+Callbacks run detached from the subscribe path (a slow observer never delays the stream) on a fresh DI
+scope, on the node holding the subscription — which for actor-fed topics is the producer's node, because
+the recommended topology routes the live prefixes (including the events endpoint) to the actor home.
+A greeting races live publishes by design; payload contracts carry a monotonic version and the client
+applies through one guard, so ordering resolves client-side.
+
+The cheap sibling is the **pull check** — no observer needed, injectable anywhere including actors:
+
+```csharp
+// Inside the producing actor's tick: nobody watching → keep the value, skip the wire entirely.
+if (!interest.HasSubscribers(QuoteChanged.Topic, ClientEventScope.Resource(context.Key))) return;
+```
+
+Skipping is safe precisely *because* of the greeting: a watcher that arrives later gets the current value
+on subscribe, so a suppressed publish is never a missed one. Interest is deliberately node-local (no
+cross-node presence protocol at this tier); a publish never returns a subscriber count — interest is a
+separate read, never a delivery receipt. `samples/LiveQuotes` dogfoods the whole pattern.
+
 ## 5. The browser
 
 The schema exporter emits the declared topics as the schema's `events` block, and the
