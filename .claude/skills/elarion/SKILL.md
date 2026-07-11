@@ -124,10 +124,17 @@ responses as generated routes; `.ProducesElarionErrors()` adds the OpenAPI failu
 
 ## Stateful in-memory work — actors
 
-Handlers are stateless. When a feature needs **in-memory state that survives across calls and must be
-mutated sequentially** (live session/connection state, a per-entity workflow between persisted
-transitions, per-key rate/flow control), don't hand-roll a `Channel` + loop or a lock-guarded
-singleton — that's `Elarion.Actors`:
+Handlers are stateless. **Default to the database for concurrency** — optimistic concurrency (version
+column), constraints, `[Idempotent]`/inbox, and scheduled jobs solve classical web-app races; most apps
+need zero actors, and an actor is never the fix for "two requests raced on a row". An actor is justified
+only when the unit of consistency is a **live in-memory thing**, in exactly three shapes: (1) it owns a
+stateful external resource that must be accessed single-flight/ordered (a TCP device session, a
+per-tenant API client, an OAuth token refresh); (2) hot, ephemeral, loss-tolerant state where DB
+round-trips are pure overhead (live telemetry/device data, presence, live progress, write-behind
+buffers — no snapshot needed); (3) a long-lived event-driven coordinator that must act exactly once
+(the snapshot + single-homing shape). Rule of thumb: if the solution sketches as a table with a version
+column, use the table. When one of those shapes fits, don't hand-roll a `Channel` + loop or a
+lock-guarded singleton — that's `Elarion.Actors`:
 
 ```csharp
 [Actor]                              // requires [assembly: GenerateActors] (or [UseElarion])
