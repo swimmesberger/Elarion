@@ -20,6 +20,9 @@ MyApp.sln
 
 The boundary that matters: **the application project declares intent; the host wires platform
 capabilities.** See [Dependency rules](#dependency-rules) below for where each kind of code belongs.
+The whole layout can also collapse into a **single project** — the bootstrapper discovers handlers in
+the host compilation too, so `Program`, the modules, and the trigger can share one csproj
+(`samples/LiveQuotes` is that shape); the split above is simply the layout that grows well.
 
 <Callout type="info">
   `MyApp.Domain` above is shown as a separate project, but for a **single bounded context** a
