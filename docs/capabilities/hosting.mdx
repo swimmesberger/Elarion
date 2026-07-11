@@ -104,6 +104,12 @@ ungated map: a host that conceptually has "no modules" simply declares a single 
 path. Handlers whose namespace falls under no module are reported (`ELHTTP003`/`ELRPC001`) so they are
 never silently dropped. The `ELRPC001` message now refers to `[Handler]`.
 
+The bootstrapper discovers modules and handlers both from **referenced module assemblies** (through
+their per-assembly Elarion manifests) and from the **host compilation itself**, so the project layout is
+your choice: the multi-project layout shown above, or a single project where `Program`, the
+`[AppModule]` declarations, and every handler live in one csproj with
+`[assembly: GenerateModuleBootstrapper]`. Both wire identically.
+
 ## What the host still owns
 
 Mapping the endpoint does not move platform concerns into the framework. The host remains responsible
