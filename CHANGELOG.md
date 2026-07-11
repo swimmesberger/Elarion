@@ -9,6 +9,19 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **`samples/LiveQuotes` — the realtime middle-ground sample.** A simulated market-data feed (~100
+  ticks/s) streamed through single-homed, per-symbol in-memory actors that conflate to human-readable
+  rates and push resource-scoped client events to browsers over SSE — zero database, zero broker, one
+  `dotnet run`. Demonstrates actor "shape 2" end-to-end (feed as a hosted service calling typed facades
+  in-process — deliberately not integration events; sequence-guarded ordering; conflation;
+  converge-then-stream on the client) with clock-deterministic, Docker-free tests and a README covering
+  the worker/web multi-node topology.
+
+### Fixed
+- **Actor facades preserve nullable reference annotations.** A method returning `Task<T?>` (or taking a
+  nullable reference parameter) lost the `?` in the generated facade and work item, failing CS8603 under
+  warnings-as-errors; the registration generator now renders method results and parameters with the
+  nullable modifier.
 - **Actor state snapshotting (ADR-0047).** Declaring an `IActorState<TState>` constructor parameter gives
   an `[Actor]` durable, snapshot-persisted state: loaded before `OnActivateAsync`, persisted only by
   explicit `WriteStateAsync` (passivation never flushes), cleared by `ClearStateAsync`, refreshed by

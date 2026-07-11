@@ -13,6 +13,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "samples/Billing/web", "run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "livequotes",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "samples/LiveQuotes/LiveQuotes.Api", "-c", "Release", "--no-build"],
+      "port": 5210
     }
   ]
 }

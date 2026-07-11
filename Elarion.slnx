@@ -70,6 +70,9 @@
     <Project Path="samples/Billing/Billing.AppHost/Billing.AppHost.csproj" />
     <Project Path="samples/Billing/Billing.Web/Billing.Web.csproj" />
     <Project Path="samples/Billing/Billing.Tests/Billing.Tests.csproj" />
+    <Project Path="samples/LiveQuotes/LiveQuotes.Api/LiveQuotes.Api.csproj" />
+    <Project Path="samples/LiveQuotes/LiveQuotes.Application/LiveQuotes.Application.csproj" />
+    <Project Path="samples/LiveQuotes/LiveQuotes.Tests/LiveQuotes.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Elarion.Benchmarks/Elarion.Benchmarks.csproj" />

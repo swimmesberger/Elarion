@@ -585,6 +585,10 @@ something the database structurally cannot be.** That happens in exactly three s
    browsers via [client events](/docs/capabilities/events/client-events); a write-behind buffer that
    coalesces many small events into one periodic DB flush. The defining property is **loss on restart is
    acceptable or naturally recovered** — which is why these actors usually need *no* snapshot state.
+   The worked, runnable example is
+   [`samples/LiveQuotes`](https://github.com/swimmesberger/Elarion/tree/main/samples/LiveQuotes): a
+   simulated market feed → conflating per-symbol actors → SSE pushes, with zero database and zero
+   broker — including the feed-not-events rule, the sequence guard, and the multi-node topology notes.
 3. **A long-lived, event-driven decision process** — a coordinator that reacts to many integration events
    over time, holds a small decision state, and must act **exactly once** (the Billing sample's dunning
    escalation latch). This is the only shape that combines with

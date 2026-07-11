@@ -1,0 +1,50 @@
+using System.Security.Claims;
+using Elarion.Abstractions.ClientEvents;
+using Elarion.AspNetCore;
+using Elarion.AspNetCore.Identity;
+using Elarion.ClientEvents.AspNetCore;
+using LiveQuotes.Api;
+using LiveQuotes.Application.Modules.Market;
+
+// LiveQuotes: the Elarion realtime middle ground. A simulated market feed pumps ~100 ticks/s through
+// single-homed in-memory actors; each actor conflates its stream and pushes updates to browsers over
+// SSE. The hot path — feed → actor → client event → browser — touches no database, no broker, no cache:
+// one process you can read in an afternoon and run with `dotnet run`.
+
+var builder = WebApplication.CreateSlimBuilder(args);
+
+builder.Services.AddSingleton(TimeProvider.System);
+
+// Transport-neutral current user, filled from the authenticated principal. Client-event subscriptions
+// are fail-closed and require an authenticated user, so even this open demo carries a principal.
+builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");
+
+// Resource-scoped subscriptions ({topic, resource: symbol}) consult this seam — fail-closed without it.
+builder.Services.AddScoped<IClientEventSubscriptionAuthorizer, MarketSubscriptionAuthorizer>();
+
+// Compose the Market module: its actors, the generated market.quoteChanged topic, the feed hosted
+// service, and the /quotes handlers — all gated by Modules:Market:Enabled. On a multi-node deployment
+// this switch IS the placement: enable the module on the worker, disable it on web nodes, and route
+// /quotes/* + /events to the worker at the ingress.
+builder.Services.AddElarion(builder.Configuration);
+
+// Mirror canonical JSON onto minimal-API binding (reflection-free route/body binding for [HttpEndpoint]).
+builder.Services.AddElarionHttpJson();
+
+var app = builder.Build();
+
+// Demo principal: every request runs as a fixed authenticated user so the sample needs no issuer.
+// Replace with your real authentication (JWT bearer, Identity, …) — see samples/Billing for both.
+app.Use(async (context, next) => {
+    context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "demo-user")], "Demo"));
+    await next();
+});
+app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
+
+app.UseDefaultFiles();
+app.UseStaticFiles();          // the demo dashboard (wwwroot/index.html)
+
+app.MapElarionEndpoints(app.Configuration);   // generated [HttpEndpoint] routes: GET /quotes, GET /quotes/{symbol}
+app.MapElarionClientEvents("/events");        // the SSE stream: ?subscriptions=[{"topic":"market.quoteChanged","resource":"ELN"}]
+
+app.Run();

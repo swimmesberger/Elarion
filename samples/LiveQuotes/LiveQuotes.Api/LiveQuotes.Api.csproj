@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>LiveQuotes sample — the Elarion realtime middle ground: a simulated market-data feed streamed through single-homed in-memory actors and pushed to browsers over SSE, with zero database and zero external infrastructure. One process, one small team, no Kafka.</Description>
+  </PropertyGroup>
+
+  <!-- Deliberately tiny: no EF, no outbox, no cache, no broker. The hot path — feed → actor → client
+       event → browser — touches no database at all (the state is transient by contract), which is the
+       point of the sample. The module code lives in LiveQuotes.Application: the host's generated
+       bootstrapper composes handlers/actors/topics from REFERENCED assemblies' manifests, so the
+       module assembly is not just style — it is how the transports get mapped. Compare
+       samples/Billing for the full layered application shape. -->
+  <ItemGroup>
+    <ProjectReference Include="..\LiveQuotes.Application\LiveQuotes.Application.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.ClientEvents.AspNetCore\Elarion.ClientEvents.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <!-- The host runs the Elarion generator to emit the module bootstrapper (AddElarion,
+       MapElarionEndpoints, …). Building from source we reference the generator project as an
+       analyzer; consuming Elarion from NuGet it ships inside the package. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

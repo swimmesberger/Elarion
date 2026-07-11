@@ -71,6 +71,37 @@ public sealed class ActorRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateActors_NullableReferenceResultAndParameters_PreserveTheAnnotation() {
+        // Regression: a method returning Task<T?> (or taking a nullable reference parameter) must
+        // flow the annotation into the facade and work item — dropping it makes the generated
+        // `return await actor.Method(...)` fail CS8603 under warnings-as-errors.
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record Quote(decimal Price);
+
+                [Elarion.Actors.Actor]
+                public sealed class QuoteActor {
+                    public System.Threading.Tasks.Task<Quote?> Current() =>
+                        System.Threading.Tasks.Task.FromResult<Quote?>(null);
+
+                    public System.Threading.Tasks.Task Tag(string? note) =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        generated.Should().Contain(
+            "global::System.Threading.Tasks.Task<global::Sample.Orders.Quote?> Current(");
+        generated.Should().Contain(
+            "global::Elarion.Actors.ActorWorkItem<global::Sample.Orders.QuoteActor, global::Sample.Orders.Quote?>");
+        generated.Should().Contain("Tag(string? note,");
+    }
+
+    [Fact]
     public void GenerateActors_SingleHomed_FlowsIntoTheRegistrationOptions() {
         var source = CreateSource(
             """
