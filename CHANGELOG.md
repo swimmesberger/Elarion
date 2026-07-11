@@ -9,6 +9,15 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **`[AllowAnyResource]` — declare a client-event topic's resource segment a routing key.** Resource-scoped
+  subscriptions stay fail-closed by default, but a topic whose resource merely selects which events to
+  receive (a stock symbol, a public room id — not an entitlement) now declares that on the contract
+  (`[AllowAnyResource]`, or `AllowAnyResource()` on the topic options): callers passing the topic's
+  requirements subscribe to any resource without the `IClientEventSubscriptionAuthorizer` seam. Per-topic
+  by design — the authorizer seam is global, so a blanket `return true` implementation would silently open
+  every future entitlement-scoped topic; the seam now stays reserved for genuine per-resource entitlement
+  checks. The generator flows the attribute into the topic registration, and `samples/LiveQuotes` drops its
+  allow-all authorizer for the declaration.
 - **The role-holder proxy (ADR-0050) — an in-app ingress rule for homogeneous fleets.**
   `app.UseElarionRoleHolderProxy("actors", "/quotes", …)` lets every instance serve the listed path
   prefixes by transparently forwarding them to the current role-lease holder when the instance is not

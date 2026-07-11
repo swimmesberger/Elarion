@@ -1,10 +1,8 @@
 using System.Security.Claims;
-using Elarion.Abstractions.ClientEvents;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.ClientEvents.AspNetCore;
 using LiveQuotes.Api;
-using LiveQuotes.Api.Modules.Market;
 
 // LiveQuotes: the Elarion realtime middle ground. A simulated market feed pumps ~100 ticks/s through
 // single-homed in-memory actors; each actor conflates its stream and pushes updates to browsers over
@@ -19,8 +17,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 // are fail-closed and require an authenticated user, so even this open demo carries a principal.
 builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");
 
-// Resource-scoped subscriptions ({topic, resource: symbol}) consult this seam — fail-closed without it.
-builder.Services.AddScoped<IClientEventSubscriptionAuthorizer, MarketSubscriptionAuthorizer>();
+// Resource-scoped subscriptions ({topic, resource: symbol}) are fail-closed by default, but the
+// QuoteChanged contract declares [AllowAnyResource] — a symbol is a routing key, not an entitlement —
+// so no IClientEventSubscriptionAuthorizer is registered. That seam stays for per-resource entitlements.
 
 // Multi-instance readiness (ADR-0050): advertise this instance's address so a role lease can publish
 // it. Costs nothing here — nothing consumes it until a lease is registered.

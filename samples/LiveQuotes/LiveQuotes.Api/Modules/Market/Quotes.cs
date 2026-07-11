@@ -13,11 +13,15 @@ public sealed record Quote(string Symbol, decimal Price, decimal ChangePercent, 
 /// <summary>
 /// The realtime push contract, topic <c>market.quoteChanged</c> (inferred from module + type name).
 /// Published <b>resource-scoped per symbol</b>, so a browser subscribes to exactly the symbols it
-/// displays. This is the ephemeral client-event tier: the payload carries the value itself, because
+/// displays. <c>[AllowAnyResource]</c> declares the symbol a routing key, not an entitlement: any
+/// authenticated user may watch any symbol, and no <c>IClientEventSubscriptionAuthorizer</c> is needed —
+/// that seam stays reserved for topics whose resource genuinely gates access (per-tenant data).
+/// This is the ephemeral client-event tier: the payload carries the value itself, because
 /// there is deliberately nothing in a database to re-query — a missed event is superseded by the next
 /// one (at-most-once by design). On (re)connect the client fetches current values from
 /// <c>GET /quotes</c> and then applies pushes: converge, then stream.
 /// </summary>
+[AllowAnyResource]
 public sealed record QuoteChanged : IClientEvent {
     public required string Symbol { get; init; }
 

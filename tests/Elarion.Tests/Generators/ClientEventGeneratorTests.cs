@@ -88,6 +88,39 @@ public sealed class ClientEventGeneratorTests {
     }
 
     [Fact]
+    public void AllowAnyResourceAttributeEmitsTheOptionsCall() {
+        const string source = Preamble +
+            """
+
+            namespace Sample.Market {
+                [AppModule("Market")]
+                public static partial class MarketModule { }
+
+                // Resource segment declared a routing key — alone and combined with a requirement.
+                [AllowAnyResource]
+                public sealed record QuoteChanged : IClientEvent {
+                    public required string Symbol { get; init; }
+                }
+
+                [AllowAnyResource]
+                [RequireRole("trader")]
+                public sealed record OrderBookChanged : IClientEvent {
+                    public required string Symbol { get; init; }
+                }
+            }
+            """;
+
+        var extensions = GetGenerated(Generate(source), "MarketClientEventExtensions.g.cs");
+
+        extensions.Should().Contain(
+            "events.AddTopic<global::Sample.Market.QuoteChanged>(\"market.quoteChanged\", static topic => topic");
+        extensions.Should().Contain(".AllowAnyResource());");
+        extensions.Should().Contain(
+            "events.AddTopic<global::Sample.Market.OrderBookChanged>(\"market.orderBookChanged\", static topic => topic");
+        extensions.Should().Contain(".RequireRole(\"trader\")");
+    }
+
+    [Fact]
     public void ReportsElcev001WhenEventNotInAnyModule() {
         const string source = Preamble +
             """

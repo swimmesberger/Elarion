@@ -27,6 +27,7 @@ public sealed class ClientEventsBuilder {
             Name = name,
             EventType = typeof(TEvent),
             Requirements = options.BuildRequirements(),
+            AllowAnyResource = options.AllowsAnyResource,
         });
         return this;
     }

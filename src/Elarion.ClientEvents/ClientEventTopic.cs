@@ -18,4 +18,9 @@ public sealed record ClientEventTopic {
     /// <see cref="ClientEventTopicOptions"/>). A denied or unknown topic is reported as not found so the
     /// topic's existence is never leaked.</summary>
     public required AuthorizationRequirements Requirements { get; init; }
+
+    /// <summary>Whether the resource segment is a routing key rather than an entitlement: resource-scoped
+    /// subscriptions skip the <c>IClientEventSubscriptionAuthorizer</c> seam once the topic's requirements
+    /// pass. Defaults to <see langword="false"/> (fail-closed).</summary>
+    public bool AllowAnyResource { get; init; }
 }

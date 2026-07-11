@@ -26,7 +26,8 @@ namespace Elarion.ClientEvents.AspNetCore;
 /// <c>{"topic":"…","resource":"…?"}</c> — because <c>EventSource</c> cannot POST; changing the subscription
 /// set means reconnecting. Authorization is <b>fail-closed</b> at subscribe time: unauthenticated → 401;
 /// an unknown topic, a failed topic requirement, or a resource scope without a passing
-/// <see cref="IClientEventSubscriptionAuthorizer"/> → 404, so a topic's existence is never leaked. User
+/// <see cref="IClientEventSubscriptionAuthorizer"/> → 404, so a topic's existence is never leaked (a topic
+/// declaring <c>AllowAnyResource</c> skips the authorizer — its resource segment is a routing key). User
 /// scope is always the caller's own. Delivery is at-most-once.
 /// </para>
 /// </remarks>
@@ -109,10 +110,14 @@ public static class ClientEventEndpointsExtensions {
                 Topic = topic.Name,
                 Scope = ClientEventScope.Resource(request.Resource),
             };
-            // Resource scopes are fail-closed: no registered authorizer denies, and denial reads as not found.
-            var authorizer = services.GetService<IClientEventSubscriptionAuthorizer>();
-            if (authorizer is null || !await authorizer.AuthorizeAsync(subscription, cancellationToken)) {
-                return Results.NotFound();
+            // Resource scopes are fail-closed: no registered authorizer denies, and denial reads as not
+            // found. A topic declaring AllowAnyResource has said "the resource is a routing key, not an
+            // entitlement" — its requirements already passed above, so the seam is skipped.
+            if (!topic.AllowAnyResource) {
+                var authorizer = services.GetService<IClientEventSubscriptionAuthorizer>();
+                if (authorizer is null || !await authorizer.AuthorizeAsync(subscription, cancellationToken)) {
+                    return Results.NotFound();
+                }
             }
             resolved.Add(subscription);
         }

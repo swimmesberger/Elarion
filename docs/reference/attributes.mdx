@@ -791,7 +791,7 @@ See [Authorization](/docs/concepts/authorization).
 ### `[GenerateClientEventTopics]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** runs the `ClientEventRegistrationGenerator` to register a topic per `IClientEvent` contract: grouped under its owning `[AppModule]` by longest-prefix namespace match, the topic named `{module}.{name}` (both camel-cased, a trailing `Event` suffix stripped; `[ClientEvent("…")]` overrides the full name), with the contract's `[RequirePermission]`/`[RequireRole]` attributes becoming subscribe-time requirements. Emits `Add{Module}ClientEvents(IServiceCollection)` wired into the module's `ConfigureDefaultServices`, so a topic exists just by declaring the contract and disappears with the module's feature gate. Marker only — no parameters. Subsumed by `[UseElarion]`, or apply it standalone. Diagnostics `ELCEV001` (contract outside any `[AppModule]`) / `ELCEV002` (duplicate topic name) / `ELCEV003` (contracts declared but `Elarion.ClientEvents` not referenced).
+- **Triggers:** runs the `ClientEventRegistrationGenerator` to register a topic per `IClientEvent` contract: grouped under its owning `[AppModule]` by longest-prefix namespace match, the topic named `{module}.{name}` (both camel-cased, a trailing `Event` suffix stripped; `[ClientEvent("…")]` overrides the full name), with the contract's `[RequirePermission]`/`[RequireRole]` attributes becoming subscribe-time requirements and `[AllowAnyResource]` declaring the resource segment a routing key. Emits `Add{Module}ClientEvents(IServiceCollection)` wired into the module's `ConfigureDefaultServices`, so a topic exists just by declaring the contract and disappears with the module's feature gate. Marker only — no parameters. Subsumed by `[UseElarion]`, or apply it standalone. Diagnostics `ELCEV001` (contract outside any `[AppModule]`) / `ELCEV002` (duplicate topic name) / `ELCEV003` (contracts declared but `Elarion.ClientEvents` not referenced).
 
 ```csharp
 [assembly: GenerateClientEventTopics]
@@ -807,6 +807,18 @@ See [Client events](/docs/capabilities/events/client-events).
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `name` | `string` (ctor) → `Name` | required | The full topic name clients subscribe to (e.g. `"invoicing.invoiceChanged"`). |
+
+### `[AllowAnyResource]`
+
+- **Package:** `Elarion.Abstractions` (ClientEvents) · **Applies to:** class (single, not inherited)
+- **Triggers:** declares the resource segment of this `IClientEvent` contract's topic a **routing key, not an entitlement**: any caller passing the topic's subscribe-time requirements (authenticated, plus any `[RequirePermission]`/`[RequireRole]` on the contract) may subscribe to any resource of this topic, without consulting the `IClientEventSubscriptionAuthorizer` seam. Without it, resource-scoped subscriptions stay **fail-closed** (denied unless a registered authorizer approves). Deliberately per-topic so a future entitlement-scoped topic is never silently opened by a global "allow everything" authorizer. Imperative form: `AllowAnyResource()` on the topic options in `AddElarionClientEvents`. Marker only — no parameters.
+
+```csharp
+[AllowAnyResource]   // the symbol selects which events to receive; it gates nothing
+public sealed record QuoteChanged : IClientEvent { /* … */ }
+```
+
+See [Client events](/docs/capabilities/events/client-events).
 
 ### `[GenerateVariantCatalog]`
 

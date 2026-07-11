@@ -7,10 +7,12 @@ namespace Elarion.Abstractions.ClientEvents;
 /// </summary>
 /// <remarks>
 /// The seam is <b>fail-closed</b>: a resource-scoped subscription is denied when no authorizer is registered
-/// or when the authorizer returns <see langword="false"/>. Global and user scopes never consult this seam —
-/// user scope is always derived from the authenticated user and cannot name someone else. Subscribe-time
-/// checks are a UX projection, never the security boundary: the data itself is only ever fetched through
-/// handlers carrying the real authorization gates.
+/// or when the authorizer returns <see langword="false"/>. Topics whose resource segment is a routing key
+/// rather than an entitlement declare <see cref="AllowAnyResourceAttribute"/> and never reach this seam —
+/// keep implementations to genuine per-resource entitlement checks. Global and user scopes never consult
+/// this seam — user scope is always derived from the authenticated user and cannot name someone else.
+/// Subscribe-time checks are a UX projection, never the security boundary: the data itself is only ever
+/// fetched through handlers carrying the real authorization gates.
 /// </remarks>
 public interface IClientEventSubscriptionAuthorizer {
     /// <summary>Returns whether the current user may observe <paramref name="subscription"/>.</summary>

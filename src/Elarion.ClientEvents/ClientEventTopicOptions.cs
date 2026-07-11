@@ -26,6 +26,19 @@ public sealed class ClientEventTopicOptions {
         return this;
     }
 
+    /// <summary>
+    /// Declares the resource segment of this topic a routing key, not an entitlement: any caller passing the
+    /// topic's requirements may subscribe to any resource, without consulting the
+    /// <c>IClientEventSubscriptionAuthorizer</c> seam. Without it, resource-scoped subscriptions stay
+    /// fail-closed. Declarative form: <c>[AllowAnyResource]</c> on the contract.
+    /// </summary>
+    public ClientEventTopicOptions AllowAnyResource() {
+        AllowsAnyResource = true;
+        return this;
+    }
+
+    internal bool AllowsAnyResource { get; private set; }
+
     internal AuthorizationRequirements BuildRequirements() =>
         new(AllowAnonymous: false,
             RequireAuthenticated: true,

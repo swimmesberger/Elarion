@@ -122,7 +122,27 @@ caller — a client cannot ask for someone else's. Control signals are named eve
 the stream opens (every occurrence means "you may have missed events" — re-query) and `elarion.keepAlive`
 on idle so proxies keep the connection open.
 
-Resource scopes need one policy class — without it, every resource subscription is denied:
+Resource scopes are fail-closed, and the framework distinguishes the two things a resource key can be:
+
+**A routing key.** When the resource merely selects *which* events to receive — a stock symbol, a public
+room id — declare it on the contract and no authorizer is involved:
+
+```csharp
+[AllowAnyResource]   // "the symbol is a routing key, not an entitlement"
+public sealed record QuoteChanged : IClientEvent {
+    public required string Symbol { get; init; }
+    // …
+}
+```
+
+Any caller who passes the topic's other requirements (authenticated, plus any `[RequirePermission]`/
+`[RequireRole]` on the contract) may subscribe to any resource of *this* topic. The declaration is
+deliberately per-topic: a global "allow everything" authorizer would silently open every future
+resource-scoped topic too. (Imperative form: `AllowAnyResource()` on the topic options in
+`AddElarionClientEvents`.)
+
+**An entitlement.** When the resource gates *who* may observe it — "customer 42's invoices" — implement
+the authorizer; without it (and without `[AllowAnyResource]`), every resource subscription is denied:
 
 ```csharp
 // "May the current user observe customer:42?" — resolved from the request scope like any scoped service.

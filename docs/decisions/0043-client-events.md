@@ -117,7 +117,12 @@ two planes explain themselves.
   changing the subscription set reconnects. Server-side filtered: `User` scope is always derived from
   `ICurrentUser` — a client can never request another user's scope. `Resource` scope goes through an
   `IClientEventSubscriptionAuthorizer` seam and is **fail-closed**: no authorizer registered → resource
-  subscriptions denied. Module-gated: a disabled module's topics do not exist.
+  subscriptions denied. *Addendum (2026-07-11):* a topic whose resource segment is a **routing key, not an
+  entitlement** (a stock symbol, a public room id) declares `[AllowAnyResource]` on the contract (or
+  `AllowAnyResource()` on the topic options) and skips the seam once the topic's requirements pass —
+  per-topic by design, because the authorizer seam is global and a blanket `return true` implementation
+  would silently open every future entitlement-scoped topic. Module-gated: a disabled module's topics do
+  not exist.
 - **Cross-node fan-out** (`Elarion.ClientEvents.PostgreSql`): LISTEN/NOTIFY, copying the ADR-0024 listener —
   one dedicated connection per node, `pg_notify` on a pooled connection per publish (no transaction gating
   needed: the recommended producer already runs after commit, and the direct-publish tier is pre-commit by
