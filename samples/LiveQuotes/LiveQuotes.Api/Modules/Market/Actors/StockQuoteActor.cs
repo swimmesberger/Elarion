@@ -1,7 +1,7 @@
 using Elarion.Abstractions.ClientEvents;
 using Elarion.Actors;
 
-namespace LiveQuotes.Application.Modules.Market.Actors;
+namespace LiveQuotes.Api.Modules.Market.Actors;
 
 /// <summary>
 /// One symbol's live quote — the actor "shape 2" from the

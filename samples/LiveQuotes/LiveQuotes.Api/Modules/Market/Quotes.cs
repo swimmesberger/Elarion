@@ -1,6 +1,6 @@
 using Elarion.Abstractions.ClientEvents;
 
-namespace LiveQuotes.Application.Modules.Market;
+namespace LiveQuotes.Api.Modules.Market;
 
 /// <summary>One update from the (simulated) upstream feed. The feed's sequence number travels with the
 /// price: the actor's mailbox serializes <em>processing</em>, the sequence number preserves the feed's

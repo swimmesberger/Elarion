@@ -12,6 +12,6 @@
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../LiveQuotes.Application/LiveQuotes.Application.csproj" />
+    <ProjectReference Include="../LiveQuotes.Api/LiveQuotes.Api.csproj" />
   </ItemGroup>
 </Project>

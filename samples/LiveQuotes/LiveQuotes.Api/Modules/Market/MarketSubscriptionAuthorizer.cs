@@ -1,6 +1,6 @@
 using Elarion.Abstractions.ClientEvents;
 
-namespace LiveQuotes.Application.Modules.Market;
+namespace LiveQuotes.Api.Modules.Market;
 
 /// <summary>
 /// Resource-scoped subscriptions are <b>fail-closed</b>: without an authorizer, subscribing

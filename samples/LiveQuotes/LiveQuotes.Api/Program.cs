@@ -4,7 +4,7 @@ using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.ClientEvents.AspNetCore;
 using LiveQuotes.Api;
-using LiveQuotes.Application.Modules.Market;
+using LiveQuotes.Api.Modules.Market;
 
 // LiveQuotes: the Elarion realtime middle ground. A simulated market feed pumps ~100 ticks/s through
 // single-homed in-memory actors; each actor conflates its stream and pushes updates to browsers over

@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
-using LiveQuotes.Application.Modules.Market.Handlers;
+using LiveQuotes.Api.Modules.Market.Handlers;
 
-namespace LiveQuotes.Application.Modules.Market;
+namespace LiveQuotes.Api.Modules.Market;
 
 // Reflection-free serialization for everything this module puts on a wire: the handler DTOs and the
 // client-event payload (QuoteChanged rides the SSE stream as canonical JSON).

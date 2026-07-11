@@ -1,9 +1,9 @@
 using Elarion.Abstractions;
 using Elarion.Actors;
-using LiveQuotes.Application.Modules.Market.Actors;
-using LiveQuotes.Application.Modules.Market.Feed;
+using LiveQuotes.Api.Modules.Market.Actors;
+using LiveQuotes.Api.Modules.Market.Feed;
 
-namespace LiveQuotes.Application.Modules.Market.Handlers;
+namespace LiveQuotes.Api.Modules.Market.Handlers;
 
 /// <summary>All configured symbols' current values — the initial page load. Each read is one mailbox
 /// hop; at a configuration-sized symbol list that is exactly as cheap as it sounds.</summary>

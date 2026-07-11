@@ -84,12 +84,10 @@ jobs, and event consumers, and gate all of it per module (`Modules:{Name}:Enable
 disabled, or a build diagnostic you skipped — never a missing `AddScoped`.
 
 Host wiring is a few generated calls (copy the current form from the quickstart doc — these names
-have evolved before). **The host/module project split is load-bearing, not style**: the bootstrapper
-composes its transport maps from *referenced assemblies'* manifests, so handlers/actors declared in
-the same project as `[GenerateModuleBootstrapper]` register their services but silently never reach
-`MapElarionEndpoints`/`RegisterHandlers` (every route 404s). Always scaffold two projects — host
-(`Program.cs` + the trigger) and a referenced application project holding the modules — even for a
-tiny app:
+have evolved before). Project layout is your choice: the bootstrapper discovers handlers from
+referenced module assemblies **and from the host compilation itself**, so a tiny app can be one
+project (`Program.cs` + modules + the trigger — `samples/LiveQuotes` is that shape); prefer the
+host + application split (`samples/Billing`) as the app grows:
 
 ```csharp
 [assembly: GenerateModuleBootstrapper]                              // once, in the host

@@ -38,18 +38,6 @@ and per-module transport extension methods (`Map{Module}Http`, `Add{Module}Handl
 and the parameterless `Get{Module}McpMetadata` for every module that owns `[HttpEndpoint]` / `[Handler]`
 handlers.
 
-<Callout type="warn" title="Module code must live in a referenced assembly — the host/module split is load-bearing">
-The bootstrapper composes its transport maps from **referenced assemblies' manifests**. Handlers and
-actors declared in the *same* project as `[assembly: GenerateModuleBootstrapper]` get their DI
-registrations (the per-module `Add…` extensions are emitted and wired), but they never reach
-`MapElarionEndpoints` / `RegisterHandlers` / the MCP metadata — a single-project host compiles cleanly
-and then **silently 404s every route**. Keep the host project to `Program.cs`, host wiring, and the
-bootstrapper trigger; put modules in a referenced class library, even for a small app (the
-`MyApp.Api` + `MyApp.Application` shape above — see `samples/LiveQuotes` for the minimal two-project
-version). This is a known limitation of the current generator composition and may be lifted later;
-until then, treat the split as required, not stylistic.
-</Callout>
-
 All transports are **module-scoped and feature-flag-gated** through the bootstrapper: a module disabled
 with `Modules:{Name}:Enabled = false` has its services, validation metadata, `MapEndpoints`, `[HttpEndpoint]` routes,
 `[Handler]` JSON-RPC methods, **and** MCP tools all left unmapped, so a disabled module disappears across

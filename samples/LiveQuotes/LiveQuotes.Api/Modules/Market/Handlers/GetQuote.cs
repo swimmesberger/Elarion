@@ -1,8 +1,8 @@
 using Elarion.Abstractions;
 using Elarion.Actors;
-using LiveQuotes.Application.Modules.Market.Actors;
+using LiveQuotes.Api.Modules.Market.Actors;
 
-namespace LiveQuotes.Application.Modules.Market.Handlers;
+namespace LiveQuotes.Api.Modules.Market.Handlers;
 
 /// <summary>
 /// The pull-based read of one symbol — the "converge" half of converge-then-stream: the demo page calls

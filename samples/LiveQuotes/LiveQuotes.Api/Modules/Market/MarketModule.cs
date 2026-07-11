@@ -1,10 +1,10 @@
 using System.Text.Json.Serialization.Metadata;
 using Elarion.Abstractions.Modules;
-using LiveQuotes.Application.Modules.Market.Feed;
+using LiveQuotes.Api.Modules.Market.Feed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace LiveQuotes.Application.Modules.Market;
+namespace LiveQuotes.Api.Modules.Market;
 
 /// <summary>
 /// The market-data module. Everything realtime lives under it — the actors, the feed, the client-event

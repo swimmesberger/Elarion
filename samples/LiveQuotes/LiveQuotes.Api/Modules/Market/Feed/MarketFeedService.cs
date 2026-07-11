@@ -1,9 +1,9 @@
 using Elarion.Actors;
-using LiveQuotes.Application.Modules.Market.Actors;
+using LiveQuotes.Api.Modules.Market.Actors;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace LiveQuotes.Application.Modules.Market.Feed;
+namespace LiveQuotes.Api.Modules.Market.Feed;
 
 /// <summary>Configures the simulated feed (read from the <c>Market</c> configuration section).</summary>
 public sealed class MarketFeedOptions {
