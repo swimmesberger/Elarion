@@ -257,6 +257,7 @@ High-value pages (paths under `/docs/`, same layout in the repo's `docs/`):
 | REST / JSON-RPC / MCP / OpenAPI | `capabilities/transports/` |
 | Validation / authorization | `concepts/validation`, `concepts/authorization`, `concepts/resource-authorization` |
 | EF, transactions, pagination | `capabilities/entity-framework`, `concepts/persistence-and-transactions`, `capabilities/pagination` |
+| Bulk insert (imports, backfills) | `capabilities/bulk-operations` |
 | Events, outbox, idempotency | `capabilities/events/`, `concepts/idempotency` |
 | Client events (browser push / SSE) | `capabilities/events/client-events` |
 | Errors | `concepts/results-and-errors` |

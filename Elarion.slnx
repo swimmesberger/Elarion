@@ -27,6 +27,7 @@
     <Project Path="src/Elarion.Blobs.PostgreSql/Elarion.Blobs.PostgreSql.csproj" />
     <Project Path="src/Elarion.Blobs.PostgreSql.Generators/Elarion.Blobs.PostgreSql.Generators.csproj" />
     <Project Path="src/Elarion.Blobs.Tus/Elarion.Blobs.Tus.csproj" />
+    <Project Path="src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj" />
     <Project Path="src/Elarion.Caching/Elarion.Caching.csproj" />
     <Project Path="src/Elarion.Caching.PostgreSql/Elarion.Caching.PostgreSql.csproj" />
     <Project Path="src/Elarion.ClientEvents/Elarion.ClientEvents.csproj" />
@@ -46,6 +47,7 @@
     <Project Path="src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj" />
     <Project Path="src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
+    <Project Path="src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj" />
     <Project Path="src/Elarion.Idempotency.EntityFrameworkCore/Elarion.Idempotency.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Idempotency.EntityFrameworkCore.Generators/Elarion.Idempotency.EntityFrameworkCore.Generators.csproj" />

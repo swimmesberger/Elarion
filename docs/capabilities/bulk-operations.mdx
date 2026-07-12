@@ -1,0 +1,136 @@
+---
+title: Bulk operations
+description: Insert large entity sets at PostgreSQL COPY speed with a non-tracking, EF-native ExecuteInsertAsync.
+---
+
+`SaveChanges` is the right write path for handlers — change-tracked, batched, transactional. It is the
+wrong tool for *volume*: importing files, seeding, backfills, or projecting large event streams pushes
+tens of thousands of rows through a tracker that was built for tens. Elarion's bulk operations add one
+verb for that case:
+
+```csharp
+await context.Orders.ExecuteInsertAsync(orders, cancellationToken: ct);
+```
+
+On PostgreSQL this streams the entities through binary `COPY … FROM STDIN` — the database's native
+ingestion path. Measured against comparable libraries (see
+[ADR-0051](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0051-postgresql-bulk-insert.md)
+for the full table): ~12× faster than `SaveChanges` at 100k rows with ~0.5% of its allocations, at
+parity with a hand-written `NpgsqlBinaryImporter` loop.
+
+The API deliberately follows the design sketched for EF Core itself
+([dotnet/efcore#27333](https://github.com/dotnet/efcore/issues/27333),
+[#29897](https://github.com/dotnet/efcore/issues/29897)): it joins the `ExecuteUpdateAsync` /
+`ExecuteDeleteAsync` family — set-based, non-tracking, bypasses the change tracker — so if EF ships the
+native API, migrating is a rename.
+
+## Package split
+
+| Package | Use it in | Contains |
+| --- | --- | --- |
+| `Elarion.EntityFrameworkCore.BulkOperations` | Application code | `ExecuteInsertAsync` extensions on `DbSet<T>`, `BulkInsertOptions`, the `IBulkInsertProvider` seam, and the shared column-selection rules. Depends on EF Core relational APIs only. |
+| `Elarion.BulkOperations.PostgreSql` | Infrastructure / host | The binary-COPY provider and its `UseElarionPostgreSqlBulkOperations()` options-builder registration. |
+
+## Setup
+
+The provider registers on the context options — the same composition point as `UseNpgsql` itself, no
+service-collection call:
+
+```csharp
+services.AddDbContext<AppDbContext>(options => options
+    .UseNpgsql(connectionString)
+    .UseElarionPostgreSqlBulkOperations());
+```
+
+Calling `ExecuteInsertAsync` without a registered provider fails with the registration hint.
+
+## Usage
+
+```csharp
+// Materialized input
+long written = await context.Orders.ExecuteInsertAsync(orders, cancellationToken: ct);
+
+// Streaming input — rows are written as they are produced, nothing is materialized
+await context.Orders.ExecuteInsertAsync(ReadRowsAsync(file, ct), cancellationToken: ct);
+
+// Options bag
+await context.Orders.ExecuteInsertAsync(orders, new BulkInsertOptions { Timeout = TimeSpan.FromMinutes(5) }, ct);
+```
+
+### Upsert
+
+Conflict handling is opt-in per call — the default streams straight into the table (fastest, any
+conflict aborts all-or-nothing); the upsert behaviors stage through a temporary table and merge with
+PostgreSQL's native `ON CONFLICT`:
+
+```csharp
+// Skip rows that already exist (any unique constraint)
+await context.Counters.ExecuteInsertAsync(counters,
+    new BulkInsertOptions { OnConflict = BulkInsertConflictBehavior.DoNothing }, ct);
+
+// Overwrite existing rows (conflict target = primary key)
+await context.Counters.ExecuteInsertAsync(counters,
+    new BulkInsertOptions { OnConflict = BulkInsertConflictBehavior.Update }, ct);
+
+// Overwrite matched on an alternate unique index
+await context.Counters.ExecuteInsertAsync(counters,
+    new BulkInsertOptions {
+        OnConflict = BulkInsertConflictBehavior.Update,
+        ConflictProperties = [nameof(Counter.Key)],
+    }, ct);
+```
+
+`Update` sets every insertable non-target column to the incoming value. The conflict target must
+match a declared key or unique index — a mismatch throws before the database is touched. The staged
+path joins the ambient transaction like the direct path, and the returned count is the number of rows
+inserted or updated.
+
+### Transactions
+
+The COPY runs on the context's own connection, so an open transaction contains it — inside a handler,
+the framework unit of work already provides one and a failure rolls the bulk rows back together with
+every other write. COPY itself is all-or-nothing: any error (e.g. a unique violation) aborts the whole
+stream; partial rows are never left behind.
+
+### Semantics to know
+
+- **Non-tracking.** Inserted entities are not attached; nothing is written back to them.
+- **Store-generated columns stay store-generated.** Identity/serial keys, computed columns, and on-add
+  store defaults are omitted from the insert and filled by the database — and deliberately **not
+  fetched back** (the bulk-import tradeoff, same as the EF sketch). Client-side value generators do not
+  run either: callers assign keys, which Elarion entities do anyway (client-assigned v7 Guids,
+  ADR-0038).
+- **Value converters are honored** — enum-to-string, strongly-typed ids, and friends convert exactly as
+  `SaveChanges` would, compiled into the write path once per model.
+- **Complex properties (value objects) flatten**, including nesting; a null anywhere along an optional
+  chain nulls the columns. Entities without complex properties pay nothing for the capability.
+- **TPH works** (the discriminator constant is written per set); a derived instance passed through a
+  base-type set throws instead of silently dropping its columns.
+- **Fail-loud shapes**: TPT / entity splitting, owned types, JSON-mapped complex collections, and
+  non-discriminator shadow properties are not supported and throw before touching the database.
+- **RETURNING is out of scope** for now — fetching database-generated values back mirrors how the EF
+  team splits plain import from `ExecuteInsertReturning`, and client-assigned v7 Guid keys make it
+  rarely needed.
+
+## When to use which write path
+
+| Rows | Path |
+| --- | --- |
+| A handful, as part of domain work | `Add`/`AddRange` + `SaveChanges` — tracking, events, interceptors all apply |
+| Thousands to millions, import-shaped | `ExecuteInsertAsync` |
+
+Note that bulk-inserted rows bypass everything that hangs off the change tracker: audit change capture
+(`SaveChangesInterceptor`), domain events raised from tracked entities, and concurrency tokens. That is
+the point — but it means bulk insert is for *ingestion*, not for domain mutations that other machinery
+must observe.
+
+## Benchmarks
+
+`tests/Elarion.Benchmarks` contains the comparison suite (real PostgreSQL via Testcontainers):
+
+```bash
+dotnet run --project tests/Elarion.Benchmarks -c Release -- --filter "*BulkInsert*"
+```
+
+It compares `SaveChanges`, Elarion, EFCore.BulkExtensions (MIT fork), linq2db, PhenX, and a raw
+`NpgsqlBinaryImporter` ceiling.

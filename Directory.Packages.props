@@ -9,6 +9,11 @@
     <PackageVersion Include="AwesomeAssertions" Version="9.4.0" />
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <PackageVersion Include="BenchmarkDotNet.Diagnostics.dotTrace" Version="0.15.8" />
+    <!-- Bulk-insert benchmark competitors (tests/Elarion.Benchmarks only, never a src/ dependency).
+         Deliberately the MIT fork of EFCore.BulkExtensions — the upstream package is revenue-gated dual-license. -->
+    <PackageVersion Include="EFCore.BulkExtensions.MIT.PostgreSql" Version="10.22.0" />
+    <PackageVersion Include="linq2db.EntityFrameworkCore" Version="10.4.0" />
+    <PackageVersion Include="PhenX.EntityFrameworkCore.BulkInsert.PostgreSql" Version="0.5.0" />
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.29.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.9" />
