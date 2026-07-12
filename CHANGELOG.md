@@ -9,6 +9,25 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **PostgreSQL bulk insert (ADR-0051).** Two new packages bring an EF-native bulk path:
+  **`Elarion.EntityFrameworkCore.BulkOperations`** (provider-neutral) adds `ExecuteInsertAsync` over
+  `DbSet<T>` — set-based and non-tracking like EF's `ExecuteUpdate`/`ExecuteDelete` family, aligned with
+  the dotnet/efcore #27333/#29897 design sketches: `IEnumerable<T>` + streaming `IAsyncEnumerable<T>`
+  overloads, joins the ambient `Database.CurrentTransaction`, store-generated columns omitted and never
+  fetched back, value converters honored, complex properties (value objects) flattened with null
+  propagation, TPH discriminators written per set, and unsupported shapes (TPT, owned types, complex
+  collections, shadow properties) failing loud before the database is touched.
+  **`Elarion.BulkOperations.PostgreSql`** implements the `IBulkInsertProvider` seam over binary
+  `COPY … FROM STDIN`, registered EF-natively on the options builder
+  (`options.UseNpgsql(…).UseElarionPostgreSqlBulkOperations()`, no app-DI wiring) and running on the
+  context's own connection (all-or-nothing, rolls back with the caller's transaction). Compiled
+  per-column typed writers (converters inlined, cached per model) put it at raw-`NpgsqlBinaryImporter`
+  parity in time *and* allocations — ~12× `SaveChanges` at 100k rows with ~0.5% of its allocations,
+  benchmarked against EFCore.BulkExtensions (MIT fork), linq2db, and PhenX in `tests/Elarion.Benchmarks`
+  (`--filter "*BulkInsert*"`, real PostgreSQL via Testcontainers). Opt-in upsert via the options bag:
+  `OnConflict = DoNothing`/`Update` stages the COPY through a per-call temp table and merges with
+  `ON CONFLICT` (target defaults to the primary key; `ConflictProperties` selects an alternate unique
+  constraint, validated against the model) — the default direct path is untouched.
 - **Producer-side subscription lifecycle for client events — initial values and interest.** A topic can
   now declare an `IClientEventSubscriptionObserver` (`[SubscriptionObserver<T>]` on the contract, or
   `ObserveSubscriptions<T>()` on the topic options) with deliberately Rx-shaped semantics:

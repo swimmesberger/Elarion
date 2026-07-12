@@ -36,6 +36,8 @@
     <ProjectReference Include="../../src/Elarion.Blobs.Azure/Elarion.Blobs.Azure.csproj" />
     <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql/Elarion.Blobs.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Blobs.Tus/Elarion.Blobs.Tus.csproj" />
+    <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj" />
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj" />
     <ProjectReference Include="../../src/Elarion.ClientEvents/Elarion.ClientEvents.csproj" />
     <ProjectReference Include="../../src/Elarion.ClientEvents.AspNetCore/Elarion.ClientEvents.AspNetCore.csproj" />
     <ProjectReference Include="../../src/Elarion.ClientEvents.PostgreSql/Elarion.ClientEvents.PostgreSql.csproj" />

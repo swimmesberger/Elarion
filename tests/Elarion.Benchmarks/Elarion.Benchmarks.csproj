@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Micro-benchmarks for framework hot paths (currently the Elarion.Actors call path).
-       Results gate the ADR-0042 optimization roadmap; run instructions are in Program.cs. -->
+  <!-- Micro-benchmarks for framework hot paths (the Elarion.Actors call path — gating the ADR-0042
+       optimization roadmap — and the PostgreSQL bulk insert vs. comparable libraries, gating ADR-0051).
+       Run instructions are in Program.cs. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
@@ -15,10 +16,18 @@
          (the "profiler EP" switch) needs no package; EventPipeProfiler ships in the core package. See Program.cs. -->
     <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <!-- Bulk insert competitors (benchmark-only dependencies; the MIT fork of EFCore.BulkExtensions is
+         deliberate — the upstream package is revenue-gated dual-license). -->
+    <PackageReference Include="EFCore.BulkExtensions.MIT.PostgreSql" />
+    <PackageReference Include="linq2db.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="PhenX.EntityFrameworkCore.BulkInsert.PostgreSql" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj" />
+    <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj" />
   </ItemGroup>
 
 </Project>

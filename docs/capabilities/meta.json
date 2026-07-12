@@ -13,6 +13,7 @@
     "feature-flags",
     "events",
     "entity-framework",
+    "bulk-operations",
     "pagination",
     "blob-storage",
     "blob-uploads",
