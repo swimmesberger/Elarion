@@ -10,4 +10,5 @@ namespace LiveQuotes.Api.Modules.Market;
 [JsonSerializable(typeof(ListQuotes.Query), TypeInfoPropertyName = "ListQuotesQuery")]
 [JsonSerializable(typeof(ListQuotes.Response), TypeInfoPropertyName = "ListQuotesResponse")]
 [JsonSerializable(typeof(QuoteChanged))]
+[JsonSerializable(typeof(Quote))]
 public sealed partial class MarketJsonContext : JsonSerializerContext;

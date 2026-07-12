@@ -27,6 +27,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
     private const string TaskGenericMetadataName = "System.Threading.Tasks.Task`1";
     private const string ValueTaskMetadataName = "System.Threading.Tasks.ValueTask";
     private const string ValueTaskGenericMetadataName = "System.Threading.Tasks.ValueTask`1";
+    private const string AsyncEnumerableGenericMetadataName = "System.Collections.Generic.IAsyncEnumerable`1";
 
     // Facade signatures must preserve nullable reference annotations (a method returning
     // Task<Quote?> gets a work item and facade of Quote?, not Quote — the bare format drops the
@@ -43,6 +44,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
     private const string CancellationTokenFqn = "global::System.Threading.CancellationToken";
     private const string TaskFqn = "global::System.Threading.Tasks.Task";
     private const string ValueTaskFqn = "global::System.Threading.Tasks.ValueTask";
+    private const string AsyncEnumerableFqn = "global::System.Collections.Generic.IAsyncEnumerable";
 
     private static readonly DiagnosticDescriptor InvalidActorType = new(
         id: "ELACT001",
@@ -59,8 +61,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         title: "Invalid actor method",
         messageFormat:
         "Public method '{0}' on [Actor] class '{1}' cannot be exposed through the facade: actor methods "
-        + "must be non-generic instance methods returning Task/Task<T>/ValueTask/ValueTask<T>, without "
-        + "ref/out/in or ref-struct parameters and with at most one CancellationToken parameter",
+        + "must be non-generic instance methods returning Task/Task<T>/ValueTask/ValueTask<T>/IAsyncEnumerable<T>, "
+        + "without ref/out/in or ref-struct parameters and with at most one CancellationToken parameter",
         category: "Elarion.Generators",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -127,11 +129,24 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor InvalidActorStreamMethod = new(
+        id: "ELACT012",
+        title: "Invalid actor stream method",
+        messageFormat:
+        "The stream method '{0}' on actor '{1}' (returning IAsyncEnumerable<T>) must not take a "
+        + "CancellationToken and cannot be a [ConsumeEvent] consumer. The turn token's lifetime ends with "
+        + "the attach turn — using it inside the returned stream would observe a recycled token; "
+        + "cancellation flows through the enumerator instead (the facade adds the token parameter).",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     private enum ReturnShape {
         TaskVoid,
         TaskOfResult,
         ValueTaskVoid,
-        ValueTaskOfResult
+        ValueTaskOfResult,
+        AsyncEnumerable
     }
 
     private enum CtorParameterKind {
@@ -270,6 +285,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var taskGenericSymbol = compilation.GetTypeByMetadataName(TaskGenericMetadataName);
         var valueTaskSymbol = compilation.GetTypeByMetadataName(ValueTaskMetadataName);
         var valueTaskGenericSymbol = compilation.GetTypeByMetadataName(ValueTaskGenericMetadataName);
+        var asyncEnumerableSymbol = compilation.GetTypeByMetadataName(AsyncEnumerableGenericMetadataName);
         var cancellationTokenSymbol = compilation.GetTypeByMetadataName(CancellationTokenMetadataName);
         var contextSymbol = compilation.GetTypeByMetadataName(ActorContextMetadataName);
         var contextGenericSymbol = compilation.GetTypeByMetadataName(ActorContextGenericMetadataName);
@@ -425,6 +441,13 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                 resultTypeFqn = genericValueTask.TypeArguments[0]
                     .ToDisplayString(NullableAwareFullyQualifiedFormat);
             }
+            else if (asyncEnumerableSymbol is not null &&
+                     method.ReturnType is INamedTypeSymbol { IsGenericType: true } genericStream &&
+                     SymbolEqualityComparer.Default.Equals(genericStream.OriginalDefinition, asyncEnumerableSymbol)) {
+                shape = ReturnShape.AsyncEnumerable;
+                resultTypeFqn = genericStream.TypeArguments[0]
+                    .ToDisplayString(NullableAwareFullyQualifiedFormat);
+            }
             else {
                 diagnostics.Add(DiagnosticInfo.Create(
                     InvalidActorMethod, LocationInfo.From(method), method.Name, typeDisplay));
@@ -455,6 +478,14 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             if (invalid || cancellationTokenCount > 1) {
                 diagnostics.Add(DiagnosticInfo.Create(
                     InvalidActorMethod, LocationInfo.From(method), method.Name, typeDisplay));
+                continue;
+            }
+
+            // A stream method's turn only attaches the subscription; the turn token (a pooled CTS) must
+            // never leak into the returned stream, and a relay cannot await an IAsyncEnumerable.
+            if (shape == ReturnShape.AsyncEnumerable && (cancellationTokenCount > 0 || consumeAttribute is not null)) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    InvalidActorStreamMethod, LocationInfo.From(method), method.Name, typeDisplay));
                 continue;
             }
 
@@ -762,6 +793,17 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var arguments = string.Join(", ", method.Parameters
             .Where(static p => !p.IsCancellationToken)
             .Select(static p => p.Name));
+
+        if (method.Return is ReturnShape.AsyncEnumerable) {
+            // The attach turn is deferred until enumeration (once per enumeration); the facade token
+            // cancels the queued attach and, linked with the enumerator's token, the stream itself.
+            sb.AppendLine($"    public {FacadeReturnType(method)} {method.Name}({FacadeParameterList(method)}) =>");
+            sb.AppendLine($"        global::Elarion.Actors.Runtime.ActorStreams.Defer<{method.ResultTypeFqn}>(");
+            sb.AppendLine($"            elarionAttachToken => _handle.InvokeAsync({method.WorkItemClassName}.Rent({arguments}), elarionAttachToken),");
+            sb.AppendLine($"            {tokenName});");
+            return;
+        }
+
         var invoke = $"_handle.InvokeAsync({method.WorkItemClassName}.Rent({arguments}), {tokenName})";
         // Pass-through instead of an async/await wrapper (ADR-0042 roadmap): ValueTask shapes
         // return the handle's ValueTask directly; Task shapes call AsTask(), which on the handle's
@@ -774,9 +816,11 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
     }
 
     private static void AppendWorkItem(StringBuilder sb, ActorInfo actor, ActorMethodInfo method) {
-        var resultFqn = method.Return is ReturnShape.TaskVoid or ReturnShape.ValueTaskVoid
-            ? UnitFqn
-            : method.ResultTypeFqn;
+        var resultFqn = method.Return switch {
+            ReturnShape.TaskVoid or ReturnShape.ValueTaskVoid => UnitFqn,
+            ReturnShape.AsyncEnumerable => $"{AsyncEnumerableFqn}<{method.ResultTypeFqn}>",
+            _ => method.ResultTypeFqn,
+        };
         var dataParameters = method.Parameters.Where(static p => !p.IsCancellationToken).ToList();
 
         var poolFqn = $"global::Elarion.Actors.Runtime.ActorWorkItemPool<{method.WorkItemClassName}>";
@@ -821,6 +865,17 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine();
         var invokeArguments = string.Join(", ", method.Parameters
             .Select(static p => p.IsCancellationToken ? "cancellationToken" : $"_{p.Name}"));
+        if (method.Return is ReturnShape.AsyncEnumerable) {
+            // The attach turn is synchronous: the method subscribes and returns; the enumeration runs
+            // off the mailbox. The turn token is deliberately not passed (ELACT012 forbids the
+            // parameter). RetainActivation ties the activation's lifetime to the enumeration (refCount
+            // lifetime, ADR-0052): idle passivation never ends a live stream mid-flight.
+            sb.AppendLine($"        protected override global::System.Threading.Tasks.ValueTask<{resultFqn}> InvokeAsync({actor.ActorTypeFqn} actor, {CancellationTokenFqn} cancellationToken) =>");
+            sb.AppendLine($"            new(global::Elarion.Actors.Runtime.ActorStreams.RetainWhileEnumerating(actor.{method.Name}({invokeArguments}), RetainActivation()));");
+            sb.AppendLine("    }");
+            return;
+        }
+
         sb.AppendLine($"        protected override async global::System.Threading.Tasks.ValueTask<{resultFqn}> InvokeAsync({actor.ActorTypeFqn} actor, {CancellationTokenFqn} cancellationToken)");
         sb.AppendLine("        {");
         if (method.Return is ReturnShape.TaskVoid or ReturnShape.ValueTaskVoid) {
@@ -1021,6 +1076,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         ReturnShape.TaskVoid => TaskFqn,
         ReturnShape.TaskOfResult => $"{TaskFqn}<{method.ResultTypeFqn}>",
         ReturnShape.ValueTaskVoid => ValueTaskFqn,
+        ReturnShape.AsyncEnumerable => $"{AsyncEnumerableFqn}<{method.ResultTypeFqn}>",
         _ => $"{ValueTaskFqn}<{method.ResultTypeFqn}>"
     };
 

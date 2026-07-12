@@ -49,6 +49,12 @@ dotnet run --project samples/LiveQuotes/LiveQuotes.Api
   a database write per event — market ticks are neither durable nor business facts.
 - **`GetQuote`/`ListQuotes`** — the pull path reads through the facade (mailbox-serialized with the
   feed). Queries and pushes carry the same `Quote` shape.
+- **`/quotes/{symbol}/stream`** — the **ordered tier** (ADR-0052) next to the conflated hints: the actor
+  also publishes every accepted tick into a `StreamHub<Quote>` (256-tick replay ring) and exposes it as a
+  facade stream, mapped with `MapElarionStream`. `curl -N http://localhost:5210/quotes/ELN/stream` tails
+  the full sequence; the SSE `id:` is the stream sequence, so a browser `EventSource` reconnect resumes
+  gap-free within the ring (`Last-Event-ID`), and loss beyond it shows as a visible sequence jump. The
+  dashboard deliberately stays on client events — latest-wins is all a ticker needs.
 - **`wwwroot/index.html`** — discover-then-stream: fetch `/quotes` once for the symbol list, open one
   `EventSource` with one subscription per symbol; the greeting converges every (re)connect, and a
   `seq` guard resolves greeting-vs-live-push ordering.

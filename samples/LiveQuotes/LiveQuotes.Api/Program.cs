@@ -1,8 +1,12 @@
 using System.Security.Claims;
+using Elarion.Actors;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
+using Elarion.AspNetCore.Streams;
 using Elarion.ClientEvents.AspNetCore;
 using LiveQuotes.Api;
+using LiveQuotes.Api.Modules.Market;
+using LiveQuotes.Api.Modules.Market.Actors;
 
 // LiveQuotes: the Elarion realtime middle ground. A simulated market feed pumps ~100 ticks/s through
 // single-homed in-memory actors; each actor conflates its stream and pushes updates to browsers over
@@ -57,5 +61,16 @@ app.UseStaticFiles();          // the demo dashboard (wwwroot/index.html)
 
 app.MapElarionEndpoints(app.Configuration);   // generated [HttpEndpoint] routes: GET /quotes, GET /quotes/{symbol}
 app.MapElarionClientEvents("/events");        // the SSE stream: ?subscriptions=[{"topic":"market.quoteChanged","resource":"ELN"}]
+
+// The ordered tier (ADR-0052) next to the conflated hints above: every accepted tick for one symbol,
+// in order, over one SSE connection — `id:` is the stream sequence, so the browser's automatic
+// Last-Event-ID reconnect resumes gap-free within the actor's replay ring. Try:
+//   curl -N http://localhost:5210/quotes/ELN/stream
+// Lives under /quotes, so the proxy / ingress rule above already routes it to the actor home.
+app.MapElarionStream<Quote>("/quotes/{symbol}/stream", (context, after) =>
+    context.Request.RouteValues["symbol"] is string symbol && symbol.Length > 0
+        ? context.RequestServices.GetRequiredService<IActorSystem>()
+            .Get<IStockQuote>(symbol.ToUpperInvariant()).Watch(after)
+        : null);
 
 app.Run();

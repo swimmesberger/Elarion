@@ -1,5 +1,6 @@
 using Elarion.Abstractions.ClientEvents;
 using Elarion.Actors;
+using Elarion.Streams;
 
 namespace LiveQuotes.Api.Modules.Market.Actors;
 
@@ -36,15 +37,32 @@ public sealed class StockQuoteActor(
     IActorContext<string> context,
     IClientEventPublisher clientEvents,
     IClientEventInterest interest,
-    TimeProvider timeProvider) {
+    TimeProvider timeProvider) : IActorLifecycle {
     /// <summary>Minimum spacing between pushed updates per symbol (the conflation window).</summary>
     public static readonly TimeSpan PublishInterval = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>Resumable window for <see cref="Watch"/>: a reconnect within the last 256 ticks is gap-free.</summary>
+    private static readonly StreamHubOptions StreamOptions = new() { ReplayCapacity = 256 };
+
+    // The ordered tier (ADR-0052) next to the conflated client-event hints: every accepted tick, in
+    // order, with completion — for the consumer that wants the full sequence rather than latest-wins.
+    private readonly StreamHub<Quote> _stream = new(StreamOptions);
 
     private decimal _price;
     private decimal _sessionOpen;
     private long _seq = -1;
     private long _lastPublishTimestamp;
     private bool _hasValue;
+
+    public ValueTask OnActivateAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+    // The stream-lifetime rule: a hub dies with its activation, so completing it here lets consumers
+    // observe the end and re-subscribe (which re-activates the actor) instead of starving silently.
+    // Academic in this sample — the feed keeps every actor busy, so idle passivation never fires.
+    public ValueTask OnDeactivateAsync(CancellationToken cancellationToken) {
+        _stream.Complete();
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>
     /// Applies one feed tick. Out-of-order delivery (possible when one symbol arrives over multiple
@@ -62,6 +80,11 @@ public sealed class StockQuoteActor(
             _hasValue = true;
             _sessionOpen = tick.Price;
         }
+
+        // The ordered stream gets every accepted tick BEFORE the interest/conflation gates below —
+        // full fidelity is its contract. With zero subscribers this is one ring append; the warm ring
+        // is what makes a Watch reconnect resumable.
+        await _stream.PublishAsync(ToQuote(tick.At), cancellationToken);
 
         // Lazy on the wire: nobody watching this symbol → keep the value, publish nothing. Safe to skip
         // because the subscription observer greets every new watcher with the current value — a skipped
@@ -91,8 +114,19 @@ public sealed class StockQuoteActor(
             ? new Quote(context.Key, _price, ChangePercent, _seq, timeProvider.GetUtcNow())
             : null);
 
+    /// <summary>
+    /// The ordered stream (<c>GET /quotes/{symbol}/stream</c>): greets with the latest tick (or resumes
+    /// after <paramref name="resumeAfter"/> from the replay ring), then every accepted tick in order —
+    /// no conflation, no interest gate. The attach runs as a mailbox turn; enumeration never holds the
+    /// mailbox. Contrast with the conflated <c>market.quoteChanged</c> hints on <c>/events</c>.
+    /// </summary>
+    public IAsyncEnumerable<StreamItem<Quote>> Watch(long? resumeAfter) =>
+        _stream.SubscribeSequenced(new StreamSubscribeOptions { ResumeAfterSequence = resumeAfter });
+
     private decimal ChangePercent =>
         _sessionOpen == 0 ? 0 : Math.Round((_price - _sessionOpen) / _sessionOpen * 100m, 2);
+
+    private Quote ToQuote(DateTimeOffset at) => new(context.Key, _price, ChangePercent, _seq, at);
 
     private QuoteChanged ToQuoteChanged(DateTimeOffset at) => new() {
         Symbol = context.Key,

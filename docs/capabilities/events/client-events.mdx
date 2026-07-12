@@ -194,6 +194,24 @@ the recommended topology routes the live prefixes (including the events endpoint
 A greeting races live publishes by design; payload contracts carry a monotonic version and the client
 applies through one guard, so ordering resolves client-side.
 
+<Callout type="warn" title="Ordering: monotonicity, not sequence">
+Client events guarantee **monotonicity you build in**, never gap-free ordered delivery — and no code
+placement changes that, because the pipe is lossy by construction: the per-subscriber buffer drops oldest
+on overflow, an SSE reconnect loses whatever was in flight, and the cross-node fan-out has no replay.
+Ordering without reliability would be false comfort — a consumer that breaks on reordering also breaks on
+the element it will eventually not get. So the doctrine splits by what you actually need:
+
+- **Latest-wins state** (quotes, presence, progress): carry a monotonic version in the payload and apply
+  through one stale-drop guard. After the guard, delivery order is unobservable — this is the payload
+  tier's contract, and it holds on every deployment shape.
+- **Every element matters, machine consumer**: integration events on the outbox (durable, at-least-once,
+  inbox-deduped) — not client events.
+- **Every element matters, browser**: publish the *hint* and let the re-query be the ordered, complete
+  read — or, when a single live producer (a homed actor) owns the sequence, use the
+  [ordered-streams tier](/docs/capabilities/events/streams) (ADR-0052): a real stream contract with
+  order, completion, and `Last-Event-ID` resume. It is a separate contract — never bolted onto hints.
+</Callout>
+
 The cheap sibling is the **pull check** — no observer needed, injectable anywhere including actors:
 
 ```csharp

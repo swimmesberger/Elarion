@@ -177,8 +177,18 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   module's `JsonSerializerContext`. Manual load/flush via `IActorLifecycle.OnActivateAsync/OnDeactivateAsync`
   remains the escape hatch for storage the seam doesn't fit.
 - The generated facade is `I{ClassName-minus-Actor}`; methods must return
-  `Task`/`Task<T>`/`ValueTask`/`ValueTask<T>` (ELACT002 otherwise). Actors are module-scoped like
-  handlers — outside a module they warn (ELACT003) and are not registered.
+  `Task`/`Task<T>`/`ValueTask`/`ValueTask<T>`/`IAsyncEnumerable<T>` (ELACT002 otherwise). Actors are
+  module-scoped like handlers — outside a module they warn (ELACT003) and are not registered.
+- **Ordered streams (ADR-0052)** — when a consumer needs *every element in order with completion/resume*
+  (not latest-wins): the actor owns an `Elarion.Streams.StreamHub<T>` field, publishes inside turns, and
+  exposes `IAsyncEnumerable<StreamItem<T>> Watch(long? resumeAfter) => _hub.SubscribeSequenced(new() {
+  ResumeAfterSequence = resumeAfter })` — a facade stream (attach = mailbox turn, enumeration
+  off-mailbox). No `CancellationToken` param, no `[ConsumeEvent]` on stream methods (ELACT012). A live
+  enumeration retains the activation against idle passivation (refCount lifetime); snapshot-conflict
+  and shutdown passivations ignore retention — so still complete the hub in `OnDeactivateAsync`
+  (re-activation = new hub = new sequence epoch). Serve it with `app.MapElarionStream<T>(route, (ctx, after) => …)` —
+  SSE with `id:` = sequence, `Last-Event-ID`/`?after=` resume. Client events stay the default push tier;
+  a stream needs a single live producer per key (route it to the actor home).
 - Default is **non-reentrant** (one message start-to-finish; an actor→actor call cycle fails with a
   `TimeoutException` after ~30 s — that's the deadlock backstop, treat it as a design smell).
   `[Reentrant]` opts into Orleans-style interleaving at await points (never parallel); don't use

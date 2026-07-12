@@ -130,6 +130,86 @@ public sealed class ActorRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateActors_StreamMethod_EmitsDeferredFacadeAndSynchronousWorkItem() {
+        // ADR-0052: an IAsyncEnumerable<T> actor method becomes a facade stream — the attach turn is
+        // deferred until enumeration via ActorStreams.Defer, and the work item invokes synchronously.
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                [Elarion.Actors.Actor]
+                public sealed class TickerActor {
+                    private System.Collections.Generic.IAsyncEnumerable<int> _stream = null!;
+
+                    public TickerActor(Elarion.Actors.IActorContext<string> context) { }
+
+                    public System.Collections.Generic.IAsyncEnumerable<int> Watch(long? after) => _stream;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        generated.Should().Contain(
+            "global::System.Collections.Generic.IAsyncEnumerable<int> Watch(long? after, global::System.Threading.CancellationToken cancellationToken = default);");
+        generated.Should().Contain("global::Elarion.Actors.Runtime.ActorStreams.Defer<int>(");
+        generated.Should().Contain(
+            "elarionAttachToken => _handle.InvokeAsync(WatchWorkItem.Rent(after), elarionAttachToken),");
+        generated.Should().Contain(
+            "private sealed class WatchWorkItem : global::Elarion.Actors.ActorWorkItem<global::Sample.Orders.TickerActor, global::System.Collections.Generic.IAsyncEnumerable<int>>");
+        // The stream turn ties the activation's lifetime to the enumeration (refCount lifetime):
+        // idle passivation must never end a live stream mid-flight.
+        generated.Should().Contain(
+            "new(global::Elarion.Actors.Runtime.ActorStreams.RetainWhileEnumerating(actor.Watch(_after), RetainActivation()));");
+    }
+
+    [Fact]
+    public void GenerateActors_StreamMethodWithCancellationToken_EmitsDiagnostic() {
+        // The turn token is a pooled CTS whose lifetime ends with the attach turn — it must never leak
+        // into the returned stream, so a CancellationToken parameter on a stream method is rejected.
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                [Elarion.Actors.Actor]
+                public sealed class TickerActor {
+                    private System.Collections.Generic.IAsyncEnumerable<int> _stream = null!;
+
+                    public System.Collections.Generic.IAsyncEnumerable<int> Watch(
+                        System.Threading.CancellationToken cancellationToken) => _stream;
+                }
+            }
+            """);
+
+        var result = Generate(source, allowedDiagnosticIds: ["ELACT012"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELACT012" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateActors_ConsumeEventOnStreamMethod_EmitsDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                public sealed record OrderShipped(System.Guid OrderId) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Actors.Actor]
+                public sealed class TickerActor {
+                    private System.Collections.Generic.IAsyncEnumerable<int> _stream = null!;
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Collections.Generic.IAsyncEnumerable<int> Watch(OrderShipped e) => _stream;
+                }
+            }
+            """);
+
+        var result = Generate(source, allowedDiagnosticIds: ["ELACT012"]);
+
+        result.Diagnostics.Any(d => d.Id == "ELACT012" && d.Severity == DiagnosticSeverity.Error)
+            .Should().BeTrue();
+    }
+
+    [Fact]
     public void GenerateActors_ActorStateParameter_EmitsFactoryBoundActivator() {
         var source = CreateSource(
             """

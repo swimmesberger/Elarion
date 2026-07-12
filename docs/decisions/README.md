@@ -71,3 +71,5 @@ designs that are not yet implemented.
 - [ADR-0048: Single-homed actors — a PostgreSQL home lease, not a cluster](0048-single-homed-actors.md)
 - [ADR-0049: Role leases — the leader-election primitive, extracted from the actor home](0049-role-leases.md)
 - [ADR-0050: The role-holder proxy — an in-app ingress rule, not a cluster](0050-role-holder-proxy.md)
+- [ADR-0051: Bulk insert as an EF-shaped seam with a PostgreSQL binary COPY provider](0051-postgresql-bulk-insert.md)
+- [ADR-0052: Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg](0052-ordered-streams.md)

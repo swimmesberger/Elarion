@@ -494,6 +494,39 @@ A hand-written relay — a separate `[ConsumeEvent]` class implementing `IHandle
 `actors.Get<…>(key).Method(…)` — remains valid for cases the attribute form can't express (fan-out to
 several actors from one event, non-trivial key derivation).
 
+## Streaming out of an actor
+
+An actor method returning `IAsyncEnumerable<T>` becomes a **facade stream** (ADR-0052) — the ordered,
+completable counterpart to publishing client-event hints, and the Orleans 7+ grain-interface shape.
+The producing actor owns a `StreamHub<T>` field (its mailbox is the sequencer), publishes inside turns,
+and the stream method just subscribes:
+
+```csharp
+private readonly StreamHub<Quote> _stream = new(new() { ReplayCapacity = 256 });
+
+public IAsyncEnumerable<StreamItem<Quote>> Watch(long? resumeAfter) =>
+    _stream.SubscribeSequenced(new StreamSubscribeOptions { ResumeAfterSequence = resumeAfter });
+```
+
+The attach runs as a mailbox turn; enumeration never holds the mailbox. Two rules are enforced by
+`ELACT012`: a stream method takes **no `CancellationToken`** (the turn token is pooled and dies with the
+attach turn — the facade adds the trailing token, which cancels the queued attach and, linked with the
+enumerator's token, the stream) and cannot carry `[ConsumeEvent]`.
+
+**Lifetime is refCount: a live enumeration retains the activation.** The generated stream turn pins the
+activation until the enumeration ends (completes, fails, or is disposed), so **idle passivation never
+ends a stream mid-flight** — a streaming-only actor with attached consumers and no incoming turns stays
+alive, and the idle window restarts when the last consumer leaves (only turns and live enumerations
+count; hub-external work does not). Two passivation paths deliberately ignore retention, because they
+are correctness paths: a snapshot-conflicted activation must die (its state is stale, ADR-0047), and
+shutdown drains regardless. That is why one rule remains yours: **complete the hub in
+`OnDeactivateAsync`** — on those paths consumers then observe the end and re-subscribe (re-activating
+the actor) instead of starving on a channel nothing writes anymore. Note that a re-activation is a new
+hub: sequences restart (a new *epoch*), so `ResumeAfterSequence`/`Last-Event-ID` resume is meaningful
+within one hub lifetime — a consumer that sees ids restart rebuilds from what arrives. Full model, the
+when-to-use table, and the resumable SSE endpoint:
+[Ordered streams](/docs/capabilities/events/streams).
+
 ## Observability
 
 Register the `Elarion.Actors` ActivitySource and Meter with your OpenTelemetry providers. Each facade call
