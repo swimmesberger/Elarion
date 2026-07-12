@@ -22,6 +22,11 @@ namespace Elarion.AspNetCore.Streams;
 /// to the producer's node (the role-holder proxy / your ingress) in multi-node deployments.
 /// </summary>
 public static class StreamEndpointRouteBuilderExtensions {
+    // Mirrors ClientEventControlEvents.KeepAlive + the client-events endpoint's interval
+    // (Elarion.ClientEvents.AspNetCore/ClientEventEndpointsExtensions) — one keep-alive wire contract
+    // across both SSE surfaces. Deliberately duplicated: the packages share no home below ASP.NET
+    // (referencing Elarion.AspNetCore would drag Elarion.JsonRpc into the client-events transport).
+    // Change one → change the other.
     private const string KeepAliveEventType = "elarion.keepAlive";
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
 
@@ -92,6 +97,8 @@ public static class StreamEndpointRouteBuilderExtensions {
     // yield is illegal inside try/catch, so the waiting lives here. The pending MoveNext is threaded
     // through because a keep-alive tick must not abandon it — a second concurrent MoveNextAsync on one
     // enumerator is invalid. A non-null returned task means "keep-alive fired, the move is still pending".
+    // The enumerator-shaped twin of ClientEventEndpointsExtensions.WaitForNextAsync (channel-shaped) —
+    // fix a bug in one, check the other.
     private static async Task<(bool HasNext, Task<bool>? PendingMove)> WaitForNextAsync<T>(
         IAsyncEnumerator<StreamItem<T>> enumerator, Task<bool>? pendingMove, CancellationToken ct) {
         try {

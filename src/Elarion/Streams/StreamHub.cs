@@ -33,6 +33,10 @@ public sealed class StreamHub<T> {
     private readonly int _replayCapacity;
     private readonly List<Subscriber> _subscribers = [];
     private long _sequence;
+    // The ring's newest element, tracked separately so a Latest subscribe is O(1) instead of copying
+    // the ring. Only set while retention is on (ReplayCapacity > 0) — Latest on a no-replay hub
+    // greets with nothing, by contract.
+    private StreamItem<T>? _latest;
     private bool _completed;
     private Exception? _error;
 
@@ -84,6 +88,7 @@ public sealed class StreamHub<T> {
 
                 element = new StreamItem<T>(++_sequence, item);
                 if (_replayCapacity > 0) {
+                    _latest = element;
                     _replay.Enqueue(element);
                     while (_replay.Count > _replayCapacity) {
                         _replay.Dequeue();
@@ -199,7 +204,7 @@ public sealed class StreamHub<T> {
         }
 
         return options.Replay switch {
-            StreamReplay.Latest when _replay.Count > 0 => [_replay.ToArray()[^1]],
+            StreamReplay.Latest when _latest is { } latest => [latest],
             StreamReplay.Available => [.. _replay],
             _ => [],
         };

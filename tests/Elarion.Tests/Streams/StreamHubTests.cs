@@ -52,6 +52,18 @@ public sealed class StreamHubTests {
     }
 
     [Fact]
+    public async Task LatestReplay_WithRetentionDisabled_GreetsWithNothing() {
+        // ReplayCapacity 0 = no retention at all: Latest greets with nothing even after publishes.
+        var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 0 });
+        await hub.PublishAsync(1, TestToken);
+
+        var subscription = hub.SubscribeSequenced();
+        hub.Complete();
+
+        (await Collect(subscription)).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task AvailableReplay_DeliversTheWholeRing_ThenLive() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 2 });
         await hub.PublishAsync(1, TestToken);

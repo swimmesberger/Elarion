@@ -35,6 +35,9 @@ public static class ClientEventEndpointsExtensions {
     private const string ConnectedEventType = ClientEventControlEvents.Connected;
     private const string KeepAliveEventType = ClientEventControlEvents.KeepAlive;
 
+    // The ordered-streams endpoint (Elarion.AspNetCore/Streams/StreamEndpointRouteBuilderExtensions)
+    // mirrors this keep-alive wire contract (event name + interval) and the WaitForNextAsync pattern —
+    // deliberately duplicated, no shared home below ASP.NET. Change one → change the other.
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
 
     /// <summary>
