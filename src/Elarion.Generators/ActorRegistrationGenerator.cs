@@ -28,6 +28,15 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
     private const string ValueTaskMetadataName = "System.Threading.Tasks.ValueTask";
     private const string ValueTaskGenericMetadataName = "System.Threading.Tasks.ValueTask`1";
 
+    // Facade signatures must preserve nullable reference annotations (a method returning
+    // Task<Quote?> gets a work item and facade of Quote?, not Quote — the bare format drops the
+    // annotation and the emitted `return await actor.Method(...)` then fails CS8603 under
+    // warnings-as-errors). Applied to method results and parameters only; ctor/key/state types are
+    // used in positions where the annotation is meaningless.
+    private static readonly SymbolDisplayFormat NullableAwareFullyQualifiedFormat =
+        SymbolDisplayFormat.FullyQualifiedFormat.AddMiscellaneousOptions(
+            SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+
     private const string ActorSingletonKeyFqn = "global::Elarion.Actors.ActorSingletonKey";
     private const string UnitFqn = "global::Elarion.Abstractions.Results.Unit";
     private const string RelayResponseFqn = "global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>";
@@ -408,13 +417,13 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             else if (method.ReturnType is INamedTypeSymbol { IsGenericType: true } generic &&
                      SymbolEqualityComparer.Default.Equals(generic.OriginalDefinition, taskGenericSymbol)) {
                 shape = ReturnShape.TaskOfResult;
-                resultTypeFqn = generic.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                resultTypeFqn = generic.TypeArguments[0].ToDisplayString(NullableAwareFullyQualifiedFormat);
             }
             else if (method.ReturnType is INamedTypeSymbol { IsGenericType: true } genericValueTask &&
                      SymbolEqualityComparer.Default.Equals(genericValueTask.OriginalDefinition, valueTaskGenericSymbol)) {
                 shape = ReturnShape.ValueTaskOfResult;
                 resultTypeFqn = genericValueTask.TypeArguments[0]
-                    .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    .ToDisplayString(NullableAwareFullyQualifiedFormat);
             }
             else {
                 diagnostics.Add(DiagnosticInfo.Create(
@@ -439,7 +448,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
                 parameters.Add(new MethodParameterInfo(
                     parameter.Name,
-                    parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    parameter.Type.ToDisplayString(NullableAwareFullyQualifiedFormat),
                     isCancellationToken));
             }
 

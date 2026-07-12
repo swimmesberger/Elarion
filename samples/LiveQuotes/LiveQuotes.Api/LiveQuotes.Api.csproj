@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>LiveQuotes sample — the Elarion realtime middle ground: a simulated market-data feed streamed through single-homed in-memory actors and pushed to browsers over SSE, with zero database and zero external infrastructure. One process, one project, one small team, no Kafka.</Description>
+  </PropertyGroup>
+
+  <!-- Deliberately tiny: no EF, no outbox, no cache, no broker — and ONE project. The hot path
+       (feed → actor → client event → browser) touches no database, and the bootstrapper discovers
+       the module's handlers/actors/topics in this compilation directly, so Program, the Market
+       module, and the wwwroot dashboard all live here. Compare samples/Billing for the layered
+       host + application shape an app grows into. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Actors\Elarion.Actors.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.ClientEvents\Elarion.ClientEvents.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.ClientEvents.AspNetCore\Elarion.ClientEvents.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <!-- The Elarion generator emits the module bootstrapper, the actor facade, the handler
+       registrations, and the client-event topic — all from the attributes in this one assembly.
+       Building from source we reference the generator project as an analyzer; consuming Elarion
+       from NuGet it ships inside the package. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

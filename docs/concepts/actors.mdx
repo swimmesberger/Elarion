@@ -198,6 +198,29 @@ that stops being readable off-home:
    optional/defaulted (nullable with a fallback in the computed interpretation), keep existing wire
    names stable, and treat a breaking shape change as what it is — a new contract that needs a
    backfill of the snapshot rows.
+6. **Choose the write cadence deliberately — it decides what queries mean.** There are three cadences,
+   and they must not be mixed up:
+   - **Write-through** (write after every mutation — the coordinator shape): the snapshot always
+     reflects the last completed turn, so `IActorStateReader` is as fresh as any database query
+     (read-committed semantics — an in-flight turn hasn't published yet, same as an uncommitted
+     transaction). This is the only cadence where the reader is a first-class query path. It is also
+     the cadence closest to "just a table with a version column" — apply the shape-3 honesty test
+     before choosing it.
+   - **Checkpointing** (mostly in-memory, periodic or milestone writes): the snapshot is a
+     **warm-restart checkpoint, not a query mechanism**. The reader returns bounded-stale data (up to
+     one checkpoint interval old) — fine for after-the-fact reporting, wrong for anything presented as
+     current. Use it to make hot shape-2 state survive restarts cheaply; never point a "live" view at
+     it.
+   - **No snapshot** (pure hot/ephemeral state): the reader has no role — there is nothing durable to
+     read.
+   **Real-time observation of hot in-memory state is a push problem, not a pull problem.** No node can
+   query another node's memory (there is deliberately no forwarding), and polling the reader against a
+   checkpoint is a staleness bug waiting to be filed. The actor — on its home — publishes
+   [client events](/docs/capabilities/events/client-events) (throttled, small current-value payloads);
+   the PostgreSQL fan-out delivers them to **every** instance's connected browsers, so observers get
+   real-time data without knowing or caring where the actor lives. A *service* (not a browser) that
+   needs pull-based real-time reads of live actor memory from arbitrary nodes has crossed the
+   placement/forwarding line — that is the Orleans trigger, not a reason to stretch the reader.
 
 The Billing sample is the reference implementation of both halves: `ClientDunningState` carries
 `EscalationThreshold`, the `NeedsAttention` interpretation, the `RecordOverdue()` transition, and its
@@ -279,13 +302,23 @@ The rules of the model:
   fails immediately with `ActorNotHomedException` naming the holder — a pointed error, not mystery
   latency. Feed single-homed actors through integration events (they follow the lease); a scheduled job
   should publish an event rather than call the facade (job claims elect a node independently of the
-  home). Transparent forwarding is deliberately out of scope — needing it is the signal to move to
-  Orleans.
+  home). Transparent *actor-call* forwarding is deliberately out of scope — needing it is the signal to
+  move to Orleans. What **is** available is one layer up: the **role-holder proxy** (ADR-0050) —
+  `app.UseElarionRoleHolderProxy("actors", "/quotes", …)` lets every instance serve the home's HTTP
+  endpoints by forwarding matching requests to the holder's advertised address *before* anything runs
+  locally (one hop, one `Elarion-Role-Proxied` loop guard, 503 + `Retry-After` during failover; SSE
+  streams through). It installs nothing when no lease is registered, so it ships in single-instance
+  apps at zero cost, and the prefix list is exactly the ingress rule that replaces it when you add a
+  load balancer. Advertise addresses with `AddElarionInstanceAddress()` (auto-detected) or
+  `RoleLeaseOptions.AdvertisedAddress` (NAT/HTTPS).
 - **Reads run anywhere — because interpretation lives on the record.** `IActorStateReader.ReadAsync<TState>(key)`
   returns the latest snapshot without activating anything — durable truth on any instance, carrying the
   state record's full logic (rule 1 of [designing applications around snapshot
   state](#designing-applications-around-snapshot-state); off-home reads lose nothing precisely because
-  actor *methods* hold no interpretation). Commands go through the actor; queries read snapshots (or
+  actor *methods* hold no interpretation). How fresh that is equals the actor's **write cadence**
+  (rule 6): write-through → as fresh as any database query; checkpointing → bounded-stale, never a
+  "live" view. Real-time observation of the home's in-memory state is push — client events fanned out
+  to every instance — not reader polling. Commands go through the actor; queries read snapshots (or
   regular entities).
 - **Unenforced without a lease.** With no `IActorHomeLease` registered (local dev, a one-instance
   deployment), `SingleHomed` is a declaration only — the actor system logs one warning per such actor so
@@ -532,17 +565,80 @@ per-partition backpressure for free.
 
 ## When (not) to use an actor
 
-Reach for an actor only when **in-memory state must survive across calls and be mutated sequentially** —
-live session/connection state, per-entity workflow steps between persisted transitions, rate/flow control
-per key, device twins. Otherwise stay with the default building blocks: request/response work is a
-[handler](handlers.mdx), shared logic is a `[Service]`, fan-out is an [event](../capabilities/events/index.mdx),
-periodic work is a scheduled job. Stateless parallelism never belongs in actors — that's handlers plus
-`Task.WhenAll`. For bounded, ordered parallelism see [Routing and worker pools](#routing-and-worker-pools-the-akka-router-patterns).
+**Default to the database.** In a classical web application, concurrency problems are database problems,
+and the ordinary stack already solves them: two users editing the same record is
+[optimistic concurrency](/docs/capabilities/entity-framework) (a version column); a webhook arriving
+twice is [`[Idempotent]`](/docs/capabilities/idempotency) or the consumer inbox; "an order number must be
+unique" is a constraint; "one export per tenant at a time" is a
+[scheduled job](/docs/capabilities/scheduling) behind claims; reliable follow-up work is the
+[outbox](/docs/capabilities/events/integration-events). A transaction plus a `WHERE version = @expected`
+update *is* serialization — it just serializes at commit time instead of queueing callers. **Most
+applications need zero actors**, and an actor is never the fix for "two requests raced on a row."
+
+The honest test: **an actor is justified only when the unit of consistency is a live, in-memory thing —
+something the database structurally cannot be.** That happens in exactly three shapes:
+
+1. **The actor owns a stateful external resource.** A proprietary TCP session per machine, a device
+   command channel, a per-tenant API client whose vendor allows one in-flight call (ordered calls, or a
+   shared OAuth token that must refresh single-flight), an IMAP connection per mailbox. The serialization
+   constraint lives *outside* the database — you cannot row-lock a socket, and holding a DB transaction
+   open across an external call is the classic anti-pattern. One actor per resource *is* the connection
+   owner: calls queue in its mailbox, the resource is touched by one turn at a time, and passivation
+   closes it cleanly.
+2. **The state is hot and ephemeral — the database would be pure overhead.** Live machine/telemetry data
+   arriving many times per second from hundreds of devices, where dashboards read the current value and
+   the data is worthless after a restart (stale readings mean nothing on startup — the device will send
+   again); presence ("who is connected right now"); live progress of a long-running import pushed to
+   browsers via [client events](/docs/capabilities/events/client-events); a write-behind buffer that
+   coalesces many small events into one periodic DB flush. The defining property is **loss on restart is
+   acceptable or naturally recovered** — which is why these actors usually need *no* snapshot state.
+   The worked, runnable example is
+   [`samples/LiveQuotes`](https://github.com/swimmesberger/Elarion/tree/main/samples/LiveQuotes): a
+   simulated market feed → conflating per-symbol actors → SSE pushes, with zero database and zero
+   broker — including the feed-not-events rule, the sequence guard, and the multi-node topology notes.
+3. **A long-lived, event-driven decision process** — a coordinator that reacts to many integration events
+   over time, holds a small decision state, and must act **exactly once** (the Billing sample's dunning
+   escalation latch). This is the only shape that combines with
+   [snapshot state](#durable-state-snapshots) (the decision must survive restarts) and often with
+   [single-homing](#single-homed-actors-the-home-lease). Be honest here: the database *can* express this
+   too (a state row + optimistic concurrency + the outbox for the side effect). The actor wins when the
+   decision spans many events and the read-decide-act cycle would otherwise be a lock held across side
+   effects or a retry loop in every consumer; if your version is one `UPDATE … WHERE version = @v`, use
+   the table.
+
+A junior-proof rule of thumb: **if you can sketch the solution as a table with a version column, do
+that.** Reach for an actor only when the sketch keeps needing one of: a socket/client that must not be
+shared, per-key state too hot or too transient to round-trip, or "react to a stream of events and act
+once."
+
+| Symptom | Reach for | Not |
+| --- | --- | --- |
+| Two users save the same record concurrently | Optimistic concurrency (version column) | Actor |
+| A payment webhook may be delivered twice | `[Idempotent]` / the consumer inbox | Actor |
+| Invariant: unique number, non-negative balance | DB constraint + transaction | Actor |
+| Run one import per tenant at a time | Scheduled job (claims) / job queue | Actor |
+| Reliable email after an order commits | Outbox integration event | Actor |
+| Cache expensive query results | `[Cacheable]` / HybridCache | Actor |
+| Fan out CPU/IO work over many items | Handler + `Task.WhenAll` | Actor |
+| One TCP/API session per device or tenant, calls must be ordered | **Actor per resource** (shape 1) | Row locks |
+| Live readings from hundreds of machines, dashboards read current values, restart resets | **Actor per machine** (shape 2, no snapshot) | A hot-loop `UPDATE` per reading |
+| Presence / live progress pushed to browsers | **Actor** (shape 2) + client events | Polling a table |
+| Real-time view of an actor's live in-memory state from any instance | **Client events pushed by the actor** (the Postgres fan-out reaches every instance's browsers) | Polling `IActorStateReader` (checkpoint staleness) |
+| Escalate to collections exactly once after N overdue events | **Actor + snapshot** (shape 3) — or a state row if it stays one `UPDATE` | `SELECT FOR UPDATE` across an email send |
+
+Everything else stays with the default building blocks: request/response work is a
+[handler](handlers.mdx), shared logic is a `[Service]`, fan-out is an
+[event](../capabilities/events/index.mdx), periodic work is a scheduled job. Stateless parallelism never
+belongs in actors — that's handlers plus `Task.WhenAll`. For bounded, ordered parallelism see
+[Routing and worker pools](#routing-and-worker-pools-the-akka-router-patterns).
 
 **Actors are single-node.** In-memory activations on three nodes are three independent states — fine for
-node-local concerns (per-node coordination, cache-like state), wrong for cluster-wide authoritative state.
-Elarion deliberately ships no clustering: if actor state must be authoritative across nodes, replace the
-runtime with a dedicated engine (Orleans, Akka.NET, Proto.Actor) rather than growing this one — the same
+node-local concerns, wrong for cluster-wide authoritative state unless you make it so deliberately:
+[snapshots](#durable-state-snapshots) make the state durable and conflict-safe,
+[single-homing](#single-homed-actors-the-home-lease) makes one instance authoritative. What Elarion
+deliberately does **not** ship is placement and call forwarding: if you need actors addressable from any
+node with the runtime routing to them — the gaming/high-scale shapes — replace the runtime with a
+dedicated engine (Orleans, Akka.NET, Proto.Actor) rather than growing this one, the same
 replace-the-seam philosophy as the scheduler and cache defaults (ADR-0025, ADR-0042).
 
 ### The migration seam: how a facade maps to an Orleans grain

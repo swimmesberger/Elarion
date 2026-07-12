@@ -29,4 +29,12 @@ public interface IRoleLease {
     /// <see langword="null"/> when unknown.
     /// </summary>
     string? CurrentHolder { get; }
+
+    /// <summary>
+    /// The holder's advertised base address (ADR-0050), or <see langword="null"/> when the holder is
+    /// unknown or does not advertise one. Like <see cref="IsHeld"/>, answered from local state
+    /// refreshed at heartbeat cadence — consumers (e.g. the role-holder proxy) tolerate it lagging a
+    /// failover by up to one renew interval.
+    /// </summary>
+    string? CurrentHolderAddress => null;
 }

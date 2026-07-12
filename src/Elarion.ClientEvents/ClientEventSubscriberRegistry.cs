@@ -9,7 +9,8 @@ namespace Elarion.ClientEvents;
 /// envelopes fan out. Matching is exact record equality on (topic, scope), O(subscribers) per envelope —
 /// right-sized for the 1–10-node tier this default targets.
 /// </summary>
-internal sealed class ClientEventSubscriberRegistry : IClientEventLocalDelivery, IClientEventSubscriptionSource {
+internal sealed class ClientEventSubscriberRegistry(ClientEventSubscriptionLifecycle lifecycle)
+    : IClientEventLocalDelivery, IClientEventSubscriptionSource {
     // Per-subscriber buffer: enough to absorb bursts between reads; overflow drops oldest (hints, not a queue).
     private const int SubscriberBufferCapacity = 64;
 
@@ -26,11 +27,18 @@ internal sealed class ClientEventSubscriberRegistry : IClientEventLocalDelivery,
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true,
         });
-        _subscribers[id] = new Entry([.. subscriptions], channel);
+        var entry = new Entry([.. subscriptions], channel);
+        _subscribers[id] = entry;
+        foreach (var subscription in entry.Subscriptions) {
+            lifecycle.OnSubscribed(subscription, channel.Writer);
+        }
 
         return new ClientEventSubscriptionHandle(channel.Reader, () => {
-            if (_subscribers.TryRemove(id, out var entry)) {
-                entry.Channel.Writer.TryComplete();
+            if (_subscribers.TryRemove(id, out var removed)) {
+                removed.Channel.Writer.TryComplete();
+                foreach (var subscription in removed.Subscriptions) {
+                    lifecycle.OnUnsubscribed(subscription);
+                }
             }
         });
     }

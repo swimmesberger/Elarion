@@ -133,6 +133,49 @@ public sealed partial class ClientEventEndpointsTests {
     }
 
     [Fact]
+    public async Task Subscribe_ResourceScope_AllowAnyResource_SkipsAuthorizerAndDelivers() {
+        // The topic declares its resource segment a routing key: no IClientEventSubscriptionAuthorizer is
+        // registered and the resource-scoped subscription still opens and receives its events.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(
+            ct,
+            configureTopics: events => events.AddTopic<InvoiceChanged>(
+                "test.invoiceChanged", t => t.AllowAnyResource()));
+
+        using var response = await host.Client.GetAsync(
+            SubscriptionsUrl("""[{"topic":"test.invoiceChanged","resource":"customer:42"}]"""),
+            HttpCompletionOption.ResponseHeadersRead, ct);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
+        var connected = await ReadFrameAsync(reader, ct);
+        connected.Should().Contain("event: elarion.connected");
+
+        var invoiceId = Guid.CreateVersion7();
+        await host.Publisher.PublishAsync(
+            new InvoiceChanged { InvoiceId = invoiceId }, ClientEventScope.Resource("customer:42"), ct);
+
+        var frame = await ReadFrameAsync(reader, ct);
+        frame.Should().ContainSingle(line => line.StartsWith("data: ") && line.Contains(invoiceId.ToString()));
+    }
+
+    [Fact]
+    public async Task Subscribe_ResourceScope_AllowAnyResource_StillEnforcesTopicRequirements() {
+        // AllowAnyResource opens the resource axis only; the topic's own requirements still gate the
+        // subscription (here: a role with no IAuthorizer registered fails closed).
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(
+            ct,
+            configureTopics: events => events.AddTopic<InvoiceChanged>(
+                "test.invoiceChanged", t => t.RequireRole("admin").AllowAnyResource()));
+
+        var response = await host.Client.GetAsync(
+            SubscriptionsUrl("""[{"topic":"test.invoiceChanged","resource":"customer:42"}]"""), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task PublishedEvent_ArrivesAsSseFrame_OnUserScope() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);

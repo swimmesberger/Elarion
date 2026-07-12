@@ -28,13 +28,15 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
     IServiceScopeFactory scopeFactory,
     RoleLeaseOptions options,
     TimeProvider timeProvider,
-    ILogger<PostgreSqlRoleLease<TDbContext>> logger) : IRoleLease
+    ILogger<PostgreSqlRoleLease<TDbContext>> logger,
+    IInstanceAddressProvider? addressProvider = null) : IRoleLease
     where TDbContext : DbContext {
     // Provider- and schema-specific (delimited identifiers, resolved column names), so built once per model.
     private static readonly ConcurrentDictionary<IModel, string> AcquireSqlCache = new();
 
     private long _heldUntilTimestamp;
     private volatile string? _currentHolder;
+    private volatile string? _currentHolderAddress;
 
     /// <inheritdoc />
     public string Role => options.RoleName;
@@ -44,6 +46,9 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
 
     /// <inheritdoc />
     public string? CurrentHolder => _currentHolder;
+
+    /// <inheritdoc />
+    public string? CurrentHolderAddress => _currentHolderAddress;
 
     /// <summary>
     /// One acquisition/renewal attempt. Returns whether this instance holds the role afterwards.
@@ -56,14 +61,19 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
         var now = timeProvider.GetUtcNow();
         var wasHeld = IsHeld;
 
+        // Explicit configuration wins; the provider seam is the auto-detected fallback (ADR-0050).
+        // Consulted per renewal (heartbeat cadence), because server addresses may only become known
+        // after the host has started listening.
+        var advertisedAddress = options.AdvertisedAddress ?? addressProvider?.GetInstanceAddress();
+
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var sql = AcquireSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildAcquireSql(context), dbContext);
+        // A missing address is a plain null parameter (EF has no type mapping for DBNull); the SQL
+        // casts it explicitly because PostgreSQL cannot infer an untyped NULL's type.
+        object?[] parameters = [options.RoleName, options.InstanceId, advertisedAddress, now + options.LeaseDuration, now];
         var acquired = await dbContext.Database
-            .ExecuteSqlRawAsync(
-                sql,
-                [options.RoleName, options.InstanceId, now + options.LeaseDuration, now],
-                cancellationToken)
+            .ExecuteSqlRawAsync(sql, parameters!, cancellationToken)
             .ConfigureAwait(false) == 1;
 
         if (acquired) {
@@ -72,6 +82,7 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
                 ref _heldUntilTimestamp,
                 attemptTimestamp + (long)(holdFor.TotalSeconds * timeProvider.TimestampFrequency));
             _currentHolder = options.InstanceId;
+            _currentHolderAddress = advertisedAddress;
             if (!wasHeld) {
                 logger.LogInformation(
                     "Instance {InstanceId} acquired the role lease '{Role}'.",
@@ -82,12 +93,14 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
         }
 
         Volatile.Write(ref _heldUntilTimestamp, 0);
-        _currentHolder = await dbContext.Set<RoleLeaseEntity>()
+        var holderRow = await dbContext.Set<RoleLeaseEntity>()
             .AsNoTracking()
             .Where(entity => entity.Role == options.RoleName)
-            .Select(entity => entity.Owner)
+            .Select(entity => new { entity.Owner, entity.Address })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
+        _currentHolder = holderRow?.Owner;
+        _currentHolderAddress = holderRow?.Address;
         if (wasHeld) {
             logger.LogWarning(
                 "Instance {InstanceId} lost the role lease '{Role}' to {Holder}.",
@@ -135,15 +148,18 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
         var table = sqlHelper.DelimitIdentifier(tableName, schema);
         var roleCol = Column(nameof(RoleLeaseEntity.Role));
         var ownerCol = Column(nameof(RoleLeaseEntity.Owner));
+        var addressCol = Column(nameof(RoleLeaseEntity.Address));
         var expiresCol = Column(nameof(RoleLeaseEntity.ExpiresOnUtc));
 
-        // Renew when we already own the row, take over when the previous hold expired ({3} = the
+        // Renew when we already own the row, take over when the previous hold expired ({4} = the
         // application clock's now — the database clock is never consulted). One affected row = held.
         // The target row is referenced through an alias: ON CONFLICT's DO UPDATE WHERE cannot use a
-        // schema-qualified table name.
-        return $"INSERT INTO {table} AS lease ({roleCol}, {ownerCol}, {expiresCol}) " +
-            "VALUES ({0}, {1}, {2}) " +
-            $"ON CONFLICT ({roleCol}) DO UPDATE SET {ownerCol} = EXCLUDED.{ownerCol}, {expiresCol} = EXCLUDED.{expiresCol} " +
-            $"WHERE lease.{ownerCol} = EXCLUDED.{ownerCol} OR lease.{expiresCol} <= {{3}}";
+        // schema-qualified table name. The address is cast explicitly: it is nullable, and PostgreSQL
+        // cannot infer the type of an untyped NULL parameter.
+        return $"INSERT INTO {table} AS lease ({roleCol}, {ownerCol}, {addressCol}, {expiresCol}) " +
+            "VALUES ({0}, {1}, CAST({2} AS character varying), {3}) " +
+            $"ON CONFLICT ({roleCol}) DO UPDATE SET {ownerCol} = EXCLUDED.{ownerCol}, " +
+            $"{addressCol} = EXCLUDED.{addressCol}, {expiresCol} = EXCLUDED.{expiresCol} " +
+            $"WHERE lease.{ownerCol} = EXCLUDED.{ownerCol} OR lease.{expiresCol} <= {{4}}";
     }
 }

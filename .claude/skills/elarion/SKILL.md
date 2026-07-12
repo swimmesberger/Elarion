@@ -84,7 +84,10 @@ jobs, and event consumers, and gate all of it per module (`Modules:{Name}:Enable
 disabled, or a build diagnostic you skipped — never a missing `AddScoped`.
 
 Host wiring is a few generated calls (copy the current form from the quickstart doc — these names
-have evolved before):
+have evolved before). Project layout is your choice: the bootstrapper discovers handlers from
+referenced module assemblies **and from the host compilation itself**, so a tiny app can be one
+project (`Program.cs` + modules + the trigger — `samples/LiveQuotes` is that shape); prefer the
+host + application split (`samples/Billing`) as the app grows:
 
 ```csharp
 [assembly: GenerateModuleBootstrapper]                              // once, in the host
@@ -124,10 +127,17 @@ responses as generated routes; `.ProducesElarionErrors()` adds the OpenAPI failu
 
 ## Stateful in-memory work — actors
 
-Handlers are stateless. When a feature needs **in-memory state that survives across calls and must be
-mutated sequentially** (live session/connection state, a per-entity workflow between persisted
-transitions, per-key rate/flow control), don't hand-roll a `Channel` + loop or a lock-guarded
-singleton — that's `Elarion.Actors`:
+Handlers are stateless. **Default to the database for concurrency** — optimistic concurrency (version
+column), constraints, `[Idempotent]`/inbox, and scheduled jobs solve classical web-app races; most apps
+need zero actors, and an actor is never the fix for "two requests raced on a row". An actor is justified
+only when the unit of consistency is a **live in-memory thing**, in exactly three shapes: (1) it owns a
+stateful external resource that must be accessed single-flight/ordered (a TCP device session, a
+per-tenant API client, an OAuth token refresh); (2) hot, ephemeral, loss-tolerant state where DB
+round-trips are pure overhead (live telemetry/device data, presence, live progress, write-behind
+buffers — no snapshot needed); (3) a long-lived event-driven coordinator that must act exactly once
+(the snapshot + single-homing shape). Rule of thumb: if the solution sketches as a table with a version
+column, use the table. When one of those shapes fits, don't hand-roll a `Channel` + loop or a
+lock-guarded singleton — that's `Elarion.Actors`:
 
 ```csharp
 [Actor]                              // requires [assembly: GenerateActors] (or [UseElarion])
@@ -153,7 +163,12 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   methods live ON the record (it's shared — the actor, `IActorStateReader` queries on other instances,
   and SQL all deserialize the same type); actor methods only apply a transition, `WriteStateAsync`, then
   side effects (after the write — the write is the commit point). Evolve the shape with
-  optional/defaulted properties on the record, never by migrating in `OnActivateAsync`. On a concurrent
+  optional/defaulted properties on the record, never by migrating in `OnActivateAsync`.
+  **Write cadence decides query meaning**: write-through → the reader is DB-fresh (the only cadence where
+  it's a first-class query path); periodic checkpointing → the reader is bounded-stale (warm-restart
+  mechanism, never a "live" view). Real-time views of hot in-memory state are **push** — the actor
+  publishes client events from its home and the Postgres fan-out reaches every instance's browsers —
+  never `IActorStateReader` polling. On a concurrent
   snapshot change the stale activation passivates and the turn transparently re-runs once on the
   reloaded snapshot (so write turns as reapplyable mutations; side effects before the write are
   at-least-once); only sustained conflicts surface as `ActorSnapshotConcurrencyException`. Backend: reference
@@ -173,7 +188,10 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   authoritative activation app-wide, mark it `[Actor(SingleHomed = true)]` and register the home
   lease (`AddElarionPostgreSqlActorHome<AppDbContext>()` + `[GenerateElarionRoleLeases]` on the
   context — the home is the `"actors"` role of the generic `IRoleLease` leader-election primitive in
-  `Elarion.Coordination.PostgreSql`): one instance is elected home, calls elsewhere fail with `ActorNotHomedException`, and
+  `Elarion.Coordination.PostgreSql`): one instance is elected home, calls elsewhere fail with
+  `ActorNotHomedException` (for HTTP endpoints, bridge with the role-holder proxy —
+  `app.UseElarionRoleHolderProxy("actors", "/live-prefixes…")` before routing + `AddElarionInstanceAddress()`
+  on every instance; installs nothing without a lease, and the prefix list is the future ingress rule), and
   event delivery follows the lease via
   `AddElarionOutbox<T>(o => o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService<IActorHomeLease>().IsHeld))`.
   Reads from any instance use `IActorStateReader.ReadAsync<TState>(key)` (snapshot, no activation).

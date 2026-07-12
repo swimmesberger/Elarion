@@ -90,6 +90,29 @@ public sealed class PostgreSqlRoleLeaseIntegrationTests(PostgreSqlActorSnapshotS
     }
 
     [Fact]
+    public async Task HolderAddress_TravelsWithTheRow_AndFollowsTakeover() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var time = new FakeTimeProvider();
+        await using var provider = CreateProvider();
+        var role = NewRole();
+        var first = CreateLease(provider, time, role, "instance-a", advertisedAddress: "http://10.0.0.1:8080");
+        var second = CreateLease(provider, time, role, "instance-b", advertisedAddress: "http://10.0.0.2:8080");
+
+        // The holder advertises; the blocked instance learns the holder's address from the row —
+        // the whole "how do I reach the holder" story is this one column (ADR-0050).
+        (await first.TryAcquireOrRenewAsync(TestToken)).Should().BeTrue();
+        first.CurrentHolderAddress.Should().Be("http://10.0.0.1:8080");
+        (await second.TryAcquireOrRenewAsync(TestToken)).Should().BeFalse();
+        second.CurrentHolderAddress.Should().Be("http://10.0.0.1:8080");
+
+        // Takeover: the address follows the role to its new holder.
+        time.Advance(TimeSpan.FromSeconds(31));
+        (await second.TryAcquireOrRenewAsync(TestToken)).Should().BeTrue();
+        (await first.TryAcquireOrRenewAsync(TestToken)).Should().BeFalse();
+        first.CurrentHolderAddress.Should().Be("http://10.0.0.2:8080");
+    }
+
+    [Fact]
     public async Task IndependentRoles_ElectIndependentHolders() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var time = new FakeTimeProvider();
@@ -109,14 +132,16 @@ public sealed class PostgreSqlRoleLeaseIntegrationTests(PostgreSqlActorSnapshotS
     private static string NewRole() => $"role-{Guid.CreateVersion7():N}";
 
     private PostgreSqlRoleLease<ActorSnapshotIntegrationDbContext> CreateLease(
-        ServiceProvider provider, FakeTimeProvider time, string role, string instanceId) =>
+        ServiceProvider provider, FakeTimeProvider time, string role, string instanceId,
+        string? advertisedAddress = null) =>
         new(provider.GetRequiredService<IServiceScopeFactory>(),
             new RoleLeaseOptions {
                 RoleName = role,
                 InstanceId = instanceId,
                 LeaseDuration = TimeSpan.FromSeconds(30),
                 RenewInterval = TimeSpan.FromSeconds(10),
-                HeldSafetyMargin = TimeSpan.FromSeconds(5)
+                HeldSafetyMargin = TimeSpan.FromSeconds(5),
+                AdvertisedAddress = advertisedAddress
             },
             time,
             NullLogger<PostgreSqlRoleLease<ActorSnapshotIntegrationDbContext>>.Instance);

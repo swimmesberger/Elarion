@@ -26,6 +26,10 @@ transport-neutral registry feeding both JSON-RPC and MCP), `GetMcpMetadata` (MCP
 `GetAllJsonTypeInfoResolvers`. Every transport is **feature-flag-gated per module**, so a disabled
 module disappears from all of them at once.
 
+The project layout is your choice: the bootstrapper discovers handlers both from referenced module
+assemblies and from the host compilation itself, so a single-project app wires identically. This
+tutorial uses the multi-project split because it is the shape that grows well.
+
 </Step>
 
 <Step>

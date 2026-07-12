@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LiveQuotes — Elarion realtime sample</title>
+<style>
+  :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+  body { max-width: 640px; margin: 3rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.2rem; } p { opacity: .75; font-size: .9rem; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: .45rem .6rem; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+  th:first-child, td:first-child { text-align: left; }
+  .up { color: #16a34a; } .down { color: #dc2626; }
+  #status { font-size: .8rem; opacity: .6; }
+</style>
+</head>
+<body>
+<h1>LiveQuotes</h1>
+<p>Simulated feed → in-memory actors (conflated to 4 Hz/symbol) → SSE. No database, no broker.
+   <span id="status">connecting…</span></p>
+<table>
+  <thead><tr><th>Symbol</th><th>Price</th><th>Change</th><th>Seq</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+const rows = document.getElementById('rows');
+const status = document.getElementById('status');
+const cells = new Map();
+
+function render(q) {
+  let row = cells.get(q.symbol);
+  if (!row) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${q.symbol}</td><td></td><td></td><td></td>`;
+    rows.appendChild(tr);
+    row = { price: tr.children[1], change: tr.children[2], seq: tr.children[3], lastSeq: -1 };
+    cells.set(q.symbol, row);
+  }
+  if (q.seq <= row.lastSeq) return;          // pushed hints are at-most-once and unordered vs. converge
+  row.lastSeq = q.seq;
+  row.price.textContent = q.price.toFixed(2);
+  row.change.textContent = `${q.changePercent > 0 ? '+' : ''}${q.changePercent.toFixed(2)}%`;
+  row.change.className = q.changePercent >= 0 ? 'up' : 'down';
+  row.seq.textContent = q.seq;
+}
+
+// Discover the symbols once (the pull path — served by the actor-hosting instance)…
+async function listSymbols() {
+  const res = await fetch('/quotes');
+  if (!res.ok) return [];
+  const body = await res.json();
+  body.quotes.forEach(render);
+  return body.quotes.map(q => q.symbol);
+}
+
+// …then stream: one SSE connection, one subscription per symbol, events named by topic.
+// The stream is self-converging: the topic's subscription observer greets every (re)subscribe with the
+// symbol's current value, so there is no re-fetch on reconnect — "last known value + everything since"
+// on one connection. The seq guard in render() resolves greeting-vs-live-push ordering.
+async function start() {
+  const symbols = await listSymbols();
+  const subscriptions = symbols.map(s => ({ topic: 'market.quoteChanged', resource: s }));
+  const es = new EventSource(`/events?subscriptions=${encodeURIComponent(JSON.stringify(subscriptions))}`);
+  es.addEventListener('market.quoteChanged', e => render(JSON.parse(e.data)));
+  es.addEventListener('elarion.connected', () => { status.textContent = 'live'; });
+  es.onerror = () => { status.textContent = 'reconnecting…'; };
+}
+start();
+</script>
+</body>
+</html>

@@ -117,7 +117,27 @@ two planes explain themselves.
   changing the subscription set reconnects. Server-side filtered: `User` scope is always derived from
   `ICurrentUser` — a client can never request another user's scope. `Resource` scope goes through an
   `IClientEventSubscriptionAuthorizer` seam and is **fail-closed**: no authorizer registered → resource
-  subscriptions denied. Module-gated: a disabled module's topics do not exist.
+  subscriptions denied. *Addendum (2026-07-11):* a topic whose resource segment is a **routing key, not an
+  entitlement** (a stock symbol, a public room id) declares `[AllowAnyResource]` on the contract (or
+  `AllowAnyResource()` on the topic options) and skips the seam once the topic's requirements pass —
+  per-topic by design, because the authorizer seam is global and a blanket `return true` implementation
+  would silently open every future entitlement-scoped topic. Module-gated: a disabled module's topics do
+  not exist.
+- **Producer-side lifecycle** *(addendum 2026-07-11)*: a topic may declare a subscription observer
+  (`[SubscriptionObserver<T>]` / `ObserveSubscriptions<T>()`) with deliberately Rx-shaped semantics
+  (`BehaviorSubject` + `RefCount`, minus backpressure — the stream stays hot at-most-once):
+  `OnSubscribedAsync(sub, sink)` hands the producer a **single-subscriber sink** to greet the new
+  subscriber with the current value (the initial-value primitive — the producer decides, existing
+  subscribers see nothing, reconnects self-heal because resubscribing re-greets), and
+  `OnInterestChangedAsync(sub, active)` fires on debounced first/last-watcher transitions (linger, default
+  5 s, so a reload never bounces an upstream). The pull sibling `IClientEventInterest.HasSubscribers`
+  lets producers skip unobserved work — safe *because* the greeting covers late arrivals. Interest is
+  **node-local** by design (no cross-node presence protocol at this tier); it is authoritative for
+  interest-driven producers because the ADR-0050 topology routes their live prefixes — including the
+  events endpoint — to their node. Rejected: `PublishAsync` returning delivered/subscriber counts (a
+  cross-node lie inviting control flow on delivery); a retained-last-value cache (cold-start hole on a
+  fresh node — exactly the slow-changing-data case it would exist for — and it turns the registry
+  stateful with unbounded cardinality).
 - **Cross-node fan-out** (`Elarion.ClientEvents.PostgreSql`): LISTEN/NOTIFY, copying the ADR-0024 listener —
   one dedicated connection per node, `pg_notify` on a pooled connection per publish (no transaction gating
   needed: the recommended producer already runs after commit, and the direct-publish tier is pre-commit by

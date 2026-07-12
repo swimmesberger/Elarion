@@ -30,4 +30,13 @@ public sealed class RoleLeaseOptions {
     /// never mistake each other for themselves.
     /// </summary>
     public string InstanceId { get; set; } = $"{Environment.MachineName}:{Guid.CreateVersion7():N}";
+
+    /// <summary>
+    /// The base address this instance advertises on the lease row while holding the role (ADR-0050),
+    /// e.g. <c>http://10.0.1.5:8080</c> — what the role-holder proxy on other instances forwards to.
+    /// <see langword="null"/> (default) falls back to a registered
+    /// <c>IInstanceAddressProvider</c> (e.g. <c>AddElarionInstanceAddress()</c> auto-detects from the
+    /// server's bound endpoints); set it explicitly behind NAT/proxies or for HTTPS-between-nodes.
+    /// </summary>
+    public string? AdvertisedAddress { get; set; }
 }

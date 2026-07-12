@@ -16,7 +16,11 @@ namespace Elarion.Actors;
 /// interpretation (constants, derived flags) and pure transitions on the record itself — the shared
 /// type carries that logic to every deserialization site — and keep actor methods to
 /// apply-write-side-effect. Interpretation left in actor methods is invisible to reader-based
-/// queries and lets them silently diverge from facade queries.
+/// queries and lets them silently diverge from facade queries. Freshness equals the actor's write
+/// cadence: under write-through the reader is as fresh as any database query; under periodic
+/// checkpointing it is bounded-stale (a warm-restart mechanism, not a live view) — real-time
+/// observation of hot in-memory state is a <em>push</em> concern (client events published by the
+/// actor and fanned out to every instance), never reader polling.
 /// </remarks>
 public interface IActorStateReader {
     /// <summary>Reads the latest snapshot for <paramref name="key"/>, or <see langword="null"/> when none is stored.</summary>

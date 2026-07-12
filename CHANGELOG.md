@@ -9,6 +9,54 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Producer-side subscription lifecycle for client events — initial values and interest.** A topic can
+  now declare an `IClientEventSubscriptionObserver` (`[SubscriptionObserver<T>]` on the contract, or
+  `ObserveSubscriptions<T>()` on the topic options) with deliberately Rx-shaped semantics:
+  `OnSubscribedAsync` hands the producer a **per-subscriber sink** — greet the new subscriber with the
+  current value (the `BehaviorSubject` pattern, producer-controlled) and the stream becomes
+  self-converging: "last known value + everything since", on one connection, re-greeted on every
+  reconnect; `OnInterestChangedAsync` is `RefCount` with a linger-debounced last-watcher departure
+  (default 5 s — a browser reload never bounces an upstream connection). The pull sibling
+  `IClientEventInterest.HasSubscribers(topic, scope)` lets producers (actors especially) skip work nobody
+  observes — safe because the greeting covers late arrivals. Interest is node-local by design and
+  authoritative for actor-fed topics via the ADR-0050 home routing. `samples/LiveQuotes` dogfoods it:
+  unwatched symbols publish nothing, new subscribers converge from the greeting, and the dashboard drops
+  its reconnect re-fetch.
+- **`[AllowAnyResource]` — declare a client-event topic's resource segment a routing key.** Resource-scoped
+  subscriptions stay fail-closed by default, but a topic whose resource merely selects which events to
+  receive (a stock symbol, a public room id — not an entitlement) now declares that on the contract
+  (`[AllowAnyResource]`, or `AllowAnyResource()` on the topic options): callers passing the topic's
+  requirements subscribe to any resource without the `IClientEventSubscriptionAuthorizer` seam. Per-topic
+  by design — the authorizer seam is global, so a blanket `return true` implementation would silently open
+  every future entitlement-scoped topic; the seam now stays reserved for genuine per-resource entitlement
+  checks. The generator flows the attribute into the topic registration, and `samples/LiveQuotes` drops its
+  allow-all authorizer for the declaration.
+- **The role-holder proxy (ADR-0050) — an in-app ingress rule for homogeneous fleets.**
+  `app.UseElarionRoleHolderProxy("actors", "/quotes", …)` lets every instance serve the listed path
+  prefixes by transparently forwarding them to the current role-lease holder when the instance is not
+  it — so `--scale app=N` works out of the box for single-homed actors' endpoints, one hop slower
+  off-home, until a load balancer takes over (the prefix list maps 1:1 onto that ingress rule). Routing
+  happens **before** anything executes locally (no double-execution hazard), bodies and SSE stream
+  through, auth headers replay verbatim (same app on both ends), and failure modes are bounded: one hop
+  ever (`Elarion-Role-Proxied` loop guard), holder unknown/unreachable or mid-failover →
+  `503 + Retry-After`, no retries or queueing. Zero cost when unused or when no role lease is
+  registered (the call installs nothing — single-instance mode). Supporting pieces: the lease row now
+  carries the holder's advertised address (`RoleLeaseOptions.AdvertisedAddress`, or the new
+  `IInstanceAddressProvider` seam with `AddElarionInstanceAddress()` auto-detecting from the server's
+  bound endpoints), exposed as `IRoleLease.CurrentHolderAddress`.
+- **`samples/LiveQuotes` — the realtime middle-ground sample.** A simulated market-data feed (~100
+  ticks/s) streamed through single-homed, per-symbol in-memory actors that conflate to human-readable
+  rates and push resource-scoped client events to browsers over SSE — zero database, zero broker, one
+  `dotnet run`. Demonstrates actor "shape 2" end-to-end (feed as a hosted service calling typed facades
+  in-process — deliberately not integration events; sequence-guarded ordering; conflation;
+  converge-then-stream on the client) with clock-deterministic, Docker-free tests and a README covering
+  the worker/web multi-node topology.
+
+### Fixed
+- **Actor facades preserve nullable reference annotations.** A method returning `Task<T?>` (or taking a
+  nullable reference parameter) lost the `?` in the generated facade and work item, failing CS8603 under
+  warnings-as-errors; the registration generator now renders method results and parameters with the
+  nullable modifier.
 - **Actor state snapshotting (ADR-0047).** Declaring an `IActorState<TState>` constructor parameter gives
   an `[Actor]` durable, snapshot-persisted state: loaded before `OnActivateAsync`, persisted only by
   explicit `WriteStateAsync` (passivation never flushes), cleared by `ClearStateAsync`, refreshed by
