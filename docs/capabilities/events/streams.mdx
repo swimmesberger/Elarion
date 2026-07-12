@@ -9,7 +9,17 @@ when *element identity* matters. When a consumer needs **the current value and e
 order, with completion, resumable across reconnects** — that is a stream, and it needs a different
 contract ([ADR-0052](https://github.com/wimmesberger/Elarion/blob/main/docs/decisions/0052-ordered-streams.md)).
 
-**Client events are the default; a stream is the exception you justify.** The deciding axis is whether a
+The litmus test is one question: **if a message is lost, is the consumer merely *stale*, or is it
+*wrong*?** Client events are at-most-once and self-healing — a lost hint means showing a value slightly
+longer (the next event or the reconnect greeting carries the complete current truth). Use a stream only
+when the **sequence itself is the data**, so a lost element makes the result silently wrong and no
+re-query can heal it: a client-side chart built from ticks, a recorder or analytics tailer, anything
+that asks "everything since sequence N", anything that must observe *completion* ("the auction closed" —
+client events just go quiet; silence and done are indistinguishable). And don't put a latest-wins UI on
+streams "because more guarantees can't hurt": full-fidelity sequences to a dashboard are pure wire waste,
+and per-key connections don't scale to a 100-symbol screen.
+
+**Client events are the default; a stream is the exception you justify.** The second axis is whether a
 **single live producer per key** exists — a sequencer. Ordering has to come from somewhere:
 
 | You need | Producer shape | Use |
