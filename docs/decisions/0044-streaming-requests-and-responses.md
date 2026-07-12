@@ -1,6 +1,7 @@
-# ADR-0043: Streaming requests and responses — deferred, with the design pre-decided
+# ADR-0044: Streaming requests and responses — deferred, with the design pre-decided
 
-- Status: Proposed
+- Status: Proposed (producer-side live streams since realized by [ADR-0052](0052-ordered-streams.md);
+  `IStreamHandler` remains deferred)
 - Date: 2026-07-06
 - Related: [ADR-0043](0043-client-events.md) (server-push of facts; the ephemeral progress tier),
   [ADR-0035](0035-protocol-neutral-staged-upload-seam.md)/[ADR-0039](0039-binary-file-responses.md)

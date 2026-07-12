@@ -9,6 +9,20 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Ordered streams (ADR-0052).** The ordered, completable tier next to client events, for when element
+  identity matters and a single live producer owns the sequence. `Elarion` core gains
+  `Elarion.Streams.StreamHub<T>` — a hot, ordered in-memory broadcast (BCL-only: Channels +
+  `IAsyncEnumerable<T>`) with atomic replay-then-live (`ReplayCapacity` ring, default 1 =
+  `BehaviorSubject`), `ResumeAfterSequence` resume (a gap beyond the ring is a visible sequence jump,
+  never a silent hole), per-subscriber overflow strategy (`DropOldest`/`Wait`/`Cancel` →
+  `StreamLaggedException`), and `Complete`/`Fail`. An `[Actor]` method returning `IAsyncEnumerable<T>`
+  now becomes a **facade stream** (the Orleans 7+ grain-interface shape): the attach runs as a mailbox
+  turn, enumeration off the mailbox, one subscription per enumeration; ELACT012 rejects
+  `CancellationToken` parameters and `[ConsumeEvent]` on stream methods. `Elarion.AspNetCore` adds
+  `MapElarionStream<T>(route, subscribe)` — the SSE leg with `id:` = sequence, so the browser's automatic
+  `Last-Event-ID` reconnect (or `?after=`) resumes from the producer's replay ring. Client events remain
+  the default push tier; `samples/LiveQuotes` now ships both side by side
+  (`curl -N /quotes/ELN/stream`).
 - **PostgreSQL bulk insert (ADR-0051).** Two new packages bring an EF-native bulk path:
   **`Elarion.EntityFrameworkCore.BulkOperations`** (provider-neutral) adds `ExecuteInsertAsync` over
   `DbSet<T>` — set-based and non-tracking like EF's `ExecuteUpdate`/`ExecuteDelete` family, aligned with

@@ -85,6 +85,34 @@ public sealed class StockQuoteActorTests {
     }
 
     [Fact]
+    public async Task Watch_GreetsWithTheLatestTick_ThenStreamsEveryAcceptedTick_InOrder() {
+        var time = new FakeTimeProvider();
+        await using var provider = BuildHost(time, new RecordingPublisher());
+        var quote = provider.GetRequiredService<IActorSystem>().Get<IStockQuote>("ELN");
+
+        await quote.Apply(new QuoteTick(1, 100m, time.GetUtcNow()), Ct);
+        await quote.Apply(new QuoteTick(2, 110m, time.GetUtcNow()), Ct);
+
+        // The generated stream facade (ADR-0052): greeting = latest accepted tick, then every accepted
+        // tick in order — no conflation, and the feed's sequence guard still applies before the stream.
+        var observed = new List<Quote>();
+        await foreach (var item in quote.Watch(resumeAfter: null, Ct).WithCancellation(Ct)) {
+            observed.Add(item.Value);
+            if (observed.Count == 1) {
+                await quote.Apply(new QuoteTick(3, 120m, time.GetUtcNow()), Ct);
+                await quote.Apply(new QuoteTick(2, 999m, time.GetUtcNow()), Ct); // stale feed seq → dropped
+                await quote.Apply(new QuoteTick(4, 130m, time.GetUtcNow()), Ct);
+            }
+
+            if (observed.Count == 3) {
+                break;
+            }
+        }
+
+        observed.Select(static q => q.Price).Should().Equal(110m, 120m, 130m);
+    }
+
+    [Fact]
     public async Task Queries_ServeTheCurrentValue_UnprimedSymbolIsNotFound() {
         var time = new FakeTimeProvider();
         await using var provider = BuildHost(time, new RecordingPublisher());

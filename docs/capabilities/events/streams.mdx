@@ -1,0 +1,125 @@
+---
+title: Ordered streams
+description: StreamHub, actor stream methods, and the resumable SSE endpoint — the ordered, completable tier next to client events.
+icon: ListOrdered
+---
+
+Client events are **at-most-once hints**: perfect for "re-query" and latest-wins state, structurally wrong
+when *element identity* matters. When a consumer needs **the current value and every change since — in
+order, with completion, resumable across reconnects** — that is a stream, and it needs a different
+contract ([ADR-0052](https://github.com/wimmesberger/Elarion/blob/main/docs/decisions/0052-ordered-streams.md)).
+
+**Client events are the default; a stream is the exception you justify.** The deciding axis is whether a
+**single live producer per key** exists — a sequencer. Ordering has to come from somewhere:
+
+| You need | Producer shape | Use |
+| --- | --- | --- |
+| Invalidation hints ("re-query") | Any handler, any node, post-commit | [Client events](/docs/capabilities/events/client-events) |
+| Latest-wins live state | Live producer, versioned payload | Client events (payload tier + greeting) |
+| Every element, machine consumer | Any handler | [Integration events / outbox](/docs/capabilities/events/backends) |
+| Every element in order, completion, resume | One sequencer per key (a homed actor) | **Streams (this page)** |
+
+No sequencer → no ordering source → not a stream. If latest-wins is enough, stay on the payload tier.
+
+## The primitive: `StreamHub<T>`
+
+A hot, ordered, completable in-memory broadcast, owned by the producer — typically a field on an
+[actor](/docs/concepts/actors), whose mailbox already serializes publishes:
+
+```csharp
+using Elarion.Streams;
+
+private readonly StreamHub<Quote> _stream = new(new StreamHubOptions {
+    ReplayCapacity = 256,   // the replay ring; 1 (default) = BehaviorSubject, more = resumable window
+});
+
+// Inside a turn: assigns the next contiguous sequence and delivers to every subscriber in order.
+await _stream.PublishAsync(quote, ct);
+
+// Subscribing is atomic replay-then-live: the retained ring and every subsequent publish, no seam
+// between them — the greeting race client events resolve client-side does not exist here.
+IAsyncEnumerable<StreamItem<Quote>> subscription = _stream.SubscribeSequenced(new StreamSubscribeOptions {
+    ResumeAfterSequence = lastSeen,          // replay everything newer; a gap that outran the ring
+});                                          // shows as a sequence jump, never a silent hole
+
+_stream.Complete();          // ends every subscription — the signal fire-and-forget events don't have
+_stream.Fail(exception);     // ends them with the error
+```
+
+Each subscriber picks its own overflow strategy — one slow consumer must never stall the fan-out unless
+it asked to: `DropOldest` (conflation, the default), `Wait` (true backpressure — trusted in-process
+consumers only), or `Cancel` (the subscriber gets `StreamLaggedException` and re-subscribes with
+`ResumeAfterSequence`; the publisher is never delayed). `SubscriberCount` is the interest pull for lazy
+producers.
+
+## Actor stream methods
+
+An `[Actor]` method returning `IAsyncEnumerable<T>` becomes a **facade stream** — the Orleans 7+
+grain-interface shape, so call sites stay migration-portable:
+
+```csharp
+[Actor(SingleHomed = true)]
+public sealed class StockQuoteActor(IActorContext<string> context) : IActorLifecycle {
+    private readonly StreamHub<Quote> _stream = new(new() { ReplayCapacity = 256 });
+
+    public async Task Apply(QuoteTick tick, CancellationToken ct) {
+        // ...update state...
+        await _stream.PublishAsync(ToQuote(tick), ct);   // inside the turn → ordered per symbol
+    }
+
+    // The attach runs as a mailbox turn (fast); enumeration never holds the mailbox.
+    public IAsyncEnumerable<StreamItem<Quote>> Watch(long? resumeAfter) =>
+        _stream.SubscribeSequenced(new StreamSubscribeOptions { ResumeAfterSequence = resumeAfter });
+
+    public ValueTask OnActivateAsync(CancellationToken ct) => ValueTask.CompletedTask;
+
+    // The lifetime rule: a hub dies with its activation. Complete it here so consumers observe the
+    // end and re-subscribe (which re-activates the actor) instead of starving silently.
+    public ValueTask OnDeactivateAsync(CancellationToken ct) {
+        _stream.Complete();
+        return ValueTask.CompletedTask;
+    }
+}
+
+// Consumers use the generated facade like any IAsyncEnumerable — nothing happens until iteration,
+// and each enumeration is its own subscription:
+await foreach (var item in actors.Get<IStockQuote>("ELN").Watch(resumeAfter: null, ct)) { … }
+```
+
+Two generator rules keep this safe (**ELACT012**): a stream method must not take a `CancellationToken` —
+the turn token is pooled and its lifetime ends with the attach turn; the facade adds the trailing token,
+which cancels the queued attach and (linked with the enumerator's token) the stream — and it cannot be a
+`[ConsumeEvent]` consumer.
+
+## The SSE endpoint: `MapElarionStream`
+
+`Elarion.AspNetCore` maps a stream as Server-Sent Events with **resume built in**: each element's
+canonical JSON is one event whose `id:` is the sequence, so the browser's automatic `Last-Event-ID`
+reconnect header (or an explicit `?after=`) resumes from the hub's ring — gap-free within the retained
+window, a visible sequence jump beyond it.
+
+```csharp
+app.MapElarionStream<Quote>("/quotes/{symbol}/stream", (context, after) =>
+    context.Request.RouteValues["symbol"] is string symbol && symbol.Length > 0
+        ? context.RequestServices.GetRequiredService<IActorSystem>()
+            .Get<IStockQuote>(symbol.ToUpperInvariant()).Watch(after)
+        : null);   // null → 404
+```
+
+The delegate is the host's control point: authorization happens inside it (or via
+`.RequireAuthorization()` on the returned builder), and returning `null` is a 404. The element type must
+be in a registered JSON source-gen context. The rest of the path is one TCP connection — ordered
+end-to-end with zero extra infrastructure.
+
+## Multi-node reach: home-served by design
+
+A stream needs its sequencer, so consumers must connect to the producer's node — which the recommended
+topology already guarantees: put the streamed routes under the prefixes the
+[role-holder proxy](/docs/capabilities/hosting) (and later your identical ingress rule) sends to the
+actor home. `pg_notify` is deliberately not involved: it has no ordering across sessions and no replay —
+and no role, since one HTTP connection to the home is already reliable and ordered. Needing cross-node
+streams *without* home routing is the existing replace-the-seam/Orleans trigger, not a knob.
+
+`samples/LiveQuotes` ships both tiers side by side: the dashboard converges on conflated
+`market.quoteChanged` client events, while `curl -N /quotes/ELN/stream` tails every accepted tick in
+order with resumable ids.

@@ -24,6 +24,7 @@ ELACT006 | Elarion.Generators | Warning | ConfigureAwait(false) inside a [Reentr
 ELACT008 | Elarion.Generators | Error | Actor event-consumer key cannot be resolved
 ELACT009 | Elarion.Generators | Error | Actor [ConsumeEvent] method must be public
 ELACT010 | Elarion.Generators | Error | Actor [ConsumeEvent] method must take one integration event
+ELACT012 | Elarion.Generators | Error | Invalid actor stream method
 ELEVT001 | Elarion.Generators | Error | Event consumer must be declared on a [Service] class
 ELEVT002 | Elarion.Generators | Error | Invalid event consumer signature
 ELEVT003 | Elarion.Generators | Warning | Event consumer is not in any module
