@@ -24,6 +24,34 @@ public static class ActorStreams {
         return new DeferredActorStream<T>(subscribe, cancellationToken);
     }
 
+    /// <summary>
+    /// Ties an activation retention (<c>ActorWorkItem.RetainActivation</c>) to a stream's lifetime:
+    /// the activation stays safe from <b>idle</b> passivation until the enumeration ends — completes,
+    /// fails, or is disposed (the refCount lifetime, ADR-0052). Generated stream work items wrap the
+    /// actor method's result with this inside the attach turn. The result must be enumerated (the
+    /// facade's <see cref="Defer{T}"/> always does); an abandoned, never-enumerated result would hold
+    /// the retention until collected.
+    /// </summary>
+    /// <param name="source">The actor's subscription.</param>
+    /// <param name="retention">The activation retention to release when the enumeration ends; may be
+    /// <see langword="null"/> (nothing to retain — e.g. a hand-driven work item outside a cell).</param>
+    public static IAsyncEnumerable<T> RetainWhileEnumerating<T>(IAsyncEnumerable<T> source, IDisposable? retention) {
+        ArgumentNullException.ThrowIfNull(source);
+        return retention is null ? source : Enumerate(source, retention);
+
+        static async IAsyncEnumerable<T> Enumerate(
+            IAsyncEnumerable<T> source, IDisposable retention, [EnumeratorCancellation] CancellationToken ct = default) {
+            try {
+                await foreach (var item in source.WithCancellation(ct).ConfigureAwait(false)) {
+                    yield return item;
+                }
+            }
+            finally {
+                retention.Dispose();
+            }
+        }
+    }
+
     private sealed class DeferredActorStream<T>(
         Func<CancellationToken, ValueTask<IAsyncEnumerable<T>>> subscribe,
         CancellationToken methodToken) : IAsyncEnumerable<T> {

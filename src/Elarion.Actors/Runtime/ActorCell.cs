@@ -17,7 +17,7 @@ namespace Elarion.Actors.Runtime;
 /// shutdown. A closed cell rejects enqueues with <see langword="false"/> so the host retries
 /// against a fresh activation.
 /// </remarks>
-internal sealed class ActorCell<TActor> where TActor : class {
+internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor : class {
     private readonly Channel<ActorWorkItem<TActor>> _mailbox;
     private readonly string _actorName;
     private readonly string _keyText;
@@ -57,6 +57,10 @@ internal sealed class ActorCell<TActor> where TActor : class {
     // OnItemCompleted (a different thread under [Reentrant]), disposed after the loop drains. Timer
     // ops are thread-safe and a post-dispose Change/fire is a benign no-op, so volatile suffices.
     private volatile ITimer? _idleTimer;
+    // Live stream enumerations retaining this activation (ADR-0052 refCount lifetime): while > 0 the
+    // idle timer's fire is a no-op, and the release back to zero re-arms it. Only the IDLE path
+    // consults this — snapshot-conflict passivation and shutdown are correctness paths and ignore it.
+    private int _streamRetentions;
 
     private static bool IsClosed(long state) => (state & ClosedFlag) != 0;
     private static long Pending(long state) => state & PendingMask;
@@ -272,7 +276,7 @@ internal sealed class ActorCell<TActor> where TActor : class {
 
     private async Task RunSequentialAsync(TActor instance) {
         await foreach (var item in _mailbox.Reader.ReadAllAsync().ConfigureAwait(false)) {
-            OnTurnFinished(item, await item.RunAsync(instance, _stoppingCts.Token).ConfigureAwait(false));
+            OnTurnFinished(item, await item.RunAsync(instance, this, _stoppingCts.Token).ConfigureAwait(false));
             OnItemCompleted();
         }
     }
@@ -285,7 +289,7 @@ internal sealed class ActorCell<TActor> where TActor : class {
         var inFlight = new List<Task>();
         await foreach (var item in _mailbox.Reader.ReadAllAsync().ConfigureAwait(false)) {
             var run = Task.Factory.StartNew(
-                () => item.RunAsync(instance, _stoppingCts.Token).AsTask(),
+                () => item.RunAsync(instance, this, _stoppingCts.Token).AsTask(),
                 CancellationToken.None,
                 TaskCreationOptions.DenyChildAttach,
                 schedulerPair.ExclusiveScheduler).Unwrap();
@@ -344,7 +348,47 @@ internal sealed class ActorCell<TActor> where TActor : class {
             Timeout.InfiniteTimeSpan);
     }
 
-    private void OnIdleTimerFired() => TryCloseWhenIdle();
+    private void OnIdleTimerFired() {
+        // Live stream consumers pin the activation against IDLE passivation only. No re-arm here:
+        // releasing the last retention re-arms the timer (and any new turn re-arms it via
+        // OnItemCompleted). A retention acquired concurrently is safe either way — it is created
+        // inside a turn, so Pending != 0 and TryCloseWhenIdle refuses.
+        if (Volatile.Read(ref _streamRetentions) > 0) {
+            return;
+        }
+
+        TryCloseWhenIdle();
+    }
+
+    IDisposable IActorActivationRetainer.Retain() {
+        Interlocked.Increment(ref _streamRetentions);
+        return new StreamRetention(this);
+    }
+
+    private void ReleaseStreamRetention() {
+        if (Interlocked.Decrement(ref _streamRetentions) != 0) {
+            return;
+        }
+
+        // Last consumer left: restart the idle window (refCount semantics — the activation lives
+        // while watched, and becomes passivatable one idle timeout after the last watcher leaves).
+        // With turns still pending, OnItemCompleted re-arms instead; on a closed cell this is the
+        // documented benign post-dispose Change.
+        var state = Volatile.Read(ref _state);
+        if (!IsClosed(state) && Pending(state) == 0 && _options.IdleTimeout is { } idle) {
+            _idleTimer?.Change(idle, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private sealed class StreamRetention(ActorCell<TActor> cell) : IDisposable {
+        private int _disposed;
+
+        public void Dispose() {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) {
+                cell.ReleaseStreamRetention();
+            }
+        }
+    }
 
     // Closes the cell iff nothing is pending — the shared invariant of idle passivation and
     // snapshot-conflict passivation: closing only at zero pending means the mailbox is empty and no

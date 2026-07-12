@@ -17,8 +17,10 @@ minor releases may include breaking changes.
   never a silent hole), per-subscriber overflow strategy (`DropOldest`/`Wait`/`Cancel` →
   `StreamLaggedException`), and `Complete`/`Fail`. An `[Actor]` method returning `IAsyncEnumerable<T>`
   now becomes a **facade stream** (the Orleans 7+ grain-interface shape): the attach runs as a mailbox
-  turn, enumeration off the mailbox, one subscription per enumeration; ELACT012 rejects
-  `CancellationToken` parameters and `[ConsumeEvent]` on stream methods. `Elarion.AspNetCore` adds
+  turn, enumeration off the mailbox, one subscription per enumeration; a live enumeration **retains the
+  activation** against idle passivation (refCount lifetime — a streaming-only actor never loses its
+  stream mid-flight; correctness passivations still complete hubs and start a new sequence epoch);
+  ELACT012 rejects `CancellationToken` parameters and `[ConsumeEvent]` on stream methods. `Elarion.AspNetCore` adds
   `MapElarionStream<T>(route, subscribe)` — the SSE leg with `id:` = sequence, so the browser's automatic
   `Last-Event-ID` reconnect (or `?after=`) resumes from the producer's replay ring. Client events remain
   the default push tier; `samples/LiveQuotes` now ships both side by side

@@ -157,7 +157,10 @@ public sealed class ActorRegistrationGeneratorTests {
             "elarionAttachToken => _handle.InvokeAsync(WatchWorkItem.Rent(after), elarionAttachToken),");
         generated.Should().Contain(
             "private sealed class WatchWorkItem : global::Elarion.Actors.ActorWorkItem<global::Sample.Orders.TickerActor, global::System.Collections.Generic.IAsyncEnumerable<int>>");
-        generated.Should().Contain("new(actor.Watch(_after));");
+        // The stream turn ties the activation's lifetime to the enumeration (refCount lifetime):
+        // idle passivation must never end a live stream mid-flight.
+        generated.Should().Contain(
+            "new(global::Elarion.Actors.Runtime.ActorStreams.RetainWhileEnumerating(actor.Watch(_after), RetainActivation()));");
     }
 
     [Fact]

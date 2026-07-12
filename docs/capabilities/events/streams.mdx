@@ -101,6 +101,13 @@ the turn token is pooled and its lifetime ends with the attach turn; the facade 
 which cancels the queued attach and (linked with the enumerator's token) the stream — and it cannot be a
 `[ConsumeEvent]` consumer.
 
+**A live enumeration retains the activation** (refCount lifetime): idle passivation never ends a stream
+mid-flight, so a streaming-only actor — consumers attached, no turns arriving — stays alive, and the
+idle window restarts when the last consumer leaves. Correctness passivations are deliberately exempt
+(snapshot conflict, shutdown): those complete the hub via `OnDeactivateAsync`, consumers observe the end
+and re-subscribe, and the fresh hub starts a new sequence *epoch* — which is why resume is a
+within-one-hub-lifetime contract, and a consumer that sees ids restart treats it as a reset.
+
 ## The SSE endpoint: `MapElarionStream`
 
 `Elarion.AspNetCore` maps a stream as Server-Sent Events with **resume built in**: each element's

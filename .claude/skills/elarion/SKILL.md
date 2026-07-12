@@ -183,8 +183,10 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   (not latest-wins): the actor owns an `Elarion.Streams.StreamHub<T>` field, publishes inside turns, and
   exposes `IAsyncEnumerable<StreamItem<T>> Watch(long? resumeAfter) => _hub.SubscribeSequenced(new() {
   ResumeAfterSequence = resumeAfter })` — a facade stream (attach = mailbox turn, enumeration
-  off-mailbox). No `CancellationToken` param, no `[ConsumeEvent]` on stream methods (ELACT012); complete
-  the hub in `OnDeactivateAsync`. Serve it with `app.MapElarionStream<T>(route, (ctx, after) => …)` —
+  off-mailbox). No `CancellationToken` param, no `[ConsumeEvent]` on stream methods (ELACT012). A live
+  enumeration retains the activation against idle passivation (refCount lifetime); snapshot-conflict
+  and shutdown passivations ignore retention — so still complete the hub in `OnDeactivateAsync`
+  (re-activation = new hub = new sequence epoch). Serve it with `app.MapElarionStream<T>(route, (ctx, after) => …)` —
   SSE with `id:` = sequence, `Last-Event-ID`/`?after=` resume. Client events stay the default push tier;
   a stream needs a single live producer per key (route it to the actor home).
 - Default is **non-reentrant** (one message start-to-finish; an actor→actor call cycle fails with a

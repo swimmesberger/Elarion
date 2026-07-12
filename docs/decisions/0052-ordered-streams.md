@@ -63,9 +63,15 @@ grain-interface shape, so call sites stay migration-portable like the rest of th
   enumerator's token, the stream); the actor method itself must **not** take one — the turn token is a
   pooled CTS whose lifetime ends with the attach turn (**ELACT012**, which also rejects `[ConsumeEvent]`
   on stream methods).
-- **Lifetime rule**: the hub dies with its activation. A passivating streaming actor completes its hubs
-  in `OnDeactivateAsync`, so consumers observe the end and re-subscribe (re-activating the actor) instead
-  of starving on a channel nothing writes to anymore.
+- **Lifetime is refCount — a live enumeration retains the activation.** The generated stream turn pins
+  the activation until the enumeration ends, so **idle passivation never ends a stream mid-flight**: a
+  streaming-only actor with attached consumers stays alive, and the idle window restarts when the last
+  consumer leaves (Orleans parity in effect — there, batch pulls are grain calls that refresh activation
+  collection). Correctness passivations deliberately ignore retention: a snapshot-conflicted activation
+  must die (stale state, ADR-0047) and shutdown drains regardless. For those paths the hub-lifetime rule
+  remains: complete hubs in `OnDeactivateAsync`, so consumers observe the end and re-subscribe
+  (re-activating the actor) instead of starving on a channel nothing writes to anymore. A re-activation
+  is a new hub — sequences restart (a new epoch), so resume is a within-one-hub-lifetime contract.
 
 ### 3. The SSE leg (`Elarion.AspNetCore`): `MapElarionStream<T>`
 
@@ -129,5 +135,6 @@ ordered sibling for consumers that want the full sequence).
   one endpoint helper. No new package, no new dependency.
 - The ordering doctrine becomes two-tiered and teachable: monotonic latest-wins → client events;
   gap-free ordered → streams at the home. Both hold on every deployment shape they permit.
-- Streaming actors take on one obligation: complete hubs on deactivation (or pin residency deliberately).
+- Streaming actors take on one obligation: complete hubs on deactivation — it covers the correctness
+  passivations that retention deliberately does not block.
 - The SSE leg's resume contract (`id:` = sequence) is now wire-visible; changing it is a breaking change.

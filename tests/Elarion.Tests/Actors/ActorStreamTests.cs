@@ -96,13 +96,67 @@ public sealed class ActorStreamTests {
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
-    private static ServiceProvider CreateProvider() {
+    [Fact]
+    public async Task LiveEnumeration_RetainsTheActivation_AgainstIdlePassivation() {
+        // The streaming-only shape: no turns arrive while consumers sit attached — without retention
+        // the idle timer would passivate mid-stream and the sequence would restart (a new epoch).
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var idle = TimeSpan.FromSeconds(1);
+        var deactivations = new DeactivationCounter();
+        await using var provider = CreateProvider(options: new ActorOptions { IdleTimeout = idle },
+            deactivations: deactivations, timeProvider: time);
+        var ticker = provider.GetRequiredService<IActorSystem>().Get<ITicker>("ELN");
+        await ticker.Apply(1, TestToken);
+
+        await using var enumerator = ticker.Watch(resumeAfter: null, TestToken).GetAsyncEnumerator(TestToken);
+        (await enumerator.MoveNextAsync()).Should().BeTrue(); // the greeting — the attach turn ran
+
+        // Idle fires many windows over: the live enumeration must keep the activation alive.
+        for (var i = 0; i < 5; i++) {
+            time.Advance(idle + TimeSpan.FromMilliseconds(50));
+            await Task.Delay(10, TestToken);
+        }
+
+        deactivations.Count.Should().Be(0, "a live stream enumeration retains the activation");
+
+        // The last consumer leaves: the idle window restarts and passivation resumes.
+        await enumerator.DisposeAsync();
+        await AdvanceUntilAsync(time, idle + TimeSpan.FromMilliseconds(50), () => deactivations.Count == 1);
+    }
+
+    private static async Task AdvanceUntilAsync(
+        Microsoft.Extensions.Time.Testing.FakeTimeProvider time, TimeSpan step, Func<bool> condition) {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition()) {
+            if (stopwatch.Elapsed > TimeSpan.FromSeconds(60)) {
+                throw new TimeoutException("The expected actor state was not reached in time.");
+            }
+
+            time.Advance(step);
+            await Task.Delay(10, TestToken);
+        }
+    }
+
+    public sealed class DeactivationCounter {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Record() => Interlocked.Increment(ref _count);
+    }
+
+    private static ServiceProvider CreateProvider(
+        ActorOptions? options = null, DeactivationCounter? deactivations = null, TimeProvider? timeProvider = null) {
         var services = new ServiceCollection();
+        if (timeProvider is not null) {
+            services.AddSingleton(timeProvider);
+        }
+
         services.AddElarionActorSystem();
         services.AddElarionActor(new ActorRegistration<TickerActor, string, ITicker> {
             Name = "Ticker",
-            Options = new ActorOptions(),
-            Activator = static (_, _) => new TickerActor(),
+            Options = options ?? new ActorOptions(),
+            Activator = (_, _) => new TickerActor(deactivations),
             Facade = static handle => new TickerFacade(handle)
         });
         return services.BuildServiceProvider();
@@ -114,8 +168,16 @@ public sealed class ActorStreamTests {
         IAsyncEnumerable<StreamItem<int>> Watch(long? resumeAfter, CancellationToken cancellationToken = default);
     }
 
-    public sealed class TickerActor {
+    public sealed class TickerActor(DeactivationCounter? deactivations = null) : IActorLifecycle {
         private readonly StreamHub<int> _hub = new(new StreamHubOptions { ReplayCapacity = 16 });
+
+        public ValueTask OnActivateAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+        public ValueTask OnDeactivateAsync(CancellationToken cancellationToken) {
+            _hub.Complete();
+            deactivations?.Record();
+            return ValueTask.CompletedTask;
+        }
 
         public async Task Apply(int value, CancellationToken cancellationToken) =>
             await _hub.PublishAsync(value, cancellationToken);
@@ -168,7 +230,7 @@ public sealed class ActorStreamTests {
 
             protected override ValueTask<IAsyncEnumerable<StreamItem<int>>> InvokeAsync(
                 TickerActor actor, CancellationToken cancellationToken) =>
-                new(actor.Watch(resumeAfter));
+                new(ActorStreams.RetainWhileEnumerating(actor.Watch(resumeAfter), RetainActivation()));
         }
     }
 }

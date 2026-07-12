@@ -867,9 +867,11 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             .Select(static p => p.IsCancellationToken ? "cancellationToken" : $"_{p.Name}"));
         if (method.Return is ReturnShape.AsyncEnumerable) {
             // The attach turn is synchronous: the method subscribes and returns; the enumeration runs
-            // off the mailbox. The turn token is deliberately not passed (ELACT012 forbids the parameter).
+            // off the mailbox. The turn token is deliberately not passed (ELACT012 forbids the
+            // parameter). RetainActivation ties the activation's lifetime to the enumeration (refCount
+            // lifetime, ADR-0052): idle passivation never ends a live stream mid-flight.
             sb.AppendLine($"        protected override global::System.Threading.Tasks.ValueTask<{resultFqn}> InvokeAsync({actor.ActorTypeFqn} actor, {CancellationTokenFqn} cancellationToken) =>");
-            sb.AppendLine($"            new(actor.{method.Name}({invokeArguments}));");
+            sb.AppendLine($"            new(global::Elarion.Actors.Runtime.ActorStreams.RetainWhileEnumerating(actor.{method.Name}({invokeArguments}), RetainActivation()));");
             sb.AppendLine("    }");
             return;
         }

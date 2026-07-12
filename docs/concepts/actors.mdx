@@ -511,10 +511,21 @@ public IAsyncEnumerable<StreamItem<Quote>> Watch(long? resumeAfter) =>
 The attach runs as a mailbox turn; enumeration never holds the mailbox. Two rules are enforced by
 `ELACT012`: a stream method takes **no `CancellationToken`** (the turn token is pooled and dies with the
 attach turn — the facade adds the trailing token, which cancels the queued attach and, linked with the
-enumerator's token, the stream) and cannot carry `[ConsumeEvent]`. One rule is yours: **a hub dies with
-its activation** — complete it in `OnDeactivateAsync` so consumers observe the end and re-subscribe
-instead of starving on a channel nothing writes anymore. Full model, the when-to-use table, and the
-resumable SSE endpoint: [Ordered streams](/docs/capabilities/events/streams).
+enumerator's token, the stream) and cannot carry `[ConsumeEvent]`.
+
+**Lifetime is refCount: a live enumeration retains the activation.** The generated stream turn pins the
+activation until the enumeration ends (completes, fails, or is disposed), so **idle passivation never
+ends a stream mid-flight** — a streaming-only actor with attached consumers and no incoming turns stays
+alive, and the idle window restarts when the last consumer leaves (only turns and live enumerations
+count; hub-external work does not). Two passivation paths deliberately ignore retention, because they
+are correctness paths: a snapshot-conflicted activation must die (its state is stale, ADR-0047), and
+shutdown drains regardless. That is why one rule remains yours: **complete the hub in
+`OnDeactivateAsync`** — on those paths consumers then observe the end and re-subscribe (re-activating
+the actor) instead of starving on a channel nothing writes anymore. Note that a re-activation is a new
+hub: sequences restart (a new *epoch*), so `ResumeAfterSequence`/`Last-Event-ID` resume is meaningful
+within one hub lifetime — a consumer that sees ids restart rebuilds from what arrives. Full model, the
+when-to-use table, and the resumable SSE endpoint:
+[Ordered streams](/docs/capabilities/events/streams).
 
 ## Observability
 

@@ -43,7 +43,8 @@ public abstract class ActorWorkItem<TActor> where TActor : class {
         TimeProvider timeProvider,
         CancellationToken callerToken);
 
-    internal abstract ValueTask<ActorTurnOutcome> RunAsync(TActor actor, CancellationToken stopping);
+    internal abstract ValueTask<ActorTurnOutcome> RunAsync(
+        TActor actor, IActorActivationRetainer? retainer, CancellationToken stopping);
 
     internal abstract void TryFail(Exception exception);
 
@@ -96,10 +97,24 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     // Initialize (pooled reuse), NOT between the two attempts of one call.
     private bool _snapshotRetryAttempted;
 
+    // Set for the duration of RunAsync (the cell); null outside a turn. Turn-scoped on purpose: the
+    // retention IDisposable it hands out outlives the turn, this reference must not (pooled reuse).
+    private IActorActivationRetainer? _retainer;
+
     internal Task<TResult> Completion => _completion.Task;
 
     /// <summary>Invokes the actor method with the already-stored arguments.</summary>
     protected abstract ValueTask<TResult> InvokeAsync(TActor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retains the current activation until the returned handle is disposed — the ADR-0052 refCount
+    /// lifetime for stream turns: a live enumeration must never be ended by <b>idle</b> passivation.
+    /// Generated stream work items call this inside <see cref="InvokeAsync"/> (race-free: a turn is in
+    /// flight, so the cell cannot passivate concurrently) and tie the handle to the enumeration via
+    /// <c>ActorStreams.RetainWhileEnumerating</c>. Returns <see langword="null"/> outside a turn.
+    /// Correctness passivations (snapshot conflict) and shutdown ignore retention by design.
+    /// </summary>
+    protected IDisposable? RetainActivation() => _retainer?.Retain();
 
     internal override void Initialize(
         string actorName,
@@ -149,7 +164,9 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         }
     }
 
-    internal override async ValueTask<ActorTurnOutcome> RunAsync(TActor actor, CancellationToken stopping) {
+    internal override async ValueTask<ActorTurnOutcome> RunAsync(
+        TActor actor, IActorActivationRetainer? retainer, CancellationToken stopping) {
+        _retainer = retainer;
         // Canceled or timed out while queued: skip execution entirely.
         if (_completion.Task.IsCompleted) {
             Cleanup();
@@ -279,6 +296,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     }
 
     private void Cleanup() {
+        _retainer = null;
         // Registration disposal blocks until an in-flight callback finishes, so after these three
         // disposals nothing can touch the source anymore and it is safe to recycle.
         _callerRegistration.Dispose();
