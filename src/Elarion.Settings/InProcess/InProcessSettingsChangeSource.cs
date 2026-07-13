@@ -13,6 +13,13 @@ public sealed class InProcessSettingsChangeSource : ISettingsChangeSource, ISett
     private readonly ConcurrentDictionary<WatchKey, TokenHolder> _holders = new();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Each distinct <c>(scope, keyPrefix)</c> pair allocates one token holder that is <b>retained for the
+    /// lifetime of this source</b> — holders are shared across re-watches of the same pair but never removed,
+    /// because a one-shot change token carries no unsubscribe signal. Watch a bounded vocabulary of scopes
+    /// and prefixes (global/module/feature-level keys); watching per user — or per any other unbounded key
+    /// population — grows the holder table without bound for the life of the process.
+    /// </remarks>
     public IChangeToken Watch(SettingsScope scope, string? keyPrefix = null) {
         var holder = _holders.GetOrAdd(new WatchKey(scope, keyPrefix ?? string.Empty), static _ => new TokenHolder());
         return holder.GetToken();
