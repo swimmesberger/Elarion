@@ -11,6 +11,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string CacheableAttributeMetadataName = "Elarion.Abstractions.Caching.CacheableAttribute";
     private const string CacheInvalidateAttributeMetadataName = "Elarion.Abstractions.Caching.CacheInvalidateAttribute";
     private const string ResilientAttributeMetadataName = "Elarion.Abstractions.Resilience.ResilientAttribute";
+    private const string ResiliencePolicyAttributeMetadataName = "Elarion.Abstractions.Resilience.ResiliencePolicyAttribute";
     private const string HandlerMetadataTypeName = "Elarion.Abstractions.Pipeline.HandlerMetadata";
     private const string RequireClaimAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireClaimAttribute";
     private const string RequirePermissionAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
@@ -76,6 +77,16 @@ public sealed partial class HandlerRegistrationGenerator {
         int StoreFailuresValue,
         string? ResultValueFqn,
         string? Owner
+    );
+
+    // A [ResiliencePolicy] declaration in the current compilation, reduced to what ELPIPE004 needs: the policy
+    // name and whether the declaration configures retry (any retry option present with an effective
+    // MaxRetryAttempts other than zero). Names declared only without retry are provably safe to pair with a
+    // command that has no [Idempotent]; everything else — retrying, unknown (referenced assembly, imperative
+    // registration), or ambiguous duplicates — is conservatively treated as retrying.
+    internal sealed record PolicyRetryCandidate(
+        string Name,
+        bool HasRetry
     );
 
     // A [RequireResource] binding: the resource type, the operation, and the compile-checked request path the
@@ -189,6 +200,21 @@ public sealed partial class HandlerRegistrationGenerator {
         + "resilient).",
         "Elarion.Abstractions.Resilience",
         DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ResilientCommandWithoutIdempotentDescriptor = new(
+        "ELPIPE004",
+        "Retrying resilient command handler is not idempotent",
+        "Handler '{0}' applies resilience policy '{1}' to command '{2}' without [Idempotent]. A retrying policy "
+        + "can execute the command twice: the resilience decorator wraps the transaction, whose finalizing "
+        + "commit deliberately runs uncancellable — a per-attempt timeout abandons the attempt without waiting "
+        + "for it, the in-flight commit still completes in the background, the timeout is not a cancellation so "
+        + "the retry fires, and the command executes and commits again. Add [Idempotent] so a retry replays the "
+        + "first committed outcome instead of re-executing. Timeout-only policies declared in this assembly are "
+        + "recognized and do not warn; suppress this diagnostic if the policy is declared elsewhere and never "
+        + "retries.",
+        "Elarion.Abstractions.Resilience",
+        DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor AuthorizationResponseNotFailureCapable = new(

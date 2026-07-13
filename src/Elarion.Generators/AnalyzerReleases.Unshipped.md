@@ -5,6 +5,7 @@ Rule ID | Category | Severity | Notes
 ELPIPE001 | Elarion.Generators | Error | Decorator AppliesTo predicate must be public
 ELPIPE002 | Elarion.Generators | Error | Decorator AppliesTo predicate has an unsupported signature
 ELPIPE003 | Elarion.Abstractions.Resilience | Error | Domain-event consumer cannot be resilient
+ELPIPE004 | Elarion.Abstractions.Resilience | Warning | Retrying resilient command handler is not idempotent
 ELSG001 | Elarion.Generators | Error | Hosted service scope must be singleton
 ELSG002 | Elarion.Generators | Error | Invalid explicit service contract
 ELSG003 | Elarion.Generators | Error | Generic services are not supported

@@ -96,6 +96,18 @@ attempts. The flow with the policy above:
   `Result<T>` failures are also terminal — they are normal return values, not exceptions.
 </Callout>
 
+<Callout type="warn">
+  **Retry × transaction = double execution.** On a command, the resilience decorator wraps the
+  transaction decorator, whose finalizing commit deliberately runs uncancellable so a committed
+  transaction is never abandoned half-acknowledged. A per-attempt `Timeout` abandons the attempt
+  *without waiting for it*: the in-flight commit completes in the background, the timeout exception is
+  not a cancellation, so the retry fires — and the command executes and commits **twice**. Always pair
+  a retrying `[Resilient]` policy on a command with
+  [`[Idempotent]`](/docs/concepts/idempotency), which turns the retry into a replay of the first
+  committed outcome. The generator warns (`ELPIPE004`) on a `[Resilient]` command without
+  `[Idempotent]` unless the policy is declared timeout-only in the same assembly.
+</Callout>
+
 ## Scheduler resilience
 
 Scheduled jobs can opt into resilience two ways.
