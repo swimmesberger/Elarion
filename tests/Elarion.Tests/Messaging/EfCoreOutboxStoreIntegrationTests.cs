@@ -119,4 +119,56 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
         row.Attempts.Should().Be(options.MaxDeliveryAttempts);
         row.Error.Should().Be("unresolvable");
     }
+
+    [Fact]
+    public async Task Claim_DoesNotClaimMessageParkedAfterCandidateRead() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var claimContext = fixture.CreateContext();
+        var options = new OutboxOptions();
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(claimContext, options, TimeProvider.System);
+        var message = await SeedAsync(claimContext);
+
+        // Park the message on a second connection inside an open transaction: the claimer's candidate SELECT
+        // still sees the pre-park row (READ COMMITTED), its conditional UPDATE then blocks on the row lock, and
+        // once the park commits the guard re-evaluates against the parked row — a stale worker's stale candidate
+        // list racing MarkPermanentlyFailedAsync, made deterministic. The Attempts re-check must keep the parked
+        // message from being delivered once more.
+        await using var parkContext = fixture.CreateContext();
+        await using var parkTransaction = await parkContext.Database.BeginTransactionAsync(Ct);
+        await parkContext.Database.ExecuteSqlAsync(
+            $"""
+             UPDATE elarion_outbox_messages
+             SET attempts = {options.MaxDeliveryAttempts}, lock_id = NULL, locked_until_utc = NULL, error = 'parked'
+             WHERE id = {message.Id}
+             """,
+            Ct);
+
+        var claimTask = store.ClaimPendingAsync(Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, Ct).AsTask();
+
+        // Commit the park only once the claim's UPDATE is provably blocked on the parked row's lock, so the
+        // candidate read has already happened and the interleaving is the one under test.
+        await using var monitorContext = fixture.CreateContext();
+        while (!claimTask.IsCompleted) {
+            var blocked = await monitorContext.Database
+                .SqlQueryRaw<int>(
+                    "SELECT count(*)::int AS \"Value\" FROM pg_stat_activity " +
+                    "WHERE wait_event_type = 'Lock' AND query ILIKE 'UPDATE%elarion_outbox_messages%'")
+                .SingleAsync(Ct);
+            if (blocked > 0) {
+                break;
+            }
+
+            await Task.Delay(25, Ct);
+        }
+
+        await parkTransaction.CommitAsync(Ct);
+
+        var claimed = await claimTask;
+        claimed.Should().BeEmpty();
+
+        var row = await claimContext.Set<OutboxMessage>().AsNoTracking().SingleAsync(m => m.Id == message.Id, Ct);
+        row.Attempts.Should().Be(options.MaxDeliveryAttempts);
+        row.LockId.Should().BeNull();
+        row.ProcessedOnUtc.Should().BeNull();
+    }
 }
