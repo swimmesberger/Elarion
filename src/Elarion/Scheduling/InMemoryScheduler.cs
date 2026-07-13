@@ -120,9 +120,11 @@ public sealed class InMemoryScheduler(
         }
 
         if (!options.Enabled) {
-            logger.LogWarning(
-                "Job {JobName} was scheduled while the in-memory scheduler is disabled; it will not run.",
-                descriptor.Name);
+            // The dispatch loop never starts on a disabled scheduler, so accepting the item would grow
+            // the queue without bound and never run it; fail loud instead of silently losing work.
+            throw new InvalidOperationException(
+                $"Cannot schedule job '{descriptor.Name}': the scheduler is disabled. Enable " +
+                $"{nameof(SchedulerOptions)}.{nameof(SchedulerOptions.Enabled)} or don't enqueue runtime jobs on this instance.");
         }
 
         var normalizedDueTimeUtc = dueTimeUtc.ToUniversalTime();

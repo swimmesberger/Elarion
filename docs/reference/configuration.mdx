@@ -41,7 +41,7 @@ Read by `AddElarionScheduler(IConfiguration)`:
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `Scheduler:Enabled` | `true` | Master switch for the in-memory scheduler. |
+| `Scheduler:Enabled` | `true` | Master switch for the in-memory scheduler. When `false`, descriptor-declared jobs are not enqueued and the runtime `IJobScheduler` enqueue/schedule APIs throw `InvalidOperationException` (a disabled instance never drains its queue). |
 | `Scheduler:MaxConcurrentExecutions` | implementation default | Global cap on concurrent job executions. |
 | `Scheduler:MaxRetainedCompletedJobs` | implementation default | How many terminal job states are kept in memory. |
 | `Scheduler:MaxMisfireCatchUpRuns` | implementation default | Upper bound on catch-up runs for the `CatchUp` misfire policy. |
