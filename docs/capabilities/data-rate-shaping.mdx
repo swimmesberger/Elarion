@@ -84,7 +84,7 @@ constructs both helpers as activation state, `Add`s/`Post`s from its turns, and 
 ```csharp
 public Task RecordAsync(Measurement m) {
     _buffer.Add(m);               // → batched ExecuteInsertAsync every few seconds
-    _conflater.Post(m.Sensor, m); // → at most 4 client events per second per sensor
+    _conflater.Post(m.Sensor, m); // → at most 4 client events/s per sensor (MinInterval = 250 ms)
     return Task.CompletedTask;
 }
 ```

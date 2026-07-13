@@ -43,12 +43,14 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
     private readonly ITimer? _timer;
     private bool _timerArmed;
     private bool _flushQueued;
-    private bool _disposed;
+    private volatile bool _disposed;
     private long _droppedCount;
 
     /// <summary>Creates a buffer that flushes through <paramref name="flush"/>.</summary>
     /// <param name="flush">Receives each accumulated batch (never empty). An exception drops the batch —
-    /// rethrown from <see cref="FlushAsync"/>, routed to <paramref name="onFlushError"/> otherwise.</param>
+    /// rethrown from <see cref="FlushAsync"/>, routed to <paramref name="onFlushError"/> otherwise. The
+    /// token it receives signals only when an explicit <see cref="FlushAsync"/> caller cancels; background
+    /// and dispose flushes pass a token that never signals — the delegate bounds its own work.</param>
     /// <param name="options">Batch size, interval, and bound; see <see cref="WriteBehindBufferOptions"/>.</param>
     /// <param name="onFlushError">Observes background/dispose flush failures together with the dropped
     /// batch. Without it those failures are swallowed — supply it to log or meter them.</param>
@@ -131,6 +133,9 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
         }
 
         if (armTimer) {
+            // May race DisposeAsync's timer disposal: ITimer.Change after Dispose returns false rather
+            // than throwing (system provider and FakeTimeProvider alike), keeping a racing producer
+            // crash-free per the dropped-after-dispose contract.
             _timer!.Change(_flushInterval, Timeout.InfiniteTimeSpan);
         }
 
@@ -141,7 +146,9 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
 
     /// <summary>
     /// Flushes everything buffered right now and returns when it reached the target (waiting first for any
-    /// in-flight flush). A flush-delegate exception propagates to this caller; its batch is dropped.
+    /// in-flight flush — note a batch already taken by a concurrent background flush reports its failure
+    /// through <c>onFlushError</c>, not here). A flush-delegate exception propagates to this caller; its
+    /// batch is dropped — cancelling this call mid-flush drops the in-flight batch too.
     /// </summary>
     public Task FlushAsync(CancellationToken cancellationToken = default) {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -150,7 +157,8 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
 
     /// <summary>
     /// Stops the interval timer and flushes the remaining tail; failures go to <c>onFlushError</c>
-    /// (dispose never throws). Subsequent adds are dropped.
+    /// (dispose never throws). Subsequent adds are dropped. A concurrent second dispose returns
+    /// immediately without waiting for the first caller's final flush.
     /// </summary>
     public async ValueTask DisposeAsync() {
         lock (_lock) {

@@ -29,6 +29,7 @@ namespace Elarion.Buffering;
 /// <typeparam name="TValue">The hot value; only the newest per key survives a window.</typeparam>
 public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey : notnull {
     private readonly ConcurrentDictionary<TKey, KeyState> _states = new();
+    private readonly Lock _disposeLock = new();
     private readonly Func<TKey, TValue, CancellationToken, ValueTask> _publish;
     private readonly Action<Exception, TKey, TValue>? _onPublishError;
     private readonly TimeSpan _minInterval;
@@ -37,7 +38,8 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
 
     /// <summary>Creates a conflater that emits through <paramref name="publish"/>.</summary>
     /// <param name="publish">Receives each emitted (key, latest value). An exception drops that emission
-    /// and is routed to <paramref name="onPublishError"/>.</param>
+    /// and is routed to <paramref name="onPublishError"/>. The token it receives never signals (dispose
+    /// flushes pending values rather than cancelling them) — the delegate bounds its own work.</param>
     /// <param name="options">Rate window and clock; see <see cref="KeyedConflaterOptions"/>.</param>
     /// <param name="onPublishError">Observes publish failures with the affected key/value. Without it they
     /// are swallowed — supply it to log or meter them.</param>
@@ -68,6 +70,16 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
         while (true) {
             var state = _states.GetOrAdd(key, static _ => new KeyState());
             lock (state.Lock) {
+                // Re-checked under the state lock: dispose sets the flag before draining, so a post that
+                // passed the lock-free check above cannot start an emission after the drain completed.
+                if (_disposed) {
+                    if (!state.Publishing && !state.HasPending) {
+                        RemoveLocked(key, state); // don't strand an idle state this racing post inserted
+                    }
+
+                    return;
+                }
+
                 if (state.Removed) {
                     continue; // retired concurrently as idle — retry against a fresh state
                 }
@@ -88,14 +100,17 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
     /// <summary>
     /// Flushes every key's pending latest value (ignoring rate windows), waits for all in-flight publishes,
     /// and retires the keys; failures go to <c>onPublishError</c> (dispose never throws). Subsequent posts
-    /// are dropped — conflation ends with the newest value delivered, never a stale one.
+    /// are dropped — conflation ends with the newest value delivered, never a stale one. A concurrent
+    /// second dispose returns immediately without waiting for the first caller's drain.
     /// </summary>
     public async ValueTask DisposeAsync() {
-        if (_disposed) {
-            return;
-        }
+        lock (_disposeLock) {
+            if (_disposed) {
+                return;
+            }
 
-        _disposed = true;
+            _disposed = true;
+        }
 
         // Drain until quiet: emit-on-completion chains (and posts that raced the flag) can surface new
         // pending values, so re-snapshot until nothing is in flight anymore.

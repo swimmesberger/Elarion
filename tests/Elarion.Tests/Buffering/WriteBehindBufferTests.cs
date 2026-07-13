@@ -230,8 +230,8 @@ public sealed class WriteBehindBufferTests {
     public async Task Options_AreValidated() {
         Func<IReadOnlyList<int>, CancellationToken, ValueTask> flush = (_, _) => ValueTask.CompletedTask;
 
-        var negativeMax = () => new WriteBehindBuffer<int>(flush, new WriteBehindBufferOptions { MaxItems = 0 });
-        negativeMax.Should().Throw<ArgumentOutOfRangeException>();
+        var zeroMaxItems = () => new WriteBehindBuffer<int>(flush, new WriteBehindBufferOptions { MaxItems = 0 });
+        zeroMaxItems.Should().Throw<ArgumentOutOfRangeException>();
 
         var zeroInterval = () => new WriteBehindBuffer<int>(
             flush, new WriteBehindBufferOptions { FlushInterval = TimeSpan.Zero });

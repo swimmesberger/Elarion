@@ -9,9 +9,10 @@ public sealed class WriteBehindBufferOptions {
     public int MaxItems { get; init; } = 500;
 
     /// <summary>
-    /// The longest an item waits before it is flushed: a one-shot timer armed by the first item after a
-    /// flush, so a trickle of samples still reaches the target within this window even when
-    /// <see cref="MaxItems"/> is never hit. Default 1 second; <see cref="Timeout.InfiniteTimeSpan"/>
+    /// The longest an item waits before it is flushed: a one-shot timer armed by the first item added
+    /// while no timer is pending, so a trickle of samples still reaches the target within this window even
+    /// when <see cref="MaxItems"/> is never hit (an interval flush may arrive sooner than this after a
+    /// count-triggered flush — never later). Default 1 second; <see cref="Timeout.InfiniteTimeSpan"/>
     /// disables interval flushing entirely (count-only).
     /// </summary>
     public TimeSpan FlushInterval { get; init; } = TimeSpan.FromSeconds(1);
