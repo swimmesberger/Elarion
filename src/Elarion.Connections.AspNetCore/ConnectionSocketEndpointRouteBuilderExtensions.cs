@@ -108,7 +108,9 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             Metadata = ticket.Metadata,
             ConnectedAt = (services.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow(),
         };
-        var connection = new WebSocketClientConnection(identity, socket);
+        // The kernel-wide invoke default (per-call ClientInvokeOptions.Timeout still wins per call).
+        var connectionDefaults = services.GetService<ElarionConnectionsOptions>() ?? new ElarionConnectionsOptions();
+        var connection = new WebSocketClientConnection(identity, socket, connectionDefaults.DefaultInvokeTimeout);
         connection.AttachProtocol(handler.CreateProtocol(connection));
 
         Exception? closeReason = null;

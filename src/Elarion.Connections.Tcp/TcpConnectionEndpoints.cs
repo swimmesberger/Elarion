@@ -83,7 +83,7 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
 
         TcpConnectionServiceCollectionExtensions.ValidateShared(options);
         return ApplyAsync(name, TcpEndpointMode.Listener, (report, token) => TcpEndpointLoops.RunListenerAsync(
-            options, services.GetRequiredService<THandler>(), Registry, Time, Logger("TcpListener"), token, report), ct);
+            options, services.GetRequiredService<THandler>(), Registry, DefaultInvokeTimeout, Time, Logger("TcpListener"), token, report), ct);
     }
 
     /// <summary>Applies (starts or reconfigures) a dial-out endpoint under <paramref name="name"/>.</summary>
@@ -107,7 +107,7 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
 
         TcpConnectionServiceCollectionExtensions.ValidateShared(options);
         return ApplyAsync(name, TcpEndpointMode.Dialer, (report, token) => TcpEndpointLoops.RunDialerAsync(
-            options, services.GetRequiredService<THandler>(), Registry, Time, Logger("TcpDialer"), token, report), ct);
+            options, services.GetRequiredService<THandler>(), Registry, DefaultInvokeTimeout, Time, Logger("TcpDialer"), token, report), ct);
     }
 
     /// <summary>
@@ -237,6 +237,9 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
     }
 
     private IClientConnectionRegistry Registry => services.GetRequiredService<IClientConnectionRegistry>();
+
+    private TimeSpan? DefaultInvokeTimeout =>
+        (services.GetService<ElarionConnectionsOptions>() ?? new ElarionConnectionsOptions()).DefaultInvokeTimeout;
 
     private TimeProvider Time => services.GetService<TimeProvider>() ?? TimeProvider.System;
 

@@ -1,4 +1,5 @@
 using Elarion.Abstractions.Connections;
+using Elarion.Connections;
 using Elarion.Connections.Tcp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -48,7 +49,11 @@ public static class InMemoryTcpLink {
         var observing = new ObservingRegistry(registry);
         var serverRun = TcpConnectionRunner.RunAsync(
             serverEnd, new TcpConnectionPeer(null, null), serverEnd, applyNoDelay: null,
-            options, handler, observing, timeProvider ?? TimeProvider.System,
+            options, handler, observing,
+            // The kernel's shipped invoke default — the link behaves like a production endpoint whose
+            // host left AddElarionConnections unconfigured.
+            new ElarionConnectionsOptions().DefaultInvokeTimeout,
+            timeProvider ?? TimeProvider.System,
             logger ?? NullLogger.Instance, shutdown.Token);
         // A rejected handshake never registers: the run completing first faults the ServerConnection await
         // instead of hanging it. The run itself never throws.

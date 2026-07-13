@@ -134,6 +134,14 @@ var status = await sink.InvokeAsync<StatusQuery, StatusReply>(
 Multi-message protocol conversations (sequence numbers, re-synchronisation, wait-for-any flows) are
 codec/actor state; the codec seam is their mounting point, not their replacement.
 
+Every invoke is **bounded by default**: a call that carries no `ClientInvokeOptions.Timeout` gets the
+kernel's `DefaultInvokeTimeout` (30 s out of the box; `AddElarionConnections(o =>
+o.DefaultInvokeTimeout = …)`), resolved by the sink before the codec sees the options — a client that
+never answers surfaces as a `TimeoutException`, never a silently hung await. The layering is per-call
+`Timeout` &gt; `DefaultInvokeTimeout` &gt; unbounded: a per-call value always wins (pass
+`Timeout.InfiniteTimeSpan` to make a single call unbounded), and only a default explicitly configured
+to `null` applies none.
+
 ## The TCP endpoints
 
 `Elarion.Connections.Tcp` runs the same handler/codec seams over raw sockets (BCL only, no ASP.NET) —
@@ -237,7 +245,9 @@ internal sealed class DeviceCodec(TcpClientConnection connection) : IClientConne
         string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct)
         where TRequest : class {
         var sequence = NextSequence();
-        var reply = _pending.WaitAsync(sequence, options?.Timeout ?? TimeSpan.FromSeconds(5), ct);
+        // The sink already resolved the default invoke timeout into options — honor it as-is
+        // (a null Timeout here means the invoke is deliberately unbounded).
+        var reply = _pending.WaitAsync(sequence, options?.Timeout, ct);
         await connection.SendBinaryAsync(DeviceFrame.Encode(sequence, name, request), ct);
         return Decode<TResponse>(await reply);
     }

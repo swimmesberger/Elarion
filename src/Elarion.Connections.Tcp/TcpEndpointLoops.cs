@@ -17,6 +17,7 @@ internal static class TcpEndpointLoops {
         ElarionTcpListenerOptions options,
         TcpConnectionHandler handler,
         IClientConnectionRegistry registry,
+        TimeSpan? defaultInvokeTimeout,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken ct,
@@ -65,7 +66,7 @@ internal static class TcpEndpointLoops {
 
                 // The runner never throws; tracking exists only so teardown can await open connections.
                 var run = TcpConnectionRunner.RunAsync(
-                    client, options, handler, registry, timeProvider, logger, ct);
+                    client, options, handler, registry, defaultInvokeTimeout, timeProvider, logger, ct);
                 running[run] = 0;
                 _ = run.ContinueWith(
                     finished => running.TryRemove(finished, out _),
@@ -88,6 +89,7 @@ internal static class TcpEndpointLoops {
         ElarionTcpDialerOptions options,
         TcpConnectionHandler handler,
         IClientConnectionRegistry registry,
+        TimeSpan? defaultInvokeTimeout,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken ct,
@@ -101,7 +103,7 @@ internal static class TcpEndpointLoops {
                 var sessionStart = timeProvider.GetTimestamp();
                 // The runner owns and disposes the client, and never throws.
                 await TcpConnectionRunner.RunAsync(
-                    client, options, handler, registry, timeProvider, logger, ct);
+                    client, options, handler, registry, defaultInvokeTimeout, timeProvider, logger, ct);
                 // A session that ended almost immediately (rejected handshake, instant server close) is a
                 // failure for backoff purposes — otherwise a misconfigured credential hammers the device
                 // at the minimum delay forever. A real session resets the backoff.

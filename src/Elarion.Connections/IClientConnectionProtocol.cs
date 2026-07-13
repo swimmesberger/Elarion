@@ -63,8 +63,11 @@ public interface IClientConnectionProtocol {
         throw new NotSupportedException("This protocol does not support named payload sends.");
 
     /// <summary>The codec behind <see cref="IClientConnectionSink.InvokeAsync"/> — encode, correlate, and
-    /// await the client's reply, honoring <see cref="ClientInvokeOptions.Timeout"/>. Codecs without
-    /// request/reply keep the fail-loud default.</summary>
+    /// await the client's reply, honoring <see cref="ClientInvokeOptions.Timeout"/>. The sink resolves the
+    /// kernel default (<see cref="ElarionConnectionsOptions.DefaultInvokeTimeout"/>) into
+    /// <paramref name="options"/> before the codec sees them, so honoring the per-call value is all a codec
+    /// does — a <see langword="null"/> timeout here means the invoke is deliberately unbounded. Codecs
+    /// without request/reply keep the fail-loud default.</summary>
     ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
         string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct) where TRequest : class =>
         throw new NotSupportedException("This protocol does not support client invocation.");

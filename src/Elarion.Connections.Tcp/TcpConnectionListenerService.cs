@@ -20,6 +20,7 @@ internal sealed class TcpConnectionListenerService<THandler>(
             options,
             services.GetRequiredService<THandler>(),
             services.GetRequiredService<IClientConnectionRegistry>(),
+            (services.GetService<ElarionConnectionsOptions>() ?? new ElarionConnectionsOptions()).DefaultInvokeTimeout,
             services.GetService<TimeProvider>() ?? TimeProvider.System,
             services.GetService<ILoggerFactory>()?.CreateLogger(GetType().Namespace + ".TcpListener")
                 ?? (ILogger)NullLogger.Instance,

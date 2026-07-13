@@ -45,18 +45,20 @@ public interface IClientConnectionSink {
     /// <summary>
     /// Invokes <paramref name="name"/> on the client with <paramref name="request"/> and awaits its reply.
     /// Completes with the client's response, or faults with <see cref="ClientConnectionClosedException"/>
-    /// (the connection ended first), <see cref="TimeoutException"/> (no reply within
-    /// <see cref="ClientInvokeOptions.Timeout"/>, when one was supplied), or
-    /// <see cref="OperationCanceledException"/> — <b>never silently</b>. The invoke is at-most-once: a fault
-    /// leaves unknown whether the client observed the call, so anything the client does in response must be
-    /// safe to re-request.
+    /// (the connection ended first), <see cref="TimeoutException"/> (no reply within the effective
+    /// timeout), or <see cref="OperationCanceledException"/> — <b>never silently</b>. The effective
+    /// timeout layers: per-call <see cref="ClientInvokeOptions.Timeout"/> when set, else the adapter's
+    /// configured default (<c>ElarionConnectionsOptions.DefaultInvokeTimeout</c>, 30 seconds out of the
+    /// box), else unbounded (only when that default was explicitly configured to <see langword="null"/>).
+    /// The invoke is at-most-once: a fault leaves unknown whether the client observed the call, so
+    /// anything the client does in response must be safe to re-request.
     /// </summary>
     /// <typeparam name="TRequest">The request contract type.</typeparam>
     /// <typeparam name="TResponse">The expected response contract type.</typeparam>
     /// <param name="name">The client-side operation name (wire name).</param>
     /// <param name="request">The request payload.</param>
-    /// <param name="options">Per-call options; <see langword="null"/> applies none (no timeout — bound the
-    /// call via <see cref="ClientInvokeOptions.Timeout"/> or the token).</param>
+    /// <param name="options">Per-call options; <see langword="null"/> applies the adapter defaults — the
+    /// call stays bounded by the configured default invoke timeout.</param>
     /// <param name="ct">A cancellation token; cancelling abandons the wait, not the client's execution.</param>
     ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
         string name,

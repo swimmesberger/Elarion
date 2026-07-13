@@ -16,6 +16,7 @@ internal static class TcpConnectionRunner {
         ElarionTcpConnectionOptions options,
         TcpConnectionHandler handler,
         IClientConnectionRegistry registry,
+        TimeSpan? defaultInvokeTimeout,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken ct) {
@@ -33,7 +34,7 @@ internal static class TcpConnectionRunner {
 
         await RunAsync(
             stream, peer, client, noDelay => client.Client.NoDelay = noDelay,
-            options, handler, registry, timeProvider, logger, ct);
+            options, handler, registry, defaultInvokeTimeout, timeProvider, logger, ct);
     }
 
     /// <summary>
@@ -50,6 +51,7 @@ internal static class TcpConnectionRunner {
         ElarionTcpConnectionOptions options,
         TcpConnectionHandler handler,
         IClientConnectionRegistry registry,
+        TimeSpan? defaultInvokeTimeout,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken ct) {
@@ -98,7 +100,8 @@ internal static class TcpConnectionRunner {
                 Metadata = ticket.Metadata,
                 ConnectedAt = timeProvider.GetUtcNow(),
             };
-            var connection = new TcpClientConnection(identity, stream, framer, sendBufferBytes, closeTransport: transport.Dispose);
+            var connection = new TcpClientConnection(
+                identity, stream, framer, sendBufferBytes, defaultInvokeTimeout, closeTransport: transport.Dispose);
             connection.AttachProtocol(handler.CreateProtocol(connection));
 
             Exception? closeReason = null;

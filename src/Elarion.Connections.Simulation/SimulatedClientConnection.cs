@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Security.Claims;
 using System.Threading.Channels;
 using Elarion.Abstractions.Connections;
+using Elarion.Connections;
 
 namespace Elarion.Connections.Simulation;
 
@@ -56,6 +57,15 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
     /// </summary>
     public Func<string, object, ValueTask<object>>? InvokeResponder { get; set; }
 
+    /// <summary>
+    /// The invoke timeout the double applies when a call carries no per-call
+    /// <see cref="ClientInvokeOptions.Timeout"/> — the same layering real adapters get from
+    /// <c>ElarionConnectionsOptions.DefaultInvokeTimeout</c>, initialized to the same shipped value so a
+    /// responder that never answers faults with <see cref="TimeoutException"/> instead of hanging the
+    /// test. Set <see langword="null"/> for unbounded.
+    /// </summary>
+    public TimeSpan? DefaultInvokeTimeout { get; set; } = new ElarionConnectionsOptions().DefaultInvokeTimeout;
+
     /// <summary>Whether <see cref="Close"/> was called.</summary>
     public bool IsClosed => Volatile.Read(ref _closed) != 0;
 
@@ -89,7 +99,14 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
                 "Set SimulatedClientConnection.InvokeResponder to answer InvokeAsync in this test.");
         }
 
-        return (TResponse)await responder(name, request);
+        // The same timeout layering real adapters apply: per-call wins, else the default bounds the wait,
+        // else the caller's token is the only bound.
+        var timeout = options?.Timeout ?? DefaultInvokeTimeout;
+        var reply = responder(name, request).AsTask();
+        var response = timeout is { } window
+            ? await reply.WaitAsync(window, ct)
+            : await reply.WaitAsync(ct);
+        return (TResponse)response;
     }
 
     private void ThrowIfClosed() {
