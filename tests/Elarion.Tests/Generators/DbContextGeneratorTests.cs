@@ -58,8 +58,10 @@ public sealed class DbContextGeneratorTests
         var dbContextSource = GetGeneratedSource(result, "AppDbContext.DbSets.g.cs");
 
         dbContextSource.Should().Contain("partial class AppDbContext {");
-        dbContextSource.Should().Contain("public DbSet<Company> Companies => Set<Company>();");
-        dbContextSource.Should().Contain("public DbSet<Invoice> Invoices => Set<Invoice>();");
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.Company> Companies => Set<global::Sample.Domain.Company>();");
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.Invoice> Invoices => Set<global::Sample.Domain.Invoice>();");
         dbContextSource.Should().Contain("var __config0 = new global::Sample.Infrastructure.CompanyConfiguration();");
         dbContextSource.Should().Contain("modelBuilder.ApplyConfiguration<global::Sample.Domain.Company>(__config0);");
         dbContextSource.Should().Contain("var __config1 = new global::Sample.Infrastructure.InvoiceConfiguration();");
@@ -158,8 +160,10 @@ public sealed class DbContextGeneratorTests
         var result = Generate(source);
         var dbContextSource = GetGeneratedSource(result, "AppDbContext.DbSets.g.cs");
 
-        dbContextSource.Should().Contain("public DbSet<Author> Authors => Set<Author>();");
-        dbContextSource.Should().Contain("public DbSet<Book> Books => Set<Book>();");
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.Author> Authors => Set<global::Sample.Domain.Author>();");
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.Book> Books => Set<global::Sample.Domain.Book>();");
         // One configuration instance, reused across both entities it configures.
         dbContextSource.Should().Contain("var __config0 = new global::Sample.Infrastructure.LibraryConfiguration();");
         dbContextSource.Should().Contain("modelBuilder.ApplyConfiguration<global::Sample.Domain.Author>(__config0);");
@@ -215,10 +219,83 @@ public sealed class DbContextGeneratorTests
 
         var dbContextSource = GetGeneratedSource(result, "AppDbContext.DbSets.g.cs");
 
-        // Exactly one Orders DbSet property is emitted; the second entity is skipped.
+        // Exactly one Orders DbSet property is emitted; the second entity is skipped. The surviving DbSet is
+        // fully qualified and no per-entity using is emitted — a using for the skipped entity's namespace would
+        // make a short-named reference ambiguous (CS0104), breaking the "context still compiles" recovery.
         System.Text.RegularExpressions.Regex
-            .Matches(dbContextSource, @"DbSet<Order> Orders")
+            .Matches(dbContextSource, @"DbSet<global::(Sales|Billing)\.Domain\.Order> Orders")
             .Count.Should().Be(1);
+        dbContextSource.Should().NotContain("using Sales.Domain;");
+        dbContextSource.Should().NotContain("using Billing.Domain;");
+    }
+
+    [Fact]
+    public void GenerateDbSets_DuplicateDbSetPropertyName_GeneratedContextStillCompiles()
+    {
+        // The ELEFC002 recovery contract, compiled for real: with two same-short-name entities the surviving
+        // DbSet must not become an ambiguous reference (CS0104) through per-entity usings.
+        var ct = TestContext.Current.CancellationToken;
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        const string source =
+            """
+            namespace Elarion.EntityFrameworkCore {
+                [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+                public sealed class GenerateDbSetsAttribute : System.Attribute {
+                    public GenerateDbSetsAttribute(params string[] scopes) { }
+                }
+
+                [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+                public sealed class EntityConfigurationAttribute : System.Attribute {
+                    public EntityConfigurationAttribute(params string[] scopes) { }
+                }
+            }
+
+            namespace Sales.Domain {
+                public sealed class Order { }
+            }
+
+            namespace Billing.Domain {
+                public sealed class Order { }
+            }
+
+            namespace Sample.Infrastructure {
+                [Elarion.EntityFrameworkCore.GenerateDbSets]
+                public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
+                }
+
+                [Elarion.EntityFrameworkCore.EntityConfiguration]
+                public sealed class SalesOrderConfiguration
+                    : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sales.Domain.Order> {
+                    public void Configure(
+                        Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Sales.Domain.Order> builder) {
+                    }
+                }
+
+                [Elarion.EntityFrameworkCore.EntityConfiguration]
+                public sealed class BillingOrderConfiguration
+                    : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Billing.Domain.Order> {
+                    public void Configure(
+                        Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Billing.Domain.Order> builder) {
+                    }
+                }
+            }
+            """;
+
+        var compilation = CSharpCompilation.Create(
+            "DuplicateDbSetCompiles",
+            [CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: ct)],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver
+            .Create(new DbContextGenerator())
+            .WithUpdatedParseOptions(parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var diagnostics, ct);
+
+        diagnostics.Count(diagnostic => diagnostic.Id == "ELEFC002").Should().Be(1);
+        outputCompilation.GetDiagnostics(ct)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
     }
 
     [Fact]
@@ -288,8 +365,10 @@ public sealed class DbContextGeneratorTests
         var result = Generate(source);
         var dbContextSource = GetGeneratedSource(result, "MainDbContext.DbSets.g.cs");
 
-        dbContextSource.Should().Contain("public DbSet<Invoice> Invoices => Set<Invoice>();");
-        dbContextSource.Should().Contain("public DbSet<User> Users => Set<User>();");
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.Invoice> Invoices => Set<global::Sample.Domain.Invoice>();");
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.User> Users => Set<global::Sample.Domain.User>();");
         dbContextSource.Should().NotContain("ChatSessions");
         dbContextSource.Should().NotContain("LegacyGlobalEntities");
         dbContextSource.Should().Contain("InvoiceConfiguration");
@@ -516,7 +595,7 @@ public sealed class DbContextGeneratorTests
         driverB = driverB.RunGenerators(compilationB, ct);
 
         var generated = string.Concat(driverB.GetRunResult().GeneratedTrees.Select(tree => tree.GetText().ToString()));
-        generated.Should().Contain("DbSet<Invoice> Invoices");
+        generated.Should().Contain("DbSet<global::Sample.Domain.Invoice> Invoices");
         generated.Should().Contain("new global::Sample.Domain.InvoiceConfiguration()");
         generated.Should().Contain("modelBuilder.ApplyConfiguration<global::Sample.Domain.Invoice>(");
     }
@@ -595,8 +674,8 @@ public sealed class DbContextGeneratorTests
             .Single(source => string.Equals(source.HintName, "AppDbContext.DbSets.g.cs", StringComparison.Ordinal))
             .SourceText
             .ToString();
-        dbContextSource.Should().Contain("DbSet<Company> Companies");
-        dbContextSource.Should().Contain("DbSet<Invoice> Invoices");
+        dbContextSource.Should().Contain("DbSet<global::Sample.Domain.Company> Companies");
+        dbContextSource.Should().Contain("DbSet<global::Sample.Domain.Invoice> Invoices");
 
         // The regeneration was driven purely by the syntax path: the reference set did not change, so the
         // MetadataReferencesProvider-backed step stays cached. This isolates same-assembly discovery from the

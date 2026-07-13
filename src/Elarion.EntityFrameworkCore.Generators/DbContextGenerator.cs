@@ -272,18 +272,10 @@ public sealed class DbContextGenerator : IIncrementalGenerator
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
 
-        var namespaces = entities
-            .Select(e => e.Namespace)
-            .Where(ns => !string.IsNullOrEmpty(ns) && ns != target.Namespace)
-            .Distinct()
-            .OrderBy(ns => ns, StringComparer.Ordinal);
-
+        // Entity references are emitted fully qualified (no per-entity usings): a using for a skipped
+        // duplicate's namespace (the ELEFC002 recovery path) would make the surviving short-named DbSet an
+        // ambiguous reference (CS0104), and two same-named entities in scope are ambiguous even without it.
         sb.AppendLine("using Microsoft.EntityFrameworkCore;");
-        foreach (var ns in namespaces)
-        {
-            sb.AppendLine(string.Format("using {0};", ns));
-        }
-
         sb.AppendLine();
         sb.AppendLine(string.Format("namespace {0};", target.Namespace));
         sb.AppendLine();
@@ -310,7 +302,7 @@ public sealed class DbContextGenerator : IIncrementalGenerator
             }
 
             claimedNames.Add(pluralName, entity.FullName);
-            sb.AppendLine(string.Format("    public DbSet<{0}> {1} => Set<{0}>();", entity.Name, pluralName));
+            sb.AppendLine(string.Format("    public DbSet<global::{0}> {1} => Set<global::{0}>();", entity.FullName, pluralName));
         }
 
         sb.AppendLine();
