@@ -40,16 +40,19 @@ public sealed class PostgreSqlMigrationOptions {
     public long AdvisoryLockKey { get; set; } = DefaultAdvisoryLockKey;
 
     /// <summary>
-    /// The per-command timeout for executing scripts and history statements. Defaults to
-    /// <see langword="null"/> — no timeout — because long-running DDL is normal for migrations
-    /// (deliberately not Npgsql's 30-second default).
+    /// The per-command timeout: a transactional script executes as one command, a
+    /// <c>no-transaction</c> script one command per statement. Defaults to <see langword="null"/> — no
+    /// timeout — because long-running DDL is normal for migrations (deliberately not Npgsql's
+    /// 30-second default). Non-positive values (e.g. <see cref="Timeout.InfiniteTimeSpan"/>) also mean
+    /// no timeout.
     /// </summary>
     public TimeSpan? CommandTimeout { get; set; }
 
     /// <summary>
     /// How long to wait for the advisory lock when another runner holds it. Defaults to
     /// <see langword="null"/> — wait indefinitely — so concurrent startups serialize behind a long
-    /// migration instead of failing.
+    /// migration instead of failing. Non-positive values (e.g. <see cref="Timeout.InfiniteTimeSpan"/>)
+    /// also mean wait indefinitely.
     /// </summary>
     public TimeSpan? LockTimeout { get; set; }
 

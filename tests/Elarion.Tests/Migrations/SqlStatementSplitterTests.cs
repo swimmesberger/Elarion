@@ -62,4 +62,10 @@ public sealed class SqlStatementSplitterTests {
     public void DollarParameterIsNotADollarQuote() {
         SqlStatementSplitter.Split("SELECT $1; SELECT $2").Should().HaveCount(2);
     }
+
+    [Fact]
+    public void DollarInsideAnIdentifierIsNotADollarQuote() {
+        // x$$ is a legal PostgreSQL identifier; the semicolon after it must still split.
+        SqlStatementSplitter.Split("SELECT x$$ FROM t; SELECT 1").Should().HaveCount(2);
+    }
 }

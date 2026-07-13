@@ -30,7 +30,7 @@ internal static class MigrationScriptDiscovery {
 
         foreach (var source in sources) {
             var names = source.Assembly.GetManifestResourceNames()
-                .Where(name => name.EndsWith(".sql", StringComparison.Ordinal)
+                .Where(name => name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)
                     && (source.ResourceNamePrefix is null || name.StartsWith(source.ResourceNamePrefix, StringComparison.Ordinal)))
                 .Order(StringComparer.Ordinal);
 

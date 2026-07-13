@@ -62,6 +62,13 @@ public static class MigrationsServiceCollectionExtensions {
         Func<PostgreSqlMigrationOptions, IServiceProvider, PostgreSqlMigrationRunner> runnerFactory) {
         ArgumentNullException.ThrowIfNull(configure);
 
+        // Fail loud on a second registration: silently keeping the first would leave the second
+        // database unmigrated. One runner per host; a second database is a second host concern.
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(IMigrationRunner))) {
+            throw new InvalidOperationException(
+                "AddElarionPostgreSqlMigrations was already called on this service collection; the runner migrates exactly one database.");
+        }
+
         var options = new PostgreSqlMigrationOptions();
         configure(options);
         if (options.ScriptSources.Count == 0) {
@@ -69,8 +76,8 @@ public static class MigrationsServiceCollectionExtensions {
                 "AddElarionPostgreSqlMigrations requires at least one script source; call options.AddScripts(assembly, resourceNamePrefix).");
         }
 
-        services.TryAddSingleton(options);
-        services.TryAddSingleton<IMigrationRunner>(provider => runnerFactory(
+        services.AddSingleton(options);
+        services.AddSingleton<IMigrationRunner>(provider => runnerFactory(
             provider.GetRequiredService<PostgreSqlMigrationOptions>(), provider));
 
         if (options.ApplyOnStartup) {

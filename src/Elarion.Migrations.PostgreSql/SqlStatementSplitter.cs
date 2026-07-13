@@ -92,7 +92,8 @@ internal static class SqlStatementSplitter {
                 continue;
             }
 
-            if (c == '$' && TryReadDollarTag(sql, i, out var tag)) {
+            // A '$' continuing an identifier (x$$ is a legal PostgreSQL identifier) is not a quote opener.
+            if (c == '$' && (i == 0 || !IsIdentifierChar(sql[i - 1])) && TryReadDollarTag(sql, i, out var tag)) {
                 significant = true;
                 var close = sql.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
                 i = close < 0 ? n : close + tag.Length;
@@ -145,6 +146,8 @@ internal static class SqlStatementSplitter {
         var beforePrevious = sql[quoteIndex - 2];
         return !char.IsLetterOrDigit(beforePrevious) && beforePrevious != '_';
     }
+
+    private static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c is '_' or '$';
 
     /// <summary>Reads a <c>$tag$</c> opener at <paramref name="index"/>: <c>$$</c> or <c>$identifier$</c>.</summary>
     private static bool TryReadDollarTag(string sql, int index, out string tag) {

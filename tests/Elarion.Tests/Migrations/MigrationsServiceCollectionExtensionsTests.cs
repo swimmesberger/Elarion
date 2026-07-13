@@ -40,6 +40,20 @@ public sealed class MigrationsServiceCollectionExtensionsTests {
     }
 
     [Fact]
+    public void SecondRegistration_FailsLoud() {
+        var services = new ServiceCollection();
+        services.AddElarionPostgreSqlMigrations(
+            "Host=localhost;Database=app",
+            o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly, MigrationScriptDiscoveryTests.ScriptPrefix + "Basic."));
+
+        var act = () => services.AddElarionPostgreSqlMigrations(
+            "Host=localhost;Database=other",
+            o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly, MigrationScriptDiscoveryTests.ScriptPrefix + "Baseline."));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*already called*");
+    }
+
+    [Fact]
     public void WithoutScriptSources_FailsAtRegistration() {
         var services = new ServiceCollection();
 

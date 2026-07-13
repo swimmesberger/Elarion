@@ -17,9 +17,11 @@ namespace Elarion.Migrations.PostgreSql;
 /// <para>
 /// A script whose leading comment block contains <c>-- elarion: no-transaction</c> runs outside a
 /// transaction, statement by statement, for DDL PostgreSQL forbids inside one
-/// (<c>CREATE INDEX CONCURRENTLY</c>, …). Only such a script can fail half-applied; the runner then
-/// records an explicit failed history row and every subsequent run fails closed until
-/// <see cref="ResolveFailedAsync"/> decides between retrying and marking the version applied.
+/// (<c>CREATE INDEX CONCURRENTLY</c>, …). Only such a script can fail half-applied; for a versioned
+/// script the runner then records an explicit failed history row and every subsequent run fails closed
+/// until <see cref="ResolveFailedAsync"/> decides between retrying and marking the version applied. A
+/// failed <em>repeatable</em> script records nothing — repeatables are idempotent by doctrine and their
+/// changed checksum was never recorded, so the next run simply retries them.
 /// </para>
 /// </remarks>
 public interface IMigrationRunner {

@@ -45,6 +45,26 @@ public sealed class PostgreSqlMigrationRunnerIntegrationTests(PostgreSqlMigratio
     }
 
     [Fact]
+    public async Task Migrate_RepeatableWithChangedChecksum_RerunsOnlyThatScript() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var connectionString = await fixture.CreateDatabaseAsync(TestToken);
+        await CreateRunner(connectionString, "Basic.").MigrateAsync(TestToken);
+
+        // Same versioned scripts, changed view body: only the repeatable reruns.
+        var changed = CreateRunner(connectionString, "RepeatableChanged.");
+        var applied = await changed.MigrateAsync(TestToken);
+        applied.Should().ContainSingle().Which.ScriptName.Should().Be("R__customer_view.sql");
+
+        // The re-applied view now exposes the email column, and a new history row was appended.
+        (await ScalarAsync(connectionString, "SELECT count(email) FROM mig_customer_names")).Should().Be(0L);
+        (await ScalarAsync(
+            connectionString,
+            "SELECT count(*) FROM elarion_schema_history WHERE script_name = 'R__customer_view.sql'")).Should().Be(2L);
+
+        (await changed.MigrateAsync(TestToken)).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Migrate_EditedAppliedScript_FailsNamingScriptAndBothChecksums() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var connectionString = await fixture.CreateDatabaseAsync(TestToken);

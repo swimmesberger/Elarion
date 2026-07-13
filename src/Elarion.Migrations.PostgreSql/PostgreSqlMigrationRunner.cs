@@ -22,7 +22,9 @@ public sealed class PostgreSqlMigrationRunner : IMigrationRunner {
     public PostgreSqlMigrationRunner(string connectionString, PostgreSqlMigrationOptions options, ILogger<PostgreSqlMigrationRunner>? logger = null)
         : this(options, logger) {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        _connectionString = connectionString;
+        // A genuinely dedicated physical connection: closing it always releases the session advisory
+        // lock server-side, so no error path can park a pooled connector that still holds the lock.
+        _connectionString = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
     }
 
     /// <summary>Creates a runner that borrows connections from an existing data source (never disposes it).</summary>
@@ -84,7 +86,7 @@ public sealed class PostgreSqlMigrationRunner : IMigrationRunner {
             return applied;
         }
         finally {
-            await ReleaseLockAsync(connection, cancellationToken);
+            await ReleaseLockAsync(connection);
         }
     }
 
@@ -170,7 +172,7 @@ public sealed class PostgreSqlMigrationRunner : IMigrationRunner {
             _logger.LogInformation("Baselined schema history at version {Version}.", parsed.Text);
         }
         finally {
-            await ReleaseLockAsync(connection, cancellationToken);
+            await ReleaseLockAsync(connection);
         }
     }
 
@@ -213,7 +215,7 @@ public sealed class PostgreSqlMigrationRunner : IMigrationRunner {
             }
         }
         finally {
-            await ReleaseLockAsync(connection, cancellationToken);
+            await ReleaseLockAsync(connection);
         }
     }
 
@@ -401,13 +403,16 @@ public sealed class PostgreSqlMigrationRunner : IMigrationRunner {
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private async Task ReleaseLockAsync(NpgsqlConnection connection, CancellationToken cancellationToken) {
+    private async Task ReleaseLockAsync(NpgsqlConnection connection) {
+        // Deliberately NOT the caller's token: a cancelled startup must still unlock, because a pooled
+        // connection (the data-source overload) returned with the session lock held would block every
+        // later runner until the pool prunes it. The unlock itself is instantaneous.
         try {
             await using var command = new NpgsqlCommand("SELECT pg_advisory_unlock($1)", connection) {
                 CommandTimeout = ToSeconds(_options.LockTimeout),
                 Parameters = { new NpgsqlParameter<long> { TypedValue = _options.AdvisoryLockKey } },
             };
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            await command.ExecuteNonQueryAsync(CancellationToken.None);
         }
         catch (Exception ex) {
             // A broken connection releases the session lock by itself.
@@ -415,7 +420,7 @@ public sealed class PostgreSqlMigrationRunner : IMigrationRunner {
         }
     }
 
-    /// <summary>Npgsql command timeouts are integer seconds with 0 as "no timeout".</summary>
+    /// <summary>Npgsql command timeouts are integer seconds with 0 as "no timeout"; non-positive spans (e.g. <see cref="Timeout.InfiniteTimeSpan"/>) mean no timeout.</summary>
     private static int ToSeconds(TimeSpan? timeout) =>
-        timeout is null ? 0 : Math.Max(1, (int)timeout.Value.TotalSeconds);
+        timeout is null || timeout.Value <= TimeSpan.Zero ? 0 : Math.Max(1, (int)timeout.Value.TotalSeconds);
 }

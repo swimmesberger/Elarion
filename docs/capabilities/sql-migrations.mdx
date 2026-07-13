@@ -101,6 +101,10 @@ await runner.ResolveFailedAsync("20260713093000", ResolveAction.MarkApplied); //
 A deliberate in-code decision at the call site — not a CLI habit. An unknown directive (a typo like
 `no-transactoin`) fails validation instead of silently changing transaction semantics.
 
+Failed rows are recorded for **versioned** scripts only: a repeatable script that fails under
+`no-transaction` records nothing — repeatables are idempotent by doctrine and their changed checksum
+was never recorded, so the next run simply retries them.
+
 ## Out-of-order scripts
 
 When a merge lands a script versioned below one already applied, the default policy is **`Warn`**: the
@@ -126,7 +130,7 @@ deploy gates; everything ships in the box, no feature tiers.
 | `HistoryTableName` | `elarion_schema_history` | The runner-created history table |
 | `OutOfOrder` | `Warn` | `Warn` (apply + log) or `Deny` (fail the run) |
 | `ApplyOnStartup` | `true` | Register the migrate-before-ready hosted service |
-| `CommandTimeout` | none | Per-statement timeout; long DDL is normal, so unlimited by default |
+| `CommandTimeout` | none | Per-command timeout (a transactional script is one command; `no-transaction` scripts run one command per statement); long DDL is normal, so unlimited by default |
 | `LockTimeout` | none | How long to wait for the advisory lock (unlimited: serialize behind a long migration) |
 | `AdvisoryLockKey` | fixed constant | Distinct keys let two apps sharing a database migrate concurrently |
 
