@@ -50,6 +50,14 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
             return IdempotencyBeginResult.InProgress();
         }
 
+        // The unit of work applied the short idempotency lock_timeout (SET LOCAL) so only the claim statement
+        // above fast-fails/bounds its wait on a concurrent duplicate's row. That timeout must not govern the
+        // handler's business statements — an ordinary hot-row wait inside the handler would otherwise surface
+        // as 55P03 (a 500). The claim is done, so revert to the session default for the rest of the transaction.
+        if (dbContext.Database.CurrentTransaction is not null) {
+            await dbContext.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout TO DEFAULT", ct).ConfigureAwait(false);
+        }
+
         if (inserted == 1) {
             return IdempotencyBeginResult.Began();
         }

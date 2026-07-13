@@ -62,6 +62,54 @@ public sealed class EfUnitOfWorkIntegrationTests(PostgreSqlUnitOfWorkFixture fix
     }
 
     [Fact]
+    public async Task NestedScope_AppliesLockTimeout_AndCommitRestoresTheAmbientValue() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+
+        await using var context = fixture.CreateContext();
+        var uow = new EfUnitOfWork<UnitOfWorkDbContext>(context);
+        await using var outer = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
+        var ambient = await CurrentLockTimeoutAsync(context);
+
+        // A nested [Idempotent] command must not block unbounded on the claim row while holding outer locks:
+        // the nested branch applies the requested lock_timeout too.
+        await using (var inner = await uow.BeginAsync(
+            new UnitOfWorkOptions { LockTimeout = TimeSpan.FromSeconds(1) }, Ct)) {
+            (await CurrentLockTimeoutAsync(context)).Should().Be("1s");
+            await inner.CommitAsync(Ct);
+        }
+
+        // SET LOCAL persists to the end of the physical transaction — the nested commit must restore the
+        // ambient value so the outer scope's statements are unaffected.
+        (await CurrentLockTimeoutAsync(context)).Should().Be(ambient);
+        await outer.CommitAsync(Ct);
+    }
+
+    [Fact]
+    public async Task NestedScope_Rollback_RevertsTheLockTimeout() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+
+        await using var context = fixture.CreateContext();
+        var uow = new EfUnitOfWork<UnitOfWorkDbContext>(context);
+        await using var outer = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
+        var ambient = await CurrentLockTimeoutAsync(context);
+
+        await using (var inner = await uow.BeginAsync(
+            new UnitOfWorkOptions { LockTimeout = TimeSpan.FromSeconds(1) }, Ct)) {
+            (await CurrentLockTimeoutAsync(context)).Should().Be("1s");
+            // Rolling back to the savepoint (created before the SET LOCAL) reverts the timeout implicitly.
+            await inner.RollbackAsync(Ct);
+        }
+
+        (await CurrentLockTimeoutAsync(context)).Should().Be(ambient);
+        await outer.CommitAsync(Ct);
+    }
+
+    private static Task<string> CurrentLockTimeoutAsync(UnitOfWorkDbContext context) =>
+        context.Database
+            .SqlQueryRaw<string>("SELECT current_setting('lock_timeout') AS \"Value\"")
+            .SingleAsync(Ct);
+
+    [Fact]
     public async Task NestedScope_Rollback_DiscardsOnlyInnerWrites() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var outerId = NewId();

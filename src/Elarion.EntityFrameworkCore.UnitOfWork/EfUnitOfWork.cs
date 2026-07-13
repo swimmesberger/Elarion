@@ -35,20 +35,39 @@ public sealed class EfUnitOfWork<TDbContext>(TDbContext dbContext) : IUnitOfWork
             var savepoint = "elarion_uow_nested_" + Interlocked.Increment(ref _nestingDepth)
                 .ToString(CultureInfo.InvariantCulture);
             await ambient.CreateSavepointAsync(savepoint, ct).ConfigureAwait(false);
-            return new NestedUnitOfWorkScope(dbContext, ambient, savepoint);
+
+            string? restoreLockTimeout = null;
+            if (options.LockTimeout is { } nestedLockTimeout && IsPostgres(dbContext)) {
+                // The requested timeout must bound the nested scope's lock waits too (a nested [Idempotent]
+                // command must not block unbounded on the claim row while holding the outer scope's locks).
+                // SET LOCAL persists to the end of the PHYSICAL transaction, so capture the ambient value first:
+                // the commit path restores it when this nested scope exits. (The rollback paths roll back to the
+                // savepoint created above, which reverts the SET LOCAL automatically.)
+                restoreLockTimeout = await dbContext.Database
+                    .SqlQueryRaw<string>("SELECT current_setting('lock_timeout') AS \"Value\"")
+                    .SingleAsync(ct)
+                    .ConfigureAwait(false);
+                await ApplyLockTimeoutAsync(nestedLockTimeout, ct).ConfigureAwait(false);
+            }
+
+            return new NestedUnitOfWorkScope(dbContext, ambient, savepoint, restoreLockTimeout);
         }
 
         var transaction = await dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         if (options.LockTimeout is { } lockTimeout && IsPostgres(dbContext)) {
-            // lock_timeout takes a value in milliseconds when no unit is given. `SET LOCAL` scopes it to this
-            // transaction. The value is a bounded integer we compute, not user input.
-            var milliseconds = (int)Math.Max(0, Math.Round(lockTimeout.TotalMilliseconds));
-            var sql = "SET LOCAL lock_timeout = " + milliseconds.ToString(CultureInfo.InvariantCulture);
-            await dbContext.Database.ExecuteSqlRawAsync(sql, ct).ConfigureAwait(false);
+            await ApplyLockTimeoutAsync(lockTimeout, ct).ConfigureAwait(false);
         }
 
         return new EfUnitOfWorkScope(dbContext, transaction);
+    }
+
+    private async ValueTask ApplyLockTimeoutAsync(TimeSpan lockTimeout, CancellationToken ct) {
+        // lock_timeout takes a value in milliseconds when no unit is given. `SET LOCAL` scopes it to the
+        // current transaction. The value is a bounded integer we compute, not user input.
+        var milliseconds = (int)Math.Max(0, Math.Round(lockTimeout.TotalMilliseconds));
+        var sql = "SET LOCAL lock_timeout = " + milliseconds.ToString(CultureInfo.InvariantCulture);
+        await dbContext.Database.ExecuteSqlRawAsync(sql, ct).ConfigureAwait(false);
     }
 
     private static bool IsPostgres(DbContext context) =>
@@ -80,16 +99,27 @@ public sealed class EfUnitOfWork<TDbContext>(TDbContext dbContext) : IUnitOfWork
     /// A nested scope that joins the ambient transaction via a savepoint. It never commits or rolls back the
     /// physical transaction (the outer scope owns that): commit flushes the handler's writes and releases the
     /// savepoint, rollback discards only this nested handler's writes by rolling back to the savepoint.
+    /// When the nested scope applied its own <c>lock_timeout</c>, the commit path restores the captured ambient
+    /// value (<c>SET LOCAL</c> would otherwise persist to the end of the physical transaction); the rollback
+    /// paths revert it implicitly, because rolling back to a savepoint undoes <c>SET LOCAL</c>s issued after it.
     /// </summary>
     private sealed class NestedUnitOfWorkScope(
         TDbContext dbContext,
         IDbContextTransaction transaction,
-        string savepoint) : IUnitOfWorkScope {
+        string savepoint,
+        string? restoreLockTimeout) : IUnitOfWorkScope {
         private bool _completed;
 
         public async ValueTask CommitAsync(CancellationToken ct) {
             await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
             await transaction.ReleaseSavepointAsync(savepoint, ct).ConfigureAwait(false);
+            if (restoreLockTimeout is not null) {
+                // Releasing the savepoint keeps this scope's SET LOCAL alive for the rest of the physical
+                // transaction — put the ambient value back so the outer scope's statements are unaffected.
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    "SELECT set_config('lock_timeout', {0}, true)", [restoreLockTimeout], ct).ConfigureAwait(false);
+            }
+
             _completed = true;
         }
 

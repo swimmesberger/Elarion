@@ -200,6 +200,36 @@ public sealed class AuditDecoratorTests {
     }
 
     [Fact]
+    public async Task DetachedWriteFailure_DoesNotMask_TheHandlersOriginalException() {
+        var scope = new AuditScope();
+        var metadata = new HandlerMetadata(typeof(PlainHandler), typeof(TestCommand), typeof(Result<string>));
+        var outer = new AuditDecorator<TestCommand, Result<string>>(
+            new StubHandler(_ => throw new InvalidOperationException("business boom")),
+            metadata, "sales.createOrder", "Sales", scope, new ThrowingAuditTrail(), currentUser: null);
+
+        var act = async () => await outer.HandleAsync(new TestCommand(), Ct);
+
+        // The audit sink's failure must not replace the handler's exception.
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("business boom");
+    }
+
+    [Fact]
+    public async Task DetachedWriteFailure_DoesNotTurn_AFailedResultIntoAnException() {
+        var scope = new AuditScope();
+        var metadata = new HandlerMetadata(typeof(PlainHandler), typeof(TestCommand), typeof(Result<string>));
+        var outer = new AuditDecorator<TestCommand, Result<string>>(
+            new StubHandler(_ => Result<string>.Failure(AppError.BusinessRule("domain no"))),
+            metadata, "sales.createOrder", "Sales", scope, new ThrowingAuditTrail(), currentUser: null);
+
+        var result = await outer.HandleAsync(new TestCommand(), Ct);
+
+        // The domain failure (a 4xx shape) must be returned unchanged, never escalated to a 500.
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Kind.Should().Be(ErrorKind.BusinessRule);
+        result.Error.Message.Should().Be("domain no");
+    }
+
+    [Fact]
     public void InactiveScope_IgnoresWrites_AndReportsInactive() {
         var scope = new AuditScope();
 
@@ -245,6 +275,14 @@ public sealed class AuditDecoratorTests {
     [Auditable(Resource = "order")]
     private sealed class AnnotatedHandler : IHandler<TestCommand, Result<string>> {
         public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) => default;
+    }
+
+    private sealed class ThrowingAuditTrail : IAuditTrail {
+        public ValueTask RecordAsync(Func<AuditRecord> buildRecord, CancellationToken cancellationToken) =>
+            throw new TimeoutException("audit sink down");
+
+        public ValueTask RecordDetachedAsync(AuditRecord record, CancellationToken cancellationToken) =>
+            throw new TimeoutException("audit sink down");
     }
 
     private sealed class RecordingAuditTrail : IAuditTrail {
