@@ -199,6 +199,134 @@ public sealed class TcpConnectionAdapterTests {
         }
     }
 
+    [Fact]
+    public async Task DynamicEndpoints_ReconfigureReconnectsUnderNewSettings_AndRemoveTearsDown() {
+        var ct = TestContext.Current.CancellationToken;
+        using var deviceA = new TcpListener(IPAddress.Loopback, 0);
+        using var deviceB = new TcpListener(IPAddress.Loopback, 0);
+        deviceA.Start();
+        deviceB.Start();
+
+        var observer = new AwaitableConnectionObserver();
+        var inbound = Channel.CreateUnbounded<string>();
+        var services = new ServiceCollection();
+        services.AddElarionConnections();
+        services.AddElarionTcpConnectionEndpoints();
+        services.AddSingleton(observer);
+        services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
+        services.AddSingleton(new DialerHandler(inbound.Writer));
+        await using var provider = services.BuildServiceProvider();
+        var endpoints = provider.GetRequiredService<TcpConnectionEndpoints>();
+
+        try {
+            // The binding starts as a dialer at device A.
+            await endpoints.ApplyDialerAsync<DialerHandler>("bind-1", o => {
+                o.Host = "127.0.0.1";
+                o.Port = ((IPEndPoint)deviceA.LocalEndpoint).Port;
+                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
+            }, ct);
+            using (var session = await deviceA.AcceptTcpClientAsync(ct)) {
+                var stream = session.GetStream();
+                (await ReadLineAsync(stream, ct)).Should().Be("hello");
+                await WriteLineAsync(stream, "ticket:dev-A", ct);
+                (await observer.Connected.Task.WaitAsync(ct)).PrincipalId.Should().Be("dev-A");
+                observer.Reset();
+
+                // Re-applying the same binding with new settings reconnects it: the device-A link drops
+                // while the session is still open, then the dialer establishes at device B.
+                await endpoints.ApplyDialerAsync<DialerHandler>("bind-1", o => {
+                    o.Host = "127.0.0.1";
+                    o.Port = ((IPEndPoint)deviceB.LocalEndpoint).Port;
+                    o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                    o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
+                }, ct);
+                await observer.Disconnected.Task.WaitAsync(ct);
+            }
+
+            using var sessionB = await deviceB.AcceptTcpClientAsync(ct);
+            var streamB = sessionB.GetStream();
+            (await ReadLineAsync(streamB, ct)).Should().Be("hello");
+            await WriteLineAsync(streamB, "ticket:dev-B", ct);
+            (await observer.Connected.Task.WaitAsync(ct)).PrincipalId.Should().Be("dev-B");
+            endpoints.EndpointNames.Should().BeEquivalentTo(["bind-1"]);
+
+            observer.Reset();
+            (await endpoints.RemoveAsync("bind-1", ct)).Should().BeTrue();
+            await observer.Disconnected.Task.WaitAsync(ct);
+            endpoints.EndpointNames.Should().BeEmpty();
+            (await endpoints.RemoveAsync("bind-1", ct)).Should().BeFalse();
+        }
+        finally {
+            await ((IHostedService)endpoints).StopAsync(CancellationToken.None);
+            deviceA.Stop();
+            deviceB.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task DynamicEndpoints_FlipDirectionFromListenerToDialer() {
+        var ct = TestContext.Current.CancellationToken;
+        using var device = new TcpListener(IPAddress.Loopback, 0);
+        device.Start();
+
+        var observer = new AwaitableConnectionObserver();
+        var boundEndPoint = new TaskCompletionSource<IPEndPoint>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var services = new ServiceCollection();
+        services.AddElarionConnections();
+        services.AddElarionTcpConnectionEndpoints();
+        services.AddSingleton(observer);
+        services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
+        services.AddSingleton<ChallengeTcpHandler>();
+        services.AddSingleton(new DialerHandler(Channel.CreateUnbounded<string>().Writer));
+        await using var provider = services.BuildServiceProvider();
+        var endpoints = provider.GetRequiredService<TcpConnectionEndpoints>();
+
+        try {
+            // The binding starts as a server-based endpoint: a device dials in.
+            await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-flip", o => {
+                o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                o.OnListening = boundEndPoint.SetResult;
+            }, ct);
+            var listenPort = await boundEndPoint.Task.WaitAsync(ct);
+            using (var inDialing = new TcpClient()) {
+                await inDialing.ConnectAsync(listenPort, ct);
+                var stream = inDialing.GetStream();
+                (await ReadLineAsync(stream, ct)).Should().Be("challenge");
+                await WriteLineAsync(stream, "device:flip-1", ct);
+                (await ReadLineAsync(stream, ct)).Should().Be("welcome");
+                await observer.Connected.Task.WaitAsync(ct);
+                observer.Reset();
+
+                // Same binding, flipped to client-based: the listener (and its connection) goes down and
+                // the endpoint now dials the device instead.
+                await endpoints.ApplyDialerAsync<DialerHandler>("bind-flip", o => {
+                    o.Host = "127.0.0.1";
+                    o.Port = ((IPEndPoint)device.LocalEndpoint).Port;
+                    o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                    o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
+                }, ct);
+                await observer.Disconnected.Task.WaitAsync(ct);
+            }
+
+            using var session = await device.AcceptTcpClientAsync(ct);
+            var deviceStream = session.GetStream();
+            (await ReadLineAsync(deviceStream, ct)).Should().Be("hello");
+            await WriteLineAsync(deviceStream, "ticket:flip-1", ct);
+            (await observer.Connected.Task.WaitAsync(ct)).PrincipalId.Should().Be("flip-1");
+
+            // The old listening socket is gone: a fresh connect to it must fail.
+            using var probe = new TcpClient();
+            var reconnect = async () => await probe.ConnectAsync(listenPort, ct).AsTask().WaitAsync(TimeSpan.FromSeconds(2), ct);
+            await reconnect.Should().ThrowAsync<Exception>();
+        }
+        finally {
+            await ((IHostedService)endpoints).StopAsync(CancellationToken.None);
+            device.Stop();
+        }
+    }
+
     private static Task<TcpTestHost> StartListenerHostAsync(CancellationToken ct, TimeSpan? idleTimeout = null) =>
         StartListenerHostAsync<ChallengeTcpHandler>(ct, idleTimeout);
 

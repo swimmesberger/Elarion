@@ -144,6 +144,30 @@ several devices, each with its own handler, framer, and options. The handler sub
 `TcpConnectionHandler`; device protocols with no credential exchange ticket straight from
 `handshake.RemoteEndPoint`/binding configuration.
 
+Bindings that live as **data** (an admin configures which device is dialed or listened for, on which
+port, with which framing) use the runtime manager instead of composition-time registrations: add
+`AddElarionTcpConnectionEndpoints()` and apply named endpoints whenever configuration changes —
+`Apply…` is an upsert that tears the old endpoint down first, so **changing a binding means a
+reconnect under the new settings**, including flipping its direction:
+
+```csharp
+var endpoints = provider.GetRequiredService<TcpConnectionEndpoints>();
+
+// Startup: apply every binding row; on admin change: re-apply just that row.
+await endpoints.ApplyDialerAsync<DeviceLinkHandler>("device-7:mgmt", o => {
+    o.Host = row.Host; o.Port = row.Port;
+    o.Framer = row.Protocol == "telegram" ? telegramFramer : new LengthPrefixedTcpFramer();
+}, ct);
+
+// The same binding later becomes server-based (the device now dials us):
+await endpoints.ApplyListenerAsync<GatewayListenHandler>("device-7:mgmt", o => {
+    o.ListenEndPoint = new IPEndPoint(IPAddress.Any, row.Port);
+    o.Framer = telegramFramer;
+}, ct);
+
+await endpoints.RemoveAsync("device-7:mgmt", ct);   // unbind: connections unregister
+```
+
 Settings can also vary **per connection on one endpoint**: override
 `ConfigureConnectionAsync(TcpConnectionPeer, …)` and return `TcpConnectionSettings` (framer, size cap,
 idle window, transport tag — nulls inherit the endpoint options). It runs before any byte is

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 namespace Elarion.Connections.Tcp;
@@ -55,7 +56,22 @@ public static class TcpConnectionServiceCollectionExtensions {
         return services;
     }
 
-    private static void ValidateShared(ElarionTcpConnectionOptions options) {
+    /// <summary>
+    /// Adds the runtime endpoint manager (idempotent): resolve <see cref="TcpConnectionEndpoints"/> and
+    /// apply/remove named endpoints from configuration data at any time — including reconfiguring or
+    /// flipping a binding's direction, which reconnects it under the new settings. Registered as a hosted
+    /// service so host shutdown tears every dynamic endpoint down.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    public static IServiceCollection AddElarionTcpConnectionEndpoints(this IServiceCollection services) {
+        ArgumentNullException.ThrowIfNull(services);
+        services.TryAddSingleton<TcpConnectionEndpoints>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, TcpConnectionEndpointsLifetime>());
+        return services;
+    }
+
+    internal static void ValidateShared(ElarionTcpConnectionOptions options) {
         if (options.Framer is null) {
             throw new ArgumentException(
                 "Framer is required — TCP has no message boundaries; pick LengthPrefixedTcpFramer, DelimitedTextTcpFramer, or a custom framer.",
@@ -64,4 +80,17 @@ public static class TcpConnectionServiceCollectionExtensions {
 
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxMessageBytes, 0);
     }
+}
+
+/// <summary>
+/// Forwards host lifetime to the singleton manager. A separate type (rather than registering the manager
+/// itself) so <c>TryAddEnumerable</c> can deduplicate by implementation type while the hosted instance is
+/// the same one apps resolve to apply endpoints.
+/// </summary>
+internal sealed class TcpConnectionEndpointsLifetime(TcpConnectionEndpoints endpoints) : IHostedService {
+    public Task StartAsync(CancellationToken cancellationToken) =>
+        ((IHostedService)endpoints).StartAsync(cancellationToken);
+
+    public Task StopAsync(CancellationToken cancellationToken) =>
+        ((IHostedService)endpoints).StopAsync(cancellationToken);
 }

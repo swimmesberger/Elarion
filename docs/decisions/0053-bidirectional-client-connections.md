@@ -244,7 +244,10 @@ adapter-tier requirements or explicit non-absorptions:
   length-prefixed and delimited-text built-ins, so codecs still receive complete messages. Framing and
   limits are configurable **per connection** (`ConfigureConnectionAsync` — resolved from the peer before
   any byte, so one ingress port serves differently-framed device families; a field requirement of the
-  industrial gateway's binding configuration). BCL sockets only — no ASP.NET.
+  industrial gateway's binding configuration). Bindings-as-data are first-class: the
+  `TcpConnectionEndpoints` runtime manager applies/removes named endpoints from configuration at any
+  time — re-applying reconnects under the new settings, **including flipping a binding's direction**
+  (listen ↔ dial), another field requirement. BCL sockets only — no ASP.NET.
 - `Elarion.AspNetCore.SignalR` — **adopted whole, after the socket adapter**: one framework-owned hub
   adapting inbound to `HandlerDispatcher` and outbound to `IClientConnectionSink`, serialization bridged
   to canonical JSON, auth from the host's ASP.NET authentication at negotiate/connect. It contains every
