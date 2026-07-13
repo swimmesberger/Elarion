@@ -1,0 +1,95 @@
+---
+title: Data-rate shaping
+description: Shape high-frequency sample streams with a write-behind buffer (batch to the database) and a keyed conflater (latest-wins to the UI).
+---
+
+Between "a device produces samples many times per second" and "the database and the UI consume them"
+sit two small concurrency problems every telemetry gateway hand-rolls: batching writes so the database
+sees hundreds of rows per call instead of hundreds of calls per second, and throttling live values so
+the UI sees at most a few updates per second per key — without ever getting stuck on a stale one. Both
+are ~100 lines that are easy to get subtly wrong (flush/publish races, shutdown flush, timer lifecycle),
+so `Elarion` core ships them once, in the `Elarion.Buffering` namespace
+([ADR-0055](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0055-data-rate-shaping-helpers.md)):
+
+| Helper | Contract | Natural delegate body |
+| --- | --- | --- |
+| `WriteBehindBuffer<T>` | Accumulate, flush in batches by count or interval — whichever first | [`ExecuteInsertAsync`](/docs/capabilities/bulk-operations) |
+| `KeyedConflater<TKey, TValue>` | Latest wins per key, at most one emit per key per interval | [`IClientEventPublisher.PublishAsync`](/docs/capabilities/events/client-events) |
+
+Both are BCL-only, need no DI registration (construct them wherever the data path lives — typically an
+[actor](/docs/concepts/actors) or gateway component), take a `TimeProvider` for deterministic tests,
+and flush on `DisposeAsync` so shutdown writes the tail instead of dropping it.
+
+## `WriteBehindBuffer<T>` — batch samples to the database
+
+```csharp
+var buffer = new WriteBehindBuffer<Measurement>(
+    async (batch, ct) => await WriteBatchAsync(batch, ct), // e.g. ExecuteInsertAsync on a fresh scope
+    new WriteBehindBufferOptions {
+        MaxItems = 500,                          // flush when the batch is full…
+        FlushInterval = TimeSpan.FromSeconds(5), // …or when the oldest item is this old
+    },
+    onFlushError: (ex, batch) => logger.LogWarning(ex, "Dropped {Count} samples", batch.Count));
+
+buffer.Add(measurement);        // any thread, never blocks on the flush target
+await buffer.FlushAsync(ct);    // explicit flush — delegate failures rethrow here
+await buffer.DisposeAsync();    // stops the timer, flushes the tail, never throws
+```
+
+The contract is **loss-tolerant samples**:
+
+- The buffer is bounded — past `Capacity` (default 4 × `MaxItems`) the *oldest* unflushed item is
+  dropped, so a slow or down database bounds memory instead of growing it. `DroppedCount` meters the
+  pressure; a climbing value means the flush target can't keep up.
+- A failed flush **drops its batch** rather than retrying it (a poisoned batch must never wedge the
+  pipeline). Explicit `FlushAsync` rethrows to its caller; background and dispose flushes route to the
+  `onFlushError` callback — without one they are swallowed, so supply it in anything beyond a prototype.
+- Flushes are single-flight: items added while a flush runs coalesce into the next drain pass, so a slow
+  target gets fewer, larger calls — not a stack of concurrent ones.
+
+Samples that must not be lost don't belong here — record them transactionally in the handler and let
+[the outbox](/docs/capabilities/events/backends) do the deferring.
+
+## `KeyedConflater<TKey, TValue>` — latest-wins to the UI
+
+```csharp
+var conflater = new KeyedConflater<string, QuoteUpdated>(
+    async (symbol, quote, ct) => await clientEvents.PublishAsync(quote, ClientEventScope.Global, ct),
+    new KeyedConflaterOptions { MinInterval = TimeSpan.FromMilliseconds(250) });
+
+conflater.Post("ACME", update);  // any thread, never blocks on the publish target
+await conflater.DisposeAsync();  // publishes every pending latest, then drops late posts
+```
+
+Each key emits at most once per `MinInterval`:
+
+- The first post of an idle key emits **immediately** (leading edge) — a dashboard shows the first value
+  without waiting a window.
+- Posts inside the window **conflate**: only the newest value survives, and it emits when the window
+  elapses (trailing edge). A quiet key therefore always publishes its final value — conflation never
+  ends on a stale reading.
+- Emissions for one key never overlap: a publish slower than the window lowers the effective rate
+  instead of stacking calls. Keys are independent, and idle keys retire automatically, so unbounded key
+  spaces (device ids, symbols) don't leak.
+- Delivery is **at-most-once**, matching the client-event contract: a publish failure drops that
+  emission to the optional `onPublishError` callback, and the next post heals.
+
+## Composition: the actor telemetry path
+
+The recommended owner is the actor that already serializes the hot state
+(the [write-behind and live-telemetry use cases](/docs/concepts/actors#when-not-to-use-an-actor)): it
+constructs both helpers as activation state, `Add`s/`Post`s from its turns, and disposes them in
+`OnDeactivateAsync` — one sample stream, two shaped consumers:
+
+```csharp
+public Task RecordAsync(Measurement m) {
+    _buffer.Add(m);               // → batched ExecuteInsertAsync every few seconds
+    _conflater.Post(m.Sensor, m); // → at most 4 client events/s per sensor (MinInterval = 250 ms)
+    return Task.CompletedTask;
+}
+```
+
+These two shapes are deliberately the whole surface — windows, joins, or replay are the trigger for a
+real reactive/streaming library, not for growing these helpers. For ordered, gap-visible streams where
+element identity matters, use [ordered streams](/docs/capabilities/events/streams) instead of
+conflation.
