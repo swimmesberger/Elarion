@@ -388,6 +388,67 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
+    public async Task CancelRunAsync_QueuedRecurringGridOccurrence_SkipsItAndTheChainContinues()
+    {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        var descriptor = CreateCountingDescriptor("test.cancelGrid", ScheduledJobSchedule.FixedRate("50ms"));
+        await using var provider = CreateProvider(time, descriptor);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        var scheduler = provider.GetRequiredService<IJobScheduler>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
+        var counter = provider.GetRequiredService<RunCounter>();
+
+        await hostedService.StartAsync(cts.Token);
+        await WaitUntilAsync(() => counter.Count >= 1);
+
+        // The grid successor was queued at dispatch; cancel it while it is still queued.
+        var queuedRun = inspector.GetSnapshot().QueuedRuns.Single(run => run.JobName == "test.cancelGrid");
+        var cancelled = await scheduler.CancelRunAsync(queuedRun.RunId, cts.Token);
+
+        // Cancelling one occurrence skips it, but the recurring chain continues: a later occurrence runs.
+        await AdvanceUntilAsync(time, Interval, () => counter.Count >= 2);
+        await hostedService.StopAsync(cts.Token);
+
+        cancelled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CancelRunAsync_QueuedFixedDelayOccurrence_SkipsItAndTheChainContinues()
+    {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        var descriptor = CreateCountingDescriptor("test.cancelDelay", ScheduledJobSchedule.FixedDelay("50ms"));
+        await using var provider = CreateProvider(time, descriptor);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        var scheduler = provider.GetRequiredService<IJobScheduler>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
+        var counter = provider.GetRequiredService<RunCounter>();
+
+        await hostedService.StartAsync(cts.Token);
+        await WaitUntilAsync(() => counter.Count >= 1);
+
+        // The fixed-delay successor is only enqueued once the first run completes.
+        var queuedRunId = Guid.Empty;
+        await WaitUntilAsync(() => {
+            var queued = inspector.GetSnapshot().QueuedRuns.SingleOrDefault(run => run.JobName == "test.cancelDelay");
+            if (queued is null) {
+                return false;
+            }
+
+            queuedRunId = queued.RunId;
+            return true;
+        });
+        var cancelled = await scheduler.CancelRunAsync(queuedRunId, cts.Token);
+
+        // Cancelling one occurrence skips it, but the fixed-delay chain continues.
+        await AdvanceUntilAsync(time, Interval, () => counter.Count >= 2);
+        await hostedService.StopAsync(cts.Token);
+
+        cancelled.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task CronJob_RunsAtCronOccurrences()
     {
         using var cts = new CancellationTokenSource(WaitTimeout);
@@ -621,6 +682,69 @@ public sealed class InMemorySchedulerTests
 
         cancelled.Should().BeTrue();
         recorder.HasObserved.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Shutdown_RunWaitingForConcurrencySlot_RecordsCancelledOutcome()
+    {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        await using var provider = CreateProvider(
+            time,
+            new SchedulerOptions { Enabled = true, MaxConcurrentExecutions = 1 });
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        var scheduler = provider.GetRequiredService<IJobScheduler>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
+        var probe = provider.GetRequiredService<CancellationProbe>();
+        var recorder = provider.GetRequiredService<SchedulerRecorder>();
+
+        await hostedService.StartAsync(cts.Token);
+        await scheduler.EnqueueAsync<CancellableRuntimeJob, TestPayload>(
+            new TestPayload { Value = "blocking" },
+            cts.Token);
+        await probe.WaitStartedAsync(cts.Token);
+
+        var waitingHandle = await scheduler.EnqueueAsync<TestRuntimeJob, TestPayload>(
+            new TestPayload { Value = "waiting" },
+            cts.Token);
+        await WaitUntilAsync(() => inspector.GetSnapshot().ActiveRuns.Any(run => run.RunId == waitingHandle.RunId));
+
+        // Shutdown cancels the run while it still waits for the global concurrency slot; the run never
+        // executed, so the scheduler itself must record the outcome instead of dropping it silently.
+        await hostedService.StopAsync(cts.Token);
+
+        inspector.GetSnapshot().RecentOutcomes.Should().Contain(outcome =>
+            outcome.RunId == waitingHandle.RunId &&
+            outcome.Status == ScheduledJobRunStatus.Cancelled &&
+            outcome.Message == "scheduler shutdown");
+        recorder.HasObserved.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IScheduledJobContext_RequestCancellation_AfterTheRunCompleted_DoesNotThrow()
+    {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        var stashedContext = new TaskCompletionSource<IScheduledJobContext>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var descriptor = new ScheduledJobDescriptor {
+            Name = "test.stashedContext",
+            Schedule = ScheduledJobSchedule.Once("50ms"),
+            InvokeAsync = (_, _, context, _) => {
+                stashedContext.TrySetResult(context);
+                return ValueTask.CompletedTask;
+            }
+        };
+        await using var provider = CreateProvider(time, descriptor);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+
+        await hostedService.StartAsync(cts.Token);
+        await AdvanceUntilAsync(time, Interval, () => stashedContext.Task.IsCompleted);
+        var context = await stashedContext.Task.WaitAsync(cts.Token);
+        // Stopping awaits the in-flight run, so its cancellation source is released by the time this returns.
+        await hostedService.StopAsync(cts.Token);
+
+        var act = () => context.RequestCancellation();
+        act.Should().NotThrow();
     }
 
     [Fact]

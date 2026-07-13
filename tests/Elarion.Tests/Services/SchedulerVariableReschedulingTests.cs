@@ -132,6 +132,58 @@ public sealed class SchedulerVariableReschedulingTests {
     }
 
     [Fact]
+    public async Task FixedDelayJob_VariableChangeDuringCompletionReschedule_DoesNotForkTheChain() {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider(Origin);
+        var source = new SwapOnReadVariableSource(new Dictionary<string, string?> { ["Jobs:Delay"] = "10m" });
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runCount = 0;
+        var descriptor = Recurring(
+            "test.fixedDelayFork",
+            ScheduledJobSchedule.FixedDelay("${Jobs:Delay:-10m}", runOnStart: true),
+            invoke: async (_, _, _, ct) => {
+                Interlocked.Increment(ref runCount);
+                running.TrySetResult();
+                await gate.Task.WaitAsync(ct);
+            });
+        await using var provider = BuildProvider(time, source, descriptor);
+        var hosted = provider.GetRequiredService<IHostedService>();
+        var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
+        await hosted.StartAsync(cts.Token);
+
+        try {
+            await running.Task.WaitAsync(cts.Token);
+            // A fixed-delay chain advances at completion by re-resolving its schedule variables. Arm the
+            // source so exactly that read swaps the delay and fires the watch token synchronously: the
+            // resync then lands inside the window between the run ending and its successor being enqueued
+            // — where the job looks neither queued nor active — and must not start a second chain.
+            source.ArmSwapOnNextRead(new Dictionary<string, string?> { ["Jobs:Delay"] = "2m" });
+            gate.TrySetResult();
+
+            await WaitUntilAsync(
+                () => {
+                    var snapshot = inspector.GetSnapshot();
+                    return snapshot.ActiveRuns.Count == 0
+                        && snapshot.QueuedRuns.Any(run => run.JobName == "test.fixedDelayFork");
+                },
+                cts.Token);
+            // A forked chain would surface as an immediately-due extra occurrence (an extra run) plus a
+            // second queued successor; give it time to surface before asserting.
+            await Task.Delay(250, cts.Token);
+
+            Volatile.Read(ref runCount).Should().Be(1);
+            inspector.GetSnapshot().QueuedRuns.Where(run => run.JobName == "test.fixedDelayFork")
+                .Should().ContainSingle();
+            // The single surviving successor picked up the changed delay at the completion reschedule.
+            NextDue(inspector, "test.fixedDelayFork").Should().Be(Origin + TimeSpan.FromMinutes(2));
+        } finally {
+            gate.TrySetResult();
+            await hosted.StopAsync(cts.Token);
+        }
+    }
+
+    [Fact]
     public async Task StartAsync_Throws_WhenInlineResilienceJobRegistered_ButRunnerMissing() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider(Origin);
@@ -199,6 +251,50 @@ public sealed class SchedulerVariableReschedulingTests {
 
     private static Guid QueuedRunId(IJobSchedulerInspector inspector, string name) =>
         inspector.GetSnapshot().QueuedRuns.Single(run => run.JobName == name).RunId;
+
+    /// <summary>
+    /// A variable source that can be armed to swap its values on the <em>next read</em>, firing the watch
+    /// token synchronously inside that read. This plants the resync deterministically inside scheduler
+    /// windows that resolve variables (e.g. the fixed-delay completion reschedule) instead of racing it.
+    /// </summary>
+    private sealed class SwapOnReadVariableSource(Dictionary<string, string?> values) : IObservableVariableSource {
+        private readonly Lock _gate = new();
+        private Dictionary<string, string?> _values = values;
+        private Dictionary<string, string?>? _pending;
+        private CancellationTokenSource _cts = new();
+
+        public bool TryGetValue(string key, out string? value) {
+            CancellationTokenSource? fire = null;
+            lock (_gate) {
+                if (_pending is { } pending) {
+                    _values = pending;
+                    _pending = null;
+                    fire = _cts;
+                    _cts = new CancellationTokenSource();
+                }
+            }
+
+            // Fired outside the gate (the resync re-enters TryGetValue) but synchronously inside the
+            // caller's read, so the resync runs while the caller is mid-reschedule.
+            fire?.Cancel();
+
+            lock (_gate) {
+                return _values.TryGetValue(key, out value);
+            }
+        }
+
+        public IChangeToken Watch() {
+            lock (_gate) {
+                return new CancellationChangeToken(_cts.Token);
+            }
+        }
+
+        public void ArmSwapOnNextRead(Dictionary<string, string?> newValues) {
+            lock (_gate) {
+                _pending = newValues;
+            }
+        }
+    }
 
     private sealed class MutableVariableSource(Dictionary<string, string?> values) : IObservableVariableSource {
         private readonly Lock _gate = new();

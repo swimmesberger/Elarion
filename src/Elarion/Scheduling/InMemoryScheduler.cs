@@ -41,6 +41,13 @@ public sealed class InMemoryScheduler(
     // Queued occurrences replaced by a live reschedule; dropped silently (no outcome) at dequeue.
     private readonly HashSet<Guid> _supersededRuns = [];
 
+    // Jobs whose dequeued recurring occurrence has not yet enqueued its successor (grid chains advance at
+    // dispatch, fixed-delay chains at completion). A live resync landing inside that window sees neither a
+    // queued occurrence nor an active run, so without this marker it would start a second, permanent chain;
+    // with it the resync treats the job as having a successor pending and lets the chain advance pick up
+    // the new variables instead.
+    private readonly HashSet<string> _chainAdvancingJobs = new(StringComparer.Ordinal);
+
     // Last resolved variable signature per recurring job, to detect which jobs a change actually affects.
     private readonly Dictionary<string, string> _recurringSignatures = new(StringComparer.Ordinal);
 
@@ -182,7 +189,7 @@ public sealed class InMemoryScheduler(
             activity.SetTag("scheduler.job.run_id", runId);
         }
 
-        CancellationTokenSource? activeCancellation = null;
+        ScheduledRunCancellation? activeCancellation = null;
         lock (_stateLock) {
             if (_queuedRuns.TryGetValue(runId, out var queued)) {
                 _cancelledRuns.Add(runId);
@@ -216,9 +223,8 @@ public sealed class InMemoryScheduler(
             }
         }
 
-        try {
-            activeCancellation?.Cancel();
-        } catch (ObjectDisposedException) {
+        if (activeCancellation is not null && !activeCancellation.Cancel()) {
+            // The run completed and released its cancellation source between the lookup and this call.
             RecordOperation(activity, "cancel-run", "disposed", started);
             return ValueTask.FromResult(false);
         }
@@ -240,7 +246,7 @@ public sealed class InMemoryScheduler(
             activity.SetTag("scheduler.job.id", jobId);
         }
 
-        CancellationTokenSource? activeCancellation = null;
+        ScheduledRunCancellation? activeCancellation = null;
         lock (_stateLock) {
             if (!_jobStates.ContainsKey(jobId)) {
                 RecordOperation(activity, "cancel-job", outcome, started);
@@ -273,9 +279,8 @@ public sealed class InMemoryScheduler(
             }
         }
 
-        try {
-            activeCancellation?.Cancel();
-        } catch (ObjectDisposedException) {
+        if (activeCancellation is not null && !activeCancellation.Cancel()) {
+            // The run completed and released its cancellation source between the lookup and this call.
             RecordOperation(activity, "cancel-job", "disposed", started);
             return ValueTask.FromResult(false);
         }
@@ -523,8 +528,12 @@ public sealed class InMemoryScheduler(
                 supersededQueued = true;
             }
 
+            // A chain-advancing job (dequeued, successor not yet enqueued) counts as active: its chain
+            // advance re-resolves the schedule and will pick up the changed variables itself, and
+            // enqueuing here would fork the chain into two permanent parallel chains.
             jobActive = _activeRunsByJob.GetValueOrDefault(descriptor.Name) > 0
-                || DispatchingContainsLocked(descriptor.Name);
+                || DispatchingContainsLocked(descriptor.Name)
+                || _chainAdvancingJobs.Contains(descriptor.Name);
         }
 
         ResolvedSchedule resolved;
@@ -645,8 +654,19 @@ public sealed class InMemoryScheduler(
             _queue.Enqueue(item, item.DueTimeUtc);
             _queuedRuns[item.RunId] = item;
             if (!item.IsRuntimeScheduled) {
+                // A recurring job has exactly one chain: if another occurrence is still queued for it
+                // (a fork — e.g. a live resync raced the chain advance), tombstone the older one so
+                // forks from any origin collapse back into a single chain.
+                if (_recurringRunIds.TryGetValue(item.Descriptor.Name, out var previousRunId) &&
+                    previousRunId != item.RunId &&
+                    _queuedRuns.Remove(previousRunId)) {
+                    _supersededRuns.Add(previousRunId);
+                }
+
                 // Track the current queued recurring occurrence so a live variable change can supersede it.
                 _recurringRunIds[item.Descriptor.Name] = item.RunId;
+                // The successor is queued: the dequeue→reschedule window (if any) is closed.
+                _chainAdvancingJobs.Remove(item.Descriptor.Name);
             }
             if (item.IsRuntimeScheduled && !_jobStates.ContainsKey(item.JobId)) {
                 RecordJobStateLocked(item, ScheduledJobLifecycleStatus.Queued, item.DueTimeUtc, null, null);
@@ -658,48 +678,82 @@ public sealed class InMemoryScheduler(
     }
 
     private ScheduledJobWorkItem? TryDequeueDueItem(out TimeSpan delay) {
-        lock (_stateLock) {
-            while (_queue.Count > 0) {
-                var next = _queue.Peek();
-                if (_supersededRuns.Remove(next.RunId)) {
-                    // A live reschedule replaced this occurrence; drop it silently (no recorded outcome).
+        List<ScheduledJobWorkItem>? cancelledChainItems = null;
+        try {
+            lock (_stateLock) {
+                while (_queue.Count > 0) {
+                    var next = _queue.Peek();
+                    if (_supersededRuns.Remove(next.RunId)) {
+                        // A live reschedule replaced this occurrence; drop it silently (no recorded outcome).
+                        _queue.Dequeue();
+                        _queuedRuns.Remove(next.RunId);
+                        continue;
+                    }
+
+                    if (_cancelledRuns.Remove(next.RunId)) {
+                        _queuedRuns.Remove(next.RunId);
+                        _queue.Dequeue();
+                        RecordOutcomeLocked(
+                            next,
+                            null,
+                            timeProvider.GetUtcNow(),
+                            ScheduledJobRunStatus.Cancelled,
+                            "cancelled before execution");
+                        RecordPreExecutionOutcome(next, "cancelled", "cancelled before execution");
+                        RecordTerminalStatus(next.Descriptor, "cancelled", TimeSpan.Zero);
+                        if (IsRecurringChainItem(next)) {
+                            // Cancelling one occurrence skips it, but the recurring chain continues: this
+                            // occurrence never reaches StartRun/RunItemAsync, so its successor is enqueued
+                            // from here. Marked chain-advancing until then so a resync cannot fork the chain.
+                            _chainAdvancingJobs.Add(next.Descriptor.Name);
+                            (cancelledChainItems ??= []).Add(next);
+                        }
+
+                        continue;
+                    }
+
+                    var now = timeProvider.GetUtcNow();
+                    if (next.DueTimeUtc > now) {
+                        delay = next.DueTimeUtc - now;
+                        return null;
+                    }
+
                     _queue.Dequeue();
                     _queuedRuns.Remove(next.RunId);
-                    continue;
+                    // Note 35: Dispatching is tracked separately to close the race between leaving the queue and becoming active.
+                    _dispatchingRuns[next.RunId] = next;
+                    if (IsRecurringChainItem(next)) {
+                        // Until the chain advance enqueues the successor the job has no queued occurrence;
+                        // mark the window so a live resync does not start a second chain inside it.
+                        _chainAdvancingJobs.Add(next.Descriptor.Name);
+                    }
+
+                    delay = TimeSpan.Zero;
+                    return next;
                 }
 
-                if (_cancelledRuns.Remove(next.RunId)) {
-                    _queuedRuns.Remove(next.RunId);
-                    _queue.Dequeue();
-                    RecordOutcomeLocked(
-                        next,
-                        null,
-                        timeProvider.GetUtcNow(),
-                        ScheduledJobRunStatus.Cancelled,
-                        "cancelled before execution");
-                    RecordPreExecutionOutcome(next, "cancelled", "cancelled before execution");
-                    RecordTerminalStatus(next.Descriptor, "cancelled", TimeSpan.Zero);
-                    continue;
-                }
-
-                var now = timeProvider.GetUtcNow();
-                if (next.DueTimeUtc > now) {
-                    delay = next.DueTimeUtc - now;
-                    return null;
-                }
-
-                _queue.Dequeue();
-                _queuedRuns.Remove(next.RunId);
-                // Note 35: Dispatching is tracked separately to close the race between leaving the queue and becoming active.
-                _dispatchingRuns[next.RunId] = next;
-                delay = TimeSpan.Zero;
-                return next;
+                delay = Timeout.InfiniteTimeSpan;
+                return null;
             }
-
-            delay = Timeout.InfiniteTimeSpan;
-            return null;
+        } finally {
+            if (cancelledChainItems is not null) {
+                // Outside the state lock: rescheduling resolves schedule variables, and user variable
+                // sources may take their own locks.
+                foreach (var item in cancelledChainItems) {
+                    RescheduleRecurring(item);
+                }
+            }
         }
     }
+
+    /// <summary>
+    /// True when the occurrence is part of a recurring chain that must advance after the occurrence is
+    /// consumed (dispatched or cancelled): a non-runtime item with a schedule that has successors.
+    /// </summary>
+    private static bool IsRecurringChainItem(ScheduledJobWorkItem item) =>
+        !item.IsRuntimeScheduled &&
+        item.Descriptor.Schedule is { } schedule &&
+        schedule.Kind != ScheduledJobScheduleKind.OneTime;
 
     private void StartRun(ScheduledJobWorkItem item, CancellationToken stoppingToken) {
         // Fixed-rate and cron chains advance at dispatch; fixed-delay chains advance when
@@ -733,36 +787,36 @@ public sealed class InMemoryScheduler(
     private async Task RunItemAsync(ScheduledJobWorkItem item, CancellationToken stoppingToken) {
         var descriptor = item.Descriptor;
         var beganRun = false;
+        var executionStarted = false;
         // Note 36: Linking the host shutdown token with per-run cancellation gives both global and user-triggered cancellation paths.
-        using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        if (TryConsumeCancelledDispatch(item)) {
-            RecordOutcome(
-                item,
-                null,
-                timeProvider.GetUtcNow(),
-                ScheduledJobRunStatus.Cancelled,
-                "cancelled before execution");
-            return;
-        }
-
-        if (!IsDescriptorEnabled(descriptor)) {
-            if (item.IsRuntimeScheduled) {
-                RecordSkipped(item, "disabled");
+        using var runCancellation = new ScheduledRunCancellation(stoppingToken);
+        try {
+            // Dispatch-time cancellation is consumed inside the try/finally so a cancelled occurrence
+            // still advances a fixed-delay chain: cancelling one occurrence skips it, the chain continues.
+            if (TryConsumeCancelledDispatch(item)) {
                 RecordOutcome(
                     item,
                     null,
                     timeProvider.GetUtcNow(),
-                    ScheduledJobRunStatus.Skipped,
-                    "disabled");
+                    ScheduledJobRunStatus.Cancelled,
+                    "cancelled before execution");
+                return;
             }
 
-            RemoveDispatching(item.RunId);
-            RescheduleFixedDelayOccurrence(item, stoppingToken);
-            return;
-        }
+            if (!IsDescriptorEnabled(descriptor)) {
+                if (item.IsRuntimeScheduled) {
+                    RecordSkipped(item, "disabled");
+                    RecordOutcome(
+                        item,
+                        null,
+                        timeProvider.GetUtcNow(),
+                        ScheduledJobRunStatus.Skipped,
+                        "disabled");
+                }
 
-        var executionStarted = false;
-        try {
+                return;
+            }
+
             if (IsScheduleDisabled(descriptor)) {
                 RecordSkipped(item, "schedule-disabled");
                 RecordOutcome(
@@ -813,8 +867,7 @@ public sealed class InMemoryScheduler(
             beganRun = true;
             var serializationSemaphore = GetSerializationSemaphore(descriptor);
             if (serializationSemaphore is null) {
-                executionStarted = true;
-                await ExecuteWithConcurrencyLimitAsync(item, runCancellation, stoppingToken);
+                await ExecuteWithConcurrencyLimitAsync(item, runCancellation, stoppingToken, () => executionStarted = true);
                 return;
             }
 
@@ -822,8 +875,7 @@ public sealed class InMemoryScheduler(
             // queued occurrence waiting for its predecessor cannot starve unrelated jobs.
             await serializationSemaphore.WaitAsync(runCancellation.Token);
             try {
-                executionStarted = true;
-                await ExecuteWithConcurrencyLimitAsync(item, runCancellation, stoppingToken);
+                await ExecuteWithConcurrencyLimitAsync(item, runCancellation, stoppingToken, () => executionStarted = true);
             } finally {
                 serializationSemaphore.Release();
             }
@@ -928,9 +980,14 @@ public sealed class InMemoryScheduler(
 
     private async Task ExecuteWithConcurrencyLimitAsync(
         ScheduledJobWorkItem item,
-        CancellationTokenSource runCancellation,
-        CancellationToken stoppingToken) {
+        ScheduledRunCancellation runCancellation,
+        CancellationToken stoppingToken,
+        Action onExecutionStarted) {
         await _concurrencyLimiter.WaitAsync(runCancellation.Token);
+        // Only past the limiter is the run actually executing (ExecuteDescriptorAsync records its own
+        // outcome); a cancellation during the limiter wait must still be recorded by the caller, so the
+        // flag flips strictly after the slot is acquired.
+        onExecutionStarted();
         try {
             await ExecuteDescriptorAsync(item, runCancellation, stoppingToken);
         } finally {
@@ -941,7 +998,7 @@ public sealed class InMemoryScheduler(
     private bool TryBeginRun(
         ScheduledJobWorkItem item,
         DateTimeOffset startedAtUtc,
-        CancellationTokenSource runCancellation,
+        ScheduledRunCancellation runCancellation,
         out string skipReason) {
         var descriptor = item.Descriptor;
         lock (_stateLock) {
@@ -1080,7 +1137,7 @@ public sealed class InMemoryScheduler(
 
     private async Task ExecuteDescriptorAsync(
         ScheduledJobWorkItem item,
-        CancellationTokenSource runCancellation,
+        ScheduledRunCancellation runCancellation,
         CancellationToken stoppingToken) {
         var descriptor = item.Descriptor;
         var startedAt = timeProvider.GetUtcNow();
@@ -1322,6 +1379,9 @@ public sealed class InMemoryScheduler(
                 "cancelled before execution");
             RecordPreExecutionOutcome(item, "cancelled", "cancelled before execution");
             RecordTerminalStatus(item.Descriptor, "cancelled", TimeSpan.Zero);
+            // Cancelling one occurrence skips it, but the chain continues — the same contract as
+            // every other dispatch-time cancel consume point.
+            RescheduleRecurring(item, resolved);
             return true;
         }
 
@@ -1344,6 +1404,12 @@ public sealed class InMemoryScheduler(
         try {
             var resolved = resolvedSchedule ?? ResolveScheduleSafely(item.Descriptor);
             if (resolved.IsDisabled) {
+                // The chain deliberately ends here; forget the advance-in-progress marker so a later
+                // re-enabling resync can start a fresh chain.
+                lock (_stateLock) {
+                    _chainAdvancingJobs.Remove(item.Descriptor.Name);
+                }
+
                 return;
             }
 
@@ -1638,10 +1704,58 @@ public sealed class InMemoryScheduler(
         activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
     }
 
+    /// <summary>
+    /// Owns a run's linked cancellation source and serializes <see cref="Cancel"/> against
+    /// <see cref="Dispose"/>: a job may stash its <see cref="IScheduledJobContext"/> and request
+    /// cancellation after the run completed (and a cancel API call can race run completion), which must
+    /// be a benign no-op — <see cref="CancellationTokenSource.Cancel()"/> is not safe against a
+    /// concurrent <see cref="CancellationTokenSource.Dispose()"/>. The source is still disposed eagerly
+    /// because it is linked to the host shutdown token: leaving it undisposed would leak a registration
+    /// on that token for every run over the host's lifetime.
+    /// </summary>
+    private sealed class ScheduledRunCancellation : IDisposable {
+        private readonly CancellationTokenSource _source;
+        private readonly Lock _lock = new();
+        private bool _disposed;
+
+        public ScheduledRunCancellation(CancellationToken stoppingToken) {
+            _source = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            Token = _source.Token;
+        }
+
+        /// <summary>Captured eagerly so it stays readable after <see cref="Dispose"/>.</summary>
+        public CancellationToken Token { get; }
+
+        public bool IsCancellationRequested => Token.IsCancellationRequested;
+
+        /// <summary>Cancels the run; false when the run already completed and released its source.</summary>
+        public bool Cancel() {
+            lock (_lock) {
+                if (_disposed) {
+                    return false;
+                }
+
+                _source.Cancel();
+                return true;
+            }
+        }
+
+        public void Dispose() {
+            lock (_lock) {
+                if (_disposed) {
+                    return;
+                }
+
+                _disposed = true;
+                _source.Dispose();
+            }
+        }
+    }
+
     private sealed record ActiveScheduledJobRun(
         ScheduledJobWorkItem Item,
         DateTimeOffset StartedAtUtc,
-        CancellationTokenSource Cancellation);
+        ScheduledRunCancellation Cancellation);
 
     private sealed class InMemoryScheduledJobContext(
         Guid runId,
@@ -1649,7 +1763,7 @@ public sealed class InMemoryScheduler(
         DateTimeOffset dueTimeUtc,
         DateTimeOffset startedAtUtc,
         bool isRuntimeScheduled,
-        CancellationTokenSource cancellation
+        ScheduledRunCancellation cancellation
     ) : IScheduledJobContext {
         public Guid RunId { get; } = runId;
 
