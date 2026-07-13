@@ -986,6 +986,14 @@ public sealed class InMemoryScheduler(
         CancellationToken stoppingToken,
         Action onExecutionStarted) {
         await _concurrencyLimiter.WaitAsync(runCancellation.Token);
+        // SemaphoreSlim may hand a freed slot to a waiter whose token was cancelled at the same moment
+        // (release and cancellation race inside the semaphore); a run whose cancellation was requested
+        // must not begin executing, so re-check before flipping the executing flag.
+        if (runCancellation.Token.IsCancellationRequested) {
+            _concurrencyLimiter.Release();
+            runCancellation.Token.ThrowIfCancellationRequested();
+        }
+
         // Only past the limiter is the run actually executing (ExecuteDescriptorAsync records its own
         // outcome); a cancellation during the limiter wait must still be recorded by the caller, so the
         // flag flips strictly after the slot is acquired.
