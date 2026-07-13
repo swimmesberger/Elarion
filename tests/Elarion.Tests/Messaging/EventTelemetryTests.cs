@@ -119,12 +119,13 @@ public sealed class EventTelemetryTests {
         using var meters = new MeterCollector(EventTelemetry.MeterName);
 
         using var publisherActivity = new Activity("command").Start();
+        var correlationId = Guid.NewGuid();
         var message = new OutboxMessage {
             Id = Guid.NewGuid(),
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
-            CorrelationId = Guid.NewGuid(),
+            CorrelationId = correlationId,
             TraceParent = publisherActivity.Id,
         };
         publisherActivity.Stop();
@@ -133,8 +134,11 @@ public sealed class EventTelemetryTests {
         store.Pending.Enqueue([message]);
         await RunDeliveryUntilSignaledAsync(store, (_, _, _, _) => ValueTask.CompletedTask);
 
+        // The collector listens globally on the shared source; scope to this test's correlation id so
+        // parallel test classes delivering the same event type cannot leak a second consume activity in.
         var consume = activities.Activities.Should()
-            .ContainSingle(activity => activity.OperationName == $"consume {typeof(OutboxTestEvent).FullName}").Subject;
+            .ContainSingle(activity => activity.OperationName == $"consume {typeof(OutboxTestEvent).FullName}" &&
+                                       Equals(activity.GetTag("messaging.correlation_id"), correlationId)).Subject;
         consume.TraceId.Should().Be(publisherActivity.TraceId);
         consume.ParentSpanId.Should().Be(publisherActivity.SpanId);
         consume.GetTag("messaging.outbox.attempt").Should().Be(1);
@@ -154,18 +158,21 @@ public sealed class EventTelemetryTests {
         using var activities = new ActivityCollector(EventTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(EventTelemetry.MeterName);
 
+        var correlationId = Guid.NewGuid();
         var store = new FakeOutboxStore();
         store.Pending.Enqueue([new OutboxMessage {
             Id = Guid.NewGuid(),
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
-            CorrelationId = Guid.NewGuid(),
+            CorrelationId = correlationId,
         }]);
         await RunDeliveryUntilSignaledAsync(store, (_, _, _, _) => throw new InvalidOperationException("boom"));
 
+        // Scoped to this test's correlation id — see OutboxDelivery_ConsumeSpan for why.
         var consume = activities.Activities.Should()
-            .ContainSingle(activity => activity.OperationName == $"consume {typeof(OutboxTestEvent).FullName}").Subject;
+            .ContainSingle(activity => activity.OperationName == $"consume {typeof(OutboxTestEvent).FullName}" &&
+                                       Equals(activity.GetTag("messaging.correlation_id"), correlationId)).Subject;
         consume.Status.Should().Be(ActivityStatusCode.Error);
 
         meters.Measurements.Should().Contain(m =>
