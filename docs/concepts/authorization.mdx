@@ -159,7 +159,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 
 // Program.cs
-builder.Services.AddElarionIdentity<ApplicationUser, ApplicationRole, Guid, AppDbContext>();
+builder.Services.AddElarionIdentity<ApplicationUser, ApplicationRole, AppDbContext>();
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
 // cookie policy, AddAuthorization policies, UseAuthentication/UseElarionCurrentUser stay host-owned
 ```

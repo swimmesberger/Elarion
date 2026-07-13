@@ -18,13 +18,12 @@ public static class ElarionIdentityServiceCollectionExtensions {
     /// Identity claim types, and registers the Elarion authorizer so handler <c>[Require*]</c> attributes are
     /// enforced against the signed-in principal.
     /// </summary>
-    public static IdentityBuilder AddElarionIdentity<TUser, TRole, TKey, TDbContext>(
+    public static IdentityBuilder AddElarionIdentity<TUser, TRole, TDbContext>(
         this IServiceCollection services,
         Action<IdentityOptions>? configureIdentity = null,
         Action<ElarionIdentityOptions>? configure = null)
         where TUser : class
         where TRole : class
-        where TKey : IEquatable<TKey>
         where TDbContext : DbContext {
         ArgumentNullException.ThrowIfNull(services);
 
