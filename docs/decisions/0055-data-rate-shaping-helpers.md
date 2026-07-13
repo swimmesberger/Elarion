@@ -1,6 +1,6 @@
-# ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater (deferred)
+# ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater
 
-- Status: Proposed (nothing ships; build alongside the first gateway port)
+- Status: Accepted (implemented 2026-07-13)
 - Date: 2026-07-13
 - Related: [ADR-0051](0051-postgresql-bulk-insert.md) (the natural flush target),
   [ADR-0043](0043-client-events.md) (the natural publish target),
@@ -24,24 +24,41 @@ Both field gateways hand-roll the same two data-rate primitives between "device 
 Both are ~100-line, easy-to-get-subtly-wrong concurrency helpers (flush/publish races, shutdown flush,
 timer lifecycle) — the same shape as the shipped conversation helpers.
 
-## Decision (pre-decided shape, deferred)
+## Decision
 
-Two opt-in helpers, BCL-only, living beside the existing helper family (exact home decided at build
-time; no DI requirement):
+Two opt-in helpers, BCL-only, in `Elarion` core under the `Elarion.Buffering` namespace — beside the
+`Elarion.Streams` helper family, with no DI requirement (constructed by whoever owns the data path,
+typically an actor or gateway component):
 
 - **`WriteBehindBuffer<T>`**: `Add(item)`; flushes via an async delegate when `MaxItems` or
-  `FlushInterval` is reached (whichever first); bounded (drop-oldest beyond capacity — these are
-  loss-tolerant samples by contract); explicit `FlushAsync` and flush-on-dispose; single-flight flushes.
-  The delegate's natural body is ADR-0051 `ExecuteInsertAsync`.
+  `FlushInterval` is reached (whichever first); bounded (drop-oldest beyond `Capacity` — these are
+  loss-tolerant samples by contract, and `DroppedCount` meters the pressure); explicit `FlushAsync` and
+  flush-on-dispose; single-flight flushes (items arriving during a flush coalesce into the next drain
+  pass instead of stacking calls). A failed flush drops its batch — rethrown from the explicit
+  `FlushAsync`, routed to the optional `onFlushError` callback on background/dispose flushes. The
+  delegate's natural body is ADR-0051 `ExecuteInsertAsync`.
 - **`KeyedConflater<TKey, TValue>`**: `Post(key, value)` (latest wins per key); emits per key at most
-  once per `MinInterval` via an async delegate (the natural body: `IClientEventPublisher.PublishAsync`);
-  a quiet key emits its final value once the interval elapses — conflation never ends on a stale value.
+  once per `MinInterval` via an async delegate (the natural body: `IClientEventPublisher.PublishAsync`) —
+  leading edge immediate on an idle key, trailing edge for the conflated latest; a quiet key emits its
+  final value once the interval elapses — conflation never ends on a stale value. Emissions for one key
+  never overlap (a slow publish lowers the effective rate instead of stacking calls); idle keys retire
+  automatically, so unbounded key spaces don't leak; dispose flushes every pending latest. Publish
+  failures drop that emission to the optional `onPublishError` callback — these are at-most-once hints
+  and the next post heals, matching the ADR-0043 client-event contract.
+
+Both take a `TimeProvider` (in their options) so tests drive them deterministically, follow the
+"shutdown flushes rather than cancels" rule (the final flush is uncancellable; the delegate bounds its
+own work), and drop `Add`/`Post` calls after dispose silently — producers racing a shutdown must not
+crash the receive path.
 
 Discipline rule: these two shapes and no more — this is not the start of an Rx clone. A need beyond
 them (windows, joins, replay) is the trigger for a real reactive/streaming library, adopted whole.
 
 ## Consequences
 
-- Nothing ships now. Trigger: the first gateway port — its telemetry path exercises both on day one.
-- Until then, the documented composition is an actor owning a plain buffer + a scheduled/interval flush
-  (the ADR-0042 write-behind use case) and publish-throttling in the twin.
+- Shipped in `Elarion` core (`Elarion.Buffering`); dependency-free beyond the BCL, `IsAotCompatible`.
+- The recommended composition stays the ADR-0042 shape — an actor owns the buffer/conflater as
+  activation state and disposes it in `OnDeactivateAsync` — but the primitives no longer need to be
+  hand-rolled there.
+- Failure observability is opt-in by callback (`onFlushError`/`onPublishError`); without one, failures
+  are swallowed under the loss-tolerance contract. Supply the callback in anything beyond a prototype.

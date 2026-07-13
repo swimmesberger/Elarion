@@ -9,6 +9,22 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Data-rate shaping helpers (ADR-0055).** `Elarion` core gains the `Elarion.Buffering` namespace with
+  the two primitives every telemetry gateway hand-rolls between "device produces samples" and
+  "database/UI consume them" — BCL-only, no DI registration, `TimeProvider`-driven for deterministic
+  tests, both flushing on `DisposeAsync` so shutdown writes the tail instead of dropping it.
+  **`WriteBehindBuffer<T>`** accumulates loss-tolerant samples and flushes batches through an async
+  delegate (the natural body: ADR-0051 `ExecuteInsertAsync`) when `MaxItems` or `FlushInterval` is
+  reached, whichever first; bounded past `Capacity` by dropping the oldest (`DroppedCount` meters the
+  pressure); flushes are single-flight (work arriving mid-flush coalesces into the next drain pass);
+  a failed flush drops its batch — rethrown from the explicit `FlushAsync`, routed to the optional
+  `onFlushError` callback on background/dispose flushes. **`KeyedConflater<TKey, TValue>`** is the
+  live-visualization primitive: `Post(key, value)` is latest-wins per key with at most one emit per
+  `MinInterval` (leading edge immediate on an idle key, trailing edge for the conflated latest — a
+  quiet key always publishes its final value, never ending on a stale one); emissions for one key never
+  overlap, idle keys retire automatically, and publish failures drop to the optional `onPublishError`
+  callback (at-most-once hints, matching the client-event contract). Deliberately just these two shapes —
+  needs beyond them (windows, joins, replay) are the trigger for a real reactive library, adopted whole.
 - **Device identity and provisioning (ADR-0054).** Two new packages own the identity chain every device
   gateway otherwise hand-rolls — exactly where mistakes are security-relevant. **`Elarion.Devices`**
   (BCL crypto only, AOT-compatible): `IDevicePairingService` issues single-use, TTL-bounded pairing

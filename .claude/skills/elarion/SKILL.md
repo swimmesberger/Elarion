@@ -189,6 +189,16 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   (re-activation = new hub = new sequence epoch). Serve it with `app.MapElarionStream<T>(route, (ctx, after) => …)` —
   SSE with `id:` = sequence, `Last-Event-ID`/`?after=` resume. Client events stay the default push tier;
   a stream needs a single live producer per key (route it to the actor home).
+- **Data-rate shaping (ADR-0055)** — don't hand-roll batching/throttling between "samples arrive" and
+  "database/UI consume": `Elarion.Buffering` (in `Elarion` core, BCL-only, no DI) ships
+  `WriteBehindBuffer<T>` (`Add(item)`; flushes batches via your async delegate — naturally
+  `ExecuteInsertAsync` — on `MaxItems` or `FlushInterval`, whichever first; bounded drop-oldest,
+  single-flight, `FlushAsync` + flush-on-dispose; pass `onFlushError` to observe dropped batches) and
+  `KeyedConflater<TKey,TValue>` (`Post(key, value)` latest-wins; at most one emit per key per
+  `MinInterval` via your delegate — naturally `IClientEventPublisher.PublishAsync`; leading emit
+  immediate, trailing emit so a quiet key never ends stale; idle keys retire). Typical owner: the actor
+  holds both as activation state and disposes them in `OnDeactivateAsync`. Loss-tolerant by contract —
+  transactional data goes through handlers + outbox, not these.
 - Default is **non-reentrant** (one message start-to-finish; an actor→actor call cycle fails with a
   `TimeoutException` after ~30 s — that's the deadlock backstop, treat it as a design smell).
   `[Reentrant]` opts into Orleans-style interleaving at await points (never parallel); don't use
