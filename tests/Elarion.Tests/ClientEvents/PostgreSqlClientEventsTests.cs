@@ -6,6 +6,7 @@ using Elarion.ClientEvents;
 using Elarion.ClientEvents.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -155,6 +156,67 @@ public sealed partial class PostgreSqlClientEventsIntegrationTests(PostgreSqlCli
 
         await Task.Delay(QuietWindow, Ct);
         handle.Events.TryRead(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task FirstListenEstablishment_DeliversTheConnectedHint() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        // Subscribe BEFORE the listener starts: notifications sent in that window are lost (SSE serves
+        // immediately; the first connect attempt can back off), so the first establishment itself must tell
+        // subscribers to re-query — not only reconnects.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(PostgreSqlClientEventTestContext.Default));
+        services.AddElarionClientEvents(events => events.AddTopic<InvoiceChanged>("test.invoiceChanged"));
+        services.AddElarionPostgreSqlClientEvents(fixture.ConnectionString);
+        await using var provider = services.BuildServiceProvider();
+
+        var source = provider.GetRequiredService<IClientEventSubscriptionSource>();
+        using var handle = source.Subscribe([Subscription("test.invoiceChanged", ClientEventScope.Global)]);
+
+        var listener = provider.GetServices<IHostedService>().OfType<PostgreSqlClientEventListener>().Single();
+        await listener.StartAsync(Ct);
+        try {
+            await listener.Listening.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+            var control = await handle.Events.ReadAsync(Ct).AsTask().WaitAsync(DeliveryTimeout, Ct);
+            control.Topic.Should().Be(ClientEventControlEvents.Connected);
+        }
+        finally {
+            await listener.StopAsync(CancellationToken.None);
+            listener.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task TerminatedListenConnection_ReconnectsDeliversTheConnectedHint_AndStaysLive() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var node = await EventNode.StartAsync(fixture.ConnectionString, Ct);
+        using var handle = node.Source.Subscribe([Subscription("test.invoiceChanged", ClientEventScope.Global)]);
+
+        await TerminateListenBackendsAsync(fixture.ConnectionString, Ct);
+
+        // The re-established LISTEN makes every local subscriber re-query (events may have been missed) …
+        var control = await handle.Events.ReadAsync(Ct).AsTask().WaitAsync(DeliveryTimeout, Ct);
+        control.Topic.Should().Be(ClientEventControlEvents.Connected);
+
+        // … and the stream is live again end-to-end.
+        var invoiceId = Guid.CreateVersion7();
+        await node.Publisher.PublishAsync(new InvoiceChanged { InvoiceId = invoiceId }, ClientEventScope.Global, Ct);
+        var delivered = await handle.Events.ReadAsync(Ct).AsTask().WaitAsync(DeliveryTimeout, Ct);
+        delivered.Topic.Should().Be("test.invoiceChanged");
+        delivered.Payload.Should().Contain(invoiceId.ToString());
+    }
+
+    /// <summary>Kills the LISTEN backend(s) server-side, simulating a dropped listen connection.</summary>
+    private static async Task TerminateListenBackendsAsync(string connectionString, CancellationToken ct) {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " +
+            "WHERE pid <> pg_backend_pid() AND query ILIKE 'LISTEN%'";
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     /// <summary>One "node": a full client-event runtime with its running listener over its own data source.</summary>

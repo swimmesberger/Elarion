@@ -17,8 +17,10 @@ namespace Elarion.ClientEvents;
 /// </summary>
 /// <remarks>
 /// Observer callbacks run detached from the subscribe path (a slow observer must never delay the stream)
-/// on a fresh DI scope per callback, sequenced per attach so an interest transition is always observed
-/// before the greeting that follows it. Exceptions are logged, never surfaced to the client.
+/// on a fresh DI scope per callback, serialized per (topic, scope) in state-transition order: an interest
+/// transition is always observed before the greeting that follows it, and a linger-elapsed <c>inactive</c>
+/// is always observed before the <c>active</c> of a resubscribe that raced it — the observer's last
+/// callback always reflects the current interest. Exceptions are logged, never surfaced to the client.
 /// </remarks>
 internal sealed class ClientEventSubscriptionLifecycle(
     ClientEventTopicCatalog catalog,
@@ -30,6 +32,9 @@ internal sealed class ClientEventSubscriptionLifecycle(
         logger ?? NullLogger<ClientEventSubscriptionLifecycle>.Instance;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly Dictionary<ClientEventSubscription, InterestState> _interest = [];
+    // The per-(topic, scope) observer dispatch chains: the tail every new callback appends behind. Entries are
+    // removed once their chain drains, so an idle key holds no memory.
+    private readonly Dictionary<ClientEventSubscription, Task> _dispatchTails = [];
     private readonly Lock _lock = new();
 
     public bool HasSubscribers(string topic, ClientEventScope scope) {
@@ -41,7 +46,7 @@ internal sealed class ClientEventSubscriptionLifecycle(
     }
 
     public void OnSubscribed(ClientEventSubscription subscription, ChannelWriter<ClientEventEnvelope> writer) {
-        bool becameActive;
+        var topic = catalog.FindByName(subscription.Topic);
         lock (_lock) {
             if (!_interest.TryGetValue(subscription, out var state)) {
                 state = new InterestState();
@@ -50,20 +55,20 @@ internal sealed class ClientEventSubscriptionLifecycle(
             state.Count += 1;
             // "Active" is the observer-visible epoch, not the raw count: a resubscribe within the linger
             // cancels the pending inactive signal and must NOT re-fire active — interest never went away.
-            becameActive = !state.Active;
+            var becameActive = !state.Active;
             state.Active = true;
             state.LingerTimer?.Dispose();
             state.LingerTimer = null;
-        }
 
-        var topic = catalog.FindByName(subscription.Topic);
-        if (topic?.ObserverType is not { } observerType) {
-            return;
-        }
+            if (topic?.ObserverType is not { } observerType) {
+                return;
+            }
 
-        var sink = new ClientEventSubscriberSink(subscription, writer, catalog, serialization);
-        // Detached from the subscribe path by design; observed inside (catch-all + logging).
-        _ = DispatchSubscribedAsync(observerType, subscription, sink, becameActive);
+            var sink = new ClientEventSubscriberSink(subscription, writer, catalog, serialization);
+            // Detached from the subscribe path by design; observed inside (catch-all + logging).
+            EnqueueDispatch(subscription,
+                () => DispatchSubscribedAsync(observerType, subscription, sink, becameActive));
+        }
     }
 
     public void OnUnsubscribed(ClientEventSubscription subscription) {
@@ -97,8 +102,42 @@ internal sealed class ClientEventSubscriptionLifecycle(
             }
             state.LingerTimer?.Dispose();
             _interest.Remove(subscription);
+            EnqueueDispatch(subscription,
+                () => DispatchInterestChangedAsync(observerType, subscription, active: false));
         }
-        _ = DispatchInterestChangedAsync(observerType, subscription, active: false);
+    }
+
+    /// <summary>
+    /// Appends an observer callback to the subscription's dispatch chain. Must be called under
+    /// <see cref="_lock"/>: taking the chain tail inside the same lock as the state transition that triggered
+    /// the callback is what makes dispatch order match state-transition order — a linger-elapsed inactive
+    /// always runs before the active/greeting of a resubscribe that raced it, and a second first-subscriber's
+    /// greeting never overtakes the first's active.
+    /// </summary>
+    private void EnqueueDispatch(ClientEventSubscription subscription, Func<Task> callback) {
+        var tail = _dispatchTails.TryGetValue(subscription, out var current) ? current : Task.CompletedTask;
+        var chained = RunChainedAsync(tail, callback);
+        _dispatchTails[subscription] = chained;
+        // Detached by design (like the dispatch itself); RemoveDrainedTailAsync never throws.
+        _ = RemoveDrainedTailAsync(subscription, chained);
+    }
+
+    private static async Task RunChainedAsync(Task tail, Func<Task> callback) {
+        // ForceYielding keeps the callback's synchronous prefix off the enqueuing caller (which holds _lock);
+        // SuppressThrowing is a defensive guard — callbacks route through DispatchAsync's catch-all, so a
+        // chain never faults, but a faulted predecessor must never wedge the key either.
+        await tail.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ForceYielding);
+        await callback().ConfigureAwait(false);
+    }
+
+    private async Task RemoveDrainedTailAsync(ClientEventSubscription subscription, Task chained) {
+        await chained.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        lock (_lock) {
+            // Only the task that is still the tail removes the entry — a newer append supersedes it.
+            if (_dispatchTails.TryGetValue(subscription, out var current) && ReferenceEquals(current, chained)) {
+                _dispatchTails.Remove(subscription);
+            }
+        }
     }
 
     private async Task DispatchSubscribedAsync(
