@@ -229,13 +229,7 @@ public sealed class ModuleServiceRegistrationGenerator : IIncrementalGenerator
         var implementationFqn = classSymbol.ToDisplayString(fmt);
         var serviceIdentifier = GetServiceIdentifier(classSymbol);
         var ns = GetNamespace(classSymbol);
-        var hintName = classSymbol.ToDisplayString(fmt)
-            .Replace("global::", string.Empty)
-            .Replace(".", "_")
-            .Replace("<", "_")
-            .Replace(">", "_")
-            .Replace(",", "_")
-            .Replace(" ", string.Empty);
+        var hintName = HintNames.Sanitize(classSymbol.ToDisplayString(fmt));
 
         var service = new ServiceInfo(
             serviceIdentifier,

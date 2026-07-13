@@ -583,6 +583,12 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         entries = DeduplicateModules(entries);
 
+        // Same-named modules from different types (two assemblies, or one assembly plus its own manifest echo)
+        // would emit duplicate switch cases (CS0152) and duplicate per-module methods (CS0111) in the
+        // bootstrapper. Report each duplicate (ELMOD006) and keep one deterministic winner per name.
+        entries = ModuleScanner.DeduplicateByName(
+            entries, static e => e.ModuleName, static e => e.TypeFqn, diagnostics);
+
         // Sort by name for deterministic output.
         entries.Sort(static (a, b) =>
             string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal));
@@ -1037,7 +1043,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             for (var i = 0; i < entries.Count; i++)
             {
                 if (i > 0) sb.Append(", ");
-                sb.Append($"\"{entries[i].ModuleName}\"");
+                sb.Append(SourceString(entries[i].ModuleName));
             }
 
             sb.AppendLine(" };");
@@ -1373,6 +1379,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        }");
     }
 
+    // Compiler-grade string-literal escaping (quotes, backslashes, control characters) — the hand-rolled
+    // two-character escape produced uncompilable output for e.g. a newline in a module name.
     private static string SourceString(string value) =>
-        "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        SymbolDisplay.FormatLiteral(value, quote: true);
 }

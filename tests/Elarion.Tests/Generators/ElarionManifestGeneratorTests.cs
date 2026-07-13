@@ -322,6 +322,34 @@ public sealed class ElarionManifestGeneratorTests {
             diagnostic.Id == "ELMOD003" && diagnostic.Severity == DiagnosticSeverity.Warning);
     }
 
+    [Fact]
+    public void Manifest_DuplicateModuleNames_ReportsElmod006AndPublishesOneWinner() {
+        // Duplicate [AppModule] names either crash a module-keyed generator (duplicate AddSource hint) or emit
+        // uncompilable bootstrapper code (CS0111/CS0152). The manifest generator — which always runs — reports
+        // the duplicate and publishes only the deterministic winner (ordinal-first by type FQN).
+        const string source =
+            """
+            using Elarion.Abstractions.Modules;
+
+            namespace Alpha {
+                [AppModule("Sales")]
+                public static class AlphaSalesModule { }
+            }
+
+            namespace Beta {
+                [AppModule("Sales")]
+                public static class BetaSalesModule { }
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == "ELMOD006" && diagnostic.Severity == DiagnosticSeverity.Error);
+        generated.Should().Contain("Alpha.AlphaSalesModule");
+        generated.Should().NotContain("Beta.BetaSalesModule");
+    }
+
     private static string RunGenerator(string source, out IReadOnlyList<Diagnostic> diagnostics) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var tree = CSharpSyntaxTree.ParseText(source, parseOptions);

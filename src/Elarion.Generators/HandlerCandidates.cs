@@ -39,7 +39,10 @@ internal static class HandlerCandidates
         if (HandlerShape.FindHandlerInterface(classSymbol) is null)
             return null;
 
-        if (classSymbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
+        // Elarion's own pipeline decorators implement IHandler<,> but are wiring, not registrable handlers.
+        // Match their exact namespace — a substring test (the old shape) silently skipped registration for any
+        // consumer handler under e.g. `MyApp.Decorators.Pricing` while the RPC map still routed to it.
+        if (classSymbol.ContainingNamespace?.ToDisplayString() == "Elarion.Pipeline")
             return null;
 
         return ModuleScanner.BuildMetadataName(classSymbol);
