@@ -13,6 +13,7 @@
     "feature-flags",
     "events",
     "connections",
+    "devices",
     "entity-framework",
     "bulk-operations",
     "pagination",

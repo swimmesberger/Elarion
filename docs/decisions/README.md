@@ -74,6 +74,6 @@ designs that are not yet implemented.
 - [ADR-0051: Bulk insert as an EF-shaped seam with a PostgreSQL binary COPY provider](0051-postgresql-bulk-insert.md)
 - [ADR-0052: Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg](0052-ordered-streams.md)
 - [ADR-0053: Bidirectional client connections — a transport-neutral connection seam; adapters adopted whole](0053-bidirectional-client-connections.md)
-- [ADR-0054: Device identity and provisioning — deferred, with the shape pre-decided — Proposed](0054-device-identity-and-provisioning.md)
+- [ADR-0054: Device identity and provisioning — pairing codes, device keys, and the HMAC connect-time handshake](0054-device-identity-and-provisioning.md)
 - [ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater — Proposed](0055-data-rate-shaping-helpers.md)
 - [ADR-0056: PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain — Proposed](0056-postgres-extensions-posture.md)

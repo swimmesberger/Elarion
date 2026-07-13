@@ -718,6 +718,20 @@ See [Actors — durable state](/docs/concepts/actors#durable-state-snapshots).
 
 See [Actors — single-homed actors](/docs/concepts/actors#single-homed-actors-the-home-lease).
 
+### `[GenerateElarionDeviceIdentity]`
+
+- **Package:** `Elarion.Devices.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<DeviceKeyEntity>`/`DbSet<DevicePairingCodeEntity>` and applies the device identity model configuration through the EF generator's model-config seam — the tables backing `IDeviceKeyStore` and `IPairingCodeStore` (ADR-0054). The hand-written equivalent is `modelBuilder.UseElarionDeviceIdentity()`. Mirrors `[GenerateElarionActorSnapshots]`/`[GenerateElarionRoleLeases]`. Requires `[GenerateDbSets]` (else `ELDEV001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column names use snake_case. |
+| `KeyTableName` | `string?` (init) | `null` | The device key table name, or `null` for the default (`elarion_device_keys` / `ElarionDeviceKeys` depending on `SnakeCase`). |
+| `PairingCodeTableName` | `string?` (init) | `null` | The pairing code table name, or `null` for the default (`elarion_device_pairing_codes` / `ElarionDevicePairingCodes` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Device identity](/docs/capabilities/devices).
+
 ### `[Keyset<TEntity>]`
 
 - **Package:** `Elarion.Paging` · **Applies to:** class (generic attribute, `where TEntity : class`)

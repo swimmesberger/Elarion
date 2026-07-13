@@ -235,6 +235,16 @@ Set `PrincipalId` to the device id — a device's parallel channels all register
 shared state across channels and user-triggered commands. Facts still travel as client events, even
 over a connection; the sink (`SendAsync`/`InvokeAsync`) is for conversation traffic only.
 
+Don't hand-roll device provisioning — `Elarion.Devices` owns the identity chain (ADR-0054):
+`AddElarionDeviceIdentityEntityFrameworkCore<TDbContext>()` + `[GenerateElarionDeviceIdentity]` on the
+context gives you `IDevicePairingService` (issue a single-use CSPRNG pairing code — device id
+pre-assigned at issue; redeem atomically mints the per-device key; codes stored hashed) and
+`HmacChallengeVerifier` for the in-socket handshake: `CreateNonce()` → send → device answers
+`HMAC-SHA256(key, nonce)` → `VerifyAsync(deviceId, nonce, mac)` returns the device `ClaimsPrincipal`
+(constant-time; null = reject) → build the ticket with `PrincipalId = deviceId`. The redeem endpoint is
+app-owned and must be rate-limited; sweep expired codes with a `[ScheduledJob]` calling
+`IPairingCodeStore.DeleteExpiredAsync`.
+
 ## Rules that don't change
 
 - **Errors are values.** Return `Result<T>`; fail with `AppError.Validation / NotFound / Conflict /

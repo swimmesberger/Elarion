@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>EF Core-backed device identity stores for Elarion (ADR-0054): durable per-device key and single-use pairing-code tables on the one PostgreSQL the app already runs, mapped through [GenerateElarionDeviceIdentity] or modelBuilder.UseElarionDeviceIdentity(). Change-tracker-free writes; atomic single-statement pairing-code claims.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Devices\Elarion.Devices.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests" />
+  </ItemGroup>
+
+  <!-- Bundle the source generator's analyzer into this package. NuGet analyzer assets are not
+       transitive, so the generator lives in the package each annotated assembly references directly.
+       ReferenceOutputAssembly=false keeps it off the runtime surface; PrivateAssets=all keeps it from
+       becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Devices.EntityFrameworkCore.Generators\Elarion.Devices.EntityFrameworkCore.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="_BundleElarionDeviceIdentityGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.Devices.EntityFrameworkCore.Generators\Elarion.Devices.EntityFrameworkCore.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionDeviceIdentityGeneratorAnalyzer" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_ElarionDeviceIdentityGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>
