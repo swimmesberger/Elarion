@@ -103,6 +103,32 @@ public sealed class ConnectionSocketEndpointTests {
         host.Registry.Connections.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task PerConnectionSettings_ServeDifferentTiersOnOneRoute() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync<TieredHandler>(ct);
+
+        // Default tier: endpoint options apply, per-connection transport tag from the query.
+        using (var standard = await host.ConnectAsync(ct, "?tier=standard")) {
+            await CompleteHandshakeAsync(standard, "ws-std", ct);
+            (await host.Observer.Connected.Task.WaitAsync(ct)).Transport.Should().Be("websocket-standard");
+            await SendTextAsync(standard, new string('x', 256), ct);
+            (await ReceiveTextAsync(standard, ct)).Should().StartWith("echo:");
+            await standard.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", ct);
+            await host.Observer.Disconnected.Task.WaitAsync(ct);
+            host.Observer.Reset();
+        }
+
+        // Constrained tier, same route: a per-connection size cap makes the same message oversized.
+        using var constrained = await host.ConnectAsync(ct, "?tier=constrained");
+        await CompleteHandshakeAsync(constrained, "ws-tiny", ct);
+        (await host.Observer.Connected.Task.WaitAsync(ct)).Transport.Should().Be("websocket-constrained");
+
+        await SendTextAsync(constrained, new string('x', 256), ct);
+        (await ReceiveTextAsync(constrained, ct)).Should().BeNull();
+        constrained.CloseStatus.Should().Be(WebSocketCloseStatus.MessageTooBig);
+    }
+
     private static async Task CompleteHandshakeAsync(ClientWebSocket socket, string deviceId, CancellationToken ct) {
         (await ReceiveTextAsync(socket, ct)).Should().Be("challenge");
         await SendTextAsync(socket, "device:" + deviceId, ct);
@@ -128,19 +154,24 @@ public sealed class ConnectionSocketEndpointTests {
         }
     }
 
-    private static async Task<SocketTestHost> StartAsync(
-        CancellationToken ct, Action<ElarionConnectionSocketOptions>? configure = null) {
+    private static Task<SocketTestHost> StartAsync(
+        CancellationToken ct, Action<ElarionConnectionSocketOptions>? configure = null) =>
+        StartAsync<ChallengeHandler>(ct, configure);
+
+    private static async Task<SocketTestHost> StartAsync<THandler>(
+        CancellationToken ct, Action<ElarionConnectionSocketOptions>? configure = null)
+        where THandler : WebSocketConnectionHandler, new() {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
         builder.Services.AddElarionConnections();
-        builder.Services.AddSingleton<ChallengeHandler>();
+        builder.Services.AddSingleton<THandler>();
         builder.Services.AddSingleton<AwaitableObserver>();
         builder.Services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableObserver>());
 
         var app = builder.Build();
         app.UseWebSockets();
-        app.MapElarionConnectionSocket<ChallengeHandler>("/ws", configure);
+        app.MapElarionConnectionSocket<THandler>("/ws", configure);
         await app.StartAsync(ct);
 
         var httpBase = app.Services.GetRequiredService<IServer>()
@@ -155,9 +186,9 @@ public sealed class ConnectionSocketEndpointTests {
 
         public AwaitableObserver Observer => app.Services.GetRequiredService<AwaitableObserver>();
 
-        public async Task<ClientWebSocket> ConnectAsync(CancellationToken ct) {
+        public async Task<ClientWebSocket> ConnectAsync(CancellationToken ct, string query = "") {
             var socket = new ClientWebSocket();
-            await socket.ConnectAsync(new Uri(HttpBase.Replace("http://", "ws://") + "/ws"), ct);
+            await socket.ConnectAsync(new Uri(HttpBase.Replace("http://", "ws://") + "/ws" + query), ct);
             return socket;
         }
 
@@ -191,21 +222,61 @@ public sealed class ConnectionSocketEndpointTests {
             connection.SendTextAsync("echo:" + message, ct);
     }
 
-    private sealed class AwaitableObserver : IClientConnectionObserver {
-        public TaskCompletionSource<ClientConnection> Connected { get; } =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>One route, two tiers: per-connection settings picked from the upgrade request's query —
+    /// the constrained tier gets a tiny size cap, and both get tier-tagged transports.</summary>
+    private sealed class TieredHandler : WebSocketConnectionHandler {
+        public override ValueTask<WebSocketConnectionSettings?> ConfigureConnectionAsync(
+            Microsoft.AspNetCore.Http.HttpContext context, CancellationToken ct) {
+            var tier = context.Request.Query["tier"].ToString();
+            return ValueTask.FromResult<WebSocketConnectionSettings?>(new WebSocketConnectionSettings {
+                Transport = "websocket-" + tier,
+                MaxMessageBytes = tier == "constrained" ? 64 : null,
+            });
+        }
 
-        public TaskCompletionSource<ClientConnection> Disconnected { get; } =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+            WebSocketHandshakeContext handshake, CancellationToken ct) {
+            await handshake.SendTextAsync("challenge", ct);
+            var reply = await handshake.ReceiveTextAsync(ct);
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
+                return null;
+            }
+
+            await handshake.SendTextAsync("welcome", ct);
+            return new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
+                PrincipalId = reply["device:".Length..],
+            };
+        }
+
+        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
+            new EchoProtocol(connection);
+    }
+
+    private sealed class AwaitableObserver : IClientConnectionObserver {
+        private TaskCompletionSource<ClientConnection> _connected = NewSource();
+        private TaskCompletionSource<ClientConnection> _disconnected = NewSource();
+
+        public TaskCompletionSource<ClientConnection> Connected => _connected;
+
+        public TaskCompletionSource<ClientConnection> Disconnected => _disconnected;
+
+        public void Reset() {
+            _connected = NewSource();
+            _disconnected = NewSource();
+        }
 
         public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
-            Connected.TrySetResult(connection.Connection);
+            _connected.TrySetResult(connection.Connection);
             return ValueTask.CompletedTask;
         }
 
         public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
-            Disconnected.TrySetResult(connection);
+            _disconnected.TrySetResult(connection);
             return ValueTask.CompletedTask;
         }
+
+        private static TaskCompletionSource<ClientConnection> NewSource() =>
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

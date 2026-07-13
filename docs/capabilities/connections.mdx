@@ -95,6 +95,17 @@ Everything after the handshake is framework: the connection is minted (v7 id, `T
 "websocket"`), registered, observed, pumped, and unregistered on every exit path — client close,
 abrupt death, oversized message (`MessageTooBig`), codec exception (logged, closed), host shutdown.
 
+Settings can vary **per connection on one route**: override
+`ConfigureConnectionAsync(HttpContext, …)` and return `WebSocketConnectionSettings` (size cap, idle
+window, keep-alive interval, transport tag — nulls inherit the endpoint options), resolved from the
+upgrade request (route values, query, headers) before the socket is accepted. And where the TCP
+adapter needs a runtime endpoint manager (ports are OS resources), WebSocket **bindings-as-data are
+just routing**: map one wildcard route (`/gateway/{binding}/ws`) and let the authenticator +
+`ConfigureConnectionAsync` consult the binding row per connection — an unknown or disabled binding
+returns `null` from the authenticator and the socket closes with nothing registered; a changed binding
+takes effect the next time the device connects (close its current connections via the registry to
+force it).
+
 ### Talking back to one client
 
 Look a connection up and use its sink — from a handler, an observer, or an actor turn:

@@ -57,10 +57,17 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         var logger = services.GetService<ILoggerFactory>()?.CreateLogger(typeof(ConnectionSocketEndpointRouteBuilderExtensions).Namespace + ".ConnectionSocket")
             ?? NullLogger.Instance;
 
+        // Per-connection configuration (the binding-config lookup point): resolved from the upgrade request
+        // before the socket is accepted; nulls inherit the endpoint options.
+        var overrides = await handler.ConfigureConnectionAsync(context, ct);
+        var maxMessageBytes = overrides?.MaxMessageBytes ?? options.MaxMessageBytes;
+        var idleTimeout = overrides?.IdleTimeout ?? options.IdleTimeout;
+        var transport = overrides?.Transport ?? "websocket";
+
         using var socket = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
-            KeepAliveInterval = options.KeepAliveInterval,
+            KeepAliveInterval = overrides?.KeepAliveInterval ?? options.KeepAliveInterval,
         });
-        var reader = new WebSocketMessageReader(socket, options.MaxMessageBytes);
+        var reader = new WebSocketMessageReader(socket, maxMessageBytes);
 
         ClientConnectionTicket? ticket;
         try {
@@ -81,7 +88,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
 
         var identity = new ClientConnection {
             ConnectionId = Guid.CreateVersion7().ToString("N"),
-            Transport = "websocket",
+            Transport = transport,
             Principal = ticket.Principal,
             PrincipalId = ticket.PrincipalId,
             Metadata = ticket.Metadata,
@@ -92,7 +99,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
 
         await registry.RegisterAsync(connection, ct);
         try {
-            await ReceiveLoopAsync(connection, reader, options.IdleTimeout, ct);
+            await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             await CloseSafelyAsync(socket, WebSocketCloseStatus.NormalClosure, "closing", ct);
         }
         catch (WebSocketMessageTooLargeException) {

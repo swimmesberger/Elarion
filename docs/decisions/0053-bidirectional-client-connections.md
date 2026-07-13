@@ -235,7 +235,11 @@ adapter-tier requirements or explicit non-absorptions:
   authenticated principal + principal id, the adapter mints the `ClientConnection` and registers it),
   framing hooks for inbound dispatch and the outbound sink, and the client-events bridge wired through.
   Real IoT consumers (device links over WSS with proprietary payloads) reduce to
-  codec + authenticator; the accept/register/bridge boilerplate becomes framework. Because it is a real
+  codec + authenticator; the accept/register/bridge boilerplate becomes framework. Per-connection
+  settings (`ConfigureConnectionAsync(HttpContext)` — limits/idle/keep-alive/transport from the upgrade
+  request) mirror the TCP adapter's; the runtime endpoint manager deliberately does not — for HTTP
+  transports the route *is* the binding, so bindings-as-data compose from a wildcard route + a
+  per-connection configuration lookup, no port management needed. Because it is a real
   second-dissimilar transport over the identical seams, it *is* the neutrality proof — the foundation is
   not done until it exists.
 - `Elarion.Connections.Tcp` — the raw-socket adapter for proprietary device protocols: hosted **listener**

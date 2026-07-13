@@ -20,6 +20,18 @@ namespace Elarion.Connections.AspNetCore;
 /// </para>
 /// </remarks>
 public abstract class WebSocketConnectionHandler {
+    /// <summary>
+    /// Per-connection configuration, called with the upgrade request <b>before the socket is accepted</b>
+    /// (so the returned keep-alive interval and size cap govern the handshake too): return overrides —
+    /// typically from a binding-configuration lookup keyed on route values, query, or headers — or
+    /// <see langword="null"/> for the endpoint's defaults. The default returns <see langword="null"/>.
+    /// </summary>
+    /// <param name="context">The upgrade request (route values, query, headers, user).</param>
+    /// <param name="ct">Aborted when the client disconnects first.</param>
+    public virtual ValueTask<WebSocketConnectionSettings?> ConfigureConnectionAsync(
+        Microsoft.AspNetCore.Http.HttpContext context, CancellationToken ct) =>
+        ValueTask.FromResult<WebSocketConnectionSettings?>(null);
+
     /// <summary>Authenticates a new socket; <see langword="null"/> rejects it.</summary>
     /// <param name="handshake">The HTTP context plus pre-registration frame IO for in-socket challenges.</param>
     /// <param name="ct">Aborted when the client disconnects mid-handshake.</param>
