@@ -53,7 +53,7 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
                     $"The actor system is stopping; call to actor '{Name}' ({typedKey}) rejected.");
             }
 
-            var cell = _cells.GetOrAdd(typedKey, static (k, host) => host.CreateCell(k), this);
+            var cell = _cells.GetOrAdd(typedKey, static (k, host) => host.CreateCell(k, predecessorLifecycle: null), this);
             cell.EnsureStarted();
             // Re-check after the GetOrAdd/start: StopAsync may have set _stopping and snapshotted
             // the cell map between the check at the top of the loop and this insert, in which case
@@ -71,9 +71,15 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
                 return;
             }
 
-            // The cell closed (idle passivation or activation failure) between lookup and enqueue:
-            // drop exactly that cell and retry against a fresh activation.
-            _cells.TryRemove(new KeyValuePair<TKey, ActorCell<TActor>>(typedKey, cell));
+            // The cell closed (idle passivation, snapshot conflict, or activation failure) between
+            // lookup and enqueue, and its lifecycle (OnDeactivateAsync, scope disposal) may still be
+            // running. Replace it atomically with a successor chained on that lifecycle, so the
+            // replacement's activation cannot overlap the predecessor's drain. TryUpdate (not
+            // remove + add) makes exactly one racer install the successor: a lost update means
+            // either another caller already installed a chained successor, or the cell's own close
+            // removed it from the map — which happens only after its lifecycle completed, so the
+            // fresh cell the retry's GetOrAdd creates needs no chain.
+            _cells.TryUpdate(typedKey, CreateCell(typedKey, cell.LifecycleCompletion), cell);
         }
     }
 
@@ -88,9 +94,9 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
         await Task.WhenAll(cells.Select(pair => pair.Value.StopAsync(cancellationToken))).ConfigureAwait(false);
     }
 
-    private ActorCell<TActor> CreateCell(TKey key) {
-        // GetOrAdd may invoke this for a losing racer; the cell stays inert (no DI scope, no loop)
-        // until EnsureStarted, so a discarded duplicate is plain garbage.
+    private ActorCell<TActor> CreateCell(TKey key, Task? predecessorLifecycle) {
+        // GetOrAdd/TryUpdate may invoke this for a losing racer; the cell stays inert (no DI scope,
+        // no loop) until EnsureStarted, so a discarded duplicate is plain garbage.
         var stoppingCts = new CancellationTokenSource();
         var context = new ActorContext<TKey>(_registration.Name, key, stoppingCts.Token);
         return new ActorCell<TActor>(
@@ -103,6 +109,7 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
             _logger,
             stoppingCts,
             onClosed: cell => _cells.TryRemove(new KeyValuePair<TKey, ActorCell<TActor>>(key, cell)),
-            reEnqueue: item => EnqueueAsync(key, item, CancellationToken.None));
+            reEnqueue: item => EnqueueAsync(key, item, CancellationToken.None),
+            predecessorLifecycle);
     }
 }

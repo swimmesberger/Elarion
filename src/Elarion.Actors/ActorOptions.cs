@@ -11,6 +11,9 @@ public sealed class ActorOptions {
     /// <summary>Runtime default for <see cref="CallTimeout"/>.</summary>
     public static readonly TimeSpan DefaultCallTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>Runtime default for <see cref="DeactivationTimeout"/>.</summary>
+    public static readonly TimeSpan DefaultDeactivationTimeout = TimeSpan.FromSeconds(30);
+
     /// <summary>Bounded mailbox capacity; <see langword="null"/> (default) is unbounded.</summary>
     public int? MailboxCapacity { get; init; }
 
@@ -29,6 +32,15 @@ public sealed class ActorOptions {
     /// <see langword="null"/> disables the timeout.
     /// </summary>
     public TimeSpan? CallTimeout { get; init; } = DefaultCallTimeout;
+
+    /// <summary>
+    /// How long a replacement activation waits for the previous activation of the same key to
+    /// finish deactivating (<c>OnDeactivateAsync</c> + DI-scope disposal) before proceeding
+    /// anyway with a logged warning. The wait is what keeps an exclusive resource released on
+    /// deactivation from being re-acquired while still held; the bound is what keeps a hung
+    /// <c>OnDeactivateAsync</c> from bricking the key forever.
+    /// </summary>
+    public TimeSpan DeactivationTimeout { get; init; } = DefaultDeactivationTimeout;
 
     /// <summary>Orleans-style turn interleaving (see <see cref="ReentrantAttribute"/>).</summary>
     public bool Reentrant { get; init; }
