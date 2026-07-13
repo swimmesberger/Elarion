@@ -43,6 +43,38 @@ public sealed class ResultUnitTests {
     }
 
     [Fact]
+    public void DefaultResult_ErrorIsInternalSentinel_NotNull() {
+        // default(Result) is a failure with no backing error; transports translate Error, so the getter
+        // must yield a well-defined internal-shaped sentinel instead of null.
+        var result = default(Result);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().NotBeNull();
+        result.Error.Kind.Should().Be(ErrorKind.Internal);
+        result.Error.Message.Should().Contain("Uninitialized");
+    }
+
+    [Fact]
+    public void DefaultResultOfT_ErrorIsInternalSentinel_NotNull() {
+        var result = default(Result<string>);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().NotBeNull();
+        result.Error.Kind.Should().Be(ErrorKind.Internal);
+        result.Error.Message.Should().Contain("Uninitialized");
+    }
+
+    [Fact]
+    public void ConstructedResults_KeepTheirOwnError() {
+        var error = AppError.NotFound("missing");
+
+        Result.Failure(error).Error.Should().BeSameAs(error);
+        Result<string>.Failure(error).Error.Should().BeSameAs(error);
+        Result<string>.Success("ok").IsSuccess.Should().BeTrue();
+        Result<string>.Success("ok").Value.Should().Be("ok");
+    }
+
+    [Fact]
     public void Result_ConvertsToResultUnit_PreservingSuccess() {
         Result<Unit> success = Result.Success();
         Result<Unit> failure = Result.Failure(AppError.Conflict("dup"));

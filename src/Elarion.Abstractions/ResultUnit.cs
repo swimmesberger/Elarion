@@ -22,16 +22,22 @@ public readonly struct Result : IResultLike, IResultError, IResultFailureFactory
     /// <inheritdoc />
     public bool IsSuccess { get; }
 
-    /// <summary>The error. Only valid when <see cref="IsSuccess"/> is <c>false</c>.</summary>
-    public AppError Error { get; }
+    /// <summary>
+    /// The error. Only valid when <see cref="IsSuccess"/> is <c>false</c>. A <c>default</c>-initialized
+    /// result (which is a failure but carries no error) yields <see cref="ResultDefaults.UninitializedError"/>
+    /// instead of <see langword="null"/>, so transports translating <see cref="Error"/> never hit a null error.
+    /// </summary>
+    public AppError Error => _error ?? (IsSuccess ? default! : ResultDefaults.UninitializedError);
 
-    private Result(bool isSuccess, AppError error) {
+    private readonly AppError? _error;
+
+    private Result(bool isSuccess, AppError? error) {
         IsSuccess = isSuccess;
-        Error = error;
+        _error = error;
     }
 
     /// <summary>Creates a successful result.</summary>
-    public static Result Success() => new(true, default!);
+    public static Result Success() => new(true, null);
 
     /// <summary>Creates a failed result wrapping <paramref name="error"/>.</summary>
     public static Result Failure(AppError error) => new(false, error);

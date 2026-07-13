@@ -23,7 +23,24 @@ public static class VariableSubstitution {
     /// <summary>True when the entire value is a single <c>${...}</c> placeholder rather than a literal.</summary>
     public static bool IsPlaceholder(string value) {
         ArgumentNullException.ThrowIfNull(value);
-        return value.StartsWith(Open, StringComparison.Ordinal) && value.EndsWith(Close);
+        if (!value.StartsWith(Open, StringComparison.Ordinal) || !value.EndsWith(Close)) {
+            return false;
+        }
+
+        // The trailing '}' must be the close matching the leading "${". If the leading placeholder closes
+        // earlier (e.g. "${a}-${b}" or "${a} }"), the value is a composite template, not a single whole-value
+        // placeholder — treating it as one would silently resolve a garbage key like "a}-${b".
+        var depth = 1;
+        for (var i = Open.Length; i < value.Length; i++) {
+            if (value[i] == '$' && i + 1 < value.Length && value[i + 1] == '{') {
+                depth++;
+                i++;
+            } else if (value[i] == Close && --depth == 0) {
+                return i == value.Length - 1;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>True when the value contains at least one <c>${...}</c> placeholder anywhere.</summary>

@@ -77,4 +77,31 @@ public sealed class ElarionFileJsonConverterTests {
 
         act.Should().Throw<JsonException>().WithMessage("*contentType*");
     }
+
+    [Fact]
+    public void Deserialize_MalformedBase64Data_ThrowsJsonException() {
+        var json = Resolve();
+
+        // A client typo must surface as JsonException (invalid input), never FormatException — transports
+        // map JsonException to invalid-params (-32602) instead of internal error (-32603).
+        var act = () => JsonSerializer.Deserialize(
+            """{"contentType":"text/plain","data":"not base64!!!"}""", json.GetTypeInfo<ElarionFile>());
+
+        act.Should().Throw<JsonException>().WithMessage("*base64*");
+    }
+
+    [Theory]
+    [InlineData("""{"contentType":"text/plain","data":123}""")]
+    [InlineData("""{"contentType":"text/plain","data":{"nested":true}}""")]
+    [InlineData("""{"contentType":"text/plain","data":null}""")]
+    [InlineData("""{"contentType":123,"data":"AQ=="}""")]
+    [InlineData("""{"contentType":"text/plain","fileName":42,"data":"AQ=="}""")]
+    public void Deserialize_WrongTokenType_ThrowsJsonException(string wire) {
+        var json = Resolve();
+
+        var act = () => JsonSerializer.Deserialize(wire, json.GetTypeInfo<ElarionFile>());
+
+        // Never InvalidOperationException from GetString()/GetBytesFromBase64 on a mistyped token.
+        act.Should().Throw<JsonException>();
+    }
 }
