@@ -247,7 +247,9 @@ adapter-tier requirements or explicit non-absorptions:
   industrial gateway's binding configuration). Bindings-as-data are first-class: the
   `TcpConnectionEndpoints` runtime manager applies/removes named endpoints from configuration at any
   time — re-applying reconnects under the new settings, **including flipping a binding's direction**
-  (listen ↔ dial), another field requirement. BCL sockets only — no ASP.NET.
+  (listen ↔ dial), and every endpoint **advertises its state** (`Statuses`/`StatusChanged`: bind failures
+  surface as `Faulted` with the reason, dial retries as `Dialing` with the last error — operator-visible
+  state, not just a log line) — both field requirements of the industrial gateway's binding model. BCL sockets only — no ASP.NET.
 - `Elarion.AspNetCore.SignalR` — **adopted whole, after the socket adapter**: one framework-owned hub
   adapting inbound to `HandlerDispatcher` and outbound to `IClientConnectionSink`, serialization bridged
   to canonical JSON, auth from the host's ASP.NET authentication at negotiate/connect. It contains every

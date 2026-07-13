@@ -19,7 +19,8 @@ internal static class TcpEndpointLoops {
         IClientConnectionRegistry registry,
         TimeProvider timeProvider,
         ILogger logger,
-        CancellationToken ct) {
+        CancellationToken ct,
+        Action<TcpEndpointState, string?>? reportState = null) {
         TcpListener listener;
         try {
             listener = new TcpListener(options.ListenEndPoint!);
@@ -28,9 +29,11 @@ internal static class TcpEndpointLoops {
         catch (SocketException failure) {
             logger.LogWarning(failure, "Listening on {EndPoint} failed; the endpoint is not serving.",
                 options.ListenEndPoint);
+            reportState?.Invoke(TcpEndpointState.Faulted, failure.Message);
             return;
         }
 
+        reportState?.Invoke(TcpEndpointState.Listening, null);
         options.OnListening?.Invoke((IPEndPoint)listener.LocalEndpoint);
 
         var running = new ConcurrentDictionary<Task, byte>();
@@ -43,8 +46,9 @@ internal static class TcpEndpointLoops {
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) {
                     break;
                 }
-                catch (SocketException) {
+                catch (SocketException failure) {
                     // The listener socket died under us; stop serving this endpoint.
+                    reportState?.Invoke(TcpEndpointState.Faulted, failure.Message);
                     break;
                 }
 
@@ -75,16 +79,19 @@ internal static class TcpEndpointLoops {
         IClientConnectionRegistry registry,
         TimeProvider timeProvider,
         ILogger logger,
-        CancellationToken ct) {
+        CancellationToken ct,
+        Action<TcpEndpointState, string?>? reportState = null) {
         var failedAttempts = 0;
         while (!ct.IsCancellationRequested) {
             var client = new TcpClient();
             try {
                 await client.ConnectAsync(options.Host!, options.Port, ct);
                 failedAttempts = 0;
+                reportState?.Invoke(TcpEndpointState.Connected, null);
                 // The runner owns and disposes the client, and never throws.
                 await TcpConnectionRunner.RunAsync(
                     client, options, handler, registry, timeProvider, logger, ct);
+                reportState?.Invoke(TcpEndpointState.Dialing, null);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) {
                 client.Dispose();
@@ -95,6 +102,7 @@ internal static class TcpEndpointLoops {
                 failedAttempts++;
                 logger.LogDebug(failure, "Dialing {Host}:{Port} failed (attempt {Attempt}).",
                     options.Host, options.Port, failedAttempts);
+                reportState?.Invoke(TcpEndpointState.Dialing, failure.Message);
             }
 
             if (ct.IsCancellationRequested) {

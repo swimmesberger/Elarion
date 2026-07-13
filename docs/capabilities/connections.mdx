@@ -168,6 +168,12 @@ await endpoints.ApplyListenerAsync<GatewayListenHandler>("device-7:mgmt", o => {
 await endpoints.RemoveAsync("device-7:mgmt", ct);   // unbind: connections unregister
 ```
 
+Every managed endpoint **advertises its binding health**: `endpoints.Statuses` / `GetStatus(name)`
+answer "which bindings are serving, which failed to bind, and why" — a listener whose port couldn't be
+bound is `Faulted` with the reason; a dialer between attempts is `Dialing` carrying the last failure —
+and `endpoints.StatusChanged` fires on every transition, ready to be projected onto a client event so
+an admin UI shows binding state live.
+
 Settings can also vary **per connection on one endpoint**: override
 `ConfigureConnectionAsync(TcpConnectionPeer, …)` and return `TcpConnectionSettings` (framer, size cap,
 idle window, transport tag — nulls inherit the endpoint options). It runs before any byte is

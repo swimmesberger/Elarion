@@ -16,15 +16,28 @@ namespace Elarion.Connections.Tcp;
 /// dialer can be re-applied as a listener, and vice versa).
 /// </summary>
 /// <remarks>
+/// <para>
+/// Every endpoint <b>advertises its state</b>: <see cref="Statuses"/>/<see cref="GetStatus"/> answer "which
+/// bindings are serving, which failed to bind, and why" (a listener whose port could not be bound is
+/// <see cref="TcpEndpointState.Faulted"/> with the reason; a dialer between attempts is
+/// <see cref="TcpEndpointState.Dialing"/> carrying the last failure). <see cref="StatusChanged"/> fires on
+/// every transition — project it onto a client event to surface binding health live in an admin UI.
+/// </para>
+/// <para>
 /// Registered by <c>AddElarionTcpConnectionEndpoints()</c> (also as a hosted service so host shutdown tears
 /// every dynamic endpoint down). Endpoints run the identical loops as the composition-time
 /// <c>AddElarionTcpConnectionListener</c>/<c>Dialer</c> registrations — use those when the bindings are
 /// static, this manager when they are data.
+/// </para>
 /// </remarks>
 public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedService {
     private readonly Dictionary<string, Endpoint> _endpoints = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _mutation = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
+
+    /// <summary>Fires on every endpoint state transition (from the endpoint's own loop — treat it like an
+    /// event handler: fast, non-throwing). The subscription point for advertising binding health.</summary>
+    public event Action<TcpEndpointStatus>? StatusChanged;
 
     /// <summary>The names of the currently applied endpoints (snapshot).</summary>
     public IReadOnlyCollection<string> EndpointNames {
@@ -32,6 +45,24 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
             lock (_endpoints) {
                 return [.. _endpoints.Keys];
             }
+        }
+    }
+
+    /// <summary>The advertised status of every applied endpoint (snapshot).</summary>
+    public IReadOnlyCollection<TcpEndpointStatus> Statuses {
+        get {
+            lock (_endpoints) {
+                return [.. _endpoints.Values.Select(static e => e.Status)];
+            }
+        }
+    }
+
+    /// <summary>The advertised status of the endpoint under <paramref name="name"/>, or
+    /// <see langword="null"/> when no such endpoint is applied.</summary>
+    public TcpEndpointStatus? GetStatus(string name) {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        lock (_endpoints) {
+            return _endpoints.TryGetValue(name, out var endpoint) ? endpoint.Status : null;
         }
     }
 
@@ -51,8 +82,8 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
         }
 
         TcpConnectionServiceCollectionExtensions.ValidateShared(options);
-        return ApplyAsync(name, token => TcpEndpointLoops.RunListenerAsync(
-            options, services.GetRequiredService<THandler>(), Registry, Time, Logger("TcpListener"), token), ct);
+        return ApplyAsync(name, TcpEndpointMode.Listener, (report, token) => TcpEndpointLoops.RunListenerAsync(
+            options, services.GetRequiredService<THandler>(), Registry, Time, Logger("TcpListener"), token, report), ct);
     }
 
     /// <summary>Applies (starts or reconfigures) a dial-out endpoint under <paramref name="name"/>.</summary>
@@ -75,8 +106,8 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
         }
 
         TcpConnectionServiceCollectionExtensions.ValidateShared(options);
-        return ApplyAsync(name, token => TcpEndpointLoops.RunDialerAsync(
-            options, services.GetRequiredService<THandler>(), Registry, Time, Logger("TcpDialer"), token), ct);
+        return ApplyAsync(name, TcpEndpointMode.Dialer, (report, token) => TcpEndpointLoops.RunDialerAsync(
+            options, services.GetRequiredService<THandler>(), Registry, Time, Logger("TcpDialer"), token, report), ct);
     }
 
     /// <summary>
@@ -102,7 +133,9 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
         }
     }
 
-    private async ValueTask ApplyAsync(string name, Func<CancellationToken, Task> loop, CancellationToken ct) {
+    private async ValueTask ApplyAsync(
+        string name, TcpEndpointMode mode,
+        Func<Action<TcpEndpointState, string?>, CancellationToken, Task> loop, CancellationToken ct) {
         ArgumentException.ThrowIfNullOrEmpty(name);
         await _mutation.WaitAsync(ct);
         try {
@@ -118,13 +151,34 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
             }
 
             var cts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
-            var endpoint = new Endpoint(cts, loop(cts.Token));
+            var endpoint = new Endpoint(cts) {
+                Status = new TcpEndpointStatus {
+                    Name = name,
+                    Mode = mode,
+                    State = TcpEndpointState.Starting,
+                    ChangedAt = Time.GetUtcNow(),
+                },
+            };
+            endpoint.Run = loop((state, error) => Advertise(endpoint, state, error), cts.Token);
             lock (_endpoints) {
                 _endpoints[name] = endpoint;
             }
         }
         finally {
             _mutation.Release();
+        }
+    }
+
+    private void Advertise(Endpoint endpoint, TcpEndpointState state, string? error) {
+        var status = endpoint.Status with { State = state, Error = error, ChangedAt = Time.GetUtcNow() };
+        endpoint.Status = status;
+        try {
+            StatusChanged?.Invoke(status);
+        }
+        catch (Exception failure) {
+            // A faulty subscriber must never take an endpoint loop down with it.
+            Logger("Endpoints").LogWarning(failure, "A StatusChanged subscriber threw for endpoint {Name}.",
+                status.Name);
         }
     }
 
@@ -165,5 +219,12 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
         services.GetService<ILoggerFactory>()?.CreateLogger(GetType().Namespace + "." + kind)
             ?? (ILogger)NullLogger.Instance;
 
-    private sealed record Endpoint(CancellationTokenSource Cts, Task Run);
+    private sealed class Endpoint(CancellationTokenSource cts) {
+        public CancellationTokenSource Cts { get; } = cts;
+
+        public Task Run { get; set; } = Task.CompletedTask;
+
+        // Written by the endpoint's own loop, read by any thread — a whole-record swap keeps it coherent.
+        public volatile TcpEndpointStatus Status = null!;
+    }
 }

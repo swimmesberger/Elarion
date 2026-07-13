@@ -265,6 +265,65 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     [Fact]
+    public async Task DynamicEndpoints_AdvertiseBindingHealthWithReasons() {
+        var ct = TestContext.Current.CancellationToken;
+        // Occupy a port so the second binding's listen fails.
+        using var occupant = new TcpListener(IPAddress.Loopback, 0);
+        occupant.Start();
+        var occupiedPort = ((IPEndPoint)occupant.LocalEndpoint).Port;
+
+        var services = new ServiceCollection();
+        services.AddElarionConnections();
+        services.AddElarionTcpConnectionEndpoints();
+        services.AddSingleton<ChallengeTcpHandler>();
+        services.AddSingleton(new DialerHandler(Channel.CreateUnbounded<string>().Writer));
+        await using var provider = services.BuildServiceProvider();
+        var endpoints = provider.GetRequiredService<TcpConnectionEndpoints>();
+
+        var transitions = Channel.CreateUnbounded<TcpEndpointStatus>();
+        endpoints.StatusChanged += status => transitions.Writer.TryWrite(status);
+
+        try {
+            // A healthy listener advertises Listening.
+            await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-ok", o => {
+                o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+            }, ct);
+            var listening = await transitions.Reader.ReadAsync(ct);
+            listening.Should().BeEquivalentTo(
+                new { Name = "bind-ok", Mode = TcpEndpointMode.Listener, State = TcpEndpointState.Listening });
+            endpoints.GetStatus("bind-ok")!.State.Should().Be(TcpEndpointState.Listening);
+
+            // A binding whose port is taken advertises Faulted with the reason — visible, not just logged.
+            await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-taken", o => {
+                o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, occupiedPort);
+                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+            }, ct);
+            var faulted = await transitions.Reader.ReadAsync(ct);
+            faulted.Name.Should().Be("bind-taken");
+            faulted.State.Should().Be(TcpEndpointState.Faulted);
+            faulted.Error.Should().NotBeNullOrEmpty();
+            endpoints.Statuses.Should().HaveCount(2);
+
+            // A dialer whose device is unreachable advertises Dialing with the last attempt's failure.
+            occupant.Stop();
+            await endpoints.ApplyDialerAsync<DialerHandler>("bind-unreachable", o => {
+                o.Host = "127.0.0.1";
+                o.Port = occupiedPort;                       // nothing listens here anymore
+                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                o.ReconnectMinDelay = TimeSpan.FromMilliseconds(20);
+            }, ct);
+            var dialing = await transitions.Reader.ReadAsync(ct);
+            dialing.Name.Should().Be("bind-unreachable");
+            dialing.State.Should().Be(TcpEndpointState.Dialing);
+            dialing.Error.Should().NotBeNullOrEmpty();
+        }
+        finally {
+            await ((IHostedService)endpoints).StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task DynamicEndpoints_FlipDirectionFromListenerToDialer() {
         var ct = TestContext.Current.CancellationToken;
         using var device = new TcpListener(IPAddress.Loopback, 0);
