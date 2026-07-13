@@ -1,6 +1,6 @@
 # ADR-0057: A Flyway-shaped PostgreSQL migration runner for EF-free (AOT) hosts
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-13
 - Related: [ADR-0025](0025-distributed-scheduler-coordination.md) (scale positioning),
   [ADR-0056](0056-postgres-extensions-posture.md) (one-Postgres composition posture),

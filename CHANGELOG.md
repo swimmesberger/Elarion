@@ -9,6 +9,28 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **PostgreSQL SQL migration runner for EF-free (AOT) hosts (ADR-0057).** New package
+  **`Elarion.Migrations.PostgreSql`** (`IsAotCompatible`; deps: `Npgsql` + `Microsoft.Extensions.*`
+  abstractions only) — the AOT tier's schema tool; EF applications keep EF Core migrations, and the
+  runner ships no Elarion framework-table scripts. Scripts are embedded resources
+  (`V{version}__{description}.sql` / repeatable `R__{description}.sql`, timestamp versions recommended)
+  discovered from the assembly manifest with fail-closed, total validation (malformed names, duplicate
+  versions, undecodable content, and unknown directives each fail naming the resource). Checksums are
+  **SHA-256 over BOM-stripped, CRLF→LF-normalized content**, so line-ending churn can never invalidate
+  an applied script. Execution: one dedicated connection under a **session-level** `pg_advisory_lock`
+  (a crashed runner releases it with its connection; concurrent startups serialize and no-op), each
+  versioned script in its own transaction with its `elarion_schema_history` row committing **in that
+  same transaction** — a failed transactional migration leaves no history row, so no repair command
+  exists. `-- elarion: no-transaction` opts a script out for DDL PostgreSQL forbids in a transaction
+  (`CREATE INDEX CONCURRENTLY`), executed statement-by-statement; only such a failure records an
+  explicit failed row, fail-closing subsequent runs until
+  `IMigrationRunner.ResolveFailedAsync(version, Retry | MarkApplied)` resolves it. Out-of-order policy
+  defaults to `Warn` (applied, logged, recorded in true execution order; `Deny` opt-in); adopting an
+  existing database is explicit-only via `BaselineAsync`; undo, placeholders, and non-PostgreSQL
+  dialects are rejected by design. `AddElarionPostgreSqlMigrations(connectionString | dataSource,
+  o => o.AddScripts(assembly, prefix))` registers the runner plus a hosted service that migrates before
+  the host reports ready and fails startup on error (`ApplyOnStartup = false` opts out). Documented in
+  the new [SQL migrations](docs/capabilities/sql-migrations.mdx) capability page.
 - **Data-rate shaping helpers (ADR-0055).** `Elarion` core gains the `Elarion.Buffering` namespace with
   the two primitives every telemetry gateway hand-rolls between "device produces samples" and
   "database/UI consume them" — BCL-only, no DI registration, `TimeProvider`-driven for deterministic

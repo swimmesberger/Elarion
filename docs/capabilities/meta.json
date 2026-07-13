@@ -18,6 +18,7 @@
     "entity-framework",
     "bulk-operations",
     "pagination",
+    "sql-migrations",
     "postgres-extensions",
     "time-series",
     "blob-storage",

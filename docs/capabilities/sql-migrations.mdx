@@ -1,0 +1,143 @@
+---
+title: SQL migrations
+description: Startup-applied SQL migrations for EF-free (NativeAOT) hosts — embedded scripts, normalized checksums, no repair command, PostgreSQL only.
+---
+
+Elarion's persistence story is EF-model-first, and an EF application keeps **EF Core migrations** — that
+default is not in question. The gap is the **EF-free host**: an app published NativeAOT on raw Npgsql
+still needs schema management, EF's NativeAOT support is experimental, and nothing maintained fills the
+hole (Evolve is dormant, Flyway is a JVM tool). `Elarion.Migrations.PostgreSql` is that tier's runner
+([ADR-0057](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0057-postgresql-sql-migration-runner.md)):
+minimal, PostgreSQL-only, AOT-compatible (`Npgsql` + `Microsoft.Extensions.*` abstractions only), and
+designed explicitly against Flyway's documented production failure modes.
+
+Pick the row that matches your app:
+
+| Your app | Schema tool |
+| --- | --- |
+| Uses EF Core | EF migrations (`UseElarion*` model hooks ride your `DbContext`) — see [Entity Framework Core](/docs/capabilities/entity-framework) |
+| EF-free / NativeAOT, 1–10 nodes, no deploy pipeline | **This runner**, applied at startup |
+| Either, with real deploy infrastructure | Bundles / `migrations script --idempotent` / Flyway in CI — replace the tool, don't grow the default |
+
+It deliberately does **not** ship Elarion framework-table scripts: the EF-based packages remain
+EF-delivered, and this package never competes with that default.
+
+## Quick start
+
+Embed your scripts and register the runner:
+
+```xml
+<ItemGroup>
+  <EmbeddedResource Include="Migrations/**/*.sql" />
+</ItemGroup>
+```
+
+```csharp
+builder.Services.AddElarionPostgreSqlMigrations(
+    builder.Configuration.GetConnectionString("Default")!,
+    o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
+```
+
+That registers `IMigrationRunner` plus a hosted service that applies pending migrations **before the
+host reports ready** and fails startup on error — serving traffic against a half-migrated schema is
+worse than not starting. Register it before other hosted services that expect the schema (hosted
+services start in registration order); set `ApplyOnStartup = false` to invoke the runner yourself.
+An `NpgsqlDataSource` overload exists for hosts that already manage one.
+
+## Script conventions
+
+Scripts are embedded resources (discovery reads the assembly manifest — AOT-safe, no filesystem):
+
+| Name | Meaning |
+| --- | --- |
+| `V{version}__{description}.sql` | Versioned: applied exactly once, in version order |
+| `R__{description}.sql` | Repeatable: re-applied whenever its checksum changes, after all versioned scripts, in name order |
+
+- **Use timestamp versions** (`V20260713093000__add_devices.sql`): they make branch-merge collisions
+  structurally rare instead of policing them at deploy time.
+- Multi-segment versions separate segments with single underscores (`V1_2__…` is version 1.2) — file
+  names cannot contain dots, because folder paths become dot-separated resource-name segments.
+- Validation is **fail-closed and total**: within the configured scope (assembly + optional resource
+  prefix), every `.sql` resource must be a valid script — duplicate versions, malformed names, and
+  undecodable content each fail naming the offending resource. Nothing is silently skipped.
+- Repeatables are for idempotent `CREATE OR REPLACE` surfaces (views, functions) — never destructive DDL.
+
+**Checksums are SHA-256 over normalized content** (BOM stripped, CRLF→LF), so line-ending churn — git
+`autocrlf`, an editor touching whitespace — can never invalidate an applied script. A genuine mismatch
+fails validation with the script name, both hashes, and the two legal resolutions: revert the edit, or
+add a new script.
+
+## Execution model
+
+One runner, one dedicated connection, guarded by a **session-level** `pg_advisory_lock`: concurrent
+startups (the 1–10-node tier) serialize on the lock, waiters re-read history and no-op, and a crashed
+runner releases the lock with its connection — there is no lock row to clean up.
+
+Each versioned script runs in its own transaction, and **its history row
+(`elarion_schema_history`) commits in that same transaction**. A failed transactional migration
+therefore leaves *no* history row: fix the script and rerun. There is no repair command because there
+is nothing to repair — and no undo either (a dropped column's data cannot be un-dropped; roll forward).
+
+### Non-transactional scripts
+
+Statements PostgreSQL forbids inside a transaction (`CREATE INDEX CONCURRENTLY`, …) opt out via a
+directive on the leading comment block:
+
+```sql
+-- elarion: no-transaction
+CREATE INDEX CONCURRENTLY orders_customer_idx ON orders (customer_id);
+```
+
+The runner executes such a script statement by statement (each as its own implicit transaction —
+batching them would reintroduce the transaction the directive opts out of). Only here can a failure
+leave a mid-applied state: the runner records an explicit **failed** history row and subsequent runs
+fail closed, naming the script and the recovery API:
+
+```csharp
+await runner.ResolveFailedAsync("20260713093000", ResolveAction.Retry);       // rerun the fixed script
+await runner.ResolveFailedAsync("20260713093000", ResolveAction.MarkApplied); // schema was completed by hand
+```
+
+A deliberate in-code decision at the call site — not a CLI habit. An unknown directive (a typo like
+`no-transactoin`) fails validation instead of silently changing transaction semantics.
+
+Failed rows are recorded for **versioned** scripts only: a repeatable script that fails under
+`no-transaction` records nothing — repeatables are idempotent by doctrine and their changed checksum
+was never recorded, so the next run simply retries them.
+
+## Out-of-order scripts
+
+When a merge lands a script versioned below one already applied, the default policy is **`Warn`**: the
+script is applied, logged as a warning, and recorded in true execution order (`installed_rank`). The
+history table records what actually happened either way; a strict default only teaches teams a global
+escape flag. Teams that want strict ordering opt into `OutOfOrder = OutOfOrderPolicy.Deny`, which fails
+the run naming the offenders.
+
+## Adopting an existing database
+
+`BaselineAsync(version)` marks an existing schema as already at a version — scripts at or below it are
+treated as applied and never run. It is explicit only (allowed solely while the history is empty);
+there is no `baselineOnMigrate` auto-magic.
+
+`ValidateAsync` (checksum + pending report, no writes) and `GetPendingAsync` back health checks and
+deploy gates; everything ships in the box, no feature tiers.
+
+## Options
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `AddScripts(assembly, prefix?)` | — (required) | Assemblies + optional resource-name prefix to scan |
+| `HistoryTableName` | `elarion_schema_history` | The runner-created history table |
+| `OutOfOrder` | `Warn` | `Warn` (apply + log) or `Deny` (fail the run) |
+| `ApplyOnStartup` | `true` | Register the migrate-before-ready hosted service |
+| `CommandTimeout` | none | Per-command timeout (a transactional script is one command; `no-transaction` scripts run one command per statement); long DDL is normal, so unlimited by default |
+| `LockTimeout` | none | How long to wait for the advisory lock (unlimited: serialize behind a long migration) |
+| `AdvisoryLockKey` | fixed constant | Distinct keys let two apps sharing a database migrate concurrently |
+
+## What it deliberately is not
+
+No undo, no repair, no placeholders/variable substitution, no dialects beyond PostgreSQL, no feature
+tiers. If you need those, replace the tool (Flyway or Evolve in CI) rather than growing this default —
+the same doctrine as every Elarion seam
+([ADR-0025](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0025-distributed-scheduler-coordination.md)).
+App-side *data access* under AOT is a separate concern, owned by ADR-0058.
