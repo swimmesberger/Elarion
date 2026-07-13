@@ -62,6 +62,16 @@ consumers only), or `Cancel` (the subscriber gets `StreamLaggedException` and re
 `ResumeAfterSequence`; the publisher is never delayed). `SubscriberCount` is the interest pull for lazy
 producers.
 
+Two contract points come with the single-sequencer design. **Serialize publishes with completion**: the
+ordering guarantees assume the producer serializes `PublishAsync` with `Complete`/`Fail` — automatic when
+the hub lives inside an actor's mailbox. Completing concurrently with an in-flight publish makes delivery
+of that final element per-subscriber nondeterministic (some live subscribers see it, others don't, and a
+late replay subscriber may see an element a live subscriber missed). **Cancellation is only clean before
+commit**: cancelling `PublishAsync` while it waits to enter the hub discards the element entirely; once
+the element is committed (sequence assigned, ring updated), cancelling — e.g. while a `Wait`-mode
+subscriber applies backpressure — abandons the remaining deliveries: the element exists in replay but
+pending `Wait`-mode subscribers never receive it.
+
 ## Actor stream methods
 
 An `[Actor]` method returning `IAsyncEnumerable<T>` becomes a **facade stream** — the Orleans 7+
