@@ -1,6 +1,6 @@
 # ADR-0056: PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain
 
-- Status: Proposed (posture decided; the image/composition improvement is deferred until designed)
+- Status: Accepted (the posture; the image/composition improvement remains deferred until designed)
 - Date: 2026-07-13
 - Related: [ADR-0025](0025-distributed-scheduler-coordination.md) (the scale positioning this refines),
   [ADR-0020](0020-postgres-unlogged-l2-cache.md) (precedent: lean on what the one Postgres can do).
@@ -45,3 +45,13 @@ shapes, in rough order of preference:
   TimescaleDB recipe composing bulk insert, keyset paging, scheduled retention, and client events.
 - The image-composition improvement waits for a consuming project's concrete need (likely the first
   telemetry-heavy port) to pick between shapes 1 and 2.
+
+## Addendum (2026-07-13)
+
+The posture shipped as two pages: `docs/capabilities/postgres-extensions.mdx` (the posture plus the
+image guidance) and the worked recipe `docs/capabilities/time-series.mdx`. The extensions page's
+"Combining extensions" section realizes **shape 1**: check for an official multi-extension image first
+(`timescale/timescaledb-ha` covers TimescaleDB + PostGIS + pgvector), else one canonical Dockerfile —
+`postgres:N-bookworm` + PGDG/vendor apt packages + a `shared_preload_libraries` CMD — shared by
+compose, Testcontainers, and production. Shape 2 (the Testcontainers image-assembly helper) remains
+deferred until a consuming project forces its design; shape 3 stays least-preferred.

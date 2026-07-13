@@ -1,0 +1,201 @@
+---
+title: Time series
+description: Store telemetry on the PostgreSQL you already run — a TimescaleDB recipe composing bulk insert, keyset paging, scheduled retention, and client events.
+---
+
+Device samples, sensor readings, metrics: append-heavy, time-ordered, queried in buckets, expired by
+age. The reflex is to reach for a second database; Elarion's posture is that
+**[a PostgreSQL extension is composition, not scale-out](/docs/capabilities/postgres-extensions)** —
+[TimescaleDB](https://www.timescale.com/) turns the Postgres you already run into the time-series
+store. Accordingly there is deliberately no `Elarion.TimeSeries` package: this page is a **recipe**,
+composing the extension with the framework pieces you already know — bulk insert, keyset paging,
+scheduled jobs, client events — over your existing EF model
+([ADR-0056](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0056-postgres-extensions-posture.md)).
+
+## Prerequisite: TimescaleDB in the server image
+
+Run the official image everywhere — dev, Testcontainers, production
+(see [PostgreSQL extensions](/docs/capabilities/postgres-extensions) for the image guidance, including
+combining several extensions in one image):
+
+```yaml
+services:
+  db:
+    image: timescale/timescaledb:latest-pg17
+```
+
+Activate the extension and convert the table in a normal EF migration — extension setup is schema, and
+it belongs in the same migration history as everything else:
+
+```csharp
+migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS timescaledb;");
+migrationBuilder.Sql("SELECT create_hypertable('device_samples', by_range('recorded_at'));");
+```
+
+## 1. The sample table is an ordinary entity
+
+Nothing about the entity or its configuration knows the table is a hypertable:
+
+```csharp
+public sealed class DeviceSample {
+    public Guid DeviceId { get; set; }
+    public DateTimeOffset RecordedAt { get; set; }
+    public double Value { get; set; }
+}
+
+[EntityConfiguration]
+public sealed class DeviceSampleConfiguration : IEntityTypeConfiguration<DeviceSample> {
+    public void Configure(EntityTypeBuilder<DeviceSample> builder) {
+        builder.ToTable("device_samples");
+        builder.HasKey(s => new { s.DeviceId, s.RecordedAt });
+        builder.Property(s => s.DeviceId).HasColumnName("device_id");
+        builder.Property(s => s.RecordedAt).HasColumnName("recorded_at");
+        builder.Property(s => s.Value).HasColumnName("value");
+    }
+}
+```
+
+The one rule TimescaleDB imposes: **every unique constraint — the primary key included — must contain
+the partition column** (`recorded_at` here). A surrogate `Id`-only key would be rejected at
+`create_hypertable` time. The composite `(DeviceId, RecordedAt)` key satisfies the rule and buys the
+dedup below for free.
+
+## 2. Ingest: bulk insert, idempotent by constraint
+
+Telemetry arrives in batches and retransmits after connection drops — device gateways resend what they
+are not sure was received. [Bulk insert](/docs/capabilities/bulk-operations) with `DoNothing` conflict
+handling makes ingestion both fast (binary `COPY`) and naturally idempotent (a replayed batch hits the
+primary key and inserts nothing):
+
+```csharp
+[Handler("telemetry.ingest")]
+public sealed class IngestSamples(AppDbContext db, IIntegrationEventBus events)
+    : IHandler<IngestSamples.Command> {
+
+    public sealed record Command : ICommand {
+        public required Guid DeviceId { get; init; }
+        public required IReadOnlyList<Point> Points { get; init; }
+    }
+
+    public sealed record Point(DateTimeOffset RecordedAt, double Value);
+
+    public async ValueTask<Result<Unit>> HandleAsync(Command command, CancellationToken ct) {
+        var rows = command.Points.Select(p => new DeviceSample {
+            DeviceId = command.DeviceId,
+            RecordedAt = p.RecordedAt,
+            Value = p.Value,
+        });
+
+        await db.DeviceSamples.ExecuteInsertAsync(rows,
+            new BulkInsertOptions { OnConflict = BulkInsertConflictBehavior.DoNothing }, ct);
+
+        await events.PublishAsync(new SamplesIngested { DeviceId = command.DeviceId }, ct);
+        await db.SaveChangesAsync(ct);   // COPY bypasses SaveChanges — this flushes only the outbox row
+        return Unit.Value;
+    }
+}
+
+public sealed record SamplesIngested : IIntegrationEvent {
+    public required Guid DeviceId { get; init; }
+}
+```
+
+The `COPY` runs on the context's own connection inside the handler's ambient transaction, so the batch
+and the [outbox](/docs/capabilities/events/backends) row commit or roll back together. The explicit
+`SaveChangesAsync` is not for the samples — bulk insert never touches the change tracker — it persists
+the recorded integration event.
+
+## 3. Query: `time_bucket` rollups and keyset feeds
+
+Aggregation is what the extension is *for* — use it directly. The database is application logic in
+Elarion ([no repository layer](/docs/capabilities/entity-framework)), so a provider function in raw SQL
+is the intended path, not an escape hatch:
+
+```csharp
+public sealed record Bucket(DateTimeOffset BucketStart, double Avg, double Max);
+
+var buckets = await db.Database
+    .SqlQuery<Bucket>($"""
+        SELECT time_bucket('5 minutes', recorded_at) AS "BucketStart",
+               avg(value) AS "Avg",
+               max(value) AS "Max"
+        FROM device_samples
+        WHERE device_id = {deviceId} AND recorded_at >= {since}
+        GROUP BY 1
+        ORDER BY 1
+        """)
+    .ToListAsync(ct);
+```
+
+Interpolated values become parameters — this is not string concatenation. For raw sample feeds
+(newest-first scroll in a dashboard), declare a [keyset ordering](/docs/capabilities/pagination) like
+any other entity; descending same-direction columns get the Npgsql row-value seek:
+
+```csharp
+[Keyset<DeviceSample>("-RecordedAt", "-DeviceId")]
+public sealed partial class SamplesNewestFirst;
+```
+
+## 4. Retention: a scheduled job dropping chunks
+
+Because a hypertable is chunked by time, expiring old data is a metadata operation
+(`drop_chunks`), not a million-row `DELETE`. Own the policy as a normal
+[scheduled job](/docs/capabilities/scheduling) — the retention window lives in your configuration and
+[runtime settings](/docs/concepts/settings), the run shows up in your job telemetry and inspector, and
+on a cluster the [per-occurrence claims](/docs/capabilities/scheduling/multi-node) make exactly one
+node run it:
+
+```csharp
+public sealed class TelemetryRetentionJob(AppDbContext db, TimeProvider timeProvider) {
+    [ScheduledJob(
+        "telemetry.retention",
+        Cron = "0 0 4 * * *")]
+    public async ValueTask RunAsync(CancellationToken ct) {
+        var cutoff = timeProvider.GetUtcNow().AddDays(-90);
+        await db.Database.ExecuteSqlAsync(
+            $"SELECT drop_chunks('device_samples', older_than => {cutoff})", ct);
+    }
+}
+```
+
+<Callout type="info">
+  TimescaleDB can also run retention in-database (`add_retention_policy`) with zero application code.
+  The application-owned job is the recommended default because the policy stays where the rest of your
+  operational configuration lives; reach for the native policy when the database is operated separately
+  from the application anyway.
+</Callout>
+
+## 5. Live dashboards: client events
+
+A telemetry dashboard is the textbook [client events](/docs/capabilities/events/client-events) shape:
+the pushed fact is a **hint** ("device X has new samples"), and the client converges by re-running the
+bucket query above. A dropped hint costs staleness until the next batch, never correctness — which is
+exactly the at-most-once contract:
+
+```csharp
+[RequirePermission("telemetry", Verbs.Read)]
+[AllowAnyResource]   // the device id routes, the permission gates
+public sealed record DeviceSamplesArrived : IClientEvent {
+    public required Guid DeviceId { get; init; }
+}
+
+[Service]
+internal sealed class TelemetryClientProjections(IClientEventPublisher clientEvents) {
+    [ConsumeEvent]
+    public ValueTask On(SamplesIngested evt, CancellationToken ct) =>
+        clientEvents.PublishAsync(
+            new DeviceSamplesArrived { DeviceId = evt.DeviceId },
+            ClientEventScope.Resource($"device:{evt.DeviceId}"), ct);
+}
+```
+
+The consumer runs after commit, so a rolled-back batch never pushes a ghost update; publishing one hint
+per *batch* (not per sample) keeps the browser tier light no matter the ingest rate.
+
+## Where this recipe stops
+
+TimescaleDB comfortably holds far more data than the 1–10 node tier Elarion targets ever produces, so
+outgrowing it is rare. If a workload genuinely needs a dedicated time-series cluster, that is an
+infrastructure decision above the framework — the entity, handlers, and events here stay; only the
+storage SQL moves. And the recipe *shape* generalizes to other extensions — pgvector, PostGIS, Apache
+AGE — see [PostgreSQL extensions](/docs/capabilities/postgres-extensions).
