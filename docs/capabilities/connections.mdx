@@ -251,6 +251,72 @@ with), and the subscription dies automatically when its connection unregisters. 
 SSE endpoint's HTTP mapping (unauthenticated / invalid / not-found — unknown and denied topics stay
 indistinguishable).
 
+## Putting it together — the device-gateway loop
+
+Connections are deliberately **not a fourth invocation model** — they're a carrier with identity.
+Actors stay the concurrency gate for device state, handlers stay the authorization gate for anything
+command-shaped, client events stay the one fan-out. The whole loop, end to end:
+
+**Connect/disconnect → the twin.** An observer (the one piece of hand-written glue) routes lifecycle
+into the digital twin's public facade; the twin marks presence and captures the sink — an actor owning
+a stateful connection is exactly actor use-case&nbsp;#1, and the mailbox serializes a device's parallel
+channels against user-triggered commands for free:
+
+```csharp
+internal sealed class DeviceTwinAttachment(IActorSystem actors) : IClientConnectionObserver {
+    public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
+        new(actors.Get<IDeviceTwin>(connection.Connection.PrincipalId!).ChannelUp(connection));
+
+    public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
+        new(actors.Get<IDeviceTwin>(connection.PrincipalId!).ChannelDown(connection.ConnectionId));
+}
+
+// services.TryAddEnumerable(ServiceDescriptor.Singleton<IClientConnectionObserver, DeviceTwinAttachment>());
+```
+
+**Inbound frames → the twin, pipeline-free.** Telemetry isn't a command; the codec parses and hands the
+frame to the mailbox (see the codec examples above). The codec's one routing decision is *which frames
+are commands* — those go through the dispatch rail instead:
+
+```csharp
+// Inside a codec, for command-shaped messages: the same per-call scope rail JSON-RPC and MCP use.
+// Authorization, validation, [Idempotent], transaction, and audit all run per message, evaluated
+// against the connection's principal (seeded as ICurrentUser by the standard initializer).
+var boundary = new DispatchScopeContext();
+boundary.Set(connection.Connection.Principal);
+await using var scope = services.CreateDispatchScope(boundary);
+if (dispatcher.TryGetRoute(name, HandlerTransports.Connection, out var route)) {
+    var result = await route.InvokeAsync(request, scope.ServiceProvider, ct);
+    // encode the result back over the sink — your framing
+}
+```
+
+**User → device.** A UI action arrives as a normal `[Handler]` (over HTTP/JSON-RPC — `[RequirePermission]`,
+ownership check, `[Auditable]`) and calls the twin facade; the twin talks to the device through its
+captured sink, serialized with everything else in its mailbox:
+
+```csharp
+[Handler("robots.start")]
+internal sealed class StartRobot(IActorSystem actors) : IHandler<StartRobot.Command, Result<Unit>> {
+    public sealed record Command : ICommand { public required Guid RobotId { get; init; } }
+
+    public async ValueTask<Result<Unit>> HandleAsync(Command request, CancellationToken ct) =>
+        await actors.Get<IDeviceTwin>(request.RobotId.ToString("N")).StartAsync(ct);
+}
+
+// inside the twin: one request/reply into the device, bounded by a timeout
+var ack = await _channel.InvokeAsync<StartCommand, StartAck>(
+    "start", new StartCommand(), new ClientInvokeOptions { Timeout = TimeSpan.FromSeconds(5) }, ct);
+```
+
+**Live state → every UI.** The twin publishes client events from its hot state (the ephemeral tier), or
+projects committed facts via a method-form `[ConsumeEvent]`; SSE browsers and connection-carried
+subscribers receive identically through the bridge. Durable facts flow as integration events — which can
+come back *into* actors via `[ConsumeEvent]` on actor methods.
+
+The hand-written glue per app is the observer (~10 lines) and the codec's routing decision; the
+handshake, registry, lifecycle, per-message scopes, mailbox, and fan-out are all framework.
+
 ## Rules of the road
 
 - **Facts still travel as client events**, even over a connection — the sink is for
