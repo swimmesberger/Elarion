@@ -6,6 +6,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
 using Elarion.Connections.AspNetCore;
+using Elarion.Connections.Testing;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -55,7 +56,7 @@ public sealed class ConnectionSocketEndpointTests {
         using var socket = await host.ConnectAsync(ct);
 
         await CompleteHandshakeAsync(socket, "dev-1", ct);
-        var connected = await host.Observer.Connected.Task.WaitAsync(ct);
+        var connected = (await host.Observer.Connected.Task.WaitAsync(ct)).Connection;
         connected.PrincipalId.Should().Be("dev-1");
         connected.Transport.Should().Be("websocket");
         connected.Metadata.Should().ContainKey("channel").WhoseValue.Should().Be("main");
@@ -111,7 +112,7 @@ public sealed class ConnectionSocketEndpointTests {
         // Default tier: endpoint options apply, per-connection transport tag from the query.
         using (var standard = await host.ConnectAsync(ct, "?tier=standard")) {
             await CompleteHandshakeAsync(standard, "ws-std", ct);
-            (await host.Observer.Connected.Task.WaitAsync(ct)).Transport.Should().Be("websocket-standard");
+            (await host.Observer.Connected.Task.WaitAsync(ct)).Connection.Transport.Should().Be("websocket-standard");
             await SendTextAsync(standard, new string('x', 256), ct);
             (await ReceiveTextAsync(standard, ct)).Should().StartWith("echo:");
             await standard.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", ct);
@@ -122,7 +123,7 @@ public sealed class ConnectionSocketEndpointTests {
         // Constrained tier, same route: a per-connection size cap makes the same message oversized.
         using var constrained = await host.ConnectAsync(ct, "?tier=constrained");
         await CompleteHandshakeAsync(constrained, "ws-tiny", ct);
-        (await host.Observer.Connected.Task.WaitAsync(ct)).Transport.Should().Be("websocket-constrained");
+        (await host.Observer.Connected.Task.WaitAsync(ct)).Connection.Transport.Should().Be("websocket-constrained");
 
         await SendTextAsync(constrained, new string('x', 256), ct);
         (await ReceiveTextAsync(constrained, ct)).Should().BeNull();
@@ -166,8 +167,8 @@ public sealed class ConnectionSocketEndpointTests {
         builder.Logging.ClearProviders();
         builder.Services.AddElarionConnections();
         builder.Services.AddSingleton<THandler>();
-        builder.Services.AddSingleton<AwaitableObserver>();
-        builder.Services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableObserver>());
+        builder.Services.AddSingleton<AwaitableConnectionObserver>();
+        builder.Services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
 
         var app = builder.Build();
         app.UseWebSockets();
@@ -184,7 +185,7 @@ public sealed class ConnectionSocketEndpointTests {
 
         public IClientConnectionRegistry Registry => app.Services.GetRequiredService<IClientConnectionRegistry>();
 
-        public AwaitableObserver Observer => app.Services.GetRequiredService<AwaitableObserver>();
+        public AwaitableConnectionObserver Observer => app.Services.GetRequiredService<AwaitableConnectionObserver>();
 
         public async Task<ClientWebSocket> ConnectAsync(CancellationToken ct, string query = "") {
             var socket = new ClientWebSocket();
@@ -253,30 +254,4 @@ public sealed class ConnectionSocketEndpointTests {
             new EchoProtocol(connection);
     }
 
-    private sealed class AwaitableObserver : IClientConnectionObserver {
-        private TaskCompletionSource<ClientConnection> _connected = NewSource();
-        private TaskCompletionSource<ClientConnection> _disconnected = NewSource();
-
-        public TaskCompletionSource<ClientConnection> Connected => _connected;
-
-        public TaskCompletionSource<ClientConnection> Disconnected => _disconnected;
-
-        public void Reset() {
-            _connected = NewSource();
-            _disconnected = NewSource();
-        }
-
-        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
-            _connected.TrySetResult(connection.Connection);
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
-            _disconnected.TrySetResult(connection);
-            return ValueTask.CompletedTask;
-        }
-
-        private static TaskCompletionSource<ClientConnection> NewSource() =>
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-    }
 }

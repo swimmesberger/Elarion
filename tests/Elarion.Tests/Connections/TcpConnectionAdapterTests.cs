@@ -8,6 +8,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
 using Elarion.Connections.Tcp;
+using Elarion.Connections.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -66,7 +67,7 @@ public sealed class TcpConnectionAdapterTests {
         await WriteLineAsync(stream, "device:tcp-1", ct);
         (await ReadLineAsync(stream, ct)).Should().Be("welcome");
 
-        var connected = await host.Observer.Connected.Task.WaitAsync(ct);
+        var connected = (await host.Observer.Connected.Task.WaitAsync(ct)).Connection;
         connected.PrincipalId.Should().Be("tcp-1");
         connected.Transport.Should().Be("tcp");
         host.Registry.GetForPrincipal("tcp-1").Should().ContainSingle();
@@ -142,7 +143,7 @@ public sealed class TcpConnectionAdapterTests {
             (await ReadLineAsync(stream, ct)).Should().Be("challenge");
             await WriteLineAsync(stream, "device:lines-1", ct);
             (await ReadLineAsync(stream, ct)).Should().Be("welcome");
-            (await host.Observer.Connected.Task.WaitAsync(ct)).Transport.Should().Be("tcp-lines");
+            (await host.Observer.Connected.Task.WaitAsync(ct)).Connection.Transport.Should().Be("tcp-lines");
 
             await WriteLineAsync(stream, "ping", ct);
             (await ReadLineAsync(stream, ct)).Should().Be("echo:ping");
@@ -158,7 +159,7 @@ public sealed class TcpConnectionAdapterTests {
         (await ReadUntilAsync(pipeStream, (byte)'|', ct)).Should().Be("challenge");
         await pipeStream.WriteAsync(Encoding.UTF8.GetBytes("device:pipes-1|"), ct);
         (await ReadUntilAsync(pipeStream, (byte)'|', ct)).Should().Be("welcome");
-        (await host.Observer.Connected.Task.WaitAsync(ct)).Transport.Should().Be("tcp-pipes");
+        (await host.Observer.Connected.Task.WaitAsync(ct)).Connection.Transport.Should().Be("tcp-pipes");
 
         await pipeStream.WriteAsync(Encoding.UTF8.GetBytes("ping|"), ct);
         (await ReadUntilAsync(pipeStream, (byte)'|', ct)).Should().Be("echo:ping");
@@ -197,7 +198,7 @@ public sealed class TcpConnectionAdapterTests {
                 var stream = session.GetStream();
                 (await ReadLineAsync(stream, ct)).Should().Be("hello");
                 await WriteLineAsync(stream, "ticket:dev-9", ct);
-                (await observer.Connected.Task.WaitAsync(ct)).PrincipalId.Should().Be("dev-9");
+                (await observer.Connected.Task.WaitAsync(ct)).Connection.PrincipalId.Should().Be("dev-9");
 
                 await WriteLineAsync(stream, "reading:42", ct);
                 (await inbound.Reader.ReadAsync(ct)).Should().Be("reading:42");
@@ -210,7 +211,7 @@ public sealed class TcpConnectionAdapterTests {
             var secondStream = second.GetStream();
             (await ReadLineAsync(secondStream, ct)).Should().Be("hello");
             await WriteLineAsync(secondStream, "ticket:dev-9", ct);
-            (await observer.Connected.Task.WaitAsync(ct)).PrincipalId.Should().Be("dev-9");
+            (await observer.Connected.Task.WaitAsync(ct)).Connection.PrincipalId.Should().Be("dev-9");
         }
         finally {
             foreach (var service in hosted) {
@@ -252,7 +253,7 @@ public sealed class TcpConnectionAdapterTests {
                 var stream = session.GetStream();
                 (await ReadLineAsync(stream, ct)).Should().Be("hello");
                 await WriteLineAsync(stream, "ticket:dev-A", ct);
-                (await observer.Connected.Task.WaitAsync(ct)).PrincipalId.Should().Be("dev-A");
+                (await observer.Connected.Task.WaitAsync(ct)).Connection.PrincipalId.Should().Be("dev-A");
                 observer.Reset();
 
                 // Re-applying the same binding with new settings reconnects it: the device-A link drops
@@ -270,7 +271,7 @@ public sealed class TcpConnectionAdapterTests {
             var streamB = sessionB.GetStream();
             (await ReadLineAsync(streamB, ct)).Should().Be("hello");
             await WriteLineAsync(streamB, "ticket:dev-B", ct);
-            (await observer.Connected.Task.WaitAsync(ct)).PrincipalId.Should().Be("dev-B");
+            (await observer.Connected.Task.WaitAsync(ct)).Connection.PrincipalId.Should().Be("dev-B");
             endpoints.EndpointNames.Should().BeEquivalentTo(["bind-1"]);
 
             observer.Reset();
@@ -395,7 +396,7 @@ public sealed class TcpConnectionAdapterTests {
             var deviceStream = session.GetStream();
             (await ReadLineAsync(deviceStream, ct)).Should().Be("hello");
             await WriteLineAsync(deviceStream, "ticket:flip-1", ct);
-            (await observer.Connected.Task.WaitAsync(ct)).PrincipalId.Should().Be("flip-1");
+            (await observer.Connected.Task.WaitAsync(ct)).Connection.PrincipalId.Should().Be("flip-1");
 
             // The old listening socket is gone: a fresh connect to it must fail.
             using var probe = new TcpClient();
@@ -569,30 +570,4 @@ public sealed class TcpConnectionAdapterTests {
             inbound.WriteAsync(Encoding.UTF8.GetString(message.Span), ct);
     }
 
-    private sealed class AwaitableConnectionObserver : IClientConnectionObserver {
-        private TaskCompletionSource<ClientConnection> _connected = NewSource();
-        private TaskCompletionSource<ClientConnection> _disconnected = NewSource();
-
-        public TaskCompletionSource<ClientConnection> Connected => _connected;
-
-        public TaskCompletionSource<ClientConnection> Disconnected => _disconnected;
-
-        public void Reset() {
-            _connected = NewSource();
-            _disconnected = NewSource();
-        }
-
-        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
-            _connected.TrySetResult(connection.Connection);
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
-            _disconnected.TrySetResult(connection);
-            return ValueTask.CompletedTask;
-        }
-
-        private static TaskCompletionSource<ClientConnection> NewSource() =>
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-    }
 }

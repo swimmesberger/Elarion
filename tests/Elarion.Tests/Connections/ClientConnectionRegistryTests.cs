@@ -1,8 +1,8 @@
-using System.Security.Claims;
 using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
 using Elarion.Connections.Diagnostics;
+using Elarion.Connections.Testing;
 using Elarion.Tests.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -115,24 +115,8 @@ public sealed class ClientConnectionRegistryTests {
         return services.BuildServiceProvider();
     }
 
-    internal static FakeConnectionSink Sink(string connectionId, string principalId) => new(new ClientConnection {
-        ConnectionId = connectionId,
-        Transport = "test",
-        Principal = new ClaimsPrincipal(new ClaimsIdentity()),
-        PrincipalId = principalId,
-        ConnectedAt = DateTimeOffset.UtcNow,
-    });
-
-    internal sealed class FakeConnectionSink(ClientConnection connection) : IClientConnectionSink {
-        public ClientConnection Connection { get; } = connection;
-
-        public ValueTask SendAsync<TPayload>(string name, TPayload payload, CancellationToken ct = default)
-            where TPayload : class => ValueTask.CompletedTask;
-
-        public ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
-            string name, TRequest request, ClientInvokeOptions? options = null, CancellationToken ct = default)
-            where TRequest : class => throw new NotSupportedException();
-    }
+    internal static TestClientConnection Sink(string connectionId, string principalId) =>
+        new(principalId: principalId, connectionId: connectionId);
 
     private sealed class RecordingObserver : IClientConnectionObserver {
         public List<ClientConnection> Connected { get; } = [];

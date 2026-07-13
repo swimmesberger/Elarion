@@ -36,6 +36,7 @@
     <Project Path="src/Elarion.Connections/Elarion.Connections.csproj" />
     <Project Path="src/Elarion.Connections.AspNetCore/Elarion.Connections.AspNetCore.csproj" />
     <Project Path="src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj" />
+    <Project Path="src/Elarion.Connections.Testing/Elarion.Connections.Testing.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />
     <Project Path="src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />

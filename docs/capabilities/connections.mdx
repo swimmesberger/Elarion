@@ -254,6 +254,19 @@ with), and the subscription dies automatically when its connection unregisters. 
 SSE endpoint's HTTP mapping (unauthenticated / invalid / not-found — unknown and denied topics stay
 indistinguishable).
 
+## Testing and simulation
+
+`Elarion.Connections.Testing` ships the pieces every gateway test suite and device simulator otherwise
+hand-rolls. `TestClientConnection` is an in-memory sink double — register it with the real registry and
+drive twins, observers, and presence logic deterministically: await its `Sent` channel for outbound
+messages, answer `InvokeAsync` via `InvokeResponder`, and `Close()` it to assert your code survives
+`ClientConnectionClosedException`. `AwaitableConnectionObserver` turns lifecycle edges into awaitable
+completions (with `Reset()` for reconnect scenarios). `TcpTestClient` is the framed simulator client:
+connect it to a listener (or wrap the accepted side of a fake device an Elarion dialer reached) and
+speak whole messages through the endpoint's own framer, with text helpers for challenge/response
+handshakes. Codec-level tests stay on real adapters — loopback TCP or Kestrel + `ClientWebSocket` — the
+double covers the kernel tier.
+
 ## Putting it together — the device-gateway loop
 
 Connections are deliberately **not a fourth invocation model** — they're a carrier with identity.

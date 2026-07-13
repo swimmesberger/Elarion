@@ -254,6 +254,9 @@ adapter-tier requirements or explicit non-absorptions:
   (listen ↔ dial), and every endpoint **advertises its state** (`Statuses`/`StatusChanged`: bind failures
   surface as `Faulted` with the reason, dial retries as `Dialing` with the last error — operator-visible
   state, not just a log line) — both field requirements of the industrial gateway's binding model. BCL sockets only — no ASP.NET.
+- `Elarion.Connections.Testing` — the test/simulation tier both field gateways hand-rolled as
+  simulators: an in-memory sink double (valid *because* the contracts never assume a socket), awaitable
+  lifecycle observers, and a framed TCP simulator client over the same framer seam.
 - `Elarion.AspNetCore.SignalR` — **adopted whole, after the socket adapter**: one framework-owned hub
   adapting inbound to `HandlerDispatcher` and outbound to `IClientConnectionSink`, serialization bridged
   to canonical JSON, auth from the host's ASP.NET authentication at negotiate/connect. It contains every

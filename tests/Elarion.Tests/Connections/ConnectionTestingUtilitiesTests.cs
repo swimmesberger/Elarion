@@ -1,0 +1,110 @@
+using System.Net;
+using AwesomeAssertions;
+using Elarion.Abstractions.Connections;
+using Elarion.Connections;
+using Elarion.Connections.Tcp;
+using Elarion.Connections.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Xunit;
+
+namespace Elarion.Tests.Connections;
+
+/// <summary>
+/// Covers the shipped test utilities themselves: the synthetic sink's capture/invoke/close semantics
+/// (including registry integration — the no-socket-assumption property), and the framed
+/// <see cref="TcpTestClient"/> driving a real listener end to end.
+/// </summary>
+public sealed class ConnectionTestingUtilitiesTests {
+    [Fact]
+    public async Task TestClientConnection_CapturesSendsAnswersInvokes_AndFaultsAfterClose() {
+        var ct = TestContext.Current.CancellationToken;
+        var connection = new TestClientConnection(principalId: "dev-1") {
+            InvokeResponder = (name, request) => ValueTask.FromResult<object>($"{name}:{request}:ack"),
+        };
+
+        await connection.SendAsync("state.changed", new { Value = 1 }, ct);
+        (await connection.Sent.ReadAsync(ct)).Name.Should().Be("state.changed");
+
+        (await connection.InvokeAsync<string, string>("start", "now", ct: ct)).Should().Be("start:now:ack");
+
+        connection.Close();
+        var send = async () => await connection.SendAsync("late", new object(), ct);
+        await send.Should().ThrowAsync<ClientConnectionClosedException>();
+    }
+
+    [Fact]
+    public async Task TestClientConnection_RegistersWithTheRealRegistry() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
+        var registry = provider.GetRequiredService<IClientConnectionRegistry>();
+        var connection = new TestClientConnection(principalId: "dev-2");
+
+        await registry.RegisterAsync(connection, ct);
+
+        registry.GetForPrincipal("dev-2").Should().ContainSingle().Which.Should().BeSameAs(connection);
+        await registry.UnregisterAsync(connection.Connection.ConnectionId, ct);
+        registry.Connections.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TcpTestClient_CompletesAFramedHandshakeAndEcho() {
+        var ct = TestContext.Current.CancellationToken;
+        var framer = new DelimitedTcpFramer(end: (byte)'\n');
+        var bound = new TaskCompletionSource<IPEndPoint>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var services = new ServiceCollection();
+        services.AddElarionConnections();
+        services.AddSingleton<EchoHandler>();
+        services.AddElarionTcpConnectionListener<EchoHandler>(o => {
+            o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+            o.Framer = framer;
+            o.OnListening = bound.SetResult;
+        });
+        await using var provider = services.BuildServiceProvider();
+        var hosted = provider.GetServices<IHostedService>().ToArray();
+        foreach (var service in hosted) {
+            await service.StartAsync(ct);
+        }
+
+        try {
+            await using var client = await TcpTestClient.ConnectAsync(await bound.Task.WaitAsync(ct), framer, ct);
+            (await client.ReceiveTextAsync(ct)).Should().Be("challenge");
+            await client.SendTextAsync("device:sim-1", ct);
+            (await client.ReceiveTextAsync(ct)).Should().Be("welcome");
+
+            await client.SendTextAsync("ping", ct);
+            (await client.ReceiveTextAsync(ct)).Should().Be("echo:ping");
+        }
+        finally {
+            foreach (var service in hosted) {
+                await service.StopAsync(CancellationToken.None);
+            }
+        }
+    }
+
+    private sealed class EchoHandler : TcpConnectionHandler {
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+            TcpHandshakeContext handshake, CancellationToken ct) {
+            await handshake.SendTextAsync("challenge", ct);
+            var reply = await handshake.ReceiveTextAsync(ct);
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
+                return null;
+            }
+
+            await handshake.SendTextAsync("welcome", ct);
+            return new ClientConnectionTicket {
+                Principal = new System.Security.Claims.ClaimsPrincipal(
+                    new System.Security.Claims.ClaimsIdentity(authenticationType: "device")),
+                PrincipalId = reply["device:".Length..],
+            };
+        }
+
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
+            new EchoProtocol(connection);
+    }
+
+    private sealed class EchoProtocol(TcpClientConnection connection) : IClientConnectionProtocol {
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
+            connection.SendTextAsync("echo:" + System.Text.Encoding.UTF8.GetString(message.Span), ct);
+    }
+}
