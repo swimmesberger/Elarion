@@ -186,6 +186,112 @@ describe('JSON-RPC client generator', () => {
     expect(generated.clientSource).toContain('export function createRpcApi')
   })
 
+  it('preserves nullable array items in types and Zod schemas', () => {
+    const schema = {
+      methods: {
+        'nullable.items': {
+          params: {
+            type: 'object',
+            properties: {
+              tags: {
+                type: 'array',
+                items: { type: ['string', 'null'] },
+              },
+            },
+            required: ['tags'],
+          },
+          result: {
+            type: 'array',
+            items: { type: ['number', 'null'] },
+          },
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    // Item-level nullability survives: a legal ["a", null] element must validate.
+    expect(generated.typesSource).toContain('tags: (string | null | undefined)[]')
+    expect(generated.typesSource).toContain('result: (number | null | undefined)[]')
+    expect(generated.schemasSource).toContain('tags: z.array(z.string().nullish()),')
+    expect(generated.schemasSource).toContain('"nullable.items": z.array(z.number().nullish()),')
+  })
+
+  it('parenthesizes union item types in arrays', () => {
+    const schema = {
+      methods: {
+        'colors.list': {
+          params: {
+            type: 'object',
+            properties: {
+              colors: {
+                type: 'array',
+                items: { enum: ['red', 'green'] },
+              },
+            },
+            required: ['colors'],
+          },
+          result: { type: 'boolean' },
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    // Without parentheses this would parse as `"red" | ("green"[])`.
+    expect(generated.typesSource).toContain('colors: ("red" | "green")[]')
+  })
+
+  it('detects a property-level $ref cycle instead of overflowing the stack', () => {
+    const schema = {
+      methods: {
+        'cyclic.tree': {
+          params: { type: 'object', properties: {} },
+          result: {
+            type: 'object',
+            properties: {
+              a: { $ref: '#/properties/b' },
+              b: {
+                type: 'object',
+                properties: {
+                  back: { $ref: '#/properties/a' },
+                },
+              },
+            },
+          },
+        },
+      },
+    } satisfies RpcSchema
+
+    // The self-referential DTO shape STJ emits (pointer refs through properties) must raise the intended
+    // unsupported-schema error, not a RangeError from unbounded recursion.
+    expect(() => generateRpcClientFiles(schema)).toThrow(UnsupportedJsonSchemaError)
+    expect(() => generateRpcClientFiles(schema)).toThrow(/cyclic \$ref detected/)
+  })
+
+  it('orders emitted API properties by code units, independent of host locale', () => {
+    const schema = {
+      methods: {
+        'a.lower': {
+          params: { type: 'object', properties: {} },
+          result: { type: 'boolean' },
+        },
+        'B.upper': {
+          params: { type: 'object', properties: {} },
+          result: { type: 'boolean' },
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    // Code-unit order puts "B" (0x42) before "a" (0x61); localeCompare would flip them in most locales.
+    expect(generated.clientSource.indexOf('readonly "B"')).toBeGreaterThan(-1)
+    expect(generated.clientSource.indexOf('readonly "B"')).toBeLessThan(
+      generated.clientSource.indexOf('readonly "a"')
+    )
+  })
+
   it('strips top-level params and result nullability', () => {
     const schema = {
       methods: {
@@ -511,6 +617,71 @@ describe('JSON-RPC client generator', () => {
         name: 'RpcProtocolError',
         message: 'JSON-RPC response id does not match request id.',
       })
+  })
+
+  it('surfaces a null-id error response as the server error, not an id mismatch', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+
+    // Per JSON-RPC 2.0, request-level failures (e.g. parse errors) respond with "id": null.
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async () => jsonResponse({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32700, message: 'Parse error' },
+      }),
+      idGenerator: () => 'request-1',
+    })
+
+    await expect(client.call('math.add', { left: 1, right: 2 })).rejects.toMatchObject({
+      name: 'RpcError',
+      code: -32700,
+      message: 'Parse error',
+    })
+  })
+
+  it('surfaces a whole-batch error object as the server error, not a protocol error', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+
+    // JSON-RPC 2.0: a whole-batch failure is a single error response object instead of an array
+    // (Elarion's server sends this shape for "Batch too large").
+    const rpc = clientModule.createRpcApi({
+      url: 'https://example.test/rpc',
+      fetch: async () => jsonResponse({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32600, message: 'Batch too large' },
+      }),
+      idGenerator: () => 'request-1',
+    })
+
+    await expect(rpc.$batch([
+      rpc.$request.math.add({ left: 1, right: 2 }),
+    ] as const)).rejects.toMatchObject({
+      name: 'RpcError',
+      code: -32600,
+      message: 'Batch too large',
+    })
+  })
+
+  it('propagates a transform result of null instead of falling back to the raw value', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async (_input, init) => {
+        const request = JSON.parse(String(init?.body)) as { id: string }
+        return jsonResponse({ jsonrpc: '2.0', id: request.id, result: 3 })
+      },
+      idGenerator: () => 'request-1',
+      validateResults: false,
+      transformResult: () => null,
+    })
+
+    await expect(client.call('math.add', { left: 1, right: 2 })).resolves.toBeNull()
   })
 
   it('exposes Elarion app-error code getters on RpcError, matching the server AppErrorMapper', async () => {

@@ -316,7 +316,8 @@ function createTopicTreeNode(): TopicTreeNode {
 function emitProperties(node: TopicTreeNode, indent: number): string[] {
   const pad = '  '.repeat(indent)
   return Array.from(node.children.entries())
-    .sort(([left], [right]) => left.localeCompare(right))
+    // Code-unit comparison, never localeCompare: output must be byte-identical regardless of host locale.
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([segment, child]) => `${pad}readonly ${JSON.stringify(segment)}: ${emitNodeType(child, indent)}`)
 }
 

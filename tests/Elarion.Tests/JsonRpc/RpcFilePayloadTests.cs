@@ -106,4 +106,25 @@ public sealed class RpcFilePayloadTests {
         receipt.ContentType.Should().Be("text/plain");
         receipt.Size.Should().Be("hello upload"u8.Length);
     }
+
+    [Fact]
+    public async Task Dispatch_MalformedFileData_ReturnsInvalidParams() {
+        var (dispatcher, services) = Build();
+        await using var scope = services.CreateAsyncScope();
+
+        // A client typo in the base64 payload is invalid input (-32602), never an internal error (-32603).
+        var request = new JsonRpcRequest {
+            Jsonrpc = "2.0",
+            Method = "files.upload",
+            Params = JsonDocument.Parse(
+                """{"container":"invoices","file":{"contentType":"text/plain","data":"not base64!!!"}}""").RootElement,
+            Id = "1",
+        };
+
+        var response = await dispatcher.DispatchAsync(
+            request, scope.ServiceProvider, TestContext.Current.CancellationToken);
+
+        response.Error.Should().NotBeNull();
+        response.Error!.Code.Should().Be(-32602);
+    }
 }

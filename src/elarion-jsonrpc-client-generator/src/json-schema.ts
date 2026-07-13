@@ -45,11 +45,22 @@ export function stripNullable(schema: JsonSchema): JsonSchema {
   return copy
 }
 
-export function resolveSchema(schema: JsonSchema, ctx: SchemaContext): JsonSchema {
+export interface ResolvedSchema {
+  schema: JsonSchema
+  /**
+   * The context after resolution, carrying every `$ref` traversed to reach the schema. Recursion into
+   * properties/items must continue from this context (not the caller's), so a cycle that re-enters one of
+   * those refs through a property (the shape STJ emits for self-referential DTOs) is detected instead of
+   * overflowing the stack.
+   */
+  ctx: SchemaContext
+}
+
+export function resolveSchema(schema: JsonSchema, ctx: SchemaContext): ResolvedSchema {
   assertSupportedComposition(schema, ctx.path)
 
   if (!schema.$ref) {
-    return schema
+    return { schema, ctx }
   }
 
   if (!schema.$ref.startsWith('#/')) {
@@ -96,19 +107,19 @@ export function collectFilePaths(schema: JsonSchema, ctx: SchemaContext): string
 }
 
 function visitFileNodes(schema: JsonSchema, ctx: SchemaContext, prefix: string[], paths: string[][]): void {
-  const resolved = resolveSchema(schema, ctx)
+  const { schema: resolved, ctx: resolvedCtx } = resolveSchema(schema, ctx)
   if (resolved['x-elarion-file'] === true) {
     paths.push(prefix)
     return
   }
 
   if (resolved.items) {
-    visitFileNodes(stripNullable(resolved.items), childContext(ctx, 'items'), [...prefix, '*'], paths)
+    visitFileNodes(stripNullable(resolved.items), childContext(resolvedCtx, 'items'), [...prefix, '*'], paths)
   }
 
   if (resolved.properties) {
     for (const [key, property] of Object.entries(resolved.properties)) {
-      visitFileNodes(property, childContext(ctx, `properties.${key}`), [...prefix, key], paths)
+      visitFileNodes(property, childContext(resolvedCtx, `properties.${key}`), [...prefix, key], paths)
     }
   }
 }

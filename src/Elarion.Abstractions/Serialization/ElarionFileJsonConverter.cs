@@ -20,16 +20,20 @@ public sealed class ElarionFileJsonConverter : JsonConverter<ElarionFile> {
         string? fileName = null;
         byte[]? data = null;
 
+        // Malformed payloads must throw JsonException (never FormatException/InvalidOperationException) so
+        // transports classify them as invalid input (-32602) rather than an internal error.
         while (reader.Read() && reader.TokenType != JsonTokenType.EndObject) {
             if (reader.ValueTextEquals("contentType"u8)) {
                 reader.Read();
-                contentType = reader.GetString();
+                contentType = ReadStringOrNull(ref reader, "contentType");
             } else if (reader.ValueTextEquals("fileName"u8)) {
                 reader.Read();
-                fileName = reader.GetString();
+                fileName = ReadStringOrNull(ref reader, "fileName");
             } else if (reader.ValueTextEquals("data"u8)) {
                 reader.Read();
-                data = reader.GetBytesFromBase64();
+                if (reader.TokenType != JsonTokenType.String || !reader.TryGetBytesFromBase64(out data)) {
+                    throw new JsonException("An ElarionFile 'data' property must be a base64-encoded string.");
+                }
             } else {
                 reader.Read();
                 reader.Skip();
@@ -46,6 +50,13 @@ public sealed class ElarionFileJsonConverter : JsonConverter<ElarionFile> {
 
         return new ElarionFile(data, contentType) { FileName = fileName };
     }
+
+    private static string? ReadStringOrNull(ref Utf8JsonReader reader, string propertyName) =>
+        reader.TokenType switch {
+            JsonTokenType.String => reader.GetString(),
+            JsonTokenType.Null => null,
+            _ => throw new JsonException($"An ElarionFile '{propertyName}' property must be a string."),
+        };
 
     public override void Write(Utf8JsonWriter writer, ElarionFile value, JsonSerializerOptions options) {
         writer.WriteStartObject();

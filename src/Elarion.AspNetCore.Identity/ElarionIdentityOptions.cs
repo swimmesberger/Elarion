@@ -3,7 +3,7 @@ using Elarion.Identity;
 
 namespace Elarion.AspNetCore.Identity;
 
-/// <summary>Options for <see cref="ElarionIdentityServiceCollectionExtensions.AddElarionIdentity{TUser, TRole, TKey, TDbContext}"/>.</summary>
+/// <summary>Options for <see cref="ElarionIdentityServiceCollectionExtensions.AddElarionIdentity{TUser, TRole, TDbContext}"/>.</summary>
 public sealed class ElarionIdentityOptions {
     /// <summary>Whether to register Identity's default token providers (for password reset, 2FA, etc.). Defaults to <c>true</c>.</summary>
     public bool AddDefaultTokenProviders { get; set; } = true;
