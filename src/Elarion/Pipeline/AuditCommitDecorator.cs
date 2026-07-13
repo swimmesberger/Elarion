@@ -19,6 +19,9 @@ namespace Elarion.Pipeline;
 /// <see cref="AuditDecorator{TRequest,TResponse}"/> on the detached path. An idempotent replay short-circuits
 /// before this decorator, so a duplicate deliberately produces no second record. The success write runs with
 /// <see cref="CancellationToken.None"/>, mirroring the transaction decorator's uncancellable finalizing commit.
+/// The scope counts an enlisted record as recorded only once the sink reports durability
+/// (<see cref="Elarion.Abstractions.Auditing.AuditRecordDurability"/>): a commit-phase failure therefore
+/// leaves the scope unrecorded and falls through to the outer decorator's detached failure record.
 /// </remarks>
 public sealed class AuditCommitDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
@@ -33,10 +36,18 @@ public sealed class AuditCommitDecorator<TRequest, TResponse>(
         if (scope.IsActive && response is not IResultLike { IsSuccess: false }) {
             // The record is handed over as a factory: the sink flushes the handler's pending writes first (so
             // change capture contributes their diffs to the scope) and materializes the record only after.
-            await trail.RecordAsync(
+            var durability = await trail.RecordAsync(
                 () => scope.BuildRecord(AuditOutcome.Succeeded, errorKind: null),
                 CancellationToken.None).ConfigureAwait(false);
-            scope.MarkRecorded();
+
+            // "Recorded" must mean durable: an enlisted write only counts once its transaction commits (the
+            // sink's durability callback promotes the pending mark), so a commit-phase failure still reaches
+            // the outer decorator's detached path instead of leaving no audit trace at all.
+            if (durability is AuditRecordDurability.Durable) {
+                scope.MarkRecorded();
+            } else {
+                scope.MarkRecordPending();
+            }
         }
 
         return response;

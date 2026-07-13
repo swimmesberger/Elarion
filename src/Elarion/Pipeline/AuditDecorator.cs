@@ -14,6 +14,10 @@ namespace Elarion.Pipeline;
 /// outcome on the detached path (<see cref="IAuditTrail.RecordDetachedAsync"/>), which must survive the
 /// business transaction's rollback. Success records are written by <see cref="AuditCommitDecorator{TRequest,TResponse}"/>
 /// inside the transaction; the <see cref="AuditScope.Recorded"/> flag keeps the two paths exclusive.
+/// <see cref="AuditScope.Recorded"/> means <b>durably committed</b>: a commit-phase failure (connection
+/// drop, serialization conflict) leaves the scope unrecorded, so the detached <see cref="AuditOutcome.Failed"/>
+/// record is still written here — while an exception thrown <em>after</em> a successful commit (a later
+/// decorator, e.g. cache invalidation) sees the promoted flag and never fabricates a spurious failure record.
 /// </summary>
 /// <remarks>
 /// A failed result whose <see cref="ErrorKind"/> is <see cref="ErrorKind.Unauthorized"/> or

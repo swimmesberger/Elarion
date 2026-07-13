@@ -1,3 +1,4 @@
+using System.Data.Common;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Auditing;
@@ -7,6 +8,7 @@ using Elarion.Auditing.EntityFrameworkCore;
 using Elarion.EntityFrameworkCore.UnitOfWork;
 using Elarion.Pipeline;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -106,6 +108,58 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
         entry.Changes.Should().Contain("\"entity\":\"AuditedProperty\"");
     }
 
+    [Fact]
+    public async Task CommitPhaseFailure_RollsBackTheSuccessRecord_AndWritesTheDetachedFailedRecord() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var id = Guid.CreateVersion7();
+        await Seed(new AuditedProperty { Id = id, Name = "Liegenschaft", Street = "Old Street", Secret = "" });
+
+        // The unit-of-work COMMIT itself fails (the connection-drop/serialization-failure shape): the enlisted
+        // success record rolls back with the business write, and "Recorded" must not have been set — the outer
+        // decorator writes the detached Failed record instead of leaving no audit trace at all.
+        await using var host = Compose(new FailNextCommitInterceptor());
+        var act = async () => await host.Run(async (db, scope, ct) => {
+            var property = await db.Properties.SingleAsync(p => p.Id == id, ct);
+            property.Street = "New Street";
+            scope.SetResource("property", id.ToString());
+            return Result<string>.Success("ok");
+        });
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("commit lost");
+        await using var verify = fixture.CreateContext();
+        (await verify.Properties.SingleAsync(p => p.Id == id, Ct)).Street.Should().Be("Old Street");
+
+        var entry = await verify.AuditLog.SingleAsync(Ct);
+        entry.Outcome.Should().Be(nameof(AuditOutcome.Failed));
+        entry.ErrorKind.Should().Be(nameof(ErrorKind.Internal));
+        entry.ResourceId.Should().Be(id.ToString());
+    }
+
+    [Fact]
+    public async Task PostCommitDecoratorFailure_KeepsTheDurableSuccessRecord_WithoutASpuriousDetachedRecord() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var id = Guid.CreateVersion7();
+        await Seed(new AuditedProperty { Id = id, Name = "Liegenschaft", Street = "Old Street", Secret = "" });
+
+        // A decorator between the outer audit decorator and the transaction (the cache-invalidation position)
+        // throws AFTER the successful commit: the transaction interceptor already promoted the pending mark to
+        // Recorded, so exactly one Succeeded record exists — no spurious detached Failed duplicate.
+        await using var host = Compose();
+        var act = async () => await host.Run(async (db, scope, ct) => {
+            var property = await db.Properties.SingleAsync(p => p.Id == id, ct);
+            property.Street = "New Street";
+            scope.SetResource("property", id.ToString());
+            return Result<string>.Success("ok");
+        }, wrapTransaction: static inner => new ThrowAfterCommitDecorator(inner));
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        await using var verify = fixture.CreateContext();
+        (await verify.Properties.SingleAsync(p => p.Id == id, Ct)).Street.Should().Be("New Street");
+
+        var entry = await verify.AuditLog.SingleAsync(Ct);
+        entry.Outcome.Should().Be(nameof(AuditOutcome.Succeeded));
+    }
+
     private async Task Seed(AuditedProperty property) {
         await using var db = fixture.CreateContext();
         // The fixture database is shared across the class's tests — start each test from an empty log.
@@ -115,9 +169,47 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
         db.ChangeTracker.Clear();
     }
 
-    private ComposedHost Compose() => new(fixture.ConnectionString);
+    private ComposedHost Compose(IInterceptor? extraInterceptor = null) =>
+        new(fixture.ConnectionString, extraInterceptor);
 
     private sealed record DemoCommand : ICommand;
+
+    /// <summary>Fails exactly one transaction commit — the connection-drop-at-COMMIT shape. Subsequent
+    /// commits (and the detached write's autocommit save) proceed normally.</summary>
+    private sealed class FailNextCommitInterceptor : DbTransactionInterceptor {
+        private bool _failed;
+
+        public override InterceptionResult TransactionCommitting(
+            DbTransaction transaction, TransactionEventData eventData, InterceptionResult result) {
+            ThrowOnce();
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
+            CancellationToken cancellationToken = default) {
+            ThrowOnce();
+            return ValueTask.FromResult(result);
+        }
+
+        private void ThrowOnce() {
+            if (_failed)
+                return;
+
+            _failed = true;
+            throw new InvalidOperationException("commit lost");
+        }
+    }
+
+    /// <summary>The post-commit failure position: cache invalidation (or any later decorator) throwing after
+    /// the transaction decorator returned.</summary>
+    private sealed class ThrowAfterCommitDecorator(IHandler<DemoCommand, Result<string>> inner)
+        : IHandler<DemoCommand, Result<string>> {
+        public async ValueTask<Result<string>> HandleAsync(DemoCommand request, CancellationToken ct) {
+            await inner.HandleAsync(request, ct);
+            throw new TimeoutException("cache invalidation down");
+        }
+    }
 
     /// <summary>
     /// The real DI composition (<c>AddDbContext</c> + <c>AddElarionUnitOfWork</c> +
@@ -127,16 +219,22 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
     private sealed class ComposedHost : IAsyncDisposable {
         private readonly ServiceProvider _provider;
 
-        public ComposedHost(string connectionString) {
+        public ComposedHost(string connectionString, IInterceptor? extraInterceptor = null) {
             var services = new ServiceCollection();
-            services.AddDbContext<AuditIntegrationDbContext>(options => options.UseNpgsql(connectionString));
+            services.AddDbContext<AuditIntegrationDbContext>(options => {
+                options.UseNpgsql(connectionString);
+                if (extraInterceptor is not null) {
+                    options.AddInterceptors(extraInterceptor);
+                }
+            });
             services.AddElarionUnitOfWork<AuditIntegrationDbContext>();
             services.AddElarionAuditingEntityFrameworkCore<AuditIntegrationDbContext>();
             _provider = services.BuildServiceProvider();
         }
 
         public async Task<Result<string>> Run(
-            Func<AuditIntegrationDbContext, IAuditScope, CancellationToken, Task<Result<string>>> body) {
+            Func<AuditIntegrationDbContext, IAuditScope, CancellationToken, Task<Result<string>>> body,
+            Func<IHandler<DemoCommand, Result<string>>, IHandler<DemoCommand, Result<string>>>? wrapTransaction = null) {
             await using var scope = _provider.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AuditIntegrationDbContext>();
             var auditScope = scope.ServiceProvider.GetRequiredService<AuditScope>();
@@ -145,7 +243,14 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
 
             var handler = new DelegateHandler(db, auditScope, body);
             var commit = new AuditCommitDecorator<DemoCommand, Result<string>>(handler, auditScope, trail);
-            var transaction = new TransactionDecorator<DemoCommand, Result<string>>(commit, unitOfWork);
+            IHandler<DemoCommand, Result<string>> transaction =
+                new TransactionDecorator<DemoCommand, Result<string>>(commit, unitOfWork);
+            if (wrapTransaction is not null) {
+                // The position between the outer audit decorator and the transaction — where cache
+                // invalidation and other post-commit decorators live in the generated chain.
+                transaction = wrapTransaction(transaction);
+            }
+
             var metadata = new HandlerMetadata(typeof(DelegateHandler), typeof(DemoCommand), typeof(Result<string>));
             var outer = new AuditDecorator<DemoCommand, Result<string>>(
                 transaction, metadata, "properties.update", "Properties", auditScope, trail, currentUser: null);
