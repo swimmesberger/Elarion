@@ -1,7 +1,7 @@
 # ADR-0053: Bidirectional client connections — a transport-neutral connection seam; adapters adopted whole
 
-- Status: Accepted (foundation + WebSocket adapter shipped; SignalR adapter and a JSON-RPC-over-connection
-  protocol deliberately deferred until demand)
+- Status: Accepted (foundation + WebSocket and TCP adapters + conversation helpers + idle hook shipped;
+  SignalR adapter and a JSON-RPC-over-connection protocol deliberately deferred until demand)
 - Date: 2026-07-13
 - Related: [ADR-0044](0044-streaming-requests-and-responses.md) (pre-decided: bidirectional arrives as a
   whole transport over the dispatch seam, never grown default complexity),
@@ -205,6 +205,7 @@ adapter-tier requirements or explicit non-absorptions:
 - **Dial-out connections.** A gateway may *initiate* the TCP connection to the device (with
   reconnect/backoff), not just accept. The kernel is indifferent — registration is identical — but a TCP
   adapter must ship both listen and dial modes; "accept loop" generalizes to "establishment loop."
+  (Shipped: `Elarion.Connections.Tcp` has both, dial-out with jittered exponential backoff.)
 - **Synthetic connections are first-class.** The industrial gateway has a proxy tap that injects telegrams
   arriving via a side channel (no socket, no adapter framing). This works *because* the kernel contracts never assume a
   socket: any app object implementing `IClientConnectionSink` can register, observe, and bridge. Keep it
@@ -213,11 +214,15 @@ adapter-tier requirements or explicit non-absorptions:
   flows with terminal-observation semantics (wait-for-any, race, step sequences) over stateful send
   coordination (persisted sequence numbers, SYN re-sync, confirmation timeouts). None of that is
   absorbable without owning the protocol; it lives inside the codec/actor stack, for which the codec seam
-  is the mounting point. If a second project grows the same inbox primitives, an optional helper library
-  is the move — never foundation growth.
-- **Idle-hook candidate.** Both gateways generate protocol-level keepalives from an idle timer (20 s poll;
-  60 s DUM). Today that is a codec-owned timer; if the pattern keeps repeating, an optional per-connection
-  idle callback on the adapter options is a cheap future addition. Noted, not built.
+  is the mounting point. The kernel ships two **optional** conversation helpers both gateways hand-rolled —
+  `ConnectionInbox<TMessage>` (predicate waiters over buffered inbound messages, timeout, completion
+  faulting) and `ConnectionPendingRequests<TKey, TResponse>` (the sequence-number → completion map, the
+  natural backing for a codec's `InvokeAsync`) — helpers a codec may use, never machinery the foundation
+  requires.
+- **Idle hook.** Both gateways generate protocol-level keepalives from an idle timer (20 s poll; 60 s
+  DUM). Shipped as the optional `IdleTimeout` adapter option calling the codec's `OnIdleAsync` per elapsed
+  idle window (default no-op; throw there to declare the link dead) — the pending read is threaded across
+  idle ticks, never abandoned.
 
 ### Package layout and adapter rules (pre-decided)
 
@@ -233,6 +238,11 @@ adapter-tier requirements or explicit non-absorptions:
   codec + authenticator; the accept/register/bridge boilerplate becomes framework. Because it is a real
   second-dissimilar transport over the identical seams, it *is* the neutrality proof — the foundation is
   not done until it exists.
+- `Elarion.Connections.Tcp` — the raw-socket adapter for proprietary device protocols: hosted **listener**
+  and **dial-out** (jittered exponential reconnect) services over the same handler/codec seams; because
+  TCP has no message boundaries, the adapter owns a framing seam (`TcpMessageFramer`) with
+  length-prefixed and delimited-text built-ins, so codecs still receive complete messages. BCL sockets
+  only — no ASP.NET.
 - `Elarion.AspNetCore.SignalR` — **adopted whole, after the socket adapter**: one framework-owned hub
   adapting inbound to `HandlerDispatcher` and outbound to `IClientConnectionSink`, serialization bridged
   to canonical JSON, auth from the host's ASP.NET authentication at negotiate/connect. It contains every
@@ -274,9 +284,11 @@ follow-up once one adapter is real.
 - Nothing ships with this ADR; it fixes the litmus test and the foundation contract so implementation can
   proceed as stacked PRs: contracts → `Elarion.Connections` kernel + client-events bridge →
   `HandlerTransports.Connection` gating → `Elarion.Connections.AspNetCore` (the device-shaped WebSocket
-  adapter, doubling as the seam-validation exercise) → `Elarion.AspNetCore.SignalR` — in that order. The
-  socket adapter moved ahead of SignalR when a real IoT consumer (device gateways over WSS with
-  proprietary payloads) showed it is the higher-demand transport.
+  adapter, doubling as the seam-validation exercise) → `Elarion.Connections.Tcp` → `Elarion.AspNetCore.SignalR`
+  — in that order. The socket adapters moved ahead of SignalR when real IoT consumers (device gateways
+  over WSS and raw TCP with proprietary payloads) showed they are the higher-demand transports; the TCP
+  adapter also completes the seam validation with a second dissimilar transport over unchanged kernel
+  contracts.
 - SignalR becomes *available* to consuming apps without ever becoming the default: SSE + JSON-RPC remains
   the shipped happy path; the connection tier is opt-in by package reference, and the doctrine section is
   the review checklist for reaching for it.

@@ -11,7 +11,15 @@ public sealed class ElarionConnectionSocketOptions {
 
     /// <summary>
     /// The transport-level keep-alive ping interval; <see langword="null"/> uses the server default.
-    /// Protocol-level keepalives (a device poll cadence) are the codec's business, not this knob.
+    /// Protocol-level keepalives (a device poll cadence) are the codec's business — see
+    /// <see cref="IdleTimeout"/>.
     /// </summary>
     public TimeSpan? KeepAliveInterval { get; set; }
+
+    /// <summary>
+    /// When set, the codec's <c>OnIdleAsync</c> is called each time this window elapses with no inbound
+    /// message — the hook for protocol-level keepalives (send the poll frame there) or dead-link detection
+    /// (throw there to close). <see langword="null"/> (the default) never calls it.
+    /// </summary>
+    public TimeSpan? IdleTimeout { get; set; }
 }

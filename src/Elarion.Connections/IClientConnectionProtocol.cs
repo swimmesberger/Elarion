@@ -32,6 +32,15 @@ public interface IClientConnectionProtocol {
     ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
         throw new NotSupportedException("This protocol does not accept binary messages.");
 
+    /// <summary>
+    /// Called when no inbound message arrived within the adapter's configured idle window (and again per
+    /// elapsed window while the connection stays idle) — the mounting point for protocol-level keepalives:
+    /// send the poll/heartbeat frame from here, or throw to end a connection you consider dead. Never
+    /// called unless the adapter's idle option is set; the default is a no-op.
+    /// </summary>
+    /// <param name="ct">The connection's lifetime token.</param>
+    ValueTask OnIdleAsync(CancellationToken ct) => ValueTask.CompletedTask;
+
     /// <summary>The codec behind <see cref="IClientConnectionSink.SendAsync"/> — encode and send a named
     /// payload. Codecs without a named-payload concept keep the fail-loud default.</summary>
     ValueTask SendAsync<TPayload>(string name, TPayload payload, CancellationToken ct) where TPayload : class =>

@@ -92,7 +92,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
 
         await registry.RegisterAsync(connection, ct);
         try {
-            await ReceiveLoopAsync(connection, reader, ct);
+            await ReceiveLoopAsync(connection, reader, options.IdleTimeout, ct);
             await CloseSafelyAsync(socket, WebSocketCloseStatus.NormalClosure, "closing", ct);
         }
         catch (WebSocketMessageTooLargeException) {
@@ -119,9 +119,25 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
     }
 
     private static async Task ReceiveLoopAsync(
-        WebSocketClientConnection connection, WebSocketMessageReader reader, CancellationToken ct) {
+        WebSocketClientConnection connection, WebSocketMessageReader reader, TimeSpan? idleTimeout,
+        CancellationToken ct) {
+        // The pending read is threaded across idle ticks — an idle callback must not abandon it (a second
+        // concurrent receive on one socket is invalid), mirroring the SSE keep-alive pattern.
+        Task<WebSocketInboundMessage?>? pendingRead = null;
         while (true) {
-            var message = await reader.ReadAsync(ct);
+            pendingRead ??= reader.ReadAsync(ct).AsTask();
+            if (idleTimeout is { } window) {
+                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var winner = await Task.WhenAny(pendingRead, Task.Delay(window, delayCts.Token));
+                if (winner != pendingRead) {
+                    await connection.Protocol.OnIdleAsync(ct);
+                    continue;
+                }
+                delayCts.Cancel();
+            }
+
+            var message = await pendingRead;
+            pendingRead = null;
             if (message is null) {
                 return;
             }

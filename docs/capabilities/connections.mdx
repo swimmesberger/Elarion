@@ -114,6 +114,76 @@ var status = await sink.InvokeAsync<StatusQuery, StatusReply>(
 Multi-message protocol conversations (sequence numbers, re-synchronisation, wait-for-any flows) are
 codec/actor state; the codec seam is their mounting point, not their replacement.
 
+## The TCP endpoints
+
+`Elarion.Connections.Tcp` runs the same handler/codec seams over raw sockets (BCL only, no ASP.NET) —
+the shape for devices that speak a proprietary protocol and can't do WebSockets. Because TCP has no
+message boundaries, the adapter owns a **framing seam**: pick `LengthPrefixedTcpFramer` (binary),
+`DelimitedTextTcpFramer` (line/telegram framing — an optional start delimiter skips serial-bridge line
+noise), or implement `TcpMessageFramer` for the vendor's format. Codecs still receive complete
+messages, unchanged.
+
+```csharp
+// Devices dial in:
+builder.Services.AddElarionTcpConnectionListener<GatewaySocketHandler2>(o => {
+    o.ListenEndPoint = new IPEndPoint(IPAddress.Any, 7010);
+    o.Framer = new DelimitedTextTcpFramer(end: (byte)'>', start: (byte)'<');
+    o.IdleTimeout = TimeSpan.FromSeconds(60);
+});
+
+// Or the gateway dials the device and keeps the link alive (jittered exponential reconnect):
+builder.Services.AddElarionTcpConnectionDialer<DeviceLinkHandler>(o => {
+    o.Host = "10.0.40.17";
+    o.Port = 2101;
+    o.Framer = new LengthPrefixedTcpFramer();
+});
+```
+
+Each `Add…` call is one endpoint — listen on several ports (one per device channel type) or dial
+several devices, each with its own handler, framer, and options. The handler subclasses
+`TcpConnectionHandler`; device protocols with no credential exchange ticket straight from
+`handshake.RemoteEndPoint`/binding configuration.
+
+## Keepalives and conversations
+
+Two optional pieces cover what every device codec otherwise hand-rolls:
+
+- **The idle hook.** Set `IdleTimeout` on any adapter and the codec's `OnIdleAsync` fires per elapsed
+  window without inbound traffic — send the protocol's poll/heartbeat there, or throw to declare the
+  link dead. Default is off; the hook never abandons the pending read.
+- **Conversation helpers** (in the kernel, use only if they fit):
+  `ConnectionPendingRequests<TKey, TResponse>` is the sequence-number → completion map behind a codec's
+  `InvokeAsync` — register the key, send, await the correlated reply with a timeout, `FailAll` on
+  teardown. `ConnectionInbox<TMessage>` serves multi-message flows: the receive path `Post`s every
+  parsed message, flow code awaits the next message matching a predicate ("the ready frame or the abort
+  frame"), buffered so a fast reply beats its waiter safely, and `Complete` faults everything when the
+  connection ends.
+
+```csharp
+internal sealed class DeviceCodec(TcpClientConnection connection) : IClientConnectionProtocol {
+    private readonly ConnectionPendingRequests<ushort, DeviceFrame> _pending = new();
+
+    public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+        var frame = DeviceFrame.Parse(message.Span);
+        return _pending.TryComplete(frame.Sequence, frame)
+            ? ValueTask.CompletedTask
+            : HandleUnsolicitedAsync(frame, ct);              // telemetry, events, …
+    }
+
+    public async ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
+        string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct)
+        where TRequest : class {
+        var sequence = NextSequence();
+        var reply = _pending.WaitAsync(sequence, options?.Timeout ?? TimeSpan.FromSeconds(5), ct);
+        await connection.SendBinaryAsync(DeviceFrame.Encode(sequence, name, request), ct);
+        return Decode<TResponse>(await reply);
+    }
+
+    public ValueTask OnIdleAsync(CancellationToken ct) =>
+        connection.SendBinaryAsync(DeviceFrame.Poll(), ct);   // the 60 s keepalive
+}
+```
+
 ## Client events over a connection
 
 A connection can serve the same topics the SSE endpoint serves — same catalog, same fail-closed
