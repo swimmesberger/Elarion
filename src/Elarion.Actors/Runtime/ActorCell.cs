@@ -156,8 +156,17 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
                 $"Mailbox of actor '{_actorName}' ({_keyText}) is full (capacity {_options.MailboxCapacity}).");
         }
 
+        // Bound the wait by the item's invocation token (call timeout + caller cancellation) so a
+        // full Wait-mode mailbox behind a stuck turn cannot hang the facade call past its
+        // CallTimeout — the exact scenario the deadlock backstop exists for. A cancelled WriteAsync
+        // never writes, so a timed-out enqueue can never land in the mailbox and execute later.
+        var waitToken = item.InvocationToken;
+        if (!waitToken.CanBeCanceled) {
+            waitToken = cancellationToken;
+        }
+
         try {
-            await _mailbox.Writer.WriteAsync(item, cancellationToken).ConfigureAwait(false);
+            await _mailbox.Writer.WriteAsync(item, waitToken).ConfigureAwait(false);
             return true;
         }
         catch (ChannelClosedException) {
@@ -189,12 +198,14 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
     private async Task RunAsync() {
         var scope = _scopeFactory.CreateAsyncScope();
         TActor instance;
+        ActorStateTracker? states;
         try {
             instance = _activator(scope.ServiceProvider);
             // Load persisted snapshots (ADR-0047) before OnActivateAsync so the hook and the first
             // message both observe durable state; a load failure fails the activation like any
-            // other activation error.
-            var states = scope.ServiceProvider.GetService<ActorStateTracker>();
+            // other activation error. The tracker is also each turn's snapshot-conflict provenance:
+            // only a conflict raised by THIS activation's own state slots is transparently retried.
+            states = scope.ServiceProvider.GetService<ActorStateTracker>();
             if (states is { HasStates: true }) {
                 await states.LoadAllAsync(_stoppingCts.Token).ConfigureAwait(false);
             }
@@ -217,11 +228,19 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
         StartIdleTimer();
         try {
             if (_options.Reentrant) {
-                await RunReentrantAsync(instance).ConfigureAwait(false);
+                await RunReentrantAsync(instance, states).ConfigureAwait(false);
             }
             else {
-                await RunSequentialAsync(instance).ConfigureAwait(false);
+                await RunSequentialAsync(instance, states).ConfigureAwait(false);
             }
+        }
+        catch (Exception ex) {
+            // The pump must never die leaving a live mailbox behind: close the cell and fail every
+            // queued item so no caller hangs on a dead mailbox (new enqueues observe the closed
+            // cell and retry against a fresh activation).
+            _logger.LogError(
+                ex, "Message pump of actor {Actor} ({ActorKey}) failed; failing queued calls.", _actorName, _keyText);
+            FailPendingItems(ex);
         }
         finally {
             // The pending count is drained (writer completed, mailbox empty) and every
@@ -274,14 +293,14 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
         }
     }
 
-    private async Task RunSequentialAsync(TActor instance) {
+    private async Task RunSequentialAsync(TActor instance, ActorStateTracker? states) {
         await foreach (var item in _mailbox.Reader.ReadAllAsync().ConfigureAwait(false)) {
-            OnTurnFinished(item, await item.RunAsync(instance, this, _stoppingCts.Token).ConfigureAwait(false));
+            OnTurnFinished(item, await item.RunAsync(instance, this, states, _stoppingCts.Token).ConfigureAwait(false));
             OnItemCompleted();
         }
     }
 
-    private async Task RunReentrantAsync(TActor instance) {
+    private async Task RunReentrantAsync(TActor instance, ActorStateTracker? states) {
         // Orleans-style turns: the initial segment of every message and each of its await
         // continuations run on the exclusive scheduler, so turns from different messages interleave
         // at await points but never execute in parallel.
@@ -289,7 +308,7 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
         var inFlight = new List<Task>();
         await foreach (var item in _mailbox.Reader.ReadAllAsync().ConfigureAwait(false)) {
             var run = Task.Factory.StartNew(
-                () => item.RunAsync(instance, this, _stoppingCts.Token).AsTask(),
+                () => item.RunAsync(instance, this, states, _stoppingCts.Token).AsTask(),
                 CancellationToken.None,
                 TaskCreationOptions.DenyChildAttach,
                 schedulerPair.ExclusiveScheduler).Unwrap();
@@ -299,6 +318,13 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
                     var cell = (ActorCell<TActor>)state!;
                     if (task.Status == TaskStatus.RanToCompletion) {
                         cell.OnTurnFinished(currentItem, task.Result);
+                    }
+                    else {
+                        // A turn task must never fault (RunAsync has its own catch-all), but if a
+                        // runtime bug slips through the caller must not hang on a lost turn and the
+                        // fault must be observed (reading Exception prevents UnobservedTaskException).
+                        currentItem.TryFail(
+                            task.Exception?.GetBaseException() ?? new TaskCanceledException(task));
                     }
 
                     cell.OnItemCompleted();
@@ -318,15 +344,21 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
     }
 
     private async Task FailAllAsync(Exception exception, AsyncServiceScope scope) {
+        FailPendingItems(exception);
+        await scope.DisposeAsync().ConfigureAwait(false);
+        _onClosed(this);
+    }
+
+    // Closes the cell and fails every queued item, so callers observe the failure instead of
+    // hanging on a mailbox nobody reads anymore. In-flight Wait-mode enqueues observe the completed
+    // writer (ChannelClosedException) and retry against a fresh activation.
+    private void FailPendingItems(Exception exception) {
         Close();
         _mailbox.Writer.TryComplete();
         while (_mailbox.Reader.TryRead(out var item)) {
             item.TryFail(exception);
             ActorTelemetry.RecordDequeued(_actorName);
         }
-
-        await scope.DisposeAsync().ConfigureAwait(false);
-        _onClosed(this);
     }
 
     private void StartIdleTimer() {
@@ -380,6 +412,9 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
         }
     }
 
+    // No finalizer by design: an abandoned (never-disposed) retention pins the activation against
+    // idle passivation for the rest of the process lifetime. ActorStreams ties every retention to
+    // an enumeration's lifetime, so disposing enumerators is the consumer's obligation.
     private sealed class StreamRetention(ActorCell<TActor> cell) : IDisposable {
         private int _disposed;
 

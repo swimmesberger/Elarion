@@ -43,8 +43,16 @@ public abstract class ActorWorkItem<TActor> where TActor : class {
         TimeProvider timeProvider,
         CancellationToken callerToken);
 
+    /// <summary>
+    /// The per-call invocation token (call timeout + caller cancellation), armed by
+    /// <see cref="Initialize"/>; <see cref="CancellationToken.None"/> when neither applies. The cell
+    /// bounds a Wait-mode bounded-mailbox enqueue with it, so a full mailbox behind a stuck turn
+    /// cannot hang a facade call past its <c>CallTimeout</c>.
+    /// </summary>
+    internal abstract CancellationToken InvocationToken { get; }
+
     internal abstract ValueTask<ActorTurnOutcome> RunAsync(
-        TActor actor, IActorActivationRetainer? retainer, CancellationToken stopping);
+        TActor actor, IActorActivationRetainer? retainer, ActorStateTracker? states, CancellationToken stopping);
 
     internal abstract void TryFail(Exception exception);
 
@@ -102,6 +110,8 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     private IActorActivationRetainer? _retainer;
 
     internal Task<TResult> Completion => _completion.Task;
+
+    internal override CancellationToken InvocationToken => _invocationCts?.Token ?? default;
 
     /// <summary>Invokes the actor method with the already-stored arguments.</summary>
     protected abstract ValueTask<TResult> InvokeAsync(TActor actor, CancellationToken cancellationToken);
@@ -165,7 +175,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     }
 
     internal override async ValueTask<ActorTurnOutcome> RunAsync(
-        TActor actor, IActorActivationRetainer? retainer, CancellationToken stopping) {
+        TActor actor, IActorActivationRetainer? retainer, ActorStateTracker? states, CancellationToken stopping) {
         _retainer = retainer;
         // Canceled or timed out while queued: skip execution entirely.
         if (_completion.Task.IsCompleted) {
@@ -208,7 +218,14 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
                 outcome = "abandoned";
             }
         }
-        catch (OperationCanceledException oce) {
+        catch (OperationCanceledException oce) when (
+            _invocationCts is { IsCancellationRequested: true }
+            || stopping.IsCancellationRequested
+            || _callerToken.IsCancellationRequested) {
+            // Only an OCE matching an actually-cancelled source is benign cancellation; any other
+            // OCE (e.g. HttpClient's internal timeout) falls through to the fault branch below so
+            // it keeps its actor-side stack instead of masquerading as a canceled call.
+            //
             // The method observed the invocation token — attribute the cancellation here instead of
             // racing the attribution registration: a timeout must surface as TimeoutException even
             // when this catch runs before that callback.
@@ -226,7 +243,11 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
                 activity.AddException(ex);
             }
 
-            if (ex is ActorSnapshotConcurrencyException) {
+            // The transparent retry only applies to THIS activation's own conflict (provenance =
+            // this scope's state tracker). A conflict re-thrown out of a nested actor call is a
+            // foreign fault: re-running this turn would double-apply its already-committed writes.
+            if (ex is ActorSnapshotConcurrencyException conflict
+                && states is not null && ReferenceEquals(conflict.Origin, states)) {
                 ActorTelemetry.RecordSnapshotConflict(_actorName);
                 if (!_snapshotRetryAttempted && !_completion.Task.IsCompleted) {
                     // Greenfield conflict semantics (ADR-0047): the caller is NOT completed. The
@@ -275,6 +296,14 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     }
 
     internal override void Abandon() {
+        // A Wait-mode bounded enqueue cancelled by the invocation token must complete the caller
+        // with the same outcome the backstop produces during execution (TimeoutException for the
+        // call timeout, canceled for the caller's token) — attribute deterministically here instead
+        // of racing the attribution registration.
+        if (_invocationCts is { IsCancellationRequested: true }) {
+            OnInvocationCanceled();
+        }
+
         // Canceled (not faulted) so an item dropped before enqueue never surfaces as an unobserved
         // task exception — the caller already got the enqueue failure directly.
         _completion.TrySetCanceled(CancellationToken.None);
@@ -309,8 +338,15 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
 
         // The actor is done with this item and the caller already holds its Task, so a pooling
         // subclass may return itself for reuse now. Runs on every terminal path (result, cancel,
-        // timeout, abandon, fail).
-        Recycle();
+        // timeout, abandon, fail). A throwing override must never escape into the cell's pump loop
+        // (it would kill the mailbox), so the failure is swallowed — the item is simply garbage
+        // instead of returning to its pool.
+        try {
+            Recycle();
+        }
+        catch {
+            // Deliberately swallowed: recycling is a best-effort optimization.
+        }
     }
 
     /// <summary>

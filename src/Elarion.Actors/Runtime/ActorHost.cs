@@ -55,6 +55,18 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
 
             var cell = _cells.GetOrAdd(typedKey, static (k, host) => host.CreateCell(k), this);
             cell.EnsureStarted();
+            // Re-check after the GetOrAdd/start: StopAsync may have set _stopping and snapshotted
+            // the cell map between the check at the top of the loop and this insert, in which case
+            // the fresh cell escaped the shutdown drain fan-out. Drain it here (graceful — anything
+            // a racer already enqueued still runs, OnDeactivateAsync runs, the DI scope is
+            // disposed) and reject like the pre-check does, so no activation outlives shutdown.
+            if (_stopping) {
+                _cells.TryRemove(new KeyValuePair<TKey, ActorCell<TActor>>(typedKey, cell));
+                await cell.StopAsync(CancellationToken.None).ConfigureAwait(false);
+                throw new InvalidOperationException(
+                    $"The actor system is stopping; call to actor '{Name}' ({typedKey}) rejected.");
+            }
+
             if (await cell.TryEnqueueAsync(item, cancellationToken).ConfigureAwait(false)) {
                 return;
             }

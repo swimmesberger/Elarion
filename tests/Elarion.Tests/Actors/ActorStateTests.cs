@@ -112,6 +112,32 @@ public sealed class ActorStateTests {
     }
 
     [Fact]
+    public async Task ForeignSnapshotConflict_FromANestedActorCall_FaultsTheOuterTurn_WithoutRetry() {
+        var store = new FakeSnapshotStore();
+        await using var provider = CreateProvider(store);
+        var turns = provider.GetRequiredService<OrchestratorTurns>();
+        var orchestrator = provider.GetRequiredService<IActorSystem>().Get<IOrchestrator>("o");
+
+        // Every vault write conflicts: the vault spends its own transparent retry, then the
+        // conflict propagates into the orchestrator's turn as the vault call's failure.
+        store.FailWritesWithConflict = true;
+
+        var act = async () => await orchestrator.DepositViaVault(1, TestToken);
+        await act.Should().ThrowAsync<ActorSnapshotConcurrencyException>();
+
+        // The conflict's provenance is the vault's activation, not the orchestrator's, so the
+        // outer turn ran exactly once (retrying it would double-apply its side effects) and only
+        // the vault's own two attempts hit the store.
+        turns.Count.Should().Be(1);
+        store.WriteAttempts.Should().Be(2);
+
+        // The orchestrator activation was not poisoned: it keeps serving once the store recovers.
+        store.FailWritesWithConflict = false;
+        (await orchestrator.DepositViaVault(2, TestToken)).Should().Be(2);
+        turns.Count.Should().Be(2);
+    }
+
+    [Fact]
     public async Task Clear_DeletesTheSnapshotAndResetsState() {
         var store = new FakeSnapshotStore();
         await using var provider = CreateProvider(store);
@@ -182,10 +208,19 @@ public sealed class ActorStateTests {
         services.AddSingleton<TimeProvider>(timeProvider ?? TimeProvider.System);
         services.AddSingleton(observations ?? new ActivationObservations());
         services.AddSingleton<IActorSnapshotStore>(store);
+        services.AddSingleton<OrchestratorTurns>();
         services.AddElarionJson();
         services.ConfigureElarionJson(options => options.TypeInfoResolvers.Add(ActorStateTestContext.Default));
         services.AddElarionActorSystem();
         AddVaultActor(services);
+        services.AddElarionActor(new ActorRegistration<OrchestratorActor, string, IOrchestrator> {
+            Name = "Orchestrator",
+            Options = new ActorOptions(),
+            Activator = static (serviceProvider, _) => new OrchestratorActor(
+                serviceProvider.GetRequiredService<IActorSystem>(),
+                serviceProvider.GetRequiredService<OrchestratorTurns>()),
+            Facade = static handle => new OrchestratorFacade(handle)
+        });
         return services.BuildServiceProvider();
     }
 
@@ -325,6 +360,39 @@ public sealed class ActorStateTests {
                 await actor.WriteEmpty(cancellationToken).ConfigureAwait(false);
                 return true;
             }
+        }
+    }
+
+    // --- Orchestrator (a stateless actor whose turn calls the vault — nested-conflict probe) ---
+
+    public sealed class OrchestratorTurns {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Record() => Interlocked.Increment(ref _count);
+    }
+
+    public interface IOrchestrator : IActorFacade<string> {
+        ValueTask<int> DepositViaVault(int amount, CancellationToken cancellationToken = default);
+    }
+
+    public sealed class OrchestratorActor(IActorSystem actors, OrchestratorTurns turns) {
+        public async Task<int> DepositViaVault(int amount, CancellationToken cancellationToken) {
+            turns.Record();
+            return await actors.Get<IVault>("a").Deposit(amount, cancellationToken);
+        }
+    }
+
+    private sealed class OrchestratorFacade(ActorHandle<OrchestratorActor> handle) : IOrchestrator {
+        public ValueTask<int> DepositViaVault(int amount, CancellationToken cancellationToken = default) =>
+            handle.InvokeAsync(new DepositViaVaultItem(amount), cancellationToken);
+
+        private sealed class DepositViaVaultItem(int amount) : ActorWorkItem<OrchestratorActor, int> {
+            public override string MethodName => "DepositViaVault";
+
+            protected override async ValueTask<int> InvokeAsync(OrchestratorActor actor, CancellationToken cancellationToken) =>
+                await actor.DepositViaVault(amount, cancellationToken).ConfigureAwait(false);
         }
     }
 
