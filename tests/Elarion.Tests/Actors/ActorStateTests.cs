@@ -32,10 +32,12 @@ public sealed class ActorStateTests {
         var stored = store.Get(new ActorSnapshotKey("Vault", "a"));
         stored.Should().NotBeNull();
         stored!.Value.Payload.Should().Contain("5");
-        stored.Value.Version.Should().Be(1);
+        // The create minted this lineage's starting version; subsequent writes increment it.
+        var lineageVersion = stored.Value.Version;
+        lineageVersion.Should().BePositive();
 
         (await vault.Deposit(3, TestToken)).Should().Be(8);
-        store.Get(new ActorSnapshotKey("Vault", "a"))!.Value.Version.Should().Be(2);
+        store.Get(new ActorSnapshotKey("Vault", "a"))!.Value.Version.Should().Be(lineageVersion + 1);
     }
 
     [Fact]
@@ -149,9 +151,31 @@ public sealed class ActorStateTests {
         store.Get(new ActorSnapshotKey("Vault", "a")).Should().BeNull();
         (await vault.Describe(TestToken)).Should().Be("empty");
 
-        // A write after clear creates a fresh version-1 snapshot.
+        // A write after clear creates a fresh snapshot under a freshly minted lineage version.
         await vault.Deposit(2, TestToken);
-        store.Get(new ActorSnapshotKey("Vault", "a"))!.Value.Version.Should().Be(1);
+        store.Get(new ActorSnapshotKey("Vault", "a"))!.Value.Version.Should().BePositive();
+    }
+
+    [Fact]
+    public async Task StaleETagFromAClearedLineage_NeverMatchesTheRecreatedSnapshot() {
+        // The ABA regression: activation A observes an ETag, then someone clears and re-creates the
+        // snapshot. A constant create version (the old "always 1") could hand the new lineage the
+        // very version A still holds, letting A's guarded write silently overwrite a snapshot it
+        // never saw. Lineage-unique minting makes that write fail loudly instead.
+        var store = new FakeSnapshotStore();
+        var key = new ActorSnapshotKey("Vault", "a");
+        var staleETag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+
+        // A second party swaps the whole lineage: clear, then re-create with different state.
+        await store.ClearAsync(key, staleETag, TestToken);
+        var newETag = await store.WriteAsync(key, """{"balance":100}""", expectedETag: null, TestToken);
+        newETag.Should().NotBe(staleETag);
+
+        var act = async () => await store.WriteAsync(key, """{"balance":2}""", staleETag, TestToken);
+        await act.Should().ThrowAsync<ActorSnapshotConcurrencyException>();
+
+        // The new lineage's snapshot is untouched by the stale writer.
+        (await store.ReadAsync(key, TestToken))!.Payload.Should().Contain("100");
     }
 
     [Fact]
@@ -396,8 +420,12 @@ public sealed class ActorStateTests {
         }
     }
 
-    /// <summary>An in-memory store with the seam's exact ETag semantics (versions as invariant text).</summary>
-    private sealed class FakeSnapshotStore : IActorSnapshotStore {
+    /// <summary>
+    /// An in-memory store with the seam's exact ETag semantics: versions as invariant text, minted
+    /// lineage-unique at create (never a constant) so a tag from a cleared lineage can never match
+    /// a re-created snapshot — the ABA guard the contract requires of every provider.
+    /// </summary>
+    internal sealed class FakeSnapshotStore : IActorSnapshotStore {
         private readonly ConcurrentDictionary<ActorSnapshotKey, (string Payload, long Version)> _rows = new();
         private int _writeAttempts;
 
@@ -408,7 +436,9 @@ public sealed class ActorStateTests {
         public (string Payload, long Version)? Get(ActorSnapshotKey key) =>
             _rows.TryGetValue(key, out var row) ? row : null;
 
-        public void Seed(ActorSnapshotKey key, string payload) => _rows[key] = (payload, 1);
+        public void Seed(ActorSnapshotKey key, string payload) => _rows[key] = (payload, MintLineageVersion());
+
+        private static long MintLineageVersion() => Random.Shared.NextInt64(1, long.MaxValue >> 1);
 
         public void BumpVersion(ActorSnapshotKey key) {
             var row = _rows[key];
@@ -436,11 +466,12 @@ public sealed class ActorStateTests {
             }
 
             if (expectedETag is null) {
-                if (!_rows.TryAdd(key, (payload, 1))) {
+                var version = MintLineageVersion();
+                if (!_rows.TryAdd(key, (payload, version))) {
                     throw new ActorSnapshotConcurrencyException(key, expectedETag: null);
                 }
 
-                return ValueTask.FromResult("1");
+                return ValueTask.FromResult(version.ToString(CultureInfo.InvariantCulture));
             }
 
             var expectedVersion = long.Parse(expectedETag, CultureInfo.InvariantCulture);

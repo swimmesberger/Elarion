@@ -1,3 +1,4 @@
+using System.Globalization;
 using AwesomeAssertions;
 using Elarion.Abstractions.Serialization;
 using Elarion.Actors;
@@ -21,11 +22,12 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         var key = NewKey();
 
         var etag = await store.WriteAsync(key, """{"balance":5}""", expectedETag: null, TestToken);
-        etag.Should().Be("1");
+        // The create mints a lineage-unique positive version, rendered as invariant text.
+        long.Parse(etag, CultureInfo.InvariantCulture).Should().BePositive();
 
         var snapshot = await store.ReadAsync(key, TestToken);
         snapshot.Should().NotBeNull();
-        snapshot!.ETag.Should().Be("1");
+        snapshot!.ETag.Should().Be(etag);
         snapshot.Payload.Should().Contain("\"balance\"");
     }
 
@@ -60,12 +62,13 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
         var etag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+        var lineageVersion = long.Parse(etag, CultureInfo.InvariantCulture);
 
         etag = await store.WriteAsync(key, """{"balance":2}""", etag, TestToken);
-        etag.Should().Be("2");
+        etag.Should().Be((lineageVersion + 1).ToString(CultureInfo.InvariantCulture));
 
         var snapshot = await store.ReadAsync(key, TestToken);
-        snapshot!.ETag.Should().Be("2");
+        snapshot!.ETag.Should().Be(etag);
         snapshot.Payload.Should().Contain("2");
     }
 
@@ -107,6 +110,29 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
 
         var act = async () => await store.ClearAsync(key, etag, TestToken);
         await act.Should().ThrowAsync<ActorSnapshotConcurrencyException>();
+    }
+
+    [Fact]
+    public async Task Write_WithETagFromAClearedLineage_Throws() {
+        // The ABA regression: a stale activation holds an ETag, someone else clears and re-creates
+        // the snapshot. With a constant create version the re-created lineage could reach the very
+        // version the stale writer holds, so its guarded write silently overwrote a snapshot it
+        // never observed. Lineage-unique create versions make it fail loudly instead.
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var provider = CreateProvider();
+        var store = provider.GetRequiredService<IActorSnapshotStore>();
+        var key = NewKey();
+        var staleETag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+
+        await store.ClearAsync(key, staleETag, TestToken);
+        var newETag = await store.WriteAsync(key, """{"balance":100}""", expectedETag: null, TestToken);
+        newETag.Should().NotBe(staleETag);
+
+        var act = async () => await store.WriteAsync(key, """{"balance":2}""", staleETag, TestToken);
+        await act.Should().ThrowAsync<ActorSnapshotConcurrencyException>();
+
+        // The re-created lineage is untouched by the stale writer.
+        (await store.ReadAsync(key, TestToken))!.Payload.Should().Contain("100");
     }
 
     [Fact]

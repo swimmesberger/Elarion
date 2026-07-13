@@ -18,6 +18,10 @@ public sealed class ActorSnapshotEntity {
     /// <summary>When the snapshot was last written.</summary>
     public DateTimeOffset UpdatedOnUtc { get; set; }
 
-    /// <summary>The optimistic-concurrency version; starts at 1 and increments on every write.</summary>
+    /// <summary>
+    /// The optimistic-concurrency version; minted lineage-unique (random) at create and
+    /// incremented on every write, so a version from a cleared lineage never matches a re-created
+    /// one (the ABA guard).
+    /// </summary>
     public long Version { get; set; }
 }
