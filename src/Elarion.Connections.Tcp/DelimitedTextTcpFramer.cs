@@ -8,7 +8,13 @@ namespace Elarion.Connections.Tcp;
 /// start/end pair is the classic device-telegram envelope. With a start delimiter, bytes before it are
 /// skipped as line noise (serial-bridge reality); without one, the message starts where the last one ended.
 /// </summary>
-public sealed class DelimitedTextTcpFramer(byte end, byte? start = null) : TcpMessageFramer {
+/// <remarks>
+/// <paramref name="kind"/> chooses the delivery leg: <see cref="TcpMessageKind.Text"/> (default) decodes
+/// each message to a <see cref="string"/> for <c>OnTextAsync</c>; a throughput-critical codec passes
+/// <see cref="TcpMessageKind.Binary"/> to receive the raw bytes on <c>OnBinaryAsync</c> instead —
+/// zero-copy, no per-message string.
+/// </remarks>
+public sealed class DelimitedTextTcpFramer(byte end, byte? start = null, TcpMessageKind kind = TcpMessageKind.Text) : TcpMessageFramer {
     /// <inheritdoc />
     public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out TcpFramedMessage message) {
         consumed = 0;
@@ -31,7 +37,7 @@ public sealed class DelimitedTextTcpFramer(byte end, byte? start = null) : TcpMe
         }
 
         consumed = payloadStart + endIndex + 1;
-        message = new TcpFramedMessage(TcpMessageKind.Text, buffer.Slice(payloadStart, endIndex));
+        message = new TcpFramedMessage(kind, buffer.Slice(payloadStart, endIndex));
         return true;
     }
 

@@ -88,23 +88,10 @@ internal static class TcpConnectionRunner {
 
     private static async Task ReceiveLoopAsync(
         TcpClientConnection connection, TcpMessageReader reader, TimeSpan? idleTimeout, CancellationToken ct) {
-        // The pending read is threaded across idle ticks — an idle callback must not abandon it, mirroring
-        // the WebSocket adapter.
-        Task<TcpFramedMessage?>? pendingRead = null;
         while (true) {
-            pendingRead ??= reader.ReadAsync(ct).AsTask();
-            if (idleTimeout is { } window) {
-                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var winner = await Task.WhenAny(pendingRead, Task.Delay(window, delayCts.Token));
-                if (winner != pendingRead) {
-                    await connection.Protocol.OnIdleAsync(ct);
-                    continue;
-                }
-                delayCts.Cancel();
-            }
-
-            var message = await pendingRead;
-            pendingRead = null;
+            var message = idleTimeout is { } window
+                ? await ReadWithIdleAsync(connection, reader, window, ct)
+                : await reader.ReadAsync(ct);
             if (message is null) {
                 return;
             }
@@ -115,6 +102,30 @@ internal static class TcpConnectionRunner {
             else {
                 await connection.Protocol.OnBinaryAsync(message.Value.Payload, ct);
             }
+        }
+    }
+
+    // The idle race only engages when the read actually goes async: buffered messages complete
+    // synchronously and pay for no timer, no Task materialization, no linked token source — the hot path
+    // under load is identical with and without an idle window. The pending read is never abandoned (a
+    // second concurrent read would be invalid); idle ticks fire per elapsed window until data arrives.
+    private static async ValueTask<TcpFramedMessage?> ReadWithIdleAsync(
+        TcpClientConnection connection, TcpMessageReader reader, TimeSpan window, CancellationToken ct) {
+        var read = reader.ReadAsync(ct);
+        if (read.IsCompletedSuccessfully) {
+            return read.Result;
+        }
+
+        var pending = read.AsTask();
+        while (true) {
+            using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var winner = await Task.WhenAny(pending, Task.Delay(window, delayCts.Token));
+            if (winner == pending) {
+                delayCts.Cancel();
+                return await pending;
+            }
+
+            await connection.Protocol.OnIdleAsync(ct);
         }
     }
 }

@@ -128,23 +128,10 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
     private static async Task ReceiveLoopAsync(
         WebSocketClientConnection connection, WebSocketMessageReader reader, TimeSpan? idleTimeout,
         CancellationToken ct) {
-        // The pending read is threaded across idle ticks — an idle callback must not abandon it (a second
-        // concurrent receive on one socket is invalid), mirroring the SSE keep-alive pattern.
-        Task<WebSocketInboundMessage?>? pendingRead = null;
         while (true) {
-            pendingRead ??= reader.ReadAsync(ct).AsTask();
-            if (idleTimeout is { } window) {
-                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var winner = await Task.WhenAny(pendingRead, Task.Delay(window, delayCts.Token));
-                if (winner != pendingRead) {
-                    await connection.Protocol.OnIdleAsync(ct);
-                    continue;
-                }
-                delayCts.Cancel();
-            }
-
-            var message = await pendingRead;
-            pendingRead = null;
+            var message = idleTimeout is { } window
+                ? await ReadWithIdleAsync(connection, reader, window, ct)
+                : await reader.ReadAsync(ct);
             if (message is null) {
                 return;
             }
@@ -155,6 +142,30 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             else {
                 await connection.Protocol.OnBinaryAsync(message.Value.Payload, ct);
             }
+        }
+    }
+
+    // The idle race only engages when the read actually goes async — synchronous completions pay for no
+    // timer or Task materialization. The pending read is never abandoned (a second concurrent receive on
+    // one socket is invalid); idle ticks fire per elapsed window until data arrives.
+    private static async ValueTask<WebSocketInboundMessage?> ReadWithIdleAsync(
+        WebSocketClientConnection connection, WebSocketMessageReader reader, TimeSpan window,
+        CancellationToken ct) {
+        var read = reader.ReadAsync(ct);
+        if (read.IsCompletedSuccessfully) {
+            return read.Result;
+        }
+
+        var pending = read.AsTask();
+        while (true) {
+            using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var winner = await Task.WhenAny(pending, Task.Delay(window, delayCts.Token));
+            if (winner == pending) {
+                delayCts.Cancel();
+                return await pending;
+            }
+
+            await connection.Protocol.OnIdleAsync(ct);
         }
     }
 

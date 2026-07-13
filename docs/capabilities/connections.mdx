@@ -132,7 +132,10 @@ the shape for devices that speak a proprietary protocol and can't do WebSockets.
 message boundaries, the adapter owns a **framing seam**: pick `LengthPrefixedTcpFramer` (binary),
 `DelimitedTextTcpFramer` (line/telegram framing — an optional start delimiter skips serial-bridge line
 noise), or implement `TcpMessageFramer` for the vendor's format. Codecs still receive complete
-messages, unchanged.
+messages, unchanged. The pipeline is benchmarked at **raw-socket parity with zero allocations per
+message** on the binary delivery path (`DelimitedTextTcpFramer(kind: TcpMessageKind.Binary)` delivers
+the raw slice to `OnBinaryAsync` — no per-message string), and an armed-but-quiet idle window costs
+nothing on the hot path; text delivery prices in one string decode per message.
 
 ```csharp
 // Devices dial in:
