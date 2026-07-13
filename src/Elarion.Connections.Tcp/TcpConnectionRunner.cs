@@ -24,14 +24,22 @@ internal static class TcpConnectionRunner {
         ClientConnection? identity = null;
         try {
             var stream = client.GetStream();
-            var framer = options.Framer!;
-            var reader = new TcpMessageReader(stream, framer, options.MaxMessageBytes);
+            // Per-connection configuration (the binding-config lookup point): resolved before any byte is
+            // exchanged so the chosen framer governs the handshake too; nulls inherit the endpoint options.
+            var peer = new TcpConnectionPeer(client.Client.RemoteEndPoint, client.Client.LocalEndPoint);
+            var overrides = await handler.ConfigureConnectionAsync(peer, ct);
+            var framer = overrides?.Framer ?? options.Framer!;
+            var maxMessageBytes = overrides?.MaxMessageBytes ?? options.MaxMessageBytes;
+            var idleTimeout = overrides?.IdleTimeout ?? options.IdleTimeout;
+            var handshakeTimeout = overrides?.HandshakeTimeout ?? options.HandshakeTimeout;
+            var transport = overrides?.Transport ?? options.Transport;
+            var reader = new TcpMessageReader(stream, framer, maxMessageBytes);
 
             ClientConnectionTicket? ticket;
             using (var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(ct)) {
-                handshakeCts.CancelAfter(options.HandshakeTimeout);
+                handshakeCts.CancelAfter(handshakeTimeout);
                 var handshake = new TcpHandshakeContext(
-                    stream, framer, reader, client.Client.RemoteEndPoint, client.Client.LocalEndPoint);
+                    stream, framer, reader, peer.RemoteEndPoint, peer.LocalEndPoint);
                 ticket = await handler.AuthenticateAsync(handshake, handshakeCts.Token);
             }
 
@@ -41,7 +49,7 @@ internal static class TcpConnectionRunner {
 
             identity = new ClientConnection {
                 ConnectionId = Guid.CreateVersion7().ToString("N"),
-                Transport = options.Transport,
+                Transport = transport,
                 Principal = ticket.Principal,
                 PrincipalId = ticket.PrincipalId,
                 Metadata = ticket.Metadata,
@@ -52,7 +60,7 @@ internal static class TcpConnectionRunner {
 
             await registry.RegisterAsync(connection, ct);
             try {
-                await ReceiveLoopAsync(connection, reader, options.IdleTimeout, ct);
+                await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             }
             finally {
                 // Unregister must run even when the token is already cancelled — observers tear down

@@ -144,6 +144,13 @@ several devices, each with its own handler, framer, and options. The handler sub
 `TcpConnectionHandler`; device protocols with no credential exchange ticket straight from
 `handshake.RemoteEndPoint`/binding configuration.
 
+Settings can also vary **per connection on one endpoint**: override
+`ConfigureConnectionAsync(TcpConnectionPeer, …)` and return `TcpConnectionSettings` (framer, size cap,
+idle window, transport tag — nulls inherit the endpoint options). It runs before any byte is
+exchanged, so a binding-configuration lookup keyed on the peer can pick the wire framing that governs
+the handshake itself — the shape gateways need when differently-speaking device families share one
+ingress port.
+
 ## Keepalives and conversations
 
 Two optional pieces cover what every device codec otherwise hand-rolls:

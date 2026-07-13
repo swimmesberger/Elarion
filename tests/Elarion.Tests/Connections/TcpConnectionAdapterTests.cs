@@ -110,6 +110,39 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     [Fact]
+    public async Task PerConnectionSettings_ServeDifferentFramingsOnOneEndpoint() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartListenerHostAsync<MultiFramingHandler>(ct);
+
+        // First connection: inherits the endpoint's newline framing, tagged per-connection.
+        using (var lines = await host.ConnectAsync(ct)) {
+            var stream = lines.GetStream();
+            (await ReadLineAsync(stream, ct)).Should().Be("challenge");
+            await WriteLineAsync(stream, "device:lines-1", ct);
+            (await ReadLineAsync(stream, ct)).Should().Be("welcome");
+            (await host.Observer.Connected.Task.WaitAsync(ct)).Transport.Should().Be("tcp-lines");
+
+            await WriteLineAsync(stream, "ping", ct);
+            (await ReadLineAsync(stream, ct)).Should().Be("echo:ping");
+        }
+
+        await host.Observer.Disconnected.Task.WaitAsync(ct);
+        host.Observer.Reset();
+
+        // Second connection, same endpoint: the handler's per-connection settings switch it to '|' framing
+        // (the binding-configuration shape — the framer applies from the very first handshake byte).
+        using var pipes = await host.ConnectAsync(ct);
+        var pipeStream = pipes.GetStream();
+        (await ReadUntilAsync(pipeStream, (byte)'|', ct)).Should().Be("challenge");
+        await pipeStream.WriteAsync(Encoding.UTF8.GetBytes("device:pipes-1|"), ct);
+        (await ReadUntilAsync(pipeStream, (byte)'|', ct)).Should().Be("welcome");
+        (await host.Observer.Connected.Task.WaitAsync(ct)).Transport.Should().Be("tcp-pipes");
+
+        await pipeStream.WriteAsync(Encoding.UTF8.GetBytes("ping|"), ct);
+        (await ReadUntilAsync(pipeStream, (byte)'|', ct)).Should().Be("echo:ping");
+    }
+
+    [Fact]
     public async Task Dialer_ConnectsAuthenticatesAndReconnectsAfterPeerDrop() {
         var ct = TestContext.Current.CancellationToken;
         var device = new TcpListener(IPAddress.Loopback, 0);
@@ -166,14 +199,19 @@ public sealed class TcpConnectionAdapterTests {
         }
     }
 
-    private static async Task<TcpTestHost> StartListenerHostAsync(CancellationToken ct, TimeSpan? idleTimeout = null) {
+    private static Task<TcpTestHost> StartListenerHostAsync(CancellationToken ct, TimeSpan? idleTimeout = null) =>
+        StartListenerHostAsync<ChallengeTcpHandler>(ct, idleTimeout);
+
+    private static async Task<TcpTestHost> StartListenerHostAsync<THandler>(
+        CancellationToken ct, TimeSpan? idleTimeout = null)
+        where THandler : TcpConnectionHandler, new() {
         var boundEndPoint = new TaskCompletionSource<IPEndPoint>(TaskCreationOptions.RunContinuationsAsynchronously);
         var services = new ServiceCollection();
         services.AddElarionConnections();
-        services.AddSingleton<ChallengeTcpHandler>();
+        services.AddSingleton<THandler>();
         services.AddSingleton<AwaitableConnectionObserver>();
         services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
-        services.AddElarionTcpConnectionListener<ChallengeTcpHandler>(o => {
+        services.AddElarionTcpConnectionListener<THandler>(o => {
             o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
             o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
             o.IdleTimeout = idleTimeout;
@@ -191,7 +229,10 @@ public sealed class TcpConnectionAdapterTests {
     private static async Task WriteLineAsync(NetworkStream stream, string line, CancellationToken ct) =>
         await stream.WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), ct);
 
-    private static async Task<string?> ReadLineAsync(NetworkStream stream, CancellationToken ct) {
+    private static Task<string?> ReadLineAsync(NetworkStream stream, CancellationToken ct) =>
+        ReadUntilAsync(stream, (byte)'\n', ct);
+
+    private static async Task<string?> ReadUntilAsync(NetworkStream stream, byte delimiter, CancellationToken ct) {
         var buffer = new List<byte>();
         var single = new byte[1];
         while (true) {
@@ -200,7 +241,7 @@ public sealed class TcpConnectionAdapterTests {
                 return null;
             }
 
-            if (single[0] == (byte)'\n') {
+            if (single[0] == delimiter) {
                 return Encoding.UTF8.GetString(buffer.ToArray());
             }
 
@@ -255,6 +296,41 @@ public sealed class TcpConnectionAdapterTests {
 
         public ValueTask OnIdleAsync(CancellationToken ct) =>
             connection.SendTextAsync("idle-poll", ct);
+    }
+
+    /// <summary>One endpoint, two wire framings: the first connection keeps the endpoint defaults, every
+    /// later one is switched to '|' delimiters via per-connection settings.</summary>
+    private sealed class MultiFramingHandler : TcpConnectionHandler {
+        private int _connections;
+
+        public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            var settings = Interlocked.Increment(ref _connections) == 1
+                ? new TcpConnectionSettings { Transport = "tcp-lines" }
+                : new TcpConnectionSettings {
+                    Framer = new DelimitedTextTcpFramer(end: (byte)'|'),
+                    Transport = "tcp-pipes",
+                };
+            return ValueTask.FromResult<TcpConnectionSettings?>(settings);
+        }
+
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+            TcpHandshakeContext handshake, CancellationToken ct) {
+            await handshake.SendTextAsync("challenge", ct);
+            var reply = await handshake.ReceiveTextAsync(ct);
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
+                return null;
+            }
+
+            await handshake.SendTextAsync("welcome", ct);
+            return new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
+                PrincipalId = reply["device:".Length..],
+            };
+        }
+
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
+            new EchoTcpProtocol(connection);
     }
 
     /// <summary>Dialer-side: introduces itself and expects a ticket line from the device.</summary>

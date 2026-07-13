@@ -241,8 +241,10 @@ adapter-tier requirements or explicit non-absorptions:
 - `Elarion.Connections.Tcp` — the raw-socket adapter for proprietary device protocols: hosted **listener**
   and **dial-out** (jittered exponential reconnect) services over the same handler/codec seams; because
   TCP has no message boundaries, the adapter owns a framing seam (`TcpMessageFramer`) with
-  length-prefixed and delimited-text built-ins, so codecs still receive complete messages. BCL sockets
-  only — no ASP.NET.
+  length-prefixed and delimited-text built-ins, so codecs still receive complete messages. Framing and
+  limits are configurable **per connection** (`ConfigureConnectionAsync` — resolved from the peer before
+  any byte, so one ingress port serves differently-framed device families; a field requirement of the
+  industrial gateway's binding configuration). BCL sockets only — no ASP.NET.
 - `Elarion.AspNetCore.SignalR` — **adopted whole, after the socket adapter**: one framework-owned hub
   adapting inbound to `HandlerDispatcher` and outbound to `IClientConnectionSink`, serialization bridged
   to canonical JSON, auth from the host's ASP.NET authentication at negotiate/connect. It contains every
