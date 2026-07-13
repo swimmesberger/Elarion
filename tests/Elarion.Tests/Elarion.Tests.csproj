@@ -44,7 +44,7 @@
     <ProjectReference Include="../../src/Elarion.Connections/Elarion.Connections.csproj" />
     <ProjectReference Include="../../src/Elarion.Connections.AspNetCore/Elarion.Connections.AspNetCore.csproj" />
     <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj" />
-    <ProjectReference Include="../../src/Elarion.Connections.Testing/Elarion.Connections.Testing.csproj" />
+    <ProjectReference Include="../../src/Elarion.Connections.Simulation/Elarion.Connections.Simulation.csproj" />
     <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
     <ProjectReference Include="../../src/Elarion.AspNetCore.OpenApi/Elarion.AspNetCore.OpenApi.csproj" />
     <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj" />

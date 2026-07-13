@@ -3,7 +3,7 @@ using System.Security.Claims;
 using System.Threading.Channels;
 using Elarion.Abstractions.Connections;
 
-namespace Elarion.Connections.Testing;
+namespace Elarion.Connections.Simulation;
 
 /// <summary>
 /// An in-memory <see cref="IClientConnectionSink"/> double — no socket, no adapter: register it with the
@@ -15,9 +15,9 @@ namespace Elarion.Connections.Testing;
 /// <remarks>
 /// This works because the kernel contracts never assume a socket (synthetic connections are first-class,
 /// ADR-0053) — the same property production proxy taps rely on. Codec-level tests belong on a real
-/// adapter instead (loopback TCP via <see cref="TcpTestClient"/>, or Kestrel + <c>ClientWebSocket</c>).
+/// adapter instead (loopback TCP via <see cref="TcpSimulatorClient"/>, or Kestrel + <c>ClientWebSocket</c>).
 /// </remarks>
-public sealed class TestClientConnection : IClientConnectionSink {
+public sealed class SimulatedClientConnection : IClientConnectionSink {
     private readonly Channel<SentMessage> _sent = Channel.CreateUnbounded<SentMessage>();
     private int _closed;
 
@@ -27,7 +27,7 @@ public sealed class TestClientConnection : IClientConnectionSink {
     /// <param name="connectionId">Explicit id (e.g. to provoke duplicate registration); default a fresh v7.</param>
     /// <param name="principal">The connect-time principal; default an authenticated test identity.</param>
     /// <param name="metadata">Adapter-style metadata.</param>
-    public TestClientConnection(
+    public SimulatedClientConnection(
         string? principalId = null,
         string transport = "test",
         string? connectionId = null,
@@ -86,7 +86,7 @@ public sealed class TestClientConnection : IClientConnectionSink {
         ThrowIfClosed();
         if (InvokeResponder is not { } responder) {
             throw new NotSupportedException(
-                "Set TestClientConnection.InvokeResponder to answer InvokeAsync in this test.");
+                "Set SimulatedClientConnection.InvokeResponder to answer InvokeAsync in this test.");
         }
 
         return (TResponse)await responder(name, request);

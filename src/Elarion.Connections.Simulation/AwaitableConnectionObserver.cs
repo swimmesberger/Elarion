@@ -1,6 +1,6 @@
 using Elarion.Abstractions.Connections;
 
-namespace Elarion.Connections.Testing;
+namespace Elarion.Connections.Simulation;
 
 /// <summary>
 /// A connection observer whose lifecycle edges are awaitable — the deterministic replacement for polling

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Test and simulation utilities for Elarion client connections: TestClientConnection (an in-memory sink double for twin/observer/bridge tests), AwaitableConnectionObserver (deterministic lifecycle assertions), and TcpTestClient (a framed device-simulator client) — the pieces every gateway test suite and simulator otherwise hand-rolls (ADR-0053).</Description>
+    <Description>Simulation and test utilities for Elarion client connections — for test suites AND runnable dev/demo simulators alike: SimulatedClientConnection (an in-memory sink double for twin/observer/bridge logic), AwaitableConnectionObserver (deterministic lifecycle assertions), and TcpSimulatorClient (a framed client for simulated devices/peers) (ADR-0053).</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

@@ -6,7 +6,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
 using Elarion.Connections.AspNetCore;
-using Elarion.Connections.Testing;
+using Elarion.Connections.Simulation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;

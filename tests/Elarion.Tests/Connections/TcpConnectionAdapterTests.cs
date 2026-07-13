@@ -8,7 +8,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
 using Elarion.Connections.Tcp;
-using Elarion.Connections.Testing;
+using Elarion.Connections.Simulation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;

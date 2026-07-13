@@ -2,7 +2,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
 using Elarion.Connections.Diagnostics;
-using Elarion.Connections.Testing;
+using Elarion.Connections.Simulation;
 using Elarion.Tests.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -115,7 +115,7 @@ public sealed class ClientConnectionRegistryTests {
         return services.BuildServiceProvider();
     }
 
-    internal static TestClientConnection Sink(string connectionId, string principalId) =>
+    internal static SimulatedClientConnection Sink(string connectionId, string principalId) =>
         new(principalId: principalId, connectionId: connectionId);
 
     private sealed class RecordingObserver : IClientConnectionObserver {

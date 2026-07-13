@@ -3,7 +3,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
 using Elarion.Connections.Tcp;
-using Elarion.Connections.Testing;
+using Elarion.Connections.Simulation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -11,15 +11,15 @@ using Xunit;
 namespace Elarion.Tests.Connections;
 
 /// <summary>
-/// Covers the shipped test utilities themselves: the synthetic sink's capture/invoke/close semantics
+/// Covers the shipped simulation utilities themselves: the synthetic sink's capture/invoke/close semantics
 /// (including registry integration — the no-socket-assumption property), and the framed
-/// <see cref="TcpTestClient"/> driving a real listener end to end.
+/// <see cref="TcpSimulatorClient"/> driving a real listener end to end.
 /// </summary>
-public sealed class ConnectionTestingUtilitiesTests {
+public sealed class ConnectionSimulationUtilitiesTests {
     [Fact]
-    public async Task TestClientConnection_CapturesSendsAnswersInvokes_AndFaultsAfterClose() {
+    public async Task SimulatedClientConnection_CapturesSendsAnswersInvokes_AndFaultsAfterClose() {
         var ct = TestContext.Current.CancellationToken;
-        var connection = new TestClientConnection(principalId: "dev-1") {
+        var connection = new SimulatedClientConnection(principalId: "dev-1") {
             InvokeResponder = (name, request) => ValueTask.FromResult<object>($"{name}:{request}:ack"),
         };
 
@@ -34,11 +34,11 @@ public sealed class ConnectionTestingUtilitiesTests {
     }
 
     [Fact]
-    public async Task TestClientConnection_RegistersWithTheRealRegistry() {
+    public async Task SimulatedClientConnection_RegistersWithTheRealRegistry() {
         var ct = TestContext.Current.CancellationToken;
         await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
-        var connection = new TestClientConnection(principalId: "dev-2");
+        var connection = new SimulatedClientConnection(principalId: "dev-2");
 
         await registry.RegisterAsync(connection, ct);
 
@@ -48,7 +48,7 @@ public sealed class ConnectionTestingUtilitiesTests {
     }
 
     [Fact]
-    public async Task TcpTestClient_CompletesAFramedHandshakeAndEcho() {
+    public async Task TcpSimulatorClient_CompletesAFramedHandshakeAndEcho() {
         var ct = TestContext.Current.CancellationToken;
         var framer = new DelimitedTcpFramer(end: (byte)'\n');
         var bound = new TaskCompletionSource<IPEndPoint>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -67,7 +67,7 @@ public sealed class ConnectionTestingUtilitiesTests {
         }
 
         try {
-            await using var client = await TcpTestClient.ConnectAsync(await bound.Task.WaitAsync(ct), framer, ct);
+            await using var client = await TcpSimulatorClient.ConnectAsync(await bound.Task.WaitAsync(ct), framer, ct);
             (await client.ReceiveTextAsync(ct)).Should().Be("challenge");
             await client.SendTextAsync("device:sim-1", ct);
             (await client.ReceiveTextAsync(ct)).Should().Be("welcome");

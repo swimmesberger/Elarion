@@ -4,7 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using Elarion.Connections.Tcp;
 
-namespace Elarion.Connections.Testing;
+namespace Elarion.Connections.Simulation;
 
 /// <summary>
 /// A framed TCP client for tests and device simulators: connects to an adapter endpoint (or is handed an
@@ -12,7 +12,7 @@ namespace Elarion.Connections.Testing;
 /// <see cref="TcpMessageFramer"/> the endpoint uses, and exposes text conveniences for challenge/response
 /// handshakes — the client every gateway simulator otherwise hand-rolls.
 /// </summary>
-public sealed class TcpTestClient : IAsyncDisposable {
+public sealed class TcpSimulatorClient : IAsyncDisposable {
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
     private readonly TcpMessageFramer _framer;
@@ -21,7 +21,7 @@ public sealed class TcpTestClient : IAsyncDisposable {
     private int _start;
     private int _end;
 
-    private TcpTestClient(TcpClient client, TcpMessageFramer framer) {
+    private TcpSimulatorClient(TcpClient client, TcpMessageFramer framer) {
         _client = client;
         _stream = client.GetStream();
         _framer = framer;
@@ -31,14 +31,14 @@ public sealed class TcpTestClient : IAsyncDisposable {
     /// <param name="endPoint">The endpoint to dial.</param>
     /// <param name="framer">The endpoint's framing.</param>
     /// <param name="ct">A cancellation token.</param>
-    public static async Task<TcpTestClient> ConnectAsync(
+    public static async Task<TcpSimulatorClient> ConnectAsync(
         EndPoint endPoint, TcpMessageFramer framer, CancellationToken ct = default) {
         ArgumentNullException.ThrowIfNull(endPoint);
         ArgumentNullException.ThrowIfNull(framer);
         var client = new TcpClient { NoDelay = true };
         try {
             await client.Client.ConnectAsync(endPoint, ct);
-            return new TcpTestClient(client, framer);
+            return new TcpSimulatorClient(client, framer);
         }
         catch {
             client.Dispose();
@@ -50,10 +50,10 @@ public sealed class TcpTestClient : IAsyncDisposable {
     /// Elarion dialer connected to).</summary>
     /// <param name="client">The connected socket; the test client owns and disposes it.</param>
     /// <param name="framer">The endpoint's framing.</param>
-    public static TcpTestClient FromConnected(TcpClient client, TcpMessageFramer framer) {
+    public static TcpSimulatorClient FromConnected(TcpClient client, TcpMessageFramer framer) {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(framer);
-        return new TcpTestClient(client, framer);
+        return new TcpSimulatorClient(client, framer);
     }
 
     /// <summary>Sends one framed message.</summary>
