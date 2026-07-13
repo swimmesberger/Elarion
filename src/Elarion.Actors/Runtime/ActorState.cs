@@ -17,7 +17,8 @@ internal interface IActorStateSlot {
 internal sealed class ActorState<TState>(
     ActorSnapshotKey key,
     IActorSnapshotStore store,
-    IElarionJsonSerialization serialization) : IActorState<TState>, IActorStateSlot
+    IElarionJsonSerialization serialization,
+    ActorStateTracker tracker) : IActorState<TState>, IActorStateSlot
     where TState : class {
     private JsonTypeInfo<TState>? _typeInfo;
 
@@ -50,15 +51,33 @@ internal sealed class ActorState<TState>(
         var state = State ?? throw new InvalidOperationException(
             $"Actor '{key.ActorName}' ({key.Key}) has no state to write; assign State before calling WriteStateAsync.");
         var payload = JsonSerializer.Serialize(state, TypeInfo);
-        Etag = await store.WriteAsync(key, payload, Etag, cancellationToken).ConfigureAwait(false);
+        try {
+            Etag = await store.WriteAsync(key, payload, Etag, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ActorSnapshotConcurrencyException ex) {
+            MarkOrigin(ex);
+            throw;
+        }
     }
 
     public async ValueTask ClearStateAsync(CancellationToken cancellationToken = default) {
         if (Etag is { } etag) {
-            await store.ClearAsync(key, etag, cancellationToken).ConfigureAwait(false);
+            try {
+                await store.ClearAsync(key, etag, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ActorSnapshotConcurrencyException ex) {
+                MarkOrigin(ex);
+                throw;
+            }
+
             Etag = null;
         }
 
         State = null;
     }
+
+    // Stamps the conflict with this activation's tracker so the turn's transparent retry
+    // (ADR-0047) only fires for the activation whose own slot raised it — a conflict re-thrown out
+    // of a nested actor call must fault the outer turn, never re-run it.
+    private void MarkOrigin(ActorSnapshotConcurrencyException exception) => exception.Origin = tracker;
 }

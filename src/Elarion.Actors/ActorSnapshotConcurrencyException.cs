@@ -16,4 +16,13 @@ public sealed class ActorSnapshotConcurrencyException(ActorSnapshotKey key, stri
 
     /// <summary>The ETag the activation expected; <see langword="null"/> when it expected to create the snapshot.</summary>
     public string? ExpectedETag { get; } = expectedETag;
+
+    /// <summary>
+    /// Provenance for the ADR-0047 transparent retry: the activation-scoped state tracker whose
+    /// slot raised this conflict, stamped by the runtime's snapshot write/clear path. The retry
+    /// check only re-runs a turn when the conflict belongs to that turn's own activation — a
+    /// conflict re-thrown out of a nested actor call must surface as an ordinary fault, because
+    /// retrying the outer turn would double-apply its already-committed state writes.
+    /// </summary>
+    internal object? Origin { get; set; }
 }
