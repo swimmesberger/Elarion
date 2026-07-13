@@ -1,0 +1,119 @@
+---
+title: PostgreSQL extensions
+description: Extensions are composition, not scale-out — how to run TimescaleDB, pgvector & co on the one Postgres you already have, including combining several in one image.
+---
+
+Specialized workloads — time-series telemetry, vector search, geospatial queries, graphs — trigger the
+reflex to add a second database, and with it a second connection string, a second backup story, a
+second thing that can be down. Elarion's positioning says otherwise: **a PostgreSQL extension changes
+what the one Postgres can do, not how many infrastructure pieces you run.** Adding
+[TimescaleDB](https://www.timescale.com/) or [pgvector](https://github.com/pgvector/pgvector) to your
+existing database is composition, exactly like the `UNLOGGED` L2 cache or `LISTEN/NOTIFY` fan-out —
+not scale-out
+([ADR-0056](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0056-postgres-extensions-posture.md)).
+
+That posture has a corollary in both directions:
+
+- **Recipes may assume extensions.** The [time-series recipe](/docs/capabilities/time-series) freely
+  assumes TimescaleDB; a vector-search recipe would assume pgvector the same way.
+- **Packages may not.** There is deliberately no `Elarion.TimeSeries` package, and no Elarion package
+  silently requires an extension. Every Elarion package keeps working on a stock `postgres` image; an
+  extension is always a *recipe's* documented prerequisite.
+
+The one real friction is the server image, so that is what this page covers.
+
+## One extension: use the official image
+
+An extension must be present in the server image before `CREATE EXTENSION` can activate it — the stock
+`postgres` image carries neither TimescaleDB nor pgvector. A single extension usually has an official
+image (`timescale/timescaledb`, `pgvector/pgvector`, `apache/age`); use it everywhere you run
+Postgres, dev, CI, and production alike:
+
+```yaml
+# docker-compose.yml — a drop-in replacement for the postgres image
+services:
+  db:
+    image: timescale/timescaledb:latest-pg17
+```
+
+Integration tests point Testcontainers at the same image:
+
+```csharp
+var container = new PostgreSqlBuilder()
+    .WithImage("timescale/timescaledb:latest-pg17")
+    .Build();
+```
+
+(Under .NET Aspire: `builder.AddPostgres("db").WithImage("timescale/timescaledb", "latest-pg17")`.)
+
+Activation is schema, so it belongs in the same EF migration history as everything else:
+
+```csharp
+migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS timescaledb;");
+```
+
+## Combining extensions
+
+Needing **several extensions at once** is where hand-assembly starts — resolve it in this order:
+
+1. **Check for an official image that already carries your combination.**
+   [`timescale/timescaledb-ha`](https://github.com/timescale/timescaledb-docker-ha) bundles
+   TimescaleDB + PostGIS + pgvector (and pgvectorscale), which covers the common
+   "time-series + vectors + geo" stack with no custom image at all.
+2. **Otherwise, the canonical image is a ~10-line Dockerfile, not a build-from-source project.** The
+   official `postgres` Debian image ships with the PGDG apt repository already configured, and PGDG
+   packages a large share of the ecosystem (`postgresql-17-pgvector`, `postgresql-17-age`,
+   PostGIS, …); a vendor repo covers the rest (TimescaleDB):
+
+```dockerfile
+# One image for compose, Testcontainers, and production — pin the PG major everywhere.
+FROM postgres:17-bookworm
+
+# TimescaleDB ships from its own apt repo; pgvector and Apache AGE come from PGDG,
+# which the base image already has configured.
+RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg lsb-release \
+    && echo "deb https://packagecloud.io/timescale/timescaledb/debian/ $(lsb_release -c -s) main" \
+        > /etc/apt/sources.list.d/timescaledb.list \
+    && wget -qO- https://packagecloud.io/timescale/timescaledb/gpgkey \
+        | gpg --dearmor -o /etc/apt/trusted.gpg.d/timescaledb.gpg \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        timescaledb-2-postgresql-17 \
+        postgresql-17-pgvector \
+        postgresql-17-age \
+    && rm -rf /var/lib/apt/lists/*
+
+# Extensions that hook the planner/executor must be preloaded — each extension's docs
+# say whether it needs this (TimescaleDB and AGE do; pgvector does not).
+CMD ["postgres", "-c", "shared_preload_libraries=timescaledb,age"]
+```
+
+CI builds this once and every environment — compose, `PostgreSqlBuilder().WithImage(...)` in tests,
+production — runs the same image, so an extension version bump is one line reviewed in one place.
+Migrations stay per-extension and unchanged (`CREATE EXTENSION IF NOT EXISTS vector;` /
+`… age;`), as does any session setup an extension wants (AGE's `ag_catalog` search path, for
+example — per its own docs).
+
+Two rules of thumb for combinations:
+
+- **The combination pins your Postgres major to the *slowest* extension.** Each extension supports a
+  range of majors and lags new releases by months (Apache AGE only reached PostgreSQL 17 with its 1.6
+  line); the majors available to you are the intersection. Decide the major from that intersection
+  *before* writing the Dockerfile, and prefer explicit `-pgN` tags over `latest` everywhere.
+- **An extension must stay a recipe's prerequisite, never a package's silent dependency**
+  (ADR-0056). If a module needs AGE, that is the module's documented requirement — every Elarion
+  package keeps working on a stock `postgres` image.
+
+<Callout type="info">
+  ADR-0056 defers a framework-level easing of this (e.g. a Testcontainers helper that assembles the
+  image from a declared extension list) until a consuming project forces the design. The Dockerfile
+  above is the documented canonical shape until then.
+</Callout>
+
+## The same shape for every extension
+
+Whatever the workload, the recipe structure repeats: the entity and migration own the
+extension-specific column or conversion, queries use the extension's operators through raw SQL or a
+provider plugin, and the surrounding Elarion machinery (handlers, paging, jobs, events) neither knows
+nor cares. The worked example is the [time-series recipe](/docs/capabilities/time-series) —
+TimescaleDB composed with bulk insert, keyset paging, scheduled retention, and client events; pgvector
+for similarity search or PostGIS for geospatial follow the same shape.

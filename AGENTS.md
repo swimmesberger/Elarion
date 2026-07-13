@@ -20,7 +20,11 @@ PostgreSQL the app already runs**. Shipped defaults (scheduler claims, outbox le
 that only appears past ~10 nodes is resolved by **replacing the seam** (`IScheduledOccurrenceCoordinator`,
 `ISettingsChangeSource`, `IIntegrationEventBus`, `IBlobStore`, `IHandlerCache`, …) with a dedicated job
 engine/broker — never by growing a default's complexity or config surface. Design test for any new default:
-"does it cover 10 nodes on one Postgres?" (ADR-0025).
+"does it cover 10 nodes on one Postgres?" (ADR-0025). **Postgres extensions are composition, not
+scale-out** (ADR-0056): a specialized workload (time-series, vector search) is a documented extension
+*recipe* over the one Postgres, never an Elarion subsystem; recipes may assume extensions, packages must
+keep working without them (posture + image guidance: `docs/capabilities/postgres-extensions.mdx`; worked
+recipe: `docs/capabilities/time-series.mdx`).
 
 ## Package layout
 

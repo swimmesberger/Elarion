@@ -76,4 +76,4 @@ designs that are not yet implemented.
 - [ADR-0053: Bidirectional client connections — a transport-neutral connection seam; adapters adopted whole](0053-bidirectional-client-connections.md)
 - [ADR-0054: Device identity and provisioning — pairing codes, device keys, and the HMAC connect-time handshake](0054-device-identity-and-provisioning.md)
 - [ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater](0055-data-rate-shaping-helpers.md)
-- [ADR-0056: PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain — Proposed](0056-postgres-extensions-posture.md)
+- [ADR-0056: PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain](0056-postgres-extensions-posture.md)
