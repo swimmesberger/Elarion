@@ -8,7 +8,8 @@ namespace Elarion.Tests.Generators;
 
 /// <summary>
 /// Regression coverage for pipeline-attachment soundness: cache-key type validation (H6/M12), event-consumer
-/// exclusions for caching (H18) and resilience (H17), and the cache-invalidation Global default (H16).
+/// exclusions for caching (H18) and resilience (H17), the retrying-[Resilient]-command-without-[Idempotent]
+/// double-execution warning (ELPIPE004), and the cache-invalidation Global default (H16).
 /// </summary>
 public sealed class HandlerPipelineSoundnessGeneratorTests {
     private const string Preamble =
@@ -18,6 +19,7 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         using System.Threading.Tasks;
         using Elarion.Abstractions;
         using Elarion.Abstractions.Caching;
+        using Elarion.Abstractions.Idempotency;
         using Elarion.Abstractions.Messaging;
         using Elarion.Abstractions.Modules;
         using Elarion.Abstractions.Resilience;
@@ -192,6 +194,148 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
 
         diagnostics.Any(d => d.Id == "ELPIPE003").Should().BeFalse();
         GetGenerated(result, "Sample_App_OrderShippedConsumer.g.cs").Should().Contain("ResilienceDecorator");
+    }
+
+    [Fact]
+    public void Resilient_CommandWithoutIdempotent_ReportsElpipe004() {
+        // ResilienceDecorator wraps TransactionDecorator, whose finalizing commit runs uncancellable: a
+        // per-attempt timeout abandons the attempt while the in-flight commit completes in the background, the
+        // retry fires (TimeoutRejectedException is not an OCE), and the command executes and commits twice.
+        // Without [Idempotent] the retry re-executes instead of replaying — warn.
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record ShipCommand(int Id) : ICommand;
+                public sealed record ShipResponse(string Name);
+
+                [Resilient("retry-3x")]
+                public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
+                    public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
+                }
+            }
+            """;
+
+        var (_, diagnostics) = Run(source);
+
+        diagnostics.Any(d => d.Id == "ELPIPE004" && d.Severity == DiagnosticSeverity.Warning).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Resilient_CommandWithIdempotent_DoesNotReportElpipe004() {
+        // [Idempotent] closes the double-execution window: the retry replays the first committed outcome.
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record ShipCommand(int Id) : ICommand;
+                public sealed record ShipResponse(string Name);
+
+                [Resilient("retry-3x")]
+                [Idempotent]
+                public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
+                    public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
+                }
+            }
+            """;
+
+        var (_, diagnostics) = Run(source);
+
+        diagnostics.Any(d => d.Id == "ELPIPE004").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Resilient_Query_DoesNotReportElpipe004() {
+        // A query opens no transaction (TransactionDecorator.AppliesTo matches only commands/integration
+        // events), so a retried query cannot double-commit.
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record ReadQuery(int Id) : IQuery;
+                public sealed record ReadResponse(string Name);
+
+                [Resilient("retry-3x")]
+                public sealed class ReadHandler : IHandler<ReadQuery, Result<ReadResponse>> {
+                    public ValueTask<Result<ReadResponse>> HandleAsync(ReadQuery request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<ReadResponse>.Success(new ReadResponse("x")));
+                }
+            }
+            """;
+
+        var (_, diagnostics) = Run(source);
+
+        diagnostics.Any(d => d.Id == "ELPIPE004").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Resilient_CommandWithDeclaredTimeoutOnlyPolicy_DoesNotReportElpipe004() {
+        // A timeout-only policy declared in the same compilation provably never retries, so the single attempt
+        // can commit at most once — no [Idempotent] required.
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                [ResiliencePolicy("timeout-only", Timeout = "30s")]
+                public static partial class TimeoutOnlyPolicy;
+
+                public sealed record ShipCommand(int Id) : ICommand;
+                public sealed record ShipResponse(string Name);
+
+                [Resilient("timeout-only")]
+                public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
+                    public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
+                }
+            }
+            """;
+
+        var (_, diagnostics) = Run(source);
+
+        diagnostics.Any(d => d.Id == "ELPIPE004").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Resilient_CommandWithDeclaredRetryingPolicy_ReportsElpipe004() {
+        // The policy is declared in the same compilation WITH retry configured — statically known to retry.
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                [ResiliencePolicy("retrying", MaxRetryAttempts = 2, Timeout = "30s")]
+                public static partial class RetryingPolicy;
+
+                public sealed record ShipCommand(int Id) : ICommand;
+                public sealed record ShipResponse(string Name);
+
+                [Resilient("retrying")]
+                public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
+                    public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
+                }
+            }
+            """;
+
+        var (_, diagnostics) = Run(source);
+
+        diagnostics.Any(d => d.Id == "ELPIPE004" && d.Severity == DiagnosticSeverity.Warning).Should().BeTrue();
     }
 
     [Fact]
