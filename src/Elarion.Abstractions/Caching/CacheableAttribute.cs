@@ -21,6 +21,14 @@ public sealed class CacheableAttribute(params string[] tags) : Attribute {
     /// <summary>
     /// Controls whether generated keys and tags are scoped to the current user or shared globally.
     /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="HandlerCacheScope.CurrentUser"/> so one user's cached response is never served to
+    /// another. A <see cref="HandlerCacheScope.CurrentUser"/>-scoped entry is additionally stamped with the
+    /// global tag namespace, so a <see cref="HandlerCacheScope.Global"/>-scoped <see cref="CacheInvalidateAttribute"/>
+    /// (its default) evicts the entry regardless of which user cached it — over-invalidation across users is the
+    /// deliberate safe default. A <see cref="HandlerCacheScope.CurrentUser"/>-scoped invalidation only clears the
+    /// invoking user's entries.
+    /// </remarks>
     public HandlerCacheScope Scope { get; init; } = HandlerCacheScope.CurrentUser;
 
     /// <summary>
