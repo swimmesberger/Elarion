@@ -513,6 +513,15 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var expiresAt = state == BlobLifecycleState.Pending ? request.ExpiresAt : null;
 
         if (existing is not null) {
+            // A committed blob is already referenced by application data; silently re-saving it as
+            // pending (with an expiry) would make it eligible for garbage collection out from under
+            // that reference. Fail loud instead — a pre-upload transport must stage under a fresh name.
+            if (existing.State == BlobLifecycleState.Committed && state == BlobLifecycleState.Pending) {
+                throw new InvalidOperationException(
+                    $"Blob '{existing.Id}' ({request.Container}/{request.Name}) is committed; re-saving it " +
+                    "as pending would make it eligible for garbage collection.");
+            }
+
             existing.ContentType = request.ContentType;
             existing.Size = size;
             existing.CreatedAt = createdAt;
