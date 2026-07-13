@@ -115,7 +115,7 @@ public sealed class StreamHub<T> {
                         break;
                     case StreamOverflowMode.Cancel:
                         subscriber.Channel.Writer.TryComplete(new StreamLaggedException(
-                            $"The subscriber lagged more than {subscriber.BufferCapacity} elements behind the " +
+                            $"The subscriber lagged more than {subscriber.EffectiveCapacity} elements behind the " +
                             "stream and was cancelled; re-subscribe with ResumeAfterSequence to continue."));
                         Remove(subscriber);
                         break;
@@ -159,6 +159,12 @@ public sealed class StreamHub<T> {
     /// unsubscribes. Ends when the hub completes; throws the hub's failure or
     /// <see cref="StreamLaggedException"/> under <see cref="StreamOverflowMode.Cancel"/>.
     /// </summary>
+    /// <remarks>
+    /// When the replay burst is larger than <see cref="StreamSubscribeOptions.BufferCapacity"/>, the
+    /// subscriber's buffer is widened to the burst size so the greeting can never overflow the buffer it
+    /// was just written into; that widened capacity is the subscription's effective capacity for its whole
+    /// lifetime (overflow decisions and the <see cref="StreamLaggedException"/> message use it).
+    /// </remarks>
     public IAsyncEnumerable<StreamItem<T>> SubscribeSequenced(StreamSubscribeOptions? options = null) {
         options ??= new StreamSubscribeOptions();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.BufferCapacity, nameof(options));
@@ -174,7 +180,7 @@ public sealed class StreamHub<T> {
                     : BoundedChannelFullMode.Wait,
                 SingleReader = true,
             });
-            subscriber = new Subscriber(channel, options.Overflow, options.BufferCapacity);
+            subscriber = new Subscriber(channel, options.Overflow, capacity);
             foreach (var item in replayItems) {
                 channel.Writer.TryWrite(item);
             }
@@ -244,7 +250,12 @@ public sealed class StreamHub<T> {
         lock (_lock) {
             _subscribers.Remove(subscriber);
         }
+
+        // Wake a publish blocked in WaitToWriteAsync on this subscriber's full Wait-mode buffer: the
+        // completed writer makes that wait return false and the publish moves on. Without it the publish
+        // would suspend forever while holding the publish gate, wedging every future publish.
+        subscriber.Channel.Writer.TryComplete();
     }
 
-    private sealed record Subscriber(Channel<StreamItem<T>> Channel, StreamOverflowMode Overflow, int BufferCapacity);
+    private sealed record Subscriber(Channel<StreamItem<T>> Channel, StreamOverflowMode Overflow, int EffectiveCapacity);
 }

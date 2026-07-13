@@ -189,6 +189,47 @@ public sealed class StreamHubTests {
     }
 
     [Fact]
+    public async Task WaitOverflow_UnsubscribingWhileThePublisherIsBlocked_WakesThePublisher() {
+        var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 0 });
+        var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions {
+            Replay = StreamReplay.None, BufferCapacity = 1, Overflow = StreamOverflowMode.Wait,
+        });
+
+        var enumerator = subscription.GetAsyncEnumerator(TestToken);
+        await hub.PublishAsync(1, TestToken);
+        (await enumerator.MoveNextAsync()).Should().BeTrue(); // start enumerating so disposal unsubscribes
+        await hub.PublishAsync(2, TestToken); // refills the freed slot
+        var blocked = hub.PublishAsync(3, TestToken).AsTask();
+        await Task.Delay(50, TestToken);
+        blocked.IsCompleted.Should().BeFalse("the buffer is full and the subscriber has not read");
+
+        await enumerator.DisposeAsync(); // unsubscribe without draining the buffer
+
+        // The blocked publish must wake instead of suspending forever while holding the publish gate.
+        await blocked;
+        hub.SubscriberCount.Should().Be(0);
+        await hub.PublishAsync(4, TestToken); // and later publishes go through
+    }
+
+    [Fact]
+    public async Task CancelOverflow_LagMessage_ReportsTheEffectiveCapacity_WhenAReplayBurstWidenedIt() {
+        var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 4 });
+        for (var i = 1; i <= 4; i++) {
+            await hub.PublishAsync(i, TestToken);
+        }
+
+        // The replay burst (4) widens the effective buffer beyond the configured capacity (1).
+        var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions {
+            Replay = StreamReplay.Available, BufferCapacity = 1, Overflow = StreamOverflowMode.Cancel,
+        });
+        await hub.PublishAsync(5, TestToken); // overflows the widened, unread buffer
+
+        var act = async () => await Collect(subscription);
+        (await act.Should().ThrowAsync<StreamLaggedException>())
+            .WithMessage("*more than 4 elements*");
+    }
+
+    [Fact]
     public async Task Fail_SurfacesTheErrorToEverySubscriber_AndToLateSubscribers() {
         var hub = new StreamHub<int>();
         var live = hub.SubscribeSequenced(new StreamSubscribeOptions { Replay = StreamReplay.None });
