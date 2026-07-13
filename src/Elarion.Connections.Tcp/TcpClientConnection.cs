@@ -19,14 +19,17 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     // Reused under the send lock (writes are serialized anyway), so the steady-state send path is
     // allocation-free — the proxy/forwarder hot loop (receive one link, send another) stays zero-cost on
     // both halves. Grows to the largest framed message this connection ever sent and is retained.
-    private readonly ArrayBufferWriter<byte> _sendBuffer = new(4 * 1024);
+    private readonly ArrayBufferWriter<byte> _sendBuffer;
     private IClientConnectionProtocol? _protocol;
 
-    internal TcpClientConnection(ClientConnection connection, TcpClient client, Stream stream, TcpMessageFramer framer) {
+    internal TcpClientConnection(
+        ClientConnection connection, TcpClient client, Stream stream, TcpMessageFramer framer,
+        int initialSendBufferBytes) {
         Connection = connection;
         _client = client;
         _stream = stream;
         _framer = framer;
+        _sendBuffer = new ArrayBufferWriter<byte>(initialSendBufferBytes);
     }
 
     /// <inheritdoc />

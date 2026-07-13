@@ -63,11 +63,12 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         var maxMessageBytes = overrides?.MaxMessageBytes ?? options.MaxMessageBytes;
         var idleTimeout = overrides?.IdleTimeout ?? options.IdleTimeout;
         var transport = overrides?.Transport ?? "websocket";
+        var receiveBufferBytes = overrides?.ReceiveBufferBytes ?? options.ReceiveBufferBytes;
 
         using var socket = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
             KeepAliveInterval = overrides?.KeepAliveInterval ?? options.KeepAliveInterval,
         });
-        var reader = new WebSocketMessageReader(socket, maxMessageBytes);
+        var reader = new WebSocketMessageReader(socket, maxMessageBytes, receiveBufferBytes);
 
         ClientConnectionTicket? ticket;
         try {

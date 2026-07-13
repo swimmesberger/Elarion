@@ -21,6 +21,12 @@ public sealed record TcpConnectionSettings {
     /// <summary>This connection's message size cap.</summary>
     public int? MaxMessageBytes { get; init; }
 
+    /// <summary>This connection's initial receive-buffer size (device families differ in frame size).</summary>
+    public int? InitialReadBufferBytes { get; init; }
+
+    /// <summary>This connection's initial send frame-buffer size.</summary>
+    public int? InitialSendBufferBytes { get; init; }
+
     /// <summary>This connection's idle window for the codec's <c>OnIdleAsync</c> (device families differ
     /// in poll cadence).</summary>
     public TimeSpan? IdleTimeout { get; init; }

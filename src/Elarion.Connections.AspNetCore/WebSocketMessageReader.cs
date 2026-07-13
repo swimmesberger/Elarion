@@ -6,8 +6,8 @@ namespace Elarion.Connections.AspNetCore;
 /// Reassembles complete WebSocket messages (a message may span many frames) with a hard size cap, shared by
 /// the handshake IO and the main receive loop so both enforce the same limit.
 /// </summary>
-internal sealed class WebSocketMessageReader(WebSocket socket, int maxMessageBytes) {
-    private readonly byte[] _buffer = new byte[8 * 1024];
+internal sealed class WebSocketMessageReader(WebSocket socket, int maxMessageBytes, int receiveBufferBytes) {
+    private readonly byte[] _buffer = new byte[receiveBufferBytes];
 
     /// <summary>Reads the next complete message; <see langword="null"/> when the client sent a close frame.</summary>
     /// <exception cref="WebSocketMessageTooLargeException">The message exceeded the configured cap.</exception>

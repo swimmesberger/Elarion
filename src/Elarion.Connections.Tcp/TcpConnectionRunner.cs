@@ -33,7 +33,9 @@ internal static class TcpConnectionRunner {
             var handshakeTimeout = overrides?.HandshakeTimeout ?? options.HandshakeTimeout;
             var transport = overrides?.Transport ?? options.Transport;
             client.Client.NoDelay = overrides?.NoDelay ?? options.NoDelay;
-            var reader = new TcpMessageReader(stream, framer, maxMessageBytes);
+            var readBufferBytes = overrides?.InitialReadBufferBytes ?? options.InitialReadBufferBytes;
+            var sendBufferBytes = overrides?.InitialSendBufferBytes ?? options.InitialSendBufferBytes;
+            var reader = new TcpMessageReader(stream, framer, maxMessageBytes, readBufferBytes);
 
             ClientConnectionTicket? ticket;
             using (var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(ct)) {
@@ -55,7 +57,7 @@ internal static class TcpConnectionRunner {
                 Metadata = ticket.Metadata,
                 ConnectedAt = timeProvider.GetUtcNow(),
             };
-            var connection = new TcpClientConnection(identity, client, stream, framer);
+            var connection = new TcpClientConnection(identity, client, stream, framer, sendBufferBytes);
             connection.AttachProtocol(handler.CreateProtocol(connection));
 
             await registry.RegisterAsync(connection, ct);

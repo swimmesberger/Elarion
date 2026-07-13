@@ -110,6 +110,28 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     [Fact]
+    public async Task TinyInitialBuffers_GrowThroughTheEchoRoundTrip() {
+        var ct = TestContext.Current.CancellationToken;
+        // Deliberately smaller than the handshake lines and the payload: exercises the read-buffer growth
+        // and the send-buffer growth paths that the defaults normally hide.
+        await using var host = await StartListenerHostAsync<ChallengeTcpHandler>(ct, configure: o => {
+            o.InitialReadBufferBytes = 4;
+            o.InitialSendBufferBytes = 4;
+        });
+        using var client = await host.ConnectAsync(ct);
+        var stream = client.GetStream();
+
+        (await ReadLineAsync(stream, ct)).Should().Be("challenge");
+        await WriteLineAsync(stream, "device:tcp-grow", ct);
+        (await ReadLineAsync(stream, ct)).Should().Be("welcome");
+        await host.Observer.Connected.Task.WaitAsync(ct);
+
+        var payload = new string('y', 500);
+        await WriteLineAsync(stream, payload, ct);
+        (await ReadLineAsync(stream, ct)).Should().Be("echo:" + payload);
+    }
+
+    [Fact]
     public async Task PerConnectionSettings_ServeDifferentFramingsOnOneEndpoint() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartListenerHostAsync<MultiFramingHandler>(ct);
@@ -390,7 +412,7 @@ public sealed class TcpConnectionAdapterTests {
         StartListenerHostAsync<ChallengeTcpHandler>(ct, idleTimeout);
 
     private static async Task<TcpTestHost> StartListenerHostAsync<THandler>(
-        CancellationToken ct, TimeSpan? idleTimeout = null)
+        CancellationToken ct, TimeSpan? idleTimeout = null, Action<ElarionTcpListenerOptions>? configure = null)
         where THandler : TcpConnectionHandler, new() {
         var boundEndPoint = new TaskCompletionSource<IPEndPoint>(TaskCreationOptions.RunContinuationsAsynchronously);
         var services = new ServiceCollection();
@@ -403,6 +425,7 @@ public sealed class TcpConnectionAdapterTests {
             o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
             o.IdleTimeout = idleTimeout;
             o.OnListening = boundEndPoint.SetResult;
+            configure?.Invoke(o);
         });
         var provider = services.BuildServiceProvider();
         var hosted = provider.GetServices<IHostedService>().ToArray();

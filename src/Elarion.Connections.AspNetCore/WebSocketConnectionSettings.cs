@@ -12,6 +12,9 @@ public sealed record WebSocketConnectionSettings {
     /// <summary>This connection's message size cap.</summary>
     public int? MaxMessageBytes { get; init; }
 
+    /// <summary>This connection's receive chunk size.</summary>
+    public int? ReceiveBufferBytes { get; init; }
+
     /// <summary>This connection's idle window for the codec's <c>OnIdleAsync</c>.</summary>
     public TimeSpan? IdleTimeout { get; init; }
 

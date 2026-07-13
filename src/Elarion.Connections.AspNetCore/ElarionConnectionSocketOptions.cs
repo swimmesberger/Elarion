@@ -2,6 +2,16 @@ namespace Elarion.Connections.AspNetCore;
 
 /// <summary>Per-endpoint tuning for <c>MapElarionConnectionSocket</c>.</summary>
 public sealed class ElarionConnectionSocketOptions {
+    /// <summary>The default receive chunk size (8 KiB).</summary>
+    public const int DefaultReceiveBufferBytes = 8 * 1024;
+
+    /// <summary>
+    /// The per-connection receive chunk size (default <see cref="DefaultReceiveBufferBytes"/>), retained
+    /// for the connection's lifetime — size it down for fleets of small-frame clients, up for
+    /// known-large-frame device links (fewer receive calls per message).
+    /// </summary>
+    public int ReceiveBufferBytes { get; set; } = DefaultReceiveBufferBytes;
+
     /// <summary>
     /// The maximum reassembled message size (default 1 MiB) — enforced during the handshake and the receive
     /// loop; an oversized message closes the connection with <c>MessageTooBig</c>. Size it to the codec's

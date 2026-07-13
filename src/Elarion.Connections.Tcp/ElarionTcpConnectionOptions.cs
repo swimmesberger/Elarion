@@ -4,9 +4,31 @@ namespace Elarion.Connections.Tcp;
 
 /// <summary>Shared tuning for TCP connection endpoints (listener and dialer).</summary>
 public class ElarionTcpConnectionOptions {
+    /// <summary>The default initial size of the per-connection receive/accumulation buffer (8 KiB).</summary>
+    public const int DefaultReadBufferBytes = 8 * 1024;
+
+    /// <summary>The default initial size of the per-connection send frame buffer (4 KiB).</summary>
+    public const int DefaultSendBufferBytes = 4 * 1024;
+
     /// <summary>The framing that turns the byte stream into messages — required. Ship-with:
     /// <see cref="LengthPrefixedTcpFramer"/> and <see cref="DelimitedTcpFramer"/>.</summary>
     public TcpMessageFramer? Framer { get; set; }
+
+    /// <summary>
+    /// The initial size of the per-connection receive buffer (default
+    /// <see cref="DefaultReadBufferBytes"/>). It grows on demand (up to <see cref="MaxMessageBytes"/>-sized
+    /// messages) and is <b>retained for the connection's lifetime</b> — size it down for fleets of
+    /// small-telegram devices (memory footprint), up to the largest expected frame for known-large
+    /// protocols (skips the regrowth copies).
+    /// </summary>
+    public int InitialReadBufferBytes { get; set; } = DefaultReadBufferBytes;
+
+    /// <summary>
+    /// The initial size of the per-connection send frame buffer (default
+    /// <see cref="DefaultSendBufferBytes"/>). Grows to the largest framed message the connection sends and
+    /// is retained; same sizing guidance as <see cref="InitialReadBufferBytes"/>.
+    /// </summary>
+    public int InitialSendBufferBytes { get; set; } = DefaultSendBufferBytes;
 
     /// <summary>The maximum unconsumed buffer (≈ largest message) before the connection is closed
     /// (default 1 MiB). Bulk payloads belong in the staged-blob tier, not a frame.</summary>

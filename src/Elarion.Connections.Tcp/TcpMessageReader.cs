@@ -5,8 +5,8 @@ namespace Elarion.Connections.Tcp;
 /// shared by the handshake IO and the main receive loop so both enforce the same limit. A returned
 /// message's payload slices the internal buffer and is only valid until the next read.
 /// </summary>
-internal sealed class TcpMessageReader(Stream stream, TcpMessageFramer framer, int maxMessageBytes) {
-    private byte[] _buffer = new byte[8 * 1024];
+internal sealed class TcpMessageReader(Stream stream, TcpMessageFramer framer, int maxMessageBytes, int initialBufferBytes) {
+    private byte[] _buffer = new byte[initialBufferBytes];
     private int _start;
     private int _end;
 

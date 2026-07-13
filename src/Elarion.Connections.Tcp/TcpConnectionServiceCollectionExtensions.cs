@@ -79,6 +79,8 @@ public static class TcpConnectionServiceCollectionExtensions {
         }
 
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxMessageBytes, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialReadBufferBytes, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialSendBufferBytes, 0);
     }
 }
 
