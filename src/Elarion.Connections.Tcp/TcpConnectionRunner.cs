@@ -1,5 +1,4 @@
 using System.Net.Sockets;
-using System.Text;
 using Elarion.Abstractions.Connections;
 using Microsoft.Extensions.Logging;
 
@@ -96,12 +95,9 @@ internal static class TcpConnectionRunner {
                 return;
             }
 
-            if (message.Value.Kind == TcpMessageKind.Text) {
-                await connection.Protocol.OnTextAsync(Encoding.UTF8.GetString(message.Value.Payload.Span), ct);
-            }
-            else {
-                await connection.Protocol.OnBinaryAsync(message.Value.Payload, ct);
-            }
+            // Bytes are bytes on TCP: every message is a raw slice on the binary leg; a text protocol's
+            // codec decodes it — the string is paid for only where it is wanted.
+            await connection.Protocol.OnBinaryAsync(message.Value, ct);
         }
     }
 
@@ -109,7 +105,7 @@ internal static class TcpConnectionRunner {
     // synchronously and pay for no timer, no Task materialization, no linked token source — the hot path
     // under load is identical with and without an idle window. The pending read is never abandoned (a
     // second concurrent read would be invalid); idle ticks fire per elapsed window until data arrives.
-    private static async ValueTask<TcpFramedMessage?> ReadWithIdleAsync(
+    private static async ValueTask<ReadOnlyMemory<byte>?> ReadWithIdleAsync(
         TcpClientConnection connection, TcpMessageReader reader, TimeSpan window, CancellationToken ct) {
         var read = reader.ReadAsync(ct);
         if (read.IsCompletedSuccessfully) {

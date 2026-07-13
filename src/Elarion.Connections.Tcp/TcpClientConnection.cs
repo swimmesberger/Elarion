@@ -7,7 +7,7 @@ namespace Elarion.Connections.Tcp;
 
 /// <summary>
 /// One live TCP connection: the adapter's <see cref="IClientConnectionSink"/>. The raw send legs
-/// (<see cref="SendTextAsync"/>/<see cref="SendBinaryAsync"/>/<see cref="SendMessageAsync"/>, writes
+/// (<see cref="SendTextAsync"/>/<see cref="SendBinaryAsync"/>, writes
 /// serialized — safe from any thread, actor turn, or observer) frame through the endpoint's configured
 /// framer; the neutral sink members delegate to the connection's codec, identical to every other adapter.
 /// </summary>
@@ -33,22 +33,18 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     internal IClientConnectionProtocol Protocol =>
         _protocol ?? throw new InvalidOperationException("The connection's protocol is not attached yet.");
 
-    /// <summary>Sends one framed UTF-8 text message; at-most-once, faults with
-    /// <see cref="ClientConnectionClosedException"/> when the link is gone.</summary>
+    /// <summary>Sends one framed UTF-8 text message (write-side sugar over <see cref="SendBinaryAsync"/>);
+    /// at-most-once, faults with <see cref="ClientConnectionClosedException"/> when the link is gone.</summary>
     public ValueTask SendTextAsync(string message, CancellationToken ct = default) {
         ArgumentNullException.ThrowIfNull(message);
-        return SendMessageAsync(new TcpFramedMessage(TcpMessageKind.Text, Encoding.UTF8.GetBytes(message)), ct);
+        return SendBinaryAsync(Encoding.UTF8.GetBytes(message), ct);
     }
 
-    /// <summary>Sends one framed binary message; at-most-once, faults with
+    /// <summary>Sends one message through the endpoint's framer; at-most-once, faults with
     /// <see cref="ClientConnectionClosedException"/> when the link is gone.</summary>
-    public ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) =>
-        SendMessageAsync(new TcpFramedMessage(TcpMessageKind.Binary, message), ct);
-
-    /// <summary>Sends one framed message through the endpoint's framer.</summary>
-    public async ValueTask SendMessageAsync(TcpFramedMessage message, CancellationToken ct = default) {
+    public async ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) {
         var writer = new ArrayBufferWriter<byte>();
-        _framer.WriteMessage(message, writer);
+        _framer.WriteMessage(message.Span, writer);
 
         await _sendLock.WaitAsync(ct);
         try {

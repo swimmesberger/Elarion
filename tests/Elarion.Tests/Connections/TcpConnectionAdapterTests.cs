@@ -25,8 +25,8 @@ public sealed class TcpConnectionAdapterTests {
     public void LengthPrefixedFramer_HandlesPartialAndBackToBackMessages() {
         var framer = new LengthPrefixedTcpFramer();
         var writer = new ArrayBufferWriter<byte>();
-        framer.WriteMessage(new TcpFramedMessage(TcpMessageKind.Binary, new byte[] { 1, 2, 3 }), writer);
-        framer.WriteMessage(new TcpFramedMessage(TcpMessageKind.Binary, new byte[] { 9 }), writer);
+        framer.WriteMessage(new byte[] { 1, 2, 3 }, writer);
+        framer.WriteMessage(new byte[] { 9 }, writer);
         var wire = writer.WrittenMemory;
 
         framer.TryReadMessage(wire[..3], out _, out _).Should().BeFalse();
@@ -34,24 +34,24 @@ public sealed class TcpConnectionAdapterTests {
 
         framer.TryReadMessage(wire, out var consumed, out var first).Should().BeTrue();
         consumed.Should().Be(7);
-        first.Payload.ToArray().Should().Equal(1, 2, 3);
+        first.ToArray().Should().Equal(1, 2, 3);
 
         framer.TryReadMessage(wire[consumed..], out var consumedSecond, out var second).Should().BeTrue();
         consumedSecond.Should().Be(5);
-        second.Payload.ToArray().Should().Equal(9);
+        second.ToArray().Should().Equal(9);
     }
 
     [Fact]
     public void DelimitedFramer_SkipsNoiseBeforeStart_AndRoundTrips() {
-        var framer = new DelimitedTextTcpFramer(end: (byte)'>', start: (byte)'<');
+        var framer = new DelimitedTcpFramer(end: (byte)'>', start: (byte)'<');
         var wire = Encoding.UTF8.GetBytes("garbage<hello>");
 
         framer.TryReadMessage(wire, out var consumed, out var message).Should().BeTrue();
         consumed.Should().Be(wire.Length);
-        Encoding.UTF8.GetString(message.Payload.Span).Should().Be("hello");
+        Encoding.UTF8.GetString(message.Span).Should().Be("hello");
 
         var writer = new ArrayBufferWriter<byte>();
-        framer.WriteMessage(new TcpFramedMessage(TcpMessageKind.Text, Encoding.UTF8.GetBytes("out")), writer);
+        framer.WriteMessage(Encoding.UTF8.GetBytes("out"), writer);
         Encoding.UTF8.GetString(writer.WrittenSpan).Should().Be("<out>");
     }
 
@@ -159,7 +159,7 @@ public sealed class TcpConnectionAdapterTests {
         services.AddElarionTcpConnectionDialer<DialerHandler>(o => {
             o.Host = "127.0.0.1";
             o.Port = port;
-            o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+            o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
             o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
             o.ReconnectMaxDelay = TimeSpan.FromMilliseconds(200);
         });
@@ -223,7 +223,7 @@ public sealed class TcpConnectionAdapterTests {
             await endpoints.ApplyDialerAsync<DialerHandler>("bind-1", o => {
                 o.Host = "127.0.0.1";
                 o.Port = ((IPEndPoint)deviceA.LocalEndpoint).Port;
-                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
                 o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
             }, ct);
             using (var session = await deviceA.AcceptTcpClientAsync(ct)) {
@@ -238,7 +238,7 @@ public sealed class TcpConnectionAdapterTests {
                 await endpoints.ApplyDialerAsync<DialerHandler>("bind-1", o => {
                     o.Host = "127.0.0.1";
                     o.Port = ((IPEndPoint)deviceB.LocalEndpoint).Port;
-                    o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                    o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
                     o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
                 }, ct);
                 await observer.Disconnected.Task.WaitAsync(ct);
@@ -287,7 +287,7 @@ public sealed class TcpConnectionAdapterTests {
             // A healthy listener advertises Listening.
             await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-ok", o => {
                 o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
             }, ct);
             var listening = await transitions.Reader.ReadAsync(ct);
             listening.Should().BeEquivalentTo(
@@ -297,7 +297,7 @@ public sealed class TcpConnectionAdapterTests {
             // A binding whose port is taken advertises Faulted with the reason — visible, not just logged.
             await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-taken", o => {
                 o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, occupiedPort);
-                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
             }, ct);
             var faulted = await transitions.Reader.ReadAsync(ct);
             faulted.Name.Should().Be("bind-taken");
@@ -310,7 +310,7 @@ public sealed class TcpConnectionAdapterTests {
             await endpoints.ApplyDialerAsync<DialerHandler>("bind-unreachable", o => {
                 o.Host = "127.0.0.1";
                 o.Port = occupiedPort;                       // nothing listens here anymore
-                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
                 o.ReconnectMinDelay = TimeSpan.FromMilliseconds(20);
             }, ct);
             var dialing = await transitions.Reader.ReadAsync(ct);
@@ -345,7 +345,7 @@ public sealed class TcpConnectionAdapterTests {
             // The binding starts as a server-based endpoint: a device dials in.
             await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-flip", o => {
                 o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-                o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
                 o.OnListening = boundEndPoint.SetResult;
             }, ct);
             var listenPort = await boundEndPoint.Task.WaitAsync(ct);
@@ -363,7 +363,7 @@ public sealed class TcpConnectionAdapterTests {
                 await endpoints.ApplyDialerAsync<DialerHandler>("bind-flip", o => {
                     o.Host = "127.0.0.1";
                     o.Port = ((IPEndPoint)device.LocalEndpoint).Port;
-                    o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+                    o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
                     o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
                 }, ct);
                 await observer.Disconnected.Task.WaitAsync(ct);
@@ -400,7 +400,7 @@ public sealed class TcpConnectionAdapterTests {
         services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
         services.AddElarionTcpConnectionListener<THandler>(o => {
             o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-            o.Framer = new DelimitedTextTcpFramer(end: (byte)'\n');
+            o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
             o.IdleTimeout = idleTimeout;
             o.OnListening = boundEndPoint.SetResult;
         });
@@ -478,8 +478,9 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     private sealed class EchoTcpProtocol(TcpClientConnection connection) : IClientConnectionProtocol {
-        public ValueTask OnTextAsync(string message, CancellationToken ct) =>
-            connection.SendTextAsync("echo:" + message, ct);
+        // Bytes are bytes on TCP: text protocols decode in the codec — the one-liner the framer no longer does.
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
+            connection.SendTextAsync("echo:" + Encoding.UTF8.GetString(message.Span), ct);
 
         public ValueTask OnIdleAsync(CancellationToken ct) =>
             connection.SendTextAsync("idle-poll", ct);
@@ -495,7 +496,7 @@ public sealed class TcpConnectionAdapterTests {
             var settings = Interlocked.Increment(ref _connections) == 1
                 ? new TcpConnectionSettings { Transport = "tcp-lines" }
                 : new TcpConnectionSettings {
-                    Framer = new DelimitedTextTcpFramer(end: (byte)'|'),
+                    Framer = new DelimitedTcpFramer(end: (byte)'|'),
                     Transport = "tcp-pipes",
                 };
             return ValueTask.FromResult<TcpConnectionSettings?>(settings);
@@ -541,7 +542,8 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     private sealed class RecordingTcpProtocol(ChannelWriter<string> inbound) : IClientConnectionProtocol {
-        public ValueTask OnTextAsync(string message, CancellationToken ct) => inbound.WriteAsync(message, ct);
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
+            inbound.WriteAsync(Encoding.UTF8.GetString(message.Span), ct);
     }
 
     private sealed class AwaitableConnectionObserver : IClientConnectionObserver {

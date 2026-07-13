@@ -245,7 +245,7 @@ adapter-tier requirements or explicit non-absorptions:
 - `Elarion.Connections.Tcp` — the raw-socket adapter for proprietary device protocols: hosted **listener**
   and **dial-out** (jittered exponential reconnect) services over the same handler/codec seams; because
   TCP has no message boundaries, the adapter owns a framing seam (`TcpMessageFramer`) with
-  length-prefixed and delimited-text built-ins, so codecs still receive complete messages. Framing and
+  length-prefixed and delimited built-ins — framing is boundaries only: bytes are bytes on TCP, every inbound message is a raw slice on the codec's binary leg, and text decoding is the codec's own one-liner (WebSocket keeps both legs because text-vs-binary is a real frame property there). Framing and
   limits are configurable **per connection** (`ConfigureConnectionAsync` — resolved from the peer before
   any byte, so one ingress port serves differently-framed device families; a field requirement of the
   industrial gateway's binding configuration). Bindings-as-data are first-class: the

@@ -20,7 +20,7 @@ namespace Elarion.Benchmarks.Connections;
 public class TcpFramingBenchmarks {
     private const int Messages = 1_000;
 
-    private readonly DelimitedTextTcpFramer _framer = new(end: (byte)'>', start: (byte)'<', kind: TcpMessageKind.Binary);
+    private readonly DelimitedTcpFramer _framer = new(end: (byte)'>', start: (byte)'<');
     private readonly ArrayBufferWriter<byte> _writer = new(64 * 1024);
     private byte[] _wire = null!;
     private byte[] _payload = null!;
@@ -30,7 +30,7 @@ public class TcpFramingBenchmarks {
         _payload = Encoding.UTF8.GetBytes(new string('x', 30));
         var writer = new ArrayBufferWriter<byte>();
         for (var i = 0; i < Messages; i++) {
-            _framer.WriteMessage(new TcpFramedMessage(TcpMessageKind.Binary, _payload), writer);
+            _framer.WriteMessage(_payload, writer);
         }
 
         _wire = writer.WrittenMemory.ToArray();
@@ -52,7 +52,7 @@ public class TcpFramingBenchmarks {
     public int WriteDelimited() {
         _writer.ResetWrittenCount();
         for (var i = 0; i < Messages; i++) {
-            _framer.WriteMessage(new TcpFramedMessage(TcpMessageKind.Binary, _payload), _writer);
+            _framer.WriteMessage(_payload, _writer);
         }
 
         return _writer.WrittenCount;
@@ -62,10 +62,10 @@ public class TcpFramingBenchmarks {
 /// <summary>
 /// End-to-end TCP server throughput over real loopback sockets, 32-byte delimited messages: a hand-rolled
 /// minimal socket read loop (the floor — accept, read, count delimiters, nothing else) against the full
-/// adapter pipeline (framer → codec dispatch → counter), in three flavors: binary delivery (zero-copy),
-/// text delivery (per-message string decode — the priced convenience), and binary with a 60&#160;s idle
-/// window armed (never firing — measures the idle machinery's hot-path cost, which the sync-completion
-/// fast path is supposed to make ~zero).
+/// adapter pipeline (framer → codec dispatch → counter), in three flavors: raw-slice delivery (zero-copy),
+/// a codec that decodes each message to a string (the priced text convenience, paid in the codec where it
+/// belongs), and raw delivery with a 60&#160;s idle window armed (never firing — measures the idle
+/// machinery's hot-path cost, which the sync-completion fast path is supposed to make ~zero).
 /// </summary>
 [MemoryDiagnoser]
 public class TcpServerBenchmarks {
@@ -109,20 +109,21 @@ public class TcpServerBenchmarks {
         services.AddElarionConnections();
         services.AddSingleton(_counter);
         services.AddSingleton<CountingConnectionHandler>();
+        services.AddSingleton<DecodingConnectionHandler>();
         services.AddElarionTcpConnectionListener<CountingConnectionHandler>(o => {
             o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-            o.Framer = new DelimitedTextTcpFramer(Delimiter, kind: TcpMessageKind.Binary);
+            o.Framer = new DelimitedTcpFramer(Delimiter);
             o.OnListening = binaryPort.SetResult;
         });
         services.AddElarionTcpConnectionListener<CountingConnectionHandler>(o => {
             o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-            o.Framer = new DelimitedTextTcpFramer(Delimiter, kind: TcpMessageKind.Binary);
+            o.Framer = new DelimitedTcpFramer(Delimiter);
             o.IdleTimeout = TimeSpan.FromSeconds(60);
             o.OnListening = binaryIdlePort.SetResult;
         });
-        services.AddElarionTcpConnectionListener<CountingConnectionHandler>(o => {
+        services.AddElarionTcpConnectionListener<DecodingConnectionHandler>(o => {
             o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-            o.Framer = new DelimitedTextTcpFramer(Delimiter);
+            o.Framer = new DelimitedTcpFramer(Delimiter);
             o.OnListening = textPort.SetResult;
         });
         _provider = services.BuildServiceProvider();
@@ -164,7 +165,7 @@ public class TcpServerBenchmarks {
     public Task Adapter_Binary_IdleArmed() => PumpAsync(_binaryIdleClient);
 
     [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]
-    public Task Adapter_Text() => PumpAsync(_textClient);
+    public Task Adapter_TextDecode() => PumpAsync(_textClient);
 
     private async Task PumpAsync(NetworkStream client) {
         var done = _counter.WaitFor(MessagesPerInvoke);
@@ -233,14 +234,29 @@ public class TcpServerBenchmarks {
             new CountingProtocol(counter);
     }
 
+    /// <summary>Same, but the codec decodes each message to a string first — the priced text convenience,
+    /// now living where it belongs (in the codec).</summary>
+    public sealed class DecodingConnectionHandler(MessageCounter counter) : TcpConnectionHandler {
+        public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+            TcpHandshakeContext handshake, CancellationToken ct) =>
+            ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "bench")),
+            });
+
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
+            new DecodingProtocol(counter);
+    }
+
     private sealed class CountingProtocol(MessageCounter counter) : IClientConnectionProtocol {
-        public ValueTask OnTextAsync(string message, CancellationToken ct) {
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
             counter.Add(1);
             return ValueTask.CompletedTask;
         }
+    }
 
+    private sealed class DecodingProtocol(MessageCounter counter) : IClientConnectionProtocol {
         public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
-            counter.Add(1);
+            counter.Add(Encoding.UTF8.GetString(message.Span).Length > 0 ? 1 : 0);
             return ValueTask.CompletedTask;
         }
     }

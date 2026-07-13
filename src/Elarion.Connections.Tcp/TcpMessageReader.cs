@@ -13,7 +13,7 @@ internal sealed class TcpMessageReader(Stream stream, TcpMessageFramer framer, i
     /// <summary>Reads the next complete message; <see langword="null"/> when the peer closed the stream.</summary>
     /// <exception cref="TcpMessageTooLargeException">The unconsumed buffer exceeded the cap without
     /// yielding a message.</exception>
-    public async ValueTask<TcpFramedMessage?> ReadAsync(CancellationToken ct) {
+    public async ValueTask<ReadOnlyMemory<byte>?> ReadAsync(CancellationToken ct) {
         while (true) {
             if (_end > _start
                 && framer.TryReadMessage(_buffer.AsMemory(_start, _end - _start), out var consumed, out var message)) {

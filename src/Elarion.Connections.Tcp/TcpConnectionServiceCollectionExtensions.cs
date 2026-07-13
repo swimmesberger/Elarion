@@ -74,7 +74,7 @@ public static class TcpConnectionServiceCollectionExtensions {
     internal static void ValidateShared(ElarionTcpConnectionOptions options) {
         if (options.Framer is null) {
             throw new ArgumentException(
-                "Framer is required — TCP has no message boundaries; pick LengthPrefixedTcpFramer, DelimitedTextTcpFramer, or a custom framer.",
+                "Framer is required — TCP has no message boundaries; pick LengthPrefixedTcpFramer, DelimitedTcpFramer, or a custom framer.",
                 nameof(options));
         }
 

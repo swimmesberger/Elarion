@@ -31,26 +31,26 @@ public sealed class TcpHandshakeContext {
     /// <summary>The local endpoint the connection arrived on (or dialed out from).</summary>
     public EndPoint? LocalEndPoint { get; }
 
-    /// <summary>Receives the next framed message; <see langword="null"/> when the peer closed instead of
-    /// answering (treat as a rejected handshake).</summary>
-    public ValueTask<TcpFramedMessage?> ReceiveAsync(CancellationToken ct = default) => _reader.ReadAsync(ct);
+    /// <summary>Receives the next framed message payload; <see langword="null"/> when the peer closed
+    /// instead of answering (treat as a rejected handshake).</summary>
+    public ValueTask<ReadOnlyMemory<byte>?> ReceiveAsync(CancellationToken ct = default) => _reader.ReadAsync(ct);
 
     /// <summary>Receives the next framed message decoded as UTF-8 text; <see langword="null"/> on close.</summary>
     public async ValueTask<string?> ReceiveTextAsync(CancellationToken ct = default) {
         var message = await _reader.ReadAsync(ct);
-        return message is null ? null : Encoding.UTF8.GetString(message.Value.Payload.Span);
+        return message is null ? null : Encoding.UTF8.GetString(message.Value.Span);
     }
 
     /// <summary>Sends one framed message (e.g. the challenge nonce).</summary>
-    public async ValueTask SendAsync(TcpFramedMessage message, CancellationToken ct = default) {
+    public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct = default) {
         var writer = new ArrayBufferWriter<byte>();
-        _framer.WriteMessage(message, writer);
+        _framer.WriteMessage(payload.Span, writer);
         await _stream.WriteAsync(writer.WrittenMemory, ct);
     }
 
     /// <summary>Sends one framed UTF-8 text message.</summary>
     public ValueTask SendTextAsync(string message, CancellationToken ct = default) {
         ArgumentNullException.ThrowIfNull(message);
-        return SendAsync(new TcpFramedMessage(TcpMessageKind.Text, Encoding.UTF8.GetBytes(message)), ct);
+        return SendAsync(Encoding.UTF8.GetBytes(message), ct);
     }
 }

@@ -5,7 +5,7 @@ namespace Elarion.Connections.Tcp;
 /// <summary>Shared tuning for TCP connection endpoints (listener and dialer).</summary>
 public class ElarionTcpConnectionOptions {
     /// <summary>The framing that turns the byte stream into messages — required. Ship-with:
-    /// <see cref="LengthPrefixedTcpFramer"/> and <see cref="DelimitedTextTcpFramer"/>.</summary>
+    /// <see cref="LengthPrefixedTcpFramer"/> and <see cref="DelimitedTcpFramer"/>.</summary>
     public TcpMessageFramer? Framer { get; set; }
 
     /// <summary>The maximum unconsumed buffer (≈ largest message) before the connection is closed
