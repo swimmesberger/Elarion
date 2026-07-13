@@ -17,6 +17,8 @@
     "entity-framework",
     "bulk-operations",
     "pagination",
+    "postgres-extensions",
+    "time-series",
     "blob-storage",
     "blob-uploads",
     "telemetry"
