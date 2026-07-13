@@ -20,6 +20,14 @@ public class ElarionTcpConnectionOptions {
     /// client that never authenticates must not hold a slot forever.</summary>
     public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// Disables Nagle's algorithm on the connection's socket (default <see langword="true"/>): small
+    /// telegrams leave immediately instead of being coalesced — Nagle interacting with delayed ACKs can
+    /// stall serial request/reply device protocols by tens of milliseconds per exchange. Set
+    /// <see langword="false"/> only for one-way bulk streams where packet count matters more than latency.
+    /// </summary>
+    public bool NoDelay { get; set; } = true;
+
     /// <summary>The transport tag stamped on connections (default <c>"tcp"</c>) — bounded telemetry
     /// vocabulary, never a behavioral switch.</summary>
     public string Transport { get; set; } = "tcp";

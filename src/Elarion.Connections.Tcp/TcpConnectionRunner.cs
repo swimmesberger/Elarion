@@ -32,6 +32,7 @@ internal static class TcpConnectionRunner {
             var idleTimeout = overrides?.IdleTimeout ?? options.IdleTimeout;
             var handshakeTimeout = overrides?.HandshakeTimeout ?? options.HandshakeTimeout;
             var transport = overrides?.Transport ?? options.Transport;
+            client.Client.NoDelay = overrides?.NoDelay ?? options.NoDelay;
             var reader = new TcpMessageReader(stream, framer, maxMessageBytes);
 
             ClientConnectionTicket? ticket;

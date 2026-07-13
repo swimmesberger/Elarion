@@ -28,6 +28,9 @@ public sealed record TcpConnectionSettings {
     /// <summary>This connection's handshake deadline.</summary>
     public TimeSpan? HandshakeTimeout { get; init; }
 
+    /// <summary>This connection's Nagle setting; see the endpoint option of the same name.</summary>
+    public bool? NoDelay { get; init; }
+
     /// <summary>This connection's transport tag — keep it a <b>bounded</b> vocabulary (a protocol-family
     /// name, never a device id).</summary>
     public string? Transport { get; init; }

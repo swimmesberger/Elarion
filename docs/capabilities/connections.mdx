@@ -134,8 +134,11 @@ message boundaries, the adapter owns a **framing seam** — and framing is bound
 skips serial-bridge line noise), or implement `TcpMessageFramer` for the vendor's format. Bytes are
 bytes on TCP, so every inbound message reaches the codec's `OnBinaryAsync` as a raw slice; a text
 protocol's codec decodes with one `Encoding.UTF8.GetString` — the string is paid for only where it is
-wanted. The pipeline is benchmarked at **raw-socket parity with zero allocations per message**, and an
-armed-but-quiet idle window costs nothing on the hot path.
+wanted. The pipeline is benchmarked at **raw-socket parity with zero allocations per message in both
+directions** — receive (framer slice → codec) and send (`SendBinaryAsync` reuses a per-connection frame
+buffer, so a proxy that forwards between links allocates nothing) — and an armed-but-quiet idle window
+costs nothing on the hot path. Sockets default to `NoDelay` (Nagle stalls serial request/reply
+telegrams); override per endpoint or per connection for bulk one-way streams.
 
 ```csharp
 // Devices dial in:

@@ -16,6 +16,10 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     private readonly Stream _stream;
     private readonly TcpMessageFramer _framer;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    // Reused under the send lock (writes are serialized anyway), so the steady-state send path is
+    // allocation-free — the proxy/forwarder hot loop (receive one link, send another) stays zero-cost on
+    // both halves. Grows to the largest framed message this connection ever sent and is retained.
+    private readonly ArrayBufferWriter<byte> _sendBuffer = new(4 * 1024);
     private IClientConnectionProtocol? _protocol;
 
     internal TcpClientConnection(ClientConnection connection, TcpClient client, Stream stream, TcpMessageFramer framer) {
@@ -43,12 +47,11 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     /// <summary>Sends one message through the endpoint's framer; at-most-once, faults with
     /// <see cref="ClientConnectionClosedException"/> when the link is gone.</summary>
     public async ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) {
-        var writer = new ArrayBufferWriter<byte>();
-        _framer.WriteMessage(message.Span, writer);
-
         await _sendLock.WaitAsync(ct);
         try {
-            await _stream.WriteAsync(writer.WrittenMemory, ct);
+            _sendBuffer.ResetWrittenCount();
+            _framer.WriteMessage(message.Span, _sendBuffer);
+            await _stream.WriteAsync(_sendBuffer.WrittenMemory, ct);
         }
         catch (IOException failure) {
             throw new ClientConnectionClosedException(Connection.ConnectionId, failure);
