@@ -1,0 +1,46 @@
+using Elarion.Abstractions.Connections;
+
+namespace Elarion.Connections;
+
+/// <summary>
+/// The app-owned codec for one connection, transport-neutral: adapters deliver <b>complete inbound
+/// messages, sequentially, in receive order</b> (the adapter's single receive loop is the per-connection
+/// ordering guarantee), and the neutral sink's outbound legs delegate here so the wire encoding stays the
+/// codec's decision. The same codec runs over any message-delivering adapter — WebSocket frames, a
+/// length-prefixed or line-delimited TCP stream (the adapter owns the framing that turns a byte stream into
+/// messages), or a datagram transport.
+/// </summary>
+/// <remarks>
+/// A proprietary device codec implements only the inbound members and sends raw frames via its adapter's
+/// concrete connection type (e.g. the WebSocket adapter's <c>SendTextAsync</c>/<c>SendBinaryAsync</c>); the
+/// neutral legs keep their fail-loud defaults. An exception thrown from any member ends the connection (the
+/// adapter logs and closes) — a codec that cannot parse a message is a protocol violation, not something to
+/// limp past. Created once per connection; instances may hold per-connection state (parser buffers, sequence
+/// counters, the pending-request map an <see cref="InvokeAsync"/> implementation correlates on).
+/// </remarks>
+public interface IClientConnectionProtocol {
+    /// <summary>Handles one complete inbound text message.</summary>
+    /// <param name="message">The reassembled message.</param>
+    /// <param name="ct">The connection's lifetime token.</param>
+    ValueTask OnTextAsync(string message, CancellationToken ct) =>
+        throw new NotSupportedException("This protocol does not accept text messages.");
+
+    /// <summary>Handles one complete inbound binary message. The memory is only valid for the duration of
+    /// the call — copy it if the codec defers work.</summary>
+    /// <param name="message">The reassembled message.</param>
+    /// <param name="ct">The connection's lifetime token.</param>
+    ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
+        throw new NotSupportedException("This protocol does not accept binary messages.");
+
+    /// <summary>The codec behind <see cref="IClientConnectionSink.SendAsync"/> — encode and send a named
+    /// payload. Codecs without a named-payload concept keep the fail-loud default.</summary>
+    ValueTask SendAsync<TPayload>(string name, TPayload payload, CancellationToken ct) where TPayload : class =>
+        throw new NotSupportedException("This protocol does not support named payload sends.");
+
+    /// <summary>The codec behind <see cref="IClientConnectionSink.InvokeAsync"/> — encode, correlate, and
+    /// await the client's reply, honoring <see cref="ClientInvokeOptions.Timeout"/>. Codecs without
+    /// request/reply keep the fail-loud default.</summary>
+    ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
+        string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct) where TRequest : class =>
+        throw new NotSupportedException("This protocol does not support client invocation.");
+}

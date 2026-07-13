@@ -1,0 +1,148 @@
+---
+title: Client connections
+description: Long-lived bidirectional links — device gateways and interactive clients — over a transport-neutral kernel; the app writes only the handshake and the codec.
+---
+
+Most realtime needs don't need a connection: server→client facts are
+[client events](/docs/capabilities/events/client-events), ordered outputs are
+[streams](/docs/capabilities/events/streams), and client→server calls are
+[transports](/docs/capabilities/transports). A **connection** is for the cases those deliberately
+don't cover — when the conversation itself is stateful or latency-interactive:
+
+1. **Interactive rate** — client→server messages are frequent *and* per-message latency is part of
+   the UX (collaboration ops, live input, telemetry ingest where batching's flush window is itself
+   too slow).
+2. **The connection is the state** — device links where connect/disconnect are business events, or
+   the link fronts a stateful device protocol (the IoT gateway shape).
+3. **Server→client RPC** — the server must address one specific connected client and await a result.
+
+If a list-carrying batch command flushed every N items or M milliseconds would do, use that instead:
+one authorization, one validation pass, one transaction per batch, visible in the schema.
+
+## The kernel
+
+`Elarion.Connections` (contracts in `Elarion.Abstractions.Connections`) is transport-neutral — the
+same seams serve a WebSocket adapter today and a raw TCP or datagram adapter tomorrow, and nothing in
+them assumes a socket exists at all:
+
+| Piece | Role |
+| --- | --- |
+| `ClientConnection` | Identity record: opaque `ConnectionId`, the principal captured at connect, `PrincipalId` (user id for browsers, **device id for device links** — many connections share one principal), `Transport` (bounded telemetry tag), opaque `Metadata`. |
+| `IClientConnectionRegistry` | Node-local index and lifecycle broker: adapters register/unregister; consumers look up by id or principal. Observers run after the index mutation and are failure-isolated. |
+| `IClientConnectionObserver` | Connect/disconnect lifecycle seam — presence projections, device registration, twin wiring hang here. |
+| `IClientConnectionSink` | The per-connection outbound port: fire-and-forget `SendAsync(name, payload)` and request/reply `InvokeAsync` (completes with the reply, a timeout, or `ClientConnectionClosedException` — never silently). |
+| `IClientConnectionProtocol` | The app-owned **codec**: complete inbound messages arrive sequentially in receive order; the sink's outbound legs delegate here so wire encoding stays the codec's decision. Legs a codec doesn't speak keep fail-loud defaults. |
+| `ClientConnectionEventBridge` | Makes any adapter a peer delivery leg of the SSE endpoint: same topic catalog, same fail-closed subscribe-time authorization, same `elarion.connected` greeting, same cross-node fan-out. |
+
+Register the kernel once:
+
+```csharp
+builder.Services.AddElarionConnections();   // registry + client-events bridge
+```
+
+## The WebSocket endpoint
+
+`Elarion.Connections.AspNetCore` ships the first adapter, shaped for device gateways: the endpoint
+owns accept, message reassembly (size-capped), registry lifecycle, and teardown; the app supplies an
+**authenticator** and a **codec** by subclassing `WebSocketConnectionHandler`.
+
+```csharp
+public sealed class GatewaySocketHandler(IActorSystem actors, DeviceKeyStore keys)
+    : WebSocketConnectionHandler {
+
+    // In-socket challenge/response (HTTP-level token auth works too — the HttpContext is available).
+    public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+        WebSocketHandshakeContext handshake, CancellationToken ct) {
+        var nonce = Guid.CreateVersion7().ToString("N");
+        await handshake.SendTextAsync($"challenge:{nonce}", ct);
+        var answer = await handshake.ReceiveTextAsync(ct);
+        if (answer is null || !keys.Verify(nonce, answer, out var deviceId)) {
+            return null;                                   // → PolicyViolation close, nothing registered
+        }
+
+        return new ClientConnectionTicket {
+            Principal = DevicePrincipal.For(deviceId),
+            PrincipalId = deviceId,                        // the registry indexes by this
+            Metadata = new Dictionary<string, string> { ["channel"] = "telemetry" },
+        };
+    }
+
+    public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
+        new GatewayCodec(connection, actors);
+}
+
+// The codec: parse the device's frames, route into the digital-twin actor, answer over raw sends.
+internal sealed class GatewayCodec(WebSocketClientConnection connection, IActorSystem actors)
+    : IClientConnectionProtocol {
+    public async ValueTask OnTextAsync(string message, CancellationToken ct) {
+        var frame = GatewayFrame.Parse(message);           // your wire format
+        var twin = actors.Get<IDeviceTwin>(connection.Connection.PrincipalId!);
+        await twin.ApplyAsync(frame);                      // the actor serializes all channels + UI actions
+    }
+}
+```
+
+```csharp
+builder.Services.AddSingleton<GatewaySocketHandler>();
+
+var app = builder.Build();
+app.UseWebSockets();
+app.MapElarionConnectionSocket<GatewaySocketHandler>("/gateway/ws",
+    o => o.MaxMessageBytes = 64 * 1024);
+```
+
+Everything after the handshake is framework: the connection is minted (v7 id, `Transport =
+"websocket"`), registered, observed, pumped, and unregistered on every exit path — client close,
+abrupt death, oversized message (`MessageTooBig`), codec exception (logged, closed), host shutdown.
+
+### Talking back to one client
+
+Look a connection up and use its sink — from a handler, an observer, or an actor turn:
+
+```csharp
+// All channels of one device (or all tabs of one user):
+foreach (var sink in registry.GetForPrincipal(deviceId)) {
+    await ((WebSocketClientConnection)sink).SendTextAsync(frame, ct);   // raw leg, codec-owned format
+}
+
+// Request/reply into a client whose codec implements InvokeAsync:
+var status = await sink.InvokeAsync<StatusQuery, StatusReply>(
+    "status.get", new StatusQuery(), new ClientInvokeOptions { Timeout = TimeSpan.FromSeconds(5) }, ct);
+```
+
+`InvokeAsync` is deliberately the *simple* tier — one request, one reply, bounded by a timeout.
+Multi-message protocol conversations (sequence numbers, re-synchronisation, wait-for-any flows) are
+codec/actor state; the codec seam is their mounting point, not their replacement.
+
+## Client events over a connection
+
+A connection can serve the same topics the SSE endpoint serves — same catalog, same fail-closed
+authorization, so a second transport can never fork the rules. The adapter parses its subscribe
+frame and hands the requests to the bridge; delivery framing is the adapter's choice:
+
+```csharp
+var result = await bridge.SubscribeAsync(connection.Connection, requests,
+    (envelope, ct) => connection.SendTextAsync($"event:{envelope.Topic}:{envelope.Payload}", ct), ct);
+```
+
+Delivery starts with the `elarion.connected` greeting (the same re-query contract an SSE stream opens
+with), and the subscription dies automatically when its connection unregisters. Statuses mirror the
+SSE endpoint's HTTP mapping (unauthenticated / invalid / not-found — unknown and denied topics stay
+indistinguishable).
+
+## Rules of the road
+
+- **Facts still travel as client events**, even over a connection — the sink is for
+  conversation-shaped traffic (replies, control frames, RPC), not a side channel for state fan-out.
+- **Guarantees are unchanged**: events are at-most-once hints healed by re-query; sends are
+  at-most-once; `InvokeAsync` faults explicitly. Commands a device may retransmit belong behind
+  [`[Idempotent]`](/docs/concepts/idempotency).
+- **One device, many connections**: give every channel the same `PrincipalId` and let a
+  [digital-twin actor](/docs/concepts/actors) keyed by device id serialize the shared state —
+  per-connection ordering comes from the receive loop, cross-channel consistency from the actor.
+- **The registry is node-local by design.** Multi-node deployments co-locate device ingress with the
+  single-homed twin (the role-holder proxy's prefix list); a replicated connection directory is the
+  point where you adopt a clustered runtime instead.
+- **Telemetry**: register the `Elarion.Connections` meter — `connection.active`,
+  `connection.opened`/`connection.closed` (tagged `elarion.connection.transport`), and
+  `connection.event_subscriptions.active`.

@@ -3,8 +3,6 @@ using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
-using Elarion.Abstractions.Authorization;
-using Elarion.Abstractions.ClientEvents;
 using Elarion.Abstractions.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -55,6 +53,8 @@ public static class ClientEventEndpointsExtensions {
     private static async Task<IResult> HandleAsync(
         HttpContext context, string? subscriptions, CancellationToken cancellationToken) {
         var services = context.RequestServices;
+        // Pre-checked here (the resolver checks too) so an unauthenticated caller with a malformed
+        // subscriptions parameter still gets 401, not 400 — response precedence is part of the contract.
         var currentUser = services.GetService<ICurrentUser>();
         if (currentUser is null || !currentUser.IsAuthenticated) {
             return Results.Unauthorized();
@@ -75,77 +75,26 @@ public static class ClientEventEndpointsExtensions {
             return Results.BadRequest();
         }
 
-        if (requests is null || requests.Length == 0) {
+        if (requests is null) {
             return Results.BadRequest();
         }
 
-        var catalog = services.GetRequiredService<ClientEventTopicCatalog>();
-        var resolved = new List<ClientEventSubscription>(requests.Length + 1);
-        var authorizedTopics = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var request in requests) {
-            if (string.IsNullOrEmpty(request.Topic)) {
+        // The subscribe pipeline (catalog lookup, fail-closed authorization, scope expansion) is the shared
+        // transport-neutral resolver, so this endpoint and connection adapters can never drift apart.
+        var resolver = services.GetRequiredService<ClientEventSubscriptionResolver>();
+        var resolution = await resolver.ResolveAsync(requests, cancellationToken);
+        switch (resolution.Status) {
+            case ClientEventSubscriptionStatus.Unauthenticated:
+                return Results.Unauthorized();
+            case ClientEventSubscriptionStatus.InvalidRequest:
                 return Results.BadRequest();
-            }
-
-            // Unknown, disabled, and denied topics are indistinguishable from the outside: not found.
-            var topic = catalog.FindByName(request.Topic);
-            if (topic is null) {
+            case ClientEventSubscriptionStatus.NotFound:
                 return Results.NotFound();
-            }
-
-            if (authorizedTopics.Add(topic.Name)) {
-                var denied = await AuthorizeTopicAsync(services, topic.Requirements, cancellationToken);
-                if (denied is not null) {
-                    return denied;
-                }
-            }
-
-            if (request.Resource is null) {
-                resolved.Add(new ClientEventSubscription { Topic = topic.Name, Scope = ClientEventScope.Global });
-                if (currentUser.UserId is { Length: > 0 } userId) {
-                    resolved.Add(new ClientEventSubscription { Topic = topic.Name, Scope = ClientEventScope.User(userId) });
-                }
-                continue;
-            }
-
-            var subscription = new ClientEventSubscription {
-                Topic = topic.Name,
-                Scope = ClientEventScope.Resource(request.Resource),
-            };
-            // Resource scopes are fail-closed: no registered authorizer denies, and denial reads as not
-            // found. A topic declaring AllowAnyResource has said "the resource is a routing key, not an
-            // entitlement" — its requirements already passed above, so the seam is skipped.
-            if (!topic.AllowAnyResource) {
-                var authorizer = services.GetService<IClientEventSubscriptionAuthorizer>();
-                if (authorizer is null || !await authorizer.AuthorizeAsync(subscription, cancellationToken)) {
-                    return Results.NotFound();
-                }
-            }
-            resolved.Add(subscription);
         }
 
         var source = services.GetRequiredService<IClientEventSubscriptionSource>();
-        return TypedResults.ServerSentEvents(StreamAsync(source.Subscribe(resolved), context.RequestAborted));
-    }
-
-    private static async ValueTask<IResult?> AuthorizeTopicAsync(
-        IServiceProvider services, AuthorizationRequirements requirements, CancellationToken ct) {
-        // "Authenticated" is already established for the whole request; only richer requirements need the
-        // IAuthorizer. Requirements with no evaluator fail closed.
-        var beyondAuthenticated = requirements.Permissions.Count > 0 || requirements.Roles.Count > 0
-            || requirements.Claims.Count > 0 || requirements.Policies.Count > 0 || requirements.Resources.Count > 0;
-        if (!beyondAuthenticated) {
-            return null;
-        }
-
-        var authorizer = services.GetService<IAuthorizer>();
-        if (authorizer is null) {
-            return Results.NotFound();
-        }
-
-        var error = await authorizer.AuthorizeAsync(requirements, resource: null, ct);
-        return error is null ? null : Results.NotFound();
+        return TypedResults.ServerSentEvents(
+            StreamAsync(source.Subscribe(resolution.Subscriptions), context.RequestAborted));
     }
 
     /// <summary>

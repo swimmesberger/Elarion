@@ -208,6 +208,33 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   For true placement/forwarding move to Orleans/Akka.NET/Proto.Actor instead of bending this.
   Stateless parallelism never belongs in actors — that's handlers + `Task.WhenAll`.
 
+## Long-lived connections — device gateways and interactive clients
+
+Server→client facts are **client events** (SSE; at-most-once hints, client re-queries), ordered outputs
+are **streams**, client→server calls are handlers. Reach for `Elarion.Connections` only when the
+conversation itself is stateful or latency-interactive: a physical device holding a socket, live
+collaborative input, or server→client RPC. The kernel (`AddElarionConnections()`) gives you the
+node-local `IClientConnectionRegistry`, lifecycle observers, and a bridge that serves client-event
+subscriptions over the connection with the exact same topic catalog + fail-closed auth as SSE.
+
+The WebSocket endpoint means you write two things — an authenticator and a codec:
+
+```csharp
+public sealed class GatewayHandler(...) : WebSocketConnectionHandler {
+    public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+        WebSocketHandshakeContext handshake, CancellationToken ct) { ... }   // null = reject
+    public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection c) =>
+        new GatewayCodec(c, ...);                                            // parses frames, routes to the twin actor
+}
+// host: services.AddSingleton<GatewayHandler>(); app.UseWebSockets();
+//       app.MapElarionConnectionSocket<GatewayHandler>("/gateway/ws");
+```
+
+Set `PrincipalId` to the device id — a device's parallel channels all register under it
+(`registry.GetForPrincipal(deviceId)`), and a digital-twin **actor keyed by device id** serializes the
+shared state across channels and user-triggered commands. Facts still travel as client events, even
+over a connection; the sink (`SendAsync`/`InvokeAsync`) is for conversation traffic only.
+
 ## Rules that don't change
 
 - **Errors are values.** Return `Result<T>`; fail with `AppError.Validation / NotFound / Conflict /

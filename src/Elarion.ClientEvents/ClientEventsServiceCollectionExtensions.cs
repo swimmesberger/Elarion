@@ -51,6 +51,9 @@ public static class ClientEventsServiceCollectionExtensions {
             static sp => sp.GetRequiredService<ClientEventSubscriberRegistry>());
         services.TryAddSingleton<IClientEventBroadcaster, InProcessClientEventBroadcaster>();
         services.TryAddSingleton<IClientEventPublisher, ClientEventPublisher>();
+        // Scoped: reads the caller from the scope's ICurrentUser (the HTTP request scope, or a dispatch
+        // scope a connection adapter seeds with the connection's principal).
+        services.TryAddScoped<ClientEventSubscriptionResolver>();
         return services;
     }
 }
