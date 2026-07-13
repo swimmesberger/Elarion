@@ -20,7 +20,9 @@ namespace Elarion.Connections.Tcp;
 public abstract class TcpMessageFramer {
     /// <summary>Tries to extract one complete message from the head of <paramref name="buffer"/>.</summary>
     /// <param name="buffer">Everything received and not yet consumed.</param>
-    /// <param name="consumed">Bytes to drop from the head of the buffer (0 when returning <see langword="false"/>).</param>
+    /// <param name="consumed">Bytes to drop from the head of the buffer. May be non-zero even when
+    /// returning <see langword="false"/>: skippable noise (bytes that can never begin a message) must be
+    /// consumed so it neither accumulates against the size cap nor gets rescanned per read.</param>
     /// <param name="message">The extracted payload; it may slice <paramref name="buffer"/> and is only
     /// valid until the adapter's next read.</param>
     public abstract bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message);

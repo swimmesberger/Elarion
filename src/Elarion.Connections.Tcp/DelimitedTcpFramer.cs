@@ -19,15 +19,22 @@ public sealed class DelimitedTcpFramer(byte end, byte? start = null) : TcpMessag
         if (start is { } startByte) {
             var startIndex = span.IndexOf(startByte);
             if (startIndex < 0) {
+                // Pure line noise — consume it so it neither accumulates against the size cap nor gets
+                // rescanned on every read.
+                consumed = buffer.Length;
                 return false;
             }
+
+            // Drop the noise before the start delimiter even when the message is still incomplete
+            // (overwritten with the full count below when a complete message is extracted).
+            consumed = startIndex;
 
             payloadStart = startIndex + 1;
         }
 
         var endIndex = span[payloadStart..].IndexOf(end);
         if (endIndex < 0) {
-            return false;
+            return false;   // consumed may carry pre-start noise dropped above
         }
 
         consumed = payloadStart + endIndex + 1;

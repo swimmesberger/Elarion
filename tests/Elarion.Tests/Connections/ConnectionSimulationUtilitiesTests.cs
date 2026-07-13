@@ -106,6 +106,21 @@ public sealed class ConnectionSimulationUtilitiesTests {
         registry.Connections.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task InMemoryDuplexStream_EmptyWriteIsNotEndOfStream() {
+        var ct = TestContext.Current.CancellationToken;
+        var (left, right) = InMemoryDuplexStream.CreatePair();
+        await using var _ = left;
+        await using var __ = right;
+
+        await left.WriteAsync(ReadOnlyMemory<byte>.Empty, ct);
+        await left.WriteAsync(new byte[] { 42 }, ct);
+
+        var buffer = new byte[8];
+        (await right.ReadAsync(buffer, ct)).Should().Be(1);
+        buffer[0].Should().Be(42);
+    }
+
     private sealed class EchoHandler : TcpConnectionHandler {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {

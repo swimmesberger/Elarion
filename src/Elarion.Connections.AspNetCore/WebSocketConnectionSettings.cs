@@ -21,6 +21,9 @@ public sealed record WebSocketConnectionSettings {
     /// <summary>This connection's transport-level keep-alive ping interval.</summary>
     public TimeSpan? KeepAliveInterval { get; init; }
 
+    /// <summary>This connection's handshake deadline.</summary>
+    public TimeSpan? HandshakeTimeout { get; init; }
+
     /// <summary>This connection's transport tag — keep it a <b>bounded</b> vocabulary (a tier or
     /// protocol-family name, never a device id).</summary>
     public string? Transport { get; init; }

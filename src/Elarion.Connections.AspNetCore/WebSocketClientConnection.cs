@@ -81,7 +81,15 @@ public sealed class WebSocketClientConnection : IClientConnectionSink {
 
         await _sendLock.WaitAsync(ct);
         try {
-            await _socket.SendAsync(payload, type, endOfMessage: true, ct);
+            try {
+                await _socket.SendAsync(payload, type, endOfMessage: true, ct);
+            }
+            catch (OperationCanceledException) {
+                // A cancelled WebSocket send leaves the socket in an indeterminate state — abort it so
+                // the receive loop tears the connection down instead of framing garbage.
+                _socket.Abort();
+                throw;
+            }
         }
         catch (WebSocketException failure) {
             throw new ClientConnectionClosedException(Connection.ConnectionId, failure);

@@ -15,10 +15,15 @@ internal sealed class TcpMessageReader(Stream stream, TcpMessageFramer framer, i
     /// yielding a message.</exception>
     public async ValueTask<ReadOnlyMemory<byte>?> ReadAsync(CancellationToken ct) {
         while (true) {
-            if (_end > _start
-                && framer.TryReadMessage(_buffer.AsMemory(_start, _end - _start), out var consumed, out var message)) {
+            if (_end > _start) {
+                var complete = framer.TryReadMessage(
+                    _buffer.AsMemory(_start, _end - _start), out var consumed, out var message);
+                // Consumed applies either way: framers drop skippable noise even without a complete
+                // message, so noise neither accumulates against the cap nor gets rescanned per read.
                 _start += consumed;
-                return message;
+                if (complete) {
+                    return message;
+                }
             }
 
             if (_end - _start >= maxMessageBytes) {

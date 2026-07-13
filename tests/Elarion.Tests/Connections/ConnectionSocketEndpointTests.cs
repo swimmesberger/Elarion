@@ -105,6 +105,37 @@ public sealed class ConnectionSocketEndpointTests {
     }
 
     [Fact]
+    public async Task SilentHandshake_IsClosedAtTheDeadline_AndRegistersNothing() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct, o => o.HandshakeTimeout = TimeSpan.FromMilliseconds(100));
+        using var socket = await host.ConnectAsync(ct);
+
+        (await ReceiveTextAsync(socket, ct)).Should().Be("challenge");
+        // Send nothing: an accepted client that never authenticates must not hold a slot forever. The
+        // deadline cancellation aborts the pending receive, so the client observes either a close frame
+        // or an abrupt reset — the slot is gone either way.
+        try {
+            (await ReceiveTextAsync(socket, ct)).Should().BeNull();
+        }
+        catch (WebSocketException) {
+        }
+
+        host.Registry.Connections.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IdleHook_SendsProtocolKeepaliveOnSilentSocket() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct, o => o.IdleTimeout = TimeSpan.FromMilliseconds(50));
+        using var socket = await host.ConnectAsync(ct);
+        await CompleteHandshakeAsync(socket, "dev-idle", ct);
+        await host.Observer.Connected.Task.WaitAsync(ct);
+
+        // Send nothing: the idle window elapses and the codec's OnIdleAsync pushes its keepalive.
+        (await ReceiveTextAsync(socket, ct)).Should().Be("idle-ping");
+    }
+
+    [Fact]
     public async Task PerConnectionSettings_ServeDifferentTiersOnOneRoute() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync<TieredHandler>(ct);
@@ -221,6 +252,9 @@ public sealed class ConnectionSocketEndpointTests {
     private sealed class EchoProtocol(WebSocketClientConnection connection) : IClientConnectionProtocol {
         public ValueTask OnTextAsync(string message, CancellationToken ct) =>
             connection.SendTextAsync("echo:" + message, ct);
+
+        public ValueTask OnIdleAsync(CancellationToken ct) =>
+            connection.SendTextAsync("idle-ping", ct);
     }
 
     /// <summary>One route, two tiers: per-connection settings picked from the upgrade request's query —

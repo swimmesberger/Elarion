@@ -72,6 +72,11 @@ public sealed class InMemoryDuplexStream : Stream {
 
     /// <inheritdoc />
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) {
+        // An empty chunk would read as end-of-stream on the peer; an empty write is a no-op instead.
+        if (buffer.IsEmpty) {
+            return ValueTask.CompletedTask;
+        }
+
         // Copy: senders reuse their buffers (the adapter's reused send buffer included).
         if (!_outgoing.Writer.TryWrite(buffer.ToArray())) {
             throw new IOException("The in-memory duplex stream is closed.");

@@ -83,11 +83,14 @@ public sealed class TcpSimulatorClient : IAsyncDisposable {
     /// <see langword="null"/> when the peer closed.</summary>
     public async ValueTask<byte[]?> ReceiveAsync(CancellationToken ct = default) {
         while (true) {
-            if (_end > _start && _framer.TryReadMessage(
-                    _receiveBuffer.AsMemory(_start, _end - _start), out var consumed, out var message)) {
-                var copy = message.ToArray();
+            if (_end > _start) {
+                var complete = _framer.TryReadMessage(
+                    _receiveBuffer.AsMemory(_start, _end - _start), out var consumed, out var message);
+                var copy = complete ? message.ToArray() : null;
                 _start += consumed;
-                return copy;
+                if (copy is not null) {
+                    return copy;
+                }
             }
 
             if (_start > 0) {

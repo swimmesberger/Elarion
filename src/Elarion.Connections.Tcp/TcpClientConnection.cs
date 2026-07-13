@@ -53,7 +53,16 @@ public sealed class TcpClientConnection : IClientConnectionSink {
         try {
             _sendBuffer.ResetWrittenCount();
             _framer.WriteMessage(message.Span, _sendBuffer);
-            await _stream.WriteAsync(_sendBuffer.WrittenMemory, ct);
+            try {
+                await _stream.WriteAsync(_sendBuffer.WrittenMemory, ct);
+            }
+            catch (OperationCanceledException) {
+                // A cancelled write may have emitted a partial frame — the stream can no longer be
+                // trusted to carry message boundaries. At-most-once covers loss, never corruption: kill
+                // the connection so the receive loop tears it down instead of desyncing the peer forever.
+                CloseTransportQuietly();
+                throw;
+            }
         }
         catch (IOException failure) {
             throw new ClientConnectionClosedException(Connection.ConnectionId, failure);
@@ -63,6 +72,15 @@ public sealed class TcpClientConnection : IClientConnectionSink {
         }
         finally {
             _sendLock.Release();
+        }
+    }
+
+    private void CloseTransportQuietly() {
+        try {
+            _closeTransport();
+        }
+        catch (Exception) {
+            // Best-effort: the teardown completes via the receive loop regardless.
         }
     }
 

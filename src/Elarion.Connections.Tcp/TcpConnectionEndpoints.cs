@@ -150,6 +150,7 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
                 await StopEndpointAsync(previous);
             }
 
+            ObjectDisposedException.ThrowIf(_shutdown.IsCancellationRequested, this);
             var cts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
             var endpoint = new Endpoint(cts) {
                 Status = new TcpEndpointStatus {
@@ -159,10 +160,14 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
                     ChangedAt = Time.GetUtcNow(),
                 },
             };
-            endpoint.Run = loop((state, error) => Advertise(endpoint, state, error), cts.Token);
+            // Visible in the dictionary before the loop runs: the loop reports its first state
+            // synchronously (a listener binds immediately), and a StatusChanged subscriber calling
+            // GetStatus(name) must find the endpoint.
             lock (_endpoints) {
                 _endpoints[name] = endpoint;
             }
+
+            endpoint.Run = loop((state, error) => Advertise(endpoint, state, error), cts.Token);
         }
         finally {
             _mutation.Release();
@@ -197,11 +202,19 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
     Task IHostedService.StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     async Task IHostedService.StopAsync(CancellationToken cancellationToken) {
-        await _shutdown.CancelAsync();
+        // Under the mutation gate: an Apply in flight either completes before the sweep (and its endpoint
+        // is swept) or observes the shutdown and throws — no zombie entries after stop.
+        await _mutation.WaitAsync(cancellationToken);
         Task[] runs;
-        lock (_endpoints) {
-            runs = [.. _endpoints.Values.Select(static e => e.Run)];
-            _endpoints.Clear();
+        try {
+            await _shutdown.CancelAsync();
+            lock (_endpoints) {
+                runs = [.. _endpoints.Values.Select(static e => e.Run)];
+                _endpoints.Clear();
+            }
+        }
+        finally {
+            _mutation.Release();
         }
 
         try {

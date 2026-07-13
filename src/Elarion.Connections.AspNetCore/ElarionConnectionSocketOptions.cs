@@ -32,4 +32,10 @@ public sealed class ElarionConnectionSocketOptions {
     /// (throw there to close). <see langword="null"/> (the default) never calls it.
     /// </summary>
     public TimeSpan? IdleTimeout { get; set; }
+
+    /// <summary>
+    /// How long the handshake may take before the socket is closed (default 10 s) — an accepted client
+    /// that never authenticates must not hold a slot forever.
+    /// </summary>
+    public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(10);
 }

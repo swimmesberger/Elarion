@@ -110,6 +110,15 @@ public sealed class ClientConnectionEventBridge(
         ConnectionTelemetry.ActiveEventSubscriptions.Add(-1);
         if (_byConnection.TryGetValue(connectionId, out var subscriptions)) {
             subscriptions.TryRemove(subscription, out _);
+            if (subscriptions.IsEmpty) {
+                // Drop the empty set so a connection id never leaves a permanent entry behind (e.g. a
+                // subscribe issued after the connection already unregistered). Pair-conditioned removal:
+                // a concurrent subscribe that re-created or grabbed the set is protected by the
+                // ReferenceEquals re-check in SubscribeAsync.
+                _byConnection.TryRemove(
+                    new KeyValuePair<string, ConcurrentDictionary<ClientConnectionEventSubscription, byte>>(
+                        connectionId, subscriptions));
+            }
         }
     }
 }

@@ -72,9 +72,22 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
 
         ClientConnectionTicket? ticket;
         try {
-            ticket = await handler.AuthenticateAsync(new WebSocketHandshakeContext(context, socket, reader), ct);
+            // The handshake is deadline-bounded: an accepted client that never authenticates must not hold
+            // a slot forever.
+            using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            handshakeCts.CancelAfter(overrides?.HandshakeTimeout ?? options.HandshakeTimeout);
+            ticket = await handler.AuthenticateAsync(
+                new WebSocketHandshakeContext(context, socket, reader), handshakeCts.Token);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+        catch (OperationCanceledException) {
+            // Request abort or handshake deadline — either way nothing was registered. Cancelling a
+            // pending WebSocket receive aborts the socket, so this close is best-effort: the peer may
+            // observe a reset instead of a close frame; the slot is freed regardless.
+            await CloseSafelyAsync(socket, WebSocketCloseStatus.PolicyViolation, "handshake timeout", CancellationToken.None);
+            return Results.Empty;
+        }
+        catch (WebSocketMessageTooLargeException) {
+            await CloseSafelyAsync(socket, WebSocketCloseStatus.MessageTooBig, "message too large", ct);
             return Results.Empty;
         }
         catch (WebSocketException) {
@@ -98,8 +111,10 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         var connection = new WebSocketClientConnection(identity, socket);
         connection.AttachProtocol(handler.CreateProtocol(connection));
 
-        await registry.RegisterAsync(connection, ct);
         try {
+            // Registration lives inside this try: RegisterAsync mutates the index before dispatching
+            // observers, so an abort mid-registration must still reach the unregister in finally.
+            await registry.RegisterAsync(connection, ct);
             await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             await CloseSafelyAsync(socket, WebSocketCloseStatus.NormalClosure, "closing", ct);
         }
@@ -158,6 +173,13 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         }
 
         var pending = read.AsTask();
+        // If OnIdleAsync throws (documented dead-link detection) the connection tears down while this read
+        // is still in flight on the doomed socket — observe its eventual fault so it never surfaces as an
+        // unobserved task exception.
+        _ = pending.ContinueWith(
+            static faulted => _ = faulted.Exception,
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
         while (true) {
             using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var winner = await Task.WhenAny(pending, Task.Delay(window, delayCts.Token));
@@ -166,6 +188,8 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
                 return await pending;
             }
 
+            // A cancelled delay can win the race during shutdown — that is teardown, not an idle window.
+            ct.ThrowIfCancellationRequested();
             await connection.Protocol.OnIdleAsync(ct);
         }
     }

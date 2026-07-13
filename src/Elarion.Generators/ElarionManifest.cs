@@ -434,20 +434,24 @@ internal static class ElarionManifest
     public static bool TryDecodeRpcMethod(string value, out RpcMethodEmission.Model? model)
     {
         model = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 12)
+        // 11 fields = an assembly built before the Connection transport flag existed; decode it with
+        // onConnection = false (that compilation never opted into the connection surface) instead of
+        // silently dropping its handlers from every transport.
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count is not (11 or 12))
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
-            fields[8] is null || fields[9] is null || fields[10] is null || fields[11] is null)
+            fields[8] is null || fields[9] is null || fields[10] is null)
         {
             return false;
         }
 
+        var onConnection = false;
         if (!TryDecodeBool(fields[5], out var onJsonRpc) ||
             !TryDecodeBool(fields[6], out var onMcp) ||
             !ElarionManifestCodec.TryDecodeParameters(fields[8]!, out var parameters) ||
             !TryDecodeBool(fields[9], out var isNameInferred) ||
             !TryDecodeBool(fields[10], out var isIdempotent) ||
-            !TryDecodeBool(fields[11], out var onConnection))
+            (fields.Count == 12 && !TryDecodeBool(fields[11], out onConnection)))
         {
             return false;
         }

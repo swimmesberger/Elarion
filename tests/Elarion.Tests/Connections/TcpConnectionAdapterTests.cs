@@ -57,6 +57,21 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     [Fact]
+    public void DelimitedFramer_ConsumesNoiseEvenWithoutACompleteMessage() {
+        var framer = new DelimitedTcpFramer(end: (byte)'>', start: (byte)'<');
+
+        // Pure noise, no start byte: fully consumed so it can never accumulate against the size cap.
+        var noise = Encoding.UTF8.GetBytes("static......");
+        framer.TryReadMessage(noise, out var consumed, out _).Should().BeFalse();
+        consumed.Should().Be(noise.Length);
+
+        // Noise followed by an incomplete message: the noise is dropped, the partial message kept.
+        var partial = Encoding.UTF8.GetBytes("zzz<hel");
+        framer.TryReadMessage(partial, out consumed, out _).Should().BeFalse();
+        consumed.Should().Be(3);
+    }
+
+    [Fact]
     public async Task Listener_HandshakeRegistryEchoAndTeardown() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartListenerHostAsync(ct);

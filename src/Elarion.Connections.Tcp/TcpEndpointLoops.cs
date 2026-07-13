@@ -86,11 +86,17 @@ internal static class TcpEndpointLoops {
             var client = new TcpClient();
             try {
                 await client.ConnectAsync(options.Host!, options.Port, ct);
-                failedAttempts = 0;
                 reportState?.Invoke(TcpEndpointState.Connected, null);
+                var sessionStart = timeProvider.GetTimestamp();
                 // The runner owns and disposes the client, and never throws.
                 await TcpConnectionRunner.RunAsync(
                     client, options, handler, registry, timeProvider, logger, ct);
+                // A session that ended almost immediately (rejected handshake, instant server close) is a
+                // failure for backoff purposes — otherwise a misconfigured credential hammers the device
+                // at the minimum delay forever. A real session resets the backoff.
+                failedAttempts = timeProvider.GetElapsedTime(sessionStart) < options.ReconnectMinDelay
+                    ? failedAttempts + 1
+                    : 0;
                 reportState?.Invoke(TcpEndpointState.Dialing, null);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) {
@@ -110,7 +116,7 @@ internal static class TcpEndpointLoops {
             }
 
             try {
-                await Task.Delay(NextDelay(options, failedAttempts), ct);
+                await Task.Delay(NextDelay(options, failedAttempts), timeProvider, ct);
             }
             catch (OperationCanceledException) {
                 break;

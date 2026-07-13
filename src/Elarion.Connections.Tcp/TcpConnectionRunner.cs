@@ -74,7 +74,16 @@ internal static class TcpConnectionRunner {
                 handshakeCts.CancelAfter(handshakeTimeout);
                 var handshake = new TcpHandshakeContext(
                     stream, framer, reader, peer.RemoteEndPoint, peer.LocalEndPoint);
-                ticket = await handler.AuthenticateAsync(handshake, handshakeCts.Token);
+                try {
+                    ticket = await handler.AuthenticateAsync(handshake, handshakeCts.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) {
+                    // The handshake deadline, not host shutdown — a slow/silent peer is rejected quietly,
+                    // not logged as a codec failure.
+                    logger.LogDebug("Connection from {RemoteEndPoint} exceeded the handshake deadline.",
+                        peer.RemoteEndPoint);
+                    return;
+                }
             }
 
             if (ticket is null) {
@@ -92,8 +101,10 @@ internal static class TcpConnectionRunner {
             var connection = new TcpClientConnection(identity, stream, framer, sendBufferBytes, closeTransport: transport.Dispose);
             connection.AttachProtocol(handler.CreateProtocol(connection));
 
-            await registry.RegisterAsync(connection, ct);
             try {
+                // Registration lives inside this try: RegisterAsync mutates the index before dispatching
+                // observers, so an abort mid-registration must still reach the unregister in finally.
+                await registry.RegisterAsync(connection, ct);
                 await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             }
             finally {
@@ -148,6 +159,13 @@ internal static class TcpConnectionRunner {
         }
 
         var pending = read.AsTask();
+        // If OnIdleAsync throws (documented dead-link detection) the connection tears down while this read
+        // is still in flight on the doomed stream — observe its eventual fault so it never surfaces as an
+        // unobserved task exception.
+        _ = pending.ContinueWith(
+            static faulted => _ = faulted.Exception,
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
         while (true) {
             using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var winner = await Task.WhenAny(pending, Task.Delay(window, delayCts.Token));
@@ -156,6 +174,8 @@ internal static class TcpConnectionRunner {
                 return await pending;
             }
 
+            // A cancelled delay can win the race during shutdown — that is teardown, not an idle window.
+            ct.ThrowIfCancellationRequested();
             await connection.Protocol.OnIdleAsync(ct);
         }
     }

@@ -23,7 +23,9 @@ public static class InMemoryTcpLink {
     /// <param name="registry">The registry the connection registers with (resolve from DI so observers,
     /// twins, and the client-events bridge participate exactly as in production).</param>
     /// <param name="configure">Endpoint options; must set <c>Framer</c>. <c>Transport</c> defaults to
-    /// <c>"in-memory"</c>.</param>
+    /// <c>"in-memory"</c>. The returned client speaks the <b>endpoint</b> framer — a handler that swaps
+    /// the framer per connection via <c>ConfigureConnectionAsync</c> must be simulated with that framer
+    /// configured here.</param>
     /// <param name="timeProvider">Optional clock.</param>
     /// <param name="logger">Optional logger for codec failures.</param>
     public static InMemoryTcpLinkSession Start(
@@ -54,6 +56,12 @@ public static class InMemoryTcpLink {
             _ => observing.Registered.TrySetException(new InvalidOperationException(
                 "The connection ended without registering — the handshake was rejected or failed.")),
             CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        // Pre-observe the fault: a test asserting rejection via the client alone must not trip the
+        // unobserved-task-exception machinery for a signal it never awaited.
+        _ = observing.Registered.Task.ContinueWith(
+            static faulted => _ = faulted.Exception,
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
         var client = TcpSimulatorClient.FromStream(clientEnd, options.Framer);
         return new InMemoryTcpLinkSession(client, serverRun, observing.Registered.Task, shutdown);
     }

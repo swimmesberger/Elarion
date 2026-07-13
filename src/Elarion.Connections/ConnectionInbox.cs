@@ -59,7 +59,9 @@ public sealed class ConnectionInbox<TMessage>(int bufferCapacity = 64) {
     /// ("the reply or the abort frame") and branch on the returned message.</param>
     /// <param name="timeout">Faults with <see cref="TimeoutException"/> when no matching message arrives in
     /// time; <see langword="null"/> waits until cancellation or <see cref="Complete"/>.</param>
-    /// <param name="ct">Cancels the wait (the message stays available to other waiters).</param>
+    /// <param name="ct">Cancels the wait. A message that matches concurrently with the cancellation is
+    /// handed to this caller rather than lost — check the returned message even on a cancelled path if
+    /// your flow must not drop it.</param>
     /// <exception cref="ConnectionInboxCompletedException">The inbox was completed (default reason).</exception>
     public async Task<TMessage> WaitAsync(
         Func<TMessage, bool>? match = null, TimeSpan? timeout = null, CancellationToken ct = default) {
