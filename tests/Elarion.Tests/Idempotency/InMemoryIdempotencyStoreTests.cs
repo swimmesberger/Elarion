@@ -123,6 +123,24 @@ public sealed class InMemoryIdempotencyStoreTests {
     }
 
     [Fact]
+    public async Task WaitThenReplay_DegradesToInProgress_WhenTheWinnerNeverCompletes() {
+        var (store, time) = CreateStore();
+
+        (await store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.WaitThenReplay, Ct)).Status
+            .Should().Be(IdempotencyBeginStatus.Began);
+
+        // The wait registers its timer synchronously before the incomplete ValueTask is returned, so advancing
+        // the fake clock past the 30 s ceiling deterministically times the waiter out.
+        var waiter = store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.WaitThenReplay, Ct).AsTask();
+        waiter.IsCompleted.Should().BeFalse();
+
+        time.Advance(TimeSpan.FromSeconds(30));
+
+        var result = await waiter;
+        result.Status.Should().Be(IdempotencyBeginStatus.InProgress);
+    }
+
+    [Fact]
     public async Task ExpiredCompletedKey_TreatedAsNew() {
         var (store, time) = CreateStore();
 

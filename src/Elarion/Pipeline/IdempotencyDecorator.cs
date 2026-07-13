@@ -44,8 +44,9 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
 
     // WaitThenReplay deliberately blocks on the in-flight winner's row to replay its result, but the wait is
     // still bounded so a stuck winner can never pin the duplicate's database connection forever. On timeout the
-    // duplicate degrades to the same "in progress" 409 the fast path returns, rather than hanging.
-    private static readonly TimeSpan WaitLockTimeout = TimeSpan.FromSeconds(30);
+    // duplicate degrades to the same "in progress" 409 the fast path returns, rather than hanging. The ceiling
+    // is shared with the in-memory store so both tiers bound the wait identically.
+    private static readonly TimeSpan WaitLockTimeout = Elarion.Idempotency.IdempotencyTimeouts.WaitThenReplayCeiling;
 
     private const string SavepointName = "elarion_idempotency";
 
