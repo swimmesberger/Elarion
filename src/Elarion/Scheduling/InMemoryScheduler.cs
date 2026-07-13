@@ -757,9 +757,11 @@ public sealed class InMemoryScheduler(
 
     private void StartRun(ScheduledJobWorkItem item, CancellationToken stoppingToken) {
         // Fixed-rate and cron chains advance at dispatch; fixed-delay chains advance when
-        // the run completes (see RunItemAsync). Runtime-scheduled one-offs never advance a
-        // chain, even when their job type also has a recurring schedule.
-        if (!item.IsRuntimeScheduled &&
+        // the run completes (see RunItemAsync). Runtime-scheduled one-offs and one-time
+        // schedules never advance a chain — a one-time occurrence has no successor, and
+        // letting it reach RescheduleRecurring would hit the no-next-due-time error path
+        // and re-enqueue the job hourly forever.
+        if (IsRecurringChainItem(item) &&
             item.Descriptor.Schedule is { } schedule &&
             schedule.Kind != ScheduledJobScheduleKind.FixedDelay) {
             if (TrySkipMisfiredOccurrence(item, stoppingToken)) {

@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Elarion.Abstractions.Resilience;
 using Elarion.Abstractions.Scheduling;
@@ -512,6 +513,40 @@ public sealed class InMemorySchedulerTests
         await hostedService.StopAsync(cts.Token);
 
         counter.Count.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task OneTimeJob_NeverReEnqueuesThroughTheRecurringReschedulePath()
+    {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        var errors = new ErrorLogCollector();
+        var descriptor = CreateCountingDescriptor(
+            "test.onceNoChain",
+            ScheduledJobSchedule.Once("50ms"));
+        await using var provider = CreateProvider(
+            time,
+            new ConfigurationBuilder().Build(),
+            new SchedulerOptions { Enabled = true, MaxConcurrentExecutions = 8 },
+            errors,
+            descriptor);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        var counter = provider.GetRequiredService<RunCounter>();
+
+        await hostedService.StartAsync(cts.Token);
+        await AdvanceUntilAsync(time, Interval, () => counter.Count >= 1);
+
+        // The broken reschedule path re-enqueued a completed one-time job at now + 1 hour
+        // (with an error log per hop); cross several of those hops and assert neither happens.
+        for (var i = 0; i < 3; i++) {
+            time.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(1));
+            await Task.Delay(100, cts.Token);
+        }
+
+        await hostedService.StopAsync(cts.Token);
+
+        counter.Count.Should().Be(1);
+        errors.ErrorMessages.Should().BeEmpty();
     }
 
     [Fact]
@@ -1200,10 +1235,22 @@ public sealed class InMemorySchedulerTests
         FakeTimeProvider timeProvider,
         IConfiguration configuration,
         SchedulerOptions options,
+        params ScheduledJobDescriptor[] descriptors) =>
+        CreateProvider(timeProvider, configuration, options, loggerProvider: null, descriptors);
+
+    private static ServiceProvider CreateProvider(
+        FakeTimeProvider timeProvider,
+        IConfiguration configuration,
+        SchedulerOptions options,
+        ILoggerProvider? loggerProvider,
         params ScheduledJobDescriptor[] descriptors)
     {
         var services = new ServiceCollection();
-        services.AddLogging();
+        services.AddLogging(builder => {
+            if (loggerProvider is not null) {
+                builder.AddProvider(loggerProvider);
+            }
+        });
         services.AddSingleton(configuration);
         services.AddSingleton<TimeProvider>(timeProvider);
         services.AddSingleton<SchedulerRecorder>();
@@ -1457,5 +1504,41 @@ public sealed class InMemorySchedulerTests
         public async Task WaitStartedAsync(CancellationToken ct) => await _started.Task.WaitAsync(ct);
 
         public async Task WaitCancelledAsync(CancellationToken ct) => await _cancelled.Task.WaitAsync(ct);
+    }
+
+    private sealed class ErrorLogCollector : ILoggerProvider, ILogger {
+        private readonly List<string> _errorMessages = [];
+
+        public IReadOnlyList<string> ErrorMessages {
+            get {
+                lock (_errorMessages) {
+                    return [.. _errorMessages];
+                }
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) => this;
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Error;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) {
+            if (logLevel < LogLevel.Error) {
+                return;
+            }
+
+            lock (_errorMessages) {
+                _errorMessages.Add(formatter(state, exception));
+            }
+        }
+
+        public void Dispose() {
+        }
     }
 }
