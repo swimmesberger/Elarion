@@ -98,4 +98,109 @@ public sealed class CursorCodecTests
         reader.TryReadInt32(out _).Should().BeFalse();
         reader.AtEnd.Should().BeTrue();
     }
+
+    [Fact]
+    public void TryReadString_HugeVarintLength_ReturnsFalse()
+    {
+        // Declared length uint.MaxValue casts to a negative int; the reader must report malformed,
+        // never attempt the slice.
+        CursorReader.TryCreate(Adversarial(0xFF, 0xFF, 0xFF, 0xFF, 0x0F), Tag, out var reader)
+            .Should().BeTrue();
+
+        reader.TryReadString(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryReadString_LengthOverflowingPositionCheck_ReturnsFalse()
+    {
+        // Declared length int.MaxValue over a tiny buffer: a naive "position + count > length" bounds
+        // check overflows negative and passes, and the slice then throws. The reader must return false.
+        CursorReader.TryCreate(Adversarial(0xFF, 0xFF, 0xFF, 0xFF, 0x07, 0x61), Tag, out var reader)
+            .Should().BeTrue();
+
+        reader.TryReadString(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryReadDateTime_OutOfRangeBits_ReturnsFalse()
+    {
+        // long.MaxValue decodes to a tick count past DateTime.MaxValue; FromBinary would throw.
+        var writer = new CursorWriter(Tag);
+        writer.WriteInt64(long.MaxValue);
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
+
+        reader.TryReadDateTime(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryReadDateTimeOffset_OutOfRangeTicks_ReturnsFalse()
+    {
+        var writer = new CursorWriter(Tag);
+        writer.WriteInt64(long.MaxValue);
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
+
+        reader.TryReadDateTimeOffset(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryReadTimeOnly_NegativeTicks_ReturnsFalse()
+    {
+        var writer = new CursorWriter(Tag);
+        writer.WriteInt64(-1);
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
+
+        reader.TryReadTimeOnly(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryReadTimeOnly_TicksPastOneDay_ReturnsFalse()
+    {
+        var writer = new CursorWriter(Tag);
+        writer.WriteInt64(TimeOnly.MaxValue.Ticks + 1);
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
+
+        reader.TryReadTimeOnly(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryReadDateOnly_OutOfRangeDayNumber_ReturnsFalse()
+    {
+        var writer = new CursorWriter(Tag);
+        writer.WriteInt32(int.MaxValue);
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
+
+        reader.TryReadDateOnly(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryReadDateOnly_NegativeDayNumber_ReturnsFalse()
+    {
+        var writer = new CursorWriter(Tag);
+        writer.WriteInt32(-1);
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
+
+        reader.TryReadDateOnly(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryReadDecimal_InvalidFlagsBits_ReturnsFalse()
+    {
+        // The fourth int is the decimal's flags word; an arbitrary bit pattern is invalid and the
+        // decimal constructor would throw.
+        var writer = new CursorWriter(Tag);
+        writer.WriteInt32(1);
+        writer.WriteInt32(2);
+        writer.WriteInt32(3);
+        writer.WriteInt32(-1);
+        CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
+
+        reader.TryReadDecimal(out _).Should().BeFalse();
+    }
+
+    /// <summary>Builds a cursor whose header is valid for <see cref="Tag"/> followed by raw adversarial payload bytes.</summary>
+    private static string Adversarial(params byte[] payload)
+    {
+        var header = System.Buffers.Text.Base64Url.DecodeFromChars(new CursorWriter(Tag).ToCursor().AsSpan());
+        return System.Buffers.Text.Base64Url.EncodeToString([.. header, .. payload]);
+    }
 }

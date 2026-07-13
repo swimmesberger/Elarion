@@ -265,7 +265,16 @@ public struct CursorReader
             }
         }
 
-        value = new decimal(bits);
+        try
+        {
+            value = new decimal(bits);
+        }
+        catch (ArgumentException)
+        {
+            // A crafted cursor can carry an invalid flags word; report malformed instead of throwing.
+            return false;
+        }
+
         return true;
     }
 
@@ -295,25 +304,37 @@ public struct CursorReader
         return true;
     }
 
+    // The date/time readers below pre-validate or catch the target type's range checks: a crafted
+    // cursor can carry any 32/64-bit pattern, and the documented contract is that every TryRead*
+    // reports a malformed buffer as false rather than throwing.
+
     /// <summary>Reads a <see cref="DateTime"/> preserving ticks and kind.</summary>
     public bool TryReadDateTime(out DateTime value)
     {
+        value = default;
         if (!TryReadInt64(out var binary))
         {
-            value = default;
             return false;
         }
 
-        value = DateTime.FromBinary(binary);
+        try
+        {
+            value = DateTime.FromBinary(binary);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
         return true;
     }
 
     /// <summary>Reads a <see cref="DateTimeOffset"/> as a UTC instant.</summary>
     public bool TryReadDateTimeOffset(out DateTimeOffset value)
     {
-        if (!TryReadInt64(out var ticks))
+        value = default;
+        if (!TryReadInt64(out var ticks) || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
         {
-            value = default;
             return false;
         }
 
@@ -324,9 +345,11 @@ public struct CursorReader
     /// <summary>Reads a <see cref="DateOnly"/> value.</summary>
     public bool TryReadDateOnly(out DateOnly value)
     {
-        if (!TryReadInt32(out var dayNumber))
+        value = default;
+        if (!TryReadInt32(out var dayNumber)
+            || dayNumber < DateOnly.MinValue.DayNumber
+            || dayNumber > DateOnly.MaxValue.DayNumber)
         {
-            value = default;
             return false;
         }
 
@@ -337,9 +360,9 @@ public struct CursorReader
     /// <summary>Reads a <see cref="TimeOnly"/> value.</summary>
     public bool TryReadTimeOnly(out TimeOnly value)
     {
-        if (!TryReadInt64(out var ticks))
+        value = default;
+        if (!TryReadInt64(out var ticks) || ticks < TimeOnly.MinValue.Ticks || ticks > TimeOnly.MaxValue.Ticks)
         {
-            value = default;
             return false;
         }
 
@@ -349,7 +372,9 @@ public struct CursorReader
 
     private bool TryTake(int count, out ReadOnlySpan<byte> span)
     {
-        if (count < 0 || _position + count > _data.Length)
+        // Compared as "count > remaining" (never "_position + count > length"): a huge decoded length
+        // would overflow the addition into a negative value and pass the bounds check.
+        if (count < 0 || count > _data.Length - _position)
         {
             span = default;
             return false;

@@ -60,6 +60,24 @@ public sealed class TusEndpointsTests {
     }
 
     [Fact]
+    public async Task Create_FileNameWithControlCharsAndQuotes_IsSanitized() {
+        // The tus metadata filename is base64-encoded, so it can smuggle CR/LF or quotes that would
+        // later be rejected when rendered into the download Content-Disposition header.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+        var payload = new byte[] { 1, 2 };
+
+        var uploadPath = await CreateAsync(
+            host.Client, payload.Length, "evil\r\nname\".bin", "application/octet-stream", ct);
+        var patch = await host.Client.SendAsync(Patch(uploadPath, 0, payload), ct);
+
+        patch.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        var name = host.Store.LastRequest!.Name;
+        name.Should().EndWith("evilname.bin");
+        name.Should().NotContainAny("\r", "\n", "\"");
+    }
+
+    [Fact]
     public async Task Create_ZeroLength_CompletesOnCreation() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);

@@ -28,6 +28,20 @@ public sealed class BlobDownloadTests {
     }
 
     [Fact]
+    public async Task DisposeAsync_ContentDisposeThrows_StillDisposesOwnedResource() {
+        // The owned backend resource (for example a streaming store's cloned connection) must not leak
+        // when disposing the content stream fails.
+        var ownedDisposed = false;
+        var owned = new TrackingDisposable(() => ownedDisposed = true);
+        var download = new BlobDownload(Metadata(), new ThrowingDisposeStream(), owned);
+
+        var act = async () => await download.DisposeAsync();
+
+        await act.Should().ThrowAsync<IOException>();
+        ownedDisposed.Should().BeTrue();
+    }
+
+    [Fact]
     public void Constructor_Rejects_NullArguments() {
         var act = () => new BlobDownload(Metadata(), null!);
 
@@ -60,5 +74,9 @@ public sealed class BlobDownloadTests {
             onDispose();
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class ThrowingDisposeStream : MemoryStream {
+        public override ValueTask DisposeAsync() => throw new IOException("Dispose failed.");
     }
 }

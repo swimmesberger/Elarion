@@ -1,3 +1,4 @@
+using System.Text;
 using Elarion.Abstractions.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -72,8 +73,10 @@ public static class BlobUploadEndpointsExtensions {
             clientName = request.Headers["X-Elarion-File-Name"].ToString() is { Length: > 0 } header
                 ? header
                 : request.Query["fileName"].ToString();
-            // Raw bodies are buffered to measure, capped while read.
-            lengthHint = null;
+            // A raw body's Content-Length is passed through so the store can stream without buffering
+            // (stores verify the actual bytes against the hint); only a chunked body is measured while
+            // read, capped below.
+            lengthHint = request.ContentLength;
             source = request.Body;
         }
 
@@ -155,6 +158,17 @@ public static class BlobUploadEndpointsExtensions {
             leaf = leaf[(slash + 1)..];
         }
 
+        // Strip control characters and double quotes: a CR/LF or quote in the stored name would later be
+        // rejected by the server when rendered into the download Content-Disposition header, leaving the
+        // blob permanently undownloadable. (Mirrored in the tus transport's sanitizer.)
+        var builder = new StringBuilder(leaf.Length);
+        foreach (var ch in leaf) {
+            if (!char.IsControl(ch) && ch != '"') {
+                builder.Append(ch);
+            }
+        }
+
+        leaf = builder.ToString();
         return string.IsNullOrWhiteSpace(leaf) ? "upload" : leaf;
     }
 

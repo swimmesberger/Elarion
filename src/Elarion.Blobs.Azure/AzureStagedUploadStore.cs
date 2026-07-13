@@ -201,13 +201,28 @@ public sealed class AzureStagedUploadStore(
             targetMetadata[AzureBlobMetadata.OwnerKey] = AzureBlobMetadata.Encode(ownerId);
         }
 
+        // Both completion legs are guarded on the staging blob's ETag from the snapshot read above: the
+        // copy rejects a source that changed (a deferred-length append landing after the read would
+        // otherwise be silently cut off mid-copy), and the recreate rejects a staging blob that changed
+        // or disappeared after the copy (an appended byte would be destroyed; a tus DELETE would be
+        // resurrected). Either 412/404 surfaces as the seam's conflict, and the completion retry
+        // converges from a fresh snapshot.
         var targetContainer = client.GetBlobContainerClient(container);
         await targetContainer.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
-        var copy = await targetContainer.GetBlobClient(name).StartCopyFromUriAsync(
-            blob.Uri,
-            new BlobCopyFromUriOptions { Metadata = targetMetadata },
-            cancellationToken);
-        await copy.WaitForCompletionAsync(cancellationToken);
+        try {
+            var copy = await targetContainer.GetBlobClient(name).StartCopyFromUriAsync(
+                blob.Uri,
+                new BlobCopyFromUriOptions {
+                    Metadata = targetMetadata,
+                    SourceConditions = new BlobRequestConditions { IfMatch = properties.ETag },
+                },
+                cancellationToken);
+            await copy.WaitForCompletionAsync(cancellationToken);
+        }
+        catch (RequestFailedException ex) when (ex.Status is 404 or 412) {
+            throw new StagedUploadConflictException(
+                $"Upload session '{uploadId}' changed concurrently while completing.");
+        }
 
         // Recreate the staging blob empty with the completion marker: the staged bytes are dropped
         // immediately (no duplicate storage during the retention window) while the session record stays
@@ -218,12 +233,21 @@ public sealed class AzureStagedUploadStore(
             [AzureBlobMetadata.BlobRefKey] = AzureBlobMetadata.Encode(location.ToBlobRef().Value),
             [AzureBlobMetadata.ExpiresAtKey] = AzureBlobMetadata.FormatInstant(completion.SessionExpiresAt),
         };
-        await blob.CreateAsync(
-            new AppendBlobCreateOptions {
-                HttpHeaders = new BlobHttpHeaders { ContentType = properties.ContentType },
-                Metadata = completedMetadata,
-            },
-            cancellationToken);
+        try {
+            await blob.CreateAsync(
+                new AppendBlobCreateOptions {
+                    HttpHeaders = new BlobHttpHeaders { ContentType = properties.ContentType },
+                    Metadata = completedMetadata,
+                    Conditions = new AppendBlobRequestConditions { IfMatch = properties.ETag },
+                },
+                cancellationToken);
+        }
+        catch (RequestFailedException ex) when (ex.Status is 404 or 412) {
+            // The already-copied target stays pending and is reclaimed by garbage collection unless a
+            // successful retry converges on it.
+            throw new StagedUploadConflictException(
+                $"Upload session '{uploadId}' changed concurrently while completing.");
+        }
 
         logger.LogInformation(
             "Staged upload {UploadId} completed into {Container}/{Name} ({Size} bytes).",

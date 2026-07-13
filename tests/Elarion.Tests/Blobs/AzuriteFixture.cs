@@ -21,6 +21,9 @@ public sealed class AzuriteFixture : IAsyncLifetime {
     /// <summary>Gets a service client bound to the emulator.</summary>
     public BlobServiceClient Client { get; private set; } = null!;
 
+    /// <summary>Gets the emulator connection string, for tests that need a client with custom pipeline options.</summary>
+    public string ConnectionString { get; private set; } = "";
+
     public async ValueTask InitializeAsync() {
         AzuriteContainer container;
         try {
@@ -38,7 +41,8 @@ public sealed class AzuriteFixture : IAsyncLifetime {
         }
 
         _container = container;
-        Client = new BlobServiceClient(container.GetConnectionString());
+        ConnectionString = container.GetConnectionString();
+        Client = new BlobServiceClient(ConnectionString);
         IsAvailable = true;
     }
 

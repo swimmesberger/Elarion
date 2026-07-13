@@ -111,7 +111,10 @@ public static class QueryablePagingExtensions
 
         var size = NormalizeSize(request.Size, maxSize);
         var page = request.Page < 1 ? 1 : request.Page;
-        var skip = (page - 1) * size;
+        // Computed in long and clamped: a hostile Page near int.MaxValue would otherwise wrap the
+        // multiplication negative and Skip a garbage offset. The clamped value simply lands past the
+        // data, yielding the same empty page any other out-of-range page number produces.
+        var skip = (int)Math.Min((long)(page - 1) * size, int.MaxValue);
 
         var total = await source.CountAsync(cancellationToken).ConfigureAwait(false);
         var items = await sort.Apply(source, request.Sort)
@@ -126,7 +129,7 @@ public static class QueryablePagingExtensions
             Items = items,
             Total = total,
             HasPrevious = page > 1,
-            HasNext = skip + items.Count < total,
+            HasNext = (long)skip + items.Count < total,
         };
     }
 

@@ -52,6 +52,7 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
 
         await entry.Gate.WaitAsync(cancellationToken);
         try {
+            ThrowIfDeleted(entry, uploadId);
             var upload = entry.Upload;
             if (upload.IsComplete) {
                 throw new StagedUploadConflictException($"Upload session '{uploadId}' is already complete.");
@@ -61,6 +62,14 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
                 throw new StagedUploadConflictException(
                     $"The append offset {offset} does not match the current offset {upload.Offset}.");
             }
+
+            // A previous append may have failed mid-chunk (for example a client disconnect while reading
+            // the caller's stream), leaving partial bytes past the committed offset. Truncate back to the
+            // committed offset so each append is atomic-per-chunk — the protocol-correct resend of the
+            // whole chunk then lands after the last committed byte, matching the conditional-append
+            // guarantees of the durable stores.
+            entry.Buffer.SetLength(upload.Offset);
+            entry.Buffer.Position = upload.Offset;
 
             // A declared length caps the read to the remaining bytes; a deferred length reads the caller's
             // whole (caller-bounded) chunk.
@@ -89,6 +98,7 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
 
         await entry.Gate.WaitAsync(cancellationToken);
         try {
+            ThrowIfDeleted(entry, uploadId);
             var upload = entry.Upload;
             if (upload.IsComplete) {
                 return upload;
@@ -116,16 +126,14 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
     }
 
     /// <inheritdoc />
-    public Task DeleteAsync(string uploadId, CancellationToken cancellationToken) {
+    public async Task DeleteAsync(string uploadId, CancellationToken cancellationToken) {
         if (_entries.TryRemove(uploadId, out var entry)) {
-            entry.Buffer.Dispose();
+            await DisposeEntryAsync(entry, cancellationToken);
         }
-
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
+    public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
 
         // Reap by expiry regardless of completion: an incomplete session past its upload-expiry window,
@@ -139,11 +147,31 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
 
         foreach (var key in expired) {
             if (_entries.TryRemove(key, out var entry)) {
-                entry.Buffer.Dispose();
+                await DisposeEntryAsync(entry, cancellationToken);
             }
         }
 
-        return Task.FromResult(expired.Count);
+        return expired.Count;
+    }
+
+    // Disposal takes the per-entry gate and flags the entry first, so a delete racing an in-flight
+    // append surfaces as the same conflict the durable stores report (their conditional appends affect
+    // zero rows once the session row is gone) instead of an ObjectDisposedException from the buffer.
+    private static async Task DisposeEntryAsync(Entry entry, CancellationToken cancellationToken) {
+        await entry.Gate.WaitAsync(cancellationToken);
+        try {
+            entry.Deleted = true;
+            entry.Buffer.Dispose();
+        }
+        finally {
+            entry.Gate.Release();
+        }
+    }
+
+    private static void ThrowIfDeleted(Entry entry, string uploadId) {
+        if (entry.Deleted) {
+            throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
+        }
     }
 
     private async Task<BlobRef> SaveBlobAsync(
@@ -208,5 +236,8 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
         public MemoryStream Buffer { get; set; } = new();
 
         public SemaphoreSlim Gate { get; } = new(1, 1);
+
+        /// <summary>Set under the gate when the session is deleted, so a racing append/complete conflicts cleanly.</summary>
+        public bool Deleted { get; set; }
     }
 }
