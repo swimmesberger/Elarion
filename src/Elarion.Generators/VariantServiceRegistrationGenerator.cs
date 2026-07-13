@@ -307,7 +307,7 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
                 SelectorKey: selectorKey,
                 IsConfiguration: isConfiguration,
                 Namespace: ordered[0].Namespace,
-                HintName: Sanitize(ordered[0].ContractFqn) + "_VariantService",
+                HintName: HintNames.Sanitize(ordered[0].ContractFqn) + "_VariantService",
                 HasDefault: defaultImpl is not null,
                 DefaultKeyExpr: defaultKeyExpr,
                 Impls: ordered));

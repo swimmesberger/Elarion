@@ -53,7 +53,10 @@ public static class RoleHolderProxyApplicationBuilderExtensions {
         var client = new HttpMessageInvoker(new SocketsHttpHandler {
             UseCookies = false,
             AllowAutoRedirect = false,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            // The default ConnectTimeout is infinite; a crashed holder (dropped SYNs) must surface as the
+            // documented 503 + Retry-After, not a hang. Time-to-response-headers is bounded in the middleware.
+            ConnectTimeout = RoleHolderProxyMiddleware.DefaultConnectTimeout
         });
         var middleware = new RoleHolderProxyMiddleware(lease, prefixes, client, logger);
         return app.Use(next => context => middleware.InvokeAsync(context, next));

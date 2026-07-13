@@ -39,6 +39,7 @@ ELMOD002 | Elarion.Modules | Warning | Cross-module reference to a module-intern
 ELMOD003 | Elarion.Modules | Warning | Referenced assembly advertises an unsupported Elarion manifest schema version
 ELMOD004 | Elarion.Modules | Warning | [ModuleEndpoints] names an unknown module
 ELMOD005 | Elarion.Modules | Warning | [ModuleEndpoints] class declares no endpoint hook
+ELMOD006 | Elarion.Modules | Error | Duplicate [AppModule] name
 ELAPI001 | Elarion.Modules | Error | Module API interface must be partial
 ELAPI002 | Elarion.Modules | Error | Module API interface must be top-level
 ELAPI003 | Elarion.Modules | Warning | Module API interface is not in any module

@@ -164,7 +164,7 @@ internal static class HttpEndpointEmission
     /// </summary>
     public static Model? CreateModel(
         GeneratorAttributeSyntaxContext ctx,
-        Action<Diagnostic>? report,
+        Action<DiagnosticInfo>? report,
         CancellationToken ct)
     {
         if (ctx.TargetSymbol is not INamedTypeSymbol type)
@@ -188,7 +188,7 @@ internal static class HttpEndpointEmission
         AttributeData attr,
         INamedTypeSymbol? descriptionType,
         SymbolDisplayFormat fmt,
-        Action<Diagnostic>? report,
+        Action<DiagnosticInfo>? report,
         CancellationToken ct,
         out Model? model)
     {
@@ -201,16 +201,16 @@ internal static class HttpEndpointEmission
         ct.ThrowIfCancellationRequested();
         if (!HandlerShape.TryResolve(type, out var requestType, out var responseInner, out _))
         {
-            report?.Invoke(Diagnostic.Create(
-                MissingRequestResponse, type.Locations.FirstOrDefault() ?? Location.None, type.ToDisplayString()));
+            report?.Invoke(DiagnosticInfo.Create(
+                MissingRequestResponse, type.Locations.FirstOrDefault(), type.ToDisplayString()));
             return false;
         }
 
         var verb = explicitVerb ?? InferVerb(requestType);
         if (verb is null)
         {
-            report?.Invoke(Diagnostic.Create(
-                CannotInferVerb, type.Locations.FirstOrDefault() ?? Location.None, type.ToDisplayString()));
+            report?.Invoke(DiagnosticInfo.Create(
+                CannotInferVerb, type.Locations.FirstOrDefault(), type.ToDisplayString()));
             return false;
         }
 

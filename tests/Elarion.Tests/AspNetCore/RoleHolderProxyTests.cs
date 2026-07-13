@@ -144,6 +144,93 @@ public sealed class RoleHolderProxyTests {
             .Should().Be("https://edge.example.com");
     }
 
+    [Fact]
+    public async Task BlackHoledHolder_AnswersBounded503_InsteadOfHanging() {
+        // Regression: no connect/overall timeout — a holder that accepted the connection but never answered
+        // (crashed node, dropped SYNs) hung the proxied request forever instead of the documented 503.
+        var lease = new FakeRoleLease { IsHeld = false, CurrentHolderAddress = "http://127.0.0.1:9" };
+        var middleware = new RoleHolderProxyMiddleware(
+            lease,
+            [new PathString("/quotes")],
+            new HttpMessageInvoker(new NeverRespondingHandler()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            responseHeadersTimeout: TimeSpan.FromMilliseconds(200));
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Path = "/quotes/ELN";
+        context.Response.Body = new MemoryStream();
+
+        var invoke = middleware.InvokeAsync(context, static _ => Task.CompletedTask);
+        var completed = await Task.WhenAny(invoke, Task.Delay(TimeSpan.FromSeconds(10), Ct));
+        completed.Should().BeSameAs(invoke, "the proxy must answer within its response-headers timeout, not hang");
+        await invoke;
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        context.Response.Headers.RetryAfter.ToString().Should().Be("5");
+        context.Response.Body.Position = 0;
+        (await new StreamReader(context.Response.Body).ReadToEndAsync(Ct)).Should().Contain("did not respond");
+    }
+
+    [Fact]
+    public async Task ConnectionNominatedHeaders_AreStrippedBothWays() {
+        // RFC 9110 §7.6.1: headers nominated by the Connection header are hop-by-hop and must be stripped in
+        // addition to the static list — on the forwarded request and on the relayed response.
+        var handler = new CapturingHandler(static () => {
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK) {
+                Content = new StringContent("ok"),
+            };
+            response.Headers.TryAddWithoutValidation("Connection", "X-Hop-Response");
+            response.Headers.TryAddWithoutValidation("X-Hop-Response", "secret");
+            response.Headers.TryAddWithoutValidation("X-Keep-Response", "kept");
+            return response;
+        });
+        var lease = new FakeRoleLease { IsHeld = false, CurrentHolderAddress = "http://127.0.0.1:9" };
+        var middleware = new RoleHolderProxyMiddleware(
+            lease,
+            [new PathString("/quotes")],
+            new HttpMessageInvoker(handler),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Path = "/quotes/ELN";
+        context.Request.Headers.Connection = "X-Hop-Request";
+        context.Request.Headers["X-Hop-Request"] = "secret";
+        context.Request.Headers["X-Keep-Request"] = "kept";
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, static _ => Task.CompletedTask);
+
+        handler.SentHeaderNames.Should().NotContain("Connection");
+        handler.SentHeaderNames.Should().NotContain("X-Hop-Request");
+        handler.SentHeaderNames.Should().Contain("X-Keep-Request");
+
+        context.Response.Headers.Should().NotContainKey("Connection");
+        context.Response.Headers.Should().NotContainKey("X-Hop-Response");
+        context.Response.Headers["X-Keep-Response"].ToString().Should().Be("kept");
+    }
+
+    private sealed class NeverRespondingHandler : HttpMessageHandler {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        }
+    }
+
+    private sealed class CapturingHandler(Func<HttpResponseMessage> respond) : HttpMessageHandler {
+        public List<string> SentHeaderNames { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) {
+            SentHeaderNames.AddRange(request.Headers.Select(static header => header.Key));
+            return Task.FromResult(respond());
+        }
+    }
+
     private sealed class FakeRoleLease : IRoleLease {
         public string Role => "actors";
 
