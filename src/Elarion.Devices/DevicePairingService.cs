@@ -20,6 +20,21 @@ public sealed class DevicePairingService(
     public async ValueTask<PairingCode> IssueAsync(
         PairingCodeIssueOptions? options = null,
         CancellationToken cancellationToken = default) {
+        // A caller-supplied id is validated here, at issue, so it fails where the caller can see it —
+        // not later at a store's column bound (or worse, only on the durable tier).
+        if (options?.DeviceId is { } suppliedId) {
+            if (string.IsNullOrWhiteSpace(suppliedId)) {
+                throw new ArgumentException("DeviceId must not be empty or whitespace.", nameof(options));
+            }
+
+            if (suppliedId.Length > DeviceIds.MaxLength) {
+                throw new ArgumentException(
+                    $"DeviceId must be at most {DeviceIds.MaxLength} characters (was {suppliedId.Length}) — "
+                    + "the bound of the durable device identity stores.",
+                    nameof(options));
+            }
+        }
+
         var deviceId = options?.DeviceId ?? Guid.CreateVersion7().ToString();
         var expiresAt = timeProvider.GetUtcNow() + (options?.TimeToLive ?? provisioningOptions.CodeTimeToLive);
 

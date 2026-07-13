@@ -64,6 +64,15 @@ public sealed class ElarionTcpListenerOptions : ElarionTcpConnectionOptions {
     /// <summary>Called once with the actually bound endpoint after the listener starts (dynamic-port
     /// discovery for tests and self-registration).</summary>
     public Action<IPEndPoint>? OnListening { get; set; }
+
+    /// <summary>
+    /// Caps the live connections (handshaking included) on this endpoint; <see langword="null"/> (the
+    /// default) is unbounded. At the cap, newly accepted sockets are closed immediately — the listener
+    /// keeps accepting so a connect flood is shed without wedging the endpoint. The count-side complement
+    /// to <see cref="ElarionTcpConnectionOptions.HandshakeTimeout"/>, which bounds how long a
+    /// pre-authentication slot may be held, not how many exist.
+    /// </summary>
+    public int? MaxConcurrentConnections { get; set; }
 }
 
 /// <summary>Options for a dial-out endpoint (the gateway initiates the connection to the device).</summary>

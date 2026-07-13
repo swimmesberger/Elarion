@@ -136,6 +136,24 @@ public sealed class ConnectionSocketEndpointTests {
     }
 
     [Fact]
+    public async Task Codec_OnClosedAsync_RunsWithNullReasonOnCleanSocketClose() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync<ClosureRecordingHandler>(ct);
+        using var socket = await host.ConnectAsync(ct);
+        await CompleteHandshakeAsync(socket, "dev-closed", ct);
+        await host.Observer.Connected.Task.WaitAsync(ct);
+
+        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", ct);
+        await host.Observer.Disconnected.Task.WaitAsync(ct);
+
+        var handler = host.Services.GetRequiredService<ClosureRecordingHandler>();
+        var (connection, reason) = await handler.Protocol!.Closed.Task.WaitAsync(ct);
+        connection.PrincipalId.Should().Be("dev-closed");
+        reason.Should().BeNull();
+        host.Registry.Connections.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task PerConnectionSettings_ServeDifferentTiersOnOneRoute() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync<TieredHandler>(ct);
@@ -214,6 +232,8 @@ public sealed class ConnectionSocketEndpointTests {
     private sealed class SocketTestHost(WebApplication app, string httpBase) : IAsyncDisposable {
         public string HttpBase { get; } = httpBase;
 
+        public IServiceProvider Services => app.Services;
+
         public IClientConnectionRegistry Registry => app.Services.GetRequiredService<IClientConnectionRegistry>();
 
         public AwaitableConnectionObserver Observer => app.Services.GetRequiredService<AwaitableConnectionObserver>();
@@ -255,6 +275,40 @@ public sealed class ConnectionSocketEndpointTests {
 
         public ValueTask OnIdleAsync(CancellationToken ct) =>
             connection.SendTextAsync("idle-ping", ct);
+    }
+
+    /// <summary>Records the codec teardown signal — the connection-ended notification a codec mounts its
+    /// pending-invoke <c>FailAll</c> on.</summary>
+    private sealed class ClosureRecordingHandler : WebSocketConnectionHandler {
+        public ClosureRecordingProtocol? Protocol { get; private set; }
+
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+            WebSocketHandshakeContext handshake, CancellationToken ct) {
+            await handshake.SendTextAsync("challenge", ct);
+            var reply = await handshake.ReceiveTextAsync(ct);
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
+                return null;
+            }
+
+            await handshake.SendTextAsync("welcome", ct);
+            return new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
+                PrincipalId = reply["device:".Length..],
+            };
+        }
+
+        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
+            Protocol = new ClosureRecordingProtocol();
+    }
+
+    private sealed class ClosureRecordingProtocol : IClientConnectionProtocol {
+        public TaskCompletionSource<(ClientConnection Connection, Exception? Reason)> Closed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) {
+            Closed.TrySetResult((connection, reason));
+            return ValueTask.CompletedTask;
+        }
     }
 
     /// <summary>One route, two tiers: per-connection settings picked from the upgrade request's query —

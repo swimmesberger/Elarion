@@ -7,8 +7,9 @@ namespace Elarion.Abstractions.Connections;
 public sealed record ClientInvokeOptions {
     /// <summary>
     /// How long to await the client's reply before the invoke faults with <see cref="TimeoutException"/>.
-    /// <see langword="null"/> uses the adapter's configured default; a server→client invoke is never
-    /// unbounded — a client that answers nothing must surface as a fault, not a hung turn.
+    /// <see langword="null"/> applies no timeout — the wait is bounded only by the caller's cancellation
+    /// token and the connection's lifetime. Pass one on every real invoke: a server→client invoke should
+    /// never be unbounded — a client that answers nothing must surface as a fault, not a hung turn.
     /// </summary>
     public TimeSpan? Timeout { get; init; }
 }

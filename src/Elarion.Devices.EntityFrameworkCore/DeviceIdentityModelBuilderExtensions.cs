@@ -31,7 +31,7 @@ public static class DeviceIdentityModelBuilderExtensions {
             builder.HasKey(entity => entity.DeviceId);
             builder.Property(entity => entity.DeviceId)
                 .HasColumnName(snakeCase ? "device_id" : "DeviceId")
-                .HasMaxLength(128);
+                .HasMaxLength(DeviceIds.MaxLength);
             builder.Property(entity => entity.Key)
                 .HasColumnName(snakeCase ? "key" : "Key");
             builder.Property(entity => entity.CreatedOnUtc)
@@ -46,7 +46,7 @@ public static class DeviceIdentityModelBuilderExtensions {
                 .HasMaxLength(64);
             builder.Property(entity => entity.DeviceId)
                 .HasColumnName(snakeCase ? "device_id" : "DeviceId")
-                .HasMaxLength(128);
+                .HasMaxLength(DeviceIds.MaxLength);
             builder.Property(entity => entity.ExpiresOnUtc)
                 .HasColumnName(snakeCase ? "expires_on_utc" : "ExpiresOnUtc");
             builder.Property(entity => entity.CreatedOnUtc)

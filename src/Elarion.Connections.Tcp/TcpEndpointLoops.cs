@@ -52,6 +52,17 @@ internal static class TcpEndpointLoops {
                     break;
                 }
 
+                if (options.MaxConcurrentConnections is { } cap && running.Count >= cap) {
+                    // Shed, don't stop accepting: closing the excess socket frees its FD/buffers
+                    // immediately, while pausing the accept loop would wedge the whole endpoint behind
+                    // the flood. HandshakeTimeout bounds slot duration; this bounds slot count.
+                    client.Dispose();
+                    logger.LogDebug(
+                        "Connection rejected: endpoint {EndPoint} is at its MaxConcurrentConnections cap ({Cap}).",
+                        options.ListenEndPoint, cap);
+                    continue;
+                }
+
                 // The runner never throws; tracking exists only so teardown can await open connections.
                 var run = TcpConnectionRunner.RunAsync(
                     client, options, handler, registry, timeProvider, logger, ct);

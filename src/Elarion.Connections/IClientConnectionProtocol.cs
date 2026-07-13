@@ -41,6 +41,22 @@ public interface IClientConnectionProtocol {
     /// <param name="ct">The connection's lifetime token.</param>
     ValueTask OnIdleAsync(CancellationToken ct) => ValueTask.CompletedTask;
 
+    /// <summary>
+    /// Called once when the connection ends, after the receive loop has exited and before the connection is
+    /// unregistered — the mounting point for codec teardown: fault the pending-invoke correlation
+    /// (<see cref="ConnectionPendingRequests{TKey, TResponse}.FailAll"/>), complete the conversation inbox
+    /// (<see cref="ConnectionInbox{TMessage}.Complete"/>), release per-connection resources. Without it a
+    /// pending <see cref="InvokeAsync"/> would hang forever. The adapter failure-isolates the call — a
+    /// throwing implementation is logged and never breaks teardown. The default is a no-op.
+    /// </summary>
+    /// <param name="connection">The identity of the connection that ended.</param>
+    /// <param name="reason">The terminating exception, or <see langword="null"/> for a clean close (the
+    /// peer ended the connection in an orderly way).</param>
+    /// <param name="ct">A teardown-scoped token — never the connection's lifetime token, which is already
+    /// cancelled on shutdown paths.</param>
+    ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
     /// <summary>The codec behind <see cref="IClientConnectionSink.SendAsync"/> — encode and send a named
     /// payload. Codecs without a named-payload concept keep the fail-loud default.</summary>
     ValueTask SendAsync<TPayload>(string name, TPayload payload, CancellationToken ct) where TPayload : class =>
