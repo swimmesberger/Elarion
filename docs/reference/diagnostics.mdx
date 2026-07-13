@@ -365,6 +365,15 @@ Role-lease-table generation for `[GenerateElarionRoleLeases]` (ADR-0049). See
 | --- | --- | --- | --- |
 | ELROLE001 | Error | A context is annotated with `[GenerateElarionRoleLeases]` but not `[GenerateDbSets]`, so the role-lease `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionRoleLeases]`. |
 
+## ELDEV — Device identity (EF Core)
+
+Device-identity-table generation for `[GenerateElarionDeviceIdentity]` (ADR-0054). See
+[Device identity](/docs/capabilities/devices).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELDEV001 | Error | A context is annotated with `[GenerateElarionDeviceIdentity]` but not `[GenerateDbSets]`, so the device identity `DbSet`s and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionDeviceIdentity]`. |
+
 ## ELCEV — Client events
 
 Generated client-event topic registration for `IClientEvent` contracts. See

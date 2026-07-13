@@ -1,0 +1,138 @@
+---
+title: Device identity
+description: Pairing codes, per-device keys, and the connect-time HMAC handshake — the provisioning chain every device gateway needs, without hand-rolling the security-relevant parts.
+---
+
+Every device gateway ends up building the same identity chain: **pairing** (a short human-typeable
+code redeemed once by the device for its identity and key), **key storage** (a per-device symmetric
+key), and **connect-time authentication** (a challenge/response producing the device principal).
+Hand-rolling it is exactly where mistakes are security-relevant — nonce reuse, non-constant-time
+comparison, guessable codes, keys minted from the wrong randomness. `Elarion.Devices` owns that
+chain and nothing else (ADR-0054); it plugs into the
+[connections](/docs/capabilities/connections) handshake seam with three lines.
+
+Deliberate non-goals: device inventory/management UI, OTA/firmware, and certificate/mTLS enrollment
+stay app concerns.
+
+## Wiring
+
+```csharp
+// The DbContext maps the two tables (device keys + pending pairing codes):
+[GenerateDbSets]
+[GenerateElarionDeviceIdentity]
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+
+// One call registers the whole chain — pairing service, HMAC verifier, durable stores:
+builder.Services.AddElarionDeviceIdentityEntityFrameworkCore<AppDbContext>();
+```
+
+Tests and single-node demos can use the volatile stores instead — an explicit opt-in, never a
+silent default, because device keys are durable identity:
+
+```csharp
+services.AddElarionDeviceIdentity();
+services.AddElarionInMemoryDeviceIdentityStores();
+```
+
+## Pairing
+
+An operator asks for a code (an ordinary authorized handler); the device redeems it once. The
+device id is **pre-assigned at issue**, so the issuer can attach it to its own domain state (a
+pending device row, a site assignment) before the device ever calls in.
+
+```csharp
+[Handler("devices.startPairing")]
+[RequirePermission("devices", "provision")]
+public sealed class StartDevicePairing(IDevicePairingService pairing)
+    : IHandler<StartDevicePairing.Command, Result<StartDevicePairing.Response>> {
+    public sealed record Command;
+    public sealed record Response(string Code, string DeviceId, DateTimeOffset ExpiresAt);
+
+    public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        var issued = await pairing.IssueAsync(cancellationToken: ct);
+        // Attach issued.DeviceId to your domain state here (pending device, site, tenant, …).
+        return new Response(issued.Code, issued.DeviceId, issued.ExpiresAt);
+    }
+}
+```
+
+Codes are CSPRNG-drawn from a Crockford-style alphabet (no `0/1/I/L/O/U`, so they survive being
+read aloud), default 8 characters and 10 minutes, and are stored **SHA-256-hashed** — the plain
+code exists only in the issue response. Redeem normalizes what a human typed (case, dashes,
+whitespace), claims the code atomically (one `DELETE … RETURNING`, so concurrent redeems have
+exactly one winner across nodes), mints the key, and returns the credentials. Unknown, expired, and
+already-used codes are deliberately indistinguishable.
+
+The redeem endpoint stays **app-owned** — it is anonymous by nature, so rate-limit it:
+
+```csharp
+app.MapPost("/devices/redeem", async (RedeemBody body, IDevicePairingService pairing, CancellationToken ct) => {
+    var credentials = await pairing.RedeemAsync(body.Code, ct);
+    return credentials is null
+        ? Results.NotFound()
+        : Results.Ok(new {
+            deviceId = credentials.DeviceId,
+            key = Convert.ToBase64String(credentials.Key.Span),
+        });
+}).RequireRateLimiting("device-pairing");
+```
+
+Redeeming a code issued for an **already-provisioned device id rotates its key** — issuing that
+code is the re-key authorization (device reset, lost key), so re-pairing is just "issue a new code
+for the same id".
+
+Expired codes are tiny rows swept by `IPairingCodeStore.DeleteExpiredAsync` — schedule it with a
+`[ScheduledJob]`. Revocation is `IDeviceKeyStore.RemoveAsync(deviceId)`: the device can no longer
+authenticate (to force the point immediately, look up its live connections with
+`registry.GetForPrincipal(deviceId)` and close each adapter connection).
+
+## Connect-time authentication
+
+`HmacChallengeVerifier` is shaped for a connection-handshake authenticator
+(`WebSocketConnectionHandler` / `TcpConnectionHandler`): mint a nonce, send it, verify the device's
+`HMAC-SHA256(key, nonce)` in constant time, and return the ticket.
+
+```csharp
+public sealed class GatewaySocketHandler(HmacChallengeVerifier verifier)
+    : WebSocketConnectionHandler {
+    public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+        WebSocketHandshakeContext handshake, CancellationToken ct) {
+        var nonce = HmacChallengeVerifier.CreateNonce();
+        await handshake.SendTextAsync($"challenge:{Convert.ToBase64String(nonce)}", ct);
+
+        // Device answers "deviceId:base64(HMAC-SHA256(key, nonce))".
+        var answer = await handshake.ReceiveTextAsync(ct);
+        if (answer?.Split(':', 2) is not [var deviceId, var mac]) {
+            return null;
+        }
+
+        var principal = await verifier.VerifyAsync(deviceId, nonce, Convert.FromBase64String(mac), ct);
+        if (principal is null) {
+            return null;                       // → policy-violation close, nothing registered
+        }
+
+        return new ClientConnectionTicket { Principal = principal, PrincipalId = deviceId };
+    }
+
+    // CreateProtocol(...) — your codec, see the connections page.
+}
+```
+
+The nonce is per connection attempt and lives only for that handshake — a captured response can
+never be replayed. Unknown device ids pay the same MAC computation as known ones, so timing does
+not leak which ids exist. `HmacChallengeVerifier.ComputeResponse(key, nonce)` is the device-side
+half, handy for simulators (`Elarion.Connections.Simulation`) and tests.
+
+## The device principal
+
+`VerifyAsync` returns a `ClaimsPrincipal` with a stable shape — authentication type
+`ElarionDevice`, the device id as both the `elarion:device` claim and the name identifier — so
+device-initiated dispatches flow through `ICurrentUser`, `[RequirePermission]`, and auditing
+unchanged. `DevicePrincipal.Create(deviceId, extraClaims)` adds permission claims for devices that
+issue commands; `DevicePrincipal.IsDevice(...)` / `GetDeviceId(...)` recognize it later.
+
+One documented trade-off: keys are raw symmetric material (the server recomputes MACs), the
+self-hosted posture. An id is never the only gate — pair the device principal with the same
+authorization attributes any caller faces, fail-closed.

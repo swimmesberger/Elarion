@@ -44,24 +44,33 @@ builder.Services.AddElarionConnections();   // registry + client-events bridge
 
 `Elarion.Connections.AspNetCore` ships the first adapter, shaped for device gateways: the endpoint
 owns accept, message reassembly (size-capped), registry lifecycle, and teardown; the app supplies an
-**authenticator** and a **codec** by subclassing `WebSocketConnectionHandler`.
+**authenticator** and a **codec** by subclassing `WebSocketConnectionHandler`. For device links, the
+provisioning chain behind the authenticator — pairing codes, per-device keys, the HMAC
+challenge/response — is [device identity](/docs/capabilities/devices) (`Elarion.Devices`).
 
 ```csharp
-public sealed class GatewaySocketHandler(IActorSystem actors, DeviceKeyStore keys)
+// HmacChallengeVerifier + DevicePrincipal come from Elarion.Devices — pairing codes, key storage,
+// and the constant-time verification are covered on the device identity page.
+public sealed class GatewaySocketHandler(IActorSystem actors, HmacChallengeVerifier verifier)
     : WebSocketConnectionHandler {
 
     // In-socket challenge/response (HTTP-level token auth works too — the HttpContext is available).
     public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
         WebSocketHandshakeContext handshake, CancellationToken ct) {
-        var nonce = Guid.CreateVersion7().ToString("N");
-        await handshake.SendTextAsync($"challenge:{nonce}", ct);
-        var answer = await handshake.ReceiveTextAsync(ct);
-        if (answer is null || !keys.Verify(nonce, answer, out var deviceId)) {
+        var nonce = HmacChallengeVerifier.CreateNonce();
+        await handshake.SendTextAsync($"challenge:{Convert.ToBase64String(nonce)}", ct);
+        var answer = await handshake.ReceiveTextAsync(ct);         // "deviceId:base64(mac)"
+        if (answer?.Split(':', 2) is not [var deviceId, var mac]) {
             return null;                                   // → PolicyViolation close, nothing registered
         }
 
+        var principal = await verifier.VerifyAsync(deviceId, nonce, Convert.FromBase64String(mac), ct);
+        if (principal is null) {
+            return null;
+        }
+
         return new ClientConnectionTicket {
-            Principal = DevicePrincipal.For(deviceId),
+            Principal = principal,
             PrincipalId = deviceId,                        // the registry indexes by this
             Metadata = new Dictionary<string, string> { ["channel"] = "telemetry" },
         };

@@ -9,6 +9,27 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Device identity and provisioning (ADR-0054).** Two new packages own the identity chain every device
+  gateway otherwise hand-rolls — exactly where mistakes are security-relevant. **`Elarion.Devices`**
+  (BCL crypto only, AOT-compatible): `IDevicePairingService` issues single-use, TTL-bounded pairing
+  codes (CSPRNG over a Crockford-style human-typeable alphabet, validated normalization-stable and
+  duplicate-free; the device id is pre-assigned at issue so the issuer can attach it to domain state)
+  and redeems them atomically for a freshly minted per-device symmetric key — codes are stored
+  SHA-256-hashed, unknown/expired/used redeems are indistinguishable, and redeeming a code issued for
+  an already-provisioned device id **rotates** its key (issuing that code is the re-key
+  authorization). `HmacChallengeVerifier` runs the connect-time handshake (per-connection CSPRNG
+  nonce, constant-time HMAC-SHA256 verification, unknown ids pay the same MAC cost as known ones) and
+  returns the device `ClaimsPrincipal` (`DevicePrincipal` — stable claim shape so
+  `[RequirePermission]` and auditing work unchanged), shaped to drop into a
+  `WebSocketConnectionHandler`/`TcpConnectionHandler` authenticator as ticket inputs. Stores sit
+  behind `IDeviceKeyStore`/`IPairingCodeStore`; the in-memory pair is an explicit opt-in
+  (`AddElarionInMemoryDeviceIdentityStores`) — durable identity never gets a silent volatile default.
+  **`Elarion.Devices.EntityFrameworkCore`** ships the durable stores (`elarion_device_keys`,
+  `elarion_device_pairing_codes`) with change-tracker-free writes on a fresh DI scope per operation;
+  the pairing-code claim is one `DELETE … RETURNING`, so concurrent redeems are single-winner across
+  nodes. Tables map via `modelBuilder.UseElarionDeviceIdentity()` or `[GenerateElarionDeviceIdentity]`
+  (bundled generator; `ELDEV001` when `[GenerateDbSets]` is missing);
+  `AddElarionDeviceIdentityEntityFrameworkCore<TDbContext>()` registers the whole chain.
 - **Ordered streams (ADR-0052).** The ordered, completable tier next to client events, for when element
   identity matters and a single live producer owns the sequence. `Elarion` core gains
   `Elarion.Streams.StreamHub<T>` — a hot, ordered in-memory broadcast (BCL-only: Channels +
