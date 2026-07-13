@@ -50,9 +50,13 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
         }
 
         // Stamp this poll's lease id onto the candidates still free; concurrent workers see the guard and skip them.
+        // The Attempts re-check matters: a message parked between the candidate read and this update
+        // (MarkPermanentlyFailedAsync leaves LockId/LockedUntilUtc null with Attempts at the max) would otherwise
+        // pass the lock guard and be delivered once more from a stale candidate list.
         await dbContext.Set<OutboxMessage>()
             .Where(message => candidateIds.Contains(message.Id)
                 && message.ProcessedOnUtc == null
+                && message.Attempts < maxAttempts
                 && (message.LockedUntilUtc == null || message.LockedUntilUtc < now))
             .ExecuteUpdateAsync(
                 setters => setters
@@ -61,10 +65,11 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
                 ct)
             .ConfigureAwait(false);
 
-        // The rows now bearing this poll's unique lease id are exactly the ones this worker won.
+        // The candidate rows now bearing this poll's unique lease id are exactly the ones this worker won.
+        // Constraining to the candidate ids keeps the read-back a primary-key probe (LockId has no index).
         return await dbContext.Set<OutboxMessage>()
             .AsNoTracking()
-            .Where(message => message.LockId == lockId)
+            .Where(message => candidateIds.Contains(message.Id) && message.LockId == lockId)
             .OrderBy(message => message.OccurredOnUtc)
             .ToListAsync(ct)
             .ConfigureAwait(false);

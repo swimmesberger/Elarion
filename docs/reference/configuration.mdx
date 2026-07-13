@@ -173,6 +173,7 @@ tier and its background `OutboxDeliveryService`:
 | `BaseRetryDelay` | `5 seconds` (exponential backoff base; `Zero` retries on the next poll) |
 | `MaxRetryDelay` | `1 hour` |
 | `RetentionPeriod` | `7 days` (`null` keeps delivered rows forever) |
+| `PurgeInterval` | `1 hour` (how often the worker runs the retention purge) |
 | `SerializerOptions` | `null` (canonical `IElarionJsonSerialization`) |
 
 See [Event backends](/docs/capabilities/events/backends).

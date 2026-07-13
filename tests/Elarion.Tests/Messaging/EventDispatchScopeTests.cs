@@ -101,6 +101,26 @@ public sealed class EventDispatchScopeTests {
     }
 
     [Fact]
+    public async Task Dispose_WithEventsBufferedAfterAFlush_StillWarns() {
+        using var provider = BuildProvider(new EventRecorder());
+        var pump = provider.GetRequiredService<EventDispatchPump>();
+        var logger = new RecordingLogger<EventDispatchScope>();
+        var scope = new EventDispatchScope(pump, logger);
+
+        // A save flushes the buffer (autocommit), then another event is published with no further save: nothing
+        // flushes it again, so it is dropped — an earlier flush must not suppress the warning.
+        scope.Add(Envelope("committed"));
+        await scope.FlushAsync(TestContext.Current.CancellationToken);
+        scope.Add(Envelope("dropped"));
+
+        scope.Dispose();
+
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Which;
+        warning.Message.Should().Contain(nameof(SampleIntegrationEvent));
+        warning.Message.Should().Contain("dropped without delivery");
+    }
+
+    [Fact]
     public void AddElarionInMemoryIntegrationEventBus_CalledTwice_RegistersSinglePumpHostedService() {
         var services = new ServiceCollection();
         services.AddLogging();
