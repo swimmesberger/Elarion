@@ -21,6 +21,11 @@
     <PackageReference Include="OpenFeature.Hosting" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Migration-runner test scripts: the runner discovers embedded .sql resources, scoped per scenario
+         by resource-name prefix. -->
+    <EmbeddedResource Include="Migrations/Scripts/**/*.sql" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
     <ProjectReference Include="../../src/Elarion/Elarion.csproj" />
     <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj" />
@@ -56,6 +61,7 @@
     <ProjectReference Include="../../src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj" />
     <ProjectReference Include="../../src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />
+    <ProjectReference Include="../../src/Elarion.Migrations.PostgreSql/Elarion.Migrations.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
     <ProjectReference Include="../../src/Elarion.Authorization.EntityFrameworkCore/Elarion.Authorization.EntityFrameworkCore.csproj" />

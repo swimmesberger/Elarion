@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>PostgreSQL SQL migration runner for EF-free (NativeAOT) Elarion hosts (ADR-0057): embedded V{version}__/R__ scripts, SHA-256 checksums over line-ending-normalized content, a session-level advisory lock, and history rows that commit in the same transaction as their script — so there is no repair command and no failed-row limbo. Startup-applied via a hosted service; PostgreSQL only by design.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests" />
+  </ItemGroup>
+
+</Project>
