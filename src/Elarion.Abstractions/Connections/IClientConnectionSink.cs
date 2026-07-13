@@ -46,7 +46,7 @@ public interface IClientConnectionSink {
     /// Invokes <paramref name="name"/> on the client with <paramref name="request"/> and awaits its reply.
     /// Completes with the client's response, or faults with <see cref="ClientConnectionClosedException"/>
     /// (the connection ended first), <see cref="TimeoutException"/> (no reply within
-    /// <see cref="ClientInvokeOptions.Timeout"/> or the adapter default), or
+    /// <see cref="ClientInvokeOptions.Timeout"/>, when one was supplied), or
     /// <see cref="OperationCanceledException"/> — <b>never silently</b>. The invoke is at-most-once: a fault
     /// leaves unknown whether the client observed the call, so anything the client does in response must be
     /// safe to re-request.
@@ -55,7 +55,8 @@ public interface IClientConnectionSink {
     /// <typeparam name="TResponse">The expected response contract type.</typeparam>
     /// <param name="name">The client-side operation name (wire name).</param>
     /// <param name="request">The request payload.</param>
-    /// <param name="options">Per-call options; <see langword="null"/> uses adapter defaults.</param>
+    /// <param name="options">Per-call options; <see langword="null"/> applies none (no timeout — bound the
+    /// call via <see cref="ClientInvokeOptions.Timeout"/> or the token).</param>
     /// <param name="ct">A cancellation token; cancelling abandons the wait, not the client's execution.</param>
     ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
         string name,

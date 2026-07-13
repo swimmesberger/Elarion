@@ -14,6 +14,8 @@ public interface IDevicePairingService {
     /// </summary>
     /// <param name="options">Optional per-issue overrides (TTL, caller-supplied device id).</param>
     /// <param name="cancellationToken">Cancels the issue.</param>
+    /// <exception cref="ArgumentException">A caller-supplied <see cref="PairingCodeIssueOptions.DeviceId"/>
+    /// is blank or longer than <see cref="DeviceIds.MaxLength"/> characters.</exception>
     ValueTask<PairingCode> IssueAsync(PairingCodeIssueOptions? options = null, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -49,7 +51,8 @@ public sealed record PairingCodeIssueOptions {
     /// <summary>
     /// Uses a caller-supplied device id instead of a minted one — for apps with their own device id
     /// scheme, and the re-pairing path: a code issued for an existing device id rotates its key at
-    /// redeem.
+    /// redeem. Validated at issue: non-blank, at most <see cref="DeviceIds.MaxLength"/> characters
+    /// (the durable stores' column bound).
     /// </summary>
     public string? DeviceId { get; init; }
 }

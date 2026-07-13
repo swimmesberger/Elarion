@@ -167,7 +167,19 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
                 _endpoints[name] = endpoint;
             }
 
-            endpoint.Run = loop((state, error) => Advertise(endpoint, state, error), cts.Token);
+            try {
+                endpoint.Run = loop((state, error) => Advertise(endpoint, state, error), cts.Token);
+            }
+            catch {
+                // A synchronous factory throw (e.g. resolving an unregistered handler type) must not leave
+                // a zombie entry stuck in Starting with a leaked CTS — the apply fails, nothing is applied.
+                lock (_endpoints) {
+                    _endpoints.Remove(name);
+                }
+
+                cts.Dispose();
+                throw;
+            }
         }
         finally {
             _mutation.Release();

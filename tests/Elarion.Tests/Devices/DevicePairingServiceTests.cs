@@ -40,6 +40,31 @@ public sealed class DevicePairingServiceTests {
         issued.ExpiresAt.Should().Be(_time.GetUtcNow() + TimeSpan.FromMinutes(2));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Issue_RejectsBlankCallerSuppliedDeviceId(string deviceId) {
+        var service = CreateService();
+
+        var issue = async () => await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = deviceId }, TestToken);
+
+        await issue.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Issue_RejectsDeviceIdLongerThanTheStoreBound_AndAcceptsTheBoundItself() {
+        var service = CreateService();
+
+        // One over the durable stores' column width fails at issue, not later inside the store.
+        var issue = async () => await service.IssueAsync(
+            new PairingCodeIssueOptions { DeviceId = new string('d', DeviceIds.MaxLength + 1) }, TestToken);
+        await issue.Should().ThrowAsync<ArgumentException>().WithMessage($"*{DeviceIds.MaxLength}*");
+
+        var issued = await service.IssueAsync(
+            new PairingCodeIssueOptions { DeviceId = new string('d', DeviceIds.MaxLength) }, TestToken);
+        issued.DeviceId.Should().HaveLength(DeviceIds.MaxLength);
+    }
+
     [Fact]
     public async Task Redeem_MintsCredentialsAndStoresTheKey() {
         var service = CreateService();
