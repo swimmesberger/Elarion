@@ -20,7 +20,7 @@ internal sealed class MicrosoftResiliencePipelineRunner(
         var started = Stopwatch.GetTimestamp();
         var outcome = "success";
         try {
-            // Note 27: The framework stores neutral policy metadata; the default runtime lazily compiles Microsoft/Polly pipelines from it.
+            // The framework stores neutral policy metadata; the default runtime lazily compiles Microsoft/Polly pipelines from it.
             var pipeline = GetPipeline(policy);
             await pipeline.ExecuteAsync(action, ct);
         } catch (Exception ex) {
@@ -40,7 +40,7 @@ internal sealed class MicrosoftResiliencePipelineRunner(
         var started = Stopwatch.GetTimestamp();
         var outcome = "success";
         try {
-            // Note 28: This overload keeps typed handler responses type-safe while sharing the same named pipeline lookup.
+            // This overload keeps typed handler responses type-safe while sharing the same named pipeline lookup.
             var pipeline = GetPipeline(policy);
             return await pipeline.ExecuteAsync(action, ct);
         } catch (Exception ex) {
