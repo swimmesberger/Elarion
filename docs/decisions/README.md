@@ -77,3 +77,5 @@ designs that are not yet implemented.
 - [ADR-0054: Device identity and provisioning — pairing codes, device keys, and the HMAC connect-time handshake](0054-device-identity-and-provisioning.md)
 - [ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater](0055-data-rate-shaping-helpers.md)
 - [ADR-0056: PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain](0056-postgres-extensions-posture.md)
+- [ADR-0057: A Flyway-shaped PostgreSQL migration runner for EF-free (AOT) hosts — Proposed](0057-postgresql-sql-migration-runner.md)
+- [ADR-0058: AOT-native SQL row mapping — explicit generated mappers, not call-site interception — Proposed](0058-aot-sql-row-mapping.md)
