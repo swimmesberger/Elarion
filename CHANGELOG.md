@@ -8,6 +8,53 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **Framework-wide audit fix pass.** A deep concurrency/correctness audit across all packages, with
+  regression tests throughout. Highlights: `StreamHub` no longer wedges permanently when a Wait-mode
+  subscriber unsubscribes under a blocked publish; user-scoped handler-cache entries are additionally
+  stamped with the global tag so a default `[CacheInvalidate]` actually evicts them; the in-memory
+  staged-upload store no longer corrupts a blob after a mid-chunk client disconnect, and the PostgreSQL
+  staged store stops re-reading the whole staged payload on every HEAD/append (O(n²) → O(n)); the
+  in-memory scheduler keeps recurring chains single and intact across variable resyncs, occurrence
+  cancels, one-time schedules, and shutdown/slot-grant races; the idempotency claim `lock_timeout` no
+  longer bleeds into business statements (and is applied in nested units of work); PostgreSQL
+  LISTEN/NOTIFY listeners survive half-open connections via a bounded-wait liveness probe and send the
+  re-query hint on every establishment; client-event lifecycle callbacks are serialized per topic/scope;
+  actor facade calls honor `CallTimeout` during bounded-mailbox enqueues, `StopAsync` can no longer leak
+  a racing activation, and snapshot-conflict retries carry provenance (a nested actor's conflict no
+  longer re-runs the outer turn); the role-holder proxy bounds connect/response-header waits (503 instead
+  of hanging); handler discovery no longer silently skips consumer namespaces containing "Decorators";
+  duplicate `[AppModule]` names are now reported as `ELMOD006` instead of crashing generation; keyset
+  cursor decoding and `ElarionFile` base64 payloads report malformed client input as 400-class errors
+  instead of 500s; the TypeScript client generator preserves nullable array items, parenthesizes enum
+  array types, and rejects cyclic `$ref` schemas instead of overflowing the stack. Plus many smaller
+  hardening, diagnostics, and documentation fixes from the same audit.
+- **Audit records survive commit-phase failures.** `IAuditTrail.RecordAsync` now reports whether the
+  success record is durable or enlisted in the ambient transaction (`AuditRecordDurability`); the EF sink
+  promotes the audit scope to recorded only once the commit succeeds, so a command that fails at COMMIT
+  gets its detached failure record instead of leaving no audit trace.
+- **Actor activation replacement is serialized on the predecessor's drain.** A replacement activation
+  for the same key no longer constructs/loads while the old activation's `OnDeactivateAsync` is still
+  running (exclusive-resource actors can no longer observe a double-hold); a hung deactivation proceeds
+  after the new `ActorOptions.DeactivationTimeout` (default 30 s) with a warning. PostgreSQL actor
+  snapshots now mint lineage-unique starting versions, closing an ETag ABA where a clear+recreate could
+  let a stale activation silently overwrite a different snapshot lineage.
+
+### Changed
+- **`IClientConnectionSink.InvokeAsync` is bounded by default.** New kernel option
+  `ElarionConnectionsOptions.DefaultInvokeTimeout` (default 30 s, `null` = no default) applies when a
+  call carries no per-call `ClientInvokeOptions.Timeout`; codecs are notified of connection teardown via
+  the new `IClientConnectionProtocol.OnClosedAsync` seam member, so pending invokes fault instead of
+  hanging. TCP listeners gain an optional `MaxConcurrentConnections` cap.
+- **The default authorization denial message is now generic** ("Access denied.") instead of echoing the
+  unmet permission/role/policy name; the unmet requirement is logged at debug level and
+  `AuthorizationOptions.ForbiddenMessageFormat` restores the detailed message.
+- **A disabled scheduler rejects runtime enqueues** (`InvalidOperationException`) instead of queueing
+  jobs unboundedly; descriptor-declared jobs are unaffected.
+- **New diagnostic `ELPIPE004`** warns when a retrying `[Resilient]` command handler lacks
+  `[Idempotent]` (a timed-out attempt's uncancellable commit can complete while the retry re-executes
+  the command). **Breaking:** `AddElarionIdentity` drops its unused `TKey` type parameter.
+
 ### Added
 - **Data-rate shaping helpers (ADR-0055).** `Elarion` core gains the `Elarion.Buffering` namespace with
   the two primitives every telemetry gateway hand-rolls between "device produces samples" and
