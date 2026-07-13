@@ -33,19 +33,19 @@ public sealed class ClaimsAuthorizer(
 
         foreach (var permission in requirements.Permissions) {
             if (!user.HasClaim(options.PermissionClaimType, permission)) {
-                return Forbidden(permission);
+                return Forbidden("permission", permission);
             }
         }
 
         foreach (var role in requirements.Roles) {
             if (!user.IsInRole(role)) {
-                return Forbidden(role);
+                return Forbidden("role", role);
             }
         }
 
         foreach (var claim in requirements.Claims) {
             if (!SatisfiesClaim(claim)) {
-                return Forbidden(claim.ClaimType);
+                return Forbidden("claim", claim.ClaimType);
             }
         }
 
@@ -55,11 +55,11 @@ public sealed class ClaimsAuthorizer(
                 // Fail closed: an unregistered policy name denies rather than silently passing.
                 logger.LogWarning(
                     "No authorization policy named '{Policy}' is registered; denying the request.", policyName);
-                return Forbidden(policyName);
+                return Forbidden("policy", policyName);
             }
 
             if (!await policy.EvaluateAsync(new AuthorizationContext(user, resource), ct).ConfigureAwait(false)) {
-                return Forbidden(policyName);
+                return Forbidden("policy", policyName);
             }
         }
 
@@ -71,7 +71,7 @@ public sealed class ClaimsAuthorizer(
                 resourceRequirement.Operation,
                 resourceRequirement.ResourceId);
             if (!await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false)) {
-                return Forbidden(resourceRequirement.ResourceTypeName);
+                return Forbidden("resource", resourceRequirement.ResourceTypeName);
             }
         }
 
@@ -95,6 +95,13 @@ public sealed class ClaimsAuthorizer(
             : values.Any(value => claim.AllowedValues.Contains(value, StringComparer.Ordinal));
     }
 
-    private AppError Forbidden(string requirement) =>
-        AppError.Forbidden(string.Format(CultureInfo.InvariantCulture, options.ForbiddenMessageFormat, requirement));
+    private AppError Forbidden(string requirementKind, string requirement) {
+        // The wire message defaults to a generic "Access denied." so a forbidden caller never learns the
+        // permission vocabulary; the unmet requirement stays available to operators through this log.
+        logger.LogDebug(
+            "Authorization denied: unmet {RequirementKind} requirement '{Requirement}'.",
+            requirementKind,
+            requirement);
+        return AppError.Forbidden(string.Format(CultureInfo.InvariantCulture, options.ForbiddenMessageFormat, requirement));
+    }
 }

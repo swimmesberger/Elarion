@@ -17,7 +17,9 @@ namespace Elarion.Streams;
 /// <b>Single sequencer by design.</b> The intended owner is a single writer — typically an actor, whose
 /// mailbox already serializes publishes. Concurrent <see cref="PublishAsync"/> calls are safe (an internal
 /// gate serializes them, preserving per-subscriber order), but ordering <em>between</em> concurrent
-/// publishers is decided by that gate, not by the callers.
+/// publishers is decided by that gate, not by the callers — and <see cref="Complete"/>/<see cref="Fail"/>
+/// must be serialized with publishes by the producer (see their remarks): racing them makes final-element
+/// delivery per-subscriber nondeterministic.
 /// </para>
 /// <para>
 /// <b>Lifetime.</b> The hub lives and dies with its owner: an actor whose activation can passivate must
@@ -74,6 +76,24 @@ public sealed class StreamHub<T> {
     /// subscriber (backpressure). Throws <see cref="InvalidOperationException"/> after
     /// <see cref="Complete"/>/<see cref="Fail"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Serialize publishes with completion.</b> The hub's ordering guarantees assume the producer
+    /// serializes its <see cref="PublishAsync"/> calls with <see cref="Complete"/>/<see cref="Fail"/> —
+    /// naturally true in the intended single-sequencer usage (an actor's mailbox, ADR-0052). A
+    /// <see cref="Complete"/>/<see cref="Fail"/> racing a concurrent publish makes delivery of that final
+    /// committed element per-subscriber nondeterministic: some live subscribers may observe it and others
+    /// not, and a later replay subscriber may see an element a live subscriber missed.
+    /// </para>
+    /// <para>
+    /// <b>Cancellation is only clean before commit.</b> <paramref name="cancellationToken"/> cancels the
+    /// publish cleanly only while it is still waiting to enter the hub (the element was not committed).
+    /// Once the element is committed — sequence assigned and retained in the replay ring — cancelling
+    /// (e.g. while a <see cref="StreamOverflowMode.Wait"/> subscriber applies backpressure) abandons the
+    /// remaining deliveries of that element: it exists in replay for new subscribers, but pending
+    /// Wait-mode subscribers never receive it.
+    /// </para>
+    /// </remarks>
     public async ValueTask PublishAsync(T item, CancellationToken cancellationToken = default) {
         // The gate keeps per-subscriber order intact even when a Wait-mode subscriber suspends this
         // publish while another one starts; single-writer owners never contend on it.
@@ -130,9 +150,23 @@ public sealed class StreamHub<T> {
     }
 
     /// <summary>Ends the stream: every subscription completes normally, further publishes throw.</summary>
+    /// <remarks>
+    /// Serialize with <see cref="PublishAsync"/> (the producer's job — automatic under the intended
+    /// single-sequencer/actor-mailbox usage, ADR-0052): completing concurrently with an in-flight publish
+    /// makes delivery of that final committed element per-subscriber nondeterministic — some live
+    /// subscribers may observe it, others may not, and a late replay subscriber may see an element a live
+    /// subscriber missed.
+    /// </remarks>
     public void Complete() => Close(null);
 
     /// <summary>Ends the stream with an error: every subscription (current and future) throws it.</summary>
+    /// <remarks>
+    /// Serialize with <see cref="PublishAsync"/> (the producer's job — automatic under the intended
+    /// single-sequencer/actor-mailbox usage, ADR-0052): failing concurrently with an in-flight publish
+    /// makes delivery of that final committed element per-subscriber nondeterministic — some live
+    /// subscribers may observe it, others may not, and a late replay subscriber may see an element a live
+    /// subscriber missed.
+    /// </remarks>
     public void Fail(Exception error) {
         ArgumentNullException.ThrowIfNull(error);
         Close(error);

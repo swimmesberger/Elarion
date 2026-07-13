@@ -85,6 +85,34 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
+    public async Task EnqueueAsync_DisabledScheduler_RejectsInsteadOfQueueingForever()
+    {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        await using var provider = CreateProvider(
+            time, new SchedulerOptions { Enabled = false, MaxConcurrentExecutions = 8 });
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        await hostedService.StartAsync(cts.Token);
+
+        var scheduler = provider.GetRequiredService<IJobScheduler>();
+
+        // A disabled scheduler never drains its queue, so runtime enqueue/schedule must fail loud
+        // instead of silently accumulating work that can never run.
+        var enqueue = async () => await scheduler.EnqueueAsync<TestRuntimeJob, TestPayload>(
+            new TestPayload { Value = "rejected" },
+            cts.Token);
+        await enqueue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*scheduler is disabled*");
+
+        var schedule = async () => await scheduler.ScheduleAsync<TestRuntimeJob, TestPayload>(
+            new TestPayload { Value = "rejected" },
+            time.GetUtcNow().AddSeconds(5),
+            cts.Token);
+        await schedule.Should().ThrowAsync<InvalidOperationException>().WithMessage("*scheduler is disabled*");
+
+        await hostedService.StopAsync(cts.Token);
+    }
+
+    [Fact]
     public async Task ScheduleAsync_FutureRun_ExecutesOnceDueTimeIsReached()
     {
         using var cts = new CancellationTokenSource(WaitTimeout);

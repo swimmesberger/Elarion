@@ -48,6 +48,35 @@ public sealed class ClaimsAuthorizerTests {
     }
 
     [Fact]
+    public async Task ForbiddenMessageIsGenericByDefault() {
+        var user = new FakeCurrentUser { IsAuthenticated = true };
+        var authorizer = Create(user);
+
+        var error = await authorizer.AuthorizeAsync(
+            Requirements(permissions: ["tenants.read"]), null, TestContext.Current.CancellationToken);
+
+        error!.Kind.Should().Be(ErrorKind.Forbidden);
+        // The default deliberately omits the unmet requirement so a forbidden caller cannot
+        // probe the permission vocabulary; ForbiddenMessageFormat opts back into the detail.
+        error.Message.Should().Be("Access denied.");
+        error.Message.Should().NotContain("tenants.read");
+    }
+
+    [Fact]
+    public async Task ForbiddenMessageFormatRestoresRequirementDetail() {
+        var user = new FakeCurrentUser { IsAuthenticated = true };
+        var authorizer = Create(user, options: new AuthorizationOptions {
+            ForbiddenMessageFormat = "Missing required permission: {0}"
+        });
+
+        var error = await authorizer.AuthorizeAsync(
+            Requirements(permissions: ["tenants.read"]), null, TestContext.Current.CancellationToken);
+
+        error!.Kind.Should().Be(ErrorKind.Forbidden);
+        error.Message.Should().Be("Missing required permission: tenants.read");
+    }
+
+    [Fact]
     public async Task UnregisteredPolicyDeniesClosed() {
         var user = new FakeCurrentUser { IsAuthenticated = true };
         var authorizer = Create(user);
