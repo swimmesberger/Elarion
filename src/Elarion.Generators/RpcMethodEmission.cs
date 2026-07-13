@@ -69,6 +69,7 @@ internal static class RpcMethodEmission
         string? ToolName,
         bool OnJsonRpc,
         bool OnMcp,
+        bool OnConnection,
         string? Description,
         EquatableArray<ParameterDescription> Parameters,
         bool IsNameInferred,
@@ -92,11 +93,19 @@ internal static class RpcMethodEmission
     public static string TransportsExpression(Model entry)
     {
         const string ns = "global::Elarion.Abstractions.HandlerTransports";
-        if (entry.OnJsonRpc && entry.OnMcp)
+        if (entry.OnJsonRpc && entry.OnMcp && entry.OnConnection)
             return $"{ns}.All";
+
+        var parts = new List<string>(3);
+        if (entry.OnJsonRpc)
+            parts.Add($"{ns}.JsonRpc");
         if (entry.OnMcp)
-            return $"{ns}.Mcp";
-        return $"{ns}.JsonRpc";
+            parts.Add($"{ns}.Mcp");
+        if (entry.OnConnection)
+            parts.Add($"{ns}.Connection");
+        // No flag set cannot come from the attribute (its default is All); keep the historical JSON-RPC
+        // fallback so a malformed constant still maps somewhere deterministic.
+        return parts.Count > 0 ? string.Join(" | ", parts) : $"{ns}.JsonRpc";
     }
 
     /// <summary>
@@ -148,7 +157,7 @@ internal static class RpcMethodEmission
         var isNameInferred = string.IsNullOrEmpty(explicitName);
         var operationName = isNameInferred ? InferOperationName(type.Name) : explicitName!;
 
-        var (onJsonRpc, onMcp) = ReadTransports(attr);
+        var (onJsonRpc, onMcp, onConnection) = ReadTransports(attr);
 
         ct.ThrowIfCancellationRequested();
         if (!HandlerShape.TryResolve(type, out var requestType, out var responseInner, out _))
@@ -179,6 +188,7 @@ internal static class RpcMethodEmission
             toolName,
             onJsonRpc,
             onMcp,
+            onConnection,
             description,
             parameters,
             isNameInferred,
@@ -229,10 +239,12 @@ internal static class RpcMethodEmission
             ? char.ToLowerInvariant(moduleName[0]) + moduleName.Substring(1)
             : moduleName;
 
-    // HandlerTransports flags: JsonRpc = 1, Mcp = 2, All = 3 (default when the named argument is absent).
-    private static (bool OnJsonRpc, bool OnMcp) ReadTransports(AttributeData attr)
+    // HandlerTransports flags: JsonRpc = 1, Mcp = 2, Connection = 4, All = 7 (default when the named
+    // argument is absent). A constant baked by an older Elarion (All = 3) decodes as JSON-RPC + MCP only —
+    // correct: that compilation never opted into the connection surface.
+    private static (bool OnJsonRpc, bool OnMcp, bool OnConnection) ReadTransports(AttributeData attr)
     {
-        var transports = 3;
+        var transports = 7;
         foreach (var named in attr.NamedArguments)
         {
             if (named.Key == "Transports" && named.Value.Value is int value)
@@ -242,7 +254,7 @@ internal static class RpcMethodEmission
             }
         }
 
-        return ((transports & 1) != 0, (transports & 2) != 0);
+        return ((transports & 1) != 0, (transports & 2) != 0, (transports & 4) != 0);
     }
 
     private static (string? ToolName, bool HasMcpMethod) ReadMcpMethod(INamedTypeSymbol type, INamedTypeSymbol? mcpMethodType)

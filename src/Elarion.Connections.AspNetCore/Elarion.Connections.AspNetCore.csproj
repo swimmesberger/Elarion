@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>WebSocket connection adapter for Elarion: MapElarionConnectionSocket accepts long-lived device or browser links, runs the app's handshake authenticator, and wires the connection into the transport-neutral kernel (registry, observers, client-events bridge) — the app writes only codec and authenticator (ADR-0053).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.Connections\Elarion.Connections.csproj" />
+  </ItemGroup>
+
+</Project>

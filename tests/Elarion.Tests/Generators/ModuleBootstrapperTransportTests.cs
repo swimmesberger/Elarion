@@ -56,6 +56,22 @@ public sealed class ModuleBootstrapperTransportTests {
                 public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
                     ValueTask.FromResult<Result<Response>>(new Response("S"));
             }
+
+            [Handler("invoices.watch", Transports = HandlerTransports.Connection)]
+            public sealed class WatchInvoiceRpc : IHandler<WatchInvoiceRpc.Query, Result<WatchInvoiceRpc.Response>> {
+                public sealed record Query { public required System.Guid Id { get; init; } }
+                public sealed record Response(string State);
+                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Response>>(new Response("open"));
+            }
+
+            [Handler("invoices.annotate", Transports = HandlerTransports.JsonRpc | HandlerTransports.Connection)]
+            public sealed class AnnotateInvoiceRpc : IHandler<AnnotateInvoiceRpc.Command, Result<AnnotateInvoiceRpc.Response>> {
+                public sealed record Command { public required System.Guid Id { get; init; } }
+                public sealed record Response(bool Ok);
+                public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Response>>(new Response(true));
+            }
         }
 
         namespace Sample.Shipping {
@@ -217,11 +233,18 @@ public sealed class ModuleBootstrapperTransportTests {
         handlers.Should().Contain("\"invoices.get\", global::Elarion.Abstractions.HandlerTransports.All");
         handlers.Should().Contain("\"invoices.archive\", global::Elarion.Abstractions.HandlerTransports.JsonRpc");
         handlers.Should().Contain("\"invoices.summarize\", global::Elarion.Abstractions.HandlerTransports.Mcp");
+        // Connection-only and composed flags survive the model round-trip (ADR-0053).
+        handlers.Should().Contain("\"invoices.watch\", global::Elarion.Abstractions.HandlerTransports.Connection");
+        handlers.Should().Contain(
+            "\"invoices.annotate\", global::Elarion.Abstractions.HandlerTransports.JsonRpc | global::Elarion.Abstractions.HandlerTransports.Connection");
 
-        // The MCP tool table mirrors the MCP surface: the "both" and MCP-only operations, never the JSON-RPC-only one.
+        // The MCP tool table mirrors the MCP surface: the "both" and MCP-only operations, never the
+        // JSON-RPC-only or connection-only ones.
         mcpMetadata.Should().Contain("MethodName = \"invoices.get\"")
             .And.Contain("MethodName = \"invoices.summarize\"");
         mcpMetadata.Should().NotContain("invoices.archive");
+        mcpMetadata.Should().NotContain("invoices.watch");
+        mcpMetadata.Should().NotContain("invoices.annotate");
     }
 
     [Fact]
@@ -540,6 +563,9 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain("app.MapGet(\"manifest\",");
         generated.Should().Contain(
             "dispatcher.Map<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\", global::Elarion.Abstractions.HandlerTransports.All);");
+        // A pre-Connection (11-field) manifest entry still maps — without the connection surface.
+        generated.Should().Contain(
+            "dispatcher.Map<global::ManifestOnly.GetLegacy.Query, global::ManifestOnly.GetLegacy.Response>(\"manifest.legacy\", global::Elarion.Abstractions.HandlerTransports.JsonRpc | global::Elarion.Abstractions.HandlerTransports.Mcp);");
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
@@ -1068,6 +1094,22 @@ public sealed class ModuleBootstrapperTransportTests {
             null,
             string.Empty,
             "0",
+            "0",
+            // OnConnection (12th field, appended by ADR-0053) — "1" so the entry decodes as All.
+            "1");
+        // The pre-Connection wire format: 11 fields. Must decode (with the connection surface off), never
+        // silently drop the handler.
+        var legacyRpc = EncodeFields(
+            "manifest.legacy",
+            "ManifestOnly",
+            "global::ManifestOnly.GetLegacy.Query",
+            "global::ManifestOnly.GetLegacy.Response",
+            null,
+            "1",
+            "1",
+            null,
+            string.Empty,
+            "0",
             "0");
 
         return $$"""
@@ -1079,6 +1121,7 @@ public sealed class ModuleBootstrapperTransportTests {
             [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
             [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.HttpEndpoint.v1", "{{http}}")]
             [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{legacyRpc}}")]
 
             namespace ManifestOnly;
 
@@ -1089,6 +1132,13 @@ public sealed class ModuleBootstrapperTransportTests {
                 public sealed record Response(string Name);
                 public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
                     ValueTask.FromResult<Result<Response>>(new Response("manifest"));
+            }
+
+            public sealed class GetLegacy : IHandler<GetLegacy.Query, Result<GetLegacy.Response>> {
+                public sealed record Query { public required System.Guid Id { get; init; } }
+                public sealed record Response(string Name);
+                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Response>>(new Response("legacy"));
             }
             """;
     }

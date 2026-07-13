@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Simulation and test utilities for Elarion client connections — for test suites AND runnable dev/demo simulators alike: SimulatedClientConnection (an in-memory sink double for twin/observer/bridge logic), AwaitableConnectionObserver (deterministic lifecycle assertions), and TcpSimulatorClient (a framed client for simulated devices/peers) (ADR-0053).</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.Connections\Elarion.Connections.csproj" />
+    <ProjectReference Include="..\Elarion.Connections.Tcp\Elarion.Connections.Tcp.csproj" />
+  </ItemGroup>
+
+</Project>

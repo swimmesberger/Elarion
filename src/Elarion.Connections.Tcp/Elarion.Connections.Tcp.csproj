@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Raw TCP connection adapter for Elarion: hosted listener and dial-out (reconnect/backoff) services for device links over proprietary protocols — the adapter owns the byte-stream framing (length-prefixed or delimited built-ins, seam for custom framers) so codecs see complete messages, identical to every other connection adapter (ADR-0053).</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Connections.Simulation" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.Connections\Elarion.Connections.csproj" />
+  </ItemGroup>
+
+</Project>

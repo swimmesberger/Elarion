@@ -12,6 +12,7 @@
     "resilience",
     "feature-flags",
     "events",
+    "connections",
     "entity-framework",
     "bulk-operations",
     "pagination",

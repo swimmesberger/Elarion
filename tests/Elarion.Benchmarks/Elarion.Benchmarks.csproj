@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj" />
+    <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj" />
     <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj" />
   </ItemGroup>
 

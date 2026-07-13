@@ -1,7 +1,8 @@
 # ADR-0044: Streaming requests and responses — deferred, with the design pre-decided
 
 - Status: Proposed (producer-side live streams since realized by [ADR-0052](0052-ordered-streams.md);
-  `IStreamHandler` remains deferred)
+  `IStreamHandler` remains deferred; the deferred bidirectional-transport question is taken up by
+  [ADR-0053](0053-bidirectional-client-connections.md))
 - Date: 2026-07-06
 - Related: [ADR-0043](0043-client-events.md) (server-push of facts; the ephemeral progress tier),
   [ADR-0035](0035-protocol-neutral-staged-upload-seam.md)/[ADR-0039](0039-binary-file-responses.md)
