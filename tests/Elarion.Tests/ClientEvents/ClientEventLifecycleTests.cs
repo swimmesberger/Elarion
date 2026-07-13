@@ -65,6 +65,46 @@ public sealed partial class ClientEventLifecycleTests {
         }
     }
 
+    /// <summary>Lets a test hold the observer's inactive callback open to race it against a resubscribe.</summary>
+    private sealed class InactiveGate {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class GatedObserver(Recorder recorder, InactiveGate gate) : IClientEventSubscriptionObserver {
+        public ValueTask OnSubscribedAsync(
+            ClientEventSubscription subscription, IClientEventSubscriberSink sink, CancellationToken ct) {
+            recorder.Greetings.Enqueue(subscription);
+            recorder.Pulse();
+            return default;
+        }
+
+        public async ValueTask OnInterestChangedAsync(
+            ClientEventSubscription subscription, bool active, CancellationToken ct) {
+            if (!active) {
+                gate.Entered.TrySetResult();
+                await gate.Release.Task;
+            }
+            recorder.InterestChanges.Enqueue((subscription, active));
+            recorder.Pulse();
+        }
+    }
+
+    private static ServiceProvider BuildGatedProvider(FakeTimeProvider timeProvider) {
+        var services = new ServiceCollection();
+        services.AddSingleton(new Recorder());
+        services.AddSingleton(new InactiveGate());
+        services.AddSingleton<TimeProvider>(timeProvider);
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(LifecycleTestContext.Default));
+        services.AddElarionClientEvents(events => events
+            .AddTopic<QuoteChanged>("market.quoteChanged", t => t
+                .AllowAnyResource()
+                .ObserveSubscriptions<GatedObserver>()
+                .WithInterestLinger(TimeSpan.FromSeconds(5))));
+        return services.BuildServiceProvider();
+    }
+
     private static ServiceProvider BuildProvider(FakeTimeProvider? timeProvider = null) {
         var services = new ServiceCollection();
         services.AddSingleton(new Recorder());
@@ -183,6 +223,33 @@ public sealed partial class ClientEventLifecycleTests {
         time.Advance(TimeSpan.FromSeconds(30));
         recorder.InterestChanges.Should().ContainSingle("no inactive fired, and active fired only once")
             .Which.Active.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task LingerElapseRacingResubscribe_ObserverEndsActive_InTransitionOrder() {
+        var ct = TestContext.Current.CancellationToken;
+        var time = new FakeTimeProvider();
+        await using var provider = BuildGatedProvider(time);
+        var source = provider.GetRequiredService<IClientEventSubscriptionSource>();
+        var recorder = provider.GetRequiredService<Recorder>();
+        var gate = provider.GetRequiredService<InactiveGate>();
+
+        var handle = source.Subscribe([Sub("ELN")]);
+        await WaitUntilAsync(recorder, () => recorder.Greetings.Count == 1, ct);
+        handle.Dispose();
+
+        // The linger elapses and the inactive callback starts — hold it open at the gate.
+        time.Advance(TimeSpan.FromSeconds(5.1));
+        await gate.Entered.Task.WaitAsync(ct);
+
+        // A resubscribe races the still-running inactive: its active/greeting must queue BEHIND it, so the
+        // observer's last observed transition matches the actual interest instead of a torn-down producer.
+        using var reconnected = source.Subscribe([Sub("ELN")]);
+
+        gate.Release.TrySetResult();
+        await WaitUntilAsync(recorder, () => recorder.Greetings.Count == 2, ct);
+
+        recorder.InterestChanges.Select(change => change.Active).Should().Equal(true, false, true);
     }
 
     [Fact]
