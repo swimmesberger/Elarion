@@ -8,8 +8,11 @@ namespace Elarion.Settings.PostgreSql;
 /// The hosted <c>LISTEN</c> loop behind <see cref="PostgreSqlSettingsChangeSource"/>: holds a dedicated
 /// connection subscribed to the notification channel and fires the matching watch tokens for each received
 /// payload. On a connection failure it reconnects with exponential backoff and, because PostgreSQL does not
-/// queue notifications for absent listeners, fires <b>all</b> watches after a successful reconnect so watchers
-/// re-read and converge on the current state.
+/// queue notifications for absent listeners, fires <b>all</b> watches after each successful <c>LISTEN</c>
+/// establishment — the first included, since watches can be registered before the first connect succeeds —
+/// so watchers re-read and converge on the current state. While listening, the wait is bounded by
+/// <see cref="PostgreSqlSettingsChangeOptions.ConnectionProbeInterval"/> and idle windows probe the
+/// connection, so a half-open connection surfaces as an error instead of a permanent silent hang.
 /// </summary>
 internal sealed class PostgreSqlSettingsChangeListener(
     PostgreSqlSettingsChangeSource changeSource,
@@ -22,7 +25,6 @@ internal sealed class PostgreSqlSettingsChangeListener(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         var delay = options.InitialReconnectDelay;
-        var hadEstablishedConnection = false;
 
         while (!stoppingToken.IsCancellationRequested) {
             try {
@@ -38,16 +40,25 @@ internal sealed class PostgreSqlSettingsChangeListener(
                         "Listening for settings changes on PostgreSQL channel '{Channel}'.", options.ChannelName);
                     delay = options.InitialReconnectDelay;
 
-                    if (hadEstablishedConnection) {
-                        // Notifications sent while we were disconnected are lost; make watchers re-read.
-                        changeSource.FireAll();
-                    }
+                    // Every establishment — the first included — may follow a window in which watches existed
+                    // but no listen connection did (the first connect attempt can back off). Notifications
+                    // sent in that window are lost, so make watchers re-read; a spurious reload is cheap and
+                    // always safe.
+                    changeSource.FireAll();
 
-                    hadEstablishedConnection = true;
                     _listening.TrySetResult();
 
                     while (true) {
-                        await connection.WaitAsync(stoppingToken).ConfigureAwait(false);
+                        if (await connection.WaitAsync(options.ConnectionProbeInterval, stoppingToken).ConfigureAwait(false)) {
+                            continue;
+                        }
+
+                        // Nothing arrived within the probe window. A half-open connection (NAT idle timeout,
+                        // failover without a FIN/RST) completes neither the wait nor an error, so run a cheap
+                        // round-trip: a dead connection throws here and falls into the reconnect path.
+                        await using var probe = connection.CreateCommand();
+                        probe.CommandText = "SELECT 1";
+                        await probe.ExecuteScalarAsync(stoppingToken).ConfigureAwait(false);
                     }
                 }
                 finally {

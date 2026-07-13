@@ -39,6 +39,13 @@ public sealed class PostgreSqlSettingsChangeSource : ISettingsChangeSource, ISet
     internal NpgsqlDataSource DataSource { get; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Each distinct <c>(scope, keyPrefix)</c> pair allocates one token holder that is <b>retained for the
+    /// lifetime of this source</b> — holders are shared across re-watches of the same pair but never removed,
+    /// because a one-shot change token carries no unsubscribe signal. Watch a bounded vocabulary of scopes
+    /// and prefixes (global/module/feature-level keys); watching per user — or per any other unbounded key
+    /// population — grows the holder table without bound for the life of the process.
+    /// </remarks>
     public IChangeToken Watch(SettingsScope scope, string? keyPrefix = null) {
         var holder = _holders.GetOrAdd(new WatchKey(scope, keyPrefix ?? string.Empty), static _ => new TokenHolder());
         return holder.GetToken();
@@ -74,8 +81,9 @@ public sealed class PostgreSqlSettingsChangeSource : ISettingsChangeSource, ISet
     }
 
     /// <summary>
-    /// Fires every registered watch. Called by the listener after it re-establishes a dropped connection:
-    /// notifications sent while disconnected are gone (PostgreSQL does not queue for absent listeners), so a
+    /// Fires every registered watch. Called by the listener after each successful <c>LISTEN</c> establishment
+    /// (the first included, since watches can be registered before the first connect succeeds): notifications
+    /// sent while no connection was listening are gone (PostgreSQL does not queue for absent listeners), so a
     /// blanket re-read is the only way watchers converge on the current state. A spurious reload is cheap and
     /// always safe — watchers re-read through the store.
     /// </summary>
