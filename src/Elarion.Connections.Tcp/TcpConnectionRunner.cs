@@ -19,20 +19,52 @@ internal static class TcpConnectionRunner {
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken ct) {
-        using var owned = client;
+        Stream stream;
+        TcpConnectionPeer peer;
+        try {
+            stream = client.GetStream();
+            peer = new TcpConnectionPeer(client.Client.RemoteEndPoint, client.Client.LocalEndPoint);
+        }
+        catch (Exception) {
+            // The socket died between accept/connect and here — nothing was registered.
+            client.Dispose();
+            return;
+        }
+
+        await RunAsync(
+            stream, peer, client, noDelay => client.Client.NoDelay = noDelay,
+            options, handler, registry, timeProvider, logger, ct);
+    }
+
+    /// <summary>
+    /// The transport-agnostic core: any duplex <see cref="Stream"/> works — a socket's network stream, or
+    /// an in-memory pair (the socket-free simulation path). <paramref name="transport"/> is disposed on
+    /// every exit; <paramref name="applyNoDelay"/> is <see langword="null"/> when the transport has no
+    /// socket-level knobs.
+    /// </summary>
+    public static async Task RunAsync(
+        Stream stream,
+        TcpConnectionPeer peer,
+        IDisposable transport,
+        Action<bool>? applyNoDelay,
+        ElarionTcpConnectionOptions options,
+        TcpConnectionHandler handler,
+        IClientConnectionRegistry registry,
+        TimeProvider timeProvider,
+        ILogger logger,
+        CancellationToken ct) {
+        using var owned = transport;
         ClientConnection? identity = null;
         try {
-            var stream = client.GetStream();
             // Per-connection configuration (the binding-config lookup point): resolved before any byte is
             // exchanged so the chosen framer governs the handshake too; nulls inherit the endpoint options.
-            var peer = new TcpConnectionPeer(client.Client.RemoteEndPoint, client.Client.LocalEndPoint);
             var overrides = await handler.ConfigureConnectionAsync(peer, ct);
             var framer = overrides?.Framer ?? options.Framer!;
             var maxMessageBytes = overrides?.MaxMessageBytes ?? options.MaxMessageBytes;
             var idleTimeout = overrides?.IdleTimeout ?? options.IdleTimeout;
             var handshakeTimeout = overrides?.HandshakeTimeout ?? options.HandshakeTimeout;
-            var transport = overrides?.Transport ?? options.Transport;
-            client.Client.NoDelay = overrides?.NoDelay ?? options.NoDelay;
+            var transportTag = overrides?.Transport ?? options.Transport;
+            applyNoDelay?.Invoke(overrides?.NoDelay ?? options.NoDelay);
             var readBufferBytes = overrides?.InitialReadBufferBytes ?? options.InitialReadBufferBytes;
             var sendBufferBytes = overrides?.InitialSendBufferBytes ?? options.InitialSendBufferBytes;
             var reader = new TcpMessageReader(stream, framer, maxMessageBytes, readBufferBytes);
@@ -51,13 +83,13 @@ internal static class TcpConnectionRunner {
 
             identity = new ClientConnection {
                 ConnectionId = Guid.CreateVersion7().ToString("N"),
-                Transport = transport,
+                Transport = transportTag,
                 Principal = ticket.Principal,
                 PrincipalId = ticket.PrincipalId,
                 Metadata = ticket.Metadata,
                 ConnectedAt = timeProvider.GetUtcNow(),
             };
-            var connection = new TcpClientConnection(identity, client, stream, framer, sendBufferBytes);
+            var connection = new TcpClientConnection(identity, stream, framer, sendBufferBytes, closeTransport: transport.Dispose);
             connection.AttachProtocol(handler.CreateProtocol(connection));
 
             await registry.RegisterAsync(connection, ct);

@@ -12,6 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Connections.Simulation" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
     <ProjectReference Include="..\Elarion.Connections\Elarion.Connections.csproj" />
   </ItemGroup>

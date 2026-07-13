@@ -13,17 +13,17 @@ namespace Elarion.Connections.Simulation;
 /// handshakes — the client every gateway simulator otherwise hand-rolls.
 /// </summary>
 public sealed class TcpSimulatorClient : IAsyncDisposable {
-    private readonly TcpClient _client;
-    private readonly NetworkStream _stream;
+    private readonly IDisposable _transport;
+    private readonly Stream _stream;
     private readonly TcpMessageFramer _framer;
     private readonly ArrayBufferWriter<byte> _sendBuffer = new(4 * 1024);
     private byte[] _receiveBuffer = new byte[8 * 1024];
     private int _start;
     private int _end;
 
-    private TcpSimulatorClient(TcpClient client, TcpMessageFramer framer) {
-        _client = client;
-        _stream = client.GetStream();
+    private TcpSimulatorClient(Stream stream, IDisposable transport, TcpMessageFramer framer) {
+        _stream = stream;
+        _transport = transport;
         _framer = framer;
     }
 
@@ -38,7 +38,7 @@ public sealed class TcpSimulatorClient : IAsyncDisposable {
         var client = new TcpClient { NoDelay = true };
         try {
             await client.Client.ConnectAsync(endPoint, ct);
-            return new TcpSimulatorClient(client, framer);
+            return new TcpSimulatorClient(client.GetStream(), client, framer);
         }
         catch {
             client.Dispose();
@@ -53,7 +53,17 @@ public sealed class TcpSimulatorClient : IAsyncDisposable {
     public static TcpSimulatorClient FromConnected(TcpClient client, TcpMessageFramer framer) {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(framer);
-        return new TcpSimulatorClient(client, framer);
+        return new TcpSimulatorClient(client.GetStream(), client, framer);
+    }
+
+    /// <summary>Wraps any duplex stream — the socket-free path: pair it with an in-memory link (see
+    /// <see cref="InMemoryTcpLink"/>) so simulators and unit tests never occupy an OS socket.</summary>
+    /// <param name="stream">The duplex stream to speak over; the simulator client owns and disposes it.</param>
+    /// <param name="framer">The endpoint's framing.</param>
+    public static TcpSimulatorClient FromStream(Stream stream, TcpMessageFramer framer) {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(framer);
+        return new TcpSimulatorClient(stream, stream, framer);
     }
 
     /// <summary>Sends one framed message.</summary>
@@ -107,7 +117,7 @@ public sealed class TcpSimulatorClient : IAsyncDisposable {
 
     /// <summary>Closes the client side of the connection.</summary>
     public ValueTask DisposeAsync() {
-        _client.Dispose();
+        _transport.Dispose();
         return ValueTask.CompletedTask;
     }
 }

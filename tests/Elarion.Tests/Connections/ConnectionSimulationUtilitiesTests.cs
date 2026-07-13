@@ -82,6 +82,30 @@ public sealed class ConnectionSimulationUtilitiesTests {
         }
     }
 
+    [Fact]
+    public async Task InMemoryTcpLink_RunsTheFullLifecycleWithoutSockets() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
+        var registry = provider.GetRequiredService<IClientConnectionRegistry>();
+
+        await using (var link = InMemoryTcpLink.Start(new EchoHandler(), registry,
+                         o => o.Framer = new DelimitedTcpFramer(end: (byte)'\n'))) {
+            (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
+            await link.Client.SendTextAsync("device:mem-1", ct);
+            (await link.Client.ReceiveTextAsync(ct)).Should().Be("welcome");
+
+            var connected = await link.ServerConnection.WaitAsync(ct);
+            connected.Connection.Transport.Should().Be("in-memory");
+            registry.GetForPrincipal("mem-1").Should().ContainSingle();
+
+            await link.Client.SendTextAsync("ping", ct);
+            (await link.Client.ReceiveTextAsync(ct)).Should().Be("echo:ping");
+        }
+
+        // Disposing the link closes the client end; the server observed EOF, unregistered, and completed.
+        registry.Connections.Should().BeEmpty();
+    }
+
     private sealed class EchoHandler : TcpConnectionHandler {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {

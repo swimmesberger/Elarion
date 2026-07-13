@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Net.Sockets;
 using System.Text;
 using Elarion.Abstractions.Connections;
 
@@ -12,7 +11,7 @@ namespace Elarion.Connections.Tcp;
 /// framer; the neutral sink members delegate to the connection's codec, identical to every other adapter.
 /// </summary>
 public sealed class TcpClientConnection : IClientConnectionSink {
-    private readonly TcpClient _client;
+    private readonly Action _closeTransport;
     private readonly Stream _stream;
     private readonly TcpMessageFramer _framer;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -23,13 +22,13 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     private IClientConnectionProtocol? _protocol;
 
     internal TcpClientConnection(
-        ClientConnection connection, TcpClient client, Stream stream, TcpMessageFramer framer,
-        int initialSendBufferBytes) {
+        ClientConnection connection, Stream stream, TcpMessageFramer framer,
+        int initialSendBufferBytes, Action closeTransport) {
         Connection = connection;
-        _client = client;
         _stream = stream;
         _framer = framer;
         _sendBuffer = new ArrayBufferWriter<byte>(initialSendBufferBytes);
+        _closeTransport = closeTransport;
     }
 
     /// <inheritdoc />
@@ -71,7 +70,7 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     /// Safe to call on an already-closed link.</summary>
     public ValueTask CloseAsync() {
         try {
-            _client.Close();
+            _closeTransport();
         }
         catch (Exception) {
             // Closing a dying socket is best-effort; teardown happens via the receive loop regardless.

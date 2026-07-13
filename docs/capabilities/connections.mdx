@@ -264,8 +264,16 @@ messages, answer `InvokeAsync` via `InvokeResponder`, and `Close()` it to assert
 completions (with `Reset()` for reconnect scenarios). `TcpSimulatorClient` is the framed client for simulated devices/peers:
 connect it to a listener (or wrap the accepted side of a fake device an Elarion dialer reached) and
 speak whole messages through the endpoint's own framer, with text helpers for challenge/response
-handshakes. Codec-level tests stay on real adapters — loopback TCP or Kestrel + `ClientWebSocket` — the
-double covers the kernel tier.
+handshakes.
+
+The default for codec/handler-level work is **fully in-memory** — no OS sockets, ports, or firewall
+prompts: `InMemoryTcpLink.Start(handler, registry, o => o.Framer = …)` runs the complete connection
+lifecycle (per-connection settings, handshake, framing, registry, codec, idle hook) over an in-memory
+duplex pair, hands you the simulator-side `Client`, a deterministic `ServerConnection` await (the
+registered sink — no polling, no handshake races), and a `ServerCompletion` for teardown assertions.
+Reserve real sockets (loopback TCP, Kestrel + `ClientWebSocket`) for integration tests of the adapters
+themselves. `InMemoryDuplexStream.CreatePair()` is public for anything else that wants a socket pair
+without the socket.
 
 ## Putting it together — the device-gateway loop
 
