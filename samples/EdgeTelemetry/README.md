@@ -48,6 +48,16 @@ claim that a specialized workload is a *recipe over the one PostgreSQL*, never a
 
 ## Run it
 
+Single click — the Aspire launcher provisions TimescaleDB (a container runtime must be running;
+Docker or Podman) and starts the API with the connection string injected:
+
+```bash
+dotnet run --project samples/EdgeTelemetry/EdgeTelemetry.AppHost
+# API on http://localhost:5217, Aspire dashboard URL printed to the console
+```
+
+Or by hand, which is also the NativeAOT path (Aspire runs projects JIT via `dotnet run`):
+
 ```bash
 # the recipe image (ADR-0056): TimescaleDB ships in the server image everywhere
 podman run -d --name edge-ts -p 5432:5432 -e POSTGRES_PASSWORD=postgres timescale/timescaledb:latest-pg17
@@ -104,6 +114,10 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   Docker-gated skip): startup migrates (extension + hypertable included), ingest flows through the
   handler pipeline into the generated mapper, a retransmit writes zero rows, and the rollup reads
   back through the projection mapper.
+- **`EdgeTelemetry.AppHost`** — the one-click dev loop: Aspire provisions the TimescaleDB container
+  (the same Postgres resource with a different image — the ADR-0056 posture in one line) and injects
+  the connection string. The API deliberately stays the lean AOT host, so the dashboard shows its
+  console logs, not traces.
 
 ## Why this shape
 

@@ -5,7 +5,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsAspireHost>true</IsAspireHost>
-    <Description>Billing sample — .NET Aspire orchestration: provisions PostgreSQL and runs the API.</Description>
+    <Description>EdgeTelemetry sample — .NET Aspire orchestration: provisions TimescaleDB and runs the API.</Description>
     <!-- The repo default (Directory.Build.props) disables reflection-based JSON for framework/AOT
          hygiene, but Aspire.Hosting's orchestrator (DCP dependency check) deserializes with
          reflection — the AppHost is dev orchestration tooling, so turn it back on here. -->
@@ -14,12 +14,11 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost" />
-    <PackageReference Include="Aspire.Hosting.JavaScript" />
     <PackageReference Include="Aspire.Hosting.PostgreSQL" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Billing.Api\Billing.Api.csproj" />
+    <ProjectReference Include="..\EdgeTelemetry.Api\EdgeTelemetry.Api.csproj" />
   </ItemGroup>
 
 </Project>
