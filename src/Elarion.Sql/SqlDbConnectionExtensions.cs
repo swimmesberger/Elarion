@@ -230,4 +230,129 @@ public static class SqlDbConnectionExtensions {
             return await connection.ExecuteScalarAsync<TResult>(sql, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    // ---- Single-row (throws on more than one) -----------------------------------------------------
+
+    /// <summary>
+    /// Runs the query and maps the single row, or returns <see langword="default"/> when empty; throws
+    /// <see cref="InvalidOperationException"/> if the query returns more than one row (a stricter
+    /// get-by-key than <c>QueryFirstOrDefaultAsync</c>, which silently takes the first of many).
+    /// </summary>
+    public static Task<T?> QuerySingleOrDefaultAsync<T>(
+        this DbConnection connection, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default)
+        where T : ISqlRecord<T> =>
+        connection.QuerySingleOrDefaultAsync<T>(new SqlStatement(sql), cancellationToken);
+
+    /// <inheritdoc cref="QuerySingleOrDefaultAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
+    public static async Task<T?> QuerySingleOrDefaultAsync<T>(
+        this DbConnection connection, SqlStatement sql, CancellationToken cancellationToken = default)
+        where T : ISqlRecord<T> {
+        var mapper = T.SqlMapper;
+        var wasClosed = connection.State == ConnectionState.Closed;
+        if (wasClosed) {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try {
+            var command = sql.CreateCommand(connection);
+            await using (command.ConfigureAwait(false)) {
+                var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken)
+                    .ConfigureAwait(false);
+                await using (reader.ConfigureAwait(false)) {
+                    if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
+                        return default;
+                    }
+
+                    var result = mapper.Read(reader);
+                    if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
+                        throw new InvalidOperationException(
+                            "The query returned more than one row but a single row was expected.");
+                    }
+
+                    return result;
+                }
+            }
+        }
+        finally {
+            if (wasClosed) {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <inheritdoc cref="QuerySingleOrDefaultAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
+    public static Task<T?> QuerySingleOrDefaultAsync<T>(
+        this DbDataSource dataSource, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default)
+        where T : ISqlRecord<T> =>
+        dataSource.QuerySingleOrDefaultAsync<T>(new SqlStatement(sql), cancellationToken);
+
+    /// <inheritdoc cref="QuerySingleOrDefaultAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
+    public static async Task<T?> QuerySingleOrDefaultAsync<T>(
+        this DbDataSource dataSource, SqlStatement sql, CancellationToken cancellationToken = default)
+        where T : ISqlRecord<T> {
+        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using (connection.ConfigureAwait(false)) {
+            return await connection.QuerySingleOrDefaultAsync<T>(sql, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // ---- Streaming (unbuffered) — O(1) per query, O(0) per row ------------------------------------
+
+    /// <summary>
+    /// Streams the query's rows without buffering them into a list — for large exports. The connection
+    /// is held open for the whole enumeration; enumerate fully (or break) promptly.
+    /// </summary>
+    public static IAsyncEnumerable<T> QueryUnbufferedAsync<T>(
+        this DbConnection connection, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default)
+        where T : ISqlRecord<T> =>
+        connection.QueryUnbufferedAsync<T>(new SqlStatement(sql), cancellationToken);
+
+    /// <inheritdoc cref="QueryUnbufferedAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
+    public static async IAsyncEnumerable<T> QueryUnbufferedAsync<T>(
+        this DbConnection connection, SqlStatement sql,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        where T : ISqlRecord<T> {
+        var mapper = T.SqlMapper;
+        var wasClosed = connection.State == ConnectionState.Closed;
+        if (wasClosed) {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try {
+            var command = sql.CreateCommand(connection);
+            await using (command.ConfigureAwait(false)) {
+                var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken)
+                    .ConfigureAwait(false);
+                await using (reader.ConfigureAwait(false)) {
+                    await foreach (var row in mapper.ReadAllStreamAsync(reader, cancellationToken).ConfigureAwait(false)) {
+                        yield return row;
+                    }
+                }
+            }
+        }
+        finally {
+            if (wasClosed) {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <inheritdoc cref="QueryUnbufferedAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
+    public static IAsyncEnumerable<T> QueryUnbufferedAsync<T>(
+        this DbDataSource dataSource, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default)
+        where T : ISqlRecord<T> =>
+        dataSource.QueryUnbufferedAsync<T>(new SqlStatement(sql), cancellationToken);
+
+    /// <inheritdoc cref="QueryUnbufferedAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
+    public static async IAsyncEnumerable<T> QueryUnbufferedAsync<T>(
+        this DbDataSource dataSource, SqlStatement sql,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        where T : ISqlRecord<T> {
+        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using (connection.ConfigureAwait(false)) {
+            await foreach (var row in connection.QueryUnbufferedAsync<T>(sql, cancellationToken).ConfigureAwait(false)) {
+                yield return row;
+            }
+        }
+    }
 }

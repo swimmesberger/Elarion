@@ -17,4 +17,11 @@ namespace Elarion.Sql;
 public interface ISqlRecord<TSelf> where TSelf : ISqlRecord<TSelf> {
     /// <summary>The row's generated mapper (a cached singleton).</summary>
     static abstract ISqlRowMapper<TSelf> SqlMapper { get; }
+
+    /// <summary>
+    /// The full-row <c>INSERT</c> command text, parameters matching
+    /// <see cref="ISqlRowMapper{T}.BindParameters"/> — backs the insert helpers. For a projection row
+    /// with no physical table this points at a non-existent table and inserting fails loud.
+    /// </summary>
+    static abstract string InsertCommandText { get; }
 }

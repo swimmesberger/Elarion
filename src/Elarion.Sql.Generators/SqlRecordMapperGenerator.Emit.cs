@@ -173,6 +173,16 @@ public sealed partial class SqlRecordMapperGenerator {
                 }
 
                 /// <inheritdoc />
+                public async global::System.Collections.Generic.IAsyncEnumerable<{{type}}> ReadAllStreamAsync(
+                    global::System.Data.Common.DbDataReader reader,
+                    [global::System.Runtime.CompilerServices.EnumeratorCancellation] global::System.Threading.CancellationToken cancellationToken = default) {
+                    var ordinals = new Ordinals(reader);
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
+                        yield return Read(reader, in ordinals);
+                    }
+                }
+
+                /// <inheritdoc />
                 public void BindParameters(global::System.Data.Common.DbCommand command, {{type}} row) {
             """);
         EmitBindBody(builder, model, provider);
@@ -205,6 +215,9 @@ public sealed partial class SqlRecordMapperGenerator {
             partial {{model.TypeKeyword}} {{model.TypeName}} : global::Elarion.Sql.ISqlRecord<{{model.TypeName}}> {
                 /// <summary>The row's generated mapper (a cached singleton).</summary>
                 public static global::Elarion.Sql.ISqlRowMapper<{{model.TypeName}}> SqlMapper => {{mapperRef}}.Instance;
+
+                /// <summary>The full-row INSERT command text (backs the insert helpers).</summary>
+                public static string InsertCommandText => {{mapperRef}}.Insert;
 
                 /// <summary>The table name as a trusted SQL fragment, for composing hand-written SQL.</summary>
                 public static global::Elarion.Sql.SqlStatement Table { get; } =

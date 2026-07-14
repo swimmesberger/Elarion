@@ -203,6 +203,47 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
     }
 
     [Fact]
+    public async Task WriteTier_InsertInsertManyAndQueryHelpers() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+
+        await using var connection = fixture.CreateConnection();
+        await connection.OpenAsync(Ct);
+        await connection.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
+
+        // Single-row insert via the generated full-row INSERT — no command/parameter ceremony.
+        var first = new SqlPositionalRow(Guid.CreateVersion7(), "a", 1);
+        var inserted = await connection.InsertAsync(first, cancellationToken: Ct);
+        inserted.Should().Be(1);
+
+        // Batch insert owns the transaction + reused command; the suffix composes ON CONFLICT.
+        var batch = new[] {
+            first, // duplicate PK — ON CONFLICT DO NOTHING skips it
+            new SqlPositionalRow(Guid.CreateVersion7(), "b", 2),
+            new SqlPositionalRow(Guid.CreateVersion7(), "c", 3),
+        };
+        var written = await connection.InsertManyAsync(batch, " ON CONFLICT DO NOTHING", cancellationToken: Ct);
+        written.Should().Be(2, "the duplicate primary key inserts nothing");
+
+        // Single-row query helper — one match.
+        var single = await connection.QuerySingleOrDefaultAsync<SqlPositionalRow>(
+            $"{SqlPositionalRow.Select} WHERE id = {first.Id}", Ct);
+        single.Should().Be(first);
+
+        // Single-row helper throws when the query returns more than one row.
+        var act = () => connection.QuerySingleOrDefaultAsync<SqlPositionalRow>($"{SqlPositionalRow.Select}", Ct);
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*more than one row*");
+
+        // Streaming — unbuffered enumeration of all rows.
+        var streamed = new List<SqlPositionalRow>();
+        await foreach (var r in connection.QueryUnbufferedAsync<SqlPositionalRow>(
+            $"{SqlPositionalRow.Select} ORDER BY count", Ct)) {
+            streamed.Add(r);
+        }
+
+        streamed.Select(r => r.Count).Should().Equal(1, 2, 3);
+    }
+
+    [Fact]
     public void GeneratedRegistration_ResolvesMappers() {
         var services = new ServiceCollection();
         services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SqlTestJsonContext.Default));

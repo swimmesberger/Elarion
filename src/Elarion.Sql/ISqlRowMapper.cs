@@ -26,6 +26,12 @@ public interface ISqlRowMapper<T> {
     Task<List<T>> ReadAllAsync(DbDataReader reader, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Streams remaining rows without buffering; ordinals are resolved once. Backs the unbuffered query
+    /// path for large result sets — O(1) per query, O(0) per row.
+    /// </summary>
+    IAsyncEnumerable<T> ReadAllStreamAsync(DbDataReader reader, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Adds one typed <see cref="DbParameter"/> per mapped column of <paramref name="row"/> to
     /// <paramref name="command"/>, named exactly like the column (so hand-written SQL binds as
     /// <c>@column_name</c>). <see langword="null"/> values bind as <see cref="DBNull"/>.
