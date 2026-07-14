@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Text;
 
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>The outcome of scanning the configured assemblies: parsed scripts plus every problem found.</summary>
 internal sealed record MigrationScriptSet {

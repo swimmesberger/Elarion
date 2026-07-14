@@ -1,18 +1,25 @@
 ---
 title: SQL migrations
-description: Startup-applied SQL migrations for EF-free (NativeAOT) hosts — embedded scripts, normalized checksums, no repair command, PostgreSQL only.
+description: Startup-applied SQL migrations for EF-free (NativeAOT) hosts — embedded scripts, normalized checksums, no repair command, PostgreSQL and SQLite providers.
 ---
 
 Elarion's persistence story is EF-model-first, and an EF application keeps **EF Core migrations** — that
-default is not in question. The gap is the **EF-free host**: an app published NativeAOT on raw Npgsql
+default is not in question. The gap is the **EF-free host**: an app published NativeAOT on a raw driver
 still needs schema management, EF's NativeAOT support is experimental, and nothing maintained fills the
-hole (Evolve is dormant, Flyway is a JVM tool). `Elarion.Migrations.PostgreSql` is that tier's runner
-([ADR-0057](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0057-postgresql-sql-migration-runner.md)):
-minimal, PostgreSQL-only, AOT-compatible (`Npgsql` + `Microsoft.Extensions.*` abstractions only), and
-designed explicitly against Flyway's documented production failure modes. The same tier's **access
-half** — generated row mappers over hand-written SQL — is [SQL mapping](/docs/capabilities/sql-mapping)
-(ADR-0058); neither package requires the other. Both run together in the
-[`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
+hole (Evolve is dormant, Flyway is a JVM tool). `Elarion.Migrations` is that tier's runner
+([ADR-0057](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0057-postgresql-sql-migration-runner.md),
+[ADR-0060](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0060-database-neutral-migration-core.md)):
+minimal, AOT-compatible, and designed explicitly against Flyway's documented production failure modes.
+The engine is **database-neutral**; a provider package supplies the SQL and locking:
+
+| Provider package | Use it for | Driver |
+| --- | --- | --- |
+| `Elarion.Migrations.PostgreSql` | Multi-node PostgreSQL AOT hosts (session advisory lock serializes 1–10 nodes) | `Npgsql` |
+| `Elarion.Migrations.Sqlite` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
+
+The same tier's **access half** — generated row mappers over hand-written SQL — is
+[SQL mapping](/docs/capabilities/sql-mapping) (ADR-0058); neither package requires the other. Both run
+together in the [`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
 NativeAOT host.
 
 Pick the row that matches your app:
@@ -20,7 +27,8 @@ Pick the row that matches your app:
 | Your app | Schema tool |
 | --- | --- |
 | Uses EF Core | EF migrations (`UseElarion*` model hooks ride your `DbContext`) — see [Entity Framework Core](/docs/capabilities/entity-framework) |
-| EF-free / NativeAOT, 1–10 nodes, no deploy pipeline | **This runner**, applied at startup |
+| EF-free / NativeAOT, multi-node on PostgreSQL, no deploy pipeline | **This runner** (`Elarion.Migrations.PostgreSql`), applied at startup |
+| EF-free / NativeAOT, single-node / edge on a local file | **This runner** (`Elarion.Migrations.Sqlite`), applied at startup |
 | Either, with real deploy infrastructure | Bundles / `migrations script --idempotent` / Flyway in CI — replace the tool, don't grow the default |
 
 It deliberately does **not** ship Elarion framework-table scripts: the EF-based packages remain
@@ -28,7 +36,8 @@ EF-delivered, and this package never competes with that default.
 
 ## Quick start
 
-Embed your scripts and register the runner:
+Embed your scripts and register the runner for your database. The API is identical across providers
+apart from the registration method:
 
 ```xml
 <ItemGroup>
@@ -37,8 +46,14 @@ Embed your scripts and register the runner:
 ```
 
 ```csharp
+// PostgreSQL
 builder.Services.AddElarionPostgreSqlMigrations(
     builder.Configuration.GetConnectionString("Default")!,
+    o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
+
+// SQLite (single-node / edge)
+builder.Services.AddElarionSqliteMigrations(
+    builder.Configuration.GetConnectionString("Default")!,   // e.g. "Data Source=app.db"
     o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
 ```
 
@@ -46,7 +61,10 @@ That registers `IMigrationRunner` plus a hosted service that applies pending mig
 host reports ready** and fails startup on error — serving traffic against a half-migrated schema is
 worse than not starting. Register it before other hosted services that expect the schema (hosted
 services start in registration order); set `ApplyOnStartup = false` to invoke the runner yourself.
-An `NpgsqlDataSource` overload exists for hosts that already manage one.
+The PostgreSQL registration also has an `NpgsqlDataSource` overload for hosts that already manage one.
+
+Scripts are plain SQL in your database's own dialect — the runner never rewrites them, so write
+PostgreSQL for the PostgreSQL provider and SQLite for the SQLite provider.
 
 ## Script conventions
 
@@ -73,29 +91,36 @@ add a new script.
 
 ## Execution model
 
-One runner, one dedicated connection, guarded by a **session-level** `pg_advisory_lock`: concurrent
-startups (the 1–10-node tier) serialize on the lock, waiters re-read history and no-op, and a crashed
-runner releases the lock with its connection — there is no lock row to clean up.
+One runner, one dedicated connection, guarded by an **exclusive migration lock** so concurrent startups
+serialize, waiters re-read history and no-op. The lock's scope is the provider's:
+
+- **PostgreSQL** takes a **session-level** `pg_advisory_lock` — it serializes the 1–10-node tier across
+  processes, and a crashed runner releases it with its connection (no lock row to clean up).
+- **SQLite** takes a per-file **in-process** lock — SQLite is single-node by design (one file per node,
+  never shared across nodes), so *this process* is the correct scope; `LockTimeout` bounds the wait and
+  `busy_timeout` backstops the unsupported cross-process case.
 
 Each versioned script runs in its own transaction, and **its history row
 (`elarion_schema_history`) commits in that same transaction**. A failed transactional migration
 therefore leaves *no* history row: fix the script and rerun. There is no repair command because there
 is nothing to repair — and no undo either (a dropped column's data cannot be un-dropped; roll forward).
+This invariant is identical on both providers (SQLite has full transactional DDL).
 
 ### Non-transactional scripts
 
-Statements PostgreSQL forbids inside a transaction (`CREATE INDEX CONCURRENTLY`, …) opt out via a
-directive on the leading comment block:
+DDL a database forbids inside a transaction opts out via a directive on the leading comment block:
 
 ```sql
 -- elarion: no-transaction
 CREATE INDEX CONCURRENTLY orders_customer_idx ON orders (customer_id);
 ```
 
-The runner executes such a script statement by statement (each as its own implicit transaction —
-batching them would reintroduce the transaction the directive opts out of). Only here can a failure
-leave a mid-applied state: the runner records an explicit **failed** history row and subsequent runs
-fail closed, naming the script and the recovery API:
+On **PostgreSQL** this is for statements like `CREATE INDEX CONCURRENTLY`; the runner executes the script
+statement by statement (each as its own implicit transaction — batching them would reintroduce the
+transaction the directive opts out of). On **SQLite** it is rarely needed — SQLite has full transactional
+DDL and no `CREATE INDEX CONCURRENTLY` — and such a script runs in autocommit mode (each statement commits
+on its own). Only a non-transactional script can leave a mid-applied state on failure: the runner records
+an explicit **failed** history row and subsequent runs fail closed, naming the script and the recovery API:
 
 ```csharp
 await runner.ResolveFailedAsync("20260713093000", ResolveAction.Retry);       // rerun the fixed script
@@ -128,20 +153,25 @@ deploy gates; everything ships in the box, no feature tiers.
 
 ## Options
 
+The neutral options apply to every provider:
+
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `AddScripts(assembly, prefix?)` | — (required) | Assemblies + optional resource-name prefix to scan |
 | `HistoryTableName` | `elarion_schema_history` | The runner-created history table |
 | `OutOfOrder` | `Warn` | `Warn` (apply + log) or `Deny` (fail the run) |
 | `ApplyOnStartup` | `true` | Register the migrate-before-ready hosted service |
-| `CommandTimeout` | none | Per-command timeout (a transactional script is one command; `no-transaction` scripts run one command per statement); long DDL is normal, so unlimited by default |
-| `LockTimeout` | none | How long to wait for the advisory lock (unlimited: serialize behind a long migration) |
-| `AdvisoryLockKey` | fixed constant | Distinct keys let two apps sharing a database migrate concurrently |
+| `CommandTimeout` | none | Per-command timeout; long DDL is normal, so unlimited by default. **PostgreSQL only** — SQLite has no server-side statement timeout, so it is ignored there |
+| `LockTimeout` | none | How long to wait for the migration lock (unlimited: serialize behind a long migration) |
+
+The PostgreSQL provider adds `AdvisoryLockKey` (a fixed constant by default) — distinct keys let two apps
+sharing one database migrate independent schemas concurrently. SQLite adds no options.
 
 ## What it deliberately is not
 
-No undo, no repair, no placeholders/variable substitution, no dialects beyond PostgreSQL, no feature
-tiers. If you need those, replace the tool (Flyway or Evolve in CI) rather than growing this default —
-the same doctrine as every Elarion seam
+No undo, no repair, no placeholders/variable substitution, no dialect *setting*, no feature tiers. A new
+database engine is a new **provider package** implementing the `IMigrationDatabase` seam — never a
+`Dialect` flag on one runner. If you need any of the rejected features, replace the tool (Flyway or Evolve
+in CI) rather than growing this default — the same doctrine as every Elarion seam
 ([ADR-0025](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0025-distributed-scheduler-coordination.md)).
 App-side *data access* under AOT is a separate concern, owned by ADR-0058.

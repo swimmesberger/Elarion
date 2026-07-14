@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>
 /// A migration version: dot- or underscore-separated numeric segments (<c>1</c>, <c>1.2</c>,

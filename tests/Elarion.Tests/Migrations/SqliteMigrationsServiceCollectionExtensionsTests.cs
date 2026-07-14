@@ -1,0 +1,50 @@
+using AwesomeAssertions;
+using Elarion.Migrations;
+using Elarion.Migrations.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Xunit;
+
+namespace Elarion.Tests.Migrations;
+
+public sealed class SqliteMigrationsServiceCollectionExtensionsTests {
+    [Fact]
+    public void RegistersRunnerAndStartupHostedService() {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddElarionSqliteMigrations(
+            "Data Source=app.db",
+            o => o.AddScripts(typeof(SqliteMigrationRunnerIntegrationTests).Assembly, SqliteMigrationRunnerIntegrationTests.ScriptPrefix + "Basic."));
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IMigrationRunner>().Should().BeOfType<SqliteMigrationRunner>();
+        provider.GetServices<IHostedService>().Should().ContainSingle();
+    }
+
+    [Fact]
+    public void ApplyOnStartupFalse_SkipsTheHostedService() {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddElarionSqliteMigrations(
+            "Data Source=app.db",
+            o => {
+                o.ApplyOnStartup = false;
+                o.AddScripts(typeof(SqliteMigrationRunnerIntegrationTests).Assembly, SqliteMigrationRunnerIntegrationTests.ScriptPrefix + "Basic.");
+            });
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IMigrationRunner>().Should().NotBeNull();
+        provider.GetServices<IHostedService>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void WithoutScriptSources_FailsAtRegistration() {
+        var services = new ServiceCollection();
+
+        var act = () => services.AddElarionSqliteMigrations("Data Source=app.db", _ => { });
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*AddScripts*");
+    }
+}

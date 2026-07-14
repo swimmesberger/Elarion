@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>What a run would do, given the discovered scripts and the current history.</summary>
 internal sealed record MigrationPlan {
