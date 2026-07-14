@@ -26,7 +26,9 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
 
     public async ValueTask InitializeAsync() {
         try {
-            var container = new PostgreSqlBuilder("postgres:17-alpine").Build();
+            // The recipe image (ADR-0056): TimescaleDB rides the server image everywhere — dev,
+            // Testcontainers, production — and the migration enables it like any other DDL.
+            var container = new PostgreSqlBuilder("timescale/timescaledb:latest-pg17").Build();
             await container.StartAsync();
             _container = container;
 
@@ -69,6 +71,12 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
         ingest.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ingest.Content.ReadFromJsonAsync(TelemetryJsonContext.Default.IngestResult, Ct);
         result!.Written.Should().Be(4);
+
+        // A retransmitted batch is idempotent by constraint: every row hits the hypertable's
+        // composite key and ON CONFLICT DO NOTHING inserts nothing.
+        var retransmit = await client.PostAsJsonAsync("/readings", batch, TelemetryJsonContext.Default.ReadingInputArray, Ct);
+        var retransmitResult = await retransmit.Content.ReadFromJsonAsync(TelemetryJsonContext.Default.IngestResult, Ct);
+        retransmitResult!.Written.Should().Be(0);
 
         // Latest per device+metric: the mapper materializes the row, jsonb meta included.
         var latest = await client.GetFromJsonAsync(

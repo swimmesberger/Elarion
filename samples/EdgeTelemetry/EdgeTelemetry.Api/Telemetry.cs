@@ -8,14 +8,14 @@ using Elarion.Sql;
 namespace EdgeTelemetry.Api;
 
 /// <summary>
-/// The stored reading. <c>[SqlRecord]</c> generates <c>ReadingRowSqlMapper</c> at compile time:
-/// ordinal-cached typed reads, typed parameter binding, and the <c>TableName</c>/<c>Columns</c>
-/// constants the endpoints compose their SQL from. No reflection — if it builds, it maps.
+/// The stored reading — a row of the TimescaleDB hypertable. <c>[SqlRecord]</c> generates
+/// <c>ReadingRowSqlMapper</c> at compile time: ordinal-cached typed reads, typed parameter binding,
+/// and the <c>TableName</c>/<c>Columns</c> constants the endpoints compose their SQL from. The
+/// composite natural key (device, metric, instant) is TimescaleDB's partition-column rule and the
+/// ingest idempotency constraint in one — no surrogate id.
 /// </summary>
 [SqlRecord("readings")]
 public sealed record ReadingRow {
-    public required Guid Id { get; init; }
-
     public required string DeviceId { get; init; }
 
     public required string Metric { get; init; }

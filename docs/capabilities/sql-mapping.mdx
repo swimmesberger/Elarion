@@ -16,8 +16,8 @@ half). It is chosen **by tier, not preference**:
 | Uses EF Core | EF Core — see [Entity Framework Core](/docs/capabilities/entity-framework) |
 | EF-free / NativeAOT | **`Elarion.Sql`** — generated mappers over hand-written SQL |
 
-A runnable end-to-end host — NativeAOT publish, embedded migrations, generated mappers, ~110 ms
-cold start — is
+A runnable end-to-end host — NativeAOT publish, embedded migrations (TimescaleDB hypertable
+included), generated mappers, ~120–160 ms start to first response — is
 [`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry).
 
 The core property: **if it builds, it maps**. A `[SqlRecord]` type gets an explicit generated mapper;

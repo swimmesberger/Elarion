@@ -48,6 +48,8 @@ app.MapGet("/healthz", () => Results.Text("ok"));
 
 // Ingest: one transaction per batch, one generated BindParameters call per row. Npgsql auto-prepares
 // the repeated INSERT, so a steady ingest loop runs on a prepared statement without any setup code.
+// ON CONFLICT DO NOTHING makes retransmits idempotent by constraint — device gateways resend batches
+// they are not sure were received, and a replayed row hits the hypertable's composite key.
 app.MapPost("/readings", async (
     ReadingInput[] readings,
     NpgsqlDataSource db,
@@ -64,10 +66,10 @@ app.MapPost("/readings", async (
     command.Transaction = transaction;
     command.CommandText =
         $"INSERT INTO {ReadingRowSqlMapper.TableName} ({ReadingRowSqlMapper.Columns.All}) "
-        + $"VALUES ({ReadingRowSqlMapper.Columns.AllParameters})";
+        + $"VALUES ({ReadingRowSqlMapper.Columns.AllParameters}) ON CONFLICT DO NOTHING";
+    var written = 0;
     foreach (var input in readings) {
         var row = new ReadingRow {
-            Id = Guid.CreateVersion7(),
             DeviceId = input.DeviceId,
             Metric = input.Metric,
             // PostgreSQL timestamptz stores an instant; normalize whatever offset the device sent.
@@ -77,11 +79,11 @@ app.MapPost("/readings", async (
         };
         command.Parameters.Clear();
         mapper.BindParameters(command, row);
-        await command.ExecuteNonQueryAsync(ct);
+        written += await command.ExecuteNonQueryAsync(ct);
     }
 
     await transaction.CommitAsync(ct);
-    return Results.Ok(new IngestResult(readings.Length));
+    return Results.Ok(new IngestResult(written));
 });
 
 // Latest sample for a device+metric — interpolated values bind as parameters, the :raw holes splice
@@ -126,8 +128,9 @@ app.MapGet("/devices/{deviceId}/history", async (
     return Results.Ok(readings);
 });
 
-// Hourly aggregate — the "full power of SQL" leg: date_trunc + aggregates stay SQL, and the
-// MetricBucket mapper binds the projection by column name (a [SqlRecord] needs no physical table).
+// Hourly aggregate — the "full power of SQL" leg: TimescaleDB's time_bucket + plain aggregates stay
+// SQL, and the MetricBucket mapper binds the projection by column name (a [SqlRecord] needs no
+// physical table). Extension functions need no framework support — SQL stays hand-written.
 app.MapGet("/devices/{deviceId}/stats", async (
     string deviceId,
     string metric,
@@ -141,7 +144,7 @@ app.MapGet("/devices/{deviceId}/stats", async (
     var buckets = await connection.QueryAsync(
         mapper,
         $"""
-         SELECT date_trunc('hour', recorded_at) AS bucket,
+         SELECT time_bucket(INTERVAL '1 hour', recorded_at) AS bucket,
                 count(*)   AS samples,
                 avg(value) AS avg_value,
                 min(value) AS min_value,
