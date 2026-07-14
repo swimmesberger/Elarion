@@ -96,8 +96,8 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   bootstrapper contributes to the canonical options (ADR-0023) — one JSON config for HTTP bodies,
   ProblemDetails, and the jsonb column.
 - **`Program.cs`** — the slim builder plus `AddElarion(configuration)` (the generated bootstrapper:
-  module-gated handler registrations + JSON contexts), `AddElarionHttpJson()`, `AddProblemDetails()`
-  (ASP.NET's ProblemDetails JSON context under reflection-off), `AddElarionSqlMappers()`, and
+  module-gated handler registrations + JSON contexts), `AddElarionHttpJson()` (canonical JSON onto
+  minimal-API binding, ProblemDetails included), `AddElarionSqlMappers()`, and
   `AddElarionPostgreSqlMigrations(dataSource, …)` for schema-before-traffic. Each endpoint is one
   line: bind → typed handler call → `ElarionHttpResults.ToResult` (200 / 400 / 404 ProblemDetails).
 - **`EdgeTelemetry.Tests`** — the whole slice end-to-end against real TimescaleDB (Testcontainers,

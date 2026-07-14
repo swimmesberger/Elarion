@@ -39,12 +39,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddElarion(builder.Configuration);
 
 // Mirror canonical JSON onto minimal-API binding — one JSON configuration for HTTP contracts, the
-// Result<T> error envelope, and the [SqlJson] column, reflection-free.
+// Result<T> error envelope (it registers ProblemDetails for the RFC 7807 legs), and the [SqlJson]
+// column, reflection-free.
 builder.Services.AddElarionHttpJson();
-
-// Result<T> failures render as RFC 7807 ProblemDetails; with reflection off, AddProblemDetails is
-// what contributes ASP.NET's own source-generated ProblemDetails JSON context.
-builder.Services.AddProblemDetails();
 
 // The generated per-assembly mapper registration (ISqlRowMapper<T> singletons; the ReadingRow mapper
 // takes the canonical JSON accessor for its jsonb column).
