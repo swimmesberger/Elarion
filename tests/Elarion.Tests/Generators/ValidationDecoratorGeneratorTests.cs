@@ -57,13 +57,13 @@ public sealed class ValidationDecoratorGeneratorTests {
         generated.Should().Contain("global::Elarion.Pipeline.ValidationDecorator<");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Validation.IRequestValidator>()");
         // Emission is innermost-first, so an outer decorator is constructed later (higher index). The contract:
-        // tracing → authorization → feature gate → validation → handler.
+        // observability → authorization → feature gate → validation → handler.
         generated.IndexOf("ValidationDecorator", StringComparison.Ordinal)
             .Should().BeLessThan(generated.IndexOf("FeatureGateDecorator", StringComparison.Ordinal));
         generated.IndexOf("FeatureGateDecorator", StringComparison.Ordinal)
             .Should().BeLessThan(generated.IndexOf("AuthorizationDecorator", StringComparison.Ordinal));
         generated.IndexOf("AuthorizationDecorator", StringComparison.Ordinal)
-            .Should().BeLessThan(generated.IndexOf("TracingDecorator", StringComparison.Ordinal));
+            .Should().BeLessThan(generated.IndexOf("ObservabilityDecorator", StringComparison.Ordinal));
 
         AssertCompiles(source, generated);
     }

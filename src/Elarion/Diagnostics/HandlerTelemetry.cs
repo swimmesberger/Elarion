@@ -8,8 +8,8 @@ namespace Elarion.Diagnostics;
 /// </summary>
 /// <remarks>
 /// The handler registration generator wraps every generated handler in a
-/// <see cref="TracingDecorator{TRequest,TResponse}"/>, but signals are collected only when a host
-/// registers <see cref="ActivitySourceName"/> and <see cref="MeterName"/> with the OpenTelemetry
+/// <see cref="Pipeline.ObservabilityDecorator{TRequest,TResponse}"/>, but signals are collected only
+/// when a host registers <see cref="ActivitySourceName"/> and <see cref="MeterName"/> with the OpenTelemetry
 /// providers. Runtime packages do not depend on the OpenTelemetry SDK.
 /// </remarks>
 public static class HandlerTelemetry {

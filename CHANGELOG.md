@@ -8,6 +8,17 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **The two always-on handler decorators are merged into one `ObservabilityDecorator`** (ADR-0059). Every
+  generated handler was wrapped by an always-on, always-adjacent pair — context enrichment just inside
+  tracing; they are now a single outermost `ObservabilityDecorator` (`Elarion.Pipeline`) over a stateless
+  `HandlerObservability` core, removing one object allocation per handler resolution on the hot path
+  (`ResolveScopedAndCall` 496 B → 472 B in the pipeline benchmark) with identical spans, metrics, and log
+  scopes. The `elarion.handler.pipeline` diagnostic tag now lists one `Observability` entry where it
+  previously listed `ContextEnrichment,Tracing`. This reverses the ADR-0033 "fold enrichment into tracing"
+  rejected alternative, whose package-dependency objection ADR-0034 had since made moot. Internal decorator
+  types only — no application code changes.
+
 ### Fixed
 - **RFC 7807 error responses work with reflection off, out of the box.** `AddElarionHttpJson()` now also
   registers ASP.NET's ProblemDetails services (`AddProblemDetails()`), whose source-generated

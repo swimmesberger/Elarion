@@ -46,9 +46,9 @@ public sealed class FeatureGateGeneratorTests {
         generated.Should().Contain("global::Elarion.Pipeline.FeatureGateDecorator<");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Features.IFeatureFlagService>()");
         generated.Should().Contain("__handlerMetadata");
-        // The feature gate is a functional gate just inside tracing.
+        // The feature gate is a functional gate just inside the observability decorator.
         generated.IndexOf("FeatureGateDecorator", StringComparison.Ordinal)
-            .Should().BeLessThan(generated.IndexOf("TracingDecorator", StringComparison.Ordinal));
+            .Should().BeLessThan(generated.IndexOf("ObservabilityDecorator", StringComparison.Ordinal));
 
         AssertCompiles(source, generated);
     }

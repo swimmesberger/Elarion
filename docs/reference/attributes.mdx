@@ -442,7 +442,7 @@ See [Validation](/docs/concepts/validation).
 
 ## Authorization
 
-Handler requirements are class attributes the handler-registration generator reads to auto-attach the `AuthorizationDecorator` (the outermost functional gate, just inside tracing). Different attribute *kinds* AND together; multiple of one kind AND; OR lives inside a single `[RequireClaim]`. All are transport-neutral (identical under JSON-RPC, MCP, and HTTP) and evaluate against `ICurrentUser` — an unauthenticated caller yields `AppError.Unauthorized` (401), authenticated-but-denied yields `AppError.Forbidden` (403). The gated handler's response must be able to represent failure (`Result<T>`/`Result`) or `ELAUTH001` is reported.
+Handler requirements are class attributes the handler-registration generator reads to auto-attach the `AuthorizationDecorator` (the outermost functional gate, just inside the observability decorator's handler span). Different attribute *kinds* AND together; multiple of one kind AND; OR lives inside a single `[RequireClaim]`. All are transport-neutral (identical under JSON-RPC, MCP, and HTTP) and evaluate against `ICurrentUser` — an unauthenticated caller yields `AppError.Unauthorized` (401), authenticated-but-denied yields `AppError.Forbidden` (403). The gated handler's response must be able to represent failure (`Result<T>`/`Result`) or `ELAUTH001` is reported.
 
 ### `[RequirePermission]`
 

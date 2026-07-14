@@ -66,12 +66,12 @@ wherever one exists, and applies their spirit where none does:
 | Scheduler | `SchedulerTelemetry` (`Elarion.Scheduling`) | Schedule/enqueue/cancel operations and job executions create spans. Runtime-scheduled jobs preserve scheduling trace context into the later execution span when possible. Fixed-rate, fixed-delay, cron, skipped, misfired/coalesced, retry, cancellation, and failure outcomes are trace-visible. |
 | Handler cache | `HandlerCacheTelemetry` (`Elarion.Caching`) | Cache get/create spans expose the precise outcome — `miss-factory-executed`, `miss-non-cacheable`, or `cached-or-coalesced`. Factory execution events, payload policy errors, and invalidation spans are trace-visible. Tags avoid full keys, raw user ids, and request values. |
 | Resilience | `ResilienceTelemetry` (`Elarion.Resilience`) | Named policy execution spans expose final outcome and duration. Retry and timeout callbacks add span events under the default Microsoft/Polly-backed runtime. |
-| Handler | `HandlerTelemetry` (`Elarion.Handlers`) | Every generated handler is wrapped in a `TracingDecorator` as the outermost decorator, emitting one `Internal` span per invocation that parents any cache/resilience/pipeline child spans, plus execution count/duration metrics. The pipeline gates surface their decisions on the same handler span and meter: authorization denials tag `elarion.authorization.outcome` (`unauthorized`/`forbidden`) and count denials per handler, a closed feature gate tags `elarion.feature_gate.outcome` and counts per handler (the wire response stays an opaque 404), and idempotent handlers tag `elarion.idempotency.outcome` (`completed`/`replayed`/`conflict`/`fingerprint_mismatch`/`abandoned`) and count outcomes per request type. **Metric** tags stay bounded: handler name, request type name, and outcome — never request/response payloads or user identity. The [context-enrichment decorator](#user--request-context) just inside tracing additionally stamps caller identity (`user.id`, `user.roles`, `user.permissions`) onto the **span** and opens a matching log scope — on the span and in logs only, never on metrics. |
+| Handler | `HandlerTelemetry` (`Elarion.Handlers`) | Every generated handler is wrapped in an `ObservabilityDecorator` as the outermost decorator, emitting one `Internal` span per invocation that parents any cache/resilience/pipeline child spans, plus execution count/duration metrics. The pipeline gates surface their decisions on the same handler span and meter: authorization denials tag `elarion.authorization.outcome` (`unauthorized`/`forbidden`) and count denials per handler, a closed feature gate tags `elarion.feature_gate.outcome` and counts per handler (the wire response stays an opaque 404), and idempotent handlers tag `elarion.idempotency.outcome` (`completed`/`replayed`/`conflict`/`fingerprint_mismatch`/`abandoned`) and count outcomes per request type. **Metric** tags stay bounded: handler name, request type name, and outcome — never request/response payloads or user identity. The same decorator additionally runs [context enrichment](#user--request-context) — stamping caller identity (`user.id`, `user.roles`, `user.permissions`) onto the **span** and opening a matching log scope — on the span and in logs only, never on metrics. |
 
 ## Handler tracing
 
 Handler tracing follows the same "instrument always, collect on demand" model as the other surfaces:
-the generator wraps every handler in a `TracingDecorator` unconditionally, but the span is a no-op
+the generator wraps every handler in an `ObservabilityDecorator` unconditionally, but the span is a no-op
 until a host registers the `Elarion.Handlers` source. To suppress handler telemetry, omit
 `HandlerTelemetry.ActivitySourceName`/`MeterName` from the OpenTelemetry registration. This mirrors
 how `HttpClient` and EF Core ship always-present `ActivitySource`s and leave collection to the host —
@@ -81,7 +81,7 @@ inside it.
 
 The span carries `elarion.handler`, `elarion.handler.request_type`, `elarion.handler.outcome`
 (`ok`/`error`/`exception`), and **`elarion.handler.pipeline`** — the decorators actually wrapping this
-handler in this process, in execution order (e.g. `Tracing,Authorization,Validation,Transaction,Audit?`).
+handler in this process, in execution order (e.g. `Observability,Authorization,Validation,Transaction,Audit?`).
 A trailing `?` marks a decorator that attached through a runtime gate — a soft-attached one whose presence
 depends on a registered service (the audit trail, the idempotency inbox) or a `[DecoratorList]` decorator
 with an `AppliesTo` predicate — so it answers "why didn't caching/auditing apply here?" straight from a
@@ -94,10 +94,11 @@ trace. The same list is available programmatically as
 
 Every handler span is enriched with **who made the call**, and a matching logging scope carries that
 context onto every log line the handler produces — so a trace or a log search can be filtered by user.
-This is a first-class part of handler tracing: the generator attaches a context-enrichment decorator
-**just inside** the `TracingDecorator`, so it tags the handler span (`Activity.Current`) and its scope
-wraps the authorization, validation, and handler chain — a denied or invalid request is still attributed
-to its caller.
+This is a first-class part of handler tracing: the same `ObservabilityDecorator` that opens the span also
+runs the enrichers, so it tags the handler span (`Activity.Current`) and its log scope wraps the
+authorization, validation, and handler chain — a denied or invalid request is still attributed to its
+caller. (Tracing and context enrichment were two adjacent always-on decorators before ADR-0059 merged
+them into one.)
 
 Because it runs in the handler pipeline (not an ASP.NET middleware), it works the same across **every**
 transport — JSON-RPC, `[HttpEndpoint]`, MCP, scheduler jobs, and event consumers — reading the

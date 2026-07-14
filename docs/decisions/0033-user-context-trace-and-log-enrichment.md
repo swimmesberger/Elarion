@@ -112,7 +112,11 @@ disabled), and never a resolution failure in a bare or test host.
 - **Fold enrichment into `TracingDecorator`.** Smallest change, most literally "part of tracing", but it mutates
   the byte-identical outermost tracer and — because that decorator lives in `Elarion.Abstractions` — forces
   `Microsoft.Extensions.Logging.Abstractions` onto the most-referenced, deliberately-minimal package to carry the
-  log scope. Rejected in favor of a single-responsibility decorator in core.
+  log scope. Rejected in favor of a single-responsibility decorator in core. *(Reversed by
+  [ADR-0059](0059-merged-handler-observability-decorator.md): once [ADR-0034](0034-abstractions-holds-contracts-not-implementations.md)
+  moved every decorator — tracing included — into `Elarion` core, the package-dependency objection was moot, and
+  a measured per-request allocation on the hot path motivated merging the two always-on decorators into one
+  `ObservabilityDecorator` over a shared static core, behavior unchanged.)*
 - **An ASP.NET enrichment middleware (the blog recipe).** HTTP-only; enriches neither JSON-RPC/MCP nor the
   scheduler/event-consumer executions. Rejected: wrong altitude for a five-transport framework.
 - **Enrich at the dispatch-scope rail (a `UserContextScopeInitializer`).** The nearest generalization of the

@@ -13,7 +13,9 @@ using Xunit;
 
 namespace Elarion.Tests.Diagnostics;
 
-public sealed class HandlerContextEnrichmentDecoratorTests {
+// The context-enrichment half of the merged ObservabilityDecorator (ADR-0059). The tracing/metric half is
+// covered by ObservabilityDecoratorTests.
+public sealed class ObservabilityEnrichmentTests {
     [Fact]
     public async Task Authenticated_StampsUserIdRolesPermissions_OnHandlerSpan() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
@@ -152,16 +154,19 @@ public sealed class HandlerContextEnrichmentDecoratorTests {
         provider.GetRequiredService<UserContextEnrichmentOptions>().Enabled.Should().BeFalse();
     }
 
+    // The merged observability decorator IS the tracing span (started when a listener is attached) plus the
+    // enrichment. Its handler name "H" is the span display name the Span() helper looks for.
     private static IHandler<Request, Result<int>> Build(
         IEnumerable<IHandlerContextEnricher> enrichers, ILoggerFactory? loggerFactory = null) =>
-        new HandlerContextEnrichmentDecorator<Request, Result<int>>(new SuccessHandler(), enrichers, loggerFactory);
+        new ObservabilityDecorator<Request, Result<int>>(new SuccessHandler(), "H",
+            new global::Elarion.Abstractions.Pipeline.HandlerMetadata(typeof(Request), typeof(Request), typeof(Result<int>)),
+            enrichers, loggerFactory);
 
-    // Wrap the enrichment decorator in a real tracing span, mirroring the generated pipeline (tracing outermost),
-    // so Activity.Current during enrichment is the handler span the tags land on.
+    // Alias for the tests that assert on the handler span: the span exists only when an ActivityListener is
+    // attached (the caller sets up an ActivityCollector), so enrichment tags land on Activity.Current = that span.
     private static IHandler<Request, Result<int>> Trace(
         IEnumerable<IHandlerContextEnricher> enrichers, ILoggerFactory? loggerFactory = null) =>
-        new TracingDecorator<Request, Result<int>>(Build(enrichers, loggerFactory), "H",
-            new global::Elarion.Abstractions.Pipeline.HandlerMetadata(typeof(Request), typeof(Request), typeof(Result<int>)));
+        Build(enrichers, loggerFactory);
 
     private static UserContextEnricher UserEnricher(ICurrentUser user, UserContextEnrichmentOptions? options = null) =>
         new(user, options ?? new UserContextEnrichmentOptions());
