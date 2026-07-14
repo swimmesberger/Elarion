@@ -33,8 +33,19 @@ var connectionString = builder.Configuration.GetConnectionString("Telemetry")
 // One pooled data source for the host. The slim builder maps exactly the PostgreSQL types this app
 // uses (uuid, text, timestamptz, double precision, jsonb-as-string); `Max Auto Prepare` turns the
 // hot INSERT and SELECTs into prepared statements automatically after a few executions.
-var dataSource = new NpgsqlSlimDataSourceBuilder(connectionString).Build();
-builder.Services.AddSingleton(dataSource);
+// Command LOGGING — the EF Core `LogTo`/`Database.Command` equivalent — lives in Npgsql: wire the
+// host's logger factory and every command logs its SQL under the "Npgsql.Command" category (visible
+// in the Aspire dashboard's structured logs). Parameter VALUES stay out of logs unless
+// EnableParameterLogging is set — the EnableSensitiveDataLogging analog, so development only.
+builder.Services.AddSingleton(sp => {
+    var db = new NpgsqlSlimDataSourceBuilder(connectionString);
+    db.UseLoggerFactory(sp.GetRequiredService<ILoggerFactory>());
+    if (builder.Environment.IsDevelopment()) {
+        db.EnableParameterLogging();
+    }
+
+    return db.Build();
+});
 builder.Services.AddSingleton(TimeProvider.System);
 
 // The generated bootstrapper: registers the Telemetry module's handlers as typed
@@ -55,8 +66,10 @@ builder.Services.AddElarionSqlMappers();
 
 // Schema before traffic: the hosted service applies pending embedded migrations and fails startup on
 // error — an edge node serving against a half-migrated schema is worse than one that does not start.
+// (Connection-string overload: the runner uses its own dedicated connection anyway, and the pooled
+// data source above is registered as a lazy DI factory.)
 builder.Services.AddElarionPostgreSqlMigrations(
-    dataSource,
+    connectionString,
     options => options.AddScripts(typeof(Program).Assembly, "EdgeTelemetry.Api.Migrations."));
 
 // Observability is composition too: when an OTLP endpoint is configured (the Aspire launcher injects

@@ -162,6 +162,26 @@ Representative numbers (Apple M4 Pro, .NET 10, PostgreSQL 17 in a container; 202
 | Dapper.AOT | 719 μs (1.02×) | 51.9 ms (1.00×) | 200.0 μs (1.02×) | 217.4 KB (1.00×) / 2.60 KB |
 | EF Core (no-tracking) | 820 μs (1.17×) | 58.9 ms (1.13×) | 250.6 μs (1.27×) | 409.7 KB (1.89×) / 10.05 KB (3.78×) |
 
+## Observability
+
+`Elarion.Sql` deliberately ships **no telemetry of its own**: a mapper at hand-written parity has
+nothing worth measuring, and a per-query wrapper span would only duplicate the provider's. The story
+is the two layers around it — and every EF Core observability feature has a direct equivalent:
+
+| EF Core | This tier |
+| --- | --- |
+| Command logging (`LogTo`, `Microsoft.EntityFrameworkCore.Database.Command`) | Npgsql command logging: `NpgsqlDataSourceBuilder.UseLoggerFactory(loggerFactory)` → `Npgsql.Command` logs every command's SQL + duration at Information. |
+| `EnableSensitiveDataLogging` (parameter values) | `NpgsqlDataSourceBuilder.EnableParameterLogging()` — same rule: development only. |
+| Command tracing (provider spans) | The same provider spans, no EF in between: `ActivitySource "Npgsql"` command spans with the SQL text. |
+| `Microsoft.EntityFrameworkCore` meter | The `"Npgsql"` meter: connection pool, command, and byte counters. |
+| `DbCommandInterceptor` | No interception seam — deliberately. The SQL is hand-written, so there is nothing hidden to observe or rewrite; cross-cutting behavior belongs in the handler pipeline (decorators), and the [Elarion handler span](/docs/capabilities/telemetry) already wraps every query with its use case. |
+
+That last row is the part EF does not give you by default: because data access runs inside handlers,
+every command span nests under an `Elarion.Handlers` span — the dashboard reads
+HTTP → `handle IngestReadings` → `INSERT INTO readings …`, so a slow query is attributed to its use
+case without any extra wiring. The [`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
+host wires all of it (OTLP-gated) and its e2e test asserts the span nesting.
+
 ## Non-goals
 
 No change tracking, no LINQ or query translation, no relationship/graph mapping, no query
