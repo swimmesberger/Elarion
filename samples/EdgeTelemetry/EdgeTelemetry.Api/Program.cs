@@ -3,9 +3,13 @@ using EdgeTelemetry.Api.Modules.Telemetry;
 using EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 using Elarion.Abstractions;
 using Elarion.AspNetCore;
+using Elarion.Diagnostics;
 using Elarion.Migrations.PostgreSql;
 using Elarion.Sql;
 using Npgsql;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 // EdgeTelemetry: the Elarion EF-free NativeAOT tier end-to-end. A telemetry ingest node published as
 // a native binary — the use case is cold-start speed and footprint (edge boxes, scale-to-zero,
@@ -52,6 +56,28 @@ builder.Services.AddElarionSqlMappers();
 builder.Services.AddElarionPostgreSqlMigrations(
     dataSource,
     options => options.AddScripts(typeof(Program).Assembly, "EdgeTelemetry.Api.Migrations."));
+
+// Observability is composition too: when an OTLP endpoint is configured (the Aspire launcher injects
+// OTEL_EXPORTER_OTLP_ENDPOINT), export Elarion handler spans/metrics, Npgsql command spans/metrics,
+// ASP.NET Core server telemetry, and structured logs — a request on the dashboard reads
+// HTTP → telemetry.ingest → npgsql INSERT, ADR-0033 user-context enrichment included. Without an
+// endpoint — the bare edge binary — nothing registers, and the host stays lean.
+if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"])) {
+    builder.Logging.AddOpenTelemetry(logging => {
+        logging.IncludeFormattedMessage = true;
+        logging.IncludeScopes = true;
+    });
+    builder.Services.AddOpenTelemetry()
+        .WithTracing(tracing => tracing
+            .AddAspNetCoreInstrumentation()
+            .AddSource(HandlerTelemetry.ActivitySourceName)
+            .AddSource("Npgsql"))
+        .WithMetrics(metrics => metrics
+            .AddAspNetCoreInstrumentation()
+            .AddMeter(HandlerTelemetry.MeterName)
+            .AddMeter("Npgsql"))
+        .UseOtlpExporter();
+}
 
 var app = builder.Build();
 

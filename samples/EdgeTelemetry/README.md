@@ -42,7 +42,7 @@ claim that a specialized workload is a *recipe over the one PostgreSQL*, never a
 
 | | |
 | --- | --- |
-| Publish output | **17 MB** self-contained native executable, **zero** trim/AOT warnings |
+| Publish output | **21 MB** self-contained native executable, **zero** trim/AOT warnings (17 MB without the OpenTelemetry pipeline) |
 | Cold start, fresh database | **≈630 ms** to the first `200 /healthz` — dominated by the one-time `CREATE EXTENSION timescaledb` + `create_hypertable`; the runner, lock, and history bookkeeping are noise |
 | Warm restarts (schema current) | **≈115–160 ms** to first response, migration validation and handler registration included — the handler pipeline costs nothing measurable |
 
@@ -116,8 +116,12 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   back through the projection mapper.
 - **`EdgeTelemetry.AppHost`** — the one-click dev loop: Aspire provisions the TimescaleDB container
   (the same Postgres resource with a different image — the ADR-0056 posture in one line) and injects
-  the connection string. The API deliberately stays the lean AOT host, so the dashboard shows its
-  console logs, not traces.
+  the connection string plus the OTLP endpoint. **Observability is composition too**: when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is present, the API exports Elarion handler spans/metrics
+  (`Elarion.Handlers` — `rpc.server.call.duration` per handler), Npgsql command spans/metrics,
+  ASP.NET Core server telemetry, and structured logs — a dashboard trace reads
+  HTTP → `telemetry.ingest` → the INSERT. Without an endpoint the whole pipeline stays unregistered,
+  so the bare edge binary keeps its lean startup.
 
 ## Why this shape
 

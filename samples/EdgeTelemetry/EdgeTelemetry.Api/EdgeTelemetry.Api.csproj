@@ -21,6 +21,14 @@
     <ProjectReference Include="..\..\..\src\Elarion.Migrations.PostgreSql\Elarion.Migrations.PostgreSql.csproj" />
   </ItemGroup>
 
+  <!-- Observability for the Aspire dashboard (OTLP). The whole pipeline only activates when an OTLP
+       endpoint is configured, so the bare edge binary stays lean. -->
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+  </ItemGroup>
+
   <!-- The generators as analyzers (building from source; from NuGet they ship inside their packages):
        Elarion.Generators emits the module bootstrapper + handler registrations, Elarion.Sql.Generators
        the row mappers. -->

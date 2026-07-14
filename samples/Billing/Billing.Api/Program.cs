@@ -25,6 +25,7 @@ using Elarion.Resilience;
 using Elarion.Scheduling;
 using Elarion.Validation;
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
@@ -143,7 +144,14 @@ builder.Services.AddElarionMcp(
 // operation ids, and advertises the Idempotency-Key contract. Serve it with app.MapOpenApi() below.
 builder.Services.AddElarionOpenApi();
 
-// Telemetry: register the Elarion sources/meters; the Aspire dashboard collects them over OTLP.
+// Telemetry: register the Elarion sources/meters plus the database signals (Npgsql command spans,
+// Npgsql + EF Core meters) and export structured logs, so the Aspire dashboard shows the whole story
+// over OTLP: HTTP → handler span → EF/Npgsql span, metrics, and per-request log scopes.
+builder.Logging.AddOpenTelemetry(logging => {
+    logging.IncludeFormattedMessage = true;
+    logging.IncludeScopes = true;
+    logging.AddOtlpExporter();
+});
 builder.Services.AddOpenTelemetry()
     .WithTracing(t => t
         .AddSource(
@@ -152,6 +160,7 @@ builder.Services.AddOpenTelemetry()
             HandlerCacheTelemetry.ActivitySourceName,
             ResilienceTelemetry.ActivitySourceName,
             HandlerTelemetry.ActivitySourceName)
+        .AddSource("Npgsql")
         .AddAspNetCoreInstrumentation()
         .AddOtlpExporter())
     .WithMetrics(m => m
@@ -161,6 +170,7 @@ builder.Services.AddOpenTelemetry()
             HandlerCacheTelemetry.MeterName,
             ResilienceTelemetry.MeterName,
             HandlerTelemetry.MeterName)
+        .AddMeter("Npgsql", "Microsoft.EntityFrameworkCore")
         .AddAspNetCoreInstrumentation()
         .AddOtlpExporter());
 
