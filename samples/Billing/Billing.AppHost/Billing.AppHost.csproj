@@ -5,6 +5,11 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsAspireHost>true</IsAspireHost>
+    <!-- Persists Aspire's generated parameter values (the postgres password) across runs;
+         without it, WithDataVolume breaks on the second run — the volume keeps the first
+         password while every new run generates a fresh one, so the database health check
+         never passes and WaitFor-gated projects never start. -->
+    <UserSecretsId>ea15b727-c2b9-4d71-bcd1-937ad7a446cd</UserSecretsId>
     <Description>Billing sample — .NET Aspire orchestration: provisions PostgreSQL and runs the API.</Description>
     <!-- The repo default (Directory.Build.props) disables reflection-based JSON for framework/AOT
          hygiene, but Aspire.Hosting's orchestrator (DCP dependency check) deserializes with
