@@ -112,13 +112,13 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
 
         var items = await InsertItemsAsync(10);
-        var active = SqlStatement.Of($"WHERE active = {true}");
+        var active = new SqlStatement($"WHERE active = {true}");
 
         await using var connection = fixture.CreateConnection();
         var count = await connection.ExecuteScalarAsync<long>(
-            SqlStatement.Of($"SELECT count(*) FROM sql_items {active}"), Ct);
+            new SqlStatement($"SELECT count(*) FROM sql_items {active}"), Ct);
         var read = await connection.QueryAsync(
-            Mapper, SqlStatement.Of($"SELECT {SqlItemSqlMapper.Columns.All:raw} FROM sql_items {active} ORDER BY id"), Ct);
+            Mapper, new SqlStatement($"SELECT {SqlItemSqlMapper.Columns.All:raw} FROM sql_items {active} ORDER BY id"), Ct);
 
         count.Should().Be(items.Count(i => i.Active));
         read.Should().HaveCount((int)count);

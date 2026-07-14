@@ -14,7 +14,7 @@ public static class SqlDbConnectionExtensions {
     public static Task<List<T>> QueryAsync<T>(
         this DbConnection connection, ISqlRowMapper<T> mapper, SqlInterpolatedStringHandler sql,
         CancellationToken cancellationToken = default) =>
-        connection.QueryAsync(mapper, SqlStatement.Of(sql), cancellationToken);
+        connection.QueryAsync(mapper, new SqlStatement(sql), cancellationToken);
 
     /// <inheritdoc cref="QueryAsync{T}(DbConnection, ISqlRowMapper{T}, SqlInterpolatedStringHandler, CancellationToken)"/>
     public static async Task<List<T>> QueryAsync<T>(
@@ -46,7 +46,7 @@ public static class SqlDbConnectionExtensions {
     public static Task<T?> QueryFirstOrDefaultAsync<T>(
         this DbConnection connection, ISqlRowMapper<T> mapper, SqlInterpolatedStringHandler sql,
         CancellationToken cancellationToken = default) =>
-        connection.QueryFirstOrDefaultAsync(mapper, SqlStatement.Of(sql), cancellationToken);
+        connection.QueryFirstOrDefaultAsync(mapper, new SqlStatement(sql), cancellationToken);
 
     /// <inheritdoc cref="QueryFirstOrDefaultAsync{T}(DbConnection, ISqlRowMapper{T}, SqlInterpolatedStringHandler, CancellationToken)"/>
     public static async Task<T?> QueryFirstOrDefaultAsync<T>(
@@ -80,7 +80,7 @@ public static class SqlDbConnectionExtensions {
     /// <summary>Executes a non-query statement and returns the affected row count.</summary>
     public static Task<int> ExecuteAsync(
         this DbConnection connection, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default) =>
-        connection.ExecuteAsync(SqlStatement.Of(sql), cancellationToken);
+        connection.ExecuteAsync(new SqlStatement(sql), cancellationToken);
 
     /// <inheritdoc cref="ExecuteAsync(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
     public static async Task<int> ExecuteAsync(
@@ -109,7 +109,7 @@ public static class SqlDbConnectionExtensions {
     /// </summary>
     public static Task<TResult?> ExecuteScalarAsync<TResult>(
         this DbConnection connection, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default) =>
-        connection.ExecuteScalarAsync<TResult>(SqlStatement.Of(sql), cancellationToken);
+        connection.ExecuteScalarAsync<TResult>(new SqlStatement(sql), cancellationToken);
 
     /// <inheritdoc cref="ExecuteScalarAsync{TResult}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
     public static async Task<TResult?> ExecuteScalarAsync<TResult>(

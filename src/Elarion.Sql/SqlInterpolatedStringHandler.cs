@@ -4,11 +4,11 @@ using System.Runtime.CompilerServices;
 namespace Elarion.Sql;
 
 /// <summary>
-/// The interpolated string handler behind <see cref="SqlStatement.Of(SqlInterpolatedStringHandler)"/> and the
-/// <c>DbConnection</c> query extensions: the compiler routes literal text to
-/// <see cref="AppendLiteral"/> and every interpolated hole to an <c>AppendFormatted</c> overload, so
-/// values become <see cref="System.Data.Common.DbParameter"/>s at compile time and injection is
-/// structurally impossible — there is no string concatenation to get wrong.
+/// The interpolated string handler behind the <see cref="SqlStatement"/> constructor and the <c>DbConnection</c>
+/// query extensions: the compiler routes literal text to <see cref="AppendLiteral"/> and every
+/// interpolated hole to an <c>AppendFormatted</c> overload, so values become
+/// <see cref="System.Data.Common.DbParameter"/>s at compile time and injection is structurally
+/// impossible — there is no string concatenation to get wrong.
 /// </summary>
 [InterpolatedStringHandler]
 public struct SqlInterpolatedStringHandler {
@@ -24,18 +24,28 @@ public struct SqlInterpolatedStringHandler {
 
     public void AppendLiteral(string value) => _segments.Add(SqlSegment.OfLiteral(value));
 
-    /// <summary>Splices a composed fragment; its parameters are renumbered into this statement.</summary>
-    public void AppendFormatted(SqlStatement? fragment) {
-        if (fragment is not null) {
-            _segments.Add(SqlSegment.OfFragment(fragment));
-        }
-    }
+    /// <summary>
+    /// Splices a composed fragment; its parameters are renumbered into this statement. A pure-literal
+    /// fragment (from <see cref="SqlStatement.Verbatim"/> or a generated <c>Table</c>/<c>Select</c>) inlines as
+    /// a literal segment, so it costs no more than raw text — this is the identifier-splice fast path.
+    /// </summary>
+    public void AppendFormatted(SqlStatement? fragment) => fragment?.AddAsSegmentTo(_segments);
+
+    /// <summary>
+    /// Splices an optional-filter accumulator: renders <c>WHERE (…) AND (…)</c>, or nothing when no
+    /// predicates were added. Its predicates carry their own parameters, so the composed WHERE stays
+    /// injection-safe.
+    /// </summary>
+    public void AppendFormatted(SqlWhere? where) => where?.ToSql().AddAsSegmentTo(_segments);
 
     /// <summary>Binds a value as a parameter; collections expand to a parameter list for <c>IN</c>.</summary>
     public void AppendFormatted<T>(T value) {
         switch (value) {
             case SqlStatement fragment:
-                _segments.Add(SqlSegment.OfFragment(fragment));
+                fragment.AddAsSegmentTo(_segments);
+                break;
+            case SqlWhere where:
+                where.ToSql().AddAsSegmentTo(_segments);
                 break;
             // string and byte[] are IEnumerable but always scalar values.
             case IEnumerable items and not (string or byte[]):
@@ -60,7 +70,11 @@ public struct SqlInterpolatedStringHandler {
         _segments.Add(SqlSegment.OfLiteral(value?.ToString() ?? ""));
     }
 
+    // Captured state read by the SqlStatement constructor.
+    internal readonly List<SqlSegment> Segments => _segments;
+
     // Capacity hints: literal text plus ~4 chars per "@pN" placeholder; one value per hole.
-    internal readonly SqlStatement ToSql() =>
-        new(_segments, _literalLength + (_formattedCount * 4), _formattedCount);
+    internal readonly int TextCapacityHint => _literalLength + (_formattedCount * 4);
+
+    internal readonly int ValueCountHint => _formattedCount;
 }

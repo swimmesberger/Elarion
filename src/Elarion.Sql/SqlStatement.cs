@@ -19,16 +19,18 @@ namespace Elarion.Sql;
 /// parenthesized parameter list for <c>IN</c>; an empty collection throws at build time (no SQL
 /// spelling keeps both <c>IN</c> and <c>NOT IN</c> correct for the empty set — guard the query).</item>
 /// <item>A nested <see cref="SqlStatement"/> value splices as a fragment — a reusable <c>WHERE</c> piece is
-/// just a value; parameters are renumbered on composition.</item>
-/// <item><c>{expr:raw}</c> splices the value verbatim (for trusted identifiers such as the generated
-/// <c>TableName</c>/column constants — never for user input).</item>
+/// just a value; parameters are renumbered on composition. A pure-literal fragment (from
+/// <see cref="Verbatim"/> or a generated <c>Table</c>/<c>Select</c>) inlines with no recursion.</item>
+/// <item>Trusted identifiers (table/column names, a validated sort column) splice via
+/// <see cref="Verbatim"/> — <c>{SqlStatement.Verbatim(orderByColumn)}</c> — never a raw <see cref="string"/>.</item>
 /// </list>
+/// There is deliberately no <see cref="string"/> conversion: a plain string interpolated into a query
+/// binds as a parameter, never as SQL text, so injection is structurally impossible.
 /// </remarks>
 /// <example>
 /// <code>
-/// SqlStatement where = SqlStatement.Of($"WHERE status = {status} AND id IN {ids}");
-/// SqlStatement query = SqlStatement.Of($"SELECT {OrderSqlMapper.Columns.All:raw} FROM {OrderSqlMapper.TableName:raw} {where}");
-/// var orders = await connection.QueryAsync(OrderSqlMapper.Instance, query, ct);
+/// SqlStatement where = new($"WHERE status = {status} AND id IN {ids}");
+/// var orders = await connection.QueryAsync&lt;Order&gt;($"{Order.Select} {where}", ct);
 /// </code>
 /// </example>
 public sealed class SqlStatement {
@@ -38,26 +40,41 @@ public sealed class SqlStatement {
     private List<object?>? _parameterValues;
     private string? _text;
 
+    /// <summary>Builds a statement from an interpolated string; interpolated values become parameters.</summary>
+    /// <remarks>
+    /// There is deliberately no <c>SqlStatement(string)</c> constructor: a plain string would bypass
+    /// parameterization. Trusted verbatim text goes through <see cref="Verbatim"/>.
+    /// </remarks>
+    public SqlStatement(SqlInterpolatedStringHandler sql)
+        : this(sql.Segments, sql.TextCapacityHint, sql.ValueCountHint) {
+    }
+
     internal SqlStatement(List<SqlSegment> segments, int textCapacityHint, int valueCountHint) {
         _segments = segments;
         _textCapacityHint = textCapacityHint;
         _valueCountHint = valueCountHint;
     }
 
-    /// <summary>Builds a statement from an interpolated string; values become parameters.</summary>
-    /// <remarks>
-    /// There is deliberately no <c>Of(string)</c> overload: a constant-only interpolated string is a
-    /// C# constant expression, and overload resolution would prefer the <see cref="string"/> conversion
-    /// — silently splicing a <c>{CONST}</c> hole as text instead of binding a parameter. With only the
-    /// handler overload, every <c>$"…"</c> parameterizes; plain text goes through <see cref="Raw"/>.
-    /// </remarks>
-    public static SqlStatement Of(SqlInterpolatedStringHandler sql) => sql.ToSql();
-
     /// <summary>
-    /// Wraps trusted text verbatim — plain parameterless SQL, or a dynamic identifier spliced into an
-    /// interpolation (<c>{SqlStatement.Raw(orderByColumn)}</c>). Never pass user input.
+    /// Wraps trusted text verbatim — parameterless SQL, or a dynamic identifier spliced into an
+    /// interpolation (<c>{SqlStatement.Verbatim(orderByColumn)}</c>). Never pass user input: verbatim text is
+    /// spliced into the command exactly, so it is an injection vector if it carries untrusted data.
     /// </summary>
-    public static SqlStatement Raw(string sql) => new([SqlSegment.OfLiteral(sql)], sql.Length, 0);
+    public static SqlStatement Verbatim(string trustedSql) => new([SqlSegment.OfLiteral(trustedSql)], trustedSql.Length, 0);
+
+    /// <summary>The empty statement — renders to <c>""</c> with no parameters. Composes as a no-op.</summary>
+    public static readonly SqlStatement Empty = new([], 0, 0);
+
+    /// <summary>Concatenates two statements; the right side's parameters are renumbered after the left's.</summary>
+    public static SqlStatement operator +(SqlStatement left, SqlStatement right) {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+        var segments = new List<SqlSegment>(2);
+        left.AddAsSegmentTo(segments);
+        right.AddAsSegmentTo(segments);
+        return new SqlStatement(segments, left._textCapacityHint + right._textCapacityHint,
+            left._valueCountHint + right._valueCountHint);
+    }
 
     /// <summary>The SQL text with <c>@p0, @p1, …</c> parameter placeholders.</summary>
     public string Text {
@@ -97,6 +114,33 @@ public sealed class SqlStatement {
 
     public override string ToString() => Text;
 
+    // A pure-literal statement (Verbatim, a generated Table/Select, or an interpolation with no holes) —
+    // when spliced as a fragment it inlines as a literal segment, so it costs no more than raw text.
+    internal bool TryGetLiteral(out string literal) {
+        if (_segments.Count == 1 && _segments[0].Kind == SqlSegmentKind.Literal) {
+            literal = _segments[0].Literal!;
+            return true;
+        }
+
+        if (_segments.Count == 0) {
+            literal = "";
+            return true;
+        }
+
+        literal = "";
+        return false;
+    }
+
+    // Appends this statement to a segment list, inlining a pure literal to avoid a fragment walk.
+    internal void AddAsSegmentTo(List<SqlSegment> segments) {
+        if (TryGetLiteral(out var literal)) {
+            segments.Add(SqlSegment.OfLiteral(literal));
+        }
+        else {
+            segments.Add(SqlSegment.OfFragment(this));
+        }
+    }
+
     private static readonly List<object?> NoValues = [];
 
     private void Materialize() {
@@ -104,10 +148,10 @@ public sealed class SqlStatement {
             return;
         }
 
-        // Fast path: a single literal (Raw, or an interpolation with no holes) IS its text.
-        if (_segments.Count == 1 && _segments[0].Kind == SqlSegmentKind.Literal) {
+        // Fast path: a pure literal (Verbatim, or an interpolation with no holes) IS its text.
+        if (TryGetLiteral(out var literal)) {
             _parameterValues = NoValues;
-            Volatile.Write(ref _text, _segments[0].Literal!);
+            Volatile.Write(ref _text, literal);
             return;
         }
 
