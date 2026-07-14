@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using AwesomeAssertions;
-using EdgeTelemetry.Api;
+using EdgeTelemetry.Api.Modules.Telemetry;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Testcontainers.PostgreSql;

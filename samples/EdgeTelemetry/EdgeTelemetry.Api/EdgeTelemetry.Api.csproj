@@ -6,19 +6,27 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
-  <!-- Deliberately the OTHER tier from samples/Billing and samples/LiveQuotes: no EF Core, no module
-       bootstrapper — a single process built for cold-start speed (edge nodes, scale-to-zero, CLI-style
-       lifetimes). The two AOT-tier packages carry the whole data story:
+  <!-- Deliberately the OTHER data tier from samples/Billing and samples/LiveQuotes: no EF Core —
+       a single process built for cold-start speed (edge nodes, scale-to-zero, CLI-style lifetimes).
+       The programming model stays the same as every Elarion app ([Handler] classes registered by the
+       generated module bootstrapper); the two AOT-tier packages carry the whole data story:
          Elarion.Migrations.PostgreSql — embedded V__ scripts applied before the host reports ready;
          Elarion.Sql                   — [SqlRecord] generated mappers + injection-safe interpolation.
        Everything else is the stock slim builder. -->
   <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.Sql\Elarion.Sql.csproj" />
     <ProjectReference Include="..\..\..\src\Elarion.Migrations.PostgreSql\Elarion.Migrations.PostgreSql.csproj" />
   </ItemGroup>
 
-  <!-- The mapper generator as an analyzer (building from source; from NuGet it ships inside Elarion.Sql). -->
+  <!-- The generators as analyzers (building from source; from NuGet they ship inside their packages):
+       Elarion.Generators emits the module bootstrapper + handler registrations, Elarion.Sql.Generators
+       the row mappers. -->
   <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\..\src\Elarion.Sql.Generators\Elarion.Sql.Generators.csproj"
                      OutputItemType="Analyzer"
                      ReferenceOutputAssembly="false" />

@@ -1,16 +1,12 @@
 using System.Text.Json.Serialization;
 using Elarion.Sql;
 
-// PostgreSQL provider trigger: [SqlJson] parameters bind as jsonb (a plain string parameter would
-// fail PostgreSQL's type check for the meta column).
-[assembly: UseElarionSql(Provider = SqlProvider.Npgsql)]
-
-namespace EdgeTelemetry.Api;
+namespace EdgeTelemetry.Api.Modules.Telemetry;
 
 /// <summary>
 /// The stored reading — a row of the TimescaleDB hypertable. <c>[SqlRecord]</c> generates
 /// <c>ReadingRowSqlMapper</c> at compile time: ordinal-cached typed reads, typed parameter binding,
-/// and the <c>TableName</c>/<c>Columns</c> constants the endpoints compose their SQL from. The
+/// and the <c>TableName</c>/<c>Columns</c> constants the handlers compose their SQL from. The
 /// composite natural key (device, metric, instant) is TimescaleDB's partition-column rule and the
 /// ingest idempotency constraint in one — no surrogate id.
 /// </summary>
@@ -54,7 +50,7 @@ public sealed record MetricBucket {
     public required double MaxValue { get; init; }
 }
 
-/// <summary>One ingested sample; the server assigns the id and defaults the timestamp.</summary>
+/// <summary>One ingested sample; the server defaults the timestamp.</summary>
 public sealed record ReadingInput {
     public required string DeviceId { get; init; }
 
@@ -70,9 +66,10 @@ public sealed record ReadingInput {
 public sealed record IngestResult(int Written);
 
 /// <summary>
-/// The one source-generated JSON context for the whole host: minimal-API binding reads it from
-/// <c>Http.Json</c>, and the <c>[SqlJson]</c> column reads it through Elarion's canonical accessor —
-/// reflection stays off everywhere (<c>JsonSerializerIsReflectionEnabledByDefault=false</c>).
+/// The module's source-generated JSON context — the bootstrapper collects it into the canonical
+/// options (ADR-0023), so minimal-API binding, the <c>Result&lt;T&gt;</c> error envelope, and the
+/// <c>[SqlJson]</c> column all read one configuration. Reflection stays off everywhere
+/// (<c>JsonSerializerIsReflectionEnabledByDefault=false</c>).
 /// </summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ReadingInput[]))]

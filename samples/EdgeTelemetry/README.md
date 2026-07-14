@@ -3,23 +3,34 @@
 A telemetry ingest node published as a **native binary**: devices POST readings, operators query
 latest values, recent history, and hourly aggregates from a **TimescaleDB hypertable**. The use case
 is **cold-start speed and footprint** — edge boxes, scale-to-zero deployments, sidecars, CLI-style
-lifetimes — so the sample is built on the tier Elarion ships for exactly that, composed with the
-extension posture from ADR-0056:
+lifetimes — and the business logic lives in **`[Handler]` classes like every Elarion app**: dropping
+EF for this tier does not mean dropping the programming model.
 
 ```
-Elarion.Migrations.PostgreSql  (ADR-0057)   the schema half: embedded V__ scripts, applied
-        │                                   before the host reports ready, fail-closed
+POST /readings … GET /devices/{id}/stats     hand-authored minimal-API endpoints (RDG-compiled),
+        │                                    one line each: bind → handler → Result<T> to HTTP
+        ▼
+[Handler] classes ([AppModule] Telemetry)    registered by the GENERATED module bootstrapper
+        │                                    (AddElarion) — no decorator attributes, so plain
+        │                                    typed IHandler<TRequest, Result<TResponse>> services
+        ▼
+Elarion.Sql                    (ADR-0058)    the access half: [SqlRecord] → generated
+        │                                    ISqlRowMapper<T> + injection-safe interpolation
         ▼
 TimescaleDB (ADR-0056: the extension rides the server image;
              enabling it is an ordinary migration — CREATE EXTENSION,
              create_hypertable, add_retention_policy, one transaction)
         ▲
-Elarion.Sql                    (ADR-0058)   the access half: [SqlRecord] → generated
-                                            ISqlRowMapper<T> + injection-safe interpolation
+Elarion.Migrations.PostgreSql  (ADR-0057)    the schema half: embedded V__ scripts, applied
+                                             before the host reports ready, fail-closed
 ```
 
-No EF, no reflection, no runtime code generation. Every row mapper, JSON contract, and route handler
-is compiled ahead of time; `JsonSerializerIsReflectionEnabledByDefault=false` holds for the whole
+No EF, no reflection, no runtime code generation. Handler registrations come from the generated
+bootstrapper, row mappers and JSON contracts are source-generated, and the endpoints are hand-authored
+in the host compilation so **ASP.NET Core's Request Delegate Generator** compiles the binding ahead of
+time too — that placement is deliberate (the ADR-0031 REST pattern): a Roslyn source generator cannot
+see another generator's output, so endpoints emitted by a generator would silently fall back to the
+runtime delegate factory. `JsonSerializerIsReflectionEnabledByDefault=false` holds for the whole
 process. If a row type doesn't map, the **build** fails (`ELSQL001`–`ELSQL007`) — there is no
 reflection fallback to limp along on, which is the property that makes NativeAOT safe here at all.
 
@@ -32,8 +43,8 @@ claim that a specialized workload is a *recipe over the one PostgreSQL*, never a
 | | |
 | --- | --- |
 | Publish output | **17 MB** self-contained native executable, **zero** trim/AOT warnings |
-| Cold start, fresh database | **≈650 ms** to the first `200 /healthz` — dominated by the one-time `CREATE EXTENSION timescaledb` + `create_hypertable`; the runner, lock, and history bookkeeping are noise |
-| Warm restarts (schema current) | **≈120–160 ms** to first response, migration validation included |
+| Cold start, fresh database | **≈630 ms** to the first `200 /healthz` — dominated by the one-time `CREATE EXTENSION timescaledb` + `create_hypertable`; the runner, lock, and history bookkeeping are noise |
+| Warm restarts (schema current) | **≈115–160 ms** to first response, migration validation and handler registration included — the handler pipeline costs nothing measurable |
 
 ## Run it
 
@@ -70,23 +81,29 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   partition column — and the same key makes ingest idempotent), `create_hypertable`, and an
   in-database `add_retention_policy` (zero application code; use an Elarion scheduled job instead
   when the window must live in app configuration).
-- **`Telemetry.cs`** — the whole data contract. `ReadingRow` is a `[SqlRecord]`: the generated
-  `ReadingRowSqlMapper` carries ordinal-cached typed reads, typed `BindParameters`, and the
-  `TableName`/`Columns` constants the endpoints compose SQL from. `MetricBucket` shows that a
-  `[SqlRecord]` needs no physical table — it binds the `time_bucket` projection. The `[SqlJson]`
-  meta column rides the same source-generated `JsonSerializerContext` as the HTTP contracts, through
-  Elarion's canonical JSON accessor (ADR-0023).
-- **`Program.cs`** — the slim builder plus exactly two Elarion registrations:
-  `ConfigureElarionJson` + `AddElarionSqlMappers()` (generated for this assembly), and
-  `AddElarionPostgreSqlMigrations(dataSource, …)` for schema-before-traffic. Ingest is one
-  transaction per batch with `ON CONFLICT DO NOTHING` — retransmitted device batches insert nothing.
-  The stats endpoint is the "full power of SQL" leg: `time_bucket` + aggregates stay SQL;
-  interpolated holes (`{deviceId}`, `{since}`) bind as parameters; `{…:raw}` splices only the
-  generated constants.
+- **`Modules/Telemetry/Handlers`** — the business logic, in the same `[Handler]` shape as every
+  Elarion app. `IngestReadings` runs one transaction per batch with `ON CONFLICT DO NOTHING`
+  (retransmitted device batches insert nothing); `GetMetricStats` is the "full power of SQL" leg —
+  `time_bucket` + aggregates stay SQL, interpolated holes bind as parameters, `{…:raw}` splices only
+  the generated constants. Failures are `Result` values (`AppError.NotFound`, `AppError.Validation`),
+  not exceptions. No decorator attributes → the pipeline registers plain typed handlers; add
+  `[Idempotent]` or `[RequirePermission]` later and only then does a decorator wrap them.
+- **`Modules/Telemetry/TelemetryContracts.cs`** — the whole data contract. `ReadingRow` is a
+  `[SqlRecord]`: the generated `ReadingRowSqlMapper` carries ordinal-cached typed reads, typed
+  `BindParameters`, and the `TableName`/`Columns` constants the handlers compose SQL from.
+  `MetricBucket` shows that a `[SqlRecord]` needs no physical table — it binds the `time_bucket`
+  projection. The `[SqlJson]` meta column rides the module's `JsonSerializerContext`, which the
+  bootstrapper contributes to the canonical options (ADR-0023) — one JSON config for HTTP bodies,
+  ProblemDetails, and the jsonb column.
+- **`Program.cs`** — the slim builder plus `AddElarion(configuration)` (the generated bootstrapper:
+  module-gated handler registrations + JSON contexts), `AddElarionHttpJson()`, `AddProblemDetails()`
+  (ASP.NET's ProblemDetails JSON context under reflection-off), `AddElarionSqlMappers()`, and
+  `AddElarionPostgreSqlMigrations(dataSource, …)` for schema-before-traffic. Each endpoint is one
+  line: bind → typed handler call → `ElarionHttpResults.ToResult` (200 / 400 / 404 ProblemDetails).
 - **`EdgeTelemetry.Tests`** — the whole slice end-to-end against real TimescaleDB (Testcontainers,
-  Docker-gated skip): startup migrates (extension + hypertable included), ingest binds through the
-  generated mapper, a retransmit writes zero rows, and the rollup reads back through the projection
-  mapper.
+  Docker-gated skip): startup migrates (extension + hypertable included), ingest flows through the
+  handler pipeline into the generated mapper, a retransmit writes zero rows, and the rollup reads
+  back through the projection mapper.
 
 ## Why this shape
 
