@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>EdgeTelemetry sample — the Elarion EF-free NativeAOT tier end-to-end: a telemetry ingest node published as a native binary (fast cold start, small footprint), with ADR-0057 SQL migrations as the schema half and ADR-0058 generated row mappers as the access half. No EF, no reflection, no runtime code generation.</Description>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- Deliberately the OTHER tier from samples/Billing and samples/LiveQuotes: no EF Core, no module
+       bootstrapper — a single process built for cold-start speed (edge nodes, scale-to-zero, CLI-style
+       lifetimes). The two AOT-tier packages carry the whole data story:
+         Elarion.Migrations.PostgreSql — embedded V__ scripts applied before the host reports ready;
+         Elarion.Sql                   — [SqlRecord] generated mappers + injection-safe interpolation.
+       Everything else is the stock slim builder. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.Sql\Elarion.Sql.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Migrations.PostgreSql\Elarion.Migrations.PostgreSql.csproj" />
+  </ItemGroup>
+
+  <!-- The mapper generator as an analyzer (building from source; from NuGet it ships inside Elarion.Sql). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.Sql.Generators\Elarion.Sql.Generators.csproj"
+                     OutputItemType="Analyzer"
+                     ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- Migration scripts are embedded resources: discovery reads the assembly manifest — AOT-safe,
+       no filesystem layout to ship next to the binary. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Migrations/**/*.sql" />
+  </ItemGroup>
+
+</Project>
