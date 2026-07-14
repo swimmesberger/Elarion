@@ -199,3 +199,23 @@ constructor dependency; it is installed at startup by a hosted service the gener
 `AddElarionSqlMappers` registers only for JSON-column assemblies (justifying a
 `Microsoft.Extensions.Hosting.Abstractions` dependency), and read lazily at first JSON use so there is
 no static-init ordering fragility.
+
+### Considered future addition: source-generated binary COPY for the AOT tier
+
+The EF tier's high-throughput bulk-insert path (ADR-0051 — `DbSet<T>.ExecuteInsertAsync` over Npgsql
+binary `COPY`) is unavailable to this tier on two counts: its entry point and column metadata come from
+the EF model, and its per-column writers are compiled at runtime via `System.Linq.Expressions`, so the
+package is **not** `IsAotCompatible`. The EF-free/AOT tier therefore has no binary-COPY path today —
+`InsertManyAsync` (a reused-prepared-command loop, one round trip per row) is the ceiling.
+
+A **source-generated** COPY would close that gap without borrowing the EF path: the `[SqlRecord]`
+generator already emits typed per-column parameter binding (`BindParameters`) and knows each column's
+`NpgsqlDbType` under the `[UseElarionSql(Provider = SqlProvider.Npgsql)]` trigger, so emitting a
+`WriteRowTo(NpgsqlBinaryImporter, T)` per column is the same compile-time, reflection-free shape —
+AOT-clean, "if it builds, it maps." Exposed as a `connection.CopyAsync(rows)` extension (or a generated
+mapper method), it would give the AOT tier raw-`NpgsqlBinaryImporter` COPY speed. This mirrors the
+migration split (EF migrations for the EF tier, `Elarion.Migrations.PostgreSql` for the AOT tier): two
+implementations by tier, because the mechanism genuinely differs (runtime-compiled vs source-generated),
+never a repackaging of the EF path. It ships behind a benchmark gate at raw-COPY parity (the ADR-0051
+discipline) and dogfoods in the EdgeTelemetry ingest handler. Deferred to its own decision — v1 keeps
+`InsertManyAsync` as the batch path and points high-throughput bulk load at the EF tier.

@@ -154,7 +154,19 @@ The query extensions live on both `DbDataSource` (opens/disposes a pooled connec
 | `InsertManyAsync(rows, sqlSuffix?)` | batch insert in one transaction (a reused prepared command; `sqlSuffix` appends `ON CONFLICT …`) |
 
 `InsertManyAsync` is a *convenience* batch (Npgsql auto-prepare), not bulk COPY — for high-throughput
-bulk load use the binary-COPY path ([bulk operations](/docs/capabilities/bulk-operations), ADR-0051).
+bulk load on the **EF tier**, use the binary-COPY path ([bulk operations](/docs/capabilities/bulk-operations),
+ADR-0051). That path is EF-only (its entry is `DbSet<T>`, its metadata comes from the EF model) and is
+**not** AOT-compatible (it compiles per-column writers at runtime via `System.Linq.Expressions`), so the
+EF-free/AOT tier has no binary-COPY path today. A **source-generated** COPY for this tier — the
+`[SqlRecord]` generator emitting per-column `NpgsqlBinaryImporter` writes the same way it emits
+`BindParameters`, AOT-clean and reflection-free — is a considered future addition (see ADR-0058).
+
+`QueryUnbufferedAsync` streams **client-side**: Npgsql reads rows off the socket incrementally, so
+client memory stays bounded (roughly one row at a time) regardless of result size — there is no
+JDBC/Hibernate-style `fetchSize` because Npgsql does not buffer the whole result set the way JDBC does.
+Bounding work on the *server* (incremental production) is a `DECLARE CURSOR … FETCH n` concern, which
+this thin API deliberately does not wrap — hand-write the cursor SQL and map each fetch through the
+generated mapper if you ever need it.
 
 The `DbConnection` extensions (`QueryAsync`, `QueryFirstOrDefaultAsync`, `ExecuteAsync`,
 `ExecuteScalarAsync`) pair statements with mappers and open/close closed connections around the call
