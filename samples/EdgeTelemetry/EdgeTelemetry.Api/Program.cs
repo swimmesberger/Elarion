@@ -50,9 +50,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 // The generated bootstrapper: registers the Telemetry module's handlers as typed
 // IHandler<TRequest, Result<TResponse>> services and contributes the module's JSON context to the
-// canonical options (ADR-0023). With no decorator attributes, only the always-on pair wraps them:
-// TracingDecorator (the Elarion.Handlers spans/metrics below — near-zero cost with no listener) and
-// user-context enrichment; gate decorators (authorization, validation, …) attach per attribute.
+// canonical options (ADR-0023). With no decorator attributes, only the always-on ObservabilityDecorator
+// wraps them (ADR-0059: merged tracing + user-context enrichment — the Elarion.Handlers spans/metrics
+// below, near-zero cost with no listener); gate decorators (authorization, validation, …) attach per attribute.
 builder.Services.AddElarion(builder.Configuration);
 
 // Mirror canonical JSON onto minimal-API binding — one JSON configuration for HTTP contracts, the

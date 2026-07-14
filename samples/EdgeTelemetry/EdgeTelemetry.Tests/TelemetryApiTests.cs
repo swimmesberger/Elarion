@@ -57,8 +57,8 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
     public async Task IngestThenQuery_RoundTripsThroughMigratedSchema() {
         Assert.SkipUnless(_factory is not null, _skipReason);
 
-        // Handler tracing is always-on (the registration generator applies TracingDecorator as the
-        // outermost decorator for every handler, attributes or not) — a listener on the Elarion and
+        // Handler tracing is always-on (the registration generator applies the ObservabilityDecorator as
+        // the outermost decorator for every handler, attributes or not) — a listener on the Elarion and
         // Npgsql sources proves the dashboard's trace story: HTTP → handler span → SQL command span.
         var spans = new ConcurrentBag<(string Source, string Name)>();
         using var listener = new ActivityListener {

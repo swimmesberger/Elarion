@@ -11,7 +11,7 @@ POST /readings … GET /devices/{id}/stats     hand-authored minimal-API endpoin
         │                                    one line each: bind → handler → Result<T> to HTTP
         ▼
 [Handler] classes ([AppModule] Telemetry)    registered by the GENERATED module bootstrapper
-        │                                    (AddElarion) — always-on tracing/enrichment only;
+        │                                    (AddElarion) — one always-on observability decorator only;
         │                                    gate decorators would attach per attribute
         ▼
 Elarion.Sql                    (ADR-0058)    the access half: [SqlRecord] → generated
@@ -98,10 +98,10 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   reused prepared command (retransmitted device batches insert nothing). `GetMetricStats` is the
   "full power of SQL" leg — `time_bucket` + aggregates stay SQL, `{ReadingRow.Table}` splices the
   source table. Failures are `Result` values (`AppError.NotFound`, `AppError.Validation`),
-  not exceptions. With no decorator attributes only the always-on pair wraps the handlers — tracing
-  (the `Elarion.Handlers` span + `handler.execution.duration` metric per call, near-zero cost when
-  nothing listens) and user-context enrichment; add `[Idempotent]` or `[RequirePermission]` later and
-  only then does a gate decorator join the chain.
+  not exceptions. With no decorator attributes only the always-on `ObservabilityDecorator` wraps the
+  handlers (ADR-0059: merged tracing + user-context enrichment — the `Elarion.Handlers` span +
+  `handler.execution.duration` metric per call, near-zero cost when nothing listens); add `[Idempotent]`
+  or `[RequirePermission]` later and only then does a gate decorator join the chain.
 - **`Modules/Telemetry/TelemetryContracts.cs`** — the whole data contract. `ReadingRow` is a
   `[SqlRecord]`: the generated `ReadingRowSqlMapper` carries ordinal-cached typed reads, typed
   `BindParameters`, and the `TableName`/`Columns` constants the handlers compose SQL from.
