@@ -57,8 +57,7 @@ Insert with the generated constants and typed binding — the SQL stays yours:
 
 ```csharp
 await using var command = connection.CreateCommand();
-command.CommandText =
-    $"INSERT INTO {OrderSqlMapper.TableName} ({OrderSqlMapper.Columns.All}) VALUES ({OrderSqlMapper.Columns.AllParameters})";
+command.CommandText = OrderSqlMapper.Insert + " ON CONFLICT DO NOTHING";  // a const, composed at compile time
 OrderSqlMapper.Instance.BindParameters(command, order);
 await command.ExecuteNonQueryAsync(ct);
 ```
@@ -72,7 +71,8 @@ For each `[SqlRecord]` type, a sealed `partial` `{Type}SqlMapper` with:
 | `Read(reader)` / `Read(reader, in Ordinals)` | One row → `T`. Ordinals resolve **by name once per result set**, then every row reads with synchronous typed `GetFieldValue<T>` — no per-row name lookups, no boxing, no per-column `await`. |
 | `ReadAll(reader)` / `ReadAllAsync(reader, ct)` | All rows → `List<T>`, ordinals resolved once. |
 | `BindParameters(command, row)` | One typed `DbParameter` per column, named exactly like the column (`@customer_name`). `null` binds as `DBNull`. |
-| `TableName`, `Columns.*`, `Columns.All`, `Columns.AllParameters` | `const string`s so hand-written SQL composes without stringly duplication. |
+| `TableName`, `Columns.*`, `Columns.All`, `Columns.AllParameters`, `Columns.AllAssignments` | `const string`s so hand-written SQL composes without stringly duplication (`AllAssignments` is the `UPDATE … SET` list, `a = @a, b = @b, …`). |
+| `Insert`, `Select` | The **clause-free statement constants** — the full-row `INSERT INTO t (…) VALUES (@…)` and the `SELECT cols FROM t` prefix. They contain zero query logic (pure column enumeration) and compose as consts: `Insert + " ON CONFLICT DO NOTHING"`, `$"{OrderSqlMapper.Select:raw} WHERE id = {id}"`. Anything with a predicate stays hand-written. |
 | `Instance` | Static stateless instance for DI-free hosts. |
 
 One `AddElarionSqlMappers()` extension per assembly registers every mapper as an
@@ -164,8 +164,10 @@ Representative numbers (Apple M4 Pro, .NET 10, PostgreSQL 17 in a container; 202
 
 ## Non-goals
 
-No change tracking, no LINQ or query translation, no relationship/graph mapping, no CRUD statement
-generation — SQL stays hand-written; the generated constants remove the boilerplate, not the SQL. No
+No change tracking, no LINQ or query translation, no relationship/graph mapping, no query
+generation — SQL stays hand-written; the generated constants (columns and the clause-free
+`Insert`/`Select` statements) remove the boilerplate, not the SQL: nothing generated ever contains a
+predicate. No
 query-builder DSL (rejected as LINQ-to-SQL-by-another-name, ADR-0058). The planned follow-up is the
 **schema-derived metamodel and drift verification**: a design-time tool introspects a real PostgreSQL
 brought to schema by any means and writes a committed `elarion-sql-schema.json`; the generator then

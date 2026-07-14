@@ -25,9 +25,8 @@ public sealed class IngestReadings(NpgsqlDataSource db, ISqlRowMapper<ReadingRow
         await using var transaction = await connection.BeginTransactionAsync(ct);
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
-        insert.CommandText =
-            $"INSERT INTO {ReadingRowSqlMapper.TableName} ({ReadingRowSqlMapper.Columns.All}) "
-            + $"VALUES ({ReadingRowSqlMapper.Columns.AllParameters}) ON CONFLICT DO NOTHING";
+        // The generated full-row INSERT constant; the conflict clause composes at compile time.
+        insert.CommandText = ReadingRowSqlMapper.Insert + " ON CONFLICT DO NOTHING";
         var written = 0;
         foreach (var input in command.Readings) {
             var row = new ReadingRow {

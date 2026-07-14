@@ -52,8 +52,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var items = Enumerable.Range(0, count).Select(NewItem).OrderBy(i => i.Id).ToList();
         foreach (var item in items) {
             await using var command = connection.CreateCommand();
-            command.CommandText =
-                $"INSERT INTO {SqlItemSqlMapper.TableName} ({SqlItemSqlMapper.Columns.All}) VALUES ({SqlItemSqlMapper.Columns.AllParameters})";
+            command.CommandText = SqlItemSqlMapper.Insert;
             Mapper.BindParameters(command, item);
             await command.ExecuteNonQueryAsync(Ct);
         }
@@ -196,6 +195,9 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
     [Fact]
     public void GeneratedConstants_MatchConventions() {
         SqlItemSqlMapper.TableName.Should().Be("sql_items");
+        SqlItemSqlMapper.Insert.Should().StartWith("INSERT INTO sql_items (id, name, note_text,");
+        SqlItemSqlMapper.Select.Should().StartWith("SELECT id, name, note_text,").And.EndWith("FROM sql_items");
+        SqlItemSqlMapper.Columns.AllAssignments.Should().Contain("note_text = @note_text");
         SqlItemSqlMapper.Columns.Note.Should().Be("note_text", "[SqlColumn] overrides the snake_case default");
         SqlItemSqlMapper.Columns.CreatedAt.Should().Be("created_at");
         SqlItemSqlMapper.Columns.All.Should().NotContain("transient", "[SqlIgnore] excludes the property");

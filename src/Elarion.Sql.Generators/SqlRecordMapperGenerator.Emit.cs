@@ -80,7 +80,34 @@ public sealed partial class SqlRecordMapperGenerator {
         builder.AppendLine("        /// <summary>One named placeholder per column, matching <c>BindParameters</c>.</summary>");
         builder.AppendLine(
             $"        public const string AllParameters = {SourceLiterals.String(string.Join(", ", columns.Select(static c => "@" + c.ColumnName)))};");
+        builder.AppendLine();
+        builder.AppendLine("        /// <summary>The mechanical <c>UPDATE … SET</c> list: every column assigned its placeholder.</summary>");
+        builder.AppendLine(
+            $"        public const string AllAssignments = {SourceLiterals.String(string.Join(", ", columns.Select(static c => c.ColumnName + " = @" + c.ColumnName)))};");
         builder.AppendLine("    }");
+
+        // Statement constants: only the statements with ZERO query logic — a full-row INSERT and the
+        // SELECT-list prefix. Everything with a predicate or clause stays hand-written SQL (ADR-0058);
+        // being consts, suffixes compose at compile time ("… ON CONFLICT DO NOTHING", "… WHERE …").
+        var insert =
+            $"INSERT INTO {model.TableName} ({string.Join(", ", columns.Select(static c => c.ColumnName))}) "
+            + $"VALUES ({string.Join(", ", columns.Select(static c => "@" + c.ColumnName))})";
+        var select =
+            $"SELECT {string.Join(", ", columns.Select(static c => c.ColumnName))} FROM {model.TableName}";
+        builder.AppendLine($$"""
+
+                /// <summary>
+                /// The full-row INSERT, parameters matching <c>BindParameters</c> — append conflict/returning
+                /// clauses as needed (<c>Insert + " ON CONFLICT DO NOTHING"</c>).
+                /// </summary>
+                public const string Insert = {{SourceLiterals.String(insert)}};
+
+                /// <summary>
+                /// The SELECT-list prefix over all mapped columns — append <c>WHERE</c>/<c>ORDER BY</c>/… as
+                /// needed; rows read back through the mapper's typed reads.
+                /// </summary>
+                public const string Select = {{SourceLiterals.String(select)}};
+            """);
 
         // Ordinals: the once-per-result-set name lookup; every row read after it is positional and typed.
         builder.AppendLine();

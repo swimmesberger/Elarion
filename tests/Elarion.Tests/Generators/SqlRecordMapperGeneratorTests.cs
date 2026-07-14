@@ -48,6 +48,13 @@ public sealed class SqlRecordMapperGeneratorTests {
             "public const string All = \"id, customer_name, note_text, quantity, status, previous_status, created_at\";");
         source.Should().Contain(
             "public const string AllParameters = \"@id, @customer_name, @note_text, @quantity, @status, @previous_status, @created_at\";");
+        source.Should().Contain(
+            "public const string AllAssignments = \"id = @id, customer_name = @customer_name, note_text = @note_text, quantity = @quantity, status = @status, previous_status = @previous_status, created_at = @created_at\";");
+        // Statement constants: the two statements with zero query logic; everything else stays hand-written.
+        source.Should().Contain(
+            "public const string Insert = \"INSERT INTO orders (id, customer_name, note_text, quantity, status, previous_status, created_at) VALUES (@id, @customer_name, @note_text, @quantity, @status, @previous_status, @created_at)\";");
+        source.Should().Contain(
+            "public const string Select = \"SELECT id, customer_name, note_text, quantity, status, previous_status, created_at FROM orders\";");
         // Ordinals resolve once per result set; reads are synchronous and typed.
         source.Should().Contain("Id = reader.GetOrdinal(Columns.Id);");
         source.Should().Contain("Id = reader.GetFieldValue<global::System.Guid>(ordinals.Id),");

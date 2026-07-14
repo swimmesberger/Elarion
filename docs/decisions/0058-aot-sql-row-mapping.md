@@ -68,7 +68,14 @@ conventions. `IsAotCompatible`; dependencies are BCL + `Microsoft.Extensions.*` 
     per-column `await`;
   - `BindParameters(DbCommand, T)` — typed, generated per property;
   - generated `TableName` / column-name constants, so hand-written SQL composes without stringly
-    duplication (`$"SELECT {OrderSqlMapper.Columns.All} FROM {OrderSqlMapper.TableName}"`).
+    duplication (`$"SELECT {OrderSqlMapper.Columns.All} FROM {OrderSqlMapper.TableName}"`);
+  - generated **statement constants for the mechanical, clause-free statements only** — `Insert`
+    (full-row `INSERT INTO t (…) VALUES (@…)`), `Select` (the SELECT-list prefix), and
+    `Columns.AllAssignments` (the `UPDATE … SET` list). These contain zero query logic — they are the
+    column enumeration a human would type mechanically — and being `const string`s they compose at
+    compile time (`OrderSqlMapper.Insert + " ON CONFLICT DO NOTHING"`). Anything with a predicate,
+    join, or clause stays hand-written; that is the line between removing boilerplate and building a
+    query DSL.
 - Mappers are stateless: a static `Instance` for DI-free minimal hosts, plus a generated
   registration extension for seam-style injection. Nominal records with `required`/`init` are
   first-class (object-initializer emission — no parameterless-constructor requirement).
@@ -126,8 +133,10 @@ conventions. `IsAotCompatible`; dependencies are BCL + `Microsoft.Extensions.*` 
 
 ### Non-goals (what keeps this from becoming an ORM)
 
-No change tracking, no LINQ or query translation, no relationship/graph mapping, no CRUD statement
-generation — SQL stays hand-written; the generated constants remove the boilerplate, not the SQL.
+No change tracking, no LINQ or query translation, no relationship/graph mapping, no query
+generation — SQL stays hand-written; the generated constants (columns and the clause-free `Insert`/
+`Select`/`AllAssignments` statements) remove the boilerplate, not the SQL: nothing generated ever
+contains a predicate.
 **No query-builder DSL**, explicitly including a jOOQ-style one: rejected above as
 LINQ-to-SQL-by-another-name; requests for it get the safe-interpolation + metamodel answer.
 The EF tier is untouched: EF Core remains the default data access for every host that can use it;
