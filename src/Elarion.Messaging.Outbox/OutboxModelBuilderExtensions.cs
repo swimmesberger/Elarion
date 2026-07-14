@@ -43,6 +43,12 @@ public static class OutboxModelBuilderExtensions
             builder.HasIndex(message => message.OccurredOnUtc)
                 .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
 
+            // Partial index over delivered rows so the retention purge's `processed_on_utc < cutoff` delete stays
+            // an indexed probe instead of a sequential scan over the whole table.
+            builder.HasIndex(message => message.ProcessedOnUtc)
+                .HasDatabaseName(snakeCase ? $"ix_{table}_purge" : $"IX_{table}_Purge")
+                .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
+
             builder.Property(message => message.Id)
                 .HasColumnName(snakeCase ? "id" : "Id")
                 .ValueGeneratedNever();
@@ -62,7 +68,7 @@ public static class OutboxModelBuilderExtensions
                 .HasColumnName(snakeCase ? "correlation_id" : "CorrelationId");
 
             builder.Property(message => message.TraceParent)
-                .HasColumnName("trace_parent")
+                .HasColumnName(snakeCase ? "trace_parent" : "TraceParent")
                 .HasMaxLength(55);
 
             builder.Property(message => message.Attempts)

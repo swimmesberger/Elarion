@@ -135,6 +135,81 @@ public sealed class InMemoryStagedUploadStoreTests {
         stillThere!.BlobRef.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task AppendAsync_FailedMidChunk_ResendProducesExactContent() {
+        // A client disconnect mid-chunk leaves partial bytes; the offset must not advance and the
+        // protocol-correct full resend must land after the last committed byte, not after the junk.
+        var ct = TestContext.Current.CancellationToken;
+        var (store, blobStore) = CreateStore();
+        var created = await store.CreateAsync(NewCreation(4), ct);
+
+        var failing = async () => await store.AppendAsync(
+            created.Id, 0, new ThrowingAfterBytesStream([1, 2]), ct);
+        await failing.Should().ThrowAsync<IOException>();
+        (await store.GetAsync(created.Id, ct))!.Offset.Should().Be(0);
+
+        await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3, 4]), ct);
+        var completed = await store.CompleteAsync(created.Id, NewCompletion(), ct);
+
+        blobStore.Content(completed.BlobRef!.Value.Value).Should().Equal([1, 2, 3, 4]);
+    }
+
+    [Fact]
+    public async Task AppendAsync_FailedMidChunk_DeferredLength_ResendProducesExactContent() {
+        // Deferred-length sessions take the unbounded copy path; a mid-chunk failure must not leave
+        // junk that a resend then appends after.
+        var ct = TestContext.Current.CancellationToken;
+        var (store, blobStore) = CreateStore();
+        var created = await store.CreateAsync(NewCreation(length: null), ct);
+
+        var failing = async () => await store.AppendAsync(
+            created.Id, 0, new ThrowingAfterBytesStream([9, 9, 9]), ct);
+        await failing.Should().ThrowAsync<IOException>();
+
+        await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3]), ct);
+        var completed = await store.CompleteAsync(created.Id, NewCompletion(), ct);
+
+        completed.Length.Should().Be(3);
+        blobStore.Content(completed.BlobRef!.Value.Value).Should().Equal([1, 2, 3]);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_RacingInFlightAppend_ConflictsInsteadOfObjectDisposed() {
+        // A delete racing an in-flight append must produce the same conflict semantics as the durable
+        // stores (the session is simply gone), never an ObjectDisposedException from the reaped buffer.
+        var ct = TestContext.Current.CancellationToken;
+        var (store, _) = CreateStore();
+        var created = await store.CreateAsync(NewCreation(4), ct);
+
+        var slowChunk = new BlockingStream([1, 2, 3, 4]);
+        var inFlight = store.AppendAsync(created.Id, 0, slowChunk, ct);
+        await slowChunk.ReadStarted;
+
+        // The delete queues behind the in-flight append's gate; a follow-up append then sees the
+        // removed session and conflicts.
+        var delete = store.DeleteAsync(created.Id, ct);
+        var lateAppend = async () => await store.AppendAsync(created.Id, 0, new MemoryStream([9]), ct);
+        await lateAppend.Should().ThrowAsync<StagedUploadConflictException>();
+
+        slowChunk.Release();
+        (await inFlight).Offset.Should().Be(4);
+        await delete;
+        (await store.GetAsync(created.Id, ct)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_AfterDelete_Conflicts() {
+        var ct = TestContext.Current.CancellationToken;
+        var (store, _) = CreateStore();
+        var created = await store.CreateAsync(NewCreation(1), ct);
+        await store.AppendAsync(created.Id, 0, new MemoryStream([1]), ct);
+        await store.DeleteAsync(created.Id, ct);
+
+        var act = async () => await store.CompleteAsync(created.Id, NewCompletion(), ct);
+
+        await act.Should().ThrowAsync<StagedUploadConflictException>();
+    }
+
     private static (InMemoryStagedUploadStore Store, RecordingBlobStore BlobStore) CreateStore() {
         var blobStore = new RecordingBlobStore();
         var services = new ServiceCollection();
@@ -159,6 +234,90 @@ public sealed class InMemoryStagedUploadStoreTests {
             SessionExpiresAt = Origin.AddHours(1),
             BlobExpiresAt = Origin.AddMinutes(30),
         };
+
+    /// <summary>Serves its payload on the first read, then fails the copy like a client disconnect.</summary>
+    private sealed class ThrowingAfterBytesStream(byte[] payload) : Stream {
+        private bool _served;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken) {
+            if (_served) {
+                throw new IOException("The client disconnected mid-chunk.");
+            }
+
+            _served = true;
+            payload.CopyTo(buffer);
+            return ValueTask.FromResult(payload.Length);
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush() { }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>Blocks the first read until released, so a test can hold an append in flight.</summary>
+    private sealed class BlockingStream(byte[] payload) : Stream {
+        private readonly TaskCompletionSource _readStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private bool _served;
+
+        public Task ReadStarted => _readStarted.Task;
+
+        public void Release() => _released.TrySetResult();
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken) {
+            _readStarted.TrySetResult();
+            await _released.Task.WaitAsync(cancellationToken);
+            if (_served) {
+                return 0;
+            }
+
+            _served = true;
+            payload.CopyTo(buffer);
+            return payload.Length;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush() { }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 
     private sealed class RecordingBlobStore : IBlobStore {
         private readonly Dictionary<string, byte[]> _content = new(StringComparer.Ordinal);

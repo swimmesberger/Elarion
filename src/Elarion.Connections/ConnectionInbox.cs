@@ -120,8 +120,9 @@ public sealed class ConnectionInbox<TMessage>(int bufferCapacity = 64) {
         }
     }
 
-    /// <summary>Returns <see langword="true"/> when the waiter was still registered (genuinely unmatched —
-    /// let the timeout/cancellation propagate); <see langword="false"/> when a post already consumed it.</summary>
+    /// <summary>Returns <see langword="true"/> when a post already consumed the waiter (its message is
+    /// ready — hand it over instead of losing it); <see langword="false"/> when the waiter was still
+    /// registered (genuinely unmatched — it is removed here and the timeout/cancellation propagates).</summary>
     private bool RemoveOrRace(Waiter waiter) {
         lock (_lock) {
             return !_waiters.Remove(waiter);

@@ -64,6 +64,39 @@ public sealed class BlobUploadEndpointsTests {
     }
 
     [Fact]
+    public async Task UploadRaw_PassesContentLengthHintToStore() {
+        // The declared length lets the store stream without buffering the whole body in memory; the
+        // store verifies the actual bytes against the hint.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var content = new ByteArrayContent([9, 8, 7]);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        var response = await host.Client.PostAsync("/_elarion/blobs?fileName=raw.bin", content, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Store.LastRequest!.ContentLength.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Upload_FileNameWithControlCharsAndQuotes_IsSanitized() {
+        // CR/LF or quotes in the stored name would later be rejected when rendered into the download
+        // Content-Disposition header, making the blob permanently undownloadable.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var content = new ByteArrayContent([1, 2, 3]);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        var response = await host.Client.PostAsync(
+            "/_elarion/blobs?fileName=evil%0D%0Aname%22.bin", content, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var name = host.Store.LastRequest!.Name;
+        name.Should().EndWith("evilname.bin");
+        name.Should().NotContainAny("\r", "\n", "\"");
+    }
+
+    [Fact]
     public async Task Upload_Unauthenticated_Returns401() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct, user: new FakeCurrentUser("user-1", isAuthenticated: false));

@@ -202,7 +202,10 @@ public sealed class ClientDunningActorTests {
         public void Dispose() => _listener.Dispose();
     }
 
-    /// <summary>An in-memory <see cref="IActorSnapshotStore"/> with the seam's ETag semantics.</summary>
+    /// <summary>
+    /// An in-memory <see cref="IActorSnapshotStore"/> with the seam's ETag semantics, including
+    /// lineage-unique create versions (a tag from a cleared lineage never matches a re-created one).
+    /// </summary>
     private sealed class InMemorySnapshotStore : IActorSnapshotStore {
         private readonly ConcurrentDictionary<ActorSnapshotKey, (string Payload, long Version)> _rows = new();
 
@@ -217,11 +220,12 @@ public sealed class ClientDunningActorTests {
         public ValueTask<string> WriteAsync(
             ActorSnapshotKey key, string payload, string? expectedETag, CancellationToken cancellationToken = default) {
             if (expectedETag is null) {
-                if (!_rows.TryAdd(key, (payload, 1))) {
+                var version = Random.Shared.NextInt64(1, long.MaxValue >> 1);
+                if (!_rows.TryAdd(key, (payload, version))) {
                     throw new ActorSnapshotConcurrencyException(key, expectedETag: null);
                 }
 
-                return ValueTask.FromResult("1");
+                return ValueTask.FromResult(version.ToString(CultureInfo.InvariantCulture));
             }
 
             var expectedVersion = long.Parse(expectedETag, CultureInfo.InvariantCulture);

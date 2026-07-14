@@ -1,3 +1,4 @@
+using System.Transactions;
 using Microsoft.EntityFrameworkCore;
 
 namespace Elarion.Settings.EntityFrameworkCore;
@@ -26,9 +27,10 @@ public interface IEfCoreSettingsChangeNotifier {
 /// transaction is already durable, so it is announced immediately; a write inside a caller-owned transaction is
 /// deferred into the scoped <see cref="SettingsChangeDispatchScope"/> and announced by the
 /// <see cref="SettingsChangeDispatchTransactionInterceptor"/> only after the transaction commits (and dropped on
-/// rollback), so watchers never observe a value a rollback discards. A backend-aware notifier (the PostgreSQL
-/// <c>LISTEN/NOTIFY</c> change source) replaces this with one whose delivery the database commit-gates and which
-/// also crosses process boundaries.
+/// rollback), so watchers never observe a value a rollback discards. A write inside a System.Transactions ambient
+/// transaction (<c>TransactionScope</c>) is likewise commit-gated, via the ambient transaction's completion event.
+/// A backend-aware notifier (the PostgreSQL <c>LISTEN/NOTIFY</c> change source) replaces this with one whose
+/// delivery the database commit-gates and which also crosses process boundaries.
 /// </summary>
 internal sealed class ChangePublisherSettingsChangeNotifier(SettingsChangeDispatchScope dispatch)
     : IEfCoreSettingsChangeNotifier {
@@ -38,6 +40,16 @@ internal sealed class ChangePublisherSettingsChangeNotifier(SettingsChangeDispat
             // Inside a caller-owned transaction: defer until commit so a rollback drops the notification rather than
             // announcing a phantom change. The dispatch interceptor flushes the buffer once the transaction commits.
             dispatch.Defer(scope, key);
+        } else if (Transaction.Current is { } ambient) {
+            // Inside a System.Transactions ambient transaction (TransactionScope): the write is enlisted and not yet
+            // durable, but EF exposes no DbTransaction, so the dispatch interceptor would never flush a deferral.
+            // Announce on the ambient transaction's own completion instead — committed publishes, aborted drops — so
+            // the notification neither fires pre-commit nor survives a rollback.
+            ambient.TransactionCompleted += (_, args) => {
+                if (args.Transaction?.TransactionInformation.Status is TransactionStatus.Committed) {
+                    dispatch.PublishNow(scope, key);
+                }
+            };
         } else {
             // No ambient transaction: the ExecuteUpdate/raw INSERT already committed, so announce immediately.
             dispatch.PublishNow(scope, key);

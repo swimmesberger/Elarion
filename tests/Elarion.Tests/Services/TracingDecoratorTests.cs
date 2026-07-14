@@ -91,6 +91,34 @@ public sealed class TracingDecoratorTests {
             measurement.HasTag("elarion.handler.outcome", "ok"));
     }
 
+    [Fact]
+    public async Task HandleAsync_TwoHandlersSharingRequestAndResponse_ReportTheirOwnPipelineTags() {
+        using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
+        // Two handlers with the same TRequest/TResponse (e.g. two handler-form consumers of one event) share
+        // the closed TracingDecorator<,> generic but have different metadata pipelines — each span must carry
+        // its OWN pipeline, not whichever handler rendered first.
+        var metadataA = new HandlerMetadata(
+            typeof(SuccessHandler), typeof(Request), typeof(Result<int>),
+            () => [new PipelineStep(typeof(TracingDecorator<,>), Conditional: false),
+                new PipelineStep(typeof(AuthorizationDecorator<,>), Conditional: false)]);
+        var metadataB = new HandlerMetadata(
+            typeof(FailureHandler), typeof(Request), typeof(Result<int>),
+            () => [new PipelineStep(typeof(TracingDecorator<,>), Conditional: false),
+                new PipelineStep(typeof(TransactionDecorator<,>), Conditional: true)]);
+        var decoratorA = new TracingDecorator<Request, Result<int>>(new SuccessHandler(), "HandlerA", metadataA);
+        var decoratorB = new TracingDecorator<Request, Result<int>>(new SuccessHandler(), "HandlerB", metadataB);
+
+        await decoratorA.HandleAsync(new Request(), TestContext.Current.CancellationToken);
+        await decoratorB.HandleAsync(new Request(), TestContext.Current.CancellationToken);
+
+        activities.Activities.Should().Contain(activity =>
+            Equals(activity.GetTag("elarion.handler"), "HandlerA") &&
+            Equals(activity.GetTag("elarion.handler.pipeline"), "Tracing,Authorization"));
+        activities.Activities.Should().Contain(activity =>
+            Equals(activity.GetTag("elarion.handler"), "HandlerB") &&
+            Equals(activity.GetTag("elarion.handler.pipeline"), "Tracing,Transaction?"));
+    }
+
     private sealed record Request;
 
     private sealed class SuccessHandler : IHandler<Request, Result<int>> {

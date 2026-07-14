@@ -767,6 +767,144 @@ public sealed class HandlerRegistrationGeneratorTests {
             .Should().BeEmpty();
     }
 
+    [Fact]
+    public void GenerateRegistration_HandlerInDecoratorsNamespace_IsRegistered() {
+        // Regression: the old exclusion matched any namespace CONTAINING "Decorators", silently skipping
+        // registration for consumer handlers (e.g. MyApp.Decorators.Pricing) while the RPC map still routed
+        // to them. Only Elarion's own pipeline decorators (Elarion.Pipeline) are excluded.
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            [assembly: UseElarion]
+
+            namespace MyApp.Decorators.Pricing {
+                [AppModule("Pricing")]
+                public static class PricingModule { }
+
+                public sealed record PriceCommand(int Id) : ICommand;
+                public sealed record PriceResponse(string Name);
+
+                public sealed class PriceCake : IHandler<PriceCommand, Result<PriceResponse>> {
+                    public ValueTask<Result<PriceResponse>> HandleAsync(PriceCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<PriceResponse>.Success(new PriceResponse("priced")));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+
+        var registration = GetGeneratedSource(result, "MyApp_Decorators_Pricing_PriceCake.g.cs");
+        registration.Should().Contain("public static IServiceCollection AddPriceCake(");
+
+        var aggregation = GetGeneratedSource(result, "PricingHandlerExtensions.g.cs");
+        aggregation.Should().Contain("MyApp.Decorators.Pricing.PriceCakeRegistration.AddPriceCake(services, lifetime);");
+    }
+
+    [Fact]
+    public void GenerateRegistration_DuplicateModuleNames_KeepsOneWinnerWithoutCrashing() {
+        // Regression: two [AppModule]s sharing one name produced two identical AddSource hint names
+        // ({Name}HandlerExtensions.g.cs), failing the whole generator with an ArgumentException. The shared
+        // module collection now keeps one deterministic winner (ordinal-first by metadata name).
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            [assembly: UseElarion]
+
+            namespace Alpha {
+                [AppModule("Sales")]
+                public static class AlphaSalesModule { }
+
+                public sealed record AlphaCommand(int Id) : ICommand;
+                public sealed record AlphaResponse(string Name);
+
+                public sealed class AlphaThing : IHandler<AlphaCommand, Result<AlphaResponse>> {
+                    public ValueTask<Result<AlphaResponse>> HandleAsync(AlphaCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<AlphaResponse>.Success(new AlphaResponse("a")));
+                }
+            }
+
+            namespace Beta {
+                [AppModule("Sales")]
+                public static class BetaSalesModule { }
+
+                public sealed record BetaCommand(int Id) : ICommand;
+                public sealed record BetaResponse(string Name);
+
+                public sealed class BetaThing : IHandler<BetaCommand, Result<BetaResponse>> {
+                    public ValueTask<Result<BetaResponse>> HandleAsync(BetaCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<BetaResponse>.Success(new BetaResponse("b")));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+
+        // Exactly one aggregation is emitted (no duplicate-hint crash), owned by the ordinal-first winner.
+        result.GeneratedTrees
+            .Count(tree => string.Equals(
+                Path.GetFileName(tree.FilePath), "SalesHandlerExtensions.g.cs", StringComparison.Ordinal))
+            .Should().Be(1);
+        var aggregation = GetGeneratedSource(result, "SalesHandlerExtensions.g.cs");
+        aggregation.Should().Contain("namespace Alpha;");
+        aggregation.Should().Contain("AddAlphaThing(services, lifetime);");
+        aggregation.Should().NotContain("BetaThing");
+
+        // Both handlers still get their per-handler registration (typed-direct resolution stays intact).
+        GetGeneratedSource(result, "Alpha_AlphaThing.g.cs").Should().Contain("AddAlphaThing(");
+        GetGeneratedSource(result, "Beta_BetaThing.g.cs").Should().Contain("AddBetaThing(");
+    }
+
+    [Fact]
+    public void GenerateRegistration_UnderscoreAndDottedNamespaces_ProduceDistinctHintNames() {
+        // Regression: '.' → '_' hint sanitization collapsed `A.B_C.FooHandler` and `A.B.C.FooHandler` onto one
+        // hint name — a duplicate AddSource crash. The ambiguous shape now carries a stable hash suffix.
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            namespace A.B_C {
+                public sealed record FooCommand(int Id) : ICommand;
+                public sealed record FooResponse(string Name);
+
+                public sealed class FooHandler : IHandler<FooCommand, Result<FooResponse>> {
+                    public ValueTask<Result<FooResponse>> HandleAsync(FooCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<FooResponse>.Success(new FooResponse("x")));
+                }
+            }
+
+            namespace A.B.C {
+                public sealed record FooCommand(int Id) : ICommand;
+                public sealed record FooResponse(string Name);
+
+                public sealed class FooHandler : IHandler<FooCommand, Result<FooResponse>> {
+                    public ValueTask<Result<FooResponse>> HandleAsync(FooCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<FooResponse>.Success(new FooResponse("x")));
+                }
+            }
+            """;
+
+        var result = GenerateHandlerRegistrationRunResult(source);
+
+        var registrationFiles = result.GeneratedTrees
+            .Select(tree => Path.GetFileName(tree.FilePath))
+            .Where(name => name.StartsWith("A_B", StringComparison.Ordinal))
+            .ToArray();
+        registrationFiles.Should().HaveCount(2);
+        registrationFiles.Distinct(StringComparer.Ordinal).Should().HaveCount(2);
+        // The plain dotted name keeps its historical hash-free shape; the ambiguous one is suffixed.
+        registrationFiles.Should().Contain("A_B_C_FooHandler.g.cs");
+    }
+
     private static string GenerateHandlerRegistrationSource(string source) {
         var result = GenerateHandlerRegistrationRunResult(source);
         return GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_CreateOrder.g.cs");

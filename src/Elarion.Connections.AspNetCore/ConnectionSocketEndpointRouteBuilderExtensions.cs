@@ -108,9 +108,12 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             Metadata = ticket.Metadata,
             ConnectedAt = (services.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow(),
         };
-        var connection = new WebSocketClientConnection(identity, socket);
+        // The kernel-wide invoke default (per-call ClientInvokeOptions.Timeout still wins per call).
+        var connectionDefaults = services.GetService<ElarionConnectionsOptions>() ?? new ElarionConnectionsOptions();
+        var connection = new WebSocketClientConnection(identity, socket, connectionDefaults.DefaultInvokeTimeout);
         connection.AttachProtocol(handler.CreateProtocol(connection));
 
+        Exception? closeReason = null;
         try {
             // Registration lives inside this try: RegisterAsync mutates the index before dispatching
             // observers, so an abort mid-registration must still reach the unregister in finally.
@@ -118,27 +121,45 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             await CloseSafelyAsync(socket, WebSocketCloseStatus.NormalClosure, "closing", ct);
         }
-        catch (WebSocketMessageTooLargeException) {
+        catch (WebSocketMessageTooLargeException failure) {
+            closeReason = failure;
             await CloseSafelyAsync(socket, WebSocketCloseStatus.MessageTooBig, "message too large", ct);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+        catch (OperationCanceledException failure) when (ct.IsCancellationRequested) {
             // Host shutdown or request abort — the normal end of a long-lived socket.
+            closeReason = failure;
         }
-        catch (WebSocketException) {
+        catch (WebSocketException failure) {
             // Abrupt client death — also a normal end.
+            closeReason = failure;
         }
         catch (Exception failure) {
+            closeReason = failure;
             logger.LogWarning(failure,
                 "Connection {ConnectionId} codec failed; closing the connection.", identity.ConnectionId);
             await CloseSafelyAsync(socket, WebSocketCloseStatus.InternalServerError, "protocol failure", ct);
         }
         finally {
-            // Unregister must run even when the request token is already cancelled — observers tear down
-            // subscriptions and presence.
+            // The codec learns the connection ended before observers do — its pending invokes and
+            // conversation waiters must fault, not hang. Then unregister must run even when the request
+            // token is already cancelled — observers tear down subscriptions and presence.
+            await NotifyClosedSafelyAsync(connection, closeReason, logger);
             await registry.UnregisterAsync(identity.ConnectionId, CancellationToken.None);
         }
 
         return Results.Empty;
+    }
+
+    // Failure-isolated: a throwing OnClosedAsync must never break teardown/unregistration.
+    private static async ValueTask NotifyClosedSafelyAsync(
+        WebSocketClientConnection connection, Exception? reason, ILogger logger) {
+        try {
+            await connection.Protocol.OnClosedAsync(connection.Connection, reason, CancellationToken.None);
+        }
+        catch (Exception failure) {
+            logger.LogWarning(failure, "Connection {ConnectionId} codec OnClosedAsync failed.",
+                connection.Connection.ConnectionId);
+        }
     }
 
     private static async Task ReceiveLoopAsync(

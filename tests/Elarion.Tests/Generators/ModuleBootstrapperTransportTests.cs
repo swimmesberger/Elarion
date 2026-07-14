@@ -992,6 +992,55 @@ public sealed class ModuleBootstrapperTransportTests {
             .Should().BeEmpty();
     }
 
+    [Fact]
+    public void Bootstrapper_DuplicateModuleNameAcrossAssemblies_ReportsElmod006AndKeepsOneWinner() {
+        // Regression: same-named modules from two assemblies both survived deduplication (keyed on
+        // name + type FQN), emitting duplicate switch case labels (CS0152) and duplicate per-module methods
+        // (CS0111) with no diagnostic. Now the duplicate is reported and one ordinal-first winner is emitted.
+        const string duplicateSource =
+            """
+            using Elarion.Abstractions.Modules;
+
+            namespace Zulu {
+                [AppModule("Billing")]
+                public static class BillingModule { }
+            }
+            """;
+
+        var references = new[] {
+            CompileToImage(ModulesSource, "Sample.Modules"),
+            CompileToImage(duplicateSource, "Zulu.Modules"),
+        };
+        var result = RunGeneratorRunWithReferences(HostSource, references);
+
+        result.Diagnostics.Should().ContainSingle(d => d.Id == "ELMOD006" && d.Severity == DiagnosticSeverity.Error);
+
+        var generated = result.GeneratedTrees
+            .Single(tree => string.Equals(
+                Path.GetFileName(tree.FilePath), "ElarionBootstrapper.g.cs", StringComparison.Ordinal))
+            .GetText(TestContext.Current.CancellationToken)
+            .ToString();
+
+        // One winner: the ordinal-first type FQN (Sample.Billing.BillingModule < Zulu.BillingModule) — a single
+        // switch arm and no reference to the losing module type.
+        System.Text.RegularExpressions.Regex.Matches(generated, "\"Billing\" => ").Count.Should().Be(1);
+        generated.Should().NotContain("Zulu.BillingModule");
+
+        // The emitted bootstrapper still compiles (the CS0111/CS0152 regression).
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var compilation = CSharpCompilation.Create(
+            "Host",
+            [
+                CSharpSyntaxTree.ParseText(HostSource, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(generated, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+            ],
+            CreateMetadataReferences().Concat(references).ToArray(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        compilation.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
     // Extracts a single emitted method body (from its signature marker to the matching closing brace) so a test can
     // assert which transport surface a handler landed on without being confused by call sites elsewhere in the file.
     private static string Slice(string source, string signatureMarker) {

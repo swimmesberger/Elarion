@@ -117,7 +117,7 @@ internal static class RpcMethodEmission
     /// </summary>
     public static Model? CreateModel(
         GeneratorAttributeSyntaxContext ctx,
-        Action<Diagnostic>? report,
+        Action<DiagnosticInfo>? report,
         CancellationToken ct)
     {
         if (ctx.TargetSymbol is not INamedTypeSymbol type)
@@ -144,7 +144,7 @@ internal static class RpcMethodEmission
         INamedTypeSymbol? mcpMethodType,
         INamedTypeSymbol? descriptionType,
         SymbolDisplayFormat fmt,
-        Action<Diagnostic>? report,
+        Action<DiagnosticInfo>? report,
         CancellationToken ct,
         out Model? model)
     {
@@ -162,17 +162,17 @@ internal static class RpcMethodEmission
         ct.ThrowIfCancellationRequested();
         if (!HandlerShape.TryResolve(type, out var requestType, out var responseInner, out _))
         {
-            report?.Invoke(Diagnostic.Create(
-                MissingHandlerShape, type.Locations.FirstOrDefault() ?? Location.None, type.ToDisplayString()));
+            report?.Invoke(DiagnosticInfo.Create(
+                MissingHandlerShape, type.Locations.FirstOrDefault(), type.ToDisplayString()));
             return false;
         }
 
         var (toolName, hasMcpMethod) = ReadMcpMethod(type, mcpMethodType);
         if (hasMcpMethod && !onMcp)
         {
-            report?.Invoke(Diagnostic.Create(
+            report?.Invoke(DiagnosticInfo.Create(
                 McpCustomizationIgnored,
-                Location.None,
+                (Location?)null,
                 type.ToDisplayString(),
                 operationName));
         }

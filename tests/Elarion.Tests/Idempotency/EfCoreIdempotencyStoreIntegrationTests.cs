@@ -107,6 +107,54 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
             Json);
     }
 
+    [Theory]
+    [InlineData(IdempotencyConflictBehavior.Conflict)]
+    [InlineData(IdempotencyConflictBehavior.WaitThenReplay)]
+    public async Task BusinessStatements_RunAtTheSessionDefaultLockTimeout_NotTheClaimTimeout(
+        IdempotencyConflictBehavior conflict) {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var key = UniqueKey();
+
+        // The session default the business phase must revert to (a fresh connection, no SET LOCAL applied).
+        string sessionDefault;
+        await using (var probe = fixture.CreateContext()) {
+            sessionDefault = await CurrentLockTimeoutAsync(probe);
+        }
+
+        var context = fixture.CreateContext();
+        var handler = new LockTimeoutProbeHandler(context);
+        var decorator = new IdempotencyDecorator<DemoCommand, Result<string>>(
+            handler,
+            new EfUnitOfWork<IdempotencyIntegrationDbContext>(context),
+            new EfCoreIdempotencyStore<IdempotencyIntegrationDbContext>(context, TimeProvider.System),
+            new FixedKeyAccessor(key),
+            new DemoPolicy(conflict),
+            new AuthenticatedUser(),
+            Json);
+
+        var result = await decorator.HandleAsync(new DemoCommand(1), Ct);
+
+        result.IsSuccess.Should().BeTrue();
+        // The short claim lock_timeout must not govern the handler's business statements — an ordinary hot-row
+        // wait inside the handler would otherwise 55P03 into a 500.
+        handler.ObservedLockTimeout.Should().Be(sessionDefault);
+    }
+
+    private static Task<string> CurrentLockTimeoutAsync(IdempotencyIntegrationDbContext context) =>
+        context.Database
+            .SqlQueryRaw<string>("SELECT current_setting('lock_timeout') AS \"Value\"")
+            .SingleAsync(Ct);
+
+    private sealed class LockTimeoutProbeHandler(IdempotencyIntegrationDbContext context)
+        : IHandler<DemoCommand, Result<string>> {
+        public string? ObservedLockTimeout { get; private set; }
+
+        public async ValueTask<Result<string>> HandleAsync(DemoCommand request, CancellationToken ct) {
+            ObservedLockTimeout = await CurrentLockTimeoutAsync(context);
+            return Result<string>.Success("ok");
+        }
+    }
+
     [Fact]
     public async Task Inbox_ConsumerScope_DedupsPerConsumer_AndFansOutAcrossConsumers() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);

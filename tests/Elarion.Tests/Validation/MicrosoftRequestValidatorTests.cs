@@ -109,6 +109,43 @@ public sealed class MicrosoftRequestValidatorTests {
     }
 
     [Fact]
+    public async Task WirePathCollision_MergesMessagesInsteadOfOverwriting() {
+        // "Name" and "NAME" are distinct CLR paths but both camelCase to "name" — the second must not
+        // silently overwrite the first.
+        await using var provider = BuildProvider(services => services.AddElarionValidationResolver(
+            new PathInjectingResolver(new Dictionary<string, string[]>(StringComparer.Ordinal) {
+                ["Name"] = ["first message"],
+                ["NAME"] = ["second message"],
+            })));
+        using var scope = provider.CreateScope();
+        var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
+
+        var result = await validator.ValidateAsync(typeof(PathInjectingRequest), new PathInjectingRequest(), Ct);
+
+        result.Should().NotBeNull();
+        result!.FieldErrors.Keys.Should().BeEquivalentTo("name");
+        result!.FieldErrors["name"].Should().BeEquivalentTo("first message", "second message");
+    }
+
+    [Fact]
+    public async Task DictionaryKeyContainingDots_IsPreservedInsideIndexer() {
+        // The content of [...] is a dictionary key, not a path segment: it must be neither split on '.' nor
+        // case-converted.
+        await using var provider = BuildProvider(services => services.AddElarionValidationResolver(
+            new PathInjectingResolver(new Dictionary<string, string[]>(StringComparer.Ordinal) {
+                ["Items[My.Key].Name"] = ["bad"],
+                ["Lookup[Ordinal.KEY]"] = ["also bad"],
+            })));
+        using var scope = provider.CreateScope();
+        var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
+
+        var result = await validator.ValidateAsync(typeof(PathInjectingRequest), new PathInjectingRequest(), Ct);
+
+        result.Should().NotBeNull();
+        result!.FieldErrors.Keys.Should().BeEquivalentTo("items[My.Key].name", "lookup[Ordinal.KEY]");
+    }
+
+    [Fact]
     public void AddElarionValidation_IsIdempotent() {
         var services = new ServiceCollection();
         services.AddElarionValidation();
@@ -135,6 +172,40 @@ public sealed class MicrosoftRequestValidatorTests {
     }
 
     private sealed record UnannotatedRequest;
+
+    private sealed record PathInjectingRequest;
+
+    /// <summary>
+    /// Injects arbitrary CLR error paths (the shapes the M.E.Validation walker produces for case-colliding
+    /// properties and dictionary keys) so the wire-path translation can be exercised deterministically.
+    /// </summary>
+    private sealed class PathInjectingResolver(Dictionary<string, string[]> errors) : IValidatableInfoResolver {
+        public bool TryGetValidatableTypeInfo(Type type, [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
+            if (type == typeof(PathInjectingRequest)) {
+                validatableInfo = new PathInjectingInfo(errors);
+                return true;
+            }
+
+            validatableInfo = null;
+            return false;
+        }
+
+        public bool TryGetValidatableParameterInfo(ParameterInfo parameterInfo, [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
+            validatableInfo = null;
+            return false;
+        }
+    }
+
+    private sealed class PathInjectingInfo(Dictionary<string, string[]> errors) : IValidatableInfo {
+        public Task ValidateAsync(object? value, ValidateContext context, CancellationToken cancellationToken) {
+            context.ValidationErrors ??= [];
+            foreach (var (path, messages) in errors) {
+                context.ValidationErrors[path] = messages;
+            }
+
+            return Task.CompletedTask;
+        }
+    }
 
     /// <summary>
     /// A hand-written stand-in for the source-generated resolver of ADR-0027 item 4: constant-constructed

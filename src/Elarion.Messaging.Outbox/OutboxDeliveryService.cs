@@ -30,6 +30,11 @@ public sealed class OutboxDeliveryService(
     {
         using var timer = new PeriodicTimer(options.PollingInterval, timeProvider);
 
+        // Retention purging is a maintenance sweep, not per-poll work: without a cadence guard every idle poll
+        // (default 1 s) would issue the purge DELETE on every node. Track the last purge and re-run only once
+        // per PurgeInterval; a failed purge waits for the next interval rather than hammering every tick.
+        var lastPurge = timeProvider.GetUtcNow();
+
         while (!stoppingToken.IsCancellationRequested)
         {
             int delivered;
@@ -54,17 +59,22 @@ public sealed class OutboxDeliveryService(
                 continue;
             }
 
-            try
+            var now = timeProvider.GetUtcNow();
+            if (now - lastPurge >= options.PurgeInterval)
             {
-                await PurgeAsync(stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Outbox retention purge failed.");
+                lastPurge = now;
+                try
+                {
+                    await PurgeAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Outbox retention purge failed.");
+                }
             }
 
             if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))

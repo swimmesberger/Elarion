@@ -5,6 +5,7 @@ Rule ID | Category | Severity | Notes
 ELPIPE001 | Elarion.Generators | Error | Decorator AppliesTo predicate must be public
 ELPIPE002 | Elarion.Generators | Error | Decorator AppliesTo predicate has an unsupported signature
 ELPIPE003 | Elarion.Abstractions.Resilience | Error | Domain-event consumer cannot be resilient
+ELPIPE004 | Elarion.Abstractions.Resilience | Warning | Retrying resilient command handler is not idempotent
 ELSG001 | Elarion.Generators | Error | Hosted service scope must be singleton
 ELSG002 | Elarion.Generators | Error | Invalid explicit service contract
 ELSG003 | Elarion.Generators | Error | Generic services are not supported
@@ -39,6 +40,7 @@ ELMOD002 | Elarion.Modules | Warning | Cross-module reference to a module-intern
 ELMOD003 | Elarion.Modules | Warning | Referenced assembly advertises an unsupported Elarion manifest schema version
 ELMOD004 | Elarion.Modules | Warning | [ModuleEndpoints] names an unknown module
 ELMOD005 | Elarion.Modules | Warning | [ModuleEndpoints] class declares no endpoint hook
+ELMOD006 | Elarion.Modules | Error | Duplicate [AppModule] name
 ELAPI001 | Elarion.Modules | Error | Module API interface must be partial
 ELAPI002 | Elarion.Modules | Error | Module API interface must be top-level
 ELAPI003 | Elarion.Modules | Warning | Module API interface is not in any module

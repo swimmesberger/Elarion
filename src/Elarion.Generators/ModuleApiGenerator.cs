@@ -277,7 +277,9 @@ public sealed class ModuleApiGenerator : IIncrementalGenerator
         if (handlerInterface is null)
             return null;
 
-        if (symbol.ContainingNamespace?.ToDisplayString().Contains("Decorators") == true)
+        // Same exclusion as HandlerCandidates.Identify: only Elarion's own pipeline decorators are skipped,
+        // never a consumer handler whose namespace merely contains "Decorators".
+        if (symbol.ContainingNamespace?.ToDisplayString() == "Elarion.Pipeline")
             return null;
 
         var exclude = false;

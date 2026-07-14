@@ -31,17 +31,17 @@ public sealed class HybridHandlerCache(
         SetCacheTags(activity, "get", policy.KeyPrefix, policy.Scope, policy.Tags.Count);
 
         try {
-            // Note 9: Policies own the logical cache key; this type turns it into a physical key with scope information.
+            // Policies own the logical cache key; this type turns it into a physical key with scope information.
             var key = CreatePhysicalKey(policy, request);
             var options = new HybridCacheEntryOptions {
                 Expiration = policy.Expiration,
                 LocalCacheExpiration = policy.Expiration,
             };
-            // Note 10: Tags are how HybridCache supports group invalidation without knowing every individual key.
-            var tags = CreatePhysicalTags(policy.Scope, policy.Tags);
+            // Tags are how HybridCache supports group invalidation without knowing every individual key.
+            var tags = CreateEntryTags(policy.Scope, policy.Tags);
 
             if (policy is IHandlerCachePayloadPolicy<TRequest, TResponse> payloadPolicy) {
-                // Note 11: Payload policies store a serialized representation, useful when response types should not be cached directly.
+                // Payload policies store a serialized representation, useful when response types should not be cached directly.
                 var payloadState = new PayloadFactoryState<TRequest, TResponse>(payloadPolicy, factory, jsonSerialization.Options, activity);
                 try {
                     var response = await GetOrCreatePayloadAsync(payloadState, key, options, tags, ct);
@@ -62,7 +62,7 @@ public sealed class HybridHandlerCache(
                         state.MarkFactoryExecuted();
                         var response = await state.Factory(token);
                         if (response is IResultLike { IsSuccess: false }) {
-                            // Note 12: Throwing here is a control-flow adapter for HybridCache: it prevents failed Result<T> values from being cached.
+                            // Throwing here is a control-flow adapter for HybridCache: it prevents failed Result<T> values from being cached.
                             throw new NonCacheableResultException<TResponse>(response);
                         }
 
@@ -94,8 +94,8 @@ public sealed class HybridHandlerCache(
         SetCacheTags(activity, "invalidate", null, policy.Scope, policy.Tags.Count);
 
         try {
-            // Note 13: Invalidating by tag keeps command handlers independent from the exact read keys they invalidate.
-            var tags = CreatePhysicalTags(policy.Scope, policy.Tags);
+            // Invalidating by tag keeps command handlers independent from the exact read keys they invalidate.
+            var tags = CreateInvalidationTags(policy.Scope, policy.Tags);
             foreach (var tag in tags) {
                 await cache.RemoveByTagAsync(tag, ct);
             }
@@ -137,11 +137,38 @@ public sealed class HybridHandlerCache(
         var scope = CreatePhysicalScope(policy.Scope);
         var requestKey = policy.CreateKey(request);
 
-        // Note 14: Prefixing each part makes the key readable and avoids accidental collisions between scopes and request keys.
+        // Prefixing each part makes the key readable and avoids accidental collisions between scopes and request keys.
         return $"{policy.KeyPrefix}:scope:{scope}:request:{requestKey}";
     }
 
-    private IReadOnlyList<string> CreatePhysicalTags(HandlerCacheScope scope, IReadOnlyList<string> tags) {
+    /// <summary>
+    /// Tags stamped onto a cache <b>entry</b>. A <see cref="HandlerCacheScope.CurrentUser"/>-scoped entry carries
+    /// its user-namespaced tags <b>and</b> the global-namespaced tags, so a
+    /// <see cref="HandlerCacheScope.Global"/>-scoped invalidation — the <c>[CacheInvalidate]</c> default — evicts
+    /// every user's entries for those tags (the safe default is over-invalidation). A user-scoped invalidation
+    /// still clears only the calling user's namespace.
+    /// </summary>
+    private IReadOnlyList<string> CreateEntryTags(HandlerCacheScope scope, IReadOnlyList<string> tags) {
+        var scoped = CreateInvalidationTags(scope, tags);
+        if (scope == HandlerCacheScope.Global) {
+            return scoped;
+        }
+
+        var physicalTags = new string[scoped.Count * 2];
+        for (var i = 0; i < scoped.Count; i++) {
+            physicalTags[i] = scoped[i];
+            physicalTags[scoped.Count + i] = $"handler-cache:global:tag:{tags[i]}";
+        }
+
+        return physicalTags;
+    }
+
+    /// <summary>
+    /// Tags an <b>invalidation</b> removes: exactly the requested scope's namespace. Global clears the global
+    /// namespace (which every entry carries, see <see cref="CreateEntryTags"/>); CurrentUser clears only the
+    /// calling user's namespace.
+    /// </summary>
+    private IReadOnlyList<string> CreateInvalidationTags(HandlerCacheScope scope, IReadOnlyList<string> tags) {
         if (tags.Count == 0) {
             throw new InvalidOperationException("Handler cache policies must define at least one tag.");
         }
@@ -164,7 +191,7 @@ public sealed class HybridHandlerCache(
     private string CreatePhysicalScope(HandlerCacheScope scope) =>
         scope switch {
             HandlerCacheScope.Global => "global",
-            // Note 15: User ids are hashed before entering cache keys so infrastructure logs do not expose raw identifiers.
+            // User ids are hashed before entering cache keys so infrastructure logs do not expose raw identifiers.
             HandlerCacheScope.CurrentUser => $"user:{Hash(GetCurrentUserId())}",
             _ => throw new InvalidOperationException($"Unsupported handler cache scope '{scope}'."),
         };

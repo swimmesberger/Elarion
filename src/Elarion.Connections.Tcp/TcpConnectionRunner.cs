@@ -16,6 +16,7 @@ internal static class TcpConnectionRunner {
         ElarionTcpConnectionOptions options,
         TcpConnectionHandler handler,
         IClientConnectionRegistry registry,
+        TimeSpan? defaultInvokeTimeout,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken ct) {
@@ -33,7 +34,7 @@ internal static class TcpConnectionRunner {
 
         await RunAsync(
             stream, peer, client, noDelay => client.Client.NoDelay = noDelay,
-            options, handler, registry, timeProvider, logger, ct);
+            options, handler, registry, defaultInvokeTimeout, timeProvider, logger, ct);
     }
 
     /// <summary>
@@ -50,6 +51,7 @@ internal static class TcpConnectionRunner {
         ElarionTcpConnectionOptions options,
         TcpConnectionHandler handler,
         IClientConnectionRegistry registry,
+        TimeSpan? defaultInvokeTimeout,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken ct) {
@@ -98,18 +100,26 @@ internal static class TcpConnectionRunner {
                 Metadata = ticket.Metadata,
                 ConnectedAt = timeProvider.GetUtcNow(),
             };
-            var connection = new TcpClientConnection(identity, stream, framer, sendBufferBytes, closeTransport: transport.Dispose);
+            var connection = new TcpClientConnection(
+                identity, stream, framer, sendBufferBytes, defaultInvokeTimeout, closeTransport: transport.Dispose);
             connection.AttachProtocol(handler.CreateProtocol(connection));
 
+            Exception? closeReason = null;
             try {
                 // Registration lives inside this try: RegisterAsync mutates the index before dispatching
                 // observers, so an abort mid-registration must still reach the unregister in finally.
                 await registry.RegisterAsync(connection, ct);
                 await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             }
+            catch (Exception failure) {
+                closeReason = failure;
+                throw;
+            }
             finally {
-                // Unregister must run even when the token is already cancelled — observers tear down
-                // subscriptions and presence.
+                // The codec learns the connection ended before observers do — its pending invokes and
+                // conversation waiters must fault, not hang. Then unregister must run even when the token
+                // is already cancelled — observers tear down subscriptions and presence.
+                await NotifyClosedSafelyAsync(connection, closeReason, logger);
                 await registry.UnregisterAsync(identity.ConnectionId, CancellationToken.None);
             }
         }
@@ -128,6 +138,18 @@ internal static class TcpConnectionRunner {
         catch (Exception failure) {
             logger.LogWarning(failure, "Connection {ConnectionId} codec failed; closing the connection.",
                 identity?.ConnectionId ?? "(handshake)");
+        }
+    }
+
+    // Failure-isolated: a throwing OnClosedAsync must never break teardown/unregistration.
+    private static async ValueTask NotifyClosedSafelyAsync(
+        TcpClientConnection connection, Exception? reason, ILogger logger) {
+        try {
+            await connection.Protocol.OnClosedAsync(connection.Connection, reason, CancellationToken.None);
+        }
+        catch (Exception failure) {
+            logger.LogWarning(failure, "Connection {ConnectionId} codec OnClosedAsync failed.",
+                connection.Connection.ConnectionId);
         }
     }
 

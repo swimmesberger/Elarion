@@ -22,9 +22,12 @@ public sealed class TracingDecorator<TRequest, TResponse>(
     string handlerName,
     HandlerMetadata metadata
 ) : IHandler<TRequest, TResponse> {
-    // The rendered pipeline tag is constant per closed handler type, so compute it once (per this generic
-    // instantiation) and reuse it — no per-request string work. A concurrent first render is benign (same value).
-    private static string? _pipelineTag;
+    // The rendered pipeline tag is constant per HANDLER, so compute it lazily and reuse it — no per-request
+    // string work. Deliberately an instance field, not static: two handlers sharing TRequest/TResponse (e.g.
+    // two handler-form consumers of one event) share this closed generic type but have different metadata
+    // pipelines, and a static cache would report one handler's pipeline for the other. A concurrent first
+    // render is benign (same value per instance).
+    private string? _pipelineTag;
 
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {

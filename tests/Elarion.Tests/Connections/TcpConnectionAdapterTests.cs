@@ -57,6 +57,29 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     [Fact]
+    public void DelimitedFramer_WriteMessage_RejectsPayloadContainingTheEndDelimiter() {
+        var framer = new DelimitedTcpFramer(end: (byte)'\n');
+        var writer = new ArrayBufferWriter<byte>();
+        var payload = Encoding.UTF8.GetBytes("first\nsecond");
+
+        // Silently emitting the delimiter would make the peer parse one message as two — fail loud instead.
+        var write = () => framer.WriteMessage(payload, writer);
+        write.Should().Throw<ArgumentException>().WithMessage("*end delimiter*");
+        writer.WrittenCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void DelimitedFramer_WriteMessage_RejectsPayloadContainingTheStartDelimiter() {
+        var framer = new DelimitedTcpFramer(end: (byte)'>', start: (byte)'<');
+        var writer = new ArrayBufferWriter<byte>();
+        var payload = Encoding.UTF8.GetBytes("tele<gram");
+
+        var write = () => framer.WriteMessage(payload, writer);
+        write.Should().Throw<ArgumentException>().WithMessage("*start delimiter*");
+        writer.WrittenCount.Should().Be(0);
+    }
+
+    [Fact]
     public void DelimitedFramer_ConsumesNoiseEvenWithoutACompleteMessage() {
         var framer = new DelimitedTcpFramer(end: (byte)'>', start: (byte)'<');
 
@@ -178,6 +201,127 @@ public sealed class TcpConnectionAdapterTests {
 
         await pipeStream.WriteAsync(Encoding.UTF8.GetBytes("ping|"), ct);
         (await ReadUntilAsync(pipeStream, (byte)'|', ct)).Should().Be("echo:ping");
+    }
+
+    [Fact]
+    public async Task Codec_OnClosedAsync_RunsWithNullReasonOnCleanClose() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
+        var registry = provider.GetRequiredService<IClientConnectionRegistry>();
+        var handler = new ClosureRecordingHandler();
+
+        await using (var link = InMemoryTcpLink.Start(handler, registry,
+                         o => o.Framer = new DelimitedTcpFramer(end: (byte)'\n'))) {
+            (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
+            await link.Client.SendTextAsync("device:closed-1", ct);
+            (await link.Client.ReceiveTextAsync(ct)).Should().Be("welcome");
+            await link.ServerConnection.WaitAsync(ct);
+        }
+
+        // Disposing the link closes the client end: the server observes EOF — a clean close.
+        var (connection, reason) = await handler.Protocol!.Closed.Task.WaitAsync(ct);
+        connection.PrincipalId.Should().Be("closed-1");
+        reason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Codec_OnClosedAsync_ReceivesTheTerminatingFailure_AndItsOwnThrowNeverBreaksTeardown() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
+        var registry = provider.GetRequiredService<IClientConnectionRegistry>();
+        var handler = new ClosureRecordingHandler(throwOnMessage: true, throwOnClosed: true);
+
+        await using var link = InMemoryTcpLink.Start(handler, registry,
+            o => o.Framer = new DelimitedTcpFramer(end: (byte)'\n'));
+        (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
+        await link.Client.SendTextAsync("device:closed-2", ct);
+        (await link.Client.ReceiveTextAsync(ct)).Should().Be("welcome");
+        await link.ServerConnection.WaitAsync(ct);
+
+        // The codec throws on this message: the connection tears down with that failure as the reason.
+        await link.Client.SendTextAsync("boom", ct);
+        var (_, reason) = await handler.Protocol!.Closed.Task.WaitAsync(ct);
+        reason.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be("codec parse failure");
+
+        // The recording OnClosedAsync itself threw — unregistration must still complete.
+        await link.ServerCompletion.WaitAsync(ct);
+        registry.Connections.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Listener_MaxConcurrentConnections_ShedsExcessAndRecoversWhenASlotFrees() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartListenerHostAsync<ChallengeTcpHandler>(
+            ct, configure: o => o.MaxConcurrentConnections = 1);
+        using var first = await host.ConnectAsync(ct);
+        var firstStream = first.GetStream();
+        (await ReadLineAsync(firstStream, ct)).Should().Be("challenge");
+        await WriteLineAsync(firstStream, "device:cap-1", ct);
+        (await ReadLineAsync(firstStream, ct)).Should().Be("welcome");
+        await host.Observer.Connected.Task.WaitAsync(ct);
+
+        // At the cap: the next socket is accepted and immediately closed — EOF (or a reset) before any
+        // challenge, and nothing registers.
+        using (var shed = await host.ConnectAsync(ct)) {
+            string? line = null;
+            try {
+                line = await ReadLineAsync(shed.GetStream(), ct);
+            }
+            catch (IOException) {
+                // A reset instead of a graceful FIN also proves the shed.
+            }
+
+            line.Should().BeNull();
+        }
+
+        host.Registry.Connections.Should().ContainSingle();
+
+        // Freeing the slot lets the endpoint serve again (the runner-exit decrement is asynchronous, so
+        // poll until the fresh connect is served).
+        first.Close();
+        await host.Observer.Disconnected.Task.WaitAsync(ct);
+        while (true) {
+            using var retry = await host.ConnectAsync(ct);
+            string? line = null;
+            try {
+                line = await ReadLineAsync(retry.GetStream(), ct);
+            }
+            catch (IOException) {
+            }
+
+            if (line == "challenge") {
+                break;
+            }
+
+            await Task.Delay(10, ct);
+        }
+    }
+
+    [Fact]
+    public async Task DynamicEndpoints_SynchronousApplyFailure_LeavesNoZombieEntry() {
+        var ct = TestContext.Current.CancellationToken;
+        var services = new ServiceCollection();
+        services.AddElarionConnections();
+        services.AddElarionTcpConnectionEndpoints();
+        // ChallengeTcpHandler is deliberately NOT registered: the loop factory throws synchronously.
+        await using var provider = services.BuildServiceProvider();
+        var endpoints = provider.GetRequiredService<TcpConnectionEndpoints>();
+
+        try {
+            var apply = async () => await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-broken", o => {
+                o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+            }, ct);
+            await apply.Should().ThrowAsync<InvalidOperationException>();
+
+            // The failed apply left nothing behind — no entry stuck in Starting.
+            endpoints.GetStatus("bind-broken").Should().BeNull();
+            endpoints.Statuses.Should().BeEmpty();
+            endpoints.EndpointNames.Should().BeEmpty();
+        }
+        finally {
+            await ((IHostedService)endpoints).StopAsync(CancellationToken.None);
+        }
     }
 
     [Fact]
@@ -583,6 +727,51 @@ public sealed class TcpConnectionAdapterTests {
     private sealed class RecordingTcpProtocol(ChannelWriter<string> inbound) : IClientConnectionProtocol {
         public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
             inbound.WriteAsync(Encoding.UTF8.GetString(message.Span), ct);
+    }
+
+    /// <summary>Records the codec teardown signal; optionally fails on a message (to provoke a codec-fault
+    /// close) and from <c>OnClosedAsync</c> itself (to prove teardown is failure-isolated).</summary>
+    private sealed class ClosureRecordingHandler(bool throwOnMessage = false, bool throwOnClosed = false)
+        : TcpConnectionHandler {
+        public ClosureRecordingProtocol? Protocol { get; private set; }
+
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+            TcpHandshakeContext handshake, CancellationToken ct) {
+            await handshake.SendTextAsync("challenge", ct);
+            var reply = await handshake.ReceiveTextAsync(ct);
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
+                return null;
+            }
+
+            await handshake.SendTextAsync("welcome", ct);
+            return new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
+                PrincipalId = reply["device:".Length..],
+            };
+        }
+
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
+            Protocol = new ClosureRecordingProtocol(throwOnMessage, throwOnClosed);
+    }
+
+    private sealed class ClosureRecordingProtocol(bool throwOnMessage, bool throwOnClosed)
+        : IClientConnectionProtocol {
+        public TaskCompletionSource<(ClientConnection Connection, Exception? Reason)> Closed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
+            throwOnMessage
+                ? throw new InvalidOperationException("codec parse failure")
+                : ValueTask.CompletedTask;
+
+        public ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) {
+            Closed.TrySetResult((connection, reason));
+            if (throwOnClosed) {
+                throw new InvalidOperationException("teardown failure");
+            }
+
+            return ValueTask.CompletedTask;
+        }
     }
 
 }

@@ -11,6 +11,12 @@ namespace Elarion.Idempotency;
 /// constraint), and a per-entry signal lets <see cref="IdempotencyConflictBehavior.WaitThenReplay"/> callers
 /// wait for the winner. Not durable and not cross-instance — use the EF Core store for the real guarantees.
 /// </summary>
+/// <remarks>
+/// Tier delta on the <see cref="IdempotencyConflictBehavior.WaitThenReplay"/> bound: the EF/PostgreSQL tier
+/// bounds the wait via the transaction's <c>lock_timeout</c> (a <c>55P03</c> surfaces as "in progress"); this
+/// store has no database lock to time out, so it bounds the completion-signal wait itself at the same
+/// <see cref="IdempotencyTimeouts.WaitThenReplayCeiling"/> and degrades to the same "in progress" outcome.
+/// </remarks>
 internal sealed class InMemoryIdempotencyStore(
     TimeProvider timeProvider,
     ILogger<InMemoryIdempotencyStore>? logger = null) : IIdempotencyStore {
@@ -55,8 +61,15 @@ internal sealed class InMemoryIdempotencyStore(
                 return IdempotencyBeginResult.InProgress();
             }
 
-            // WaitThenReplay: block until the winner completes or abandons, then re-evaluate.
-            await existing.Signal.Task.WaitAsync(ct).ConfigureAwait(false);
+            // WaitThenReplay: block until the winner completes or abandons, then re-evaluate — bounded so a
+            // stuck winner can never pin the waiter forever (the decorator's documented 30 s ceiling).
+            try {
+                await existing.Signal.Task
+                    .WaitAsync(IdempotencyTimeouts.WaitThenReplayCeiling, timeProvider, ct)
+                    .ConfigureAwait(false);
+            } catch (TimeoutException) {
+                return IdempotencyBeginResult.InProgress();
+            }
         }
     }
 

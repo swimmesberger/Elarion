@@ -39,6 +39,7 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
             "HandlerCandidateNodes",
             "HandlerCandidates",
             "VariantContracts",
+            "NoRetryPolicies",
             "Handlers",
             "HandlerModuleAggregation");
 
@@ -53,5 +54,6 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
             Source,
             "HandlerCandidateNodes",
             "HandlerCandidates",
-            "VariantContracts");
+            "VariantContracts",
+            "NoRetryPolicies");
 }

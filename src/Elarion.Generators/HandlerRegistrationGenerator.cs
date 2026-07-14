@@ -36,6 +36,21 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
             .Select(static (groups, _) => FlattenSortedDistinct(groups))
             .WithTrackingName("VariantContracts");
 
+        // The policy names provably declared WITHOUT retry in this compilation (timeout-only, or an explicit
+        // MaxRetryAttempts = 0). ELPIPE004 skips a [Resilient] command whose policy is in this set — it can
+        // never re-run the handler. A name not in the set (retrying, declared in a referenced assembly, or
+        // registered imperatively at runtime) is conservatively treated as retrying. Collected via the
+        // attribute syntax provider so it stays incremental.
+        var noRetryPolicies = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ResiliencePolicyAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => GetPolicyRetryCandidate(ctx))
+            .Where(static candidate => candidate is not null)
+            .Collect()
+            .Select(static (candidates, _) => FlattenNoRetryPolicyNames(candidates))
+            .WithTrackingName("NoRetryPolicies");
+
         var handlerCandidates = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
@@ -51,9 +66,12 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
         var handlerProvider = handlerCandidates
             .Combine(modules)
             .Combine(variantContracts)
+            .Combine(noRetryPolicies)
             .Combine(context.CompilationProvider)
             .Select(static (source, ct) =>
-                ResolveHandlers(source.Left.Left.Left, source.Left.Left.Right, source.Left.Right, source.Right, ct))
+                ResolveHandlers(
+                    source.Left.Left.Left.Left, source.Left.Left.Left.Right, source.Left.Left.Right,
+                    source.Left.Right, source.Right, ct))
             .WithTrackingName("Handlers");
 
         context.RegisterSourceOutput(handlerProvider, static (spc, handlers) => {

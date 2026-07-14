@@ -204,6 +204,11 @@ The transaction makes the outcome paths physically asymmetric, so two thin decor
 
 - **Success** — recorded *inside* the unit of work: the row commits atomically with the business writes.
   A record can never claim an action that rolled back, and a committed action can never lose its record.
+  "Recorded" means **durably committed**: an enlisted success record only counts once its transaction
+  commits (the EF sink promotes it from a transaction interceptor at that moment). A commit-phase failure —
+  connection drop, serialization conflict — therefore falls through to the detached failure path below
+  instead of leaving no trace, while a failure *after* a successful commit (say, a cache-invalidation
+  hiccup) never fabricates a spurious failure record for an action that durably succeeded.
 - **Failure / denial** — recorded *detached* (own scope and connection): the caller's transaction is gone
   or rolling back, and the record must survive it. Denials (`Unauthorized`/`Forbidden`) are observed
   outside the authorization gate, so rejected attempts are audited too. Failure records carry the changes

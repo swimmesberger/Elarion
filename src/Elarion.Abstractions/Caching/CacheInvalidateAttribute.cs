@@ -21,8 +21,11 @@ public sealed class CacheInvalidateAttribute(params string[] tags) : Attribute {
     /// and the caller performing the mutation is usually <b>not</b> the user whose cached read must be evicted (an
     /// admin editing another user's record, for example). A <see cref="HandlerCacheScope.CurrentUser"/> default
     /// would invalidate only the mutator's own tag and leave every affected user permanently stale, so the safe
-    /// default is over-invalidation (Global). Set <see cref="HandlerCacheScope.CurrentUser"/> explicitly only for a
-    /// genuinely per-user cache the mutating caller also owns.
+    /// default is over-invalidation (Global). A <see cref="HandlerCacheScope.Global"/>-scoped invalidation evicts
+    /// the globally shared entries <b>and</b> every user's <see cref="HandlerCacheScope.CurrentUser"/>-scoped
+    /// entries for the listed tags (user-scoped entries also carry the global tag namespace precisely so this
+    /// pairing works). Set <see cref="HandlerCacheScope.CurrentUser"/> explicitly only for a genuinely per-user
+    /// cache the mutating caller also owns — it clears the invoking user's entries and nothing else.
     /// </remarks>
     public HandlerCacheScope Scope { get; init; } = HandlerCacheScope.Global;
 }

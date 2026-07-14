@@ -185,6 +185,50 @@ public sealed class PostgreSqlBlobLifecycleIntegrationTests(PostgreSqlBlobStoreF
         (await commitLifecycle.CommitAsync(blobRef, ct)).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task SaveAsync_PendingOverCommittedBlob_ThrowsAndLeavesRowCommitted() {
+        // A committed blob is already referenced by application data; a pre-upload transport re-saving
+        // its (container, name) as pending must fail loud instead of silently making the blob
+        // GC-eligible.
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        var request = NewCommittedRequest();
+        await SaveCommitted(request, ct);
+        var downgrade = request with {
+            InitialState = BlobLifecycleState.Pending,
+            ExpiresAt = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        };
+
+        await using (var context = fixture.CreateContext()) {
+            var act = async () => await CreateStore(context).SaveAsync(downgrade, new MemoryStream(Bytes(8)), ct);
+            await act.Should().ThrowAsync<InvalidOperationException>();
+        }
+
+        await using var verify = fixture.CreateContext();
+        var row = await Row(verify, request, ct);
+        row!.State.Should().Be(BlobLifecycleState.Committed);
+        row.ExpiresAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveAsync_PendingOverPendingBlob_ReplacesIt() {
+        // Re-staging an uncommitted (pending) blob under the same name stays allowed — only the
+        // committed state is protected from the downgrade.
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        var request = NewPendingRequest(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        await SavePending(request, ct);
+
+        await using (var context = fixture.CreateContext()) {
+            await CreateStore(context).SaveAsync(request, new MemoryStream(Bytes(16)), ct);
+        }
+
+        await using var verify = fixture.CreateContext();
+        var row = await Row(verify, request, ct);
+        row!.State.Should().Be(BlobLifecycleState.Pending);
+        row.Size.Should().Be(16);
+    }
+
     private async Task<BlobRef> SavePending(BlobUploadRequest request, CancellationToken ct) {
         await using var context = fixture.CreateContext();
         return await CreateStore(context).SaveAsync(request, new MemoryStream(Bytes(256)), ct);

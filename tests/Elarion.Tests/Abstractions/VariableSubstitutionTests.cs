@@ -15,6 +15,12 @@ public sealed class VariableSubstitutionTests {
     [InlineData("literal", false)]
     [InlineData("${a}x", false)]
     [InlineData("x${a}", false)]
+    // The trailing '}' must be the close of the leading "${": composites are not whole-value placeholders.
+    [InlineData("${a} }", false)]
+    [InlineData("${a}-${b}", false)]
+    [InlineData("${a}}", false)]
+    // A genuinely nested placeholder still parses as whole-value (and is then rejected as unsupported).
+    [InlineData("${a:-${b}}", true)]
     public void IsPlaceholder_DetectsWholeValuePlaceholders(string value, bool expected) {
         VariableSubstitution.IsPlaceholder(value).Should().Be(expected);
     }
@@ -54,6 +60,20 @@ public sealed class VariableSubstitutionTests {
     [Fact]
     public void Resolve_ReturnsNullWhenUnresolvedAndNoDefault() {
         VariableSubstitution.Resolve("${greeting}", Source()).Should().BeNull();
+    }
+
+    [Fact]
+    public void Resolve_PlaceholderFollowedByText_IsLiteral() {
+        // The leading "${a}" closes at index 3, so the value is a composite — it must not be resolved as a
+        // whole-value placeholder with the garbage key "a} ".
+        VariableSubstitution.Resolve("${a} }", Source(("a", "x"))).Should().Be("${a} }");
+    }
+
+    [Fact]
+    public void Resolve_MultiplePlaceholders_IsLiteralNotNestingError() {
+        // Two adjacent placeholders are an embedded template (Substitute's job), not a nested placeholder —
+        // the whole-value model passes the composite through unchanged instead of throwing FormatException.
+        VariableSubstitution.Resolve("${a}-${b}", Source(("a", "x"), ("b", "y"))).Should().Be("${a}-${b}");
     }
 
     [Theory]

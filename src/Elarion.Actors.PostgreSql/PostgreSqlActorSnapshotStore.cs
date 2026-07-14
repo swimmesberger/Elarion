@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -20,8 +21,10 @@ namespace Elarion.Actors.PostgreSql;
 /// <c>INSERT … ON CONFLICT DO NOTHING</c> (zero rows = someone else created the snapshot),
 /// replace/clear are <c>ExecuteUpdate</c>/<c>ExecuteDelete</c> guarded by the version column, so a
 /// stale activation always surfaces as <see cref="ActorSnapshotConcurrencyException"/> instead of a
-/// silent lost write. The ETag is the version rendered as invariant text. Requires PostgreSQL
-/// (the <c>ON CONFLICT</c> create shape and the <c>jsonb</c> payload column).
+/// silent lost write. The ETag is the version rendered as invariant text; create mints a
+/// lineage-unique random starting version (never <c>1</c>) so a clear + re-create can never
+/// resurrect a previously observed version — the seam's lineage-uniqueness requirement. Requires
+/// PostgreSQL (the <c>ON CONFLICT</c> create shape and the <c>jsonb</c> payload column).
 /// </remarks>
 public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
     IServiceScopeFactory scopeFactory,
@@ -58,14 +61,15 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
 
         if (expectedETag is null) {
             var sql = InsertSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildInsertSql(context), dbContext);
+            var version = MintLineageVersion();
             var inserted = await dbContext.Database
-                .ExecuteSqlRawAsync(sql, [key.ActorName, key.Key, payload, now, 1L], cancellationToken)
+                .ExecuteSqlRawAsync(sql, [key.ActorName, key.Key, payload, now, version], cancellationToken)
                 .ConfigureAwait(false);
             if (inserted == 0) {
                 throw new ActorSnapshotConcurrencyException(key, expectedETag: null);
             }
 
-            return FormatVersion(1);
+            return FormatVersion(version);
         }
 
         var expectedVersion = ParseVersion(expectedETag);
@@ -102,6 +106,19 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
         if (deleted == 0) {
             throw new ActorSnapshotConcurrencyException(key, expectedETag);
         }
+    }
+
+    // Create mints a lineage-unique starting version instead of 1: version values must never repeat
+    // across create → clear → re-create lineages of one key, otherwise a stale activation's
+    // version-guarded write could match a NEW lineage that happens to reach the same number and
+    // silently overwrite it — the ABA the seam's "no unnoticed lost write" contract forbids.
+    // CSPRNG because this is a correctness guard, not an optimization; 62 random bits leave
+    // ~4.6e18 increments of headroom before the bigint could overflow.
+    private static long MintLineageVersion() {
+        Span<byte> buffer = stackalloc byte[sizeof(long)];
+        RandomNumberGenerator.Fill(buffer);
+        var version = BitConverter.ToInt64(buffer) & (long.MaxValue >> 1);
+        return version == 0 ? 1 : version;
     }
 
     private static string FormatVersion(long version) => version.ToString(CultureInfo.InvariantCulture);

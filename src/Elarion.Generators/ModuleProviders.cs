@@ -14,6 +14,9 @@ internal static class ModuleProviders
     /// <summary>
     /// All <c>[AppModule]</c> declarations as a value-equatable array, recomputed only when an
     /// <c>[AppModule]</c> declaration changes. Replaces the full-compilation <c>ModuleScanner.Collect</c>.
+    /// Same-named duplicates are collapsed to one deterministic winner (ordinal-first by metadata name) so
+    /// every module-name-keyed emission (hint names, per-module extension methods) stays compilable; the
+    /// duplicate itself is reported once, as ELMOD006, by the manifest generator that always runs alongside.
     /// </summary>
     public static IncrementalValueProvider<EquatableArray<ModuleScanner.Module>> CollectModules(
         IncrementalGeneratorInitializationContext context) =>
@@ -25,7 +28,12 @@ internal static class ModuleProviders
             .Where(static module => module is not null)
             .Select(static (module, _) => module!)
             .Collect()
-            .Select(static (modules, _) => modules.ToEquatableArray());
+            .Select(static (modules, _) => ModuleScanner
+                .DeduplicateByName(
+                    modules.OrderBy(static m => m.Name, StringComparer.Ordinal),
+                    static m => m.Name,
+                    static m => m.MetadataName)
+                .ToEquatableArray());
 
     /// <summary>
     /// Whether the assembly opts into the given generator, projected to a <see cref="bool"/> so

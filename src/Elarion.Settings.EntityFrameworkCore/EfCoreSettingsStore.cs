@@ -40,9 +40,10 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     IEfCoreSettingsChangeNotifier changeNotifier,
     TimeProvider timeProvider) : ISettingsStore
     where TDbContext : DbContext {
-    // The INSERT statement is provider- and schema-specific (delimited identifiers, resolved column names),
-    // so it is built once per model and reused.
+    // The raw INSERT/UPDATE statements are provider- and schema-specific (delimited identifiers, resolved
+    // column names), so they are built once per model and reused.
     private static readonly ConcurrentDictionary<IModel, string> InsertSqlCache = new();
+    private static readonly ConcurrentDictionary<IModel, string> UpdateSqlCache = new();
 
     /// <inheritdoc />
     public async ValueTask<string?> GetAsync(SettingsScope scope, string key, CancellationToken cancellationToken = default) {
@@ -184,26 +185,31 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     /// Applies a last-write-wins update keyed only on <c>(Kind, Owner, Key)</c>, incrementing the version column
     /// in place. Returns the new version, or <see langword="null"/> when no row matched (a concurrent delete).
     /// </summary>
+    /// <remarks>
+    /// Increment-and-read must be a single statement: a separate <c>SELECT</c> after the <c>UPDATE</c> could
+    /// observe a concurrent writer's increment and report that writer's version as this caller's own, silently
+    /// defeating a subsequent optimistic write. <c>UPDATE … RETURNING</c> reads the row exactly as this
+    /// statement produced it.
+    /// </remarks>
     private async Task<int?> UnconditionalUpdateAsync(
         string kind, string owner, string key, string? value, DateTimeOffset now, CancellationToken cancellationToken) {
-        var updated = await dbContext.Set<Setting>()
-            .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(setting => setting.Value, value)
-                .SetProperty(setting => setting.UpdatedOnUtc, now)
-                .SetProperty(setting => setting.Version, setting => setting.Version + 1), cancellationToken)
+        var sql = UpdateSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildUpdateSql(context), dbContext);
+
+        // Same nullable-value handling as the raw INSERT path: a raw null cannot have its store type inferred
+        // from a CLR DBNull, so it goes in as an explicitly typed parameter.
+        using var parameterFactory = dbContext.Database.GetDbConnection().CreateCommand();
+        var valueParameter = parameterFactory.CreateParameter();
+        valueParameter.ParameterName = "@p_value";
+        valueParameter.DbType = DbType.String;
+        valueParameter.Value = (object?)value ?? DBNull.Value;
+
+        object[] parameters = [valueParameter, now, kind, owner, key];
+        var versions = await dbContext.Database
+            .SqlQueryRaw<int>(sql, parameters)
+            .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (updated == 0) {
-            return null;
-        }
-
-        return await dbContext.Set<Setting>()
-            .AsNoTracking()
-            .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key)
-            .Select(setting => (int?)setting.Version)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
+        return versions.Count == 0 ? null : versions[0];
     }
 
     /// <inheritdoc />
@@ -251,6 +257,29 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     }
 
     private static string BuildInsertSql(DbContext context) {
+        var (sqlHelper, table, column) = ResolveSettingTable(context);
+        return $"INSERT INTO {table} (" +
+            $"{column(nameof(Setting.Kind))}, {column(nameof(Setting.Owner))}, {column(nameof(Setting.Key))}, " +
+            $"{column(nameof(Setting.Value))}, {column(nameof(Setting.UpdatedOnUtc))}, {column(nameof(Setting.Version))}) " +
+            "VALUES ({0}, {1}, {2}, {3}, {4}, {5})";
+    }
+
+    private static string BuildUpdateSql(DbContext context) {
+        var (sqlHelper, table, column) = ResolveSettingTable(context);
+        var version = column(nameof(Setting.Version));
+
+        // RETURNING (PostgreSQL, SQLite) atomically reads back the version this statement wrote; the alias
+        // "Value" is the column name EF's scalar SqlQueryRaw<T> materializes from.
+        return $"UPDATE {table} SET " +
+            $"{column(nameof(Setting.Value))} = {{0}}, {column(nameof(Setting.UpdatedOnUtc))} = {{1}}, " +
+            $"{version} = {version} + 1 " +
+            $"WHERE {column(nameof(Setting.Kind))} = {{2}} AND {column(nameof(Setting.Owner))} = {{3}} " +
+            $"AND {column(nameof(Setting.Key))} = {{4}} " +
+            $"RETURNING {version} AS {sqlHelper.DelimitIdentifier("Value")}";
+    }
+
+    private static (ISqlGenerationHelper SqlHelper, string Table, Func<string, string> Column) ResolveSettingTable(
+        DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(Setting))
             ?? throw new InvalidOperationException(
                 "The Setting entity is not mapped. Call modelBuilder.UseElarionSettings() in OnModelCreating.");
@@ -269,10 +298,6 @@ public sealed class EfCoreSettingsStore<TDbContext>(
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
-        var table = sqlHelper.DelimitIdentifier(tableName, schema);
-        return $"INSERT INTO {table} (" +
-            $"{Column(nameof(Setting.Kind))}, {Column(nameof(Setting.Owner))}, {Column(nameof(Setting.Key))}, " +
-            $"{Column(nameof(Setting.Value))}, {Column(nameof(Setting.UpdatedOnUtc))}, {Column(nameof(Setting.Version))}) " +
-            "VALUES ({0}, {1}, {2}, {3}, {4}, {5})";
+        return (sqlHelper, sqlHelper.DelimitIdentifier(tableName, schema), Column);
     }
 }

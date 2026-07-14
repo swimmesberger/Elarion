@@ -7,6 +7,9 @@ namespace Elarion.Abstractions.Scheduling;
 /// Runtime jobs must be annotated with <see cref="ScheduledJobAttribute"/> and implement
 /// <see cref="IScheduledJob{TPayload}"/> so the source generator can emit a typed invocation
 /// descriptor. This API is in-memory only; accepted jobs do not survive process restart.
+/// A disabled scheduler (<see cref="SchedulerOptions.Enabled"/> is <see langword="false"/>) rejects
+/// every enqueue/schedule call with <see cref="InvalidOperationException"/>: its dispatch loop never
+/// runs, so accepting work would only grow the queue without bound.
 /// </remarks>
 public interface IJobScheduler {
     /// <summary>

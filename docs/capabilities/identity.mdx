@@ -28,11 +28,11 @@ web-framework dependency. In a single-project host, reference both.
 
 ```csharp
 // Program.cs
-builder.Services.AddElarionIdentity<ApplicationUser, ApplicationRole, Guid, AppDbContext>();
+builder.Services.AddElarionIdentity<ApplicationUser, ApplicationRole, AppDbContext>();
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
 ```
 
-`AddElarionIdentity<TUser, TRole, TKey, TDbContext>`:
+`AddElarionIdentity<TUser, TRole, TDbContext>`:
 
 - registers `AddIdentity<TUser, TRole>()` + `AddEntityFrameworkStores<TDbContext>()` (+ default token providers),
 - maps [`ICurrentUser`](/docs/capabilities/current-user) to the Identity claim types (`NameIdentifier`/`Email`/`Role`, overridable), and

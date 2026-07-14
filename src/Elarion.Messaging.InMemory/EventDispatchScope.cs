@@ -27,7 +27,6 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
     // Buffer high-water marks, one per active savepoint, in creation (stack) order. The interceptor callbacks
     // carry no savepoint name, so rollback/release target the top of the stack — correct for LIFO nesting.
     private readonly Stack<int> _savepointMarks = new();
-    private bool _flushed;
 
     public void Add(EventEnvelope envelope) => _buffer.Add(envelope);
 
@@ -60,7 +59,6 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
     public async ValueTask FlushAsync(CancellationToken ct = default) {
         _savepointMarks.Clear();
         if (_buffer.Count == 0) {
-            _flushed = true;
             return;
         }
 
@@ -69,7 +67,6 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
         }
 
         _buffer.Clear();
-        _flushed = true;
     }
 
     /// <summary>
@@ -80,7 +77,6 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
     public void FlushSynchronously() {
         _savepointMarks.Clear();
         if (_buffer.Count == 0) {
-            _flushed = true;
             return;
         }
 
@@ -89,23 +85,22 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
         }
 
         _buffer.Clear();
-        _flushed = true;
     }
 
     public void Discard() {
         _buffer.Clear();
         _savepointMarks.Clear();
-        _flushed = true;
     }
 
     /// <summary>
     /// Warns if the scope ends with events that were buffered but never flushed by a commit — the sign that an
     /// integration event was published in a request that never committed a transaction (no <c>SaveChanges</c>, or
     /// an <c>ExecuteUpdate</c>-only handler with no ambient transaction), which would otherwise drop the event
-    /// silently.
+    /// silently. Every flush and discard clears the buffer, so a non-empty buffer here always identifies dropped
+    /// events — even when an earlier commit in the same scope did flush (events published after it still drop).
     /// </summary>
     public void Dispose() {
-        if (_flushed || _buffer.Count == 0) {
+        if (_buffer.Count == 0) {
             return;
         }
 

@@ -49,9 +49,7 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
 
     /// <inheritdoc />
     public async Task<StagedUpload?> GetAsync(string uploadId, CancellationToken cancellationToken) {
-        var row = await dbContext.Set<StagedUploadRow>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == uploadId, cancellationToken);
+        var row = await QueryHeader(uploadId).FirstOrDefaultAsync(cancellationToken);
 
         return row is null ? null : Map(row);
     }
@@ -62,9 +60,7 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
         long offset,
         Stream chunk,
         CancellationToken cancellationToken) {
-        var row = await dbContext.Set<StagedUploadRow>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == uploadId, cancellationToken);
+        var row = await QueryHeader(uploadId).FirstOrDefaultAsync(cancellationToken);
 
         if (row is null || row.BlobId is not null || offset != row.Offset) {
             throw new StagedUploadConflictException(
@@ -245,7 +241,40 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
             $"WHERE {id} = {{2}} AND {offset} = {{3}} AND {blobId} IS NULL";
     }
 
+    // Status probes and the append pre-check read only the session header — never the staged bytea —
+    // so a HEAD/PATCH on a large in-progress upload does not re-transfer everything received so far.
+    // Only CompleteAsync materializes Data.
+    private IQueryable<StagedUploadHeader> QueryHeader(string uploadId) =>
+        dbContext.Set<StagedUploadRow>()
+            .AsNoTracking()
+            .Where(r => r.Id == uploadId)
+            .Select(r => new StagedUploadHeader(
+                r.Id, r.Length, r.Offset, r.ContentType, r.Metadata, r.OwnerId, r.ExpiresAt, r.BlobId));
+
+    /// <summary>The non-content columns of a staging row: everything a status probe or append pre-check needs.</summary>
+    private sealed record StagedUploadHeader(
+        string Id,
+        long? Length,
+        long Offset,
+        string ContentType,
+        string? Metadata,
+        string? OwnerId,
+        DateTimeOffset ExpiresAt,
+        string? BlobId);
+
     private static StagedUpload Map(StagedUploadRow row) =>
+        new() {
+            Id = row.Id,
+            Length = row.Length,
+            Offset = row.Offset,
+            ContentType = row.ContentType,
+            Metadata = row.Metadata,
+            OwnerId = row.OwnerId,
+            ExpiresAt = row.ExpiresAt,
+            BlobRef = row.BlobId is null ? null : new BlobRef { Value = row.BlobId },
+        };
+
+    private static StagedUpload Map(StagedUploadHeader row) =>
         new() {
             Id = row.Id,
             Length = row.Length,

@@ -16,17 +16,8 @@ public sealed partial class HandlerRegistrationGenerator {
         spc.AddSource(GenerateHandlerHintName(handler), SourceText.From(code, Encoding.UTF8));
     }
 
-    internal static string GenerateHandlerHintName(HandlerInfo handler) {
-        var hintName = handler.HandlerFqn
-            .Replace("global::", "")
-            .Replace(".", "_")
-            .Replace("<", "_")
-            .Replace(">", "_")
-            .Replace(",", "_")
-            .Replace(" ", "");
-
-        return $"{hintName}.g.cs";
-    }
+    internal static string GenerateHandlerHintName(HandlerInfo handler) =>
+        $"{HintNames.Sanitize(handler.HandlerFqn)}.g.cs";
 
     internal static string GenerateRegistration(HandlerInfo handler) {
         var sb = new StringBuilder();
@@ -142,7 +133,7 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     // The shared pipeline factory: builds the decorator chain once per resolution, preserving normal scoped
-    // lifetimes (Note 57). The normal registration calls it synchronously; a variant handler's async builder calls
+    // lifetimes. The normal registration calls it synchronously; a variant handler's async builder calls
     // the same method after awaiting its variant dependencies, so the chain is defined exactly once.
     private static void AppendBuildPipelineMethods(StringBuilder sb, HandlerInfo handler) {
         var ifaceFqn = $"global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}>";
@@ -233,7 +224,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private static void AppendPipelineDecorators(StringBuilder sb, ImmutableArray<DecoratorInfo> decorators) {
         for (var i = decorators.Length - 1; i >= 0; i--) {
             var dec = decorators[i];
-            // Note 58: Decorators are emitted in reverse so the first configured decorator becomes the outermost wrapper.
+            // Decorators are emitted in reverse so the first configured decorator becomes the outermost wrapper.
             var indent = "                ";
             if (dec.HasAppliesTo) {
                 // Attach only when the decorator's AppliesTo(HandlerMetadata) predicate returned true (cached above).
@@ -587,7 +578,7 @@ public sealed partial class HandlerRegistrationGenerator {
         var cacheable = handler.Cacheable!;
 
         if (cacheable.ResultValueFqn is not null) {
-            // Note 59: For Result<T>, only the success value is serialized; failures are handled by the cache layer as non-cacheable.
+            // For Result<T>, only the success value is serialized; failures are handled by the cache layer as non-cacheable.
             sb.AppendLine($"        public string Serialize({handler.ResponseFqn} response, global::System.Text.Json.JsonSerializerOptions options)");
             sb.AppendLine("        {");
             sb.AppendLine("            return global::System.Text.Json.JsonSerializer.Serialize(response.Value, options);");

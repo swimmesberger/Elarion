@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Elarion.Abstractions.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -300,6 +301,17 @@ public static class ResumableBlobUploadEndpointsExtensions {
             leaf = leaf[(slash + 1)..];
         }
 
+        // Strip control characters and double quotes: a CR/LF or quote in the stored name would later be
+        // rejected by the server when rendered into the download Content-Disposition header, leaving the
+        // blob permanently undownloadable. (Mirrored in the direct upload transport's sanitizer.)
+        var builder = new StringBuilder(leaf.Length);
+        foreach (var ch in leaf) {
+            if (!char.IsControl(ch) && ch != '"') {
+                builder.Append(ch);
+            }
+        }
+
+        leaf = builder.ToString();
         return string.IsNullOrWhiteSpace(leaf) ? "upload" : leaf;
     }
 

@@ -12,9 +12,11 @@ public sealed record SchedulerOptions {
     /// Whether the hosted scheduler loop should enqueue recurring jobs and process queued work.
     /// </summary>
     /// <remarks>
-    /// When disabled, the scheduler service starts but does not execute jobs. Runtime schedule
-    /// calls can still be accepted by the in-memory API, but they will not run until a scheduler
-    /// instance is enabled.
+    /// When disabled, the scheduler service starts but never runs anything: descriptor-declared
+    /// (recurring/startup) jobs are simply not enqueued, and the runtime
+    /// <see cref="IJobScheduler"/> enqueue/schedule APIs are rejected with
+    /// <see cref="InvalidOperationException"/> — a disabled instance can never drain its queue,
+    /// so accepting runtime work would grow it without bound.
     /// </remarks>
     public bool Enabled { get; init; } = true;
 

@@ -1,4 +1,8 @@
 using AwesomeAssertions;
+using Azure.Core;
+using Azure.Core.Pipeline;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Specialized;
 using Elarion.Blobs;
 using Elarion.Blobs.Azure;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -198,6 +202,113 @@ public sealed class AzureStagedUploadStoreIntegrationTests(AzuriteFixture fixtur
         (await store.GetAsync(expiredIncomplete.Id, ct)).Should().BeNull();
         (await store.GetAsync(reapedCompleted.Id, ct)).Should().BeNull();
         (await store.GetAsync(fresh.Id, ct)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_AppendLandingAfterSnapshot_ThrowsConflict() {
+        // A deferred-length append landing between completion's status read and the server-side copy
+        // changes the staging blob's ETag; the copy's source precondition must reject it instead of
+        // silently completing without the late bytes.
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        var staging = $"staging-{Guid.NewGuid():N}";
+        var (store, _) = CreateStores(staging);
+        var created = await store.CreateAsync(NewCreation(length: null), ct);
+        await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3]), ct);
+
+        var interceptedStore = CreateInterceptedStore(
+            staging,
+            request => request.Method == RequestMethod.Head && request.Uri.ToString().Contains(created.Id),
+            () => AppendRawByteAsync(staging, created.Id, ct));
+
+        var act = async () => await interceptedStore.CompleteAsync(created.Id, NewCompletion(), ct);
+        await act.Should().ThrowAsync<StagedUploadConflictException>();
+
+        // The session stays incomplete with every byte intact; a retry completes from a fresh snapshot.
+        var probed = await store.GetAsync(created.Id, ct);
+        probed!.BlobRef.Should().BeNull();
+        probed.Offset.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_AppendLandingAfterCopy_ThrowsConflictAndPreservesLateBytes() {
+        // A deferred-length append landing between the server-side copy and the staging blob's
+        // recreate-with-marker used to be silently destroyed by the unconditional overwrite; the ETag
+        // precondition must surface the race as a conflict and leave the late bytes in place.
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        var staging = $"staging-{Guid.NewGuid():N}";
+        var (store, _) = CreateStores(staging);
+        var created = await store.CreateAsync(NewCreation(length: null), ct);
+        await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3]), ct);
+
+        var interceptedStore = CreateInterceptedStore(
+            staging,
+            request => request.Method == RequestMethod.Put && request.Headers.TryGetValue("x-ms-copy-source", out _),
+            () => AppendRawByteAsync(staging, created.Id, ct));
+
+        var act = async () => await interceptedStore.CompleteAsync(created.Id, NewCompletion(), ct);
+        await act.Should().ThrowAsync<StagedUploadConflictException>();
+
+        var probed = await store.GetAsync(created.Id, ct);
+        probed!.BlobRef.Should().BeNull();
+        probed.Offset.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_DeleteLandingAfterCopy_ThrowsConflictInsteadOfResurrecting() {
+        // A tus DELETE landing in the same window used to be resurrected by the unconditional recreate;
+        // with the precondition the completion conflicts and the session stays gone.
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        var staging = $"staging-{Guid.NewGuid():N}";
+        var (store, _) = CreateStores(staging);
+        var created = await store.CreateAsync(NewCreation(2), ct);
+        await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2]), ct);
+
+        var interceptedStore = CreateInterceptedStore(
+            staging,
+            request => request.Method == RequestMethod.Put && request.Headers.TryGetValue("x-ms-copy-source", out _),
+            () => store.DeleteAsync(created.Id, ct));
+
+        var act = async () => await interceptedStore.CompleteAsync(created.Id, NewCompletion(), ct);
+        await act.Should().ThrowAsync<StagedUploadConflictException>();
+
+        (await store.GetAsync(created.Id, ct)).Should().BeNull();
+    }
+
+    private AzureStagedUploadStore CreateInterceptedStore(
+        string stagingContainer,
+        Func<Request, bool> trigger,
+        Func<Task> mutation) {
+        var clientOptions = new BlobClientOptions();
+        clientOptions.AddPolicy(new MutateAfterResponsePolicy(trigger, mutation), HttpPipelinePosition.PerCall);
+        var client = new BlobServiceClient(fixture.ConnectionString, clientOptions);
+        return new AzureStagedUploadStore(
+            client,
+            new AzureStagedUploadOptions { StagingContainer = stagingContainer },
+            NullLogger<AzureStagedUploadStore>.Instance);
+    }
+
+    private async Task AppendRawByteAsync(string stagingContainer, string uploadId, CancellationToken ct) =>
+        await fixture.Client.GetBlobContainerClient(stagingContainer)
+            .GetAppendBlobClient(uploadId)
+            .AppendBlockAsync(new MemoryStream([7]), cancellationToken: ct);
+
+    /// <summary>Runs a one-shot side effect after the first response matching the trigger, so a test can
+    /// deterministically interleave a concurrent mutation inside a multi-request operation.</summary>
+    private sealed class MutateAfterResponsePolicy(Func<Request, bool> trigger, Func<Task> mutation) : HttpPipelinePolicy {
+        private int _fired;
+
+        public override async ValueTask ProcessAsync(HttpMessage message, ReadOnlyMemory<HttpPipelinePolicy> pipeline) {
+            await ProcessNextAsync(message, pipeline);
+            if (trigger(message.Request) && Interlocked.Exchange(ref _fired, 1) == 0) {
+                await mutation();
+            }
+        }
+
+        public override void Process(HttpMessage message, ReadOnlyMemory<HttpPipelinePolicy> pipeline) =>
+            ProcessNext(message, pipeline);
     }
 
     private (AzureStagedUploadStore Store, AzureBlobStore BlobStore) CreateStores(string? stagingContainer = null) {

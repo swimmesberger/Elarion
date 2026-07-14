@@ -13,11 +13,14 @@ namespace Elarion.Connections.AspNetCore;
 public sealed class WebSocketClientConnection : IClientConnectionSink {
     private readonly WebSocket _socket;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly TimeSpan? _defaultInvokeTimeout;
     private IClientConnectionProtocol? _protocol;
 
-    internal WebSocketClientConnection(ClientConnection connection, WebSocket socket) {
+    internal WebSocketClientConnection(
+        ClientConnection connection, WebSocket socket, TimeSpan? defaultInvokeTimeout) {
         Connection = connection;
         _socket = socket;
+        _defaultInvokeTimeout = defaultInvokeTimeout;
     }
 
     /// <inheritdoc />
@@ -71,7 +74,8 @@ public sealed class WebSocketClientConnection : IClientConnectionSink {
         where TRequest : class {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(request);
-        return Protocol.InvokeAsync<TRequest, TResponse>(name, request, options, ct);
+        return Protocol.InvokeAsync<TRequest, TResponse>(
+            name, request, options.WithDefaultTimeout(_defaultInvokeTimeout), ct);
     }
 
     private async ValueTask SendCoreAsync(ReadOnlyMemory<byte> payload, WebSocketMessageType type, CancellationToken ct) {

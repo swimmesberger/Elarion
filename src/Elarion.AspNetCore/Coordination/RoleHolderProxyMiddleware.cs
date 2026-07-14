@@ -16,11 +16,30 @@ internal sealed class RoleHolderProxyMiddleware(
     IRoleLease lease,
     PathString[] pathPrefixes,
     HttpMessageInvoker client,
-    ILogger logger) {
+    ILogger logger,
+    TimeSpan? responseHeadersTimeout = null) {
     /// <summary>Marks a forwarded request so a mid-failover receiver answers 503 instead of re-forwarding.</summary>
     public const string ProxiedHeaderName = "Elarion-Role-Proxied";
 
-    // Hop-by-hop headers never cross a proxy (RFC 9110 §7.6.1); Host is set from the target.
+    /// <summary>
+    /// How long the proxy waits for a TCP/TLS connection to the holder. A crashed node or dropped SYNs would
+    /// otherwise hang forever (<see cref="System.Net.Http.SocketsHttpHandler.ConnectTimeout"/> defaults to
+    /// infinite) instead of answering the documented 503 + Retry-After.
+    /// </summary>
+    public static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// How long the proxy waits for the holder's response <em>headers</em> (connect + send + first response
+    /// bytes). Generous — the holder runs real handlers — but bounded, so a black-holed holder surfaces as the
+    /// documented 503 instead of an indefinite hang. Only time-to-headers is bounded; a streaming body (SSE)
+    /// flows for as long as the caller stays connected.
+    /// </summary>
+    public static readonly TimeSpan DefaultResponseHeadersTimeout = TimeSpan.FromSeconds(30);
+
+    private readonly TimeSpan _responseHeadersTimeout = responseHeadersTimeout ?? DefaultResponseHeadersTimeout;
+
+    // Hop-by-hop headers never cross a proxy (RFC 9110 §7.6.1); Host is set from the target. Headers the
+    // message's own Connection header nominates are hop-by-hop too and are stripped per message.
     private static readonly string[] HopByHopHeaders = [
         "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization",
         "Proxy-Connection", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Host"
@@ -77,8 +96,9 @@ internal sealed class RoleHolderProxyMiddleware(
             upstreamRequest.Content = new StreamContent(request.Body);
         }
 
+        var requestNominated = NominatedConnectionHeaders(request.Headers.Connection);
         foreach (var header in request.Headers) {
-            if (HopByHopHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase)) {
+            if (IsHopByHop(header.Key, requestNominated)) {
                 continue;
             }
 
@@ -90,14 +110,32 @@ internal sealed class RoleHolderProxyMiddleware(
         upstreamRequest.Headers.TryAddWithoutValidation(ProxiedHeaderName, lease.Role);
 
         HttpResponseMessage upstreamResponse;
+        // Bounds time-to-response-headers (SocketsHttpHandler has no such knob and HttpMessageInvoker no default
+        // timeout); the registration disposes with the linked source, so a long-lived streaming body is unaffected.
+        using var headersTimeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        headersTimeout.CancelAfter(_responseHeadersTimeout);
         try {
             // HttpMessageInvoker streams: the response returns after headers, bodies flow through.
-            upstreamResponse = await client.SendAsync(upstreamRequest, context.RequestAborted);
+            upstreamResponse = await client.SendAsync(upstreamRequest, headersTimeout.Token);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
             return; // the caller went away; nothing to answer
         }
+        catch (OperationCanceledException) {
+            // Our own headers deadline fired: the holder accepted (or black-holed) the connection but never
+            // answered — same bounded failure contract as an unreachable holder.
+            logger.LogWarning(
+                "Proxying to the '{Role}' role holder at {Address} timed out after {Timeout}.",
+                lease.Role, address, _responseHeadersTimeout);
+            await Reject(
+                context,
+                $"The '{lease.Role}' role holder at '{address}' did not respond within "
+                + $"{_responseHeadersTimeout.TotalSeconds:0.###} s. Retry shortly.");
+            return;
+        }
         catch (HttpRequestException ex) {
+            // Covers connection failures including SocketsHttpHandler's ConnectTimeout (a crashed node or
+            // dropped SYNs no longer hangs — the handler is configured with DefaultConnectTimeout).
             logger.LogWarning(
                 ex, "Proxying to the '{Role}' role holder at {Address} failed.", lease.Role, address);
             await Reject(
@@ -109,8 +147,11 @@ internal sealed class RoleHolderProxyMiddleware(
 
         using (upstreamResponse) {
             context.Response.StatusCode = (int)upstreamResponse.StatusCode;
+            var responseNominated = upstreamResponse.Headers.TryGetValues("Connection", out var connectionValues)
+                ? NominatedConnectionHeaders(connectionValues)
+                : null;
             foreach (var header in upstreamResponse.Headers.Concat(upstreamResponse.Content.Headers)) {
-                if (!HopByHopHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase)) {
+                if (!IsHopByHop(header.Key, responseNominated)) {
                     context.Response.Headers[header.Key] = header.Value.ToArray();
                 }
             }
@@ -130,6 +171,31 @@ internal sealed class RoleHolderProxyMiddleware(
                 // The caller disconnected mid-stream (normal for SSE); stop copying.
             }
         }
+    }
+
+    private static bool IsHopByHop(string name, HashSet<string>? nominated) =>
+        HopByHopHeaders.Contains(name, StringComparer.OrdinalIgnoreCase)
+        || nominated?.Contains(name) == true;
+
+    // RFC 9110 §7.6.1: the Connection header nominates additional per-message hop-by-hop headers; an
+    // intermediary must strip the nominated headers along with Connection itself.
+    private static HashSet<string>? NominatedConnectionHeaders(IEnumerable<string?> connectionValues) {
+        HashSet<string>? nominated = null;
+        foreach (var value in connectionValues) {
+            if (string.IsNullOrEmpty(value)) {
+                continue;
+            }
+
+            foreach (var token in value.Split(',')) {
+                var name = token.Trim();
+                if (name.Length > 0) {
+                    nominated ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    nominated.Add(name);
+                }
+            }
+        }
+
+        return nominated;
     }
 
     private static async Task Reject(HttpContext context, string message) {

@@ -14,4 +14,13 @@ public sealed class PostgreSqlClientEventOptions {
 
     /// <summary>The cap for the exponential reconnect backoff. Defaults to 30 seconds.</summary>
     public TimeSpan MaxReconnectDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long the listener waits for a notification before probing the connection with a cheap round-trip
+    /// (<c>SELECT 1</c>). A half-open TCP connection — a NAT idle timeout or a failover that never sends a
+    /// FIN/RST — neither delivers notifications nor surfaces an error, so an unbounded wait would leave the
+    /// node silently deaf forever; the probe makes such a connection throw and fall into the normal
+    /// reconnect path. Defaults to 30 seconds.
+    /// </summary>
+    public TimeSpan ConnectionProbeInterval { get; set; } = TimeSpan.FromSeconds(30);
 }

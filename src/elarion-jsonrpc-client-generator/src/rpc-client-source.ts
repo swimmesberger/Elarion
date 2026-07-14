@@ -346,7 +346,8 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '  }',
     '',
     '  function parseResult<M extends RpcMethod>(method: M, result: unknown): RpcResult<M> {',
-    '    const transformed = options.transformResult?.(method, result) ?? result',
+    '    // A transform returning null/undefined is a legitimate result — never ??-fallback to the raw value.',
+    '    const transformed = options.transformResult ? options.transformResult(method, result) : result',
     '    if (!validateResults) {',
     '      return transformed as RpcResult<M>',
     '    }',
@@ -371,6 +372,12 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '      try {',
     '        const raw = await post(request, context, requestOptions, span)',
     '        const response = parseResponseEnvelope(raw)',
+    '        // A spec-compliant server reports request-level failures (e.g. parse errors) with "id": null —',
+    '        // surface the server error instead of a generic id-mismatch protocol error.',
+    '        if (response.error && (response.id === null || response.id === undefined)) {',
+    '          throw toRpcError(response.error)',
+    '        }',
+    '',
     '        if (!idsEqual(response.id, request.id)) {',
     "          throw new RpcProtocolError('JSON-RPC response id does not match request id.')",
     '        }',
@@ -432,6 +439,11 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '        const raw = await post(requests, context, requestOptions, span)',
     '',
     '        if (!Array.isArray(raw)) {',
+    '          // JSON-RPC 2.0: a whole-batch failure (invalid JSON, batch too large, ...) is a single error',
+    '          // response object — surface the server error instead of a generic protocol error.',
+    '          if (isRecord(raw) && isJsonRpcErrorObject(raw.error)) {',
+    '            throw toRpcError(raw.error)',
+    '          }',
     "          throw new RpcProtocolError('Expected JSON-RPC batch response array.')",
     '        }',
     '',
@@ -679,7 +691,8 @@ function generateApiTypeLines(methodTree: MethodTreeNode): string[] {
 function emitProperties(node: MethodTreeNode, endpointType: string, indent: number): string[] {
   const pad = '  '.repeat(indent)
   return Array.from(node.children.entries())
-    .sort(([left], [right]) => left.localeCompare(right))
+    // Code-unit comparison, never localeCompare: output must be byte-identical regardless of host locale.
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([segment, child]) => {
       return `${pad}readonly ${JSON.stringify(segment)}: ${emitNodeType(child, endpointType, indent)}`
     })

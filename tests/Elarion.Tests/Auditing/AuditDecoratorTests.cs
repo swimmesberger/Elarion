@@ -168,6 +168,52 @@ public sealed class AuditDecoratorTests {
     }
 
     [Fact]
+    public async Task CommitPhaseFailure_WritesTheDetachedFailedRecord_BecauseTheEnlistedRecordNeverBecameDurable() {
+        // Chain shaped like the generated pipeline: outer audit → transaction → inner commit → handler. The
+        // sink enlists the success record; the transaction then fails at COMMIT, so the enlisted write is
+        // rolled back and "Recorded" must never have become true — the detached Failed record is the trace.
+        var scope = new AuditScope();
+        var trail = new RecordingAuditTrail { Durability = AuditRecordDurability.EnlistedInTransaction };
+        var commit = new AuditCommitDecorator<TestCommand, Result<string>>(
+            new StubHandler(_ => Result<string>.Success("ok")), scope, trail);
+        var failingTransaction = new DelegatingDecorator(commit, afterInner: _ => throw new InvalidOperationException("commit lost"));
+        var metadata = new HandlerMetadata(typeof(PlainHandler), typeof(TestCommand), typeof(Result<string>));
+        var outer = new AuditDecorator<TestCommand, Result<string>>(
+            failingTransaction, metadata, "sales.createOrder", "Sales", scope, trail, currentUser: null);
+
+        var act = async () => await outer.HandleAsync(new TestCommand(), Ct);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("commit lost");
+        trail.Records.Should().HaveCount(2);
+        trail.Records[0].Detached.Should().BeFalse(); // The enlisted success write, rolled back with the tx.
+        trail.Records[1].Detached.Should().BeTrue();
+        trail.Records[1].Record.Outcome.Should().Be(AuditOutcome.Failed);
+        trail.Records[1].Record.ErrorKind.Should().Be(nameof(ErrorKind.Internal));
+    }
+
+    [Fact]
+    public async Task PostCommitFailure_AfterTheRecordBecameDurable_WritesNoSpuriousDetachedRecord() {
+        // A later decorator (e.g. cache invalidation) throwing AFTER a successful commit: the durability
+        // callback already promoted the pending mark, so the outer decorator records nothing extra.
+        var scope = new AuditScope();
+        var trail = new RecordingAuditTrail { Durability = AuditRecordDurability.EnlistedInTransaction };
+        var commit = new AuditCommitDecorator<TestCommand, Result<string>>(
+            new StubHandler(_ => Result<string>.Success("ok")), scope, trail);
+        // Simulates the transaction decorator plus the EF durability callback: commit succeeded → promote.
+        var committingTransaction = new DelegatingDecorator(commit, afterInner: _ => scope.MarkRecorded());
+        var postCommitFailure = new DelegatingDecorator(committingTransaction, afterInner: _ => throw new TimeoutException("cache down"));
+        var metadata = new HandlerMetadata(typeof(PlainHandler), typeof(TestCommand), typeof(Result<string>));
+        var outer = new AuditDecorator<TestCommand, Result<string>>(
+            postCommitFailure, metadata, "sales.createOrder", "Sales", scope, trail, currentUser: null);
+
+        var act = async () => await outer.HandleAsync(new TestCommand(), Ct);
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        trail.Records.Should().ContainSingle().Which.Detached.Should().BeFalse();
+        trail.Records[0].Record.Outcome.Should().Be(AuditOutcome.Succeeded);
+    }
+
+    [Fact]
     public async Task NestedAuditedInvocations_RecordIndependently() {
         var scope = new AuditScope();
         var trail = new RecordingAuditTrail();
@@ -197,6 +243,36 @@ public sealed class AuditDecoratorTests {
         trail.Records[0].Record.ResourceType.Should().Be("child");
         trail.Records[1].Record.Action.Should().Be("sales.parent");
         trail.Records[1].Record.ResourceType.Should().Be("parent");
+    }
+
+    [Fact]
+    public async Task DetachedWriteFailure_DoesNotMask_TheHandlersOriginalException() {
+        var scope = new AuditScope();
+        var metadata = new HandlerMetadata(typeof(PlainHandler), typeof(TestCommand), typeof(Result<string>));
+        var outer = new AuditDecorator<TestCommand, Result<string>>(
+            new StubHandler(_ => throw new InvalidOperationException("business boom")),
+            metadata, "sales.createOrder", "Sales", scope, new ThrowingAuditTrail(), currentUser: null);
+
+        var act = async () => await outer.HandleAsync(new TestCommand(), Ct);
+
+        // The audit sink's failure must not replace the handler's exception.
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("business boom");
+    }
+
+    [Fact]
+    public async Task DetachedWriteFailure_DoesNotTurn_AFailedResultIntoAnException() {
+        var scope = new AuditScope();
+        var metadata = new HandlerMetadata(typeof(PlainHandler), typeof(TestCommand), typeof(Result<string>));
+        var outer = new AuditDecorator<TestCommand, Result<string>>(
+            new StubHandler(_ => Result<string>.Failure(AppError.BusinessRule("domain no"))),
+            metadata, "sales.createOrder", "Sales", scope, new ThrowingAuditTrail(), currentUser: null);
+
+        var result = await outer.HandleAsync(new TestCommand(), Ct);
+
+        // The domain failure (a 4xx shape) must be returned unchanged, never escalated to a 500.
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Kind.Should().Be(ErrorKind.BusinessRule);
+        result.Error.Message.Should().Be("domain no");
     }
 
     [Fact]
@@ -230,6 +306,18 @@ public sealed class AuditDecoratorTests {
             ValueTask.FromResult(respond(request));
     }
 
+    /// <summary>Runs the inner handler, then a side effect — the building block for commit/post-commit shapes.</summary>
+    private sealed class DelegatingDecorator(
+        IHandler<TestCommand, Result<string>> inner,
+        Action<Result<string>> afterInner
+    ) : IHandler<TestCommand, Result<string>> {
+        public async ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) {
+            var response = await inner.HandleAsync(request, ct);
+            afterInner(response);
+            return response;
+        }
+    }
+
     private sealed class RetryOnceDecorator(IHandler<TestCommand, Result<string>> inner)
         : IHandler<TestCommand, Result<string>> {
         public async ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) {
@@ -247,12 +335,24 @@ public sealed class AuditDecoratorTests {
         public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) => default;
     }
 
+    private sealed class ThrowingAuditTrail : IAuditTrail {
+        public ValueTask<AuditRecordDurability> RecordAsync(
+            Func<AuditRecord> buildRecord, CancellationToken cancellationToken) =>
+            throw new TimeoutException("audit sink down");
+
+        public ValueTask RecordDetachedAsync(AuditRecord record, CancellationToken cancellationToken) =>
+            throw new TimeoutException("audit sink down");
+    }
+
     private sealed class RecordingAuditTrail : IAuditTrail {
+        public AuditRecordDurability Durability { get; init; } = AuditRecordDurability.Durable;
+
         public List<(AuditRecord Record, bool Detached)> Records { get; } = [];
 
-        public ValueTask RecordAsync(Func<AuditRecord> buildRecord, CancellationToken cancellationToken) {
+        public ValueTask<AuditRecordDurability> RecordAsync(
+            Func<AuditRecord> buildRecord, CancellationToken cancellationToken) {
             Records.Add((buildRecord(), false));
-            return default;
+            return ValueTask.FromResult(Durability);
         }
 
         public ValueTask RecordDetachedAsync(AuditRecord record, CancellationToken cancellationToken) {

@@ -78,6 +78,32 @@ public sealed class ActorSystemTests {
     }
 
     [Fact]
+    public async Task ForeignOperationCanceledException_FaultsTheCall_InsteadOfMasqueradingAsCanceled() {
+        await using var provider = CreateProvider();
+        var thrower = provider.GetRequiredService<IActorSystem>().Get<IThrower>("t");
+
+        var call = thrower.BoomWithForeignCancellation(TestToken).AsTask();
+        var act = async () => await call.WaitAsync(WaitTimeout, TestToken);
+        await act.Should().ThrowAsync<OperationCanceledException>().WithMessage("foreign timeout*");
+
+        // Nothing of ours was cancelled (an HttpClient-internal timeout OCE is the archetype), so
+        // the call must surface as a fault with actor-side provenance — not benign cancellation.
+        call.IsFaulted.Should().BeTrue();
+        call.IsCanceled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ThrowingRecycleOverride_DoesNotKillTheMailbox() {
+        await using var provider = CreateProvider();
+        var probe = provider.GetRequiredService<IActorSystem>().Get<IRecycleProbe>("r");
+
+        (await probe.Increment(TestToken)).Should().Be(1);
+        // A Recycle escaping into the pump would tear the activation down between calls; the
+        // preserved in-memory count proves the same activation kept serving.
+        (await probe.Increment(TestToken)).Should().Be(2);
+    }
+
+    [Fact]
     public async Task CallerCancellation_WhileQueued_SkipsExecution() {
         await using var provider = CreateProvider();
         var actors = provider.GetRequiredService<IActorSystem>();
@@ -316,6 +342,48 @@ public sealed class ActorSystemTests {
     }
 
     [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task Shutdown_RacingFirstCalls_NeverLeaksALiveActivation() {
+        // TOCTOU guard: a caller past the _stopping pre-check may GetOrAdd + start a fresh
+        // activation after StopAsync snapshotted the cell map — that cell would escape the drain
+        // fan-out. The enqueue path re-checks and drains such a cell itself, so once StopAsync and
+        // every caller have settled, no activation (and no DI scope) may still be alive.
+        const int rounds = 150;
+        for (var round = 0; round < rounds; round++) {
+            var services = new ServiceCollection();
+            services.AddSingleton<TimeProvider>(TimeProvider.System);
+            var recorder = new LifecycleRecorder();
+            services.AddSingleton(recorder);
+            services.AddElarionActorSystem();
+            services.AddElarionActor(new ActorRegistration<CounterActor, string, ICounter> {
+                Name = "Counter",
+                Options = new ActorOptions(),
+                Activator = static (sp, context) => new CounterActor(context, sp.GetRequiredService<LifecycleRecorder>()),
+                Facade = static handle => new CounterFacade(handle)
+            });
+            await using var provider = services.BuildServiceProvider();
+            var actors = provider.GetRequiredService<IActorSystem>();
+            var hostedService = provider.GetServices<IHostedService>().Single();
+
+            var calls = Enumerable.Range(0, 4).Select(i => Task.Run(async () => {
+                try {
+                    await actors.Get<ICounter>("k" + i).Increment(TestToken);
+                }
+                catch (InvalidOperationException) {
+                    // The system was stopping: the call was rejected, and any freshly created
+                    // activation was drained before the rejection surfaced.
+                }
+            }, TestToken)).ToArray();
+            var stop = hostedService.StopAsync(CancellationToken.None);
+            await Task.WhenAll(calls).WaitAsync(WaitTimeout, TestToken);
+            await stop.WaitAsync(WaitTimeout, TestToken);
+
+            recorder.Activations.Should().Be(
+                recorder.Deactivations, $"no activation may outlive shutdown (round {round})");
+        }
+    }
+
+    [Fact]
     public async Task Activation_ResolvesDependenciesFromOwnScope() {
         await using var provider = CreateProvider();
         var actors = provider.GetRequiredService<IActorSystem>();
@@ -381,6 +449,12 @@ public sealed class ActorSystemTests {
             Options = new ActorOptions(),
             Activator = static (_, _) => new PooledEchoActor(),
             Facade = static handle => new PooledEchoFacade(handle)
+        });
+        services.AddElarionActor(new ActorRegistration<RecycleProbeActor, string, IRecycleProbe> {
+            Name = "RecycleProbe",
+            Options = new ActorOptions(),
+            Activator = static (_, _) => new RecycleProbeActor(),
+            Facade = static handle => new RecycleProbeFacade(handle)
         });
         return services.BuildServiceProvider();
     }
@@ -610,10 +684,11 @@ public sealed class ActorSystemTests {
         }
     }
 
-    // --- Thrower (stack-trace probe) ---
+    // --- Thrower (stack-trace / cancellation-attribution probe) ---
 
     public interface IThrower : IActorFacade<string> {
         ValueTask Boom(CancellationToken cancellationToken = default);
+        ValueTask BoomWithForeignCancellation(CancellationToken cancellationToken = default);
     }
 
     public sealed class ThrowerActor {
@@ -621,11 +696,23 @@ public sealed class ActorSystemTests {
             await Task.Yield();
             throw new InvalidOperationException("boom");
         }
+
+        public async Task BoomWithForeignCancellation() {
+            await Task.Yield();
+            // An OCE carrying a token unrelated to the invocation (e.g. HttpClient's internal
+            // timeout source): a real fault, not a cancellation of this call.
+            using var foreignSource = new CancellationTokenSource();
+            foreignSource.Cancel();
+            throw new OperationCanceledException("foreign timeout", foreignSource.Token);
+        }
     }
 
     private sealed class ThrowerFacade(ActorHandle<ThrowerActor> handle) : IThrower {
         public ValueTask Boom(CancellationToken cancellationToken = default) =>
             handle.InvokeAsync(new BoomItem(), cancellationToken);
+
+        public ValueTask BoomWithForeignCancellation(CancellationToken cancellationToken = default) =>
+            handle.InvokeAsync(new BoomWithForeignCancellationItem(), cancellationToken);
 
         private sealed class BoomItem : ActorWorkItem<ThrowerActor, Unit> {
             public override string MethodName => "Boom";
@@ -634,6 +721,43 @@ public sealed class ActorSystemTests {
                 await actor.Boom().ConfigureAwait(false);
                 return Unit.Value;
             }
+        }
+
+        private sealed class BoomWithForeignCancellationItem : ActorWorkItem<ThrowerActor, Unit> {
+            public override string MethodName => "BoomWithForeignCancellation";
+
+            protected override async ValueTask<Unit> InvokeAsync(ThrowerActor actor, CancellationToken cancellationToken) {
+                await actor.BoomWithForeignCancellation().ConfigureAwait(false);
+                return Unit.Value;
+            }
+        }
+    }
+
+    // --- Recycle probe (a pooling subclass whose Recycle throws) ---
+
+    public interface IRecycleProbe : IActorFacade<string> {
+        ValueTask<int> Increment(CancellationToken cancellationToken = default);
+    }
+
+    public sealed class RecycleProbeActor {
+        private int _count;
+
+        public Task<int> Increment() => Task.FromResult(++_count);
+    }
+
+    private sealed class RecycleProbeFacade(ActorHandle<RecycleProbeActor> handle) : IRecycleProbe {
+        public ValueTask<int> Increment(CancellationToken cancellationToken = default) =>
+            handle.InvokeAsync(new ThrowingRecycleItem(), cancellationToken);
+
+        // A buggy pooling subclass: the runtime must swallow the Recycle failure (the item is
+        // simply not pooled) instead of letting it escape into the cell's pump loop.
+        private sealed class ThrowingRecycleItem : ActorWorkItem<RecycleProbeActor, int> {
+            public override string MethodName => "Increment";
+
+            protected override void Recycle() => throw new InvalidOperationException("recycle boom");
+
+            protected override async ValueTask<int> InvokeAsync(RecycleProbeActor actor, CancellationToken cancellationToken) =>
+                await actor.Increment().ConfigureAwait(false);
         }
     }
 

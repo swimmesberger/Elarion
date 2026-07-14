@@ -361,6 +361,65 @@ public sealed class OutboxDeliveryServiceTests
         store.Processed.Should().ContainSingle().Which.Id.Should().Be(id);
     }
 
+    [Fact]
+    public async Task RetentionPurge_RunsOncePerPurgeInterval_NotEveryIdlePoll()
+    {
+        var store = new FakeOutboxStore();
+        var timeProvider = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-02T03:04:05Z"));
+        var options = new OutboxOptions
+        {
+            PollingInterval = TimeSpan.FromSeconds(1),
+            PurgeInterval = TimeSpan.FromHours(1)
+        };
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IOutboxStore>(store);
+        await using var provider = services.BuildServiceProvider();
+        var dispatcher = new OutboxEventDispatcher(
+            [], options, OutboxTestJson.Instance, NullLogger<OutboxEventDispatcher>.Instance);
+        var service = new OutboxDeliveryService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            dispatcher,
+            options,
+            timeProvider,
+            NullLogger<OutboxDeliveryService>.Instance);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+
+        // Several idle polls inside the purge interval: cycles run (claims observed) but no purge fires.
+        await WaitUntilAsync(() => store.ClaimCalls >= 1);
+        for (var i = 0; i < 3; i++)
+        {
+            var nextClaim = store.ClaimCalls + 1;
+            timeProvider.Advance(options.PollingInterval);
+            await WaitUntilAsync(() => store.ClaimCalls >= nextClaim);
+        }
+
+        store.PurgeCalls.Should().Be(0);
+
+        // Crossing the purge interval runs exactly one purge.
+        timeProvider.Advance(options.PurgeInterval);
+        await WaitUntilAsync(() => store.PurgeCalls >= 1);
+
+        // The next idle poll after a purge stays purge-free until another interval elapses.
+        var claimsAfterPurge = store.ClaimCalls + 1;
+        timeProvider.Advance(options.PollingInterval);
+        await WaitUntilAsync(() => store.ClaimCalls >= claimsAfterPurge);
+        store.PurgeCalls.Should().Be(1);
+
+        await service.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        while (!condition())
+        {
+            await Task.Delay(10, cts.Token);
+        }
+    }
+
     private static async Task RunUntilSignaledAsync(
         FakeOutboxStore store,
         OutboxOptions options,
@@ -468,6 +527,15 @@ internal sealed class FakeOutboxStore : IOutboxStore
     /// <summary>When <see langword="false"/>, every finalize call reports the lease was lost (returns false).</summary>
     public bool FinalizeSucceeds { get; init; } = true;
 
+    private int _claimCalls;
+    private int _purgeCalls;
+
+    /// <summary>How many claim polls the delivery worker has run.</summary>
+    public int ClaimCalls => Volatile.Read(ref _claimCalls);
+
+    /// <summary>How many retention purges the delivery worker has run.</summary>
+    public int PurgeCalls => Volatile.Read(ref _purgeCalls);
+
     public void Append(OutboxMessage message) => Appended.Add(message);
 
     public ValueTask<IReadOnlyList<OutboxMessage>> ClaimPendingAsync(
@@ -477,6 +545,7 @@ internal sealed class FakeOutboxStore : IOutboxStore
         CancellationToken ct)
     {
         LastLockId = lockId;
+        Interlocked.Increment(ref _claimCalls);
         return ValueTask.FromResult(Pending.Count > 0 ? Pending.Dequeue() : (IReadOnlyList<OutboxMessage>)[]);
     }
 
@@ -518,8 +587,11 @@ internal sealed class FakeOutboxStore : IOutboxStore
         return ValueTask.FromResult(FinalizeSucceeds);
     }
 
-    public ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) =>
-        ValueTask.FromResult(0);
+    public ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct)
+    {
+        Interlocked.Increment(ref _purgeCalls);
+        return ValueTask.FromResult(0);
+    }
 }
 
 internal sealed class EmptyProvider : IServiceProvider

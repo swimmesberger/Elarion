@@ -50,6 +50,12 @@ public sealed record ClientConnection {
     /// visualization, logging — each register as their own connection under the device's id).
     /// <see langword="null"/> when the link has no stable identity.
     /// </summary>
+    /// <remarks>
+    /// User ids and device ids share this <b>one namespace</b> — the registry indexes on the string alone.
+    /// A custom device-id scheme must therefore never be able to produce a value that collides with a user
+    /// id (a collision would let a device's connections be addressed as that user, and vice versa); the
+    /// default minted v7-GUID device ids are safe by construction.
+    /// </remarks>
     public string? PrincipalId { get; init; }
 
     /// <summary>When the connection was established.</summary>

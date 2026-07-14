@@ -164,7 +164,10 @@ One EF-mapped table on the app's existing Postgres, following the established EF
 - Writes are change-tracker-free and version-guarded: create is `INSERT … ON CONFLICT DO NOTHING` (zero
   rows → concurrency conflict, and the `ON CONFLICT` form never poisons an outer transaction), replace is
   `ExecuteUpdate … WHERE version = expected`, clear is `ExecuteDelete … WHERE version = expected`. ETag =
-  the version rendered as invariant text, starting at 1.
+  the version rendered as invariant text. Create mints a **lineage-unique random starting version**
+  (not 1): version values never repeat across create → clear → re-create lineages of one key, so a
+  stale activation's version-guarded write can never silently match a new lineage (the ABA guard —
+  every `IActorSnapshotStore` implementation must uphold this, see the seam's XML docs).
 
 ### What was considered and rejected
 

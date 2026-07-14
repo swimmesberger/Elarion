@@ -11,9 +11,10 @@ namespace Elarion.Auditing;
 /// </summary>
 /// <remarks>
 /// The lifecycle members (<see cref="Begin"/>/<see cref="End"/>/<see cref="BeginAttempt"/>/
-/// <see cref="BuildRecord"/>/<see cref="MarkRecorded"/>) are called by the framework's audit decorators —
-/// application code only ever uses the <see cref="IAuditScope"/> surface. Not thread-safe: like the rest of
-/// the per-invocation pipeline state it is written sequentially by one logical request.
+/// <see cref="BuildRecord"/>/<see cref="MarkRecordPending"/>/<see cref="MarkRecorded"/>) are called by the
+/// framework's audit decorators and the sink's durability callback — application code only ever uses the
+/// <see cref="IAuditScope"/> surface. Not thread-safe: like the rest of the per-invocation pipeline state it
+/// is written sequentially by one logical request.
 /// </remarks>
 public sealed class AuditScope(TimeProvider? timeProvider = null) : IAuditScope {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -22,8 +23,19 @@ public sealed class AuditScope(TimeProvider? timeProvider = null) : IAuditScope 
     /// <inheritdoc />
     public bool IsActive => _frames.Count > 0;
 
-    /// <summary>Whether the current invocation's record was already written (by the inner success recorder).</summary>
+    /// <summary>
+    /// Whether the current invocation's record is already <b>durable</b>: written by the inner success
+    /// recorder and, when it enlisted in the ambient transaction, committed with it. Only then does the outer
+    /// decorator skip the detached failure record.
+    /// </summary>
     public bool Recorded => _frames.TryPeek(out var frame) && frame.Recorded;
+
+    /// <summary>
+    /// Whether the current invocation's success record is enlisted in the ambient transaction and awaiting
+    /// durability. The sink's durability callback (the EF transaction interceptor) promotes it to
+    /// <see cref="Recorded"/> once the commit succeeds.
+    /// </summary>
+    public bool RecordPending => _frames.TryPeek(out var frame) && frame.RecordPending;
 
     /// <summary>Opens a frame for one audited handler invocation. Called by the outer audit decorator.</summary>
     public void Begin(string action, string? module, string? userId, string? defaultResourceType) =>
@@ -48,16 +60,31 @@ public sealed class AuditScope(TimeProvider? timeProvider = null) : IAuditScope 
 
         frame.Changes.Clear();
         frame.Details.Clear();
+        frame.RecordPending = false;
         frame.ResourceType = null;
         frame.ResourceId = null;
         frame.ParentResourceType = null;
         frame.ParentResourceId = null;
     }
 
-    /// <summary>Marks the current invocation's record as written, so the outer decorator does not record again.</summary>
-    public void MarkRecorded() {
+    /// <summary>
+    /// Marks the current invocation's success record as enlisted in the ambient transaction: written, but
+    /// durable only once that transaction commits. The sink's durability callback promotes it via
+    /// <see cref="MarkRecorded"/>; if the commit fails the mark is simply never promoted, so the outer
+    /// decorator still records the commit-phase failure on the detached path.
+    /// </summary>
+    public void MarkRecordPending() {
         if (_frames.TryPeek(out var frame))
-            frame.Recorded = true;
+            frame.RecordPending = true;
+    }
+
+    /// <summary>Marks the current invocation's record as durably written, so the outer decorator does not record again.</summary>
+    public void MarkRecorded() {
+        if (!_frames.TryPeek(out var frame))
+            return;
+
+        frame.RecordPending = false;
+        frame.Recorded = true;
     }
 
     /// <summary>Drains the current frame into a record. The frame stays open (End closes it).</summary>
@@ -119,6 +146,7 @@ public sealed class AuditScope(TimeProvider? timeProvider = null) : IAuditScope 
         public string? ParentResourceType { get; set; }
         public string? ParentResourceId { get; set; }
         public bool Recorded { get; set; }
+        public bool RecordPending { get; set; }
         public List<AuditChange> Changes { get; } = [];
         public Dictionary<string, string> Details { get; } = new(StringComparer.Ordinal);
     }

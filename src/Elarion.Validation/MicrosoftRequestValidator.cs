@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text;
 using System.Text.Json;
 using Elarion.Abstractions.Serialization;
 using Elarion.Abstractions.Validation;
@@ -48,7 +49,12 @@ public sealed class MicrosoftRequestValidator(
         var namingPolicy = jsonSerialization.Options.PropertyNamingPolicy;
         var fieldErrors = new Dictionary<string, string[]>(errors.Count, StringComparer.Ordinal);
         foreach (var (path, messages) in errors) {
-            fieldErrors[TranslatePath(path, namingPolicy)] = messages;
+            // Two CLR paths can collide on one wire path (e.g. "Name" and "name" both camelCase to "name");
+            // merge rather than overwrite so no violation is silently dropped.
+            var wirePath = TranslatePath(path, namingPolicy);
+            fieldErrors[wirePath] = fieldErrors.TryGetValue(wirePath, out var existing)
+                ? [.. existing, .. messages]
+                : messages;
         }
 
         return new RequestValidationErrors { FieldErrors = fieldErrors };
@@ -57,27 +63,45 @@ public sealed class MicrosoftRequestValidator(
     /// <summary>
     /// Translates a CLR property path (e.g. <c>"Address.Street"</c>, <c>"Items[0].Name"</c>) into its wire-named
     /// form by converting each segment's property-name part through <paramref name="namingPolicy"/>, preserving
-    /// indexer suffixes. A <see langword="null"/> policy leaves the path unchanged.
+    /// indexer contents verbatim — a dictionary key inside <c>[...]</c> may itself contain dots (e.g.
+    /// <c>"Items[My.Key].Name"</c>) and must never be split or case-converted. A <see langword="null"/> policy
+    /// leaves the path unchanged.
     /// </summary>
     private static string TranslatePath(string path, JsonNamingPolicy? namingPolicy) {
         if (namingPolicy is null || path.Length == 0) {
             return path;
         }
 
-        var segments = path.Split('.');
-        for (var i = 0; i < segments.Length; i++) {
-            var segment = segments[i];
-            var bracket = segment.IndexOf('[');
-            var name = bracket < 0 ? segment : segment[..bracket];
-            if (name.Length == 0) {
-                continue;
+        var builder = new StringBuilder(path.Length);
+        var index = 0;
+        while (index < path.Length) {
+            var nameStart = index;
+            while (index < path.Length && path[index] != '.' && path[index] != '[') {
+                index++;
             }
 
-            segments[i] = bracket < 0
-                ? namingPolicy.ConvertName(name)
-                : namingPolicy.ConvertName(name) + segment[bracket..];
+            if (index > nameStart) {
+                builder.Append(namingPolicy.ConvertName(path[nameStart..index]));
+            }
+
+            while (index < path.Length && path[index] == '[') {
+                var close = path.IndexOf(']', index);
+                if (close < 0) {
+                    // Unterminated indexer: emit the remainder verbatim rather than mangling it.
+                    builder.Append(path, index, path.Length - index);
+                    return builder.ToString();
+                }
+
+                builder.Append(path, index, close - index + 1);
+                index = close + 1;
+            }
+
+            if (index < path.Length && path[index] == '.') {
+                builder.Append('.');
+                index++;
+            }
         }
 
-        return string.Join('.', segments);
+        return builder.ToString();
     }
 }

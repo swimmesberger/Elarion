@@ -41,7 +41,7 @@ Read by `AddElarionScheduler(IConfiguration)`:
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `Scheduler:Enabled` | `true` | Master switch for the in-memory scheduler. |
+| `Scheduler:Enabled` | `true` | Master switch for the in-memory scheduler. When `false`, descriptor-declared jobs are not enqueued and the runtime `IJobScheduler` enqueue/schedule APIs throw `InvalidOperationException` (a disabled instance never drains its queue). |
 | `Scheduler:MaxConcurrentExecutions` | implementation default | Global cap on concurrent job executions. |
 | `Scheduler:MaxRetainedCompletedJobs` | implementation default | How many terminal job states are kept in memory. |
 | `Scheduler:MaxMisfireCatchUpRuns` | implementation default | Upper bound on catch-up runs for the `CatchUp` misfire policy. |
@@ -173,6 +173,7 @@ tier and its background `OutboxDeliveryService`:
 | `BaseRetryDelay` | `5 seconds` (exponential backoff base; `Zero` retries on the next poll) |
 | `MaxRetryDelay` | `1 hour` |
 | `RetentionPeriod` | `7 days` (`null` keeps delivered rows forever) |
+| `PurgeInterval` | `1 hour` (how often the worker runs the retention purge) |
 | `SerializerOptions` | `null` (canonical `IElarionJsonSerialization`) |
 
 See [Event backends](/docs/capabilities/events/backends).
@@ -249,3 +250,22 @@ builder.Services.AddElarionHandlerContextEnricher<TenantContextEnricher>();
 
 The log-scope keys only surface if the host enables `IncludeScopes` on its logging exporter. See
 [Telemetry & observability › User & request context](/docs/capabilities/telemetry#user--request-context).
+
+## Connections (options, not config)
+
+`AddElarionConnections(options => …)` (from `Elarion.Connections`) takes an optional
+`Action<ElarionConnectionsOptions>` configured in code rather than `appsettings` — kernel-wide behavior
+every connection adapter applies identically (per-endpoint and per-connection knobs stay on the
+adapters):
+
+```csharp
+builder.Services.AddElarionConnections(o => o.DefaultInvokeTimeout = TimeSpan.FromSeconds(10));
+```
+
+| Option | Default |
+| --- | --- |
+| `DefaultInvokeTimeout` | `30 seconds` (applied whenever an `InvokeAsync` call carries no per-call `ClientInvokeOptions.Timeout`; `null` = no default — the call is bounded only by its token) |
+
+The layering is per-call `Timeout` > `DefaultInvokeTimeout` > unbounded; pass
+`Timeout.InfiniteTimeSpan` per call to make a single invoke unbounded without touching the default. See
+[Connections](/docs/capabilities/connections).

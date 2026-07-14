@@ -161,6 +161,35 @@ public sealed class QueryablePagingExtensionsTests
         page.Items.Select(i => i.Name).Should().Equal("item9", "item8");
     }
 
+    [Fact]
+    public async Task ToOffsetPageAsync_HostilePageNumber_ReturnsEmptyPageInsteadOfWrapping()
+    {
+        // (int.MaxValue - 1) * 2 wraps a 32-bit skip negative, which would silently serve the first
+        // page; the clamped long computation lands past the data and yields the usual empty page.
+        var data = Items(10).AsAsyncQueryable();
+
+        var page = await data.ToOffsetPageAsync(
+            new OffsetPageRequest { Page = int.MaxValue, Size = 2 }, Project, DefaultSort, cancellationToken: Token);
+
+        page.Items.Should().BeEmpty();
+        page.Total.Should().Be(10);
+        page.HasPrevious.Should().BeTrue();
+        page.HasNext.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ToOffsetPageAsync_NegativePageNumber_ClampsToFirstPage()
+    {
+        var data = Items(10).AsAsyncQueryable();
+
+        var page = await data.ToOffsetPageAsync(
+            new OffsetPageRequest { Page = int.MinValue, Size = 3 }, Project, DefaultSort, cancellationToken: Token);
+
+        page.Items.Select(i => i.Name).Should().Equal("item0", "item1", "item2");
+        page.HasPrevious.Should().BeFalse();
+        page.HasNext.Should().BeTrue();
+    }
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private static readonly SortMap<TestEntity> DefaultSort =

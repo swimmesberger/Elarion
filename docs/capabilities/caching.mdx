@@ -108,18 +108,23 @@ public sealed class UpdateClient(AppDbContext db)
 }
 ```
 
-`[CacheInvalidate]` takes the same `tags` and `Scope` as `[Cacheable]`. Tag and scope must line up:
-a `CurrentUser`-scoped invalidation clears that user's `clients` entries; a `Global` one clears the
-shared entries.
+`[CacheInvalidate]` takes the same `tags` and `Scope` as `[Cacheable]`. The scopes compose precisely:
+
+- A **`Global`** invalidation (the default) evicts the globally shared entries **and** every user's
+  `CurrentUser`-scoped entries for the listed tags. User-scoped entries are deliberately also stamped
+  with the global tag namespace so the default `[Cacheable]` (`CurrentUser`) / default `[CacheInvalidate]`
+  (`Global`) pairing works out of the box.
+- A **`CurrentUser`** invalidation clears only the *invoking* user's entries for the listed tags — never
+  another user's, and never the globally shared entries.
 
 <Callout type="warn">
   `[CacheInvalidate]`'s `Scope` defaults to **`Global`** — unlike `[Cacheable]`, whose default is
   `CurrentUser`. Invalidation is a mutation reacting to a state change, and the caller performing it is
   usually *not* the user whose cached read must be evicted (an admin editing another user's record). A
   `CurrentUser`-scoped invalidation would clear only the mutator's own tag and leave every affected user
-  permanently stale, so the safe default is over-invalidation (`Global`). Set
-  `Scope = HandlerCacheScope.CurrentUser` explicitly only for a genuinely per-user cache the mutating
-  caller also owns.
+  permanently stale, so the safe default is over-invalidation (`Global` — it evicts the tag across all
+  users). Set `Scope = HandlerCacheScope.CurrentUser` explicitly only for a genuinely per-user cache the
+  mutating caller also owns.
 </Callout>
 
 ## Registering the cache runtime

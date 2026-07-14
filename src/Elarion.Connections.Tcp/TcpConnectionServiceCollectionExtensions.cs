@@ -81,6 +81,9 @@ public static class TcpConnectionServiceCollectionExtensions {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxMessageBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialReadBufferBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialSendBufferBytes, 0);
+        if (options is ElarionTcpListenerOptions { MaxConcurrentConnections: <= 0 }) {
+            throw new ArgumentException("MaxConcurrentConnections must be positive when set.", nameof(options));
+        }
     }
 }
 

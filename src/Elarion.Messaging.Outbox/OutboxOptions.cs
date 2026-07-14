@@ -83,6 +83,15 @@ public sealed class OutboxOptions
     /// </summary>
     public TimeSpan? RetentionPeriod { get; set; } = TimeSpan.FromDays(7);
 
+    /// <summary>How often the delivery worker runs the retention purge. Defaults to 1 hour.</summary>
+    /// <remarks>
+    /// The purge is a maintenance sweep over already-delivered rows, far less urgent than delivery itself, so it
+    /// runs on its own cadence instead of once per idle <see cref="PollingInterval"/> tick (which would issue the
+    /// purge <c>DELETE</c> roughly every second on every node). Only relevant when <see cref="RetentionPeriod"/>
+    /// is set.
+    /// </remarks>
+    public TimeSpan PurgeInterval { get; set; } = TimeSpan.FromHours(1);
+
     /// <summary>
     /// Overrides the serializer used for event payloads. Defaults to <c>null</c> — the canonical Elarion JSON
     /// options (<c>IElarionJsonSerialization</c>) are used, so event DTOs resolve through the app's source-generated

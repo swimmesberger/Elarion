@@ -16,6 +16,7 @@ public sealed partial class HandlerRegistrationGenerator {
         EquatableArray<string> candidates,
         EquatableArray<ModuleScanner.Module> modules,
         EquatableArray<string> variantContracts,
+        EquatableArray<string> noRetryPolicies,
         Compilation compilation,
         CancellationToken ct) {
         if (candidates.IsEmpty)
@@ -27,6 +28,9 @@ public sealed partial class HandlerRegistrationGenerator {
         var variantContractSet = variantContracts.IsEmpty
             ? null
             : new HashSet<string>(variantContracts.AsImmutableArray, StringComparer.Ordinal);
+        var noRetryPolicySet = noRetryPolicies.IsEmpty
+            ? null
+            : new HashSet<string>(noRetryPolicies.AsImmutableArray, StringComparer.Ordinal);
         // ValidationDecorator auto-attach is conditional on the compilation referencing Elarion.Validation (the
         // enforcement package). Without it, no decorator attaches — the ValidationResolverGenerator reports
         // ELVAL002 so the unenforced attributes are a visible choice. The walk context memoizes the validatable
@@ -49,7 +53,7 @@ public sealed partial class HandlerRegistrationGenerator {
             var info = GetHandlerInfo(
                 classDecl, classSymbol, compilation, moduleDecoratorLists, moduleAuthDefaults,
                 assemblyRequireAuthenticated, moduleAuditDefaults, assemblyAuditDefault, modules,
-                variantContractSet, validationWalk, ct);
+                variantContractSet, noRetryPolicySet, validationWalk, ct);
             if (info is not null)
                 builder.Add(info);
         }
@@ -110,6 +114,7 @@ public sealed partial class HandlerRegistrationGenerator {
         bool assemblyAuditDefault,
         EquatableArray<ModuleScanner.Module> modules,
         HashSet<string>? variantContracts,
+        HashSet<string>? noRetryPolicies,
         ValidatableTypeWalker.Context? validationWalk,
         CancellationToken ct) {
         ct.ThrowIfCancellationRequested();
@@ -163,6 +168,26 @@ public sealed partial class HandlerRegistrationGenerator {
         // (TransactionDecorator.AppliesTo mirrors this, handing the plain transaction back).
         idempotent ??= ParseInbox(
             classDecl, classSymbol, requestType, responseType, compilation, fmt, diagnostics);
+
+        // ELPIPE004 (warning): a retrying [Resilient] policy around a command without [Idempotent] risks double
+        // execution. ResilienceDecorator sits OUTSIDE TransactionDecorator, whose finalizing commit deliberately
+        // runs on CancellationToken.None — so a per-attempt Polly timeout abandons the attempt without waiting
+        // for the delegate, the in-flight commit completes in the background, TimeoutRejectedException is not an
+        // OCE so the retry fires, and the command executes and commits twice. [Idempotent] turns the retry into
+        // a replay of the first committed outcome. A policy provably declared without retry in this compilation
+        // is exempt; an unknown name (referenced assembly, imperative registration) warns conservatively.
+        // Integration-event consumers never reach here: the default inbox (or their non-command request when
+        // [AllowDuplicates] opts out) keeps them off the command path.
+        if (resiliencePolicyName is not null && idempotent is null &&
+            RequestImplementsMarker(requestType, compilation, CommandMarkerMetadataName) &&
+            noRetryPolicies?.Contains(resiliencePolicyName) != true) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                ResilientCommandWithoutIdempotentDescriptor,
+                classDecl.Identifier.GetLocation(),
+                handlerFqn,
+                resiliencePolicyName,
+                requestFqn));
+        }
 
         var audit = ParseAudit(
             classSymbol, requestType, compilation, moduleAuditDefaults, assemblyAuditDefault,
@@ -344,6 +369,74 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         return policyName;
+    }
+
+    // Reduces a [ResiliencePolicy] declaration to (name, retry-ness) for ELPIPE004. Retry-ness mirrors the
+    // ResiliencePolicyRegistrationGenerator's parse: any retry option present enables retry generation with a
+    // default MaxRetryAttempts of 3, so a declaration retries unless it configures no retry option at all
+    // (timeout-only) or sets MaxRetryAttempts = 0 explicitly. Nameless/blank declarations are dropped — they
+    // are ELRES001 territory and can never match a [Resilient] reference.
+    private static PolicyRetryCandidate? GetPolicyRetryCandidate(GeneratorAttributeSyntaxContext ctx) {
+        if (ctx.Attributes.Length == 0)
+            return null;
+
+        var attribute = ctx.Attributes[0];
+        if (attribute.ConstructorArguments.Length == 0 ||
+            attribute.ConstructorArguments[0].Value is not string name ||
+            string.IsNullOrWhiteSpace(name)) {
+            return null;
+        }
+
+        var hasRetryOption = false;
+        var maxRetryAttempts = 3;
+        foreach (var namedArgument in attribute.NamedArguments) {
+            switch (namedArgument.Key) {
+                case "MaxRetryAttempts":
+                    hasRetryOption = true;
+                    if (namedArgument.Value.Value is int max)
+                        maxRetryAttempts = max;
+                    break;
+                case "Delay":
+                case "Backoff":
+                case "MaxDelay":
+                case "UseJitter":
+                    hasRetryOption = true;
+                    break;
+            }
+        }
+
+        return new PolicyRetryCandidate(name, hasRetryOption && maxRetryAttempts != 0);
+    }
+
+    // The provably-no-retry policy names: declared in this compilation and never with retry configured. A name
+    // duplicated with any retrying declaration is excluded (duplicates are ELRES002 errors, but this stage must
+    // not pick a winner). Sorted for a deterministic, value-equatable pipeline output.
+    private static EquatableArray<string> FlattenNoRetryPolicyNames(
+        ImmutableArray<PolicyRetryCandidate?> candidates) {
+        if (candidates.IsDefaultOrEmpty)
+            return EquatableArray<string>.Empty;
+
+        HashSet<string>? retrying = null;
+        HashSet<string>? noRetry = null;
+        foreach (var candidate in candidates) {
+            if (candidate is null)
+                continue;
+
+            if (candidate.HasRetry)
+                (retrying ??= new HashSet<string>(StringComparer.Ordinal)).Add(candidate.Name);
+            else
+                (noRetry ??= new HashSet<string>(StringComparer.Ordinal)).Add(candidate.Name);
+        }
+
+        if (noRetry is null)
+            return EquatableArray<string>.Empty;
+
+        if (retrying is not null)
+            noRetry.ExceptWith(retrying);
+
+        return noRetry
+            .OrderBy(static name => name, StringComparer.Ordinal)
+            .ToImmutableArray();
     }
 
     // Yields every attribute declared on the handler and — because the authorization/feature-gate attributes all

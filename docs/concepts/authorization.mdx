@@ -64,6 +64,12 @@ does caching, validation, or a transaction:
 
 This mirrors ASP.NET's 401-vs-403 split, mapped centrally — see [Results & errors](/docs/concepts/results-and-errors).
 
+The default forbidden message is a generic `"Access denied."` — it deliberately does not name the unmet
+permission/role/policy, so a forbidden caller cannot probe the permission vocabulary (the same opacity
+the feature-gate 404 applies). The default authorizer logs the unmet requirement at debug level for
+operators; a host that wants the detail on the wire sets `AuthorizationOptions.ForbiddenMessageFormat`
+to a format containing `{0}` (e.g. `"Missing required permission: {0}"`).
+
 ## Opt-in by default
 
 By default the authorization decorator is attached **only to handlers that carry a `Require*` or
@@ -159,7 +165,7 @@ public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 
 // Program.cs
-builder.Services.AddElarionIdentity<ApplicationUser, ApplicationRole, Guid, AppDbContext>();
+builder.Services.AddElarionIdentity<ApplicationUser, ApplicationRole, AppDbContext>();
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
 // cookie policy, AddAuthorization policies, UseAuthentication/UseElarionCurrentUser stay host-owned
 ```

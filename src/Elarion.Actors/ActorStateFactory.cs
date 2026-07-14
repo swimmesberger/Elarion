@@ -38,8 +38,9 @@ public static class ActorStateFactory {
                                 + "canonical JSON is not registered; call services.AddElarionJson().");
 
         var key = new ActorSnapshotKey(context.ActorName, context.Key.ToString() ?? string.Empty);
-        var state = new ActorState<TState>(key, store, serialization);
-        serviceProvider.GetRequiredService<ActorStateTracker>().Register(state);
+        var tracker = serviceProvider.GetRequiredService<ActorStateTracker>();
+        var state = new ActorState<TState>(key, store, serialization, tracker);
+        tracker.Register(state);
         return state;
     }
 }

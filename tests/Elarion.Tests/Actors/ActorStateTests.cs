@@ -32,10 +32,12 @@ public sealed class ActorStateTests {
         var stored = store.Get(new ActorSnapshotKey("Vault", "a"));
         stored.Should().NotBeNull();
         stored!.Value.Payload.Should().Contain("5");
-        stored.Value.Version.Should().Be(1);
+        // The create minted this lineage's starting version; subsequent writes increment it.
+        var lineageVersion = stored.Value.Version;
+        lineageVersion.Should().BePositive();
 
         (await vault.Deposit(3, TestToken)).Should().Be(8);
-        store.Get(new ActorSnapshotKey("Vault", "a"))!.Value.Version.Should().Be(2);
+        store.Get(new ActorSnapshotKey("Vault", "a"))!.Value.Version.Should().Be(lineageVersion + 1);
     }
 
     [Fact]
@@ -112,6 +114,32 @@ public sealed class ActorStateTests {
     }
 
     [Fact]
+    public async Task ForeignSnapshotConflict_FromANestedActorCall_FaultsTheOuterTurn_WithoutRetry() {
+        var store = new FakeSnapshotStore();
+        await using var provider = CreateProvider(store);
+        var turns = provider.GetRequiredService<OrchestratorTurns>();
+        var orchestrator = provider.GetRequiredService<IActorSystem>().Get<IOrchestrator>("o");
+
+        // Every vault write conflicts: the vault spends its own transparent retry, then the
+        // conflict propagates into the orchestrator's turn as the vault call's failure.
+        store.FailWritesWithConflict = true;
+
+        var act = async () => await orchestrator.DepositViaVault(1, TestToken);
+        await act.Should().ThrowAsync<ActorSnapshotConcurrencyException>();
+
+        // The conflict's provenance is the vault's activation, not the orchestrator's, so the
+        // outer turn ran exactly once (retrying it would double-apply its side effects) and only
+        // the vault's own two attempts hit the store.
+        turns.Count.Should().Be(1);
+        store.WriteAttempts.Should().Be(2);
+
+        // The orchestrator activation was not poisoned: it keeps serving once the store recovers.
+        store.FailWritesWithConflict = false;
+        (await orchestrator.DepositViaVault(2, TestToken)).Should().Be(2);
+        turns.Count.Should().Be(2);
+    }
+
+    [Fact]
     public async Task Clear_DeletesTheSnapshotAndResetsState() {
         var store = new FakeSnapshotStore();
         await using var provider = CreateProvider(store);
@@ -123,9 +151,31 @@ public sealed class ActorStateTests {
         store.Get(new ActorSnapshotKey("Vault", "a")).Should().BeNull();
         (await vault.Describe(TestToken)).Should().Be("empty");
 
-        // A write after clear creates a fresh version-1 snapshot.
+        // A write after clear creates a fresh snapshot under a freshly minted lineage version.
         await vault.Deposit(2, TestToken);
-        store.Get(new ActorSnapshotKey("Vault", "a"))!.Value.Version.Should().Be(1);
+        store.Get(new ActorSnapshotKey("Vault", "a"))!.Value.Version.Should().BePositive();
+    }
+
+    [Fact]
+    public async Task StaleETagFromAClearedLineage_NeverMatchesTheRecreatedSnapshot() {
+        // The ABA regression: activation A observes an ETag, then someone clears and re-creates the
+        // snapshot. A constant create version (the old "always 1") could hand the new lineage the
+        // very version A still holds, letting A's guarded write silently overwrite a snapshot it
+        // never saw. Lineage-unique minting makes that write fail loudly instead.
+        var store = new FakeSnapshotStore();
+        var key = new ActorSnapshotKey("Vault", "a");
+        var staleETag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+
+        // A second party swaps the whole lineage: clear, then re-create with different state.
+        await store.ClearAsync(key, staleETag, TestToken);
+        var newETag = await store.WriteAsync(key, """{"balance":100}""", expectedETag: null, TestToken);
+        newETag.Should().NotBe(staleETag);
+
+        var act = async () => await store.WriteAsync(key, """{"balance":2}""", staleETag, TestToken);
+        await act.Should().ThrowAsync<ActorSnapshotConcurrencyException>();
+
+        // The new lineage's snapshot is untouched by the stale writer.
+        (await store.ReadAsync(key, TestToken))!.Payload.Should().Contain("100");
     }
 
     [Fact]
@@ -182,10 +232,19 @@ public sealed class ActorStateTests {
         services.AddSingleton<TimeProvider>(timeProvider ?? TimeProvider.System);
         services.AddSingleton(observations ?? new ActivationObservations());
         services.AddSingleton<IActorSnapshotStore>(store);
+        services.AddSingleton<OrchestratorTurns>();
         services.AddElarionJson();
         services.ConfigureElarionJson(options => options.TypeInfoResolvers.Add(ActorStateTestContext.Default));
         services.AddElarionActorSystem();
         AddVaultActor(services);
+        services.AddElarionActor(new ActorRegistration<OrchestratorActor, string, IOrchestrator> {
+            Name = "Orchestrator",
+            Options = new ActorOptions(),
+            Activator = static (serviceProvider, _) => new OrchestratorActor(
+                serviceProvider.GetRequiredService<IActorSystem>(),
+                serviceProvider.GetRequiredService<OrchestratorTurns>()),
+            Facade = static handle => new OrchestratorFacade(handle)
+        });
         return services.BuildServiceProvider();
     }
 
@@ -328,8 +387,45 @@ public sealed class ActorStateTests {
         }
     }
 
-    /// <summary>An in-memory store with the seam's exact ETag semantics (versions as invariant text).</summary>
-    private sealed class FakeSnapshotStore : IActorSnapshotStore {
+    // --- Orchestrator (a stateless actor whose turn calls the vault — nested-conflict probe) ---
+
+    public sealed class OrchestratorTurns {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Record() => Interlocked.Increment(ref _count);
+    }
+
+    public interface IOrchestrator : IActorFacade<string> {
+        ValueTask<int> DepositViaVault(int amount, CancellationToken cancellationToken = default);
+    }
+
+    public sealed class OrchestratorActor(IActorSystem actors, OrchestratorTurns turns) {
+        public async Task<int> DepositViaVault(int amount, CancellationToken cancellationToken) {
+            turns.Record();
+            return await actors.Get<IVault>("a").Deposit(amount, cancellationToken);
+        }
+    }
+
+    private sealed class OrchestratorFacade(ActorHandle<OrchestratorActor> handle) : IOrchestrator {
+        public ValueTask<int> DepositViaVault(int amount, CancellationToken cancellationToken = default) =>
+            handle.InvokeAsync(new DepositViaVaultItem(amount), cancellationToken);
+
+        private sealed class DepositViaVaultItem(int amount) : ActorWorkItem<OrchestratorActor, int> {
+            public override string MethodName => "DepositViaVault";
+
+            protected override async ValueTask<int> InvokeAsync(OrchestratorActor actor, CancellationToken cancellationToken) =>
+                await actor.DepositViaVault(amount, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// An in-memory store with the seam's exact ETag semantics: versions as invariant text, minted
+    /// lineage-unique at create (never a constant) so a tag from a cleared lineage can never match
+    /// a re-created snapshot — the ABA guard the contract requires of every provider.
+    /// </summary>
+    internal sealed class FakeSnapshotStore : IActorSnapshotStore {
         private readonly ConcurrentDictionary<ActorSnapshotKey, (string Payload, long Version)> _rows = new();
         private int _writeAttempts;
 
@@ -340,7 +436,9 @@ public sealed class ActorStateTests {
         public (string Payload, long Version)? Get(ActorSnapshotKey key) =>
             _rows.TryGetValue(key, out var row) ? row : null;
 
-        public void Seed(ActorSnapshotKey key, string payload) => _rows[key] = (payload, 1);
+        public void Seed(ActorSnapshotKey key, string payload) => _rows[key] = (payload, MintLineageVersion());
+
+        private static long MintLineageVersion() => Random.Shared.NextInt64(1, long.MaxValue >> 1);
 
         public void BumpVersion(ActorSnapshotKey key) {
             var row = _rows[key];
@@ -368,11 +466,12 @@ public sealed class ActorStateTests {
             }
 
             if (expectedETag is null) {
-                if (!_rows.TryAdd(key, (payload, 1))) {
+                var version = MintLineageVersion();
+                if (!_rows.TryAdd(key, (payload, version))) {
                     throw new ActorSnapshotConcurrencyException(key, expectedETag: null);
                 }
 
-                return ValueTask.FromResult("1");
+                return ValueTask.FromResult(version.ToString(CultureInfo.InvariantCulture));
             }
 
             var expectedVersion = long.Parse(expectedETag, CultureInfo.InvariantCulture);

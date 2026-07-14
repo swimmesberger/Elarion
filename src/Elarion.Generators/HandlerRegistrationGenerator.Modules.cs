@@ -74,7 +74,7 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("        ServiceLifetime lifetime = ServiceLifetime.Scoped)");
         sb.AppendLine("    {");
 
-        foreach (var handler in handlers.OrderBy(x => x.HandlerName))
+        foreach (var handler in handlers.OrderBy(x => x.HandlerName, StringComparer.Ordinal))
             sb.AppendLine($"        {handler.Namespace}.{handler.HandlerName}Registration.Add{handler.HandlerName}(services, lifetime);");
 
         sb.AppendLine("        return services;");

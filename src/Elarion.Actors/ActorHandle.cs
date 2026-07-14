@@ -79,6 +79,15 @@ public sealed class ActorHandle<TActor> where TActor : class {
                 // it here to complete the caller is safe.
                 callActivity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 item.Abandon();
+                if (ex is OperationCanceledException) {
+                    // A Wait-mode bounded enqueue was cancelled by the invocation token (call
+                    // timeout or caller cancellation). Abandon attributed the outcome, so the
+                    // caller observes the same TimeoutException/cancellation the backstop produces
+                    // during execution — never a raw enqueue OCE. A cancelled channel write never
+                    // lands in the mailbox, so the abandoned call can never execute later.
+                    return await completion.ConfigureAwait(false);
+                }
+
                 throw;
             }
 

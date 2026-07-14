@@ -21,15 +21,31 @@ namespace Elarion.Abstractions.Dispatch;
 /// </remarks>
 public sealed class DispatchScopeContext {
     private readonly Dictionary<Type, object?> _items = [];
+    private readonly bool _isReadOnly;
+
+    /// <summary>Creates a new, mutable context for a single dispatch site.</summary>
+    public DispatchScopeContext() {
+    }
+
+    private DispatchScopeContext(bool isReadOnly) => _isReadOnly = isReadOnly;
 
     /// <summary>
-    /// A shared, empty context used when a dispatch site has nothing to carry. Treat it as read-only;
-    /// do not call <see cref="Set{T}"/> on it.
+    /// A shared, empty, read-only context used when a dispatch site has nothing to carry.
+    /// Calling <see cref="Set{T}"/> on it throws — it is one instance shared across every call,
+    /// so a value stored here would leak per-request state globally.
     /// </summary>
-    public static DispatchScopeContext Empty { get; } = new();
+    public static DispatchScopeContext Empty { get; } = new(isReadOnly: true);
 
     /// <summary>Stores <paramref name="value"/> keyed by <typeparamref name="T"/>, replacing any existing entry.</summary>
-    public void Set<T>(T value) => _items[typeof(T)] = value;
+    /// <exception cref="InvalidOperationException">This is the shared <see cref="Empty"/> context.</exception>
+    public void Set<T>(T value) {
+        if (_isReadOnly) {
+            throw new InvalidOperationException(
+                "DispatchScopeContext.Empty is a shared read-only instance; create a new DispatchScopeContext for per-call state.");
+        }
+
+        _items[typeof(T)] = value;
+    }
 
     /// <summary>
     /// Gets the value captured for <typeparamref name="T"/>.

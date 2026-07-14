@@ -5,12 +5,11 @@ import {
   formatPropertyName,
   isNullable,
   resolveSchema,
-  stripNullable,
   type SchemaContext,
 } from './json-schema.js'
 
 export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent = 0): string {
-  const resolved = resolveSchema(schema, ctx)
+  const { schema: resolved, ctx: resolvedCtx } = resolveSchema(schema, ctx)
   const nullable = isNullable(resolved)
   const base = baseType(resolved)
 
@@ -46,7 +45,10 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
   }
 
   if (base === 'array' && resolved.items) {
-    const itemSchema = jsonSchemaToZod(stripNullable(resolved.items), childContext(ctx, 'items'), indent)
+    // The item schema goes in unstripped: the recursion handles item-level nullability, so a
+    // `["string","null"]` item emits `z.string().nullish()` and a legal `["a", null]` element validates.
+    // Nullability is only ever stripped at the top-level params/result envelope.
+    const itemSchema = jsonSchemaToZod(resolved.items, childContext(resolvedCtx, 'items'), indent)
     return nullish(arraySchema(`z.array(${itemSchema})`, resolved), nullable)
   }
 
@@ -54,7 +56,7 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
     const required = new Set(resolved.required ?? [])
     const pad = '  '.repeat(indent + 1)
     const fields = Object.entries(resolved.properties).map(([key, property]) => {
-      let fieldSchema = jsonSchemaToZod(property, childContext(ctx, `properties.${key}`), indent + 1)
+      let fieldSchema = jsonSchemaToZod(property, childContext(resolvedCtx, `properties.${key}`), indent + 1)
       if (!required.has(key)) {
         fieldSchema += '.optional()'
       }

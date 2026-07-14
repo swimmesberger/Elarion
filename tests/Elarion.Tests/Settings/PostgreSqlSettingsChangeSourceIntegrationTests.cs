@@ -104,6 +104,61 @@ public sealed class PostgreSqlSettingsChangeSourceIntegrationTests(PostgreSqlSet
         fired.IsCompleted.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task FirstListenEstablishment_FiresPreexistingWatchers() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        // Watch BEFORE the listener starts: notifications sent in that window are lost (the first connect
+        // attempt can back off), so the first establishment itself must make watchers re-read — not only
+        // reconnects.
+        var options = new PostgreSqlSettingsChangeOptions();
+        await using var source = new PostgreSqlSettingsChangeSource(
+            NpgsqlDataSource.Create(fixture.ConnectionString),
+            ownsDataSource: true,
+            options,
+            NullLogger<PostgreSqlSettingsChangeSource>.Instance);
+        var fired = WaitForFire(source.Watch(SettingsScope.Global));
+
+        var listener = new PostgreSqlSettingsChangeListener(
+            source, options, NullLogger<PostgreSqlSettingsChangeListener>.Instance);
+        await listener.StartAsync(Ct);
+        try {
+            await listener.Listening.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            await fired.WaitAsync(FireTimeout, Ct);
+        }
+        finally {
+            await listener.StopAsync(CancellationToken.None);
+            listener.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task TerminatedListenConnection_ReconnectsFiresAllWatchers_AndStaysLive() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var node = await ChangeNode.StartAsync(fixture.ConnectionString, Ct);
+        var fired = WaitForFire(node.Source.Watch(SettingsScope.Global));
+
+        await TerminateListenBackendsAsync(fixture.ConnectionString, Ct);
+
+        // The re-established LISTEN makes every watcher re-read (changes may have been missed) …
+        await fired.WaitAsync(FireTimeout, Ct);
+
+        // … and notifications flow again end-to-end.
+        var refired = WaitForFire(node.Source.Watch(SettingsScope.Global));
+        node.Source.Publish(SettingsScope.Global, UniqueKey());
+        await refired.WaitAsync(FireTimeout, Ct);
+    }
+
+    /// <summary>Kills the LISTEN backend(s) server-side, simulating a dropped listen connection.</summary>
+    private static async Task TerminateListenBackendsAsync(string connectionString, CancellationToken ct) {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " +
+            "WHERE pid <> pg_backend_pid() AND query ILIKE 'LISTEN%'";
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     private static EfCoreSettingsStore<SettingsIntegrationDbContext> CreateStore(
         SettingsIntegrationDbContext context,
         PostgreSqlSettingsChangeOptions options) =>

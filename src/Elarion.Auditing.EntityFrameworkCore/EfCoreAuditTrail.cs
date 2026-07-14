@@ -30,7 +30,8 @@ public sealed class EfCoreAuditTrail<TDbContext>(
 ) : IAuditTrail
     where TDbContext : DbContext {
     /// <inheritdoc />
-    public async ValueTask RecordAsync(Func<AuditRecord> buildRecord, CancellationToken cancellationToken) {
+    public async ValueTask<AuditRecordDurability> RecordAsync(
+        Func<AuditRecord> buildRecord, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(buildRecord);
 
         // Flush the handler's pending writes FIRST: the common shape leaves them for the unit-of-work commit
@@ -43,9 +44,14 @@ public sealed class EfCoreAuditTrail<TDbContext>(
         }
 
         dbContext.Add(ToEntry(buildRecord()));
-        if (!inTransaction) {
-            await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        if (inTransaction) {
+            // The unit-of-work commit flush persists the entry; it becomes durable only when the transaction
+            // commits — at which point the AuditSaveChangesInterceptor promotes the scope's pending mark.
+            return AuditRecordDurability.EnlistedInTransaction;
         }
+
+        await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return AuditRecordDurability.Durable;
     }
 
     /// <inheritdoc />

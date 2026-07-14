@@ -29,8 +29,9 @@ public static class ActorStreams {
     /// the activation stays safe from <b>idle</b> passivation until the enumeration ends — completes,
     /// fails, or is disposed (the refCount lifetime, ADR-0052). Generated stream work items wrap the
     /// actor method's result with this inside the attach turn. The result must be enumerated (the
-    /// facade's <see cref="Defer{T}"/> always does); an abandoned, never-enumerated result would hold
-    /// the retention until collected.
+    /// facade's <see cref="Defer{T}"/> always does) and the enumerator disposed: the retention has no
+    /// finalizer, so an abandoned enumeration pins the activation against idle passivation for the
+    /// rest of the process lifetime.
     /// </summary>
     /// <param name="source">The actor's subscription.</param>
     /// <param name="retention">The activation retention to release when the enumeration ends; may be

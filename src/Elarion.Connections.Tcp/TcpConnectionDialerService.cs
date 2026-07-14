@@ -19,6 +19,7 @@ internal sealed class TcpConnectionDialerService<THandler>(
             options,
             services.GetRequiredService<THandler>(),
             services.GetRequiredService<IClientConnectionRegistry>(),
+            (services.GetService<ElarionConnectionsOptions>() ?? new ElarionConnectionsOptions()).DefaultInvokeTimeout,
             services.GetService<TimeProvider>() ?? TimeProvider.System,
             services.GetService<ILoggerFactory>()?.CreateLogger(GetType().Namespace + ".TcpDialer")
                 ?? (ILogger)NullLogger.Instance,

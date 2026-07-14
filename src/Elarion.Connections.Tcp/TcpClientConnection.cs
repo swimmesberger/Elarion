@@ -19,15 +19,17 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     // allocation-free — the proxy/forwarder hot loop (receive one link, send another) stays zero-cost on
     // both halves. Grows to the largest framed message this connection ever sent and is retained.
     private readonly ArrayBufferWriter<byte> _sendBuffer;
+    private readonly TimeSpan? _defaultInvokeTimeout;
     private IClientConnectionProtocol? _protocol;
 
     internal TcpClientConnection(
         ClientConnection connection, Stream stream, TcpMessageFramer framer,
-        int initialSendBufferBytes, Action closeTransport) {
+        int initialSendBufferBytes, TimeSpan? defaultInvokeTimeout, Action closeTransport) {
         Connection = connection;
         _stream = stream;
         _framer = framer;
         _sendBuffer = new ArrayBufferWriter<byte>(initialSendBufferBytes);
+        _defaultInvokeTimeout = defaultInvokeTimeout;
         _closeTransport = closeTransport;
     }
 
@@ -111,6 +113,7 @@ public sealed class TcpClientConnection : IClientConnectionSink {
         where TRequest : class {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(request);
-        return Protocol.InvokeAsync<TRequest, TResponse>(name, request, options, ct);
+        return Protocol.InvokeAsync<TRequest, TResponse>(
+            name, request, options.WithDefaultTimeout(_defaultInvokeTimeout), ct);
     }
 }
