@@ -19,6 +19,7 @@
     "bulk-operations",
     "pagination",
     "sql-migrations",
+    "sql-mapping",
     "postgres-extensions",
     "time-series",
     "blob-storage",

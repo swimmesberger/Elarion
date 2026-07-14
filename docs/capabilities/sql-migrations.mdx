@@ -9,7 +9,9 @@ still needs schema management, EF's NativeAOT support is experimental, and nothi
 hole (Evolve is dormant, Flyway is a JVM tool). `Elarion.Migrations.PostgreSql` is that tier's runner
 ([ADR-0057](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0057-postgresql-sql-migration-runner.md)):
 minimal, PostgreSQL-only, AOT-compatible (`Npgsql` + `Microsoft.Extensions.*` abstractions only), and
-designed explicitly against Flyway's documented production failure modes.
+designed explicitly against Flyway's documented production failure modes. The same tier's **access
+half** — generated row mappers over hand-written SQL — is [SQL mapping](/docs/capabilities/sql-mapping)
+(ADR-0058); neither package requires the other.
 
 Pick the row that matches your app:
 

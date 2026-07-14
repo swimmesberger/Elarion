@@ -54,6 +54,8 @@
     <Project Path="src/Elarion.Settings.EntityFrameworkCore.Generators/Elarion.Settings.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj" />
     <Project Path="src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj" />
+    <Project Path="src/Elarion.Sql/Elarion.Sql.csproj" />
+    <Project Path="src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj" />

@@ -744,6 +744,47 @@ See [Device identity](/docs/capabilities/devices).
 
 See [Entity Framework](/docs/capabilities/entity-framework) and [Pagination](/docs/capabilities/pagination).
 
+## SQL row mapping (EF-free tier)
+
+### `[SqlRecord]`
+
+- **Package:** `Elarion.Sql` · **Applies to:** class, struct (records included)
+- **Triggers:** marks a row type for SQL mapper generation (ADR-0058). The bundled generator emits a sealed `{Type}SqlMapper : ISqlRowMapper<T>` — column ordinals resolved by name once per result set (`Ordinals` struct), synchronous typed `GetFieldValue<T>` row reads, typed `BindParameters` (parameters named like columns), `TableName`/`Columns.*` constants (including `Columns.All` and `Columns.AllParameters`), a static `Instance`, and a per-assembly `AddElarionSqlMappers()` DI registration. Column names default to the snake_case of the property name; the table name defaults to the snake_case of the type name (no pluralization). Positional records construct through the primary constructor; nominal records with `required`/`init` members through an object initializer. Derived (get-only) members are skipped. There is no reflection fallback: an unmapped type or unsupported shape is a compile error (`ELSQL001`–`ELSQL007`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `tableName` | `string?` (ctor) | `null` | The table name, or `null` for the snake_case of the type name. |
+
+### `[SqlColumn]`
+
+- **Package:** `Elarion.Sql` · **Applies to:** property
+- **Triggers:** overrides the column name of a `[SqlRecord]` property (default: snake_case of the property name). On a non-writable property this is an error (`ELSQL007`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `name` | `string` (ctor) | required | The column name as it appears in SQL. |
+
+### `[SqlIgnore]`
+
+- **Package:** `Elarion.Sql` · **Applies to:** property
+- **Triggers:** excludes a `[SqlRecord]` property from mapping (neither read nor bound). A `required` property cannot be ignored (`ELSQL003`).
+
+### `[SqlJson]`
+
+- **Package:** `Elarion.Sql` · **Applies to:** property
+- **Triggers:** maps a `[SqlRecord]` property as a JSON column, (de)serialized through the canonical JSON accessor's `JsonTypeInfo<T>` (`IElarionJsonSerialization`, ADR-0023) — the property type must be in a registered `JsonSerializerContext`. A mapper with JSON columns takes the accessor as a constructor parameter instead of exposing `Instance`; the generated DI registration wires it. Under `[UseElarionSql(Provider = SqlProvider.Npgsql)]`, parameters bind as `NpgsqlDbType.Jsonb`.
+
+### `[UseElarionSql]`
+
+- **Package:** `Elarion.Sql` · **Applies to:** assembly
+- **Triggers:** provider trigger for the SQL mapper generator (precedent: `[UseElarionEntityFrameworkCore]`). `Provider = SqlProvider.Npgsql` emits PostgreSQL-specific parameter typing (`jsonb` for `[SqlJson]` columns); without it, emission stays provider-neutral.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Provider` | `SqlProvider` (init) | `Portable` | The provider to emit provider-specific code for (`Portable` or `Npgsql`). |
+
+See [SQL mapping](/docs/capabilities/sql-mapping).
+
 ## Cross-module communication
 
 ### `[ModuleContract]`

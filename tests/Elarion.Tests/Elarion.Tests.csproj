@@ -60,6 +60,13 @@
     <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore/Elarion.Settings.EntityFrameworkCore.csproj" />
     <ProjectReference Include="../../src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj" />
     <ProjectReference Include="../../src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj" />
+    <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj" />
+    <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj" />
+    <!-- Also applied as an analyzer so the Sql integration tests exercise REAL generated mappers
+         compiled into this assembly, not driver-emitted text. -->
+    <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />
     <ProjectReference Include="../../src/Elarion.Migrations.PostgreSql/Elarion.Migrations.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />

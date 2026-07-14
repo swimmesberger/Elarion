@@ -1,6 +1,6 @@
 # ADR-0058: AOT-native SQL row mapping — explicit generated mappers, not call-site interception
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-13
 - Related: [ADR-0057](0057-postgresql-sql-migration-runner.md) (the EF-free/AOT tier this completes),
   [ADR-0006](0006-incremental-source-generator-conventions.md) (generator conventions),

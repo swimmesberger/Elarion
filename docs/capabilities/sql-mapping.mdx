@@ -1,0 +1,168 @@
+---
+title: SQL mapping
+description: AOT-native SQL row mapping for EF-free hosts — explicit generated mappers, injection-safe SQL interpolation, no reflection, no silent fallback.
+---
+
+Elarion's persistence story is EF-model-first, and an EF application keeps EF Core — that default is
+not in question. The gap is the **EF-free host**: an app published NativeAOT on raw Npgsql still needs
+to turn `DbDataReader` rows into records and records into parameters, per row type, by hand.
+`Elarion.Sql` is that tier's access half
+([ADR-0058](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0058-aot-sql-row-mapping.md)),
+completing the pair with [SQL migrations](/docs/capabilities/sql-migrations) (ADR-0057, the schema
+half). It is chosen **by tier, not preference**:
+
+| Your app | Data access |
+| --- | --- |
+| Uses EF Core | EF Core — see [Entity Framework Core](/docs/capabilities/entity-framework) |
+| EF-free / NativeAOT | **`Elarion.Sql`** — generated mappers over hand-written SQL |
+
+The core property: **if it builds, it maps**. A `[SqlRecord]` type gets an explicit generated mapper;
+a type without one has no mapper to call. There is no reflection twin to fall back to — an unmapped
+type, an unsupported property, a duplicate column are compile errors (`ELSQL001`–`ELSQL007`), never a
+runtime surprise.
+
+## Quick start
+
+```csharp
+using Elarion.Sql;
+
+[SqlRecord("orders")]
+public sealed record Order {
+    public required Guid Id { get; init; }
+    public required string CustomerName { get; init; }
+    public string? Note { get; init; }
+    public required OrderStatus Status { get; init; }   // enums map via their underlying type
+    public DateTimeOffset CreatedAt { get; init; }
+}
+```
+
+The bundled generator emits `OrderSqlMapper : ISqlRowMapper<Order>`. Query with the `DbConnection`
+extensions — interpolated values become parameters, never concatenated text:
+
+```csharp
+var orders = await connection.QueryAsync(
+    OrderSqlMapper.Instance,
+    $"""
+     SELECT {OrderSqlMapper.Columns.All:raw} FROM {OrderSqlMapper.TableName:raw}
+     WHERE status = {status} AND customer_name IN {names}
+     """,
+    ct);
+```
+
+Insert with the generated constants and typed binding — the SQL stays yours:
+
+```csharp
+await using var command = connection.CreateCommand();
+command.CommandText =
+    $"INSERT INTO {OrderSqlMapper.TableName} ({OrderSqlMapper.Columns.All}) VALUES ({OrderSqlMapper.Columns.AllParameters})";
+OrderSqlMapper.Instance.BindParameters(command, order);
+await command.ExecuteNonQueryAsync(ct);
+```
+
+## What the mapper generates
+
+For each `[SqlRecord]` type, a sealed `partial` `{Type}SqlMapper` with:
+
+| Member | Purpose |
+| --- | --- |
+| `Read(reader)` / `Read(reader, in Ordinals)` | One row → `T`. Ordinals resolve **by name once per result set**, then every row reads with synchronous typed `GetFieldValue<T>` — no per-row name lookups, no boxing, no per-column `await`. |
+| `ReadAll(reader)` / `ReadAllAsync(reader, ct)` | All rows → `List<T>`, ordinals resolved once. |
+| `BindParameters(command, row)` | One typed `DbParameter` per column, named exactly like the column (`@customer_name`). `null` binds as `DBNull`. |
+| `TableName`, `Columns.*`, `Columns.All`, `Columns.AllParameters` | `const string`s so hand-written SQL composes without stringly duplication. |
+| `Instance` | Static stateless instance for DI-free hosts. |
+
+One `AddElarionSqlMappers()` extension per assembly registers every mapper as an
+`ISqlRowMapper<T>` singleton — a mapper is a *value you pass around*, so wrapping calls in your own
+helpers costs nothing (there is no call-site pattern to break, unlike interception).
+
+Conventions and knobs:
+
+- Names default to **snake_case** (property `CreatedAt` → `created_at`; type `OrderLine` → table
+  `order_line`, no pluralization guessed). Override with `[SqlRecord("orders")]` / `[SqlColumn("…")]`.
+- `[SqlIgnore]` excludes a property; get-only (derived) members are skipped automatically.
+- **Positional records** construct through their primary constructor; nominal records with
+  `required`/`init` members through an object initializer — no parameterless-constructor requirement.
+- `[SqlJson]` maps a property as a JSON column through the canonical accessor's `JsonTypeInfo<T>`
+  ([serialization](/docs/capabilities/serialization), ADR-0023) — AOT-strict, one JSON config
+  everywhere. JSON mappers take `IElarionJsonSerialization` as a constructor parameter instead of
+  exposing `Instance`; the generated registration wires it. Under
+  `[assembly: UseElarionSql(Provider = SqlProvider.Npgsql)]` JSON parameters bind as `jsonb`.
+- Supported column types: the numeric/text/boolean primitives, `Guid`, `DateTime`, `DateTimeOffset`,
+  `DateOnly`, `TimeOnly`, `TimeSpan`, `char`, `byte[]`, enums (underlying type), `Nullable<T>` of all
+  of these, and nullable reference types. Anything else: `[SqlJson]` or `[SqlIgnore]` — or `ELSQL001`.
+
+## Safe SQL interpolation
+
+`SqlStatement.Of($"…")` is the C#-native equivalent of jOOQ's plain-SQL templating tier: full SQL
+stays full SQL — window functions, CTEs, `ON CONFLICT`, any PostgreSQL feature — with injection safety
+enforced by the compiler, not by review:
+
+```csharp
+SqlStatement where = SqlStatement.Of($"WHERE status = {status} AND id IN {ids}");
+SqlStatement query = SqlStatement.Of(
+    $"SELECT {OrderSqlMapper.Columns.All:raw} FROM {OrderSqlMapper.TableName:raw} {where} LIMIT {limit}");
+var page = await connection.QueryAsync(OrderSqlMapper.Instance, query, ct);
+```
+
+- A **scalar** hole binds as a `@pN` parameter — there is no string concatenation to get wrong.
+- A **collection** hole expands to a parenthesized parameter list for `IN`. An **empty** collection
+  throws at build time: no SQL spelling keeps both `IN` (match nothing) and `NOT IN` (match
+  everything) correct for the empty set, so guard the query instead of shipping silently wrong rows.
+- A **`SqlStatement`** hole splices as a fragment with its parameters renumbered — a reusable `WHERE`
+  piece is just a value.
+- **`{expr:raw}`** splices trusted text verbatim (the generated constants; a validated sort column).
+  Never user input.
+- There is deliberately **no `Of(string)` overload**: a constant-only interpolated string is a C#
+  constant expression, and overload resolution would prefer the `string` conversion — silently
+  splicing a `{CONST}` hole as text instead of binding a parameter. Plain parameterless text is
+  `SqlStatement.Raw("…")`.
+
+The `DbConnection` extensions (`QueryAsync`, `QueryFirstOrDefaultAsync`, `ExecuteAsync`,
+`ExecuteScalarAsync`) pair statements with mappers and open/close closed connections around the call
+(Dapper semantics). They save the command/reader ceremony — nothing more.
+
+## Why not Dapper.AOT
+
+Dapper.AOT is actively maintained and its *emitted code* is excellent. The difference is
+architectural, not maturity: Dapper.AOT works by **call-site interception** of the reflection-based
+Dapper API. Only direct, inline Dapper calls are intercepted — a call the interceptor cannot
+statically see (your own helper wrapping `Query<T>`, a generic utility) compiles cleanly and silently
+executes classic reflection Dapper, which under NativeAOT is a *runtime* failure. The one guarantee an
+AOT-first framework must give — "if it builds, it maps" — is exactly the one interception cannot make.
+
+`Elarion.Sql` inverts the consumption model: the mapper is an **explicit generated contract**, not a
+recognized call pattern. Indirection is free (the mapper is a value), private/internal types work, and
+the failure mode for an unmapped type is a compile error. What Dapper.AOT does better remains true and
+documented: it accepts arbitrary result shapes per query (Elarion maps declared `[SqlRecord]` types),
+and it drops into an existing Dapper codebase unchanged. The benchmark suite keeps an honest
+comparison column for both classic Dapper and Dapper.AOT.
+
+## Performance
+
+The benchmark gate (`tests/Elarion.Benchmarks`, `--filter "*SqlMapping*"`, real PostgreSQL via
+Testcontainers — the ADR-0051 discipline): the generated read path must sit at parity with a
+hand-written ADO.NET reader in **time and allocations**, with classic Dapper, Dapper.AOT, and EF Core
+(no-tracking) as comparison columns, on both the many-rows path (1k/100k rows → `List<T>`) and the
+single-row path (per-call overhead: statement build, parameter binding, command setup).
+
+The generated mapper emits the same code you would write by hand — an ordinal struct and typed
+`GetFieldValue<T>` calls — so parity is by construction, and the benchmark exists to keep it that way.
+Representative numbers (Apple M4 Pro, .NET 10, PostgreSQL 17 in a container; 2026-07):
+
+| Method | 1k rows | 100k rows | Single row | Allocated (1k / single) |
+| --- | --- | --- | --- | --- |
+| Hand-written ADO.NET (baseline) | 702 μs | 52.0 ms | 196.7 μs | 217.2 KB / 2.66 KB |
+| **Elarion generated mapper** | 703 μs (1.00×) | 52.4 ms (1.01×) | 196.0 μs (1.00×) | **217.4 KB (1.00×) / 2.66 KB (1.00×)** |
+| Elarion `QueryAsync` (interpolation end-to-end) | 703 μs (1.00×) | 52.4 ms (1.01×) | 195.6 μs (0.99×) | 218.1 KB / 3.36 KB (+0.7 KB per-call statement build) |
+| Dapper | 716 μs (1.02×) | 52.3 ms (1.01×) | 200.9 μs (1.02×) | 373.3 KB (1.72×) / 2.52 KB |
+| Dapper.AOT | 719 μs (1.02×) | 51.9 ms (1.00×) | 200.0 μs (1.02×) | 217.4 KB (1.00×) / 2.60 KB |
+| EF Core (no-tracking) | 820 μs (1.17×) | 58.9 ms (1.13×) | 250.6 μs (1.27×) | 409.7 KB (1.89×) / 10.05 KB (3.78×) |
+
+## Non-goals
+
+No change tracking, no LINQ or query translation, no relationship/graph mapping, no CRUD statement
+generation — SQL stays hand-written; the generated constants remove the boilerplate, not the SQL. No
+query-builder DSL (rejected as LINQ-to-SQL-by-another-name, ADR-0058). The planned follow-up is the
+**schema-derived metamodel and drift verification**: a design-time tool introspects a real PostgreSQL
+brought to schema by any means and writes a committed `elarion-sql-schema.json`; the generator then
+validates every `[SqlRecord]` against the actual schema at build time.
