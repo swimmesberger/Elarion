@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using AwesomeAssertions;
@@ -54,6 +56,18 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
     [Fact]
     public async Task IngestThenQuery_RoundTripsThroughMigratedSchema() {
         Assert.SkipUnless(_factory is not null, _skipReason);
+
+        // Handler tracing is always-on (the registration generator applies TracingDecorator as the
+        // outermost decorator for every handler, attributes or not) — a listener on the Elarion and
+        // Npgsql sources proves the dashboard's trace story: HTTP → handler span → SQL command span.
+        var spans = new ConcurrentBag<(string Source, string Name)>();
+        using var listener = new ActivityListener {
+            ShouldListenTo = source => source.Name is "Elarion.Handlers" or "Npgsql",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => spans.Add((activity.Source.Name, activity.DisplayName)),
+        };
+        ActivitySource.AddActivityListener(listener);
+
         using var client = _factory!.CreateClient();
 
         var recordedAt = new DateTimeOffset(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
@@ -100,5 +114,13 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
         stats[0].MinValue.Should().Be(21.5);
         stats[0].MaxValue.Should().Be(23.0);
         stats[0].AvgValue.Should().BeApproximately(22.25, 0.0001);
+
+        // Every handler on the path emitted its span; the ingest ran its SQL inside one.
+        var handlerSpans = spans.Where(s => s.Source == "Elarion.Handlers").Select(s => s.Name).ToList();
+        handlerSpans.Should().Contain("handle IngestReadings");
+        handlerSpans.Should().Contain("handle GetLatestReading");
+        handlerSpans.Should().Contain("handle GetReadingHistory");
+        handlerSpans.Should().Contain("handle GetMetricStats");
+        spans.Should().Contain(s => s.Source == "Npgsql", "the SQL command spans nest under the handler spans");
     }
 }

@@ -11,8 +11,8 @@ POST /readings … GET /devices/{id}/stats     hand-authored minimal-API endpoin
         │                                    one line each: bind → handler → Result<T> to HTTP
         ▼
 [Handler] classes ([AppModule] Telemetry)    registered by the GENERATED module bootstrapper
-        │                                    (AddElarion) — no decorator attributes, so plain
-        │                                    typed IHandler<TRequest, Result<TResponse>> services
+        │                                    (AddElarion) — always-on tracing/enrichment only;
+        │                                    gate decorators would attach per attribute
         ▼
 Elarion.Sql                    (ADR-0058)    the access half: [SqlRecord] → generated
         │                                    ISqlRowMapper<T> + injection-safe interpolation
@@ -96,8 +96,10 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   (retransmitted device batches insert nothing); `GetMetricStats` is the "full power of SQL" leg —
   `time_bucket` + aggregates stay SQL, interpolated holes bind as parameters, `{…:raw}` splices only
   the generated constants. Failures are `Result` values (`AppError.NotFound`, `AppError.Validation`),
-  not exceptions. No decorator attributes → the pipeline registers plain typed handlers; add
-  `[Idempotent]` or `[RequirePermission]` later and only then does a decorator wrap them.
+  not exceptions. With no decorator attributes only the always-on pair wraps the handlers — tracing
+  (the `Elarion.Handlers` span + `handler.execution.duration` metric per call, near-zero cost when
+  nothing listens) and user-context enrichment; add `[Idempotent]` or `[RequirePermission]` later and
+  only then does a gate decorator join the chain.
 - **`Modules/Telemetry/TelemetryContracts.cs`** — the whole data contract. `ReadingRow` is a
   `[SqlRecord]`: the generated `ReadingRowSqlMapper` carries ordinal-cached typed reads, typed
   `BindParameters`, and the `TableName`/`Columns` constants the handlers compose SQL from.
