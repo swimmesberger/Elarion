@@ -54,6 +54,8 @@
     <Project Path="src/Elarion.Settings.EntityFrameworkCore.Generators/Elarion.Settings.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj" />
     <Project Path="src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj" />
+    <Project Path="src/Elarion.Sql/Elarion.Sql.csproj" />
+    <Project Path="src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj" />
@@ -80,6 +82,9 @@
     <Project Path="samples/Billing/Billing.AppHost/Billing.AppHost.csproj" />
     <Project Path="samples/Billing/Billing.Web/Billing.Web.csproj" />
     <Project Path="samples/Billing/Billing.Tests/Billing.Tests.csproj" />
+    <Project Path="samples/EdgeTelemetry/EdgeTelemetry.Api/EdgeTelemetry.Api.csproj" />
+    <Project Path="samples/EdgeTelemetry/EdgeTelemetry.AppHost/EdgeTelemetry.AppHost.csproj" />
+    <Project Path="samples/EdgeTelemetry/EdgeTelemetry.Tests/EdgeTelemetry.Tests.csproj" />
     <Project Path="samples/LiveQuotes/LiveQuotes.Api/LiveQuotes.Api.csproj" />
     <Project Path="samples/LiveQuotes/LiveQuotes.Tests/LiveQuotes.Tests.csproj" />
   </Folder>

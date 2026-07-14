@@ -1,6 +1,6 @@
 # ADR-0058: AOT-native SQL row mapping — explicit generated mappers, not call-site interception
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-13
 - Related: [ADR-0057](0057-postgresql-sql-migration-runner.md) (the EF-free/AOT tier this completes),
   [ADR-0006](0006-incremental-source-generator-conventions.md) (generator conventions),
@@ -68,7 +68,14 @@ conventions. `IsAotCompatible`; dependencies are BCL + `Microsoft.Extensions.*` 
     per-column `await`;
   - `BindParameters(DbCommand, T)` — typed, generated per property;
   - generated `TableName` / column-name constants, so hand-written SQL composes without stringly
-    duplication (`$"SELECT {OrderSqlMapper.Columns.All} FROM {OrderSqlMapper.TableName}"`).
+    duplication (`$"SELECT {OrderSqlMapper.Columns.All} FROM {OrderSqlMapper.TableName}"`);
+  - generated **statement constants for the mechanical, clause-free statements only** — `Insert`
+    (full-row `INSERT INTO t (…) VALUES (@…)`), `Select` (the SELECT-list prefix), and
+    `Columns.AllAssignments` (the `UPDATE … SET` list). These contain zero query logic — they are the
+    column enumeration a human would type mechanically — and being `const string`s they compose at
+    compile time (`OrderSqlMapper.Insert + " ON CONFLICT DO NOTHING"`). Anything with a predicate,
+    join, or clause stays hand-written; that is the line between removing boilerplate and building a
+    query DSL.
 - Mappers are stateless: a static `Instance` for DI-free minimal hosts, plus a generated
   registration extension for seam-style injection. Nominal records with `required`/`init` are
   first-class (object-initializer emission — no parameterless-constructor requirement).
@@ -126,8 +133,10 @@ conventions. `IsAotCompatible`; dependencies are BCL + `Microsoft.Extensions.*` 
 
 ### Non-goals (what keeps this from becoming an ORM)
 
-No change tracking, no LINQ or query translation, no relationship/graph mapping, no CRUD statement
-generation — SQL stays hand-written; the generated constants remove the boilerplate, not the SQL.
+No change tracking, no LINQ or query translation, no relationship/graph mapping, no query
+generation — SQL stays hand-written; the generated constants (columns and the clause-free `Insert`/
+`Select`/`AllAssignments` statements) remove the boilerplate, not the SQL: nothing generated ever
+contains a predicate.
 **No query-builder DSL**, explicitly including a jOOQ-style one: rejected above as
 LINQ-to-SQL-by-another-name; requests for it get the safe-interpolation + metamodel answer.
 The EF tier is untouched: EF Core remains the default data access for every host that can use it;
@@ -146,3 +155,67 @@ carried over in v1 — each returns only on demonstrated consumer need, as its o
   the validated predecessor.
 - `Elarion.Migrations.PostgreSql` (ADR-0057) stays independent of this package — its single
   history-row reader remains hand-written; neither package requires the other.
+
+## Addendum (2026-07): call-site DX rework
+
+The v1 surface shipped, then a design panel (five independent reviews + a synthesis) found the
+architecture sound but the call site leaking machinery. The following DX rework landed as four slices;
+none touched the hard constraints (read-path allocation parity — re-verified 1.00× time and
+allocations vs hand-written ADO.NET at 1k and 100k rows — no reflection, no interception, no runtime
+codegen, AOT-clean, SQL stays hand-written).
+
+- **Self-mapping.** The generator emits a partial making each `[SqlRecord]` type implement
+  `ISqlRecord<T>` (static-abstract `SqlMapper` resolving the cached singleton, plus `InsertCommandText`
+  and typed `Table`/`Select` fragments). The query extensions resolve the mapper from the type
+  argument — `db.QueryAsync<Order>($"…")`, no mapper threaded through the call. C# cannot locate a
+  *separate* mapper class from the row type (no associated types), so the static abstract lives on the
+  row itself; the row must be `partial` (`ELSQL010`) and must not shadow the generated member names
+  (`ELSQL011`). Resolution is a static field read, devirtualized under AOT — zero measurable cost.
+- **`:raw` removed.** The generated `Table`/`Select` fragments splice with no annotation (forgetting
+  the marker is now impossible), and the `AppendFormatted` format overload — with its runtime
+  `FormatException` for a typo'd spec — is gone; a stray `{x:fmt}` is now a compile error. Dynamic
+  identifiers use `SqlStatement.Verbatim(col)`, the one greppable trusted-text door.
+- **`SqlWhere`.** The no-DSL answer to the dominant call-site shape (a list with optional filters):
+  accumulate parenthesized predicate fragments carrying their own parameters, render `WHERE (a) AND (b)`
+  or nothing. It kills `WHERE 1=1`, keeps the obvious thing to type safe, and the same accumulator
+  drives a page query and its `count(*)`. It knows only the `WHERE`/`AND` joiners — no predicate is
+  generated, staying on the boilerplate side of the DSL line.
+- **Write + streaming tier.** `InsertAsync`/`InsertManyAsync` (the latter owns the one-transaction
+  reused-prepared-command loop; `sqlSuffix` appends `ON CONFLICT …`), `QuerySingleOrDefaultAsync`
+  (throws on more than one row), `QueryUnbufferedAsync` (`IAsyncEnumerable` streaming), and a
+  transaction-taking `ExecuteAsync` — on both `DbDataSource` (pooled connection per call) and
+  `DbConnection`. `InsertManyAsync` is a *convenience* batch, not bulk COPY — ADR-0051 stays the bulk
+  path.
+- **Constructor + `Verbatim`.** `new SqlStatement($"…")` replaces the `SqlStatement.Of` factory; `Raw`
+  became `Verbatim`; `Empty` and `operator+` compose fragments.
+
+*Rejected from the panel:* renaming the type to `Sql` (it shadows the `Elarion.Sql` namespace for
+`Elarion.*`-rooted consumers — CA1724; the type stays `SqlStatement`); a `Sql<T>.Where/.OrderBy/.Limit`
+statement-builder (clause-named members are a query-DSL seed — `SqlWhere` accumulation plus hand-written
+SQL covers the optional-filter bucket instead); and per-type `Entity.ById`-style static helpers (ORM
+pressure). Self-mapping JSON rows read the canonical JSON accessor from a process-global ambient
+(`ElarionSqlJson`) — the one unavoidable global, since a static-abstract mapper cannot take a
+constructor dependency; it is installed at startup by a hosted service the generated
+`AddElarionSqlMappers` registers only for JSON-column assemblies (justifying a
+`Microsoft.Extensions.Hosting.Abstractions` dependency), and read lazily at first JSON use so there is
+no static-init ordering fragility.
+
+### Considered future addition: source-generated binary COPY for the AOT tier
+
+The EF tier's high-throughput bulk-insert path (ADR-0051 — `DbSet<T>.ExecuteInsertAsync` over Npgsql
+binary `COPY`) is unavailable to this tier on two counts: its entry point and column metadata come from
+the EF model, and its per-column writers are compiled at runtime via `System.Linq.Expressions`, so the
+package is **not** `IsAotCompatible`. The EF-free/AOT tier therefore has no binary-COPY path today —
+`InsertManyAsync` (a reused-prepared-command loop, one round trip per row) is the ceiling.
+
+A **source-generated** COPY would close that gap without borrowing the EF path: the `[SqlRecord]`
+generator already emits typed per-column parameter binding (`BindParameters`) and knows each column's
+`NpgsqlDbType` under the `[UseElarionSql(Provider = SqlProvider.Npgsql)]` trigger, so emitting a
+`WriteRowTo(NpgsqlBinaryImporter, T)` per column is the same compile-time, reflection-free shape —
+AOT-clean, "if it builds, it maps." Exposed as a `connection.CopyAsync(rows)` extension (or a generated
+mapper method), it would give the AOT tier raw-`NpgsqlBinaryImporter` COPY speed. This mirrors the
+migration split (EF migrations for the EF tier, `Elarion.Migrations.PostgreSql` for the AOT tier): two
+implementations by tier, because the mechanism genuinely differs (runtime-compiled vs source-generated),
+never a repackaging of the EF path. It ships behind a benchmark gate at raw-COPY parity (the ADR-0051
+discipline) and dogfoods in the EdgeTelemetry ingest handler. Deferred to its own decision — v1 keeps
+`InsertManyAsync` as the batch path and points high-throughput bulk load at the EF tier.

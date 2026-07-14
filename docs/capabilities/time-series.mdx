@@ -199,3 +199,10 @@ outgrowing it is rare. If a workload genuinely needs a dedicated time-series clu
 infrastructure decision above the framework — the entity, handlers, and events here stay; only the
 storage SQL moves. And the recipe *shape* generalizes to other extensions — pgvector, PostGIS, Apache
 AGE — see [PostgreSQL extensions](/docs/capabilities/postgres-extensions).
+
+## The EF-free variant
+
+The same composition on the AOT tier — `CREATE EXTENSION` + `create_hypertable` +
+`add_retention_policy` in one ADR-0057 migration, `time_bucket` rollups read through ADR-0058
+generated mappers, published NativeAOT — is the runnable
+[`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry).

@@ -14,9 +14,13 @@
     <PackageVersion Include="EFCore.BulkExtensions.MIT.PostgreSql" Version="10.22.0" />
     <PackageVersion Include="linq2db.EntityFrameworkCore" Version="10.4.0" />
     <PackageVersion Include="PhenX.EntityFrameworkCore.BulkInsert.PostgreSql" Version="0.5.0" />
+    <!-- SQL row-mapping benchmark competitors (ADR-0058 gate; tests/Elarion.Benchmarks only, never a src/ dependency). -->
+    <PackageVersion Include="Dapper" Version="2.1.79" />
+    <PackageVersion Include="Dapper.AOT" Version="1.0.52" />
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.29.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.9" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
     <!-- Pin past the transitive 2.0.0 pulled by Microsoft.AspNetCore.OpenApi: GHSA-v5pm-xwqc-g5wc is fixed in 2.7.5.
          Stay on the 2.x line: Microsoft.AspNetCore.OpenApi 10.0.9's XML-comment source generator assigns

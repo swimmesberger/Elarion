@@ -1,12 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Micro-benchmarks for framework hot paths (the Elarion.Actors call path — gating the ADR-0042
-       optimization roadmap — and the PostgreSQL bulk insert vs. comparable libraries, gating ADR-0051).
+       optimization roadmap — the PostgreSQL bulk insert vs. comparable libraries, gating ADR-0051, and
+       the SQL row mapping vs. hand-written ADO.NET / Dapper / EF Core, gating ADR-0058).
        Run instructions are in Program.cs. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!-- Dapper.AOT rewrites its Dapper call sites via interceptors (the SQL-mapping benchmark's
+         Dapper.AOT column); classic-Dapper methods opt out per call site with [DapperAot(false)]. -->
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Dapper.AOT</InterceptorsNamespaces>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +27,9 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="PhenX.EntityFrameworkCore.BulkInsert.PostgreSql" />
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <!-- SQL row-mapping competitors (ADR-0058 gate). -->
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Dapper.AOT" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,6 +37,12 @@
     <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj" />
     <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj" />
     <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj" />
+    <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj" />
+    <!-- The mapper generator applied as an analyzer, so the benchmarks exercise the REAL generated
+         mapper (in-repo ProjectReferences do not flow bundled analyzers). -->
+    <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

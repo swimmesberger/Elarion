@@ -386,3 +386,21 @@ Generated client-event topic registration for `IClientEvent` contracts. See
 | ELCEV001 | Warning | An `IClientEvent` contract's namespace is not under any `[AppModule]`, so no topic is registered for it. | Move the contract under an `[AppModule]` namespace, or register the topic manually via `AddElarionClientEvents`. |
 | ELCEV002 | Error | Two `IClientEvent` contracts resolve to the same topic name; the colliding topics are withheld. | Rename one contract, or disambiguate with an explicit `[ClientEvent("…")]` name. |
 | ELCEV003 | Warning | The compilation declares `IClientEvent` contracts but does not reference `Elarion.ClientEvents`, so no topics are registered. | Reference `Elarion.ClientEvents` (and map the endpoint from `Elarion.ClientEvents.AspNetCore`), or remove the contracts. |
+
+## ELSQL — SQL row mapping
+
+Mapper generation for `[SqlRecord]` types (ADR-0058). See [SQL mapping](/docs/capabilities/sql-mapping).
+There is deliberately no runtime fallback behind these errors: an unmapped type has no mapper to call,
+so every gap surfaces at build time.
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELSQL001 | Error | A property's type is not a supported SQL column type. | Use a supported primitive, serialize the property as JSON with `[SqlJson]`, or exclude it with `[SqlIgnore]`. |
+| ELSQL002 | Error | Two properties map to the same column name — a silent last-wins would corrupt reads. | Rename one property or give it a distinct `[SqlColumn("…")]`. |
+| ELSQL003 | Error | A `required` property is excluded from mapping (`[SqlIgnore]` or non-writable), so the generated mapper could not construct the row. | Map the property or drop `required`. |
+| ELSQL004 | Error | A `[SqlRecord]` type has no mapped columns. | Add at least one readable, writable property of a supported type. |
+| ELSQL005 | Error | A `[SqlRecord]` type is nested, generic, or abstract. | Move the row type to a top-level, non-generic, concrete class, record, or struct. |
+| ELSQL006 | Error | No usable constructor: no accessible parameterless constructor with writable mapped properties, and no constructor whose parameters match mapped columns by name. | Add a parameterless constructor with `set`/`init` properties, or use a positional record. |
+| ELSQL007 | Error | A property carries `[SqlColumn]`/`[SqlJson]` but has no accessible setter or initializer. | Add `set`/`init`, or remove the mapping attribute (derived members are skipped silently). |
+| ELSQL010 | Error | A `[SqlRecord]` type is not `partial`, so the self-mapping members (`ISqlRecord<T>.SqlMapper`, `Table`, `Select`) cannot be generated. | Add the `partial` modifier. (The mapper still generates, so the explicit-mapper overloads keep working meanwhile.) |
+| ELSQL011 | Error | A `[SqlRecord]` type declares a member named `SqlMapper`, `Table`, or `Select`, colliding with a generated self-mapping member. | Rename the member; a mapped column can keep its SQL name via `[SqlColumn("…")]`. |

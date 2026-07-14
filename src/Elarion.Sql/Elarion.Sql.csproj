@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>AOT-native SQL row mapping for EF-free Elarion hosts (ADR-0058): [SqlRecord] generates an explicit ISqlRowMapper contract per row type (ordinal-cached typed reads, typed parameter binding, table/column constants) plus injection-safe SQL interpolation. No reflection, no call-site interception, no silent fallback — if it builds, it maps.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <!-- The generated AddElarionSqlMappers registers a hosted service that installs the canonical JSON
+         accessor for self-mapping [SqlJson] rows (ADR-0058) — so a JSON-column host needs no extra
+         wiring. AOT-compatible. Justified: convention-over-configuration for the self-mapping happy path. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Contracts only: the canonical JSON accessor ([SqlJson] rides IElarionJsonSerialization, ADR-0023). -->
+    <ProjectReference Include="../Elarion.Abstractions/Elarion.Abstractions.csproj" />
+  </ItemGroup>
+
+  <!-- Bundle the row-mapper source generator's analyzer into this package (single home, like Elarion core's
+       bundled generators). NuGet analyzer assets are not transitive, so shipping the generator inside the
+       package that declares [SqlRecord] makes the reference self-sufficient. ReferenceOutputAssembly=false
+       keeps the generator off the runtime surface; PrivateAssets=all keeps it from becoming a downstream
+       package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Sql.Generators\Elarion.Sql.Generators.csproj"
+                     ReferenceOutputAssembly="false"
+                     PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="_BundleSqlGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.Sql.Generators\Elarion.Sql.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_SqlGeneratorAnalyzer" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_SqlGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests" />
+  </ItemGroup>
+
+</Project>
