@@ -1,7 +1,7 @@
 namespace Elarion.Diagnostics;
 
 /// <summary>
-/// Configures the built-in user-context enricher that <see cref="HandlerContextEnrichmentDecorator{TRequest,TResponse}"/>
+/// Configures the built-in user-context enricher that <see cref="Pipeline.ObservabilityDecorator{TRequest,TResponse}"/>
 /// runs — the default-on contribution that stamps the calling user's identity onto the handler span and log scope.
 /// </summary>
 /// <remarks>

@@ -9,16 +9,23 @@ using Elarion.Pipeline;
 using Elarion.Diagnostics;
 namespace Elarion.Tests.Services;
 
-public sealed class TracingDecoratorTests {
+// The tracing + execution-metric half of the merged ObservabilityDecorator (ADR-0059). The context-enrichment
+// half is covered by HandlerObservabilityEnrichmentTests.
+public sealed class ObservabilityDecoratorTests {
     private static readonly HandlerMetadata Metadata =
         new(typeof(Request), typeof(Request), typeof(Result<int>));
+
+    private static readonly IHandlerContextEnricher[] NoEnrichers = [];
+
+    private static ObservabilityDecorator<Request, Result<int>> Decorate(
+        IHandler<Request, Result<int>> inner, string name, HandlerMetadata? metadata = null) =>
+        new(inner, name, metadata ?? Metadata, NoEnrichers, loggerFactory: null);
 
     [Fact]
     public async Task HandleAsync_SuccessResult_EmitsSpanAndMetricWithOkOutcome() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
-        var decorator = new TracingDecorator<Request, Result<int>>(
-            new SuccessHandler(), "SuccessHandler", Metadata);
+        var decorator = Decorate(new SuccessHandler(), "SuccessHandler");
 
         var result = await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -40,8 +47,7 @@ public sealed class TracingDecoratorTests {
     public async Task HandleAsync_FailureResult_RecordsErrorOutcome() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
-        var decorator = new TracingDecorator<Request, Result<int>>(
-            new FailureHandler(), "FailureHandler", Metadata);
+        var decorator = Decorate(new FailureHandler(), "FailureHandler");
 
         var result = await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -60,8 +66,7 @@ public sealed class TracingDecoratorTests {
     public async Task HandleAsync_InnerThrows_RecordsExceptionAndRethrows() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
-        var decorator = new TracingDecorator<Request, Result<int>>(
-            new ThrowingHandler(), "ThrowingHandler", Metadata);
+        var decorator = Decorate(new ThrowingHandler(), "ThrowingHandler");
 
         var act = async () => await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -80,8 +85,7 @@ public sealed class TracingDecoratorTests {
     [Fact]
     public async Task HandleAsync_NoActivityListener_StillRecordsMetric() {
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
-        var decorator = new TracingDecorator<Request, Result<int>>(
-            new SuccessHandler(), "MetricOnlyHandler", Metadata);
+        var decorator = Decorate(new SuccessHandler(), "MetricOnlyHandler");
 
         await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -95,28 +99,28 @@ public sealed class TracingDecoratorTests {
     public async Task HandleAsync_TwoHandlersSharingRequestAndResponse_ReportTheirOwnPipelineTags() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         // Two handlers with the same TRequest/TResponse (e.g. two handler-form consumers of one event) share
-        // the closed TracingDecorator<,> generic but have different metadata pipelines — each span must carry
-        // its OWN pipeline, not whichever handler rendered first.
+        // the closed ObservabilityDecorator<,> generic but have different metadata pipelines — each span
+        // must carry its OWN pipeline, not whichever handler rendered first.
         var metadataA = new HandlerMetadata(
             typeof(SuccessHandler), typeof(Request), typeof(Result<int>),
-            () => [new PipelineStep(typeof(TracingDecorator<,>), Conditional: false),
+            () => [new PipelineStep(typeof(ObservabilityDecorator<,>), Conditional: false),
                 new PipelineStep(typeof(AuthorizationDecorator<,>), Conditional: false)]);
         var metadataB = new HandlerMetadata(
             typeof(FailureHandler), typeof(Request), typeof(Result<int>),
-            () => [new PipelineStep(typeof(TracingDecorator<,>), Conditional: false),
+            () => [new PipelineStep(typeof(ObservabilityDecorator<,>), Conditional: false),
                 new PipelineStep(typeof(TransactionDecorator<,>), Conditional: true)]);
-        var decoratorA = new TracingDecorator<Request, Result<int>>(new SuccessHandler(), "HandlerA", metadataA);
-        var decoratorB = new TracingDecorator<Request, Result<int>>(new SuccessHandler(), "HandlerB", metadataB);
+        var decoratorA = Decorate(new SuccessHandler(), "HandlerA", metadataA);
+        var decoratorB = Decorate(new SuccessHandler(), "HandlerB", metadataB);
 
         await decoratorA.HandleAsync(new Request(), TestContext.Current.CancellationToken);
         await decoratorB.HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
         activities.Activities.Should().Contain(activity =>
             Equals(activity.GetTag("elarion.handler"), "HandlerA") &&
-            Equals(activity.GetTag("elarion.handler.pipeline"), "Tracing,Authorization"));
+            Equals(activity.GetTag("elarion.handler.pipeline"), "Observability,Authorization"));
         activities.Activities.Should().Contain(activity =>
             Equals(activity.GetTag("elarion.handler"), "HandlerB") &&
-            Equals(activity.GetTag("elarion.handler.pipeline"), "Tracing,Transaction?"));
+            Equals(activity.GetTag("elarion.handler.pipeline"), "Observability,Transaction?"));
     }
 
     private sealed record Request;

@@ -100,11 +100,11 @@ public sealed class AuditPipelineGeneratorTests {
         generated.Should().Contain("var __steps = __pipeline is null");
         generated.Should().Contain("if (__steps is not null) { __steps.Reverse(); __pipeline = __steps; }");
 
-        // Soft-attached audit is a conditional step; always-on tracing is not.
+        // Soft-attached audit is a conditional step; the always-on observability decorator is not.
         generated.Should().Contain(
             "__steps?.Add(new global::Elarion.Abstractions.Pipeline.PipelineStep(typeof(global::Elarion.Pipeline.AuditDecorator<,>), true));");
         generated.Should().Contain(
-            "__steps?.Add(new global::Elarion.Abstractions.Pipeline.PipelineStep(typeof(global::Elarion.Pipeline.TracingDecorator<,>), false));");
+            "__steps?.Add(new global::Elarion.Abstractions.Pipeline.PipelineStep(typeof(global::Elarion.Pipeline.ObservabilityDecorator<,>), false));");
         // The metadata singleton feeds the accessor into HandlerMetadata.
         generated.Should().Contain(
             "static () => __pipeline ?? global::System.Array.Empty<global::Elarion.Abstractions.Pipeline.PipelineStep>());");

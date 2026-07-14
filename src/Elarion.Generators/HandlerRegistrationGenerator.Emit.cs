@@ -77,8 +77,8 @@ public sealed partial class HandlerRegistrationGenerator {
             "    private static volatile global::System.Collections.Generic.IReadOnlyList<global::Elarion.Abstractions.Pipeline.PipelineStep>? __pipeline;");
         sb.AppendLine();
 
-        // The metadata singleton is always emitted now: TracingDecorator (always the outermost decorator) reads
-        // it to surface the pipeline, and it captures the concrete handler type so an attribute-reading decorator
+        // The metadata singleton is always emitted now: ObservabilityDecorator (always the outermost
+        // decorator) reads it to surface the pipeline, and it captures the concrete handler type so an attribute-reading decorator
         // sees the true handler regardless of its position (the inner.GetType() approach only works when innermost
         // — a fail-open footgun). The pipeline accessor is late-bound (a static lambda over the cache above), so
         // it reads empty until first resolution and the composed list after, without mutable state on the singleton.
@@ -176,14 +176,13 @@ public sealed partial class HandlerRegistrationGenerator {
         // detached path (their transaction — if any — is gone by the time a failure surfaces here). It sits
         // inside enrichment/tracing so Activity.Current supplies the record's correlation id (ADR-0045).
         AppendAuditDecorator(sb, handler);
-        // Context enrichment sits just inside tracing so it tags the handler span (Activity.Current) and its log
-        // scope wraps authorization/validation/handler — a denied or invalid request is still attributed to its
-        // caller. Runs the built-in user-context enricher plus any host IHandlerContextEnricher; on by default across
-        // every transport, inert for anonymous callers with no host enrichers.
-        AppendContextEnrichmentDecorator(sb, handler);
-        // Note: tracing is emitted last so the handler span is the outermost decorator and parents
-        // any cache/resilience/pipeline child spans.
-        AppendTracingDecorator(sb, handler);
+        // Observability is emitted last, so it is the outermost decorator: its span parents any
+        // cache/resilience/pipeline child spans, and its context-enrichment log scope wraps
+        // authorization/validation/handler — a denied or invalid request is still attributed to its caller.
+        // One decorator merges tracing + context enrichment (ADR-0059): it starts the handler span, runs the
+        // built-in user-context enricher plus any host IHandlerContextEnricher (on by default across every
+        // transport, inert for anonymous callers with no host enrichers), and records the execution metric.
+        AppendObservabilityDecorator(sb, handler);
 
         // Steps were collected innermost-first (each decorator wraps the previous); reverse to execution order
         // (outermost-first) and publish once. Later resolutions found __pipeline non-null and skipped collection.
@@ -502,23 +501,18 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("                }");
     }
 
-    private static void AppendTracingDecorator(StringBuilder sb, HandlerInfo handler) {
-        sb.AppendLine($"                handler = new global::Elarion.Pipeline.TracingDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
+    // The single always-on observability decorator (ADR-0059): starts the handler span, records the execution
+    // metric, and runs every registered IHandlerContextEnricher (the built-in UserContextEnricher is on by default
+    // with current-user support). Soft-resolves the enrichers/logger via GetServices/GetService so a bare/test host
+    // never fails resolution, and it stays a pass-through when no listener is attached and no enricher contributes.
+    private static void AppendObservabilityDecorator(StringBuilder sb, HandlerInfo handler) {
+        sb.AppendLine($"                handler = new global::Elarion.Pipeline.ObservabilityDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine($"                    {FormatStringLiteral(handler.HandlerName)},");
-        sb.AppendLine("                    __handlerMetadata);");
-        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.TracingDecorator<,>", conditional: false);
-    }
-
-    // Runs every registered IHandlerContextEnricher (the built-in UserContextEnricher is on by default with
-    // current-user support). Soft-resolves via GetServices/GetService so a bare/test host never fails resolution, and
-    // the decorator stays inert when no enricher contributes anything.
-    private static void AppendContextEnrichmentDecorator(StringBuilder sb, HandlerInfo handler) {
-        sb.AppendLine($"                handler = new global::Elarion.Pipeline.HandlerContextEnrichmentDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
-        sb.AppendLine("                    handler,");
+        sb.AppendLine("                    __handlerMetadata,");
         sb.AppendLine("                    sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>(),");
         sb.AppendLine("                    sp.GetService<global::Microsoft.Extensions.Logging.ILoggerFactory>());");
-        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.HandlerContextEnrichmentDecorator<,>", conditional: false);
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.ObservabilityDecorator<,>", conditional: false);
     }
 
     private static void AppendCacheInvalidationDecorator(StringBuilder sb, HandlerInfo handler) {

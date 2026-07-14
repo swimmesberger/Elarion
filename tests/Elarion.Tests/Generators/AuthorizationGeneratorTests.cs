@@ -45,9 +45,9 @@ public sealed class AuthorizationGeneratorTests {
         generated.Should().Contain("global::Elarion.Pipeline.AuthorizationDecorator<");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>()");
         generated.Should().Contain("__handlerMetadata");
-        // Authorization is the outermost functional gate, just inside tracing.
+        // Authorization is the outermost functional gate, just inside the observability decorator.
         generated.IndexOf("AuthorizationDecorator", StringComparison.Ordinal)
-            .Should().BeLessThan(generated.IndexOf("TracingDecorator", StringComparison.Ordinal));
+            .Should().BeLessThan(generated.IndexOf("ObservabilityDecorator", StringComparison.Ordinal));
 
         AssertCompiles(source, generated);
     }

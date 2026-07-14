@@ -7,7 +7,7 @@ namespace Elarion.Diagnostics;
 
 /// <summary>
 /// Host wiring for handler context enrichment
-/// (<see cref="Pipeline.HandlerContextEnrichmentDecorator{TRequest,TResponse}"/>): configuring the built-in
+/// (<see cref="Pipeline.ObservabilityDecorator{TRequest,TResponse}"/>): configuring the built-in
 /// <see cref="UserContextEnricher"/> and contributing custom <see cref="IHandlerContextEnricher"/>s.
 /// </summary>
 public static class UserContextEnrichmentServiceCollectionExtensions {

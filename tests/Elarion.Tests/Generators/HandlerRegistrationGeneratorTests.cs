@@ -130,7 +130,7 @@ public sealed class HandlerRegistrationGeneratorTests {
     }
 
     [Fact]
-    public void GenerateRegistration_AnyHandler_EmitsTracingDecoratorOutermost() {
+    public void GenerateRegistration_AnyHandler_EmitsObservabilityDecoratorOutermost() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
             modulePipelineAttribute: "",
@@ -138,16 +138,17 @@ public sealed class HandlerRegistrationGeneratorTests {
 
         var generated = GenerateHandlerRegistrationSource(source);
 
-        // Tracing is applied unconditionally to every handler, with no opt-in attribute.
-        generated.Should().Contain("global::Elarion.Pipeline.TracingDecorator<");
+        // The observability decorator (tracing + context enrichment, ADR-0059) is applied unconditionally to
+        // every handler, with no opt-in attribute.
+        generated.Should().Contain("global::Elarion.Pipeline.ObservabilityDecorator<");
         generated.Should().Contain("\"CreateOrder\"");
-        // Tracing is emitted last so its span parents the pipeline decorators.
+        // It is emitted last so its span parents the pipeline decorators.
         generated.IndexOf("TransactionDecorator", StringComparison.Ordinal)
-            .Should().BeLessThan(generated.IndexOf("TracingDecorator", StringComparison.Ordinal));
+            .Should().BeLessThan(generated.IndexOf("ObservabilityDecorator", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void GenerateRegistration_HandlerWithoutPipeline_StillEmitsTracingDecorator() {
+    public void GenerateRegistration_HandlerWithoutPipeline_StillEmitsObservabilityDecorator() {
         var source = CreateSource(
             assemblyPipelineAttribute: "",
             modulePipelineAttribute: "",
@@ -155,14 +156,14 @@ public sealed class HandlerRegistrationGeneratorTests {
 
         var generated = GenerateHandlerRegistrationSource(source);
 
-        // Default-on: tracing wraps the handler even when no other decorator applies.
-        generated.Should().Contain("global::Elarion.Pipeline.TracingDecorator<");
+        // Default-on: the observability decorator wraps the handler even when no other decorator applies.
+        generated.Should().Contain("global::Elarion.Pipeline.ObservabilityDecorator<");
         generated.Should().NotContain("TransactionDecorator");
         generated.Should().NotContain("ValidationDecorator");
     }
 
     [Fact]
-    public void GenerateRegistration_AnyHandler_EmitsContextEnrichmentJustInsideTracing() {
+    public void GenerateRegistration_AnyHandler_EmitsObservabilityDecoratorWithEnrichersAndLogger() {
         var source = CreateSource(
             assemblyPipelineAttribute: "",
             modulePipelineAttribute: "",
@@ -170,12 +171,12 @@ public sealed class HandlerRegistrationGeneratorTests {
 
         var generated = GenerateHandlerRegistrationSource(source);
 
-        // User/context enrichment is on by default for every handler (no opt-in attribute), like tracing.
-        generated.Should().Contain("global::Elarion.Pipeline.HandlerContextEnrichmentDecorator<");
-        // Emitted just before tracing (inner→outer), so at runtime it runs just inside the handler span: its tags
-        // land on that span and its log scope wraps authorization/validation/handler.
-        generated.IndexOf("HandlerContextEnrichmentDecorator", StringComparison.Ordinal)
-            .Should().BeLessThan(generated.IndexOf("TracingDecorator", StringComparison.Ordinal));
+        // The merged observability decorator carries the context-enrichment inputs (the built-in user-context
+        // enricher plus any host IHandlerContextEnricher, on by default) and the logger factory — both
+        // soft-resolved so a bare host never fails resolution.
+        generated.Should().Contain("global::Elarion.Pipeline.ObservabilityDecorator<");
+        generated.Should().Contain("sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>()");
+        generated.Should().Contain("sp.GetService<global::Microsoft.Extensions.Logging.ILoggerFactory>()");
     }
 
     [Fact]
@@ -557,7 +558,7 @@ public sealed class HandlerRegistrationGeneratorTests {
     }
 
     [Fact]
-    public void GenerateRegistration_IHandlerOfT_RegistersResultUnitInterfaceWithTracing() {
+    public void GenerateRegistration_IHandlerOfT_RegistersResultUnitInterfaceWithObservability() {
         // The IHandler<T> sugar inherits IHandler<T, Result<Unit>> via a default interface method,
         // so the generator discovers and registers it as the two-arg interface with no special-casing.
         var source = """
@@ -578,7 +579,7 @@ public sealed class HandlerRegistrationGeneratorTests {
 
         generated.Should().Contain(
             "global::Elarion.Abstractions.IHandler<global::Sample.Modules.Sales.Handlers.Ping, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>");
-        generated.Should().Contain("global::Elarion.Pipeline.TracingDecorator<");
+        generated.Should().Contain("global::Elarion.Pipeline.ObservabilityDecorator<");
     }
 
     [Fact]
