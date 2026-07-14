@@ -1,33 +1,35 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>
-/// Applies embedded SQL migration scripts to a PostgreSQL database (ADR-0057). Scripts are embedded
+/// Applies embedded SQL migration scripts to a database (ADR-0057/ADR-0060). Scripts are embedded
 /// resources named <c>V{version}__{description}.sql</c> (versioned, applied once, in version order) or
 /// <c>R__{description}.sql</c> (repeatable, re-applied whenever its checksum changes). The runner is the
-/// EF-free (NativeAOT) tier's schema tool — EF-based applications keep EF Core migrations.
+/// EF-free (NativeAOT) tier's schema tool — EF-based applications keep EF Core migrations. The
+/// database-specific work (locking, history-table SQL, script execution) is supplied by a provider
+/// through <see cref="IMigrationDatabase"/>; the engine here is provider-neutral.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Execution uses one dedicated connection guarded by a <em>session-level</em> <c>pg_advisory_lock</c>,
-/// so concurrent startups serialize and a crashed runner releases the lock with its connection. Each
-/// versioned script runs in its own transaction and its history row commits in that same transaction —
-/// a failed transactional migration leaves no history row and is simply rerun after the script is fixed.
-/// There is deliberately no repair command and no undo: roll forward.
+/// Execution uses one dedicated connection guarded by an exclusive migration lock, so concurrent
+/// startups serialize and a crashed runner releases the lock with its connection. Each versioned script
+/// runs in its own transaction and its history row commits in that same transaction — a failed
+/// transactional migration leaves no history row and is simply rerun after the script is fixed. There is
+/// deliberately no repair command and no undo: roll forward.
 /// </para>
 /// <para>
 /// A script whose leading comment block contains <c>-- elarion: no-transaction</c> runs outside a
-/// transaction, statement by statement, for DDL PostgreSQL forbids inside one
-/// (<c>CREATE INDEX CONCURRENTLY</c>, …). Only such a script can fail half-applied; for a versioned
-/// script the runner then records an explicit failed history row and every subsequent run fails closed
-/// until <see cref="ResolveFailedAsync"/> decides between retrying and marking the version applied. A
-/// failed <em>repeatable</em> script records nothing — repeatables are idempotent by doctrine and their
-/// changed checksum was never recorded, so the next run simply retries them.
+/// transaction for DDL a database forbids inside one (PostgreSQL's <c>CREATE INDEX CONCURRENTLY</c>, …).
+/// Only such a script can fail half-applied; for a versioned script the runner then records an explicit
+/// failed history row and every subsequent run fails closed until <see cref="ResolveFailedAsync"/>
+/// decides between retrying and marking the version applied. A failed <em>repeatable</em> script records
+/// nothing — repeatables are idempotent by doctrine and their changed checksum was never recorded, so
+/// the next run simply retries them.
 /// </para>
 /// </remarks>
 public interface IMigrationRunner {
     /// <summary>
     /// Validates checksums, then applies all pending scripts: versioned scripts in version order
-    /// (out-of-order arrivals per <see cref="PostgreSqlMigrationOptions.OutOfOrder"/>), repeatable
+    /// (out-of-order arrivals per <see cref="MigrationOptions.OutOfOrder"/>), repeatable
     /// scripts afterwards in name order when their checksum changed.
     /// </summary>
     /// <returns>The scripts applied by this run, in execution order; empty when the schema was up to date.</returns>

@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>Describes one discovered migration script.</summary>
 public sealed record MigrationScriptInfo {

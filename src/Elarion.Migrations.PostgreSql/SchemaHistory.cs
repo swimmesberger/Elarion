@@ -1,47 +1,15 @@
+using Elarion.Migrations;
 using Npgsql;
 
 namespace Elarion.Migrations.PostgreSql;
 
-/// <summary>The wire values of the history table's <c>state</c> column.</summary>
-internal static class MigrationStates {
-    public const string Applied = "applied";
-    public const string Failed = "failed";
-    public const string Baseline = "baseline";
-}
-
-/// <summary>One row of the schema history table.</summary>
-internal sealed record AppliedMigrationRow {
-    public required int InstalledRank { get; init; }
-
-    public required string? Version { get; init; }
-
-    public required string Description { get; init; }
-
-    public required string ScriptName { get; init; }
-
-    public required string? Checksum { get; init; }
-
-    public required string State { get; init; }
-}
-
 /// <summary>
-/// Operations on the <c>elarion_schema_history</c> table over the runner's dedicated connection. The
-/// table is created by the runner itself under the advisory lock; rows for transactional migrations are
-/// inserted inside the migration's own transaction (the no-repair invariant of ADR-0057).
+/// PostgreSQL operations on the <c>elarion_schema_history</c> table over the session's dedicated
+/// connection. The table is created by the runner itself under the advisory lock; rows for transactional
+/// migrations are inserted inside the migration's own transaction (the no-repair invariant of ADR-0057).
 /// </summary>
 internal sealed class SchemaHistory(NpgsqlConnection connection, string tableName, int commandTimeoutSeconds) {
     private readonly string _quotedTable = '"' + tableName + '"';
-
-    /// <summary>History table names are plain identifiers; anything else fails before touching the database.</summary>
-    public static void ValidateTableName(string tableName) {
-        var valid = tableName.Length > 0
-            && (char.IsAsciiLetter(tableName[0]) || tableName[0] == '_')
-            && tableName.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
-        if (!valid) {
-            throw new MigrationException(
-                $"History table name '{tableName}' is not a plain identifier (letters, digits, underscores, not starting with a digit).");
-        }
-    }
 
     public async Task EnsureTableAsync(CancellationToken cancellationToken) {
         var sql = $"""
@@ -69,7 +37,7 @@ internal sealed class SchemaHistory(NpgsqlConnection connection, string tableNam
         return (bool)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    public async Task<List<AppliedMigrationRow>> LoadAsync(CancellationToken cancellationToken) {
+    public async Task<IReadOnlyList<AppliedMigrationRow>> LoadAsync(CancellationToken cancellationToken) {
         var sql = $"SELECT installed_rank, version, description, script_name, checksum, state FROM {_quotedTable} ORDER BY installed_rank";
         await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = commandTimeoutSeconds };
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -89,16 +57,7 @@ internal sealed class SchemaHistory(NpgsqlConnection connection, string tableNam
         return rows;
     }
 
-    public async Task InsertAsync(
-        int installedRank,
-        string? version,
-        string description,
-        string scriptName,
-        string? checksum,
-        string state,
-        long durationMs,
-        NpgsqlTransaction? transaction,
-        CancellationToken cancellationToken) {
+    public async Task InsertAsync(MigrationHistoryRecord row, NpgsqlTransaction? transaction, CancellationToken cancellationToken) {
         var sql = $"""
             INSERT INTO {_quotedTable} (installed_rank, version, description, script_name, checksum, state, duration_ms)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -106,13 +65,13 @@ internal sealed class SchemaHistory(NpgsqlConnection connection, string tableNam
         await using var command = new NpgsqlCommand(sql, connection, transaction) {
             CommandTimeout = commandTimeoutSeconds,
             Parameters = {
-                new NpgsqlParameter<int> { TypedValue = installedRank },
-                new NpgsqlParameter<string?> { TypedValue = version },
-                new NpgsqlParameter<string> { TypedValue = description },
-                new NpgsqlParameter<string> { TypedValue = scriptName },
-                new NpgsqlParameter<string?> { TypedValue = checksum },
-                new NpgsqlParameter<string> { TypedValue = state },
-                new NpgsqlParameter<long> { TypedValue = durationMs },
+                new NpgsqlParameter<int> { TypedValue = row.InstalledRank },
+                new NpgsqlParameter<string?> { TypedValue = row.Version },
+                new NpgsqlParameter<string> { TypedValue = row.Description },
+                new NpgsqlParameter<string> { TypedValue = row.ScriptName },
+                new NpgsqlParameter<string?> { TypedValue = row.Checksum },
+                new NpgsqlParameter<string> { TypedValue = row.State },
+                new NpgsqlParameter<long> { TypedValue = row.DurationMs },
             },
         };
         await command.ExecuteNonQueryAsync(cancellationToken);

@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>How <see cref="IMigrationRunner.ResolveFailedAsync"/> resolves a failed no-transaction migration.</summary>
 public enum ResolveAction {
