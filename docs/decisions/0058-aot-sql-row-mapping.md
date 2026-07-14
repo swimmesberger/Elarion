@@ -155,3 +155,47 @@ carried over in v1 — each returns only on demonstrated consumer need, as its o
   the validated predecessor.
 - `Elarion.Migrations.PostgreSql` (ADR-0057) stays independent of this package — its single
   history-row reader remains hand-written; neither package requires the other.
+
+## Addendum (2026-07): call-site DX rework
+
+The v1 surface shipped, then a design panel (five independent reviews + a synthesis) found the
+architecture sound but the call site leaking machinery. The following DX rework landed as four slices;
+none touched the hard constraints (read-path allocation parity — re-verified 1.00× time and
+allocations vs hand-written ADO.NET at 1k and 100k rows — no reflection, no interception, no runtime
+codegen, AOT-clean, SQL stays hand-written).
+
+- **Self-mapping.** The generator emits a partial making each `[SqlRecord]` type implement
+  `ISqlRecord<T>` (static-abstract `SqlMapper` resolving the cached singleton, plus `InsertCommandText`
+  and typed `Table`/`Select` fragments). The query extensions resolve the mapper from the type
+  argument — `db.QueryAsync<Order>($"…")`, no mapper threaded through the call. C# cannot locate a
+  *separate* mapper class from the row type (no associated types), so the static abstract lives on the
+  row itself; the row must be `partial` (`ELSQL010`) and must not shadow the generated member names
+  (`ELSQL011`). Resolution is a static field read, devirtualized under AOT — zero measurable cost.
+- **`:raw` removed.** The generated `Table`/`Select` fragments splice with no annotation (forgetting
+  the marker is now impossible), and the `AppendFormatted` format overload — with its runtime
+  `FormatException` for a typo'd spec — is gone; a stray `{x:fmt}` is now a compile error. Dynamic
+  identifiers use `SqlStatement.Verbatim(col)`, the one greppable trusted-text door.
+- **`SqlWhere`.** The no-DSL answer to the dominant call-site shape (a list with optional filters):
+  accumulate parenthesized predicate fragments carrying their own parameters, render `WHERE (a) AND (b)`
+  or nothing. It kills `WHERE 1=1`, keeps the obvious thing to type safe, and the same accumulator
+  drives a page query and its `count(*)`. It knows only the `WHERE`/`AND` joiners — no predicate is
+  generated, staying on the boilerplate side of the DSL line.
+- **Write + streaming tier.** `InsertAsync`/`InsertManyAsync` (the latter owns the one-transaction
+  reused-prepared-command loop; `sqlSuffix` appends `ON CONFLICT …`), `QuerySingleOrDefaultAsync`
+  (throws on more than one row), `QueryUnbufferedAsync` (`IAsyncEnumerable` streaming), and a
+  transaction-taking `ExecuteAsync` — on both `DbDataSource` (pooled connection per call) and
+  `DbConnection`. `InsertManyAsync` is a *convenience* batch, not bulk COPY — ADR-0051 stays the bulk
+  path.
+- **Constructor + `Verbatim`.** `new SqlStatement($"…")` replaces the `SqlStatement.Of` factory; `Raw`
+  became `Verbatim`; `Empty` and `operator+` compose fragments.
+
+*Rejected from the panel:* renaming the type to `Sql` (it shadows the `Elarion.Sql` namespace for
+`Elarion.*`-rooted consumers — CA1724; the type stays `SqlStatement`); a `Sql<T>.Where/.OrderBy/.Limit`
+statement-builder (clause-named members are a query-DSL seed — `SqlWhere` accumulation plus hand-written
+SQL covers the optional-filter bucket instead); and per-type `Entity.ById`-style static helpers (ORM
+pressure). Self-mapping JSON rows read the canonical JSON accessor from a process-global ambient
+(`ElarionSqlJson`) — the one unavoidable global, since a static-abstract mapper cannot take a
+constructor dependency; it is installed at startup by a hosted service the generated
+`AddElarionSqlMappers` registers only for JSON-column assemblies (justifying a
+`Microsoft.Extensions.Hosting.Abstractions` dependency), and read lazily at first JSON use so there is
+no static-init ordering fragility.

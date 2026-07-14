@@ -15,6 +15,8 @@ namespace Elarion.Benchmarks.SqlMapping;
 public class SqlStatementBuildingBenchmarks {
     private readonly Guid _id = Guid.CreateVersion7();
     private readonly string _metric = "temperature";
+    private readonly double _threshold = 21.5;
+    private readonly int _limit = 100;
     private readonly Guid[] _ids = [.. Enumerable.Range(0, 8).Select(_ => Guid.CreateVersion7())];
 
     // The generated column-list / table fragments (before: two separate identifier splices; the
@@ -48,6 +50,18 @@ public class SqlStatementBuildingBenchmarks {
     [Benchmark]
     public int InList() {
         var sql = new SqlStatement($"{SelectPrefix} WHERE device_id IN {_ids}");
+        return sql.Text.Length + sql.ParameterValues.Count;
+    }
+
+    // The dynamic-WHERE gate: SqlWhere accumulation of 3 optional predicates, spliced into a query.
+    // Build-path only; must stay a small constant per call (no per-row cost).
+    [Benchmark]
+    public int SqlWhereThreePredicates() {
+        var where = new SqlWhere();
+        where.And($"device_id = {_id}");
+        where.And($"metric = {_metric}");
+        where.And($"value > {_threshold}");
+        var sql = new SqlStatement($"{SelectPrefix} {where} ORDER BY recorded_at DESC LIMIT {_limit}");
         return sql.Text.Length + sql.ParameterValues.Count;
     }
 }

@@ -92,10 +92,12 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   in-database `add_retention_policy` (zero application code; use an Elarion scheduled job instead
   when the window must live in app configuration).
 - **`Modules/Telemetry/Handlers`** — the business logic, in the same `[Handler]` shape as every
-  Elarion app. `IngestReadings` runs one transaction per batch with `ON CONFLICT DO NOTHING`
-  (retransmitted device batches insert nothing); `GetMetricStats` is the "full power of SQL" leg —
-  `time_bucket` + aggregates stay SQL, interpolated holes bind as parameters, `{…:raw}` splices only
-  the generated constants. Failures are `Result` values (`AppError.NotFound`, `AppError.Validation`),
+  Elarion app, on the self-mapping Elarion.Sql surface: `db.QueryAsync<ReadingRow>($"{ReadingRow.Select} …")`
+  resolves the mapper from the row type (no mapper argument, no `:raw`), and `IngestReadings` is one
+  `db.InsertManyAsync(rows, " ON CONFLICT DO NOTHING")` — the helper owns the transaction and the
+  reused prepared command (retransmitted device batches insert nothing). `GetMetricStats` is the
+  "full power of SQL" leg — `time_bucket` + aggregates stay SQL, `{ReadingRow.Table}` splices the
+  source table. Failures are `Result` values (`AppError.NotFound`, `AppError.Validation`),
   not exceptions. With no decorator attributes only the always-on pair wraps the handlers — tracing
   (the `Elarion.Handlers` span + `handler.execution.duration` metric per call, near-zero cost when
   nothing listens) and user-context enrichment; add `[Idempotent]` or `[RequirePermission]` later and

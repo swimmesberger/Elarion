@@ -22,16 +22,18 @@ included), generated mappers, ~120–160 ms start to first response — is
 
 The core property: **if it builds, it maps**. A `[SqlRecord]` type gets an explicit generated mapper;
 a type without one has no mapper to call. There is no reflection twin to fall back to — an unmapped
-type, an unsupported property, a duplicate column are compile errors (`ELSQL001`–`ELSQL007`), never a
+type, an unsupported property, a duplicate column are compile errors (`ELSQL001`–`ELSQL011`), never a
 runtime surprise.
 
 ## Quick start
+
+A `[SqlRecord]` type is `partial` (the generator adds its self-mapping half; else `ELSQL010`):
 
 ```csharp
 using Elarion.Sql;
 
 [SqlRecord("orders")]
-public sealed record Order {
+public sealed partial record Order {
     public required Guid Id { get; init; }
     public required string CustomerName { get; init; }
     public string? Note { get; init; }
@@ -40,44 +42,44 @@ public sealed record Order {
 }
 ```
 
-The bundled generator emits `OrderSqlMapper : ISqlRowMapper<Order>`. Query with the `DbConnection`
-extensions — interpolated values become parameters, never concatenated text:
+The generator emits `OrderSqlMapper : ISqlRowMapper<Order>` **and** makes `Order` self-mapping, so the
+query extensions resolve its mapper from the type — **no mapper argument**. Query a `DbDataSource` (a
+pooled connection per call) or a `DbConnection`; interpolated values become parameters, and
+`Order.Select` splices the generated `SELECT`-list with no `:raw`:
 
 ```csharp
-var orders = await connection.QueryAsync(
-    OrderSqlMapper.Instance,
-    $"""
-     SELECT {OrderSqlMapper.Columns.All:raw} FROM {OrderSqlMapper.TableName:raw}
-     WHERE status = {status} AND customer_name IN {names}
-     """,
-    ct);
+var orders = await db.QueryAsync<Order>(
+    $"{Order.Select} WHERE status = {status} AND customer_name IN {names}", ct);
+
+Order? one = await db.QueryFirstOrDefaultAsync<Order>($"{Order.Select} WHERE id = {id}", ct);
 ```
 
-Insert with the generated constants and typed binding — the SQL stays yours:
+Write with the same self-mapping — no command/transaction/`BindParameters` ceremony:
 
 ```csharp
-await using var command = connection.CreateCommand();
-command.CommandText = OrderSqlMapper.Insert + " ON CONFLICT DO NOTHING";  // a const, composed at compile time
-OrderSqlMapper.Instance.BindParameters(command, order);
-await command.ExecuteNonQueryAsync(ct);
+await db.InsertAsync(order, ct);                                   // one row
+await db.InsertManyAsync(orders, " ON CONFLICT DO NOTHING", ct);   // batch, one transaction
+long open = await db.ExecuteScalarAsync<long>($"SELECT count(*) FROM {Order.Table} WHERE status = {open}", ct);
 ```
 
-## What the mapper generates
+## What the generator emits
 
-For each `[SqlRecord]` type, a sealed `partial` `{Type}SqlMapper` with:
+Per `[SqlRecord]` type, a sealed `partial` `{Type}SqlMapper` **and** a self-mapping partial on the row:
 
-| Member | Purpose |
-| --- | --- |
-| `Read(reader)` / `Read(reader, in Ordinals)` | One row → `T`. Ordinals resolve **by name once per result set**, then every row reads with synchronous typed `GetFieldValue<T>` — no per-row name lookups, no boxing, no per-column `await`. |
-| `ReadAll(reader)` / `ReadAllAsync(reader, ct)` | All rows → `List<T>`, ordinals resolved once. |
-| `BindParameters(command, row)` | One typed `DbParameter` per column, named exactly like the column (`@customer_name`). `null` binds as `DBNull`. |
-| `TableName`, `Columns.*`, `Columns.All`, `Columns.AllParameters`, `Columns.AllAssignments` | `const string`s so hand-written SQL composes without stringly duplication (`AllAssignments` is the `UPDATE … SET` list, `a = @a, b = @b, …`). |
-| `Insert`, `Select` | The **clause-free statement constants** — the full-row `INSERT INTO t (…) VALUES (@…)` and the `SELECT cols FROM t` prefix. They contain zero query logic (pure column enumeration) and compose as consts: `Insert + " ON CONFLICT DO NOTHING"`, `$"{OrderSqlMapper.Select:raw} WHERE id = {id}"`. Anything with a predicate stays hand-written. |
-| `Instance` | Static stateless instance for DI-free hosts. |
+| Member | On | Purpose |
+| --- | --- | --- |
+| `Read` / `Read(reader, in Ordinals)` | mapper | One row → `T`. Ordinals resolve **by name once per result set**, then typed `GetFieldValue<T>` per row — no name lookups, no boxing, no per-column `await`. |
+| `ReadAll` / `ReadAllAsync` / `ReadAllStreamAsync` | mapper | All rows → `List<T>` (ordinals once), or an unbuffered `IAsyncEnumerable<T>` stream. |
+| `BindParameters(command, row)` | mapper | One typed `DbParameter` per column, named like the column. `null` → `DBNull`. |
+| `TableName`, `Columns.*`, `Columns.All`, `Columns.AllParameters`, `Columns.AllAssignments`, `Insert`, `Select` | mapper | `const string`s for composing hand-written SQL (`AllAssignments` = the `UPDATE … SET` list; `Insert`/`Select` are clause-free — pure column enumeration, compose as consts, never a predicate). |
+| `Instance` | mapper | The cached singleton. |
+| `Order.SqlMapper`, `Order.InsertCommandText` | **row** | The self-mapping contract (`ISqlRecord<Order>`) the query extensions resolve `T.SqlMapper` through. |
+| `Order.Table`, `Order.Select` | **row** | Typed trusted `SqlStatement` fragments (`Verbatim`) — splice them into interpolations with no `:raw`; forgetting the marker is impossible. |
 
-One `AddElarionSqlMappers()` extension per assembly registers every mapper as an
-`ISqlRowMapper<T>` singleton — a mapper is a *value you pass around*, so wrapping calls in your own
-helpers costs nothing (there is no call-site pattern to break, unlike interception).
+One generated `AddElarionSqlMappers()` per assembly registers every mapper as an `ISqlRowMapper<T>`
+singleton — a mapper is still a *value you pass around* (the explicit-mapper overloads remain for
+hand-written mappers of non-`[SqlRecord]` shapes). For JSON-column assemblies it also installs the
+canonical JSON accessor at startup (a hosted service), so a `[SqlJson]` host wires nothing extra.
 
 Conventions and knobs:
 
@@ -88,24 +90,21 @@ Conventions and knobs:
   `required`/`init` members through an object initializer — no parameterless-constructor requirement.
 - `[SqlJson]` maps a property as a JSON column through the canonical accessor's `JsonTypeInfo<T>`
   ([serialization](/docs/capabilities/serialization), ADR-0023) — AOT-strict, one JSON config
-  everywhere. JSON mappers take `IElarionJsonSerialization` as a constructor parameter instead of
-  exposing `Instance`; the generated registration wires it. Under
-  `[assembly: UseElarionSql(Provider = SqlProvider.Npgsql)]` JSON parameters bind as `jsonb`.
+  everywhere. Under `[assembly: UseElarionSql(Provider = SqlProvider.Npgsql)]` JSON parameters bind
+  as `jsonb`.
 - Supported column types: the numeric/text/boolean primitives, `Guid`, `DateTime`, `DateTimeOffset`,
   `DateOnly`, `TimeOnly`, `TimeSpan`, `char`, `byte[]`, enums (underlying type), `Nullable<T>` of all
   of these, and nullable reference types. Anything else: `[SqlJson]` or `[SqlIgnore]` — or `ELSQL001`.
 
 ## Safe SQL interpolation
 
-`SqlStatement.Of($"…")` is the C#-native equivalent of jOOQ's plain-SQL templating tier: full SQL
-stays full SQL — window functions, CTEs, `ON CONFLICT`, any PostgreSQL feature — with injection safety
-enforced by the compiler, not by review:
+`new SqlStatement($"…")` (and every query extension's `$"…"` overload) is the C#-native equivalent of
+jOOQ's plain-SQL templating tier: full SQL stays full SQL — window functions, CTEs, `ON CONFLICT`, any
+PostgreSQL feature — with injection safety enforced by the compiler, not by review:
 
 ```csharp
-SqlStatement where = SqlStatement.Of($"WHERE status = {status} AND id IN {ids}");
-SqlStatement query = SqlStatement.Of(
-    $"SELECT {OrderSqlMapper.Columns.All:raw} FROM {OrderSqlMapper.TableName:raw} {where} LIMIT {limit}");
-var page = await connection.QueryAsync(OrderSqlMapper.Instance, query, ct);
+SqlStatement where = new($"WHERE status = {status} AND id IN {ids}");
+var page = await db.QueryAsync<Order>($"{Order.Select} {where} LIMIT {limit}", ct);
 ```
 
 - A **scalar** hole binds as a `@pN` parameter — there is no string concatenation to get wrong.
@@ -113,13 +112,49 @@ var page = await connection.QueryAsync(OrderSqlMapper.Instance, query, ct);
   throws at build time: no SQL spelling keeps both `IN` (match nothing) and `NOT IN` (match
   everything) correct for the empty set, so guard the query instead of shipping silently wrong rows.
 - A **`SqlStatement`** hole splices as a fragment with its parameters renumbered — a reusable `WHERE`
-  piece is just a value.
-- **`{expr:raw}`** splices trusted text verbatim (the generated constants; a validated sort column).
-  Never user input.
-- There is deliberately **no `Of(string)` overload**: a constant-only interpolated string is a C#
-  constant expression, and overload resolution would prefer the `string` conversion — silently
-  splicing a `{CONST}` hole as text instead of binding a parameter. Plain parameterless text is
-  `SqlStatement.Raw("…")`.
+  piece is just a value. A pure-literal fragment (`Verbatim`, `Order.Select`) inlines with no cost.
+- Trusted identifiers (a validated sort column) splice via **`SqlStatement.Verbatim(col)`** — never a
+  raw `string`. There is no `:raw` format and no `SqlStatement(string)` constructor: a plain string
+  interpolated into a query always binds as a parameter, so injection is structurally impossible.
+
+### Optional filters without a query DSL
+
+`SqlWhere` is the answer to the dominant call-site shape — a list with optional filters — without a
+query builder. Accumulate parenthesized predicate fragments; it renders `WHERE (a) AND (b)` or nothing,
+so `WHERE 1=1` disappears and the *same* accumulator drives a page query and its `count(*)`:
+
+```csharp
+var where = new SqlWhere();
+where.And($"org_id = {orgId}");
+if (status is not null) where.And($"status = {status}");
+if (since is not null)  where.And($"created_at >= {since}");
+
+var page  = await db.QueryAsync<Order>($"{Order.Select} {where} ORDER BY created_at DESC LIMIT {take}", ct);
+var total = await db.ExecuteScalarAsync<long>($"SELECT count(*) FROM {Order.Table} {where}", ct);
+```
+
+Each predicate's interpolated values become parameters — the obvious thing to type is the safe thing.
+`SqlWhere` knows only the `WHERE`/`AND` joiners; `OR`, grouping, and joins are hand-written SQL inside
+a predicate fragment. Its build-path cost is a small per-call constant (~2.4 KB for three predicates,
+zero per row); there is no cheaper *safe* way to build a dynamic `WHERE`.
+
+## Reads and writes
+
+The query extensions live on both `DbDataSource` (opens/disposes a pooled connection per call) and
+`DbConnection` (Dapper open/close semantics):
+
+| Call | Shape |
+| --- | --- |
+| `QueryAsync<T>($"…")` | many rows → `List<T>` |
+| `QueryFirstOrDefaultAsync<T>($"…")` | first row or `default` |
+| `QuerySingleOrDefaultAsync<T>($"…")` | single row or `default`; **throws** on more than one |
+| `QueryUnbufferedAsync<T>($"…")` | `IAsyncEnumerable<T>` — unbuffered streaming for large exports |
+| `ExecuteAsync($"…")` / `ExecuteScalarAsync<T>($"…")` | affected rows / first scalar |
+| `InsertAsync(row)` | one full-row insert |
+| `InsertManyAsync(rows, sqlSuffix?)` | batch insert in one transaction (a reused prepared command; `sqlSuffix` appends `ON CONFLICT …`) |
+
+`InsertManyAsync` is a *convenience* batch (Npgsql auto-prepare), not bulk COPY — for high-throughput
+bulk load use the binary-COPY path ([bulk operations](/docs/capabilities/bulk-operations), ADR-0051).
 
 The `DbConnection` extensions (`QueryAsync`, `QueryFirstOrDefaultAsync`, `ExecuteAsync`,
 `ExecuteScalarAsync`) pair statements with mappers and open/close closed connections around the call
