@@ -9,3 +9,5 @@ ELSQL004 | Elarion.Sql | Error | [SqlRecord] type has no mapped columns
 ELSQL005 | Elarion.Sql | Error | [SqlRecord] type shape is unsupported (nested, generic, or abstract)
 ELSQL006 | Elarion.Sql | Error | [SqlRecord] type has no usable constructor
 ELSQL007 | Elarion.Sql | Error | Annotated property is not writable
+ELSQL010 | Elarion.Sql | Error | [SqlRecord] type must be partial for self-mapping members
+ELSQL011 | Elarion.Sql | Error | [SqlRecord] type declares a reserved member name (SqlMapper/Table/Select)

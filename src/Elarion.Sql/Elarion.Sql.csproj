@@ -7,6 +7,10 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <!-- The generated AddElarionSqlMappers registers a hosted service that installs the canonical JSON
+         accessor for self-mapping [SqlJson] rows (ADR-0058) — so a JSON-column host needs no extra
+         wiring. AOT-compatible. Justified: convention-over-configuration for the self-mapping happy path. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

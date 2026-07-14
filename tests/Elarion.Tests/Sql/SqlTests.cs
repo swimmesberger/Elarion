@@ -60,20 +60,15 @@ public sealed class SqlTests {
     }
 
     [Fact]
-    public void RawFormat_SplicesVerbatim() {
+    public void VerbatimSplice_TrustedIdentifier() {
+        // A dynamic trusted identifier (a validated table/column/sort name) splices via Verbatim;
+        // there is no ':raw' format — a raw string interpolated into a query binds as a parameter.
         var table = "orders";
 
-        var sql = new SqlStatement($"SELECT count(*) FROM {table:raw}");
+        var sql = new SqlStatement($"SELECT count(*) FROM {SqlStatement.Verbatim(table)}");
 
         sql.Text.Should().Be("SELECT count(*) FROM orders");
         sql.ParameterValues.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void UnknownFormat_Throws() {
-        var act = () => new SqlStatement($"SELECT {1:d4}");
-
-        act.Should().Throw<FormatException>().WithMessage("*'d4'*");
     }
 
     [Fact]

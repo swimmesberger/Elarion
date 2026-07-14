@@ -5,21 +5,19 @@ using Npgsql;
 namespace EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 
 /// <summary>
-/// Latest sample for a device+metric — interpolated values bind as parameters, the <c>:raw</c> holes
-/// splice the generated constants, and the mapper materializes the row. Full SQL, no translation
-/// layer; a miss is a <c>Result</c> failure that the HTTP layer renders as 404.
+/// Latest sample for a device+metric — self-mapping resolves the row's mapper, interpolated values
+/// bind as parameters, and <c>ReadingRow.Select</c> splices the generated SELECT-list (no <c>:raw</c>).
+/// Full SQL, no translation layer; a miss is a <c>Result</c> failure the HTTP layer renders as 404.
 /// </summary>
 [Handler("telemetry.latest")]
-public sealed class GetLatestReading(NpgsqlDataSource db, ISqlRowMapper<ReadingRow> mapper)
+public sealed class GetLatestReading(NpgsqlDataSource db)
     : IHandler<GetLatestReading.Query, Result<ReadingRow>> {
     public sealed record Query(string DeviceId, string Metric) : IQuery;
 
     public async ValueTask<Result<ReadingRow>> HandleAsync(Query query, CancellationToken ct) {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        var reading = await connection.QueryFirstOrDefaultAsync(
-            mapper,
+        var reading = await db.QueryFirstOrDefaultAsync<ReadingRow>(
             $"""
-             SELECT {ReadingRowSqlMapper.Columns.All:raw} FROM {ReadingRowSqlMapper.TableName:raw}
+             {ReadingRow.Select}
              WHERE device_id = {query.DeviceId} AND metric = {query.Metric}
              ORDER BY recorded_at DESC LIMIT 1
              """,

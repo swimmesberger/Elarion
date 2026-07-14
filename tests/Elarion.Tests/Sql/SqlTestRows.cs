@@ -24,7 +24,7 @@ public sealed partial class SqlTestJsonContext : JsonSerializerContext;
 
 /// <summary>The kitchen-sink row: every supported column shape the mapper generator emits.</summary>
 [SqlRecord("sql_items")]
-public sealed record SqlItem {
+public sealed partial record SqlItem {
     public required Guid Id { get; init; }
 
     public required string Name { get; init; }
@@ -62,4 +62,4 @@ public sealed record SqlItem {
 
 /// <summary>Positional-record shape: mapped through the primary constructor, no parameterless ctor.</summary>
 [SqlRecord]
-public sealed record SqlPositionalRow(Guid Id, string Label, int Count);
+public sealed partial record SqlPositionalRow(Guid Id, string Label, int Count);

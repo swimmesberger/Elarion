@@ -69,7 +69,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         await using var connection = fixture.CreateConnection();
         var read = await connection.QueryAsync(
             Mapper,
-            $"SELECT {SqlItemSqlMapper.Columns.All:raw} FROM {SqlItemSqlMapper.TableName:raw}",
+            $"{SqlItem.Select}",
             Ct);
 
         read.Should().BeEquivalentTo(items.Select(i => i with { Transient = null }));
@@ -87,7 +87,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var read = await connection.QueryAsync(
             Mapper,
             $"""
-             SELECT {SqlItemSqlMapper.Columns.All:raw} FROM {SqlItemSqlMapper.TableName:raw}
+             {SqlItem.Select}
              WHERE id IN {wanted} AND quantity > {minQuantity}
              """,
             Ct);
@@ -101,7 +101,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
 
         var act = () => connection.QueryAsync(
             Mapper,
-            $"SELECT {SqlItemSqlMapper.Columns.All:raw} FROM sql_items WHERE id IN {Array.Empty<Guid>()}",
+            $"{SqlItem.Select} WHERE id IN {Array.Empty<Guid>()}",
             Ct);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*empty collection*");
@@ -118,7 +118,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var count = await connection.ExecuteScalarAsync<long>(
             new SqlStatement($"SELECT count(*) FROM sql_items {active}"), Ct);
         var read = await connection.QueryAsync(
-            Mapper, new SqlStatement($"SELECT {SqlItemSqlMapper.Columns.All:raw} FROM sql_items {active} ORDER BY id"), Ct);
+            Mapper, new SqlStatement($"{SqlItem.Select} {active} ORDER BY id"), Ct);
 
         count.Should().Be(items.Count(i => i.Active));
         read.Should().HaveCount((int)count);
@@ -133,7 +133,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
 
         await using var connection = fixture.CreateConnection();
         var missing = await connection.QueryFirstOrDefaultAsync(
-            Mapper, $"SELECT {SqlItemSqlMapper.Columns.All:raw} FROM sql_items WHERE id = {Guid.NewGuid()}", Ct);
+            Mapper, $"{SqlItem.Select} WHERE id = {Guid.NewGuid()}", Ct);
 
         missing.Should().BeNull();
     }
@@ -149,7 +149,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var affected = await connection.ExecuteAsync(
             $"UPDATE sql_items SET name = {"renamed"} WHERE id = {target.Id}", Ct);
         var renamed = await connection.QueryFirstOrDefaultAsync(
-            Mapper, $"SELECT {SqlItemSqlMapper.Columns.All:raw} FROM sql_items WHERE id = {target.Id}", Ct);
+            Mapper, $"{SqlItem.Select} WHERE id = {target.Id}", Ct);
 
         affected.Should().Be(1);
         renamed!.Name.Should().Be("renamed");
@@ -172,12 +172,34 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
             await command.ExecuteNonQueryAsync(Ct);
         }
 
-        var read = await connection.QueryAsync(
-            SqlPositionalRowSqlMapper.Instance,
-            $"SELECT {SqlPositionalRowSqlMapper.Columns.All:raw} FROM {SqlPositionalRowSqlMapper.TableName:raw}",
-            Ct);
+        // Self-mapping happy path: the row type resolves its own mapper — no mapper argument.
+        var read = await connection.QueryAsync<SqlPositionalRow>($"{SqlPositionalRow.Select}", Ct);
 
         read.Should().Equal(row);
+    }
+
+    [Fact]
+    public async Task SelfMapping_ResolvesMapperFromRowType() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+
+        var row = new SqlPositionalRow(Guid.CreateVersion7(), "self-mapped", 3);
+        await using var connection = fixture.CreateConnection();
+        await connection.OpenAsync(Ct);
+        await connection.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
+        await using (var command = connection.CreateCommand()) {
+            command.CommandText = SqlPositionalRowSqlMapper.Insert;
+            SqlPositionalRowSqlMapper.Instance.BindParameters(command, row);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+
+        // db.QueryAsync<T>(...) with no mapper, and the generated Select/Table fragments (no :raw).
+        var list = await connection.QueryAsync<SqlPositionalRow>(
+            $"{SqlPositionalRow.Select} WHERE label = {row.Label}", Ct);
+        var one = await connection.QueryFirstOrDefaultAsync<SqlPositionalRow>(
+            $"SELECT count, label, id FROM {SqlPositionalRow.Table} WHERE id = {row.Id}", Ct);
+
+        list.Should().Equal(row);
+        one.Should().Be(row);
     }
 
     [Fact]

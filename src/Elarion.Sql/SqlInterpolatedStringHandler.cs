@@ -57,19 +57,6 @@ public struct SqlInterpolatedStringHandler {
         }
     }
 
-    /// <summary>
-    /// <c>{expr:raw}</c> splices the value's text verbatim — for trusted identifiers such as the
-    /// generated <c>TableName</c>/column constants, never for user input. Any other format is an error.
-    /// </summary>
-    public void AppendFormatted<T>(T value, string format) {
-        if (format != "raw") {
-            throw new FormatException(
-                $"Unknown SQL interpolation format '{format}' — the only supported format is 'raw' (verbatim splice of trusted text).");
-        }
-
-        _segments.Add(SqlSegment.OfLiteral(value?.ToString() ?? ""));
-    }
-
     // Captured state read by the SqlStatement constructor.
     internal readonly List<SqlSegment> Segments => _segments;
 

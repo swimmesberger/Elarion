@@ -16,7 +16,7 @@ public sealed class SqlRecordMapperGeneratorTests {
             public enum OrderStatus { Draft = 0, Open = 1 }
 
             [Elarion.Sql.SqlRecord("orders")]
-            public sealed record Order {
+            public sealed partial record Order {
                 public required System.Guid Id { get; init; }
                 public required string CustomerName { get; init; }
                 [Elarion.Sql.SqlColumn("note_text")]
@@ -81,7 +81,7 @@ public sealed class SqlRecordMapperGeneratorTests {
             """
             namespace Sample.Domain {
                 [Elarion.Sql.SqlRecord]
-                public sealed record OrderLine(System.Guid Id, string Sku, int Count);
+                public sealed partial record OrderLine(System.Guid Id, string Sku, int Count);
             }
             """);
 
@@ -94,14 +94,14 @@ public sealed class SqlRecordMapperGeneratorTests {
     }
 
     [Fact]
-    public void SqlRecord_JsonColumn_RidesTheCanonicalAccessorAndDropsInstance() {
+    public void SqlRecord_JsonColumn_RidesTheCanonicalAccessorViaAmbientInstance() {
         var result = Generate(
             """
             namespace Sample.Domain {
                 public sealed record Profile { public int Weight { get; init; } }
 
                 [Elarion.Sql.SqlRecord]
-                public sealed record Client {
+                public sealed partial record Client {
                     public required System.Guid Id { get; init; }
                     [Elarion.Sql.SqlJson]
                     public Profile? Settings { get; init; }
@@ -112,13 +112,99 @@ public sealed class SqlRecordMapperGeneratorTests {
         NoErrors(result);
         var source = GetGenerated(result, "Sample_Domain_Client.SqlMapper.g.cs");
 
+        // The DI ctor stays; the static Instance now exists too, reading the ambient accessor lazily.
         source.Should().Contain(
             "public ClientSqlMapper(global::Elarion.Abstractions.Serialization.IElarionJsonSerialization json)");
-        source.Should().Contain("_json.GetTypeInfo<global::Sample.Domain.Profile>()");
+        source.Should().Contain("public static ClientSqlMapper Instance { get; } = new ClientSqlMapper();");
+        source.Should().Contain("_json ?? global::Elarion.Sql.ElarionSqlJson.Serialization");
+        source.Should().Contain("Json.GetTypeInfo<global::Sample.Domain.Profile>()");
         source.Should().Contain("global::System.Text.Json.JsonSerializer.Deserialize(reader.GetFieldValue<string>(ordinals.Settings), JsonTypeInfoSettings)");
-        source.Should().NotContain("public static ClientSqlMapper Instance");
         // Provider-neutral by default: no Npgsql types.
         source.Should().NotContain("NpgsqlDbType");
+    }
+
+    [Fact]
+    public void SqlRecord_JsonAssembly_RegistersTheAmbientInstaller() {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed record Profile { public int Weight { get; init; } }
+
+                [Elarion.Sql.SqlRecord]
+                public sealed partial record Client {
+                    public required System.Guid Id { get; init; }
+                    [Elarion.Sql.SqlJson]
+                    public Profile? Settings { get; init; }
+                }
+            }
+            """);
+
+        NoErrors(result);
+        var source = GetGenerated(result, "ElarionSqlMapperRegistration.g.cs");
+
+        source.Should().Contain("AddHostedService<global::Elarion.Sql.ElarionSqlJsonInstaller>");
+    }
+
+    [Fact]
+    public void SqlRecord_NonJsonAssembly_DoesNotRegisterTheInstaller() {
+        var result = Generate(OrderSource);
+
+        NoErrors(result);
+        var source = GetGenerated(result, "ElarionSqlMapperRegistration.g.cs");
+
+        source.Should().NotContain("ElarionSqlJsonInstaller");
+    }
+
+    [Fact]
+    public void SqlRecord_EmitsSelfMappingPartial() {
+        var result = Generate(OrderSource);
+
+        NoErrors(result);
+        var source = GetGenerated(result, "Sample_Domain_Order.SqlRecord.g.cs");
+
+        source.Should().Contain(
+            "partial record Order : global::Elarion.Sql.ISqlRecord<Order>");
+        source.Should().Contain(
+            "public static global::Elarion.Sql.ISqlRowMapper<Order> SqlMapper => global::Sample.Domain.OrderSqlMapper.Instance;");
+        source.Should().Contain(
+            "public static global::Elarion.Sql.SqlStatement Table { get; } =");
+        source.Should().Contain("global::Elarion.Sql.SqlStatement.Verbatim(\"orders\");");
+        source.Should().Contain(
+            "global::Elarion.Sql.SqlStatement.Verbatim(\"SELECT id, customer_name, note_text, quantity, status, previous_status, created_at FROM orders\");");
+    }
+
+    [Fact]
+    public void SqlRecord_NonPartial_ReportsElsql010() {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                [Elarion.Sql.SqlRecord]
+                public sealed record Row {
+                    public required System.Guid Id { get; init; }
+                }
+            }
+            """);
+
+        result.Diagnostics.Should().ContainSingle(d => d.Id == "ELSQL010");
+        // The mapper still emits (the explicit-mapper escape hatch keeps working); only self-mapping is skipped.
+        result.GeneratedTrees.Should().Contain(t => t.FilePath.EndsWith("Sample_Domain_Row.SqlMapper.g.cs"));
+        result.GeneratedTrees.Should().NotContain(t => t.FilePath.EndsWith("Sample_Domain_Row.SqlRecord.g.cs"));
+    }
+
+    [Fact]
+    public void SqlRecord_ReservedMemberName_ReportsElsql011() {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                [Elarion.Sql.SqlRecord]
+                public sealed partial record Row {
+                    public required System.Guid Id { get; init; }
+                    public required string Select { get; init; }
+                }
+            }
+            """);
+
+        result.Diagnostics.Should().ContainSingle(d => d.Id == "ELSQL011");
     }
 
     [Fact]
@@ -129,7 +215,7 @@ public sealed class SqlRecordMapperGeneratorTests {
                 public sealed record Profile { public int Weight { get; init; } }
 
                 [Elarion.Sql.SqlRecord]
-                public sealed record Client {
+                public sealed partial record Client {
                     public required System.Guid Id { get; init; }
                     [Elarion.Sql.SqlJson]
                     public Profile? Settings { get; init; }
@@ -163,9 +249,10 @@ public sealed class SqlRecordMapperGeneratorTests {
 
         NoErrors(result);
         var generated = GetGenerated(result, "Sample_Domain_Order.SqlMapper.g.cs");
+        var selfMapping = GetGenerated(result, "Sample_Domain_Order.SqlRecord.g.cs");
         var registration = GetGenerated(result, "ElarionSqlMapperRegistration.g.cs");
 
-        CompileErrors(OrderSource, generated, registration).Should().BeEmpty();
+        CompileErrors(OrderSource, generated, selfMapping, registration).Should().BeEmpty();
     }
 
     [Fact]

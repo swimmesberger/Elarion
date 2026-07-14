@@ -90,10 +90,9 @@ public class PostgreSqlSqlMappingReadBenchmarks {
 
     [Benchmark]
     public Task<List<BenchReadRow>> ElarionQueryAsync() =>
-        // The product path end-to-end: interpolated statement build + connection extension + mapper.
-        _connection.QueryAsync(
-            BenchReadRowSqlMapper.Instance,
-            $"SELECT {BenchReadRowSqlMapper.Columns.All:raw} FROM {BenchReadRowSqlMapper.TableName:raw}");
+        // The product path end-to-end: self-mapping (BenchReadRow resolves its own mapper) +
+        // interpolated statement build + connection extension.
+        _connection.QueryAsync<BenchReadRow>($"{BenchReadRow.Select}");
 
     [Benchmark]
     [DapperAot(false)]
@@ -186,10 +185,9 @@ public class PostgreSqlSqlMappingSingleRowBenchmarks {
 
     [Benchmark]
     public Task<BenchReadRow?> ElarionQueryAsync() =>
-        // The product path end-to-end: interpolated statement (one parameter) + generated mapper.
-        _connection.QueryFirstOrDefaultAsync(
-            BenchReadRowSqlMapper.Instance,
-            $"SELECT {BenchReadRowSqlMapper.Columns.All:raw} FROM {BenchReadRowSqlMapper.TableName:raw} WHERE id = {_targetId}");
+        // The product path end-to-end: self-mapping + interpolated statement (one parameter).
+        _connection.QueryFirstOrDefaultAsync<BenchReadRow>(
+            $"{BenchReadRow.Select} WHERE id = {_targetId}");
 
     [Benchmark]
     [DapperAot(false)]
@@ -215,7 +213,7 @@ public class PostgreSqlSqlMappingSingleRowBenchmarks {
 /// DateTimeOffset — the column would crash (the Elarion mapper reads either via typed GetFieldValue).
 /// </summary>
 [SqlRecord("read_rows")]
-public sealed class BenchReadRow {
+public sealed partial class BenchReadRow {
     public Guid Id { get; set; }
 
     public string Name { get; set; } = "";

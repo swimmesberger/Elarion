@@ -82,6 +82,27 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor NotPartial = new(
+        "ELSQL010",
+        "[SqlRecord] type must be partial",
+        "[SqlRecord] type '{0}' must be declared 'partial' so the generated self-mapping members "
+        + "(ISqlRecord<T>.SqlMapper, Table, Select) can be added; add the 'partial' modifier",
+        "Elarion.Sql",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ReservedMemberName = new(
+        "ELSQL011",
+        "[SqlRecord] type declares a reserved member name",
+        "[SqlRecord] type '{0}' declares a member named '{1}', which collides with a generated "
+        + "self-mapping member; rename it (a mapped column can keep its SQL name via [SqlColumn])",
+        "Elarion.Sql",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    // The static members the generated ISqlRecord<T> partial adds to the row type.
+    private static readonly string[] ReservedMemberNames = ["SqlMapper", "Table", "Select"];
+
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var records = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -104,6 +125,10 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
 
             if (model.Emit) {
                 EmitMapper(spc, model, pair.Right);
+            }
+
+            if (model.EmitSelfMapping) {
+                EmitSelfMapping(spc, model);
             }
         });
 
@@ -146,11 +171,34 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
         string MapperName,
         string HintName,
         string Accessibility,
+        string TypeKeyword,
+        bool IsPartial,
         string TableName,
+        string SelectSql,
         bool Emit,
+        bool EmitSelfMapping,
         bool RequiresJson,
         EquatableArray<ColumnModel> Columns,
         EquatableArray<DiagnosticInfo> Diagnostics);
+
+    private static string TypeKeyword(INamedTypeSymbol type) =>
+        (type.IsRecord, type.TypeKind) switch {
+            (true, TypeKind.Struct) => "record struct",
+            (true, _) => "record",
+            (_, TypeKind.Struct) => "struct",
+            _ => "class",
+        };
+
+    private static bool IsDeclaredPartial(INamedTypeSymbol type) {
+        foreach (var reference in type.DeclaringSyntaxReferences) {
+            if (reference.GetSyntax() is Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax declaration
+                && declaration.Modifiers.Any(static m => m.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PartialKeyword))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static SqlProviderKind ReadProvider(Compilation compilation) {
         foreach (var attribute in compilation.Assembly.GetAttributes()) {
@@ -212,6 +260,25 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
             return Invalid();
         }
 
+        var resolvedTable = tableName ?? ToSnakeCase(typeName);
+        var selectSql = "SELECT " + string.Join(", ", bound.Select(static c => c.ColumnName)) + " FROM " + resolvedTable;
+
+        // Self-mapping (ISqlRecord<T>) needs a partial to add the static members and no member-name
+        // collision. Either failure is an error, but the mapper still emits, so the explicit-mapper
+        // escape hatch keeps working while the author applies the one-keyword / rename fix.
+        var isPartial = IsDeclaredPartial(type);
+        if (!isPartial) {
+            diagnostics.Add(DiagnosticInfo.Create(NotPartial, LocationInfo.From(type), typeFqn));
+        }
+
+        var hasReservedCollision = false;
+        foreach (var reserved in ReservedMemberNames) {
+            if (!type.GetMembers(reserved).IsEmpty) {
+                hasReservedCollision = true;
+                diagnostics.Add(DiagnosticInfo.Create(ReservedMemberName, LocationInfo.From(type), typeFqn, reserved));
+            }
+        }
+
         return new SqlRecordModel(
             ns,
             typeName,
@@ -219,15 +286,20 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
             mapperName,
             hintName,
             accessibility,
-            tableName ?? ToSnakeCase(typeName),
+            TypeKeyword(type),
+            isPartial,
+            resolvedTable,
+            selectSql,
             Emit: true,
+            EmitSelfMapping: isPartial && !hasReservedCollision,
             RequiresJson: bound.Any(static column => column.Kind == ColumnKind.Json),
             bound.ToEquatableArray(),
             diagnostics.ToImmutable().ToEquatableArray());
 
         SqlRecordModel Invalid() => new(
-            ns, typeName, typeFqn, mapperName, hintName, accessibility, tableName ?? ToSnakeCase(typeName),
-            Emit: false, RequiresJson: false, EquatableArray<ColumnModel>.Empty,
+            ns, typeName, typeFqn, mapperName, hintName, accessibility, TypeKeyword(type), IsDeclaredPartial(type),
+            tableName ?? ToSnakeCase(typeName), "",
+            Emit: false, EmitSelfMapping: false, RequiresJson: false, EquatableArray<ColumnModel>.Empty,
             diagnostics.ToImmutable().ToEquatableArray());
     }
 

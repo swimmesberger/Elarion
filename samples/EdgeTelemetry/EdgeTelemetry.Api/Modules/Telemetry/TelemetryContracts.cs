@@ -11,7 +11,7 @@ namespace EdgeTelemetry.Api.Modules.Telemetry;
 /// ingest idempotency constraint in one — no surrogate id.
 /// </summary>
 [SqlRecord("readings")]
-public sealed record ReadingRow {
+public sealed partial record ReadingRow {
     public required string DeviceId { get; init; }
 
     public required string Metric { get; init; }
@@ -38,7 +38,7 @@ public sealed record ReadingMeta {
 /// the mapper binds whatever the SELECT produces, by column name (the derived table name is unused).
 /// </summary>
 [SqlRecord]
-public sealed record MetricBucket {
+public sealed partial record MetricBucket {
     public required DateTimeOffset Bucket { get; init; }
 
     public required long Samples { get; init; }
