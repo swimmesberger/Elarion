@@ -23,6 +23,14 @@ namespace Elarion.AspNetCore;
 /// also keeps REST output identical to the JSON-RPC/MCP transports for the same DTO.
 /// </para>
 /// <para>
+/// It also registers ASP.NET's ProblemDetails services (<c>AddProblemDetails()</c>): the RFC 7807 error legs
+/// (<see cref="ElarionHttpResults.ToProblem"/> via <c>Results.Problem</c>/<c>Results.ValidationProblem</c>)
+/// serialize through ASP.NET's own source-generated <c>ProblemDetailsJsonContext</c>, which only that call
+/// contributes — without it, every <see cref="Elarion.Abstractions.AppError"/> response 500s under
+/// <c>JsonSerializerIsReflectionEnabledByDefault=false</c>. A host's own <c>AddProblemDetails(configure)</c>
+/// composes with this registration in either order.
+/// </para>
+/// <para>
 /// This is a deliberate, global alignment: it changes <see cref="HttpJsonOptions"/> for the whole app, so a
 /// host's own hand-written minimal-API endpoints share Elarion's canonical JSON contract (camelCase, source-gen
 /// resolvers, ignore-null-when-writing). Because the aligning configuration runs in registration order, a host
@@ -40,6 +48,11 @@ public static class ElarionHttpJsonServiceCollectionExtensions {
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddElarionJson();
+        // The ElarionHttpResults error legs render through Results.Problem/Results.ValidationProblem, whose
+        // ProblemDetails payloads resolve only via ASP.NET's ProblemDetailsJsonContext — contributed by
+        // AddProblemDetails(). Without it every AppError response 500s with reflection off. TryAdd-based, so a
+        // host's own AddProblemDetails(configure) composes in either order.
+        services.AddProblemDetails();
         // TryAddEnumerable dedupes by implementation type, so repeated calls register the aligner exactly once.
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IConfigureOptions<HttpJsonOptions>, ElarionHttpJsonConfigureOptions>());

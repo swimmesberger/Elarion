@@ -65,7 +65,7 @@ method; a module disabled with `Modules:{Name}:Enabled = false` drops its routes
 [assembly: Elarion.AspNetCore.GenerateModuleBootstrapper]
 
 // Program.cs
-builder.Services.AddProblemDetails();   // RFC 7807 responses
+builder.Services.AddElarionHttpJson();   // canonical JSON + RFC 7807 responses (see below)
 var app = builder.Build();
 
 app.MapElarionEndpoints(app.Configuration);   // module routes, gated per module
@@ -99,6 +99,12 @@ responses (and your host's own minimal-API endpoints) resolve through the same c
 REST output matches the JSON-RPC/MCP transports for the same DTO. It is a deliberate, **global** alignment of the
 app's minimal-API JSON, is idempotent, and runs in registration order — a host that needs different behavior calls
 `ConfigureHttpJsonOptions(…)` **after** it and wins (applying to both directions consistently).
+
+It also calls ASP.NET's `AddProblemDetails()` for you: the RFC 7807 **error** legs (`ElarionHttpResults` renders an
+`AppError` via `Results.Problem`/`Results.ValidationProblem`) serialize through ASP.NET's own source-generated
+`ProblemDetailsJsonContext`, which only that call contributes — without it, every error response 500s with
+reflection off while the success legs work. A host that wants `CustomizeProblemDetails` just calls
+`AddProblemDetails(configure)` itself; the two registrations compose in either order.
 
 <Callout type="info">
 `AddElarionOpenApi()` already calls `AddElarionHttpJson()`, so a host that adds

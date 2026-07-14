@@ -19,7 +19,9 @@ namespace Elarion.AspNetCore;
 /// <see cref="ElarionHttpJsonServiceCollectionExtensions.AddElarionHttpJson"/> (which
 /// <c>AddElarionOpenApi</c> also does) to align those options with the canonical
 /// <c>IElarionJsonSerialization</c> configuration, so REST output matches the JSON-RPC/MCP transports for the
-/// same DTO and resolves through the source-generated contexts with reflection off.
+/// same DTO and resolves through the source-generated contexts with reflection off. The same call registers
+/// ASP.NET's ProblemDetails services, whose source-generated <c>ProblemDetailsJsonContext</c> is what lets the
+/// <see cref="ToProblem"/> error legs serialize with reflection off.
 /// </para>
 /// </remarks>
 public static class ElarionHttpResults {
