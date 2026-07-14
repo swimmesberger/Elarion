@@ -9,6 +9,12 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Fixed
+- **RFC 7807 error responses work with reflection off, out of the box.** `AddElarionHttpJson()` now also
+  registers ASP.NET's ProblemDetails services (`AddProblemDetails()`), whose source-generated
+  `ProblemDetailsJsonContext` is what lets the `ElarionHttpResults` error legs (`Results.Problem`/
+  `Results.ValidationProblem`) serialize under `JsonSerializerIsReflectionEnabledByDefault=false`.
+  Previously every `AppError` response 500'd on a reflection-off (NativeAOT) host unless the host called
+  `AddProblemDetails()` itself; a host's own `AddProblemDetails(configure)` still composes in either order.
 - **Framework-wide audit fix pass.** A deep concurrency/correctness audit across all packages, with
   regression tests throughout. Highlights: `StreamHub` no longer wedges permanently when a Wait-mode
   subscriber unsubscribes under a blocked publish; user-scoped handler-cache entries are additionally
