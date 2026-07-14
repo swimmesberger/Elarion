@@ -53,7 +53,6 @@ public sealed partial class ElarionHttpJsonEndToEndTests {
         // context, and only because AddElarionHttpJson copies the canonical resolver onto the HTTP JSON options.
         builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(HttpJsonTestContext.Default));
         builder.Services.AddElarionHttpJson();
-        builder.Services.AddProblemDetails();
         builder.Services.AddScoped<IHandler<CreateThingCommand, Result<CreateThingResponse>>, CreateThingHandler>();
 
         await using var app = builder.Build();
@@ -76,6 +75,51 @@ public sealed partial class ElarionHttpJsonEndToEndTests {
             // 200 (not 500) proves the body deserialized through the source-gen resolver with reflection off.
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             (await response.Content.ReadAsStringAsync(ct)).Should().Contain("Widget");
+        } finally {
+            await app.StopAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task AddElarionHttpJson_RendersAppErrorsAsProblemDetails_WithReflectionOff() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+
+        // Reflection stays OFF and the host does NOT call AddProblemDetails() itself — AddElarionHttpJson must
+        // contribute ASP.NET's ProblemDetailsJsonContext, or every RFC 7807 error leg 500s (the regression this
+        // guards: the EdgeTelemetry NativeAOT host 500'd on AppError responses until the wiring was added).
+        builder.Services.AddElarionHttpJson();
+
+        await using var app = builder.Build();
+
+        app.MapGet("/missing", static () =>
+            ElarionHttpResults.ToResult(Result<CreateThingResponse>.Failure(AppError.NotFound("no such thing"))));
+        app.MapGet("/invalid", static () =>
+            ElarionHttpResults.ToResult(Result<CreateThingResponse>.Failure(AppError.Validation(
+                "Invalid request",
+                new Dictionary<string, string[]> { ["name"] = ["Name is required"] }))));
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var notFound = await client.GetAsync("/missing", ct);
+            notFound.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            notFound.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+            (await notFound.Content.ReadAsStringAsync(ct)).Should().Contain("no such thing");
+
+            var invalid = await client.GetAsync("/invalid", ct);
+            invalid.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            invalid.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+            var body = await invalid.Content.ReadAsStringAsync(ct);
+            body.Should().Contain("Name is required");
+            body.Should().Contain("\"errors\"");
         } finally {
             await app.StopAsync(ct);
         }
