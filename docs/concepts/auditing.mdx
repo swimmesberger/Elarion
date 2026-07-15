@@ -13,8 +13,8 @@ identically.
 Automatic **field-level change capture** (`Street: "Old" → "New"` in the record) is a *separate, optional*
 layer you turn on per entity — it is not required for auditing to work.
 
-It is the same declarative shape as [authorization](authorization.mdx) and
-[idempotency](idempotency.mdx): a class-level attribute, generated decorators, a seam-in-Abstractions /
+It is the same declarative shape as [authorization](/docs/concepts/authorization) and
+[idempotency](/docs/concepts/idempotency): a class-level attribute, generated decorators, a seam-in-Abstractions /
 impl-in-package split ([ADR-0045](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0045-handler-action-audit-trail.md)).
 
 ## The three axes
@@ -146,7 +146,7 @@ One append-only row per audited invocation, with the searchable facts as structu
 | `Details` | App-supplied string facts (display names, rule ids — keep values free of secrets). |
 
 The classic search — *"alle Änderungen an Feuerlöschern durch Max, letzte Woche"* — is a plain indexed
-`WHERE` over those columns plus [keyset pagination](../capabilities/pagination.mdx); querying and display
+`WHERE` over those columns plus [keyset pagination](/docs/capabilities/pagination); querying and display
 stay app-owned (the framework never renders audit UI).
 
 ## Automatic change capture (optional)

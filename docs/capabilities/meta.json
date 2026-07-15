@@ -12,6 +12,7 @@
     "resilience",
     "feature-flags",
     "events",
+    "coordination",
     "connections",
     "devices",
     "data-rate-shaping",

@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   title: 'Datenschutzerklärung',
   description:
     'Datenschutzerklärung (privacy policy) for the Elarion website: GitHub Pages hosting, no cookies, no analytics, self-hosted fonts, and your rights under the GDPR (DSGVO) and Austrian DSG.',
+  alternates: { canonical: '/datenschutz' },
 };
 
 export default function DatenschutzPage() {

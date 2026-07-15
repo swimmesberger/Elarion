@@ -1,3 +1,5 @@
+import { adrCount } from '@/lib/adr-catalog';
+
 /**
  * "The bet you're actually making" — drawn as an I/O panel: your product is a
  * chassis whose every external connection is a standard port (nothing
@@ -7,7 +9,7 @@
  */
 export function BetPanel() {
   const ports = [
-    { x: 130, name: 'MCP', sub: 'any AI assistant' },
+    { x: 130, name: 'MCP', sub: 'compatible AI clients' },
     { x: 270, name: 'OpenTelemetry', sub: 'any monitoring' },
     { x: 410, name: 'OpenFeature', sub: 'any flag provider' },
     { x: 550, name: 'HTTP · JSON-RPC', sub: 'any client' },
@@ -16,8 +18,8 @@ export function BetPanel() {
   // Three seals of 192px inside the 640px chassis (x 40..680): 16px margins.
   const seals = [
     { x: 56, main: 'APACHE-2.0', sub: 'yours to keep' },
-    { x: 264, main: '23 ADRs ON FILE', sub: 'every tradeoff reasoned' },
-    { x: 472, main: '600+ TESTS', sub: 'guarding the promises' },
+    { x: 264, main: `${adrCount} ADRs ON FILE`, sub: 'every tradeoff reasoned' },
+    { x: 472, main: '1,500+ TESTS', sub: 'guarding the promises' },
   ];
 
   return (
@@ -25,7 +27,7 @@ export function BetPanel() {
       viewBox="0 0 960 410"
       className="h-auto w-full"
       role="img"
-      aria-label="Your product drawn as a chassis. Every external connection is a standard port — MCP for any AI assistant, OpenTelemetry for any monitoring, OpenFeature for any flag provider, HTTP and JSON-RPC for any client. An exit door stands open in the wall: leave anytime and keep a conventional .NET codebase. Inside, three seals: Apache-2.0, twenty-three decision records, six hundred plus tests."
+      aria-label={`Your product drawn as a chassis. Every external connection is a standard port — MCP for compatible AI clients, OpenTelemetry for monitoring, OpenFeature for feature-flag providers, and HTTP or JSON-RPC for clients. An exit door stands open in the wall: leave anytime and keep a conventional .NET codebase. Inside, three seals: Apache-2.0, ${adrCount} decision records, more than fifteen hundred tests.`}
       xmlns="http://www.w3.org/2000/svg"
     >
       {/* cables into the standard ports */}

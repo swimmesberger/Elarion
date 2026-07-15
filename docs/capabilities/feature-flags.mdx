@@ -1,5 +1,5 @@
 ---
-title: Feature flags
+title: Feature flag providers
 description: Wire a feature-flag backend into the host so [FeatureGate] handlers and variant services evaluate against the provider of your choice.
 ---
 
@@ -8,7 +8,7 @@ implementation per user with `[FeatureVariant]`. The attributes, the `IFeatureFl
 generated decorators ship in `Elarion.Abstractions` and carry **no** feature-management dependency — so
 gating is free to declare and the host picks the backend. This page covers the host wiring; for the gate
 semantics, multiple-flag forms, and variant injection in depth see
-[Feature flags (concept)](/docs/concepts/feature-flags).
+[Feature flags & variants](/docs/concepts/feature-flags).
 
 ## Choose a provider
 

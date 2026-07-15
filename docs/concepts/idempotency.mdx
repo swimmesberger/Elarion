@@ -9,7 +9,7 @@ result. You annotate the handler with `[Idempotent]`; a generated decorator owns
 in which it writes the idempotency key **atomically with the handler's business writes**, lets a unique
 constraint reject a duplicate, and replays the stored result — under every transport identically.
 
-It is the same declarative shape as [authorization](authorization.mdx) and [feature flags](feature-flags.mdx):
+It is the same declarative shape as [authorization](/docs/concepts/authorization) and [feature flags](/docs/concepts/feature-flags):
 a class-level attribute, a generated decorator, a seam-in-Abstractions / impl-in-package split.
 
 ## The core guarantee

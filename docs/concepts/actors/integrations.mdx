@@ -1,0 +1,79 @@
+---
+title: Actor events, streams, and telemetry
+description: Feed integration events into actors, stream ordered state out, and operate actors with traces and metrics.
+---
+
+## Integration events
+
+Put `[ConsumeEvent]` on a public actor method and the generator emits an inbox-deduped integration-event
+relay that extracts the key and calls the typed facade:
+
+```csharp
+[Actor]
+public sealed class OrderFulfillmentActor(IActorContext<Guid> context)
+{
+    [ConsumeEvent]
+    [ActorKey(nameof(OrderShipped.OrderId))] // optional when key inference is unambiguous
+    public Task OnShipped(OrderShipped message) => Task.CompletedTask;
+}
+```
+
+The event must expose exactly one property assignable to the actor key, or name it with `[ActorKey]`.
+Singleton actors need no key. `ELACT008` reports an ambiguous/missing key and `ELACT009` rejects a
+non-public consumed method because the relay uses the same public facade a hand-written relay would.
+
+Only integration events may enter an actor this way (`ELACT010`). Domain events execute inside the
+emitting handler's transaction and scope, while an actor has its own scope and schedule. Publish an
+integration event after commit, or call the actor directly after the transaction.
+
+The generated relay composes inbox deduplication before mailbox enqueue. If the actor call fails, outbox
+delivery retries; successful prior delivery remains deduped. Inside the actor, call sibling methods on
+`this`—calling the same actor through its facade re-enqueues and deadlocks a non-reentrant activation.
+
+Use a hand-written relay when one event fans out to several actors or key derivation is non-trivial.
+
+## Ordered facade streams
+
+An actor method returning `IAsyncEnumerable<T>` becomes an Orleans-shaped facade stream. The mailbox is
+the sequencer; attach is a turn, but enumeration runs off-mailbox:
+
+```csharp
+private readonly StreamHub<Quote> _quotes = new(new() { ReplayCapacity = 256 });
+
+public IAsyncEnumerable<StreamItem<Quote>> Watch(long? resumeAfter) =>
+    _quotes.SubscribeSequenced(new StreamSubscribeOptions
+    {
+        ResumeAfterSequence = resumeAfter
+    });
+```
+
+`ELACT012` enforces two rules: the actor stream method has no `CancellationToken` parameter (the facade
+adds the consumer token), and it cannot also be an event consumer.
+
+A live enumeration retains the activation against idle passivation. Correctness passivation—snapshot
+conflict and shutdown—still wins, so complete or fail every hub in `OnDeactivateAsync`; otherwise a
+consumer can wait forever on an abandoned channel. Reactivation creates a new hub and sequence epoch.
+See [ordered streams](/docs/capabilities/events/streams) for resume semantics and the SSE adapter.
+
+Use streams when a lost item makes the consumer wrong and one sequencer exists. Use client events when a
+lost hint merely makes a view stale and re-query repairs it.
+
+## Observability
+
+Register the `Elarion.Actors` ActivitySource and Meter with OpenTelemetry. Each facade call emits a
+client-side `actor.call` span that parents an actor-side `actor.process` span. Actor name, method, and key
+are span attributes; the high-cardinality key is intentionally absent from metrics.
+
+| Metric | Meaning |
+| --- | --- |
+| `actor.message.count` | Outcomes: `ok`, `error`, `canceled`, `timeout`, `abandoned` |
+| `actor.message.duration` | Execution time, excluding queue wait |
+| `actor.message.queue_wait` | Time waiting for the mailbox |
+| `actor.mailbox.pending` | Enqueued or executing calls |
+| `actor.activations.active` | Current live activations |
+| `actor.activations.count` | Total activations and reactivation churn |
+| `actor.activations.failed` | Constructor or activation-hook failures |
+| `actor.snapshot.conflicts` | Snapshot conflicts; sustained values suggest double-hosting |
+
+Durations are seconds. Exceptions are not wrapped, and activations are not silently restarted, so there
+are no dead-letter or restart metrics.

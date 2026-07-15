@@ -1,4 +1,4 @@
 {
   "title": "Transports",
-  "pages": ["http-endpoints", "openapi", "json-rpc", "mcp", "schema-generation", "typescript-client"]
+  "pages": ["http-endpoints", "openapi", "json-rpc", "mcp", "schema-generation", "typescript-client", "custom-transports"]
 }

@@ -1,0 +1,165 @@
+---
+title: Coordination & role leases
+description: Elect one instance for a coarse application role on PostgreSQL, gate work at the holder, and route HTTP traffic to it when needed.
+---
+
+Elarion has three deliberately different coordination shapes. Choose the one that matches the unit
+being coordinated:
+
+| Need | Primitive | Coordination key |
+| --- | --- | --- |
+| Run one recurring occurrence across the cluster | [Scheduler claim](/docs/capabilities/scheduling/multi-node) | Job + due time |
+| Deliver one integration message at a time | [Outbox lease](/docs/capabilities/events/backends) | Message |
+| Make exactly one instance hold a long-lived application role | **Role lease** | Role name |
+
+A role lease answers a coarse question such as “which instance is the maintenance coordinator?” It
+is a heartbeat-renewed row in the application's PostgreSQL database, exposed as an `IRoleLease`
+keyed by role name. The current holder renews; other instances keep trying; graceful shutdown
+releases immediately; a crashed holder fails over when its lease expires.
+
+<Callout type="warn">
+  A role lease is **not a distributed-lock API**. Do not create one per tenant, record, or work item.
+  An application should have a handful of stable roles. Use database constraints and optimistic
+  concurrency for rows, scheduler claims for job occurrences, and outbox leases for messages.
+</Callout>
+
+This default targets Elarion's normal scale: roughly 1–10 application nodes on the PostgreSQL the app
+already runs. Beyond that tier, replace the coordination seam with dedicated infrastructure rather
+than growing a membership system inside the application.
+
+## Map the lease table
+
+Add `Elarion.Coordination.PostgreSql` and opt the application's concrete `DbContext` into the model:
+
+```csharp
+using Elarion.Coordination.PostgreSql;
+using Elarion.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+[GenerateDbSets]
+[GenerateElarionRoleLeases]
+public sealed partial class AppDbContext(DbContextOptions<AppDbContext> options)
+    : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
+        base.OnModelCreating(modelBuilder);
+        ConfigureEntities(modelBuilder); // generated, including elarion_role_leases
+    }
+}
+```
+
+The hand-written model equivalent is `modelBuilder.UseElarionRoleLeases()`. Apply the resulting EF
+Core migration before any instance starts competing for a role.
+
+## Register one lease per role
+
+Each registration adds a keyed `IRoleLease` and its heartbeat worker:
+
+```csharp
+builder.Services.AddElarionPostgreSqlRoleLease<AppDbContext>(options => {
+    options.RoleName = "maintenance";
+});
+```
+
+Duplicate registration of the same role in one process fails at startup. The defaults are sized so
+the old holder stops acting before a successor may legitimately take over:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `LeaseDuration` | 30 s | How long one successful acquisition remains valid; also the crash-failover bound. |
+| `RenewInterval` | 10 s | How often holders renew and non-holders try to acquire. |
+| `HeldSafetyMargin` | 5 s | How early local `IsHeld` becomes false before database expiry. |
+| `InstanceId` | Machine name + random suffix | Process identity written to the lease row. |
+| `AdvertisedAddress` | `null` | Explicit holder address for proxying; otherwise an `IInstanceAddressProvider` may supply it. |
+
+`LeaseDuration` must be greater than `RenewInterval + HeldSafetyMargin`.
+
+## Gate every cycle
+
+Resolve the lease by its role name and check `IsHeld` at the start of every unit of work. `IsHeld` is
+local, lock-free state; it does not query PostgreSQL on the hot path.
+
+```csharp
+using Elarion.Abstractions.Coordination;
+using Microsoft.Extensions.DependencyInjection;
+
+public sealed class MaintenanceWorker(
+    [FromKeyedServices("maintenance")] IRoleLease lease,
+    TimeProvider timeProvider)
+    : BackgroundService {
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
+        while (!stoppingToken.IsCancellationRequested) {
+            if (lease.IsHeld) {
+                await RunOneCycleAsync(stoppingToken);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(10), timeProvider, stoppingToken);
+        }
+    }
+}
+```
+
+Do not start a permanent leader-only loop in response to a lease-change event. There is deliberately
+no such event: database outages fail closed, and a holder can lose the role between any two cycles.
+Gate each call or polling cycle instead.
+
+`CurrentHolder` and `CurrentHolderAddress` are diagnostic/routing snapshots refreshed at heartbeat
+cadence. They may lag a failover by one renewal interval; correctness comes from `IsHeld`, not from
+comparing holder strings.
+
+## Route HTTP to the holder
+
+Some roles own live state or an ordered stream, so every public instance must accept the route while
+only the holder may execute it. `Elarion.AspNetCore` ships a small role-holder proxy for that shape:
+
+```csharp
+builder.Services.AddElarionInstanceAddress();
+builder.Services.AddElarionPostgreSqlRoleLease<AppDbContext>(options => {
+    options.RoleName = "maintenance";
+});
+
+var app = builder.Build();
+
+// Install before routing/auth so a non-holder never starts local execution.
+app.UseElarionRoleHolderProxy("maintenance", "/maintenance", "/maintenance-streams");
+
+app.MapMaintenanceEndpoints();
+```
+
+`AddElarionInstanceAddress()` advertises the server's bound address, replacing wildcard hosts with a
+non-loopback IPv4 address. Pass an explicit address behind NAT, a reverse proxy, or when nodes use
+HTTPS between themselves:
+
+```csharp
+builder.Services.AddElarionInstanceAddress("https://app-03.internal:8443");
+```
+
+The proxy forwards at most one hop and supports streaming responses such as SSE. It never retries or
+queues a request: an unknown/unreachable holder or a failover race returns `503` with
+`Retry-After`. The loop guard prevents a forwarded request from bouncing again. When the named lease
+is not registered (for example in single-instance development), the call installs no middleware.
+
+The prefix list is intentionally the same rule a future ingress or service mesh would own. When
+external routing can target the holder directly, remove the in-app proxy rather than layering both.
+
+## Actor home is a specialized role
+
+`AddElarionPostgreSqlActorHome<TDbContext>()` composes the same mechanism under the reserved
+`"actors"` role for `[Actor(SingleHomed = true)]` actors. Calls on other instances fail rather than
+forwarding through the actor runtime; host-owned HTTP prefixes can use
+`UseElarionRoleHolderProxy("actors", ...)` to reach the home. See [Actors](/docs/concepts/actors) for
+the placement and migration boundaries.
+
+## Failure behavior
+
+- **Graceful shutdown:** the holder releases the row, allowing immediate takeover.
+- **Process or node loss:** another instance acquires after `LeaseDuration` expires.
+- **Database outage:** no instance considers itself holder after its safety window; coordination
+  fails closed.
+- **Clock skew:** leases use application clocks. Keep node clocks synchronized; this is not a
+  consensus protocol.
+- **Two processes on one machine:** the random `InstanceId` suffix keeps their identities distinct.
+
+The full rationale and proxy design are recorded in
+[ADR-0049](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0049-role-leases.md) and
+[ADR-0050](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0050-role-holder-proxy.md).

@@ -8,11 +8,13 @@ import { MaximSplit } from '../_components/philosophy/maxim-split';
 import { PipelineDiagram } from '../_components/philosophy/pipeline-diagram';
 import { GithubIcon, Mono, PAD, Section, SectionTitle, Ticks } from '../_components/section';
 import { githubUrl } from '@/lib/shared';
+import { adrCount } from '@/lib/adr-catalog';
 
 export const metadata: Metadata = {
   title: 'Philosophy — why Elarion is built this way',
   description:
     'The engineering philosophy behind Elarion, visualized: auto-detect application patterns, explicitly wire platform capabilities. The mental model, the feedback loop, the decorator pipeline, the batteries-and-sockets packaging, and the opinions — each on the record as an ADR.',
+  alternates: { canonical: '/philosophy' },
 };
 
 export default function PhilosophyPage() {
@@ -166,7 +168,7 @@ function PipelineSection() {
               </>
             }
             points={[
-              <>Authorization sits outermost: a denied caller never warms a cache or opens a transaction.</>,
+              <>Authorization is the outermost functional gate, just inside always-on observability: a denied caller never warms a cache or opens a transaction.</>,
               <>Domain events ride your transaction; integration events wait for the commit.</>,
               <>
                 The handler stays a plain function: request in, <Mono>Result&lt;T&gt;</Mono> out —
@@ -280,7 +282,7 @@ const opinions = [
 
 function OpinionsSection() {
   return (
-    <Section id="opinions" n="05" label="Opinions" aside="23 ADRs · public reasoning">
+    <Section id="opinions" n="05" label="Opinions" aside={`${adrCount} ADRs · public reasoning`}>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
           <SectionTitle

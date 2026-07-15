@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
+import type { Metadata } from 'next';
 import { BuildOutput } from './_components/build-output';
 import { CodeWindow } from './_components/code-window';
 import { MigrationDiffStat } from './_components/diff-stat';
@@ -8,6 +9,10 @@ import { Code } from './_components/highlight';
 import { OutputTabs } from './_components/output-tabs';
 import { GithubIcon, Mono, PAD, Section, SectionTitle, Ticks } from './_components/section';
 import { githubUrl } from '@/lib/shared';
+
+export const metadata: Metadata = {
+  alternates: { canonical: '/' },
+};
 
 export default function HomePage() {
   return (
@@ -109,10 +114,10 @@ function Hero() {
 
 const facts = [
   '.NET 10 · C# 14',
-  'AOT & trim-safe',
+  'NativeAOT paths',
   'Zero runtime reflection',
-  '28 packages · pay per use',
-  '600+ tests',
+  '40+ focused packages',
+  '1,500+ tests',
   'Apache-2.0',
 ];
 
@@ -168,8 +173,8 @@ private static IHandler<GetClient.Query, Result<GetClient.Response>> BuildPipeli
     IServiceProvider sp) {
     IHandler<GetClient.Query, Result<GetClient.Response>> handler =
         sp.GetRequiredService<GetClient>();
-    handler = new AuthorizationDecorator<GetClient.Query, GetClient.Response>(handler, …);
-    handler = new TracingDecorator<GetClient.Query, GetClient.Response>(handler, …);
+    handler = new AuthorizationDecorator<GetClient.Query, Result<GetClient.Response>>(handler, …);
+    handler = new ObservabilityDecorator<GetClient.Query, Result<GetClient.Response>>(handler, …);
     return handler;
 }`;
 
@@ -250,8 +255,8 @@ function GeneratedOutput() {
             },
             {
               n: 'b',
-              title: 'AOT & trim-safe',
-              body: 'Emitted code is concrete and statically typed, and JSON serialization is source-generated — reflection is off by default across the framework.',
+              title: 'NativeAOT-ready paths',
+              body: 'Emitted code is concrete and statically typed, and JSON serialization is source-generated — supported AOT paths avoid runtime discovery.',
             },
             {
               n: 'c',
@@ -353,6 +358,18 @@ const capabilityGroups: CapabilityGroup[] = [
         href: '/docs/capabilities/pagination',
       },
       {
+        name: 'Bulk inserts',
+        desc: 'Non-tracking inserts over PostgreSQL binary COPY, shaped for high-rate write paths.',
+        tag: 'ExecuteInsertAsync',
+        href: '/docs/capabilities/bulk-operations',
+      },
+      {
+        name: 'NativeAOT SQL',
+        desc: 'Generated row mappers, safe interpolation, and ordered SQL migrations without EF Core.',
+        tag: '[SqlRecord]',
+        href: '/docs/capabilities/sql-mapping',
+      },
+      {
         name: 'Blob storage',
         desc: 'Streaming-first store with direct and resumable (tus) uploads and a pending → commit lifecycle.',
         tag: 'IBlobStore',
@@ -396,6 +413,53 @@ const capabilityGroups: CapabilityGroup[] = [
     ],
   },
   {
+    label: 'Realtime & coordination',
+    caps: [
+      {
+        name: 'Client events',
+        desc: 'At-most-once hints tell browsers to re-query; reconnect greetings make views converge.',
+        tag: 'IClientEvent',
+        href: '/docs/capabilities/events/client-events',
+      },
+      {
+        name: 'Ordered streams',
+        desc: 'Sequenced hot broadcasts with bounded replay, visible gaps, and resumable SSE.',
+        tag: 'StreamHub<T>',
+        href: '/docs/capabilities/events/streams',
+      },
+      {
+        name: 'Client connections',
+        desc: 'Bidirectional WebSocket and TCP links for devices, interactive input, and server-to-client RPC.',
+        tag: 'IClientConnection',
+        href: '/docs/capabilities/connections',
+      },
+      {
+        name: 'Device identity',
+        desc: 'Single-use pairing, key rotation, and constant-time HMAC handshakes for device links.',
+        tag: 'HmacChallengeVerifier',
+        href: '/docs/capabilities/devices',
+      },
+      {
+        name: 'Actors',
+        desc: 'Mailbox-serialized live state with generated typed facades; use only when a row is not the answer.',
+        tag: '[Actor]',
+        href: '/docs/concepts/actors',
+      },
+      {
+        name: 'Role leases',
+        desc: 'Elect one instance for a coarse role and proxy holder-owned HTTP routes when needed.',
+        tag: 'IRoleLease',
+        href: '/docs/capabilities/coordination',
+      },
+      {
+        name: 'Data-rate shaping',
+        desc: 'Batch loss-tolerant writes and conflate latest-wins values before they hit storage or the UI.',
+        tag: 'WriteBehindBuffer<T>',
+        href: '/docs/capabilities/data-rate-shaping',
+      },
+    ],
+  },
+  {
     label: 'Operations',
     caps: [
       {
@@ -428,13 +492,19 @@ const capabilityGroups: CapabilityGroup[] = [
         tag: 'ActivitySource',
         href: '/docs/capabilities/telemetry',
       },
+      {
+        name: 'Audit trail',
+        desc: 'Explicit durable action records with outcomes, resource context, trace correlation, and optional diffs.',
+        tag: '[Auditable]',
+        href: '/docs/concepts/auditing',
+      },
     ],
   },
 ];
 
 function CapabilityIndex() {
   return (
-    <Section id="capabilities" n="02" label="Capability index" aside="21 capabilities · 28 packages">
+    <Section id="capabilities" n="02" label="Capability index" aside="30+ capabilities · 40+ packages">
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <SectionTitle
           title="Everything an application needs. Nothing you didn't reference."
@@ -508,7 +578,7 @@ const contrastRows: { scan: string; gen: string }[] = [
 
 function Diagnostics() {
   return (
-    <Section id="diagnostics" n="03" label="Diagnostics" aside="60+ compile-time checks" tinted>
+    <Section id="diagnostics" n="03" label="Diagnostics" aside="100+ compile-time checks" tinted>
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <SectionTitle
           title="Wrong wiring doesn't ship."
@@ -646,35 +716,50 @@ function PhilosophyTeaser() {
 /* --------------------------------------------------------- 05 · Start */
 
 const stepModule = `
-[AppModule("Clients")]
-public static partial class ClientsModule;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using Elarion.Abstractions;
+using Elarion.Abstractions.Modules;
+using Elarion.AspNetCore;
 
-[Handler("clients.get")]
-public sealed class GetClient(AppDbContext db)
-    : IHandler<Query, Result<Response>> {
-    // the handler from the top of the page
-}`;
+[assembly: UseElarion]
+[assembly: GenerateModuleBootstrapper]
+
+namespace MyApp.System;
+
+[AppModule("System", Kind = AppModuleKind.Core)]
+public static partial class SystemModule {
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() =>
+        SystemJsonContext.Default;
+}
+
+[Handler("system.ping")]
+[HttpEndpoint("ping")]
+public sealed class Ping : IHandler<Ping.Query, Result<Ping.Response>> {
+    public sealed record Query : IQuery;
+    public sealed record Response(string Message);
+
+    public ValueTask<Result<Response>> HandleAsync(
+        Query query, CancellationToken ct) =>
+        ValueTask.FromResult<Result<Response>>(new Response("pong"));
+}
+
+[JsonSerializable(typeof(Ping.Query))]
+[JsonSerializable(typeof(Ping.Response))]
+public sealed partial class SystemJsonContext : JsonSerializerContext;`;
 
 const stepProgram = `
-var builder = WebApplication
-    .CreateSlimBuilder(args);
+using Elarion.AspNetCore;
+using MyApp;
 
-// one database — the host's only infra
-builder.Services
-    .AddDbContext<AppDbContext>(o =>
-        o.UseInMemoryDatabase("app"));
+var builder = WebApplication.CreateSlimBuilder(args);
 
-// discover modules + wire JSON
-builder.Services.AddElarion(
-    builder.Configuration);
-builder.Services.AddElarionJsonRpc(
-    ElarionBootstrapper.RegisterHandlers);
+builder.Services.AddElarion(builder.Configuration);
+builder.Services.AddElarionHttpJson();
 
 var app = builder.Build();
 
-app.MapElarionEndpoints(
-    app.Configuration);
-app.MapElarionJsonRpc();
+app.MapElarionEndpoints(app.Configuration);
 
 app.Run();`;
 
@@ -682,9 +767,7 @@ const treeRows: { text: string; note?: string }[] = [
   { text: 'MyApp/' },
   { text: '├─ MyApp.csproj', note: 'step 1' },
   { text: '├─ Program.cs', note: 'step 3' },
-  { text: '└─ Modules/' },
-  { text: '   └─ Clients/' },
-  { text: '      └─ GetClient.cs', note: 'step 2' },
+  { text: '└─ SystemFeature.cs', note: 'step 2' },
 ];
 
 function ProjectTree() {
@@ -701,17 +784,17 @@ function ProjectTree() {
 }
 
 const buildEmits = [
-  'DI registration & decorator pipeline',
-  'GET /clients/{id} — minimal API',
-  'clients.get — JSON-RPC + MCP tool',
-  'schema export → typed TS client',
+  'DI registration + observability pipeline',
+  'GET /ping — minimal API',
+  'system.ping — operation metadata',
+  'source-generated JSON metadata',
 ];
 
 function Start() {
   return (
     <Section id="start" n="05" label="Start" aside="~5 minutes">
       <div className={`py-14 lg:py-16 ${PAD}`}>
-        <SectionTitle title="A module in three steps." />
+        <SectionTitle title="A working handler in three steps." />
 
         <div className="mt-10 grid gap-8 *:min-w-0 lg:grid-cols-[0.85fr_1.1fr_1.05fr]">
           <div className="flex flex-col">
@@ -723,13 +806,13 @@ function Start() {
             <p className="mt-3 text-sm text-fd-muted-foreground">
               The generators ride along as analyzers — nothing extra to install.
             </p>
-            <CodeWindow filename="your project" note="3 files · 1 module" className="mt-5">
+            <CodeWindow filename="your project" note="3 files · 1 project" className="mt-5">
               <ProjectTree />
             </CodeWindow>
           </div>
           <div className="flex flex-col">
-            <p className="eyebrow">Step 2 — declare a module and a handler</p>
-            <CodeWindow filename="Modules/Clients" className="mt-4">
+            <p className="eyebrow">Step 2 — declare one feature</p>
+            <CodeWindow filename="SystemFeature.cs" className="mt-4">
               <Code lang="cs" code={stepModule} />
             </CodeWindow>
             <p className="eyebrow mt-6">The build now emits</p>
@@ -744,16 +827,16 @@ function Start() {
           </div>
           <div className="flex flex-col">
             <p className="eyebrow">Step 3 — wire the host</p>
-            <CodeWindow filename="Program.cs" note="the whole host" className="mt-4">
+            <CodeWindow filename="Program.cs" note="the complete host" className="mt-4">
               <Code lang="cs" code={stepProgram} />
             </CodeWindow>
           </div>
         </div>
 
         <p className="mt-6 max-w-3xl text-sm text-fd-muted-foreground">
-          Step 3 is the entire host — a slim builder, one database, three Elarion lines. Nothing
-          hides in a base class or a startup scan; add the MCP package and one{' '}
-          <Mono>MapElarionMcp()</Mono> line, and the same handlers answer AI agents too.
+          This sample has no hidden database or undeclared dependency: build it and call{' '}
+          <Mono>GET /ping</Mono>. The quickstart adds JSON-RPC, while the MCP guide exposes the same
+          operation registry to AI agents; the handler and its policy stay unchanged.
         </p>
 
         <div className="mt-12 flex flex-wrap items-center gap-3">
@@ -777,4 +860,3 @@ function Start() {
     </Section>
   );
 }
-

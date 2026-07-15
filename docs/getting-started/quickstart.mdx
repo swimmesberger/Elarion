@@ -10,14 +10,22 @@ request over HTTP.
 It assumes you have followed [Installation](/docs/getting-started/installation) and have two
 projects: an application library (`MyApp.Application`) and an ASP.NET Core host (`MyApp.Api`).
 
+The data-model step uses two packages beyond the base installation: the application project needs
+the EF Core integration/generator, and the host needs the demo-only in-memory provider.
+
+```bash
+dotnet add MyApp.Application package Elarion.EntityFrameworkCore --version 0.2.4
+dotnet add MyApp.Api package Microsoft.EntityFrameworkCore.InMemory --version 10.0.9
+```
+
 <Steps>
 
 <Step>
 
 ### Turn on the generators
 
-In the application project, opt in once. This enables generation for module handlers, services,
-and scheduled jobs across the assembly.
+In the application project, opt in once. This enables the framework-owned application generators
+across the assembly; the narrower trigger list is in [Source generation](/docs/concepts/source-generation).
 
 ```csharp title="MyApp.Application/ElarionAssembly.cs"
 using Elarion.Abstractions;

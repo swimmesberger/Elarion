@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { cn } from '@/lib/cn';
 
 /**
- * The interactive payoff of the journal: pick a question a leader would
- * actually ask, read the answer the AI gives from the journal. Illustrative
+ * The interactive payoff of exported operational evidence: pick a question a
+ * leader would actually ask, then read an illustrative AI-assisted answer.
  * by design and labeled as such in the parent window.
  */
 
@@ -52,7 +52,7 @@ export function JournalQA() {
       </div>
 
       <p className="mt-4 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-white/35">
-        Your AI answers, from the journal
+        Example AI answer, from exported evidence
       </p>
       <p className="mt-1.5 min-h-20 text-[0.92rem] leading-relaxed text-[#b9c6e4]">
         {EXCHANGES[active].a}

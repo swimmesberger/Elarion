@@ -219,7 +219,7 @@ public sealed class InvoiceNotifications(
 written in the same transaction as the invoice — commit them both, or neither. The consumer is a
 `[ConsumeEvent]` handler, so it is discovered, registered, and module-gated automatically like every
 other handler; the
-host only chooses *how* delivery happens by wiring the [EF Core outbox](/docs/capabilities/events#the-ef-core-outbox)
+host only chooses *how* delivery happens by wiring the [EF Core outbox](/docs/capabilities/events/backends#ef-core-transactional-outbox)
 in [Host the API](/docs/tutorial/hosting), which is what makes the event survive a crash between commit
 and delivery.
 
