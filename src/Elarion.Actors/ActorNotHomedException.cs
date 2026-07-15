@@ -1,18 +1,16 @@
 namespace Elarion.Actors;
 
 /// <summary>
-/// Thrown when a <c>[Actor(SingleHomed = true)]</c> actor is called on an instance that does not
-/// hold the actor home lease (ADR-0048). Single-homed actors are fed by work that lands on the home
-/// instance — integration events (gate the outbox delivery worker on the lease) or calls made on
-/// the home itself; reads that may run anywhere go through <see cref="IActorStateReader"/> or a
-/// regular handler instead of the facade.
+/// Thrown when a single-homed or virtual-sharded actor is called on an instance that does not own
+/// the relevant role lease. Calls are gated locally; the runtime never forwards actor methods.
 /// </summary>
-public sealed class ActorNotHomedException(string actorName, string key, string? currentHolder)
-    : InvalidOperationException(
-        $"Single-homed actor '{actorName}' ({key}) cannot run on this instance: the actor home lease is held "
-        + (currentHolder is null ? "elsewhere." : $"by '{currentHolder}'.")
-        + " Route the triggering work to the home instance (e.g. gate outbox delivery on the lease) or read "
-        + "state via IActorStateReader.") {
+public sealed class ActorNotHomedException(
+    string actorName,
+    string key,
+    string? currentHolder,
+    string? placementRole = null,
+    string? currentHolderAddress = null)
+    : InvalidOperationException(BuildMessage(actorName, key, currentHolder, placementRole)) {
     /// <summary>The actor's logical name.</summary>
     public string ActorName { get; } = actorName;
 
@@ -21,4 +19,26 @@ public sealed class ActorNotHomedException(string actorName, string key, string?
 
     /// <summary>The instance currently believed to hold the home lease, when known.</summary>
     public string? CurrentHolder { get; } = currentHolder;
+
+    /// <summary>The role that owns the actor key, when the failure came from virtual sharding.</summary>
+    public string? PlacementRole { get; } = placementRole;
+
+    /// <summary>The holder's advertised address, when the placement provider knows it.</summary>
+    public string? CurrentHolderAddress { get; } = currentHolderAddress;
+
+    private static string BuildMessage(
+        string actorName,
+        string key,
+        string? currentHolder,
+        string? placementRole) {
+        var leaseDescription = placementRole is null
+            ? "the actor home lease"
+            : $"virtual-shard role '{placementRole}'";
+        var holder = currentHolder is null ? "elsewhere." : $"by '{currentHolder}'.";
+        var routeHint = placementRole is null
+            ? " Route the triggering work to the home instance or read state via IActorStateReader."
+            : " Route the triggering work to the shard holder; actor calls are never forwarded.";
+        return $"Actor '{actorName}' ({key}) cannot run on this instance: {leaseDescription} is held {holder}"
+            + routeHint;
+    }
 }

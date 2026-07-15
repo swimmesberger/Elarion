@@ -152,7 +152,7 @@ never in the transport.
 
 `IClientConnectionSink.InvokeAsync` is the new primitive, and it is deliberately **node-local**: you can
 invoke a client you hold. Reaching a client held elsewhere is not a foundation feature — it composes from
-the shipped pieces: the connection-owning actor is `[Actor(SingleHomed = true)]`, inbound decisions route
+the shipped pieces: the connection-owning actor is `[Actor(Placement = ActorPlacementMode.SingleHome)]`, inbound decisions route
 to the home via the role-holder proxy, and the home node holds both the actor and the connection. A
 replicated invoke-anyone directory is the cluster trigger (swap to Orleans/SignalR Service), not a
 foundation growth path.
@@ -171,8 +171,9 @@ Two multi-node deltas are acknowledged and deliberately deferred, not designed a
   single-home default (ADR-0025). When a deployment actually needs it, the choices are, in order:
   partition by hand (N roles over ADR-0049 leases — `"actors:shard-0"`…`"actors:shard-2"`, key→shard by
   stable hash, each shard's prefix home-routed), or the Orleans trigger (real placement, activation
-  rebalancing, and directory — adopted whole). A future ADR may promote the partitioned-roles pattern to
-  a documented recipe; it stays out of the foundation.
+  rebalancing, and directory — adopted whole). ADR-0060 now promotes the fixed partitioned-role
+  pattern as an opt-in actor recipe; connection ingress still needs an application-composed
+  shard-aware route and remains outside the connection kernel.
 
 ### Guarantees and lossy transports
 

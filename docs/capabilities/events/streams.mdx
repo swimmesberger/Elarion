@@ -78,7 +78,7 @@ An `[Actor]` method returning `IAsyncEnumerable<T>` becomes a **facade stream** 
 grain-interface shape, so call sites stay migration-portable:
 
 ```csharp
-[Actor(SingleHomed = true)]
+[Actor(Placement = ActorPlacementMode.SingleHome)]
 public sealed class StockQuoteActor(IActorContext<string> context) : IActorLifecycle {
     private readonly StreamHub<Quote> _stream = new(new() { ReplayCapacity = 256 });
 

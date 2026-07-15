@@ -15,7 +15,7 @@ here, and every piece is a framework primitive doing what it was built for:
 MarketFeedService (BackgroundService, owns the "vendor connection")
         │  in-process typed facade calls — deliberately NOT integration events
         ▼
-StockQuoteActor per symbol   [Actor(SingleHomed = true)], keyed by symbol
+StockQuoteActor per symbol   [Actor(Placement = ActorPlacementMode.SingleHome)], keyed by symbol
         │  mailbox = first-come-first-served serialization, no locks
         │  sequence guard = the feed's order survives multi-channel delivery
         │  conflation = at most one push per 250 ms per symbol, latest value wins

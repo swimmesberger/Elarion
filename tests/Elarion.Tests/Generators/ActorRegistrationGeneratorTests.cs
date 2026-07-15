@@ -102,11 +102,11 @@ public sealed class ActorRegistrationGeneratorTests {
     }
 
     [Fact]
-    public void GenerateActors_SingleHomed_FlowsIntoTheRegistrationOptions() {
+    public void GenerateActors_SingleHome_FlowsIntoTheRegistrationOptions() {
         var source = CreateSource(
             """
             namespace Sample.Orders {
-                [Elarion.Actors.Actor(SingleHomed = true)]
+                [Elarion.Actors.Actor(Placement = Elarion.Actors.ActorPlacementMode.SingleHome)]
                 public sealed class CoordinatorActor {
                     public System.Threading.Tasks.Task Run(System.Threading.CancellationToken cancellationToken) =>
                         System.Threading.Tasks.Task.CompletedTask;
@@ -124,9 +124,29 @@ public sealed class ActorRegistrationGeneratorTests {
         var generated = AllGenerated(result);
 
         generated.Should().Contain("Name = \"Coordinator\"");
-        generated.Should().Contain("SingleHomed = true");
-        // The default stays false for actors that don't opt in.
-        generated.Should().Contain("SingleHomed = false");
+        generated.Should().Contain("Placement = global::Elarion.Actors.ActorPlacementMode.SingleHome");
+        generated.Should().Contain("Placement = global::Elarion.Actors.ActorPlacementMode.Local");
+    }
+
+    [Fact]
+    public void GenerateActors_VirtualShards_FlowsIntoTheRegistrationOptions() {
+        var source = CreateSource(
+            """
+            namespace Sample.Orders {
+                [Elarion.Actors.Actor(Placement = Elarion.Actors.ActorPlacementMode.VirtualShards)]
+                public sealed class ShardedActor {
+                    public ShardedActor(Elarion.Actors.IActorContext<string> context) { }
+
+                    public System.Threading.Tasks.Task Run() =>
+                        System.Threading.Tasks.Task.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(source);
+        var generated = AllGenerated(result);
+
+        generated.Should().Contain("Placement = global::Elarion.Actors.ActorPlacementMode.VirtualShards");
     }
 
     [Fact]

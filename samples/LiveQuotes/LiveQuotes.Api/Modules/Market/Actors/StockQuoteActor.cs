@@ -26,13 +26,13 @@ namespace LiveQuotes.Api.Modules.Market.Actors;
 /// drives the clock.
 /// </para>
 /// <para>
-/// <b>SingleHomed</b> states the topology intent: exactly one instance runs the feed and these actors.
+/// <b>SingleHome</b> states the topology intent: exactly one instance runs the feed and these actors.
 /// In this single-process sample it is unenforced (no home lease registered — you'll see the startup
 /// warning); on a worker + web-nodes deployment, module gating places the actors and
 /// <c>AddElarionPostgreSqlActorHome</c> turns a wrong-instance call into a pointed error.
 /// </para>
 /// </remarks>
-[Actor(SingleHomed = true)]
+[Actor(Placement = ActorPlacementMode.SingleHome)]
 public sealed class StockQuoteActor(
     IActorContext<string> context,
     IClientEventPublisher clientEvents,

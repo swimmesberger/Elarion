@@ -30,7 +30,7 @@ public static class ActorSnapshotServiceCollectionExtensions {
     /// <summary>
     /// Registers the PostgreSQL actor home (ADR-0048): sugar over the generic role lease (ADR-0049)
     /// — one heartbeat-renewed <c>"actors"</c> role on the app's database elects exactly one
-    /// instance as the actor home, enforcing <c>[Actor(SingleHomed = true)]</c>.
+    /// instance as the actor home, enforcing <c>[Actor(Placement = ActorPlacementMode.SingleHome)]</c>.
     /// <typeparamref name="TDbContext"/> must map the role lease table — annotate the context with
     /// <c>[GenerateElarionRoleLeases]</c> or call <c>modelBuilder.UseElarionRoleLeases()</c>. To
     /// make integration-event delivery follow the lease, gate the outbox: <c>o.DeliveryGate =

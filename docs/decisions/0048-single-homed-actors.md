@@ -59,10 +59,10 @@ Two clock rules keep it honest:
   extreme clock skew) degrades to brief double-holding, which ADR-0047's ETag + transparent retry
   absorbs losslessly. A database outage degrades to "nobody is home" — fail-closed, never two homes.
 
-### `[Actor(SingleHomed = true)]` — the per-actor declaration
+### `[Actor(Placement = ActorPlacementMode.SingleHome)]` — the per-actor declaration
 
 The core seam is `IActorHomeLease { bool IsHeld; string? CurrentHolder; }` in `Elarion.Actors`. A
-`SingleHomed` actor's calls are gated per enqueue: on a non-holding instance the call fails immediately
+`SingleHome` actor's calls are gated per enqueue: on a non-holding instance the call fails immediately
 with `ActorNotHomedException` naming the holder. Gating per call (not per activation) means a lease
 lost mid-activation stops *new* work at once; in-flight turns finish under the ETag safety net.
 
@@ -138,6 +138,6 @@ a query the rich-record rule cannot express.
 - Scheduled jobs run on a claim-elected node that is generally *not* the home; a job that feeds a
   single-homed actor should publish an integration event (delivered on the home) rather than call the
   facade. Documented; a lease-aware job placement could follow if demand appears.
-- The Orleans migration seam is intact: `SingleHomed` maps conceptually onto "any grain" (Orleans
+- The Orleans migration seam is intact: `SingleHome` maps conceptually onto "any grain" (Orleans
   places it), the lease infrastructure is deleted rather than ported, and `DeliveryGate` reverts to
   always-on.

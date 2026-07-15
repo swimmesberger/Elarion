@@ -141,6 +141,26 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor VirtualShardedActorMustBeKeyed = new(
+        id: "ELACT013",
+        title: "Virtual-sharded actor must be keyed",
+        messageFormat:
+        "Actor '{0}' uses Placement = VirtualShards but has no actor key; virtual-shard placement "
+        + "requires an IActorContext<TKey> constructor parameter or Actor(KeyType = ...)",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor VirtualShardedActorCannotConsumeEvents = new(
+        id: "ELACT014",
+        title: "Virtual-sharded actor cannot consume events",
+        messageFormat:
+        "Actor '{0}' uses Placement = VirtualShards but declares an event consumer; event delivery is "
+        + "not shard-routed, so call the actor from shard-aware ingress or use SingleHome with a delivery gate",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     private enum ReturnShape {
         TaskVoid,
         TaskOfResult,
@@ -189,7 +209,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         bool MailboxFailFast,
         double IdleTimeoutSeconds,
         double CallTimeoutSeconds,
-        bool SingleHomed,
+        string Placement,
         EquatableArray<CtorParameterInfo> CtorParameters,
         EquatableArray<ActorMethodInfo> Methods,
         EquatableArray<ActorConsumerInfo> Consumers,
@@ -301,7 +321,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var mailboxFailFast = false;
         double idleTimeoutSeconds = 0;
         double callTimeoutSeconds = 0;
-        var singleHomed = false;
+        var placement = "Local";
         foreach (var named in ctx.Attributes[0].NamedArguments) {
             switch (named.Key) {
                 case "Name":
@@ -322,8 +342,14 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                 case "CallTimeoutSeconds":
                     callTimeoutSeconds = named.Value.Value is double call ? call : 0;
                     break;
-                case "SingleHomed":
-                    singleHomed = named.Value.Value is true;
+                case "Placement":
+                    placement = named.Value.Value is int placementValue
+                        ? placementValue switch {
+                            1 => "SingleHome",
+                            2 => "VirtualShards",
+                            _ => "Local"
+                        }
+                        : "Local";
                     break;
             }
         }
@@ -390,10 +416,15 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var keyType = attributeKeyType ?? contextKeyType;
         var actorName = explicitName ?? DeriveActorName(type.Name);
 
+        if (placement == "VirtualShards" && keyType is null) {
+            diagnostics.Add(DiagnosticInfo.Create(VirtualShardedActorMustBeKeyed, location, typeDisplay));
+        }
+
         // Public instance methods become facade methods; lifecycle hooks stay off the facade. A method carrying
         // [ConsumeEvent] additionally gets a generated integration-event relay (ADR-0046).
         var methods = new List<ActorMethodInfo>();
         var consumers = new List<ActorConsumerInfo>();
+        var hasConsumer = false;
         var workItemNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var member in type.GetMembers()) {
             cancellationToken.ThrowIfCancellationRequested();
@@ -410,6 +441,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             }
 
             var consumeAttribute = GetAttribute(method, ConsumeEventAttributeDisplayName);
+            hasConsumer |= consumeAttribute is not null;
 
             // Non-public methods are off the facade. The relay reaches the actor through its public facade, so a
             // non-public [ConsumeEvent] method is an error; other non-public methods are simply not facade methods.
@@ -513,6 +545,13 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             }
         }
 
+        if (placement == "VirtualShards" && hasConsumer) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                VirtualShardedActorCannotConsumeEvents,
+                location,
+                typeDisplay));
+        }
+
         var actorNamespace = type.ContainingNamespace is { IsGlobalNamespace: false } containing
             ? containing.ToDisplayString()
             : string.Empty;
@@ -528,7 +567,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             mailboxFailFast,
             idleTimeoutSeconds,
             callTimeoutSeconds,
-            singleHomed,
+            placement,
             ctorParameters.ToEquatableArray(),
             methods.ToEquatableArray(),
             consumers.ToEquatableArray(),
@@ -1053,7 +1092,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"                IdleTimeout = {TimeoutExpression(actor.IdleTimeoutSeconds, "DefaultIdleTimeout")},");
         sb.AppendLine($"                CallTimeout = {TimeoutExpression(actor.CallTimeoutSeconds, "DefaultCallTimeout")},");
         sb.AppendLine($"                Reentrant = {(actor.Reentrant ? "true" : "false")},");
-        sb.AppendLine($"                SingleHomed = {(actor.SingleHomed ? "true" : "false")}");
+        sb.AppendLine($"                Placement = global::Elarion.Actors.ActorPlacementMode.{actor.Placement}");
         sb.AppendLine("            },");
         sb.AppendLine($"            Activator = static (serviceProvider, context) => new {actor.ActorTypeFqn}({activatorArguments}),");
         sb.AppendLine($"            Facade = static handle => new {facadeImplFqn}(handle)");

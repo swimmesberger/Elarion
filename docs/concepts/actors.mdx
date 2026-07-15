@@ -246,7 +246,7 @@ backend implements `IActorSnapshotStore` and replaces the registration — the a
 
 ## Running on multiple instances
 
-There is no placement and no forwarding: `IActorSystem.Get<T>(key)` always resolves an activation **on
+The default has no placement and no forwarding: `IActorSystem.Get<T>(key)` resolves an activation **on
 the calling instance**. Five instances calling the same key means up to five independent activations —
 each with its own mailbox; the single-threaded guarantee holds per instance. What snapshot state adds is
 one shared row: the ETag becomes the *cross-instance* serialization point (whoever writes first wins;
@@ -258,10 +258,14 @@ at-least-once. Pick a topology per actor:
 1. **Per-instance actors** (caches, per-node rate limiters, batchers — usually no `IActorState`):
    independent activations per instance are the point. Nothing to do.
 2. **Single-homed actors** (per-entity coordinators like an escalation latch) — **the recommended
-   shape**: declare `[Actor(SingleHomed = true)]` and let the **actor home lease** (ADR-0048) elect
+   shape**: declare `[Actor(Placement = ActorPlacementMode.SingleHome)]` and let the **actor home lease** (ADR-0048) elect
    exactly one instance as the home. See [Single-homed actors](#single-homed-actors-the-home-lease)
    below.
-3. **Multi-writer everywhere** (no topology work): keep mutations reapplyable and side effects
+3. **Virtual-sharded actors** (a static spread of keyed actors): declare
+   `[Actor(Placement = ActorPlacementMode.VirtualShards)]` and register the PostgreSQL recipe below.
+   Each process may own several fixed virtual shards; this does not require the process count up front.
+   Calls still need shard-aware ingress and fail on a non-owner — there is no transparent forwarding.
+4. **Multi-writer everywhere** (no topology work): keep mutations reapplyable and side effects
    idempotent (or after the write), and let the runtime's conflict handling converge — a losing turn
    re-runs once on the reloaded snapshot; only sustained contention surfaces errors. Fine for
    low-contention keys; a hot shared key or true placement/forwarding is the signal to move to
@@ -270,7 +274,7 @@ at-least-once. Pick a topology per actor:
 
 ## Single-homed actors: the home lease
 
-`[Actor(SingleHomed = true)]` declares that an actor must only run on one instance app-wide. The
+`[Actor(Placement = ActorPlacementMode.SingleHome)]` declares that an actor must only run on one instance app-wide. The
 enforcement is the **actor home** — a [role lease](/docs/decisions) (ADR-0049): one heartbeat-renewed
 row on the app's PostgreSQL that elects exactly one instance as the holder of the `"actors"` role (the
 row is the whole membership protocol; failover is expiry, bounded by `LeaseDuration`, immediate on
@@ -321,7 +325,7 @@ The rules of the model:
   to every instance — not reader polling. Commands go through the actor; queries read snapshots (or
   regular entities).
 - **Unenforced without a lease.** With no `IActorHomeLease` registered (local dev, a one-instance
-  deployment), `SingleHomed` is a declaration only — the actor system logs one warning per such actor so
+  deployment), `SingleHome` is a declaration only — the actor system logs one warning per such actor so
   a multi-instance misconfiguration is visible.
 - **Failover is honest.** The local `IsHeld` turns false a safety margin *before* the stored lease
   expires, so the old home stops before a new one can start; pathological overlaps (GC pause, clock
@@ -331,6 +335,33 @@ The rules of the model:
 The static alternative — a fixed web/worker split via module gating (`Modules:{Name}:Enabled=false` on
 web instances) plus `RunDeliveryWorker = false` on publisher-only nodes — remains valid when you prefer
 topology in configuration over self-election; the lease is for fleets of identical instances.
+
+## Virtual-sharded actors: fixed partitions
+
+Virtual shards are the small, static placement option for a keyed actor that should be spread across
+several processes without making the actor runtime a cluster. The count is virtual — it is not the
+number of processes — and one process can hold multiple shard roles:
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionRoleLeases]
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options);
+
+services.AddElarionPostgreSqlActorSharding<AppDbContext>(); // 16 roles by default
+```
+
+Use `PostgreSqlActorShardingOptions.VirtualShardCount` only when the topology needs a different fixed
+partition count. `RolePrefix` defaults to `actors`, producing `actors:shard-N`; lease timing can be
+customized with `ConfigureLease`. All processes must use the same count and prefix. Ownership is a
+stable hash of the logical actor name and key, exposed as `ActorVirtualShard.GetShardIndex` for
+shard-aware ingress. Role acquisition is independent, so the framework does not promise even load:
+one process may own many roles.
+
+Calls on a non-owning process fail with `ActorNotHomedException` and are never forwarded. The existing
+role-holder proxy can forward a whole route to one role, but it does not extract actor keys or route
+individual virtual shards. Virtual-sharded actors also cannot use `[ConsumeEvent]` yet because outbox
+delivery has no per-key shard routing; use shard-aware ingress, or use `SingleHome` when event delivery
+should follow one home lease. Changing the shard count remaps keys and is a topology migration.
 
 ## Execution model: single-threaded, non-reentrant by default
 
@@ -390,6 +421,7 @@ specific pressure; reach for one only when you have the matching problem.
 | `MailboxFullMode` | `Wait` | The mailbox is bounded and you need load-shedding rather than backpressure (see below). |
 | `IdleTimeoutSeconds` | `0` (→ 5 min) | You want to trade the default memory-reclamation behaviour for something else (see below). |
 | `CallTimeoutSeconds` | `0` (→ 30 s) | A single call is legitimately long, or you must disable the deadlock backstop (see below). |
+| `Placement` | `Local` | You need a static, keyed spread across processes; use `VirtualShards` with `AddElarionPostgreSqlActorSharding`. |
 
 The three that need real judgment:
 
@@ -669,11 +701,12 @@ belongs in actors — that's handlers plus `Task.WhenAll`. For bounded, ordered 
 **Actors are single-node.** In-memory activations on three nodes are three independent states — fine for
 node-local concerns, wrong for cluster-wide authoritative state unless you make it so deliberately:
 [snapshots](#durable-state-snapshots) make the state durable and conflict-safe,
-[single-homing](#single-homed-actors-the-home-lease) makes one instance authoritative. What Elarion
-deliberately does **not** ship is placement and call forwarding: if you need actors addressable from any
-node with the runtime routing to them — the gaming/high-scale shapes — replace the runtime with a
-dedicated engine (Orleans, Akka.NET, Proto.Actor) rather than growing this one, the same
-replace-the-seam philosophy as the scheduler and cache defaults (ADR-0025, ADR-0042).
+[single-homing](#single-homed-actors-the-home-lease) makes one instance authoritative. The opt-in
+virtual-shard recipe adds fixed ownership partitions, but Elarion deliberately does **not** ship
+transparent actor-call forwarding, rebalancing, or a placement directory: if you need actors
+addressable from any node with the runtime routing to them — the gaming/high-scale shapes — replace the
+runtime with a dedicated engine (Orleans, Akka.NET, Proto.Actor) rather than growing this one, the same
+replace-the-seam philosophy as the scheduler and cache defaults (ADR-0025, ADR-0042, ADR-0060).
 
 ### The migration seam: how a facade maps to an Orleans grain
 

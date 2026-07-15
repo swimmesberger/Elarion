@@ -39,12 +39,26 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
 
     public async ValueTask EnqueueAsync(object key, ActorWorkItem<TActor> item, CancellationToken cancellationToken) {
         var typedKey = (TKey)key;
-        // Single-homing gate (ADR-0048): a SingleHomed actor only runs on the instance holding the
-        // home lease. Checked per call (not per activation) so a lease lost mid-activation stops
-        // NEW work immediately; in-flight turns finish and any conflicting write is caught by the
+        var canonicalKey = typedKey.ToString() ?? string.Empty;
+        // Ownership is checked per call (not per activation), so a lease lost mid-activation stops
+        // new work immediately; in-flight turns finish and any conflicting write is caught by the
         // snapshot ETag + transparent retry.
-        if (_registration.Options.SingleHomed && _runtime.HomeLease is { IsHeld: false } lease) {
-            throw new ActorNotHomedException(Name, typedKey.ToString() ?? string.Empty, lease.CurrentHolder);
+        if (_registration.Options.Placement == ActorPlacementMode.SingleHome &&
+            _runtime.HomeLease is { IsHeld: false } homeLease) {
+            throw new ActorNotHomedException(Name, canonicalKey, homeLease.CurrentHolder);
+        }
+
+        if (_registration.Options.Placement == ActorPlacementMode.VirtualShards &&
+            _runtime.PlacementResolver is { } placementResolver) {
+            var placement = placementResolver.Resolve(Name, canonicalKey);
+            if (!placement.IsHeld) {
+                throw new ActorNotHomedException(
+                    Name,
+                    canonicalKey,
+                    placement.CurrentHolder,
+                    placement.Role,
+                    placement.CurrentHolderAddress);
+            }
         }
 
         while (true) {

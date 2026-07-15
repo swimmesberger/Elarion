@@ -66,11 +66,10 @@ public sealed class ActorAttribute : Attribute {
     public double CallTimeoutSeconds { get; init; }
 
     /// <summary>
-    /// Declares that this actor must only run on the instance holding the actor home lease
-    /// (ADR-0048). Enforced when an <see cref="IActorHomeLease"/> is registered (e.g.
-    /// <c>AddElarionPostgreSqlActorHome&lt;TDbContext&gt;()</c>): calls on any other instance fail
-    /// with <see cref="ActorNotHomedException"/>. Without a registered lease the declaration is not
-    /// enforced — the single-instance / local-dev case.
+    /// Placement mode for this actor. <see cref="ActorPlacementMode.Local"/> is the default;
+    /// <see cref="ActorPlacementMode.SingleHome"/> uses the actor-home role lease, while
+    /// <see cref="ActorPlacementMode.VirtualShards"/> assigns each key to a fixed virtual-shard
+    /// role lease when a placement provider is registered.
     /// </summary>
-    public bool SingleHomed { get; init; }
+    public ActorPlacementMode Placement { get; init; }
 }
