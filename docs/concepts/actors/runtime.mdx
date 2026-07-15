@@ -1,0 +1,111 @@
+---
+title: Actor runtime and facades
+description: Generated facades, keying, activation, mailboxes, lifecycle, reentrancy, configuration, wiring, and worker-pool patterns.
+---
+
+## Generated facades
+
+For `OrderFulfillmentActor`, the generator emits a public facade in the actor's namespace:
+
+```csharp
+public interface IOrderFulfillment : IActorFacade<Guid>
+{
+    Task<Result<Unit>> Ship(
+        ShipmentInfo info,
+        CancellationToken cancellationToken = default);
+}
+```
+
+The rules are mechanical:
+
+- The name is the class name without a trailing `Actor`, prefixed with `I`; override it with
+  `[Actor(Name = ...)]`.
+- `IActorContext<TKey>` makes the actor keyed and the facade extends `IActorFacade<TKey>`; without a key,
+  it extends `IActorFacade` and is a process singleton.
+- Every public `Task`, `Task<T>`, `ValueTask`, `ValueTask<T>`, or `IAsyncEnumerable<T>` method is mirrored.
+  Lifecycle methods stay private to the runtime.
+- The facade appends an optional caller-side `CancellationToken` when the actor method has none.
+- Results pass through untouched and exceptions rethrow unwrapped with the actor-side stack trace.
+
+Use `Get<TFacade>(key)` for `string`, `Guid`, `long`, and `int` keys, or
+`GetByKey<TFacade,TKey>(key)` for another `notnull` key. Each activation owns a DI scope.
+
+## Execution model
+
+Actors are non-reentrant by default: one method runs start-to-finish before the next, and an `await`
+holds the mailbox. Every method body is therefore a critical section. A facade call has a 30-second
+default timeout so an A→B→A call cycle fails visibly instead of hanging forever.
+
+Use `[Reentrant]` only when turns must interleave while a call awaits I/O:
+
+```csharp
+[Actor]
+[Reentrant]
+public sealed class DeviceSessionActor { /* ... */ }
+```
+
+Turns still never execute concurrently, but state can change across an `await`. Do not use
+`ConfigureAwait(false)` in actor code that touches actor state; `ELACT006` flags it. Prefer events or
+short, acyclic actor calls over relying on reentrancy to hide call cycles.
+
+## Mailbox, cancellation, and lifecycle
+
+Mailboxes are unbounded by default. A positive `MailboxCapacity` bounds work per activation:
+
+- `ActorMailboxFullMode.Wait` applies asynchronous backpressure.
+- `ActorMailboxFullMode.Fail` throws `ActorMailboxFullException` for deliberate load shedding.
+
+There are no drop modes because every message is request/reply. Cancellation removes a queued call or
+flows into the running method, linked with the call timeout and `IActorContext.Stopping`.
+
+Implement `IActorLifecycle` when activation needs setup or teardown. `OnActivateAsync` runs before the
+first turn; `OnDeactivateAsync` runs after the mailbox drains on passivation or shutdown. Passivation
+drops ordinary fields, so durable state belongs in
+[`IActorState<TState>`](/docs/concepts/actors/state-and-placement).
+
+## Configuration
+
+| Option | Default | Use it when |
+| --- | --- | --- |
+| `Name` | Derived facade name | Class and public actor identity should differ |
+| `KeyType` | Inferred | The actor is keyed but does not need `IActorContext<TKey>` |
+| `MailboxCapacity` | Unbounded | A hot key can grow an unsafe backlog |
+| `MailboxFullMode` | `Wait` | Fast failure is better than queued work |
+| `IdleTimeoutSeconds` | 300 s | Reload cost or memory pressure justifies another lifetime; `-1` disables idle passivation |
+| `CallTimeoutSeconds` | 30 s | A legitimate call needs another deadline; `-1` disables the backstop |
+
+Keep defaults unless the matching pressure is measured. In particular, disabling the call timeout can
+turn an actor cycle into a permanent hang.
+
+## Wiring and boundaries
+
+Reference `Elarion.Actors` and the generator-bearing `Elarion` package, then opt the assembly in:
+
+```csharp
+[assembly: GenerateActors] // or [assembly: UseElarion]
+```
+
+With `[GenerateModuleBootstrapper]`, actors register through generated `Add{Module}Actors` hooks inside
+their module feature gate. Otherwise call that method yourself. Actors outside a module warn with
+`ELACT003` and are not registered.
+
+Actors are module-internal implementation machinery. They have no handler decorator pipeline, so the
+transport-facing handler remains the validation, authorization, feature-gate, transaction, and audit
+boundary. Share a facade across modules only through a `[ModuleContract]`.
+
+## Worker pools without routers
+
+Actor keys are the routing function. Common router patterns become ordinary key selection:
+
+```csharp
+// Identity affinity: all work for one device is serialized.
+var twin = actors.Get<IDeviceTwin>(deviceId);
+
+// Partition-affine pool: bounded parallelism while preserving per-entity ordering.
+const int poolSize = 8;
+var worker = actors.Get<IImportWorker>(
+    (int)((uint)entityId.GetHashCode() % poolSize));
+```
+
+Prefer partition affinity to round-robin. If ordering or per-worker state does not matter, use a handler
+or service with `Task.WhenAll`/`Parallel.ForEachAsync`; stateless parallelism does not need an actor.

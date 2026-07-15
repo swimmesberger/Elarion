@@ -33,7 +33,8 @@ using MyApp.Application.Pipeline;
 ```
 
 `[assembly: UseElarion]` enables the framework-owned assembly-level generators for module handlers,
-module services, scheduled jobs, event consumers, and resilience policies. It
+services, scheduled jobs, event consumers, resilience policies, actor facades, authorization
+policies, client-event topics, permissions, and variants. It
 intentionally does **not** replace application-owned policy attributes such as `[DefaultPipeline]`, nor
 the dedicated triggers `[assembly: GenerateModuleBootstrapper]` (the host) or `[GenerateDbSets]` (the
 application's `DbContext`).
@@ -48,6 +49,11 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 [assembly: GenerateScheduledJobs]
 [assembly: GenerateEventConsumers]
 [assembly: GenerateResiliencePolicies]
+[assembly: GenerateActors]
+[assembly: GenerateModuleAuthorizationPolicies]
+[assembly: GenerateClientEventTopics]
+[assembly: GeneratePermissionCatalog]
+[assembly: GenerateVariantCatalog]
 ```
 
 ## Generator reference
@@ -59,7 +65,12 @@ Use the narrower triggers when an assembly intentionally wants only a subset of 
 | `ValidationResolverGenerator` | Handler discovery (`[assembly: UseElarion]` or `[assembly: GenerateModuleHandlers]`) when the compilation references `Elarion.Validation` | A per-module `IValidatableInfoResolver` for the module handlers' annotated request types (constant-constructed attribute arrays — no runtime attribute reflection), registered through the module's gated `ConfigureDefaultServices`. See [Validation](/docs/concepts/validation). |
 | `SchedulerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateScheduledJobs]` | `Add{AssemblyName}ScheduledJobs()` registering descriptors and job types. |
 | `EventConsumerRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateEventConsumers]` | Per-module `Add{Module}EventConsumers()` registering each `[ConsumeEvent]` consumer (handler or `[Service]` method) plus its `EventSubscriptionDescriptor`. See [Events](/docs/capabilities/events). |
-| `ResiliencePolicyGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |
+| `ResiliencePolicyRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateResiliencePolicies]` | Policy name, typed `Reference`, per-policy and aggregate registration methods. |
+| `ActorRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateActors]` | Typed actor facades and each module's `Add{Module}Actors()` registration hook. See [Actors](/docs/concepts/actors). |
+| `AuthorizationPolicyRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateModuleAuthorizationPolicies]` | Per-module registration for named `[AuthorizationPolicy]` implementations. See [Authorization](/docs/concepts/authorization). |
+| `ClientEventRegistrationGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateClientEventTopics]` | Per-module topic catalog/registration from `IClientEvent` contracts and their subscribe-time requirements. See [Client events](/docs/capabilities/events/client-events). |
+| `PermissionCatalogGenerator` | `[assembly: UseElarion]` or `[assembly: GeneratePermissionCatalog]` | The typed `ElarionPermissions` catalog harvested from handler permission and role requirements. |
+| `VariantCatalogGenerator` | `[assembly: UseElarion]` or `[assembly: GenerateVariantCatalog]` | The typed `ElarionVariants` catalog, grouped by module and switch. See [Feature flags](/docs/concepts/feature-flags). |
 | `ElarionManifestGenerator` | Any project containing `[AppModule]`, `[HttpEndpoint]`, or `[Handler]` | Internal assembly metadata manifests consumed by host-side generators for referenced modules and transport handlers. |
 | `AppModuleDiscoveryGenerator` | `[assembly: GenerateModuleBootstrapper]` on the host → the fixed-name `ElarionBootstrapper` static | Extension methods on their natural receivers — `services.AddElarion(configuration)`, `endpoints.MapElarionEndpoints(configuration)`, `dispatcher.RegisterHandlers(configuration)`, `configuration.GetMcpMetadata()`, `configuration.GetAllJsonTypeInfoResolvers()`, `configuration.IsModuleEnabled(name)` — plus the parameterless `GetAllModuleNames`, the per-module transport extension methods `Map{Module}Http` / `Add{Module}Handlers`, and the parameterless `Get{Module}McpMetadata`. The single transport-wiring path for `[HttpEndpoint]`, JSON-RPC, and MCP. See [Hosting](/docs/capabilities/hosting) and [HTTP endpoints](/docs/capabilities/transports/http-endpoints). |
 | EF Core `DbSet` generator | `[GenerateDbSets]` on the concrete partial `DbContext` class (entities supplied by `[EntityConfiguration]` classes) | `DbSet<T>` members and entity configuration application via direct `ApplyConfiguration<T>` calls. See [Entity Framework Core](/docs/capabilities/entity-framework). |

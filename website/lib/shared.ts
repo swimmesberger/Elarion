@@ -1,7 +1,7 @@
 export const appName = 'Elarion';
 export const appTagline = 'Application framework for .NET';
 export const appDescription =
-  'Elarion turns modules, handlers, and attributes into deterministic, compile-time wiring — JSON-RPC, MCP tools, and HTTP endpoints, plus declarative authorization, resource & data-level access control, runtime feature flags over OpenFeature, runtime settings, pub/sub events, and EF Core, with no runtime reflection scanning.';
+  'Elarion is a source-generated .NET application framework for modular handlers, HTTP, JSON-RPC, MCP, background work, realtime, and PostgreSQL-backed infrastructure.';
 
 export const docsRoute = '/docs';
 export const docsImageRoute = '/og/docs';

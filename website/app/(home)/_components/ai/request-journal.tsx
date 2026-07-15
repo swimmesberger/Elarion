@@ -1,9 +1,9 @@
 import { JournalQA } from './journal-qa';
 
 /**
- * "Every request keeps a journal" — one customer action in plain English with
- * real-looking timings, followed by the payoff: asking your AI a question and
- * getting an answer read straight out of that journal. Always-dark surface,
+ * An illustrative joined trace + audit view — one customer action in plain
+ * English with timings, followed by an example of asking an AI integration a
+ * question over exported evidence. Always-dark surface,
  * matching the site's tooling windows.
  */
 
@@ -19,7 +19,7 @@ export function RequestJournal() {
     <div className="overflow-hidden rounded-[4px] border border-white/12 bg-ink-800">
       <div className="flex items-center justify-between gap-4 border-b border-white/8 px-4 py-2.5">
         <span className="truncate font-mono text-xs text-white/55">
-          the journal — one customer action
+          illustrative trace + audit view
         </span>
         <span className="shrink-0 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-white/35">
           illustrative

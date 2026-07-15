@@ -160,7 +160,7 @@ Two things to know about the default:
 
 - **Durability follows the idempotency store.** The delivery tiers register the in-memory store
   automatically (process-local dedup); pair the outbox with
-  [`AddElarionIdempotencyEntityFrameworkCore`](/docs/capabilities/idempotency) so inbox claims survive
+  [`AddElarionIdempotencyEntityFrameworkCore`](/docs/concepts/idempotency) so inbox claims survive
   restarts — the outbox is durable, so its inbox should be too.
 - **Retention outlives retries.** Inbox rows expire like idempotency keys after 24 h — comfortably above
   the outbox's maximum retry window (≈43 minutes at the defaults). The margin matters: a still-retrying

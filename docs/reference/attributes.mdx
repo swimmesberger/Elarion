@@ -31,6 +31,17 @@ The class may optionally implement convention-based statics: `ConfigureServices(
 
 See [Modules](/docs/concepts/modules).
 
+### `[ClientFeatures]`
+
+- **Package:** `Elarion.Abstractions` (Modules) · **Applies to:** class (alongside `[AppModule]`)
+- **Triggers:** opts named feature flags and variants into the generated client-capability manifest. The list is the complete client-visible vocabulary for that module: internal flags are not exposed by discovery, and a disabled module contributes none. A listed name may be a pure UI flag; it does not need a server-side `[FeatureGate]`.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `features` | `params string[]` (ctor) → `Features` (`IReadOnlyList<string>`) | empty | Feature flag or variant names the session endpoint may evaluate and return for this module. |
+
+See [Client capabilities](/docs/concepts/client-capabilities).
+
 ### `[Service]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
@@ -184,7 +195,7 @@ See [Consuming events](/docs/capabilities/events/consuming-events) and [Backends
 ### `[Actor]`
 
 - **Package:** `Elarion.Actors` · **Applies to:** class
-- **Triggers:** marks a plain class as an in-memory actor: its public async methods (`Task`/`Task<T>`/`ValueTask`/`ValueTask<T>`) become the message surface of a source-generated typed facade (`I{Name}`, class name minus the `Actor` suffix), and every call runs sequentially on the activation's mailbox. Keyed when the constructor takes an `IActorContext<TKey>` (one activation per key, activated on first message, passivated when idle) or `KeyType` is set; otherwise a process singleton. Registered per module via the generated `Add{Module}Actors`; requires the assembly opt-in `[assembly: GenerateActors]` (or `[UseElarion]`).
+- **Triggers:** marks a plain class as an in-memory actor: its public async methods (`Task`/`Task<T>`/`ValueTask`/`ValueTask<T>`) become request/reply methods on a source-generated typed facade (`I{Name}`, class name minus the `Actor` suffix), while methods returning `IAsyncEnumerable<T>` become facade streams with a generated trailing cancellation token. Calls attach through the activation's mailbox; stream enumeration continues off-mailbox. Keyed when the constructor takes an `IActorContext<TKey>` (one activation per key, activated on first message, passivated when idle) or `KeyType` is set; otherwise a process singleton. Registered per module via the generated `Add{Module}Actors`; requires the assembly opt-in `[assembly: GenerateActors]` (or `[UseElarion]`).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -703,7 +714,7 @@ See [Blob uploads](/docs/capabilities/blob-uploads).
 | `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_actor_snapshots` / `ElarionActorSnapshots` depending on `SnakeCase`). |
 | `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
-See [Actors — durable state](/docs/concepts/actors#durable-state-snapshots).
+See [Actor state and placement](/docs/concepts/actors/state-and-placement#durable-state-with-snapshots).
 
 ### `[GenerateElarionRoleLeases]`
 
@@ -716,7 +727,7 @@ See [Actors — durable state](/docs/concepts/actors#durable-state-snapshots).
 | `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_role_leases` / `ElarionRoleLeases` depending on `SnakeCase`). |
 | `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
-See [Actors — single-homed actors](/docs/concepts/actors#single-homed-actors-the-home-lease).
+See [Actors — multiple instances and single-homing](/docs/concepts/actors/state-and-placement#multiple-instances-and-single-homing).
 
 ### `[GenerateElarionDeviceIdentity]`
 
@@ -818,7 +829,7 @@ See [Cross-module communication](/docs/concepts/cross-module-communication).
 ### `[UseElarion]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** enables the core Elarion source-generation features at once — equivalent to applying `[GenerateModuleHandlers]`, `[GenerateModuleServices]`, `[GenerateScheduledJobs]`, `[GenerateEventConsumers]`, and `[GenerateResiliencePolicies]`, and it also subsumes the catalog triggers `[GeneratePermissionCatalog]` and `[GenerateVariantCatalog]` (each usable standalone, below). Application-owned attributes such as pipeline defaults remain explicit. Marker only — no parameters.
+- **Triggers:** enables the framework-owned assembly generators at once — handlers, services, scheduled jobs, event consumers, resilience policies, actor facades/registration, authorization-policy registration, client-event topics, the permission catalog, and the variant catalog. Application-owned policy attributes such as pipeline defaults remain explicit, as do host/provider triggers such as `[GenerateModuleBootstrapper]`, `[GenerateDbSets]`, and `[UseElarionSql]`. Marker only — no parameters.
 
 ### Individual generation triggers
 
@@ -831,6 +842,11 @@ All are `Elarion.Abstractions`, applied to the assembly, marker-only (no paramet
 | `[GenerateScheduledJobs]` | Source-generated scheduler descriptor registration. |
 | `[GenerateEventConsumers]` | Source-generated event-consumer descriptor registration. |
 | `[GenerateResiliencePolicies]` | Source-generated resilience-policy registration. |
+| `[GenerateActors]` | Actor typed facades and per-module actor registration. |
+| `[GenerateModuleAuthorizationPolicies]` | Per-module registration for `[AuthorizationPolicy]` implementations. |
+| `[GenerateClientEventTopics]` | Per-module client-event topic registration and subscribe-time policy metadata. |
+| `[GeneratePermissionCatalog]` | The typed permission/role catalog harvested from handler requirements. |
+| `[GenerateVariantCatalog]` | The typed feature/configuration variant catalog. |
 
 ### `[GeneratePermissionCatalog]`
 
@@ -918,7 +934,7 @@ See [Entity Framework](/docs/capabilities/entity-framework).
 ## Related references
 
 <Cards>
-  <Card title="Diagnostics" href="/docs/reference/diagnostics">Compiler diagnostic ids (ELMOD/ELHTTP/ELRPC/ELMCP/ELEVT/ELKEY/ELEFC/ELAPI/ELSG/ELPIPE/ELVAL/ELFEAT/ELVAR/ELAUTH/ELPOL/ELPERM/ELRES/ELRG/ELIDN/ELIDEM/ELINBX/ELIDEMEF/ELOBX/ELSET/ELBLB/ELCACHE) referenced above.</Card>
+  <Card title="Diagnostics" href="/docs/reference/diagnostics">The complete compiler-diagnostic catalog, grouped by generator and capability.</Card>
   <Card title="Configuration" href="/docs/reference/configuration">Feature flags (`Modules:{Name}:Enabled`) and other settings keys.</Card>
   <Card title="Conventions" href="/docs/reference/conventions">Module statics, namespace matching, and naming rules.</Card>
   <Card title="Packages" href="/docs/reference/packages">Which package each attribute ships in.</Card>

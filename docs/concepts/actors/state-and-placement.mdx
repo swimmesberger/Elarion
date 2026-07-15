@@ -1,0 +1,129 @@
+---
+title: Actor state and placement
+description: Snapshot durability, query semantics, conflict recovery, multi-instance topology, role leases, and actor placement.
+---
+
+## Durable state with snapshots
+
+Declaring `IActorState<TState>` loads one snapshot before the first turn and exposes an explicit durable
+commit point:
+
+```csharp
+public sealed record FulfillmentState
+{
+    public required string Stage { get; init; }
+    public int Attempts { get; init; }
+    public bool IsStuck => Attempts >= 3 && Stage != "shipped";
+    public FulfillmentState Shipped() => this with { Stage = "shipped" };
+}
+
+[Actor]
+public sealed class OrderFulfillmentActor(IActorState<FulfillmentState> state)
+{
+    public async Task Ship(CancellationToken ct)
+    {
+        state.State = (state.State ?? new() { Stage = "new" }).Shipped();
+        await state.WriteStateAsync(ct); // publication and durability point
+        // Non-repeatable side effects belong after the successful write.
+    }
+}
+```
+
+The surface mirrors Orleans `IPersistentState<TState>`:
+`State`, `RecordExists`, `Etag`, `ReadStateAsync`, `WriteStateAsync`, and `ClearStateAsync`. Passivation
+never writes implicitly. `TState` must participate in Elarion's canonical source-generated JSON options.
+
+The PostgreSQL provider stores canonical JSON in `elarion_actor_snapshots.payload` (`jsonb`) and a
+monotonic version as the ETag:
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionActorSnapshots]
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options);
+
+services.AddElarionPostgreSqlActorSnapshots<AppDbContext>();
+```
+
+## The state record is the query contract
+
+Snapshot state is published state, not a private serialization detail:
+
+1. Put constants, derived interpretation, and pure transitions on `TState`, not in actor methods.
+2. Make actor turns apply a transition, write it, then perform side effects.
+3. Treat `WriteStateAsync` as publication: before it, readers cannot see the mutation and a crash loses it.
+4. Send commands through the facade; read published state with `IActorStateReader` from any instance.
+5. Evolve records shape-tolerantly with optional/defaulted properties. Activation-time migration only
+   fixes the home's view and leaves readers and SQL behind.
+
+Write cadence defines query meaning:
+
+- **Write-through:** the reader is database-fresh after each completed turn and is a first-class query path.
+- **Checkpointing:** the reader is bounded-stale and exists for warm restart, not a live UI.
+- **No snapshot:** state is intentionally ephemeral and has no pull-based read path.
+
+Observe hot in-memory state by pushing [client events](/docs/capabilities/events/client-events), not by
+polling a checkpoint. If services on arbitrary nodes need live pull access to another node's actor
+memory, the application has crossed the placement boundary and should use Orleans.
+
+## Conflict recovery
+
+Every write is ETag-guarded. On a conflict, the runtime passivates the stale activation and transparently
+re-runs the turn once against a fresh snapshot. A second consecutive conflict surfaces as
+`ActorSnapshotConcurrencyException` and every conflict increments `actor.snapshot.conflicts`.
+
+The retried turn executes twice. Express mutation as a pure transition from loaded state, and put side
+effects after the successful write or make them idempotent. Snapshot writes are separate commits; state
+that must be atomic with business entities belongs in the handler transaction instead.
+
+## Multiple instances and single-homing
+
+Without placement, `Get<TFacade>(key)` activates locally. Multiple instances can therefore host the same
+key; snapshots prevent lost writes but do not make turns globally sequential. Choose deliberately:
+
+1. **Per-instance:** caches, rate windows, and buffers intentionally live independently on each node.
+2. **Single-homed:** `[Actor(Placement = ActorPlacementMode.SingleHome)]` makes one leased instance authoritative.
+3. **Virtual-sharded:** `[Actor(Placement = ActorPlacementMode.VirtualShards)]` assigns each keyed actor to
+   one of a fixed set of role-lease partitions.
+4. **Optimistic multi-writer:** low-contention keys use conflict retry; side effects remain retry-safe.
+
+The recommended authoritative shape uses the PostgreSQL-backed `"actors"` role lease:
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionActorSnapshots]
+[GenerateElarionRoleLeases]
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options);
+
+services.AddElarionPostgreSqlActorHome<AppDbContext>();
+services.AddElarionOutbox<AppDbContext>(o =>
+    o.DeliveryGate = (sp, _) => ValueTask.FromResult(
+        sp.GetRequiredService<IActorHomeLease>().IsHeld));
+```
+
+Facade calls on a non-home instance fail with `ActorNotHomedException`; they are never silently
+forwarded. Integration-event delivery follows the lease, and HTTP/SSE routes that must execute on the
+home can use the [role-holder proxy](/docs/capabilities/coordination). During failover, outbox messages
+wait until a home exists.
+
+## Fixed virtual-shard placement
+
+Virtual shards provide a deliberately simple spread for keyed actors without requiring the process count
+up front or introducing activation rebalancing. Register the same role set on every process:
+
+```csharp
+[Actor(Placement = ActorPlacementMode.VirtualShards)]
+public sealed class OrderActor(IActorContext<Guid> context) { /* ... */ }
+
+services.AddElarionPostgreSqlActorSharding<AppDbContext>(); // 16 shards by default
+```
+
+The PostgreSQL recipe creates `actors:shard-0` through `actors:shard-15` as ordinary role leases. A
+process may own multiple shards, and a new process can acquire unowned shards after failover. The shard
+is selected by a stable hash of the actor name and canonical key text; the process count is irrelevant.
+There is no rebalancing, activation draining, or transparent forwarding, and virtual-sharded actors
+cannot use generated `[ConsumeEvent]` relays because the existing outbox path is not shard-routed. Use
+shard-aware ingress, or choose `SingleHome` when integration-event delivery through the home is required.
+
+If calls must be transparently routed to arbitrary actor homes, keys need partitioned placement, or the
+deployment exceeds roughly ten nodes, replace this runtime with Orleans, Akka.NET, or Proto.Actor rather
+than extending Elarion's default.

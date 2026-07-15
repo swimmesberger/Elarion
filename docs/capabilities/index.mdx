@@ -1,6 +1,6 @@
 ---
 title: Capabilities
-description: The opt-in platform pieces you wire into a host — transports, scheduling, events, EF Core, caching, telemetry, and more.
+description: Choose the opt-in platform pieces you need — transports, policy, messaging, realtime, coordination, persistence, and operations.
 ---
 
 [Concepts](/docs/concepts) covers the application model you cannot avoid: every Elarion app has
@@ -12,10 +12,10 @@ That line is the framework's guiding principle in practice:
 
 > Auto-detect application patterns, explicitly wire platform capabilities.
 
-Each capability below is independent. Add the package, opt the relevant handlers in with an attribute,
-and wire the runtime in your host.
+Each capability below is independent. Add its package, declare any compile-time opt-in it needs, and
+wire the runtime in your host.
 
-## Expose your handlers
+## Hosting & transports
 
 <Cards>
   <Card title="Hosting & composition" href="/docs/capabilities/hosting">
@@ -30,17 +30,23 @@ and wire the runtime in your host.
   </Card>
 </Cards>
 
-## Application capabilities
+## Application policy
 
 <Cards>
   <Card title="Current user" href="/docs/capabilities/current-user">
     Transport-neutral access to the authenticated caller, without depending on `HttpContext`.
   </Card>
+  <Card title="Identity" href="/docs/capabilities/identity">
+    Optional ASP.NET Core Identity host wiring over the application's existing `DbContext`.
+  </Card>
+  <Card title="Authorization" href="/docs/concepts/authorization">
+    One generated handler gate for permissions, roles, claims, policies, and every transport.
+  </Card>
+  <Card title="Validation" href="/docs/concepts/validation">
+    Data-annotation request validation with generated metadata and transport-safe failures.
+  </Card>
   <Card title="Caching" href="/docs/capabilities/caching">
     Declarative handler result caching with `[Cacheable]` and tag-based invalidation.
-  </Card>
-  <Card title="Scheduling" href="/docs/capabilities/scheduling">
-    Source-generated recurring and one-off jobs on one in-memory scheduler.
   </Card>
   <Card title="Resilience" href="/docs/capabilities/resilience">
     Named retry and timeout policies applied to handlers and jobs.
@@ -48,8 +54,25 @@ and wire the runtime in your host.
   <Card title="Feature flags" href="/docs/capabilities/feature-flags">
     Gate handlers with `[FeatureGate]` and swap per-variant services over any OpenFeature provider.
   </Card>
-  <Card title="Events & messaging" href="/docs/capabilities/events">
+</Cards>
+
+## Work, messaging & realtime
+
+<Cards>
+  <Card title="Scheduling" href="/docs/capabilities/scheduling">
+    Source-generated recurring and one-off jobs, with optional cross-node occurrence claims.
+  </Card>
+  <Card title="Domain & integration events" href="/docs/capabilities/events">
     In-process domain events and after-commit integration events, with a durable EF Core outbox.
+  </Card>
+  <Card title="Client events" href="/docs/capabilities/events/client-events">
+    At-most-once, latest-wins hints that tell browsers when to re-query authoritative state.
+  </Card>
+  <Card title="Ordered streams" href="/docs/capabilities/events/streams">
+    Hot sequenced broadcasts with replay, visible gaps, and resumable SSE delivery.
+  </Card>
+  <Card title="Coordination & role leases" href="/docs/capabilities/coordination">
+    Elect one instance for a coarse application role and route holder-owned HTTP work to it.
   </Card>
   <Card title="Client connections" href="/docs/capabilities/connections">
     Long-lived bidirectional links (device gateways, interactive clients) over a transport-neutral kernel.
@@ -62,7 +85,7 @@ and wire the runtime in your host.
   </Card>
 </Cards>
 
-## Data & storage
+## Data & persistence
 
 <Cards>
   <Card title="Entity Framework Core" href="/docs/capabilities/entity-framework">
@@ -75,7 +98,7 @@ and wire the runtime in your host.
     Transport-neutral keyset and offset paging that produces a `Page<T>`.
   </Card>
   <Card title="SQL migrations" href="/docs/capabilities/sql-migrations">
-    Startup-applied SQL migrations for EF-free (NativeAOT) hosts — no repair command, no undo.
+    Startup-applied SQL migrations for EF-free (NativeAOT) hosts, PostgreSQL or SQLite — no repair command, no undo.
   </Card>
   <Card title="SQL mapping" href="/docs/capabilities/sql-mapping">
     Generated `ISqlRowMapper` contracts + injection-safe SQL interpolation for EF-free (NativeAOT) hosts.
@@ -89,7 +112,21 @@ and wire the runtime in your host.
   <Card title="Blob storage" href="/docs/capabilities/blob-storage">
     Provider-neutral, streaming-first blob contracts with a PostgreSQL implementation.
   </Card>
+  <Card title="Blob uploads" href="/docs/capabilities/blob-uploads">
+    Direct and resumable uploads over one staged-upload lifecycle, with tus as the recommended transport.
+  </Card>
+</Cards>
+
+## Operations & governance
+
+<Cards>
   <Card title="Telemetry" href="/docs/capabilities/telemetry">
     OpenTelemetry-compatible traces and metrics through `System.Diagnostics` — no SDK lock-in.
+  </Card>
+  <Card title="Audit trail" href="/docs/concepts/auditing">
+    Durable, explicit action records with outcomes, resource context, correlation ids, and optional diffs.
+  </Card>
+  <Card title="Runtime settings" href="/docs/concepts/settings">
+    Global and per-user settings with optimistic concurrency and cross-node change notification.
   </Card>
 </Cards>

@@ -171,7 +171,7 @@ Two multi-node deltas are acknowledged and deliberately deferred, not designed a
   single-home default (ADR-0025). When a deployment actually needs it, the choices are, in order:
   partition by hand (N roles over ADR-0049 leases — `"actors:shard-0"`…`"actors:shard-2"`, key→shard by
   stable hash, each shard's prefix home-routed), or the Orleans trigger (real placement, activation
-  rebalancing, and directory — adopted whole). ADR-0060 now promotes the fixed partitioned-role
+  rebalancing, and directory — adopted whole). ADR-0061 now promotes the fixed partitioned-role
   pattern as an opt-in actor recipe; connection ingress still needs an application-composed
   shard-aware route and remains outside the connection kernel.
 

@@ -68,7 +68,7 @@ Actor facade generation for `[Actor]` classes. See [Actors](/docs/concepts/actor
 | ELACT004 | Error | An `[Actor]` class declares conflicting keys — multiple `IActorContext<TKey>` constructor parameters with different key types, or an `[Actor(KeyType = ...)]` that contradicts the context parameter. | Declare a single `IActorContext<TKey>` constructor parameter (the idiomatic way to make an actor keyed), or make `KeyType` match it. |
 | ELACT005 | Error | An `[Actor]` class does not have exactly one public constructor, so the generator cannot emit its activator. | Keep one public constructor carrying the activation dependencies (context + services). |
 | ELACT006 | Warning | `ConfigureAwait(false)` (or a `ConfigureAwaitOptions` value without `ContinueOnCapturedContext`) inside a `[Reentrant]` actor escapes the exclusive scheduler: the rest of the method resumes off the actor's single-threaded context — and only when the await actually suspends, so the escape is latent. | Remove `ConfigureAwait(false)` from the actor's own methods, helpers, and lambdas. Libraries the actor calls may use it internally without harm (context capture is per-method). Non-reentrant actors are exempt — their guarantee comes from the mailbox loop, not a scheduler. |
-| ELACT008 | Error | A keyed actor's `[ConsumeEvent]` method needs an actor key the generator cannot determine: the event has zero or more than one property assignable to the actor's key type, or the `[ActorKey(...)]` name does not resolve to such a property. | Add `[ActorKey(nameof(TheEvent.KeyProperty))]` naming the event property whose type is assignable to the actor's key type. Singleton actors need no key. See [Actors and events](/docs/concepts/actors#actors-and-events). |
+| ELACT008 | Error | A keyed actor's `[ConsumeEvent]` method needs an actor key the generator cannot determine: the event has zero or more than one property assignable to the actor's key type, or the `[ActorKey(...)]` name does not resolve to such a property. | Add `[ActorKey(nameof(TheEvent.KeyProperty))]` naming the event property whose type is assignable to the actor's key type. Singleton actors need no key. See [Actors and events](/docs/concepts/actors/integrations#integration-events). |
 | ELACT009 | Error | `[ConsumeEvent]` is placed on a non-public `[Actor]` method. The generated relay reaches the actor through its public facade (the same call a hand-written relay makes), so the method must be on the facade. | Make the method `public`. |
 | ELACT010 | Error | `[ConsumeEvent]` on an `[Actor]` method consumes an `IDomainEvent`. Domain events run inside the emitting command's transaction and scope; an actor runs in its own scope, so awaiting one abandons the same-transaction contract. | Consume an `IIntegrationEvent` instead (publish one to react to a domain change), or call the actor from the command's handler after its transaction commits. |
 | ELACT012 | Error | An actor stream method (returning `IAsyncEnumerable<T>`, ADR-0052) takes a `CancellationToken` or carries `[ConsumeEvent]`. The turn token is a pooled CTS whose lifetime ends with the attach turn — using it inside the returned stream would observe a recycled token; a relay cannot await a stream. | Drop the `CancellationToken` parameter (the generated facade adds a trailing token that cancels the attach and, linked with the enumerator's token, the stream) and keep `[ConsumeEvent]` on Task-shaped methods. |
@@ -354,7 +354,7 @@ Blob-table generation for `[GenerateElarionBlobStorage]` and staged-upload-table
 ## ELASN — Actor snapshots (PostgreSQL)
 
 Snapshot-table generation for `[GenerateElarionActorSnapshots]`. See
-[Actors](/docs/concepts/actors#durable-state-snapshots).
+[Actor state and placement](/docs/concepts/actors/state-and-placement#durable-state-with-snapshots).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
@@ -363,7 +363,7 @@ Snapshot-table generation for `[GenerateElarionActorSnapshots]`. See
 ## ELROLE — Role leases (PostgreSQL)
 
 Role-lease-table generation for `[GenerateElarionRoleLeases]` (ADR-0049). See
-[Actors — single-homed actors](/docs/concepts/actors#single-homed-actors-the-home-lease).
+[Actors — multiple instances and single-homing](/docs/concepts/actors/state-and-placement#multiple-instances-and-single-homing).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |

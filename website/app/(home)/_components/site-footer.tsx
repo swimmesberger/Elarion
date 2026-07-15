@@ -20,11 +20,12 @@ const footerColumns: { heading: string; links: { label: string; href: string }[]
     heading: 'Capabilities',
     links: [
       { label: 'Source generation', href: '/docs/concepts/source-generation' },
-      { label: 'Transports', href: '/docs/concepts/transports' },
-      { label: 'Authorization', href: '/docs/concepts/authorization' },
-      { label: 'Events & outbox', href: '/docs/capabilities/events' },
-      { label: 'Idempotency', href: '/docs/concepts/idempotency' },
-      { label: 'Feature flags', href: '/docs/concepts/feature-flags' },
+      { label: 'Transports', href: '/docs/capabilities/transports' },
+      { label: 'Security & policy', href: '/docs/concepts/authorization' },
+      { label: 'Events & realtime', href: '/docs/capabilities/events' },
+      { label: 'Coordination', href: '/docs/capabilities/coordination' },
+      { label: 'Connections & devices', href: '/docs/capabilities/connections' },
+      { label: 'Data & persistence', href: '/docs/capabilities/entity-framework' },
     ],
   },
   {

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>SQLite provider for the Elarion.Migrations SQL migration engine (ADR-0060), for single-node / edge EF-free (NativeAOT) hosts: embedded V{version}__/R__ scripts, SHA-256 checksums over line-ending-normalized content, and history rows that commit in the same transaction as their script — so there is no repair command and no failed-row limbo. Serializes runners with a connection-held exclusive lock (SQLite's locking_mode=EXCLUSIVE). Startup-applied via a hosted service. The EF tier keeps EF Core migrations.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Migrations\Elarion.Migrations.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- Pin the patched native bundle: Microsoft.Data.Sqlite's transitive SQLitePCLRaw 2.1.x carries a
+         known-vulnerable e_sqlite3 (NU1903). The 3.x bundle also supplies the native library the driver
+         needs, so referencing it explicitly is the recommended pattern. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests" />
+  </ItemGroup>
+
+</Project>

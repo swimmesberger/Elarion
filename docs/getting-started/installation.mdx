@@ -73,8 +73,9 @@ using Elarion.Abstractions;
 [assembly: UseElarion]
 ```
 
-`[assembly: UseElarion]` turns on generation for module handlers, services, and
-scheduled jobs. If you want only a subset, use the narrower triggers instead — see
+`[assembly: UseElarion]` turns on the framework-owned application generators, including handlers,
+services, jobs, event consumers, actor facades, policy registration, and typed catalogs. If you want
+only a subset, use the narrower triggers instead — see
 [Source generation](/docs/concepts/source-generation).
 
 ## Host project

@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using Elarion.Migrations.PostgreSql;
+using Elarion.Migrations;
 using Xunit;
 
 namespace Elarion.Tests.Migrations;

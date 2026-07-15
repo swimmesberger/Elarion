@@ -8,6 +8,23 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **The SQL migration runner is now database-neutral, with a SQLite provider** (ADR-0060). The EF-free
+  (NativeAOT) migration runner splits into `Elarion.Migrations` — the database-neutral engine (script
+  discovery, SHA-256 normalized checksums, versioning, out-of-order/repeatable planning, the roll-forward
+  `MigrationRunner`, and the `IMigrationDatabase`/`IMigrationSession` provider seam; contains no driver) —
+  plus per-engine provider packages. `Elarion.Migrations.PostgreSql` becomes a thin provider (its public
+  API — `AddElarionPostgreSqlMigrations` / `PostgreSqlMigrationRunner` — is unchanged), and the new
+  **`Elarion.Migrations.Sqlite`** provider (`AddElarionSqliteMigrations` / `SqliteMigrationRunner`) targets
+  the single-node / edge tier over `Microsoft.Data.Sqlite`. All roll-forward / no-repair / failed-row policy
+  lives in the neutral core, so providers cannot drift on it. SQLite serializes concurrent runners with a
+  per-file in-process lock (SQLite is single-node — one file per node; a whole-connection
+  `locking_mode = EXCLUSIVE` is rejected because two connections deadlock promoting to exclusive), its full
+  transactional DDL keeps the history-row-commits-with-its-script invariant identical, and its rarely-needed
+  `no-transaction` path runs in autocommit (`CommandTimeout` is not applicable — SQLite has no server-side
+  statement timeout). This amends ADR-0057's "PostgreSQL only" positioning while preserving its doctrine: a
+  new database engine is a new **provider package**, never a dialect flag on one runner.
+
 ### Changed
 - **The two always-on handler decorators are merged into one `ObservabilityDecorator`** (ADR-0059). Every
   generated handler was wrapped by an always-on, always-adjacent pair — context enrichment just inside

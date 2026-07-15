@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Elarion.Migrations;
 using Elarion.Migrations.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -50,7 +51,7 @@ public sealed class MigrationsServiceCollectionExtensionsTests {
             "Host=localhost;Database=other",
             o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly, MigrationScriptDiscoveryTests.ScriptPrefix + "Baseline."));
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*already called*");
+        act.Should().Throw<InvalidOperationException>().WithMessage("*already registered*");
     }
 
     [Fact]
@@ -64,8 +65,8 @@ public sealed class MigrationsServiceCollectionExtensionsTests {
 
     [Fact]
     public void InvalidHistoryTableName_FailsAtRunnerConstruction() {
-        var options = new PostgreSqlMigrationOptions { HistoryTableName = "bad name; drop" }
-            .AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly);
+        var options = new PostgreSqlMigrationOptions { HistoryTableName = "bad name; drop" };
+        options.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly);
 
         var act = () => new PostgreSqlMigrationRunner("Host=localhost;Database=app", options);
 

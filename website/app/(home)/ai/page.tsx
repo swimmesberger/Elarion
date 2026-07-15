@@ -11,11 +11,13 @@ import { RequestJournal } from '../_components/ai/request-journal';
 import { RequestPath } from '../_components/ai/request-path';
 import { GithubIcon, PAD, Section, SectionTitle, Ticks } from '../_components/section';
 import { githubUrl } from '@/lib/shared';
+import { adrCount } from '@/lib/adr-catalog';
 
 export const metadata: Metadata = {
   title: 'Elarion + AI — why AI-first teams still need a foundation',
   description:
-    'The plain-language case for Elarion: every feature you build is instantly usable by AI assistants, your AI reads (and bills) a fraction of the code, mistakes stop at an automatic gate, and every request keeps a journal your AI can be asked about.',
+    'The plain-language case for Elarion: expose selected application operations to AI through the same contracts and policy pipeline, generate repetitive wiring, catch mistakes at build time, and export structured operational evidence.',
+  alternates: { canonical: '/ai' },
 };
 
 export default function AiPage() {
@@ -150,24 +152,24 @@ function PathBand() {
 
 function ReachSection() {
   return (
-    <Section id="reach" n="01" label="Reach" aside="works with Claude · ChatGPT · Copilot">
+    <Section id="reach" n="01" label="Reach" aside="MCP · one contract · one policy pipeline">
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
         <SectionTitle
-          title="Build a feature once. Every audience gets it — including AI."
+          title="Build a feature once. Expose the same contract to every audience."
           lead={
             <>
               Software has a third audience now — AI assistants acting on your customers&apos;
-              behalf. Elarion treats it as standard equipment: finish a feature, and all three
-              audiences have it.
+              behalf. A handler you select for MCP can serve that audience through the same
+              operation contract and policy pipeline as your HTTP and JSON-RPC clients.
             </>
           }
           points={[
             <>
-              Through <span className="text-fd-foreground">MCP</span> — the open plug standard the
-              AI industry settled on, the way USB became the standard for devices.
+              Through <span className="text-fd-foreground">MCP</span> — an open protocol for
+              exposing tools and context to compatible AI clients.
             </>,
-            <>No second project, no separate &ldquo;AI version&rdquo; of your product to keep in sync.</>,
+            <>No second implementation or separate &ldquo;AI version&rdquo; of an operation to keep in sync.</>,
             <>One set of permissions for people, partners, and AI alike.</>,
           ]}
         />
@@ -203,10 +205,10 @@ function ReachSection() {
             </p>
           </div>
           <div className="border-t border-(--line) pt-4">
-            <h3 className="font-medium text-fd-foreground">A standard, not a gamble</h3>
+            <h3 className="font-medium text-fd-foreground">A shared protocol, not a custom bridge</h3>
             <p className="mt-2 text-sm leading-relaxed text-(--body)">
-              MCP is backed across the industry — Anthropic, OpenAI, Microsoft. You are plugging
-              into a standard, not marrying a vendor&apos;s platform.
+              MCP keeps the AI-facing boundary separate from any one client. Compatible clients
+              consume the same operation descriptions and schemas instead of a vendor-specific tool layer.
             </p>
           </div>
         </div>
@@ -287,7 +289,7 @@ function EconomicsSection() {
 
 function GateSection() {
   return (
-    <Section id="safety" n="03" label="Safety" aside="60+ automatic checks, every build">
+    <Section id="safety" n="03" label="Safety" aside="100+ automatic checks, every build">
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
         <SectionTitle
@@ -295,7 +297,7 @@ function GateSection() {
           lead={
             <>
               AI writes code fast — and is sometimes confidently wrong. So every change, human or
-              AI, passes a gate of more than sixty automatic checks before it can even finish
+              AI, passes a gate of more than one hundred automatic checks before it can even finish
               building.
             </>
           }
@@ -345,12 +347,13 @@ function JournalSection() {
       <div className={`py-14 lg:py-16 ${PAD}`}>
         <div className="vt-rise">
         <SectionTitle
-          title="Every request keeps a journal. Your AI reads it."
+          title="Every request leaves a trace. Important actions can keep an audit record."
           lead={
             <>
-              Every customer action automatically writes a journal entry — what happened, in what
-              order, how long each step took. When something misbehaves, your AI reads the record
-              instead of guessing from the code.
+              Elarion instruments every handler invocation with structured spans and metrics. Once
+              the host configures an exporter, operations tools can show what ran and how long it
+              took. Mark business-critical handlers <code>[Auditable]</code> when they also need a
+              durable action record.
             </>
           }
           points={[
@@ -358,8 +361,8 @@ function JournalSection() {
               In <span className="text-fd-foreground">OpenTelemetry</span>, the industry&apos;s
               standard format — your monitoring tools already speak it.
             </>,
-            <>Microsoft&apos;s .NET Aspire puts the journal on a live dashboard and hands it to AI assistants directly.</>,
-            <>Answers come back in plain language — &ldquo;why was Tuesday slow?&rdquo; is a question, not a ticket.</>,
+            <>Microsoft&apos;s .NET Aspire can visualize local OpenTelemetry traces; production exporters send the same evidence to your chosen backend.</>,
+            <>AI integrations can analyze exported telemetry and audit data — the connection is host-owned, explicit, and replaceable.</>,
           ]}
         />
         </div>
@@ -371,15 +374,15 @@ function JournalSection() {
             points={[
               {
                 title: 'From “who knows?” to “here’s why”',
-                body: 'Slow afternoons, failed payments, odd spikes — the journal holds the answer, and the AI can be asked in plain English. Diagnosis stops being archaeology.',
+                body: 'Slow afternoons, failed payments, odd spikes — exported traces provide timing and correlation evidence, while audited actions provide durable outcomes. Diagnosis starts from facts instead of code-only guesses.',
               },
               {
-                title: 'Zero extra effort',
-                body: 'Nobody has to remember to add the record-keeping. The framework writes the journal for every feature, from the first day, including the ones AI built last night.',
+                title: 'Instrumentation without handler boilerplate',
+                body: 'The handler span and framework metrics are emitted centrally, so feature code does not hand-roll timing. Exporters and retention remain deliberate host and operations choices.',
               },
               {
-                title: 'One story, dev to production',
-                body: 'The journal your AI reads while building is the same journal your operations team reads when it matters. Same names, same structure, no blind spots.',
+                title: 'Audit is an explicit policy',
+                body: 'Apply [Auditable] only where a durable business record is warranted. The audit entry carries outcome, resource context, and the trace id so it can be correlated with telemetry.',
               },
             ]}
           />
@@ -428,7 +431,7 @@ const seats = [
   },
   {
     role: 'For the CISO',
-    body: 'One set of permissions for humans, partners, and AI — enforced beneath all of them, with no quiet way around it. A change that would weaken the rules does not pass the gate, and every action leaves a journal entry.',
+    body: 'One set of permissions for humans, partners, and AI — enforced beneath all of them, with no quiet way around it. A change that would weaken the rules does not pass the gate, and auditable actions can keep a durable outcome record.',
   },
   {
     role: 'For the CTO',
@@ -473,7 +476,7 @@ const betRows: { title: string; body: string; icon: BetIconKind }[] = [
   },
   {
     title: 'Homework you can check',
-    body: 'Twenty-three written decision records explain every major choice, and six hundred automated tests guard them. Your architects can audit the reasoning before you commit a single sprint.',
+    body: `${adrCount} written decision records explain the major choices, and more than fifteen hundred automated tests guard them. Your architects can audit the reasoning before you commit a single sprint.`,
     icon: 'magnifier',
   },
   {

@@ -1,8 +1,11 @@
 # ADR-0057: A Flyway-shaped PostgreSQL migration runner for EF-free (AOT) hosts
 
-- Status: Accepted
+- Status: Accepted (the "PostgreSQL only by design" positioning is amended by
+  [ADR-0060](0060-database-neutral-migration-core.md), which extracts the neutral `Elarion.Migrations`
+  core this ADR anticipated and adds a SQLite provider; every other decision here stands)
 - Date: 2026-07-13
-- Related: [ADR-0025](0025-distributed-scheduler-coordination.md) (scale positioning),
+- Related: [ADR-0060](0060-database-neutral-migration-core.md) (the neutral-core extraction + SQLite provider),
+  [ADR-0025](0025-distributed-scheduler-coordination.md) (scale positioning),
   [ADR-0056](0056-postgres-extensions-posture.md) (one-Postgres composition posture),
   [ADR-0026](0026-openapi-http-transport.md) (the migrate-on-startup guard note),
   [ADR-0041](0041-blob-streaming-connections-clone-the-context-connection.md) (the own-connection principle this deliberately
