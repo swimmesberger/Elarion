@@ -11,7 +11,7 @@ side connection that escapes your transaction.
 <Callout type="info">
   Every EF Core store acts on the **`DbContext` you inject**, so it rides that context's
   current transaction. You do not pass a transaction around; you share the `DbContext`.
-  See [ADR-0015](../decisions/0015-ef-core-transaction-participation.md).
+  See [ADR-0015](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0015-ef-core-transaction-participation.md).
 </Callout>
 
 ## The contract
@@ -121,7 +121,7 @@ same transaction via an `ON DELETE CASCADE` foreign key.
 ## After-commit delivery is deliberate
 
 Two things intentionally run **after** your transaction commits rather than inside it
-(see [ADR-0001](../decisions/0001-event-transaction-phase.md)):
+(see [ADR-0001](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0001-event-transaction-phase.md)):
 
 - **Integration events** (`IIntegrationEventBus`) are recorded in your unit of work and
   delivered after commit — never on rollback. This is the cross-boundary notification
@@ -139,7 +139,7 @@ Two things intentionally run **after** your transaction commits rather than insi
   services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
   ```
 
-  The durable [outbox](../decisions/0001-event-transaction-phase.md) tier commit-gates
+  The durable [outbox](/docs/capabilities/events/backends) tier commit-gates
   through its own `SaveChanges` interceptor instead.
 </Callout>
 

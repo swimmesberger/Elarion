@@ -7,7 +7,7 @@ icon: ListOrdered
 Client events are **at-most-once hints**: perfect for "re-query" and latest-wins state, structurally wrong
 when *element identity* matters. When a consumer needs **the current value and every change since — in
 order, with completion, resumable across reconnects** — that is a stream, and it needs a different
-contract ([ADR-0052](https://github.com/wimmesberger/Elarion/blob/main/docs/decisions/0052-ordered-streams.md)).
+contract ([ADR-0052](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0052-ordered-streams.md)).
 
 The litmus test is one question: **if a message is lost, is the consumer merely *stale*, or is it
 *wrong*?** Client events are at-most-once and self-healing — a lost hint means showing a value slightly

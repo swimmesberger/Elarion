@@ -83,7 +83,7 @@ export function GateDiagram() {
       </g>
       <rect x={477} y={36} width={8} height={238} rx={4} fill="var(--color-fd-primary)" />
       <text x={481} y={20} fontSize={12} textAnchor="middle" fill="var(--color-fd-muted-foreground)">
-        the gate — 60+ automatic checks
+        the gate — 100+ automatic checks
       </text>
 
       {/* incoming cards */}

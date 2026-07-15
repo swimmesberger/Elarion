@@ -1,0 +1,151 @@
+---
+title: Writing a custom transport
+description: Invoke Elarion handlers from gRPC, a console, a queue, or another host while preserving scoped identity and the full handler pipeline.
+---
+
+Elarion's HTTP, JSON-RPC, and MCP surfaces are thin adapters over transport-neutral handler seams. A
+custom adapter has four responsibilities:
+
+1. Authenticate the caller and produce a `ClaimsPrincipal`.
+2. Create a fresh dispatch scope seeded with boundary state.
+3. Invoke the handler through DI so the full decorator pipeline runs.
+4. Translate `Result<T>` and `AppError` to the wire protocol.
+
+JSON-RPC and MCP are protocols; ASP.NET Core is one possible host. A gRPC server, CLI, queue consumer, or
+custom socket host can invoke the same handlers without referencing `Elarion.AspNetCore`.
+
+## Choose typed or name-based dispatch
+
+Use `HandlerInvoker` when the adapter knows the request and response types at compile time. Use the
+transport-neutral `HandlerDispatcher` when messages route by operation name.
+
+| Seam | Package | Purpose |
+| --- | --- | --- |
+| `IHandler<TRequest,TResponse>`, `Result<T>`, `AppError` | `Elarion.Abstractions` | Application contract and error model |
+| `HandlerDispatcher` | `Elarion.Abstractions.Dispatch` | Named request/reply bus with no wire format |
+| `DispatchScopeContext`, `CreateDispatchScope`, `SeedScope` | `Elarion.Abstractions.Dispatch` | Per-call scope-seeding rail |
+| `HandlerInvoker` | `Elarion` | Typed scope + resolve + invoke + dispose helper |
+| `ICurrentUser`, `IAuthorizer` | `Elarion.Abstractions` | Transport-neutral identity and authorization |
+| `IAppErrorTranslator<TError>` | `Elarion.Abstractions` | Protocol-specific error translation |
+
+`JsonRpcDispatcher` and `McpDispatcher` filter one generated operation registry by
+`HandlerTransports.JsonRpc` and `HandlerTransports.Mcp`. REST `[HttpEndpoint]` is route/verb based and is
+not part of the named bus.
+
+## Seed each call scope
+
+A child DI scope does not inherit scoped instances from its parent. Capture boundary state into a
+`DispatchScopeContext`; `CreateDispatchScope` runs every registered `IDispatchScopeInitializer`:
+
+```csharp
+var context = new DispatchScopeContext();
+context.Set<ClaimsPrincipal>(principal);
+
+await using var scope = rootProvider.CreateDispatchScope(context);
+// Resolve and invoke inside scope.ServiceProvider.
+```
+
+Use `SeedScope(context)` when the host already owns the correct scope, as the ASP.NET middleware does for
+the request scope. Do not hand-roll propagation of individual scoped services.
+
+## Seed current user off HTTP
+
+Authentication belongs at the adapter boundary. Once it has validated the caller and built a principal,
+the core claims implementation maps that principal to `ICurrentUser`:
+
+```csharp
+services.AddElarionClaimsCurrentUser(o => o.UserIdClaimType = "sub");
+services.AddElarionAuthorization();
+```
+
+Putting `ClaimsPrincipal` in `DispatchScopeContext` then gives the handler the same authorization behavior
+as an HTTP request. Without an authenticated principal, `[Require*]` handlers fail as unauthorized.
+
+## Invoke the handler
+
+Typed adapters such as gRPC and CLIs usually use:
+
+```csharp
+var result = await HandlerInvoker.InvokeAsync<CreateClientCommand, ClientDto>(
+    rootProvider, command, context, ct);
+```
+
+Dynamic adapters map and dispatch names:
+
+```csharp
+dispatcher.Map<CreateClientCommand, ClientDto>("clients.create");
+dispatcher.MapDelegate<PingRequest, PongResponse>("ping", (request, ct) => HandlePing(request, ct));
+
+var response = await dispatcher.DispatchAsync(
+    "clients.create", command, scope.ServiceProvider, ct);
+```
+
+Both paths resolve the decorated handler and therefore retain tracing, validation, authorization,
+feature gates, resilience, caching, idempotency, transactions, and auditing configured for that handler.
+
+## Map application errors
+
+Implement `IAppErrorTranslator<TWireError>` or map `ErrorKind` directly. Keep protocol status codes stable:
+
+| `ErrorKind` | JSON-RPC | HTTP | Suggested gRPC | Suggested CLI exit |
+| --- | --- | --- | --- | --- |
+| `Validation` | `-32602` | 400 | `InvalidArgument` | 2 |
+| `NotFound` | `-32001` | 404 | `NotFound` | 3 |
+| `Conflict` | `-32002` | 409 | `AlreadyExists` | 4 |
+| `Forbidden` | `-32003` | 403 | `PermissionDenied` | 5 |
+| `Unauthorized` | `-32005` | 401 | `Unauthenticated` | 6 |
+| `BusinessRule` | `-32004` | 422 | `FailedPrecondition` | 7 |
+| `Internal` | `-32603` | 500 | `Internal` | 70 |
+
+`AppErrorMapper` and `HttpAppErrorMapper` are the shipped reference implementations.
+
+## Exposing a handler you do not own
+
+Attributes can only decorate handler classes you own. For framework or third-party handlers, or when the
+host chooses exposure at startup, map imperatively (ADR-0031):
+
+```csharp
+dispatcher.Map<MyRequest, MyResponse>(
+    "my.operation",
+    HandlerTransports.JsonRpc | HandlerTransports.Mcp);
+```
+
+The named bus has a generic map because its schema and serialization metadata are explicit. REST has no
+generic equivalent: ASP.NET's request delegate generator needs concrete `MapGet`/`MapPost` call sites for
+AOT-safe binding. A reusable feature therefore ships a concrete `MapElarionX(route)` extension.
+
+## Packaging boundary
+
+A non-HTTP adapter references `Elarion` and `Elarion.Abstractions`. Add `Elarion.JsonRpc` only when serving
+its JSON-RPC/MCP protocol adapters, and `Elarion.AspNetCore` only when hosting in ASP.NET Core. Core must
+never reference the new adapter.
+
+## Complete console example
+
+```csharp
+using System.Security.Claims;
+using Elarion;
+using Elarion.Abstractions.Dispatch;
+using Elarion.Authorization;
+using Elarion.Identity;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddElarion(configuration);
+services.AddElarionClaimsCurrentUser();
+services.AddElarionAuthorization();
+await using var provider = services.BuildServiceProvider();
+
+var principal = new ClaimsPrincipal(new ClaimsIdentity(
+    [new Claim("sub", userArg)], authenticationType: "cli"));
+var context = new DispatchScopeContext();
+context.Set<ClaimsPrincipal>(principal);
+
+var result = await HandlerInvoker.InvokeAsync<CreateClientCommand, ClientDto>(
+    provider,
+    new CreateClientCommand(/* parsed arguments */),
+    context,
+    CancellationToken.None);
+
+return result.IsSuccess ? 0 : (int)MapExitCode(result.Error.Kind);
+```

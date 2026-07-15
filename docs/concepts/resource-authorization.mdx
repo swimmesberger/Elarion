@@ -3,7 +3,7 @@ title: Resource authorization
 description: Per-resource (read/write) access control and efficient database-level filtering — owner, tenant, and role-based sharing — composed from one declarative source.
 ---
 
-[Handler authorization](./authorization) decides on the *whole operation* ("may this user call this handler?").
+[Handler authorization](/docs/concepts/authorization) decides on the *whole operation* ("may this user call this handler?").
 **Resource authorization** decides on *specific resources* ("may this user read *this* contact?", "*which*
 contacts may they list?"). These are two different problems, and Elarion solves them with two complementary,
 opt-in legs driven from one declarative source — never by filtering rows in memory after the query (which
@@ -137,7 +137,7 @@ operation-independent, so an owner still sees their own rows under any operation
 ## Leg A — the per-resource point check
 
 For a get-one or write handler, declare which request property names the resource. The id is a **compile-checked
-path** (per [ADR-0012](../decisions/0012-dynamic-variable-references.md)), not a string expression — the
+path** (per [ADR-0012](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0012-dynamic-variable-references.md)), not a string expression — the
 generator validates it against the request and emits a zero-reflection accessor:
 
 ```csharp
@@ -193,6 +193,6 @@ if (contact is null || !ContactAccess.Specification.Matches(contact, currentUser
 
 ## See also
 
-- [ADR-0013: Resource-based and data-level authorization](../decisions/0013-resource-and-data-level-authorization.md)
-- [ADR-0012: Referencing dynamic variables in attributes](../decisions/0012-dynamic-variable-references.md)
-- [Authorization](./authorization) — the operation-level gate this builds on.
+- [ADR-0013: Resource-based and data-level authorization](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0013-resource-and-data-level-authorization.md)
+- [ADR-0012: Referencing dynamic variables in attributes](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0012-dynamic-variable-references.md)
+- [Authorization](/docs/concepts/authorization) — the operation-level gate this builds on.

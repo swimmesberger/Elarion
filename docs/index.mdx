@@ -4,16 +4,16 @@ description: Elarion is a .NET application framework that turns modules, handler
 icon: BookOpen
 ---
 
-Elarion is a .NET application framework for **module-based handler pipelines, compile-time
-registration, JSON-RPC hosting, MCP tools for AI agents, scheduled jobs, and optional Entity
-Framework Core source generation**.
+Elarion is a .NET application framework for **module-based handler pipelines and deterministic,
+compile-time wiring**. Its focused packages add HTTP, JSON-RPC and MCP transports; background work;
+events and realtime delivery; PostgreSQL-backed coordination and persistence; device connections;
+and optional EF Core or NativeAOT-friendly SQL data access.
 
 The central idea is simple: your application assemblies define modules and handlers; your host
 assembly only wires infrastructure, transport, and deployment concerns. Everything that can be
-discovered from your code — handlers, services, scheduled jobs, handler operations, validation
-metadata, EF Core
-`DbSet`s — is emitted by source generators at compile time instead of scanned by reflection at
-startup.
+discovered from your code — handler pipelines, module registrations, transport maps, serializers,
+jobs, event consumers, policy catalogs, actor facades, and data-access metadata — is emitted by
+source generators at compile time instead of scanned by reflection at startup.
 
 ```csharp
 [Handler("clients.get")]
@@ -93,6 +93,41 @@ registration list.
   </Card>
 </Cards>
 
+## Choose the right runtime shape
+
+The framework now covers several kinds of work, but they are not interchangeable. Start with the
+simplest shape whose correctness contract fits:
+
+<Cards>
+  <Card title="Request or command" href="/docs/concepts/handlers">
+    Use a handler for bounded request/reply work. It is the transport-facing gate for authorization,
+    validation, transactions, idempotency, resilience, caching, and audit policy.
+  </Card>
+  <Card title="Browser needs to refresh" href="/docs/capabilities/events/client-events">
+    Publish a client event when a lost message merely leaves the UI stale and re-querying converges.
+  </Card>
+  <Card title="Sequence is the data" href="/docs/capabilities/events/streams">
+    Use an ordered stream when a missing item makes the consumer wrong and one live sequencer owns the key.
+  </Card>
+  <Card title="Conversation is stateful" href="/docs/capabilities/connections">
+    Use a connection for interactive-rate client input, device links, or server-to-client request/reply.
+  </Card>
+  <Card title="Live in-memory consistency" href="/docs/concepts/actors">
+    Default to the database. Reach for an actor only when a live resource, ephemeral hot state, or a
+    decide-once coordinator is genuinely the consistency unit.
+  </Card>
+  <Card title="One instance owns a role" href="/docs/capabilities/coordination">
+    Use a PostgreSQL role lease for a handful of coarse leader roles—not as a per-record distributed lock.
+  </Card>
+  <Card title="Data access" href="/docs/capabilities/entity-framework">
+    Choose EF Core for the full application data platform, or generated SQL mapping and migrations for
+    EF-free NativeAOT hosts.
+  </Card>
+  <Card title="High-rate data" href="/docs/capabilities/data-rate-shaping">
+    Batch loss-tolerant writes and conflate latest-wins values before adding a reactive or streaming stack.
+  </Card>
+</Cards>
+
 ## The philosophy in one line
 
 > Auto-detect application patterns, explicitly wire platform capabilities.
@@ -120,6 +155,8 @@ use-case boundary, result-based errors, JSON-RPC for internal APIs, and a thin h
 - You want a typed RPC contract shared between a .NET backend and a TypeScript frontend.
 - You want to expose your application to AI agents as MCP tools without hand-writing a separate tool layer.
 - You want in-process recurring/background work without standing up external job infrastructure.
+- You need realtime, device, or coordination building blocks sized for roughly 1–10 nodes on the
+  PostgreSQL your application already runs.
 
 It is intentionally **not** a thin wrapper around default ASP.NET Core. You trade some convention
 freedom for less host boilerplate, inherent modularity, and a clear line between application policy

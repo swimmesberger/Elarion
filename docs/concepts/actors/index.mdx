@@ -1,0 +1,111 @@
+---
+title: Actors
+description: Decide whether a live in-memory consistency unit deserves an actor, then choose the runtime, durability, placement, and integration model.
+---
+
+`Elarion.Actors` turns a plain `[Actor]` class into a keyed, mailbox-protected state machine with a
+source-generated typed facade. It is deliberately a small-to-mid application primitive: virtual
+activation, sequential execution, idle passivation, and optional PostgreSQL snapshots and single-homing,
+without a clustered actor runtime.
+
+<Callout type="warn" title="Default to the database">
+Most applications need zero actors. If the solution sketches cleanly as a table with a version column,
+use optimistic concurrency, constraints, idempotency, jobs, and the outbox. An actor is justified only
+when the consistency unit is a live in-memory thing.
+</Callout>
+
+## When (not) to use an actor
+
+An actor earns its place in exactly three shapes:
+
+1. **It owns a stateful external resource** — a TCP session, device command channel, IMAP connection,
+   or per-tenant API client whose calls must be ordered. You cannot row-lock a socket.
+2. **Its state is hot, ephemeral, and loss-tolerant** — live telemetry, presence, progress, or a
+   write-behind buffer. Restart loss is acceptable or naturally repaired by the next reading.
+3. **It is an event-driven decide-once coordinator** — a small state machine that reacts over time and
+   must act once. This is the only shape that normally combines snapshots and single-homing, and a
+   versioned state row may still be simpler.
+
+| Symptom | Reach for |
+| --- | --- |
+| Two users race to update a record | Optimistic concurrency |
+| A webhook can arrive twice | `[Idempotent]` or the consumer inbox |
+| A follow-up must survive the request | Outbox integration event |
+| One import per tenant | Scheduled job claims |
+| One ordered TCP/API session per key | Actor owning the resource |
+| Live, disposable per-key readings | Actor with no snapshot |
+| Act once after a sequence of events | Actor + snapshot, or a versioned state row |
+
+For common loss-tolerant batching and latest-wins publishing, prefer the ready-made
+[data-rate shaping helpers](/docs/capabilities/data-rate-shaping) before writing an actor.
+
+## The basic shape
+
+```csharp
+[Actor]
+public sealed class DeviceSessionActor(
+    IActorContext<Guid> context,
+    IDeviceConnection connection)
+{
+    public Task<DeviceReply> Send(DeviceCommand command, CancellationToken ct) =>
+        connection.SendAsync(context.Key, command, ct);
+}
+```
+
+The generator emits `IDeviceSession : IActorFacade<Guid>`. Callers keep a cheap address, not a live
+activation handle:
+
+```csharp
+var device = actors.Get<IDeviceSession>(deviceId);
+var reply = await device.Send(command, ct);
+```
+
+`Get` never activates anything. The first call activates the actor, calls are serialized through its
+mailbox, and a cold activation passivates after five minutes by default. A facade remains valid across
+passivation, and actor method renames fail at compile time at every call site.
+
+<Cards>
+  <Card title="Runtime and facades" href="/docs/concepts/actors/runtime">
+    Generated contracts, keying, mailboxes, reentrancy, lifecycle, configuration, and worker pools.
+  </Card>
+  <Card title="State and placement" href="/docs/concepts/actors/state-and-placement">
+    PostgreSQL snapshots, query semantics, conflict retry, multi-instance topology, and the actor home.
+  </Card>
+  <Card title="Events, streams, and telemetry" href="/docs/concepts/actors/integrations">
+    Generated event relays, ordered facade streams, activation retention, traces, and metrics.
+  </Card>
+</Cards>
+
+## The migration seam
+
+The generated facade is intentionally the same kind of contract as an Orleans grain interface: a
+key-addressed interface of `Task`-shaped methods resolved through a factory.
+
+| Elarion.Actors | Orleans |
+| --- | --- |
+| `IActorFacade<Guid>` | `IGrainWithGuidKey` |
+| `actors.Get<IMyActor>(id)` | `grainFactory.GetGrain<IMyActor>(id)` |
+| `[Reentrant]` | `[Reentrant]` |
+| `IActorState<TState>` | `[PersistentState] IPersistentState<TState>` |
+
+Migration is still real work: arguments and results must become serializable, the actor class becomes a
+grain implementation, custom keys need mapping, and placement moves to Orleans. Serializable DTO-shaped
+method signatures keep that seam honest.
+
+{/* Compatibility anchors for links to the former single-page guide. */}
+<span id="when-not-to-use-an-actor" />
+<span id="the-migration-seam-how-a-facade-maps-to-an-orleans-grain" />
+<span id="what-the-generated-facade-looks-like" />
+<span id="keyed-and-singleton-actors" />
+<span id="execution-model-single-threaded-non-reentrant-by-default" />
+<span id="mailbox-cancellation-shutdown" />
+<span id="configuring-an-actor" />
+<span id="wiring" />
+<span id="routing-and-worker-pools-the-akka-router-patterns" />
+<span id="durable-state-snapshots" />
+<span id="designing-applications-around-snapshot-state" />
+<span id="running-on-multiple-instances" />
+<span id="single-homed-actors-the-home-lease" />
+<span id="actors-and-events" />
+<span id="streaming-out-of-an-actor" />
+<span id="observability" />

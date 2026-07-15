@@ -1,14 +1,14 @@
 /**
  * "The same guarded path, every time" — the life of one request on a single
  * line: a person taps or an AI asks, both pass the same checkpoint, the rule
- * runs, the result is saved, the journal is written. Sits directly under the
+ * runs, the result is saved, and telemetry/audit evidence is emitted. Sits directly under the
  * /ai hero as the page's establishing shot.
  */
 export function RequestPath() {
   const stations = [
     { x: 350, w: 185, title: 'your business rule' },
     { x: 585, w: 175, title: 'saved, safely' },
-    { x: 810, w: 130, title: 'the journal' },
+    { x: 810, w: 130, title: 'trace + audit' },
   ];
 
   const wires = [
@@ -24,7 +24,7 @@ export function RequestPath() {
       viewBox="0 0 960 224"
       className="h-auto w-full"
       role="img"
-      aria-label="A customer taps, or an AI asks — both requests pass the same permission checkpoint, then the business rule runs, the result is saved, and a journal entry is written."
+      aria-label="A customer taps, or an AI asks — both requests pass the same permission checkpoint, then the business rule runs, the result is saved, telemetry is emitted, and configured auditable actions keep a durable record."
       xmlns="http://www.w3.org/2000/svg"
     >
       {wires.map((w) => (
@@ -91,7 +91,7 @@ export function RequestPath() {
         </g>
       ))}
       <text x={875} y={158} fontSize={11.5} textAnchor="middle" fill="var(--color-fd-muted-foreground)">
-        written automatically
+        telemetry always · audit by policy
       </text>
     </svg>
   );

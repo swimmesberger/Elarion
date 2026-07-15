@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   title: 'Impressum & Offenlegung',
   description:
     'Offenlegung gemäß § 25 Mediengesetz für die private, nicht-kommerzielle Website des Open-Source-Projekts Elarion. Media-owner disclosure under Austrian law.',
+  alternates: { canonical: '/impressum' },
 };
 
 export default function ImpressumPage() {

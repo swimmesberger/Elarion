@@ -51,7 +51,7 @@ builder.Services.AddElarionVariableSubstitution(); // IVariableSource → Config
 ```
 
 Because it reads `IConfiguration`, it transparently sees appsettings, environment variables, and — if you
-add the [settings](settings.mdx) `IConfiguration` adapter — database-backed settings, with **runtime
+add the [settings](/docs/concepts/settings) `IConfiguration` adapter — database-backed settings, with **runtime
 changes** as those providers reload. Register a different `IVariableSource` first to override the source.
 
 ### Observable sources

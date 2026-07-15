@@ -55,7 +55,7 @@ client flag to adopt it.
 ## Wiring the host
 
 The bootstrap handler is framework-shipped (you don't own its class), so it is exposed **imperatively** — see
-[exposing a handler you don't own](/docs/concepts/transports#exposing-a-handler-you-do-not-own) and
+[exposing a handler you don't own](/docs/capabilities/transports/custom-transports#exposing-a-handler-you-do-not-own) and
 [ADR-0031](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0031-imperative-handler-transport-mapping.md).
 A host opts in and chooses surfaces:
 
@@ -76,7 +76,7 @@ app.MapElarionSession();   // GET /session
 ```
 
 Nothing else is needed for Native AOT: `AddElarionSession` contributes the framework-owned `SessionJsonContext`
-to the canonical [`IElarionJsonSerialization`](./transports.mdx) itself (ADR-0023), so the session's wire types
+to the canonical [`IElarionJsonSerialization`](/docs/capabilities/serialization) itself (ADR-0023), so the session's wire types
 serialize reflection-free on every transport — the same self-registration every other subsystem's `Add…` performs.
 
 ## On the client — one mechanism over OpenFeature
@@ -136,4 +136,4 @@ compile-checked on both sides of the wire (see
 - [ADR-0031: Imperative handler transport mapping](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0031-imperative-handler-transport-mapping.md)
 - [ADR-0032: Frontend contribution model and the typed capability vocabulary](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md)
 - [Feature flags](/docs/concepts/feature-flags) — the flag/variant seams the snapshot reads.
-- [Transports](/docs/concepts/transports) — declarative vs. imperative exposure.
+- [Custom transports](/docs/capabilities/transports/custom-transports) — declarative vs. imperative exposure.
