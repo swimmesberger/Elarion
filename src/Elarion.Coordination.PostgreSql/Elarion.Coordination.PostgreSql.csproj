@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>PostgreSQL role leases for Elarion (ADR-0049): heartbeat-renewed single-holder election for named roles on the one PostgreSQL the app already runs — one conditional-upsert row per role is the whole membership protocol. Backs single-homed actors, lease-gated outbox delivery, and any "exactly one instance runs this" background work.</Description>
+    <Description>PostgreSQL role leases and fixed role partitions for Elarion (ADR-0049/0062): heartbeat-renewed single-holder election on the app's existing database, with locally cached ownership and advertised holder addresses.</Description>
   </PropertyGroup>
 
   <ItemGroup>

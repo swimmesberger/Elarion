@@ -33,6 +33,9 @@ public sealed class ActorOptions {
     /// </summary>
     public TimeSpan? CallTimeout { get; init; } = DefaultCallTimeout;
 
+    /// <summary>Placement mode for this actor; local process placement is the default.</summary>
+    public ActorPlacementMode Placement { get; init; }
+
     /// <summary>
     /// How long a replacement activation waits for the previous activation of the same key to
     /// finish deactivating (<c>OnDeactivateAsync</c> + DI-scope disposal) before proceeding
@@ -44,10 +47,4 @@ public sealed class ActorOptions {
 
     /// <summary>Orleans-style turn interleaving (see <see cref="ReentrantAttribute"/>).</summary>
     public bool Reentrant { get; init; }
-
-    /// <summary>
-    /// Whether this actor only runs on the instance holding the actor home lease (ADR-0048);
-    /// enforced when an <see cref="IActorHomeLease"/> is registered.
-    /// </summary>
-    public bool SingleHomed { get; init; }
 }

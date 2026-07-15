@@ -176,7 +176,7 @@ lease/delivery/purge machinery and its tests. A real saving — roughly half the
 
 ### Finding 3 — semantic deltas of running jobs through the outbox pipeline (verified in code)
 
-- **Delivery is sequential per node**: `OutboxDeliveryService` iterates its claimed batch one consumer scope at
+- **Delivery is sequential per node**: `OutboxDeliveryService` iterates its claimed batch one target-group scope at
   a time. Jobs share that single-file pipeline with business events — a slow job delays event delivery on its
   node. Worse: the whole claimed batch is stamped with **one** `leaseUntil`, so a job outrunning
   `LeaseDuration` (2 min default) lets the *other* messages in its batch expire mid-flight and be reclaimed by

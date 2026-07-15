@@ -24,8 +24,8 @@ public static class OutboxServiceCollectionExtensions
     /// This replaces the in-memory integration tier; the domain plane and the generated consumer descriptors are
     /// registered separately (for example via <c>AddElarionDomainEventBus</c> for Plane A and the generated
     /// <c>Add{Assembly}EventConsumers</c>). Consumers must be idempotent because delivery is at-least-once.
-    /// Set <see cref="OutboxOptions.RunDeliveryWorker"/> to <see langword="false"/> on publisher-only instances
-    /// so another node hosting all the consumers runs the delivery worker instead.
+    /// Set <see cref="OutboxOptions.RunDeliveryWorker"/> to <see langword="false"/> on publisher-only instances;
+    /// they still register the complete descriptor catalog used to create target-group envelopes.
     /// </remarks>
     public static IServiceCollection AddElarionOutbox<TDbContext>(
         this IServiceCollection services,
@@ -45,6 +45,7 @@ public static class OutboxServiceCollectionExtensions
         services.AddElarionIdempotency();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton(options);
+        services.TryAddSingleton<OutboxConsumerCatalog>();
         services.TryAddSingleton<OutboxEventDispatcher>();
 
         services.TryAddScoped<IOutboxStore, EfCoreOutboxStore<TDbContext>>();
@@ -53,8 +54,7 @@ public static class OutboxServiceCollectionExtensions
         // integration bus was registered for the domain plane's sake.
         services.AddScoped<IIntegrationEventBus, OutboxIntegrationEventBus>();
 
-        // Publisher-only nodes (heterogeneous topologies where another instance hosts all the consumers) opt out
-        // of the delivery loop entirely — otherwise this node would claim messages it cannot resolve and park them.
+        // Publisher-only nodes may opt out of claiming while retaining publish-time target metadata.
         if (options.RunDeliveryWorker)
         {
             services.AddHostedService<OutboxDeliveryService>();

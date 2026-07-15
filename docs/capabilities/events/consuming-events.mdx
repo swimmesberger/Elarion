@@ -121,6 +121,11 @@ Beyond the message parameter, a method-form consumer may optionally declare — 
 Both are supplied by the runtime; omit what you don't need, and use `[ConsumeEvent(Order = n)]` to order
 fan-out subscribers. (The handler form takes the event and an optional `CancellationToken`.)
 
+The durable consumer identity is `{service}.{method}({event type})`. Runtime-supplied context and
+`CancellationToken` parameters are intentionally excluded, so adding or removing either does not orphan
+pending outbox deliveries or inbox claims. Two overloads on the same service with the same method name and
+event type would share that identity and are rejected by `ELEVT006`; rename or split one consumer.
+
 A class-level `[ConsumeEvent]` on a non-handler class, or a method-form consumer not on a `[Service]`, is
 reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`.
 
@@ -134,8 +139,9 @@ reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`.
 ## Handling duplicates
 
 Integration delivery is **at-least-once**: a consumer can see the same message more than once — a worker
-crash after the consumer ran but before the message was finalized, a fan-out consumer that threw and
-retried the whole message, or a lease that expired under multiple instances. There is no exactly-once
+crash after the consumer ran but before its delivery was finalized, or a lease that expired under
+multiple instances. Outbox retries are independent per consumer, so a failed sibling no longer re-runs
+completed siblings. There is no exactly-once
 *delivery*; exactly-once *effect* comes from deduplication on the consumer side. Every redelivery carries
 the **same** `IEventContext.MessageId` (the durable message identity — for the outbox, the row's id), so
 that id is the deduplication key. (`CorrelationId` is a *tracing* identifier — don't key dedup on it.)

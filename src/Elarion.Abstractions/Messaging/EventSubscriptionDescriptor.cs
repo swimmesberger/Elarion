@@ -14,6 +14,13 @@ public delegate ValueTask EventSubscriberInvokeDelegate(
     IEventContext context,
     CancellationToken ct);
 
+/// <summary>Resolves the coarse role that must execute one durable consumer delivery.</summary>
+/// <remarks>
+/// A <see langword="null"/> result means any outbox worker may claim the delivery. The resolver runs
+/// while publishing, in the publisher's dependency-injection scope, and must not perform remote I/O.
+/// </remarks>
+public delegate string? EventDeliveryRoleResolver(IServiceProvider serviceProvider, object @event);
+
 /// <summary>
 /// Immutable source-generated metadata and invocation logic for one event consumer (a fan-out subscriber).
 /// </summary>
@@ -24,6 +31,11 @@ public delegate ValueTask EventSubscriberInvokeDelegate(
 /// by typed dispatch (<c>IHandlerSender</c>/<c>IHandler</c>) or the named <c>HandlerDispatcher</c>.
 /// </remarks>
 public sealed record EventSubscriptionDescriptor {
+    /// <summary>
+    /// Stable identity of this consumer. Durable outbox fan-out stores it when one publish splits into target groups.
+    /// </summary>
+    public string ConsumerId { get; init; } = string.Empty;
+
     /// <summary>The message type this consumer handles (the dispatch address).</summary>
     public required Type EventType { get; init; }
 
@@ -41,6 +53,12 @@ public sealed record EventSubscriptionDescriptor {
     /// belongs to no module (mapped ungated).
     /// </summary>
     public string? Module { get; init; }
+
+    /// <summary>
+    /// Optional role-affinity resolver for durable delivery. It selects where this consumer executes;
+    /// it does not affect in-memory event dispatch.
+    /// </summary>
+    public EventDeliveryRoleResolver? ResolveDeliveryRole { get; init; }
 
     /// <summary>The fan-out subscriber delegate.</summary>
     public EventSubscriberInvokeDelegate? InvokeAsync { get; init; }

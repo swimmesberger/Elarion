@@ -8,6 +8,8 @@ namespace Elarion.Actors.Runtime;
 /// from role to home is one explicit registration (<c>AddElarionActorHome("actors")</c>).
 /// </summary>
 internal sealed class RoleLeaseActorHome(IRoleLease lease) : IActorHomeLease {
+    public string Role => lease.Role;
+
     public bool IsHeld => lease.IsHeld;
 
     public string? CurrentHolder => lease.CurrentHolder;

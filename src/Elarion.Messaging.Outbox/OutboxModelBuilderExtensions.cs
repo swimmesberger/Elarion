@@ -35,23 +35,19 @@ public static class OutboxModelBuilderExtensions
         {
             builder.ToTable(table, schema);
             builder.HasKey(message => message.Id);
-
-            // Partial index over pending rows only: the worker's "oldest undelivered first" scan stays a tiny indexed
-            // probe regardless of how many delivered rows await retention purge. Filtered indexes are supported by
-            // PostgreSQL, SQL Server, and SQLite; on MySQL, replace this with an unfiltered index in your own model.
-            // The PascalCase filter quotes the identifier because unquoted identifiers fold to lower case on PostgreSQL.
-            builder.HasIndex(message => message.OccurredOnUtc)
-                .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
-
-            // Partial index over delivered rows so the retention purge's `processed_on_utc < cutoff` delete stays
-            // an indexed probe instead of a sequential scan over the whole table.
             builder.HasIndex(message => message.ProcessedOnUtc)
                 .HasDatabaseName(snakeCase ? $"ix_{table}_purge" : $"IX_{table}_Purge")
                 .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
+            builder.HasIndex(message => new { message.TargetRole, message.OccurredOnUtc, message.Id })
+                .HasDatabaseName(snakeCase ? $"ix_{table}_claim" : $"IX_{table}_Claim")
+                .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
 
             builder.Property(message => message.Id)
                 .HasColumnName(snakeCase ? "id" : "Id")
                 .ValueGeneratedNever();
+
+            builder.Property(message => message.MessageId)
+                .HasColumnName(snakeCase ? "message_id" : "MessageId");
 
             builder.Property(message => message.OccurredOnUtc)
                 .HasColumnName(snakeCase ? "occurred_on_utc" : "OccurredOnUtc");
@@ -71,18 +67,21 @@ public static class OutboxModelBuilderExtensions
                 .HasColumnName(snakeCase ? "trace_parent" : "TraceParent")
                 .HasMaxLength(55);
 
+            builder.Property(message => message.ConsumerIdsJson)
+                .HasColumnName(snakeCase ? "consumer_ids" : "ConsumerIds");
+
+            builder.Property(message => message.TargetRole)
+                .HasColumnName(snakeCase ? "target_role" : "TargetRole")
+                .HasMaxLength(200);
+
             builder.Property(message => message.Attempts)
                 .HasColumnName(snakeCase ? "attempts" : "Attempts");
-
             builder.Property(message => message.ProcessedOnUtc)
                 .HasColumnName(snakeCase ? "processed_on_utc" : "ProcessedOnUtc");
-
             builder.Property(message => message.LockId)
                 .HasColumnName(snakeCase ? "lock_id" : "LockId");
-
             builder.Property(message => message.LockedUntilUtc)
                 .HasColumnName(snakeCase ? "locked_until_utc" : "LockedUntilUtc");
-
             builder.Property(message => message.Error)
                 .HasColumnName(snakeCase ? "error" : "Error");
         });

@@ -34,6 +34,7 @@ public sealed class ElarionOutboxGeneratorTests
 
         source.Should().Contain(
             "public DbSet<global::Elarion.Messaging.Outbox.OutboxMessage> OutboxMessages => Set<global::Elarion.Messaging.Outbox.OutboxMessage>();");
+        source.Should().NotContain("OutboxDeliveries");
         source.Should().Contain("partial void OnEntitiesConfigured_GenerateElarionOutbox(ModelBuilder modelBuilder) =>");
         source.Should().Contain("UseElarionOutbox(");
         source.Should().Contain("tableName: null");

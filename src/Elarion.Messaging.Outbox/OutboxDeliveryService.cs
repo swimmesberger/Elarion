@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Elarion.Abstractions.Coordination;
 using Elarion.Abstractions.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -7,14 +8,14 @@ using Microsoft.Extensions.Logging;
 namespace Elarion.Messaging.Outbox;
 
 /// <summary>
-/// Polls the outbox, claims pending messages, dispatches them to their integration consumers on isolated scopes, and
+/// Polls the outbox, claims eligible target-group envelopes, dispatches them on isolated scopes, and
 /// finalizes each — the durable, after-commit delivery tier.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Delivery is at-least-once: a message redelivers if the worker crashes after dispatch but before finalizing, or if
-/// any consumer throws (the whole message is retried until <see cref="OutboxOptions.MaxDeliveryAttempts"/>). Consumers
-/// must therefore be idempotent. A claim lease lets a crashed worker's messages be reclaimed once the lease expires,
+/// a consumer throws (only that target group retries until <see cref="OutboxOptions.MaxDeliveryAttempts"/>). Consumers
+/// must still be idempotent across crash windows. A claim lease lets a crashed worker's deliveries be reclaimed,
 /// and the conditional claim makes running multiple instances safe.
 /// </para>
 /// </remarks>
@@ -88,24 +89,44 @@ public sealed class OutboxDeliveryService(
     {
         await using var pollScope = scopeFactory.CreateAsyncScope();
 
-        // Dynamic delivery gate (e.g. "only the actor home delivers", ADR-0048): a closed gate skips
-        // the whole cycle before anything is claimed, so messages stay pending for an open instance.
-        if (options.DeliveryGate is { } gate &&
-            !await gate(pollScope.ServiceProvider, ct).ConfigureAwait(false))
-        {
-            return 0;
-        }
-
         var store = pollScope.ServiceProvider.GetRequiredService<IOutboxStore>();
+        var roleLeases = pollScope.ServiceProvider.GetService<IRoleLeaseRegistry>()?.Leases
+            .ToDictionary(static lease => lease.Role, StringComparer.Ordinal);
+        var heldRoles = roleLeases?.Values
+            .Where(static lease => lease.IsHeld)
+            .Select(static lease => lease.Role)
+            .ToArray() ?? [];
 
         var lockId = Guid.CreateVersion7();
         var leaseUntil = timeProvider.GetUtcNow() + options.LeaseDuration;
-        var claimed = await store.ClaimPendingAsync(lockId, leaseUntil, options.BatchSize, ct).ConfigureAwait(false);
+        var claimed = await store.ClaimPendingAsync(
+            lockId,
+            leaseUntil,
+            options.BatchSize,
+            heldRoles,
+            ct).ConfigureAwait(false);
 
-        foreach (var message in claimed)
+        foreach (var group in claimed)
         {
             ct.ThrowIfCancellationRequested();
-            await DeliverAsync(store, lockId, message, ct).ConfigureAwait(false);
+            if (group.TargetRole is { } targetRole
+                && (roleLeases is null
+                    || !roleLeases.TryGetValue(targetRole, out var targetLease)
+                    || !targetLease.IsHeld)) {
+                if (!await store.ReleaseClaimAsync(group.Id, lockId, ct).ConfigureAwait(false)) {
+                    LogLeaseLost(group);
+                }
+                else {
+                    logger.LogInformation(
+                        "Released outbox delivery group {GroupId} for role '{Role}' because this process no longer holds the role.",
+                        group.Id,
+                        targetRole);
+                }
+
+                continue;
+            }
+
+            await DeliverAsync(store, lockId, group, ct).ConfigureAwait(false);
         }
 
         return claimed.Count;
@@ -124,6 +145,9 @@ public sealed class OutboxDeliveryService(
             activity.SetTag("messaging.event.type", message.EventType);
             activity.SetTag("messaging.event.plane", "integration");
             activity.SetTag("messaging.correlation_id", message.CorrelationId);
+            activity.SetTag("messaging.message.id", message.MessageId);
+            activity.SetTag("messaging.outbox.delivery_group_id", message.Id);
+            activity.SetTag("messaging.outbox.target_role", message.TargetRole);
             activity.SetTag("messaging.outbox.attempt", message.Attempts + 1);
         }
 
@@ -179,8 +203,10 @@ public sealed class OutboxDeliveryService(
                 message.EventType, "failed", Stopwatch.GetElapsedTime(startTimestamp));
             logger.LogError(
                 ex,
-                "Delivery of outbox message {MessageId} ({EventType}, correlation {CorrelationId}) failed on attempt {Attempt}.",
+                "Delivery group {GroupId} of outbox message {MessageId} for role {TargetRole} ({EventType}, correlation {CorrelationId}) failed on attempt {Attempt}.",
                 message.Id,
+                message.MessageId,
+                message.TargetRole,
                 message.EventType,
                 message.CorrelationId,
                 message.Attempts + 1);
@@ -197,8 +223,9 @@ public sealed class OutboxDeliveryService(
         // were dispatching. Finalizing anyway would wipe the new owner's active lease and cause overlapping
         // redelivery, so we skip and let the current owner finalize it.
         logger.LogWarning(
-            "Outbox message {MessageId} ({EventType}) lease was lost before finalizing; another worker reclaimed it. Skipping finalize.",
+            "Outbox delivery group {GroupId} for message {MessageId} ({EventType}) lease was lost before finalizing; another worker reclaimed it. Skipping finalize.",
             message.Id,
+            message.MessageId,
             message.EventType);
 
     /// <summary>Exponential backoff for the next attempt: <c>BaseRetryDelay × 2^(attempt-1)</c>, capped at <see cref="OutboxOptions.MaxRetryDelay"/>.</summary>

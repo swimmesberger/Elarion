@@ -105,7 +105,13 @@ public sealed class EventTelemetryTests {
     [Fact]
     public async Task OutboxPublish_PersistsTraceParent() {
         var store = new FakeOutboxStore();
-        var bus = new OutboxIntegrationEventBus(store, new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
+        var bus = new OutboxIntegrationEventBus(
+            store,
+            new OutboxConsumerCatalog([Subscriber<OutboxTestEvent>(EventPlane.Integration)]),
+            EmptyProvider.Instance,
+            new OutboxOptions(),
+            OutboxTestJson.Instance,
+            TimeProvider.System);
 
         using var publisherActivity = new Activity("command").Start();
         await bus.PublishAsync(new OutboxTestEvent(1, "a"), TestContext.Current.CancellationToken);
@@ -120,8 +126,10 @@ public sealed class EventTelemetryTests {
 
         using var publisherActivity = new Activity("command").Start();
         var correlationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var message = new OutboxMessage {
-            Id = Guid.NewGuid(),
+            Id = messageId,
+            MessageId = messageId,
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
@@ -160,8 +168,10 @@ public sealed class EventTelemetryTests {
 
         var correlationId = Guid.NewGuid();
         var store = new FakeOutboxStore();
+        var messageId = Guid.NewGuid();
         store.Pending.Enqueue([new OutboxMessage {
-            Id = Guid.NewGuid(),
+            Id = messageId,
+            MessageId = messageId,
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
@@ -187,14 +197,15 @@ public sealed class EventTelemetryTests {
         await using var provider = services.BuildServiceProvider();
 
         var dispatcher = new OutboxEventDispatcher(
-            [
+            new OutboxConsumerCatalog([
                 new EventSubscriptionDescriptor {
+                    ConsumerId = "telemetry-consumer",
                     EventType = typeof(OutboxTestEvent),
                     Plane = EventPlane.Integration,
                     ServiceType = typeof(object),
                     InvokeAsync = consumer
                 }
-            ],
+            ]),
             new OutboxOptions(),
             OutboxTestJson.Instance,
             NullLogger<OutboxEventDispatcher>.Instance);
@@ -226,6 +237,7 @@ public sealed class EventTelemetryTests {
 
     private static EventSubscriptionDescriptor Subscriber<TEvent>(EventPlane plane) =>
         new() {
+            ConsumerId = $"subscriber:{typeof(TEvent).FullName}:{plane}",
             EventType = typeof(TEvent),
             Plane = plane,
             ServiceType = typeof(Recorder),
@@ -237,6 +249,7 @@ public sealed class EventTelemetryTests {
 
     private static EventSubscriptionDescriptor Throwing<TEvent>(EventPlane plane) =>
         new() {
+            ConsumerId = $"throwing:{typeof(TEvent).FullName}:{plane}",
             EventType = typeof(TEvent),
             Plane = plane,
             ServiceType = typeof(Recorder),

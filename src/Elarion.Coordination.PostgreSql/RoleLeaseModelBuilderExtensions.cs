@@ -27,7 +27,7 @@ public static class RoleLeaseModelBuilderExtensions {
             builder.HasKey(entity => entity.Role);
             builder.Property(entity => entity.Role)
                 .HasColumnName(snakeCase ? "role" : "Role")
-                .HasMaxLength(128);
+                .HasMaxLength(RoleLeaseOptions.MaximumRoleNameLength);
             builder.Property(entity => entity.Owner)
                 .HasColumnName(snakeCase ? "owner" : "Owner")
                 .HasMaxLength(256);

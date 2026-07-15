@@ -26,10 +26,12 @@ ELACT008 | Elarion.Generators | Error | Actor event-consumer key cannot be resol
 ELACT009 | Elarion.Generators | Error | Actor [ConsumeEvent] method must be public
 ELACT010 | Elarion.Generators | Error | Actor [ConsumeEvent] method must take one integration event
 ELACT012 | Elarion.Generators | Error | Invalid actor stream method
+ELACT013 | Elarion.Generators | Error | Virtual-sharded actor must be keyed
 ELEVT001 | Elarion.Generators | Error | Event consumer must be declared on a [Service] class
 ELEVT002 | Elarion.Generators | Error | Invalid event consumer signature
 ELEVT003 | Elarion.Generators | Warning | Event consumer is not in any module
 ELEVT005 | Elarion.Generators | Error | Invalid handler-form event consumer
+ELEVT006 | Elarion.Generators | Error | Event consumers have the same durable identity
 ELMCP003 | Elarion.Mcp | Warning | MCP customization is ignored when the handler excludes MCP
 ELHTTP001 | Elarion.Http | Warning | HTTP endpoint handler has no resolvable request/response shape
 ELHTTP002 | Elarion.Http | Warning | Duplicate HTTP endpoint route

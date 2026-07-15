@@ -81,3 +81,5 @@ designs that are not yet implemented.
 - [ADR-0058: AOT-native SQL row mapping — explicit generated mappers, not call-site interception — Proposed](0058-aot-sql-row-mapping.md)
 - [ADR-0059: Merge the always-on tracing + context-enrichment decorators into one observability decorator](0059-merged-handler-observability-decorator.md)
 - [ADR-0060: A database-neutral migration core, and a SQLite provider](0060-database-neutral-migration-core.md)
+- [ADR-0061: Virtual-sharded actors — fixed role partitions without a cluster](0061-virtual-sharded-actors.md)
+- [ADR-0062: Role-affine routing and target-group outbox delivery](0062-role-affine-routing-and-outbox-delivery.md)

@@ -16,16 +16,30 @@ internal sealed class ActorSystem : IActorSystem {
         IServiceScopeFactory scopeFactory,
         TimeProvider timeProvider,
         ILoggerFactory loggerFactory,
-        IActorHomeLease? homeLease = null) {
+        IActorHomeLease? homeLease = null,
+        IActorPlacementResolver? placementResolver = null) {
         var runtime = new ActorRuntime(
-            scopeFactory, timeProvider, loggerFactory, new ActorCancellationPool(timeProvider), homeLease);
+            scopeFactory,
+            timeProvider,
+            loggerFactory,
+            new ActorCancellationPool(timeProvider),
+            homeLease,
+            placementResolver);
         foreach (var registration in registrations) {
-            if (registration.Options.SingleHomed && homeLease is null) {
+            if (registration.Options.Placement == ActorPlacementMode.SingleHome && homeLease is null) {
                 // Declared intent without enforcement (single-instance / local dev) is legal but
                 // worth one loud line: on a multi-instance deployment this is the misconfiguration.
                 loggerFactory.CreateLogger("Elarion.Actors." + registration.Name).LogWarning(
-                    "Actor {Actor} is declared SingleHomed but no IActorHomeLease is registered; "
+                    "Actor {Actor} is configured for SingleHome placement but no IActorHomeLease is registered; "
                     + "single-homing is not enforced on this instance.",
+                    registration.Name);
+            }
+
+            if (registration.Options.Placement == ActorPlacementMode.VirtualShards &&
+                placementResolver is null) {
+                loggerFactory.CreateLogger("Elarion.Actors." + registration.Name).LogWarning(
+                    "Actor {Actor} is configured for virtual-shard placement but no "
+                    + "IActorPlacementResolver is registered; placement is not enforced on this instance.",
                     registration.Name);
             }
 

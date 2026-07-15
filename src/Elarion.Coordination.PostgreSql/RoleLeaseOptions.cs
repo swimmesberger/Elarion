@@ -2,6 +2,9 @@ namespace Elarion.Coordination.PostgreSql;
 
 /// <summary>Configures one PostgreSQL role lease (ADR-0049).</summary>
 public sealed class RoleLeaseOptions {
+    /// <summary>The maximum persisted role-name length.</summary>
+    public const int MaximumRoleNameLength = 128;
+
     /// <summary>
     /// The role this lease elects a holder for (the DI key of the registered
     /// <c>IRoleLease</c>, and the primary key of its row). Required.

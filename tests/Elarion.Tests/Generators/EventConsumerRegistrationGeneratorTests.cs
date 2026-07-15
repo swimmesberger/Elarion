@@ -34,6 +34,8 @@ public sealed class EventConsumerRegistrationGeneratorTests {
         generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Domain");
         generated.Should().Contain("ServiceType = typeof(global::Sample.Events.InvoiceProjections)");
         generated.Should().Contain("Order = 3");
+        generated.Should().Contain(
+            "ConsumerId = \"Sample.Events.InvoiceProjections.OnCreating(Sample.Events.InvoiceCreating)\"");
         generated.Should().Contain("InvokeAsync = static (serviceProvider, @event, context, ct) =>");
         generated.Should().Contain("service.OnCreating((global::Sample.Events.InvoiceCreating)@event, ct)");
         generated.Should().NotContain("System.Reflection");
@@ -288,6 +290,65 @@ public sealed class EventConsumerRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateEventConsumers_InjectedParametersDoNotChangeDurableIdentity() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record InvoiceCreated(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class InvoiceProjection {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnCreated(
+                        InvoiceCreated e,
+                        Elarion.Abstractions.Messaging.IEventContext context,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var generated = AllGenerated(Generate(source));
+
+        generated.Should().Contain(
+            "ConsumerId = \"Sample.Events.InvoiceProjection.OnCreated(Sample.Events.InvoiceCreated)\"");
+        generated.Should().NotContain("ContextGeneric");
+        generated.Should().NotContain("CancellationToken)");
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_OverloadsWithSameDurableIdentity_EmitDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record InvoiceCreated(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class InvoiceProjection {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnCreated(
+                        InvoiceCreated e,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnCreated(
+                        InvoiceCreated e,
+                        Elarion.Abstractions.Messaging.IEventContext context) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(
+            source,
+            assertGeneratedOutputCompiles: false,
+            allowedDiagnosticIds: ["ELEVT006"]);
+
+        result.Diagnostics.Count(diagnostic => diagnostic.Id == "ELEVT006").Should().Be(2);
+    }
+
+    [Fact]
     public void GenerateEventConsumers_MethodForm_GenericResultReturn_EmitsDiagnostic() {
         // A Result<T> with a VALUE is request/reply, rejected on either plane — including domain, which used to
         // be the responder role (ADR-0010). The non-generic Result is fine (see the test below).
@@ -414,6 +475,10 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             "serviceProvider.GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Events.NotifyBilling\");");
         generated.Should().Contain(
             "serviceProvider.GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Events.ReindexInvoice\");");
+        generated.Should().Contain(
+            "ConsumerId = \"Sample.Events.NotifyBilling.HandleAsync(Sample.Events.InvoiceCreated)\"");
+        generated.Should().Contain(
+            "ConsumerId = \"Sample.Events.ReindexInvoice.HandleAsync(Sample.Events.InvoiceCreated)\"");
     }
 
     [Fact]

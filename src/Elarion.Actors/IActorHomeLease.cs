@@ -2,7 +2,7 @@ namespace Elarion.Actors;
 
 /// <summary>
 /// The single-homing seam (ADR-0048): a cluster-wide lease that elects exactly one instance as the
-/// <b>actor home</b> — the only instance allowed to activate <c>[Actor(SingleHomed = true)]</c>
+/// <b>actor home</b> — the only instance allowed to activate <c>[Actor(Placement = ActorPlacementMode.SingleHome)]</c>
 /// actors. When no lease is registered, single-homing is declared but not enforced (the local-dev /
 /// single-instance case); registering an implementation (e.g.
 /// <c>AddElarionPostgreSqlActorHome&lt;TDbContext&gt;()</c>) turns the declaration into a gate.
@@ -19,6 +19,9 @@ namespace Elarion.Actors;
 /// transparent conflict retry (ADR-0047) make the overlap loud and lossless rather than corrupting.
 /// </remarks>
 public interface IActorHomeLease {
+    /// <summary>The coarse role that homes these actors.</summary>
+    string Role { get; }
+
     /// <summary>Whether this instance currently holds the actor home role.</summary>
     bool IsHeld { get; }
 

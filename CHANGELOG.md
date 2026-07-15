@@ -247,7 +247,7 @@ minor releases may include breaking changes.
   `ActorSnapshotConcurrencyException` (every conflict logs and counts `actor.snapshot.conflicts`). The
   docs state the mandatory state-design rules (the record is the query contract; interpretation and pure
   transitions live on `TState`; side effects after the write; shape-tolerant evolution).
-- **Single-homed actors (ADR-0048).** `[Actor(SingleHomed = true)]` declares that an actor runs on exactly
+- **Single-homed actors (ADR-0048).** `[Actor(Placement = ActorPlacementMode.SingleHome)]` declares that an actor runs on exactly
   one instance app-wide; enforcement is the **actor home** — calls on any other instance fail immediately
   with `ActorNotHomedException` naming the holder (no call forwarding, deliberately: needing it is the
   Orleans trigger). Unenforced (with a warning) when no `IActorHomeLease` is registered, so local dev

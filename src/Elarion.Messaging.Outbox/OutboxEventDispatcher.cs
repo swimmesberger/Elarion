@@ -8,16 +8,16 @@ using Microsoft.Extensions.Logging;
 
 namespace Elarion.Messaging.Outbox;
 
-/// <summary>The result of attempting to dispatch a persisted <see cref="OutboxMessage"/> to its consumers.</summary>
+/// <summary>The result of attempting one persisted target-group delivery.</summary>
 public enum OutboxDispatchOutcome
 {
-    /// <summary>Every registered consumer ran to completion (including the case of no registered consumers).</summary>
+    /// <summary>Every consumer in the target group ran to completion.</summary>
     Delivered,
 
     /// <summary>
-    /// The message could not be dispatched and never will be — its stored <see cref="OutboxMessage.EventType"/>
-    /// resolves to no registered consumer/CLR type, or its payload deserialized to <see langword="null"/>. Retrying
-    /// would only spin, so the delivery worker parks the message for inspection rather than retrying it.
+    /// The delivery could not be dispatched and never will be — its consumer selection and event type do not resolve
+    /// to compatible registered consumers, or its payload deserialized to <see langword="null"/>. Retrying would
+    /// only spin, so the delivery worker parks it for inspection rather than retrying it.
     /// </summary>
     Unresolvable
 }
@@ -28,8 +28,8 @@ public enum OutboxDispatchOutcome
 /// </summary>
 /// <remarks>
 /// Built once as a singleton from the registered <see cref="EventSubscriptionDescriptor"/>s. The event type is
-/// resolved from the registered consumers' descriptors (by <see cref="Type.FullName"/>). A message whose stored type
-/// resolves to no registered consumer — or whose payload deserializes to <see langword="null"/> — is
+/// resolved from the targeted consumer descriptors. A delivery whose consumer selection and event type do not resolve
+/// to compatible descriptors — or whose payload deserializes to <see langword="null"/> — is
 /// <see cref="OutboxDispatchOutcome.Unresolvable"/>: it can never be delivered (an event-type rename or dropped
 /// consumer would otherwise silently discard every in-flight event), so it is logged at <see cref="LogLevel.Error"/>
 /// and parked for inspection by the delivery worker rather than being silently finalized as delivered.
@@ -38,61 +38,30 @@ public sealed class OutboxEventDispatcher
 {
     private readonly ILogger<OutboxEventDispatcher> _logger;
     private readonly JsonSerializerOptions _serializerOptions;
-    private readonly Dictionary<string, Type> _typeByName = new(StringComparer.Ordinal);
-    private readonly Dictionary<Type, EventSubscriptionDescriptor[]> _consumersByType = new();
+    private readonly OutboxConsumerCatalog _consumerCatalog;
 
     /// <summary>Builds the integration-event consumer index from the registered descriptors.</summary>
     public OutboxEventDispatcher(
-        IEnumerable<EventSubscriptionDescriptor> descriptors,
+        OutboxConsumerCatalog consumerCatalog,
         OutboxOptions options,
         IElarionJsonSerialization jsonSerialization,
         ILogger<OutboxEventDispatcher> logger)
     {
-        ArgumentNullException.ThrowIfNull(descriptors);
+        ArgumentNullException.ThrowIfNull(consumerCatalog);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(jsonSerialization);
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
         _serializerOptions = options.SerializerOptions ?? jsonSerialization.Options;
-
-        var byType = new Dictionary<Type, List<EventSubscriptionDescriptor>>();
-        foreach (var descriptor in descriptors)
-        {
-            if (descriptor.Plane is not EventPlane.Integration || descriptor.InvokeAsync is null)
-            {
-                continue;
-            }
-
-            var fullName = descriptor.EventType.FullName;
-            if (fullName is null)
-            {
-                continue;
-            }
-
-            _typeByName[fullName] = descriptor.EventType;
-            if (!byType.TryGetValue(descriptor.EventType, out var list))
-            {
-                list = [];
-                byType[descriptor.EventType] = list;
-            }
-
-            list.Add(descriptor);
-        }
-
-        foreach (var (type, list) in byType)
-        {
-            _consumersByType[type] = list.OrderBy(static descriptor => descriptor.Order).ToArray();
-        }
+        _consumerCatalog = consumerCatalog;
     }
 
     /// <summary>
-    /// Deserializes <paramref name="message"/> and invokes every registered integration consumer on
-    /// <paramref name="serviceProvider"/>. Any consumer exception propagates so the worker can mark the message failed
-    /// and retry the whole message later.
+    /// Deserializes the envelope once and invokes its ordered consumer group.
     /// </summary>
     /// <returns>
     /// <see cref="OutboxDispatchOutcome.Delivered"/> when the consumers ran; <see cref="OutboxDispatchOutcome.Unresolvable"/>
-    /// when the stored event type resolves to no registered consumer/CLR type or the payload deserializes to
+    /// when the consumer selection and event type resolve to no compatible descriptor or the payload deserializes to
     /// <see langword="null"/> — both logged at <see cref="LogLevel.Error"/> because a retry can never resolve them.
     /// </returns>
     public async ValueTask<OutboxDispatchOutcome> DispatchAsync(
@@ -100,46 +69,90 @@ public sealed class OutboxEventDispatcher
         OutboxMessage message,
         CancellationToken ct)
     {
-        if (!_typeByName.TryGetValue(message.EventType, out var eventType)
-            || !_consumersByType.TryGetValue(eventType, out var consumers))
-        {
-            _logger.LogError(
-                "Outbox message {MessageId} has event type '{EventType}' that resolves to no registered integration consumer; parking it for inspection. An event-type rename or a dropped consumer can cause this.",
-                message.Id,
-                message.EventType);
-            return OutboxDispatchOutcome.Unresolvable;
+        EventSubscriptionDescriptor[] consumers;
+        Type eventType;
+        if (message.ConsumerIdsJson is null) {
+            if (!_consumerCatalog.TryGetConsumerArray(message.EventType, out consumers)
+                || consumers.Length == 0) {
+                _logger.LogError(
+                    "Outbox delivery group {GroupId} for message {MessageId} has no registered consumers for event type '{EventType}'; parking it for inspection.",
+                    message.Id,
+                    message.MessageId,
+                    message.EventType);
+                return OutboxDispatchOutcome.Unresolvable;
+            }
+
+            eventType = consumers[0].EventType;
+        }
+        else {
+            string[] consumerIds;
+            try {
+                consumerIds = OutboxConsumerIds.Deserialize(message.ConsumerIdsJson);
+            }
+            catch (JsonException ex) {
+                _logger.LogError(
+                    ex,
+                    "Outbox delivery group {GroupId} for message {MessageId} has malformed consumer identities; parking it for inspection.",
+                    message.Id,
+                    message.MessageId);
+                return OutboxDispatchOutcome.Unresolvable;
+            }
+
+            if (consumerIds.Length == 0) {
+                _logger.LogError(
+                    "Outbox delivery group {GroupId} for message {MessageId} targets no consumers; parking it for inspection.",
+                    message.Id,
+                    message.MessageId);
+                return OutboxDispatchOutcome.Unresolvable;
+            }
+
+            consumers = new EventSubscriptionDescriptor[consumerIds.Length];
+            Type? resolvedEventType = null;
+            for (var index = 0; index < consumerIds.Length; index++) {
+                var consumerId = consumerIds[index];
+                if (!_consumerCatalog.TryGetConsumer(consumerId, out var descriptor)
+                    || descriptor.EventType.FullName != message.EventType) {
+                    _logger.LogError(
+                        "Outbox delivery group {GroupId} for message {MessageId} targets unknown consumer '{ConsumerId}' or an incompatible event type '{EventType}'; parking it for inspection.",
+                        message.Id,
+                        message.MessageId,
+                        consumerId,
+                        message.EventType);
+                    return OutboxDispatchOutcome.Unresolvable;
+                }
+
+                resolvedEventType ??= descriptor.EventType;
+                consumers[index] = descriptor;
+            }
+
+            eventType = resolvedEventType!;
         }
 
         var instance = JsonSerializer.Deserialize(message.Payload, eventType, _serializerOptions);
-        if (instance is null)
-        {
+        if (instance is null) {
             _logger.LogError(
-                "Outbox message {MessageId} of type '{EventType}' deserialized to null; parking it for inspection.",
-                message.Id,
+                "Outbox message {MessageId} of type '{EventType}' deserialized to null; parking its target group for inspection.",
+                message.MessageId,
                 message.EventType);
             return OutboxDispatchOutcome.Unresolvable;
         }
 
-        // Seed the outbox row's id as the delivery scope's idempotency key: the inbox decorator on handler-form
+        // Seed the logical message id as the delivery scope's idempotency key: the inbox decorator on handler-form
         // consumers (ADR-0022) claims it per (consumer, message), and it is stable across redeliveries — unlike
         // the correlation id, which is a tracing identifier. Soft-resolved so a host without idempotency wiring
         // simply delivers un-deduped, as before the inbox existed.
-        serviceProvider.GetService<IIdempotencyKeySeed>()?.Seed(message.Id.ToString("N"));
+        serviceProvider.GetService<IIdempotencyKeySeed>()?.Seed(message.MessageId.ToString("N"));
 
-        var context = OutboxEventContext.Create(instance, eventType, message.CorrelationId, message.Id);
-        foreach (var descriptor in consumers)
-        {
+        var context = OutboxEventContext.Create(instance, eventType, message.CorrelationId, message.MessageId);
+        foreach (var descriptor in consumers) {
             var startTimestamp = Stopwatch.GetTimestamp();
-            try
-            {
+            try {
                 await descriptor.InvokeAsync!(serviceProvider, instance, context, ct).ConfigureAwait(false);
                 EventTelemetry.RecordConsumer(
                     eventType.Name, descriptor.ServiceType.Name, "ok",
                     Stopwatch.GetElapsedTime(startTimestamp));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // The exception still propagates so the worker marks the message failed and retries it.
+            catch (Exception ex) when (ex is not OperationCanceledException) {
                 EventTelemetry.RecordConsumer(
                     eventType.Name, descriptor.ServiceType.Name, "exception",
                     Stopwatch.GetElapsedTime(startTimestamp));

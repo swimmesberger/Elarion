@@ -118,8 +118,8 @@ public sealed partial class HandlerRegistrationGenerator {
     private const int InboxRetentionHours = 24;
 
     // The inbox (ADR-0022): every handler-form consumer whose request is an IIntegrationEvent is deduped by
-    // default — integration delivery is at-least-once and retry is per-message (one failing consumer re-runs every
-    // already-succeeded sibling), so dedup must be the pit of success. The synthesized policy reuses the
+    // default — integration delivery remains at-least-once across the consumer-commit/finalize crash window,
+    // so dedup must be the pit of success. The synthesized policy reuses the
     // idempotency decorator with Consumer scope: owner = this handler's identity (baked in below), key = the
     // message id seeded by the delivery tier, WaitThenReplay so a lease-race loser waits for the winner's claim and
     // replays it (never acknowledging success while the winner is still uncommitted), no fingerprint (the payload

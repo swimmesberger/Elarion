@@ -12,30 +12,11 @@ public sealed class OutboxOptions
     /// Defaults to <see langword="true"/>.
     /// </summary>
     /// <remarks>
-    /// Set to <see langword="false"/> on instances that should only <em>publish</em> to the outbox. In a
-    /// heterogeneous topology — for example web nodes with a feature module disabled plus a worker-role node
-    /// hosting that module's consumers (or its actors) — a node whose delivery loop claims a message whose
-    /// consumers are not registered locally parks it as unresolvable. Run the worker only on the instance(s)
-    /// that register <em>all</em> integration consumers; publisher-only nodes keep the bus and storage but
-    /// skip the worker entirely.
+    /// Set to <see langword="false"/> on an instance that should publish but not claim. Publishing still
+    /// requires the complete generated consumer catalog because target grouping and role resolution happen
+    /// when the message is recorded.
     /// </remarks>
     public bool RunDeliveryWorker { get; set; } = true;
-
-    /// <summary>
-    /// Optional per-cycle gate for the delivery worker: consulted before each claim; when it returns
-    /// <see langword="false"/> the cycle is skipped (no messages are claimed) and the worker idles
-    /// until the next tick. <see langword="null"/> (default) always delivers.
-    /// </summary>
-    /// <remarks>
-    /// The <em>dynamic</em> sibling of <see cref="RunDeliveryWorker"/>: use it when whether this
-    /// instance delivers changes at runtime — the canonical case is following the actor home lease
-    /// (ADR-0048) in a homogeneous deployment, so integration events (and the single-homed actors
-    /// they feed) are delivered on exactly the lease-holding instance:
-    /// <code>o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService&lt;IActorHomeLease&gt;().IsHeld);</code>
-    /// The service provider is the worker's poll scope. Messages published while the gate is closed
-    /// simply wait in the outbox for whichever instance's gate opens.
-    /// </remarks>
-    public Func<IServiceProvider, CancellationToken, ValueTask<bool>>? DeliveryGate { get; set; }
 
     /// <summary>How long the delivery worker waits between polls when the outbox is idle. Defaults to 1 second.</summary>
     /// <remarks>
@@ -48,13 +29,13 @@ public sealed class OutboxOptions
     public int BatchSize { get; set; } = 100;
 
     /// <summary>
-    /// The maximum number of delivery attempts before a message is left for inspection and no longer retried.
+    /// The maximum number of attempts before one target group is left for inspection and no longer retried.
     /// Defaults to 10.
     /// </summary>
     public int MaxDeliveryAttempts { get; set; } = 10;
 
     /// <summary>
-    /// How long a claimed message stays leased to one worker before another may reclaim it. Defaults to 2 minutes.
+    /// How long a claimed target group stays leased before another eligible worker may reclaim it.
     /// </summary>
     /// <remarks>
     /// A crashed worker's in-flight messages are retried once their lease expires, so this also bounds crash-recovery

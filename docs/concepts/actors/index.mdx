@@ -5,8 +5,8 @@ description: Decide whether a live in-memory consistency unit deserves an actor,
 
 `Elarion.Actors` turns a plain `[Actor]` class into a keyed, mailbox-protected state machine with a
 source-generated typed facade. It is deliberately a small-to-mid application primitive: virtual
-activation, sequential execution, idle passivation, and optional PostgreSQL snapshots and single-homing,
-without a clustered actor runtime.
+activation, sequential execution, idle passivation, and optional PostgreSQL snapshots, single-homing, and
+fixed virtual-shard placement, without a clustered actor runtime.
 
 <Callout type="warn" title="Default to the database">
 Most applications need zero actors. If the solution sketches cleanly as a table with a version column,

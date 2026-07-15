@@ -28,10 +28,31 @@ public sealed class OutboxModelBuilderExtensionsTests {
 
         // The retention purge's `processed_on_utc < cutoff` delete must stay an indexed probe; the pending
         // partial index cannot serve it.
-        var purgeIndex = model.FindEntityType(typeof(OutboxMessage))!.GetIndexes()
-            .Single(index => index.Properties.Single().Name == nameof(OutboxMessage.ProcessedOnUtc));
+        var message = model.FindEntityType(typeof(OutboxMessage))!;
+        var purgeIndex = message.GetIndexes()
+            .Single(index => index.Properties.Count == 1
+                && index.Properties[0].Name == nameof(OutboxMessage.ProcessedOnUtc));
         purgeIndex.GetDatabaseName().Should().Be("ix_elarion_outbox_messages_purge");
         purgeIndex.GetFilter().Should().Be("processed_on_utc IS NOT NULL");
+    }
+
+    [Fact]
+    public void UseElarionOutbox_AddsOrderedPartialClaimIndex() {
+        var modelBuilder = new ModelBuilder(new ConventionSet());
+        modelBuilder.UseElarionOutbox();
+        var model = modelBuilder.FinalizeModel();
+
+        var message = model.FindEntityType(typeof(OutboxMessage))!;
+        message.FindProperty(nameof(OutboxMessage.OccurredOnUtc))!.GetColumnName()
+            .Should().Be("occurred_on_utc");
+        var claimIndex = message.GetIndexes().Single(index =>
+            index.Properties.Select(property => property.Name).SequenceEqual([
+                nameof(OutboxMessage.TargetRole),
+                nameof(OutboxMessage.OccurredOnUtc),
+                nameof(OutboxMessage.Id)
+            ]));
+        claimIndex.GetDatabaseName().Should().Be("ix_elarion_outbox_messages_claim");
+        claimIndex.GetFilter().Should().Be("processed_on_utc IS NULL");
     }
 
     [Fact]
@@ -55,16 +76,12 @@ public sealed class OutboxModelBuilderExtensionsTests {
         var outboxMessage = model.FindEntityType(typeof(OutboxMessage))!;
         outboxMessage.GetTableName().Should().Be("ElarionOutboxMessages");
         outboxMessage.FindProperty(nameof(OutboxMessage.OccurredOnUtc))!.GetColumnName().Should().Be("OccurredOnUtc");
-        outboxMessage.FindProperty(nameof(OutboxMessage.ProcessedOnUtc))!.GetColumnName().Should().Be("ProcessedOnUtc");
         outboxMessage.FindProperty(nameof(OutboxMessage.TraceParent))!.GetColumnName().Should().Be("TraceParent");
 
-        // The pending partial index must reference the PascalCase column, quoted for PostgreSQL folding.
-        outboxMessage.GetIndexes()
-            .Single(index => index.Properties.Single().Name == nameof(OutboxMessage.OccurredOnUtc))
-            .GetFilter().Should().Be("\"ProcessedOnUtc\" IS NULL");
-
+        outboxMessage.FindProperty(nameof(OutboxMessage.ProcessedOnUtc))!.GetColumnName().Should().Be("ProcessedOnUtc");
         var purgeIndex = outboxMessage.GetIndexes()
-            .Single(index => index.Properties.Single().Name == nameof(OutboxMessage.ProcessedOnUtc));
+            .Single(index => index.Properties.Count == 1
+                && index.Properties[0].Name == nameof(OutboxMessage.ProcessedOnUtc));
         purgeIndex.GetDatabaseName().Should().Be("IX_ElarionOutboxMessages_Purge");
         purgeIndex.GetFilter().Should().Be("\"ProcessedOnUtc\" IS NOT NULL");
     }

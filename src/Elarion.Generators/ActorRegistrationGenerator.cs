@@ -141,6 +141,16 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor VirtualShardedActorMustBeKeyed = new(
+        id: "ELACT013",
+        title: "Virtual-sharded actor must be keyed",
+        messageFormat:
+        "Actor '{0}' uses Placement = VirtualShards but has no actor key; virtual-shard placement "
+        + "requires an IActorContext<TKey> constructor parameter or Actor(KeyType = ...)",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     private enum ReturnShape {
         TaskVoid,
         TaskOfResult,
@@ -189,7 +199,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         bool MailboxFailFast,
         double IdleTimeoutSeconds,
         double CallTimeoutSeconds,
-        bool SingleHomed,
+        string Placement,
         EquatableArray<CtorParameterInfo> CtorParameters,
         EquatableArray<ActorMethodInfo> Methods,
         EquatableArray<ActorConsumerInfo> Consumers,
@@ -301,7 +311,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var mailboxFailFast = false;
         double idleTimeoutSeconds = 0;
         double callTimeoutSeconds = 0;
-        var singleHomed = false;
+        var placement = "Local";
         foreach (var named in ctx.Attributes[0].NamedArguments) {
             switch (named.Key) {
                 case "Name":
@@ -322,8 +332,14 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                 case "CallTimeoutSeconds":
                     callTimeoutSeconds = named.Value.Value is double call ? call : 0;
                     break;
-                case "SingleHomed":
-                    singleHomed = named.Value.Value is true;
+                case "Placement":
+                    placement = named.Value.Value is int placementValue
+                        ? placementValue switch {
+                            1 => "SingleHome",
+                            2 => "VirtualShards",
+                            _ => "Local"
+                        }
+                        : "Local";
                     break;
             }
         }
@@ -389,6 +405,10 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
         var keyType = attributeKeyType ?? contextKeyType;
         var actorName = explicitName ?? DeriveActorName(type.Name);
+
+        if (placement == "VirtualShards" && keyType is null) {
+            diagnostics.Add(DiagnosticInfo.Create(VirtualShardedActorMustBeKeyed, location, typeDisplay));
+        }
 
         // Public instance methods become facade methods; lifecycle hooks stay off the facade. A method carrying
         // [ConsumeEvent] additionally gets a generated integration-event relay (ADR-0046).
@@ -528,7 +548,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             mailboxFailFast,
             idleTimeoutSeconds,
             callTimeoutSeconds,
-            singleHomed,
+            placement,
             ctorParameters.ToEquatableArray(),
             methods.ToEquatableArray(),
             consumers.ToEquatableArray(),
@@ -1010,10 +1030,24 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"        {registrationFqn}.Add{consumer.RelayClassName}(services);");
         sb.AppendLine("        services.AddSingleton(new global::Elarion.Abstractions.Messaging.EventSubscriptionDescriptor");
         sb.AppendLine("        {");
+        sb.AppendLine($"            ConsumerId = \"{relayFqn}\",");
         sb.AppendLine($"            EventType = typeof({consumer.EventTypeFqn}),");
         sb.AppendLine("            Plane = global::Elarion.Abstractions.Messaging.EventPlane.Integration,");
         sb.AppendLine($"            ServiceType = typeof({interfaceFqn}),");
         sb.AppendLine($"            Order = {consumer.Order},");
+        if (actor.Placement == "SingleHome") {
+            sb.AppendLine("            ResolveDeliveryRole = static (serviceProvider, _) =>");
+            sb.AppendLine("                serviceProvider.GetService<global::Elarion.Actors.IActorHomeLease>()?.Role,");
+        }
+        else if (actor.Placement == "VirtualShards") {
+            var eventKey = consumer.KeyExpression!.Replace(
+                "request.", $"(({consumer.EventTypeFqn})@event).");
+            sb.AppendLine("            ResolveDeliveryRole = static (serviceProvider, @event) =>");
+            sb.AppendLine("            {");
+            sb.AppendLine("                var resolver = serviceProvider.GetService<global::Elarion.Actors.IActorPlacementResolver>();");
+            sb.AppendLine($"                return resolver is null ? null : resolver.Resolve(\"{actor.ActorName}\", {eventKey}.ToString() ?? string.Empty).Role;");
+            sb.AppendLine("            },");
+        }
         sb.AppendLine("            InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
         sb.AppendLine("            {");
         sb.AppendLine($"                var handler = serviceProvider.GetRequiredKeyedService<{interfaceFqn}>(\"{relayFqn}\");");
@@ -1053,7 +1087,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"                IdleTimeout = {TimeoutExpression(actor.IdleTimeoutSeconds, "DefaultIdleTimeout")},");
         sb.AppendLine($"                CallTimeout = {TimeoutExpression(actor.CallTimeoutSeconds, "DefaultCallTimeout")},");
         sb.AppendLine($"                Reentrant = {(actor.Reentrant ? "true" : "false")},");
-        sb.AppendLine($"                SingleHomed = {(actor.SingleHomed ? "true" : "false")}");
+        sb.AppendLine($"                Placement = global::Elarion.Actors.ActorPlacementMode.{actor.Placement}");
         sb.AppendLine("            },");
         sb.AppendLine($"            Activator = static (serviceProvider, context) => new {actor.ActorTypeFqn}({activatorArguments}),");
         sb.AppendLine($"            Facade = static handle => new {facadeImplFqn}(handle)");

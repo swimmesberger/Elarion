@@ -1,18 +1,24 @@
 namespace Elarion.Messaging.Outbox;
 
 /// <summary>
-/// A persisted integration event awaiting after-commit delivery.
+/// One persisted integration-event delivery group awaiting after-commit execution.
 /// </summary>
 /// <remarks>
-/// One row is written into the caller's <see cref="Microsoft.EntityFrameworkCore.DbContext"/> per
-/// <see cref="Elarion.Abstractions.Messaging.IIntegrationEventBus.PublishAsync{TEvent}"/> call and committed
-/// atomically with the business data. A background delivery worker later claims, dispatches, and finalizes each row.
-/// The payload is immutable once written; only the delivery-tracking columns are updated.
+/// Consumers resolving to the same target role share one row and one retry boundary. The common
+/// unbound case therefore remains one row per publish regardless of consumer count. A publish that
+/// resolves consumers to several roles writes one envelope per distinct role, all sharing
+/// <see cref="MessageId"/> as their inbox/idempotency identity.
 /// </remarks>
 public sealed class OutboxMessage
 {
-    /// <summary>The unique message identifier (primary key).</summary>
+    /// <summary>The unique delivery-group identifier (primary key and lease/finalize identity).</summary>
     public required Guid Id { get; init; }
+
+    /// <summary>
+    /// The logical published-message identifier, shared by every target group produced by one publish.
+    /// This is the stable <c>IEventContext.MessageId</c> and inbox deduplication key.
+    /// </summary>
+    public required Guid MessageId { get; init; }
 
     /// <summary>When the event was published, in UTC.</summary>
     public required DateTimeOffset OccurredOnUtc { get; init; }
@@ -34,18 +40,32 @@ public sealed class OutboxMessage
     /// </summary>
     public string? TraceParent { get; init; }
 
-    /// <summary>The number of delivery attempts made so far.</summary>
+    /// <summary>
+    /// Fixed JSON array of stable consumer identities, in invocation order, for role-routed publishes.
+    /// <see langword="null"/> means no consumer for <see cref="EventType"/> declares role routing, so this
+    /// envelope targets the catalog's complete ordered consumer array without per-consumer metadata.
+    /// Infrastructure-owned;
+    /// applications should not construct or edit this payload.
+    /// </summary>
+    public string? ConsumerIdsJson { get; init; }
+
+    /// <summary>
+    /// The role that must execute this group, or <see langword="null"/> when any worker may claim it.
+    /// </summary>
+    public string? TargetRole { get; init; }
+
+    /// <summary>The number of failed delivery attempts made so far.</summary>
     public int Attempts { get; set; }
 
-    /// <summary>When the message was delivered, in UTC, or <c>null</c> while pending.</summary>
+    /// <summary>When this delivery group completed, or <see langword="null"/> while pending.</summary>
     public DateTimeOffset? ProcessedOnUtc { get; set; }
 
-    /// <summary>The identifier of the worker currently holding the delivery lease, or <c>null</c> when unclaimed.</summary>
+    /// <summary>The current worker lease token.</summary>
     public Guid? LockId { get; set; }
 
-    /// <summary>When the current delivery lease expires, in UTC, after which another worker may reclaim the message.</summary>
+    /// <summary>Lease expiry or retry visibility deadline.</summary>
     public DateTimeOffset? LockedUntilUtc { get; set; }
 
-    /// <summary>The last delivery error, truncated for diagnostics, or <c>null</c> when never failed.</summary>
+    /// <summary>The latest delivery error, retained for diagnostics.</summary>
     public string? Error { get; set; }
 }

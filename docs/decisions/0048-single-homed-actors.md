@@ -59,10 +59,10 @@ Two clock rules keep it honest:
   extreme clock skew) degrades to brief double-holding, which ADR-0047's ETag + transparent retry
   absorbs losslessly. A database outage degrades to "nobody is home" — fail-closed, never two homes.
 
-### `[Actor(SingleHomed = true)]` — the per-actor declaration
+### `[Actor(Placement = ActorPlacementMode.SingleHome)]` — the per-actor declaration
 
 The core seam is `IActorHomeLease { bool IsHeld; string? CurrentHolder; }` in `Elarion.Actors`. A
-`SingleHomed` actor's calls are gated per enqueue: on a non-holding instance the call fails immediately
+`SingleHome` actor's calls are gated per enqueue: on a non-holding instance the call fails immediately
 with `ActorNotHomedException` naming the holder. Gating per call (not per activation) means a lease
 lost mid-activation stops *new* work at once; in-flight turns finish under the ETag safety net.
 
@@ -71,25 +71,20 @@ single-instance / local-dev case) — the inbox precedent (no store → un-dedup
 failure). The actor system logs one warning per such actor so a multi-instance misconfiguration is
 visible.
 
-### The work follows the lease — delivery gating, not call forwarding
+### The work follows the lease — target-group role affinity, not call forwarding
 
-Single-homed actors are fed by **integration events**; the framework routes delivery, not calls.
-`OutboxOptions.DeliveryGate` (`Func<IServiceProvider, CancellationToken, ValueTask<bool>>`) is consulted
-before each delivery cycle — a closed gate skips the cycle before anything is claimed, so messages
-simply wait in the outbox for whichever instance's gate opens. The host composes the two features with
-one line (deliberately host-composed — the outbox knows nothing of actors, the actors package nothing
-of the outbox):
+ADR-0062 replaces the original whole-worker `DeliveryGate`. Generated actor consumer descriptors name
+the actor-home role, and publishing groups that consumer into an `OutboxMessage` envelope for the role. A
+worker can claim the group only while its local role registry says it holds `"actors"`. Other
+consumers of the same event remain in an unbound group or target their own roles.
 
 ```csharp
 services.AddElarionPostgreSqlActorHome<AppDbContext>();
-services.AddElarionOutbox<AppDbContext>(o =>
-    o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService<IActorHomeLease>().IsHeld));
+services.AddElarionOutbox<AppDbContext>();
 ```
 
-With that, a homogeneous deployment self-organizes: every instance publishes; the lease holder delivers
-events and hosts the single-homed actors; failover moves both together, bounded by `LeaseDuration`.
-(`DeliveryGate` is the dynamic sibling of the static `RunDeliveryWorker` opt-out — use the static knob
-for a fixed web/worker split, the gate for self-electing homogeneous instances.)
+The outbox and actors remain decoupled through general descriptor/role contracts. Failover transfers
+claim eligibility, bounded by `LeaseDuration`, without remote actor calls or an HTTP hop.
 
 ### Reads run anywhere — `IActorStateReader`
 
@@ -138,6 +133,5 @@ a query the rich-record rule cannot express.
 - Scheduled jobs run on a claim-elected node that is generally *not* the home; a job that feeds a
   single-homed actor should publish an integration event (delivered on the home) rather than call the
   facade. Documented; a lease-aware job placement could follow if demand appears.
-- The Orleans migration seam is intact: `SingleHomed` maps conceptually onto "any grain" (Orleans
-  places it), the lease infrastructure is deleted rather than ported, and `DeliveryGate` reverts to
-  always-on.
+- The Orleans migration seam is intact: `SingleHome` maps conceptually onto "any grain" (Orleans
+  places it), the lease infrastructure and generated delivery-role metadata are deleted rather than ported.
