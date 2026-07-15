@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-15
+
 ### Added
 - **The SQL migration runner is now database-neutral, with a SQLite provider** (ADR-0060). The EF-free
   (NativeAOT) migration runner splits into `Elarion.Migrations` — the database-neutral engine (script
@@ -1195,7 +1197,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.5
 [0.2.4]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.4
 [0.2.3]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.3
 [0.2.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.2
