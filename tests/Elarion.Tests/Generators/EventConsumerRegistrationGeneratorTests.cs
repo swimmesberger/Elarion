@@ -34,6 +34,8 @@ public sealed class EventConsumerRegistrationGeneratorTests {
         generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Domain");
         generated.Should().Contain("ServiceType = typeof(global::Sample.Events.InvoiceProjections)");
         generated.Should().Contain("Order = 3");
+        generated.Should().Contain(
+            "ConsumerId = \"Sample.Events.InvoiceProjections.OnCreating(Sample.Events.InvoiceCreating)\"");
         generated.Should().Contain("InvokeAsync = static (serviceProvider, @event, context, ct) =>");
         generated.Should().Contain("service.OnCreating((global::Sample.Events.InvoiceCreating)@event, ct)");
         generated.Should().NotContain("System.Reflection");
@@ -285,6 +287,65 @@ public sealed class EventConsumerRegistrationGeneratorTests {
 
         result.Diagnostics.Any(d => d.Id == "ELEVT002" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_InjectedParametersDoNotChangeDurableIdentity() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record InvoiceCreated(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class InvoiceProjection {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnCreated(
+                        InvoiceCreated e,
+                        Elarion.Abstractions.Messaging.IEventContext context,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var generated = AllGenerated(Generate(source));
+
+        generated.Should().Contain(
+            "ConsumerId = \"Sample.Events.InvoiceProjection.OnCreated(Sample.Events.InvoiceCreated)\"");
+        generated.Should().NotContain("ContextGeneric");
+        generated.Should().NotContain("CancellationToken)");
+    }
+
+    [Fact]
+    public void GenerateEventConsumers_OverloadsWithSameDurableIdentity_EmitDiagnostic() {
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                public sealed record InvoiceCreated(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+
+                [Elarion.Abstractions.Service]
+                public sealed class InvoiceProjection {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnCreated(
+                        InvoiceCreated e,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnCreated(
+                        InvoiceCreated e,
+                        Elarion.Abstractions.Messaging.IEventContext context) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var result = Generate(
+            source,
+            assertGeneratedOutputCompiles: false,
+            allowedDiagnosticIds: ["ELEVT006"]);
+
+        result.Diagnostics.Count(diagnostic => diagnostic.Id == "ELEVT006").Should().Be(2);
     }
 
     [Fact]

@@ -73,7 +73,9 @@ configuring an ingress yet.
 one-hop rule after resolving a fixed role partition from each request key. The resolver reads raw
 path/query/header state because routing has not run. A missing key returns 400; a known key follows
 the selected role's holder address and loop/failover behavior. This shares role selection with actors
-and outbox delivery without turning the actor runtime into a remote-call subsystem.
+and outbox delivery without turning the actor runtime into a remote-call subsystem. The overload with
+an `affinityScope` hashes scope and key as separate components; virtual-sharded actor ingress passes the
+logical actor name so HTTP and actor activation cannot select different shards for the same key.
 
 ### What stays out
 

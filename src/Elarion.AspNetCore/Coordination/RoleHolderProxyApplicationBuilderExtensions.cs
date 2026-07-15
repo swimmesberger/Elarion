@@ -17,7 +17,36 @@ public static class RoleHolderProxyApplicationBuilderExtensions {
         this IApplicationBuilder app,
         string partition,
         Func<HttpContext, string?> affinityKey,
+        params string[] pathPrefixes) =>
+        UseElarionPartitionHolderProxyCore(app, partition, null, affinityKey, pathPrefixes);
+
+    /// <summary>
+    /// Routes matching requests to the holder of the virtual partition selected by the scoped
+    /// <paramref name="affinityKey"/>. Use the same stable scope as the subsystem being addressed;
+    /// actor routes use the actor's generated logical name so ingress and actor activation resolve
+    /// the same virtual shard.
+    /// </summary>
+    public static IApplicationBuilder UseElarionPartitionHolderProxy(
+        this IApplicationBuilder app,
+        string partition,
+        string affinityScope,
+        Func<HttpContext, string?> affinityKey,
         params string[] pathPrefixes) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(affinityScope);
+        return UseElarionPartitionHolderProxyCore(
+            app,
+            partition,
+            affinityScope,
+            affinityKey,
+            pathPrefixes);
+    }
+
+    private static IApplicationBuilder UseElarionPartitionHolderProxyCore(
+        IApplicationBuilder app,
+        string partition,
+        string? affinityScope,
+        Func<HttpContext, string?> affinityKey,
+        string[] pathPrefixes) {
         ArgumentNullException.ThrowIfNull(app);
         ArgumentException.ThrowIfNullOrWhiteSpace(partition);
         ArgumentNullException.ThrowIfNull(affinityKey);
@@ -39,7 +68,9 @@ public static class RoleHolderProxyApplicationBuilderExtensions {
                     return null;
                 }
 
-                var target = rolePartition.Resolve(key);
+                var target = affinityScope is null
+                    ? rolePartition.Resolve(key)
+                    : rolePartition.Resolve(affinityScope, key);
                 return new RoleHolderTarget(
                     target.Role,
                     target.IsHeld,

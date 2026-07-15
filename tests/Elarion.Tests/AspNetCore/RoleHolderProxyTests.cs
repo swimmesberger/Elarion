@@ -60,6 +60,22 @@ public sealed class RoleHolderProxyTests {
     }
 
     [Fact]
+    public async Task ScopedPartitionProxy_UsesTheSameTwoComponentHashAsActorPlacement() {
+        await using var holder = await StartHolderAsync();
+        var partition = new FakeRolePartition(holder.Address);
+        const string actorName = "Order";
+        const string actorKey = "order-42";
+        await using var node = await StartPartitionedWebNodeAsync(partition, actorName);
+
+        var response = await node.Client.GetAsync($"/quotes/{actorKey}", Ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        partition.ResolvedScopedKeys.Should().ContainSingle().Which.Should().Be((actorName, actorKey));
+        partition.ResolvedPartitions.Should().ContainSingle().Which.Should().Be(
+            RolePartitionHash.GetPartition(actorName, actorKey, partition.PartitionCount));
+    }
+
+    [Fact]
     public async Task NonPrefixedPaths_ServeLocally_EvenWhenNotHolder() {
         await using var holder = await StartHolderAsync();
         var lease = new FakeRoleLease { IsHeld = false, CurrentHolderAddress = holder.Address };
@@ -257,6 +273,8 @@ public sealed class RoleHolderProxyTests {
         public string Name => "actors";
         public int PartitionCount => 2;
         public List<string> ResolvedKeys { get; } = [];
+        public List<(string Scope, string Key)> ResolvedScopedKeys { get; } = [];
+        public List<int> ResolvedPartitions { get; } = [];
 
         public RolePartitionTarget Resolve(string affinityKey) {
             ResolvedKeys.Add(affinityKey);
@@ -264,8 +282,13 @@ public sealed class RoleHolderProxyTests {
             return new(held ? 0 : 1, $"actors:partition-{(held ? 0 : 1)}", held, null, holderAddress);
         }
 
-        public RolePartitionTarget Resolve(string affinityScope, string affinityKey) =>
-            Resolve(RolePartitionHash.Combine(affinityScope, affinityKey));
+        public RolePartitionTarget Resolve(string affinityScope, string affinityKey) {
+            ResolvedScopedKeys.Add((affinityScope, affinityKey));
+            var resolved = RolePartitionHash.GetPartition(affinityScope, affinityKey, PartitionCount);
+            ResolvedPartitions.Add(resolved);
+            var held = resolved == 0;
+            return new(resolved, $"actors:partition-{resolved}", held, null, holderAddress);
+        }
     }
 
     private sealed class FakeServer(params string[] addresses) : IServer {
@@ -322,17 +345,28 @@ public sealed class RoleHolderProxyTests {
         return new TestHost(app);
     }
 
-    private static async Task<TestHost> StartPartitionedWebNodeAsync(IRolePartition partition) {
+    private static async Task<TestHost> StartPartitionedWebNodeAsync(
+        IRolePartition partition,
+        string? affinityScope = null) {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
         builder.Services.AddKeyedSingleton<IRolePartition>(partition.Name, partition);
 
         var app = builder.Build();
-        app.UseElarionPartitionHolderProxy(
-            partition.Name,
-            static context => context.Request.Path.Value?.Split('/').LastOrDefault(),
-            "/quotes");
+        if (affinityScope is null) {
+            app.UseElarionPartitionHolderProxy(
+                partition.Name,
+                static context => context.Request.Path.Value?.Split('/').LastOrDefault(),
+                "/quotes");
+        }
+        else {
+            app.UseElarionPartitionHolderProxy(
+                partition.Name,
+                affinityScope,
+                static context => context.Request.Path.Value?.Split('/').LastOrDefault(),
+                "/quotes");
+        }
         app.MapGet("/quotes/{symbol}", static (string symbol) => $"local:{symbol}");
         await app.StartAsync(Ct);
         return new TestHost(app);

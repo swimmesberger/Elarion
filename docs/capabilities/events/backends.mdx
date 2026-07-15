@@ -217,7 +217,9 @@ builder.Services.AddElarionOutbox<BillingDbContext>(o =>
 Role-bound deliveries are different: every worker may run, but it claims a delivery only when its
 `TargetRole` is null or appears in the local `IRoleLeaseRegistry` as held. Generated `SingleHome` and
 `VirtualShards` actor consumers populate that role automatically; failover transfers eligibility without
-HTTP forwarding or a global delivery gate.
+HTTP forwarding or a global delivery gate. The worker rechecks the live lease immediately before each
+dispatch; if ownership changed after the batch claim, it releases that delivery without incrementing its
+attempt count or applying backoff so the new holder can claim it immediately.
 
 The deliveries table copies the envelope's publish time into each delivery and has a **partial (filtered)
 claim index** over `(target_role, occurred_on_utc, id)` where `processed_on_utc IS NULL` (PascalCase
@@ -225,6 +227,9 @@ equivalents with `snakeCase: false`). The worker's "oldest eligible delivery fir
 on the delivery table and does not join/sort through the parent envelope; completed rows awaiting retention
 purge are absent from the index. Filtered indexes are supported on PostgreSQL, SQL Server, and SQLite; on
 MySQL, supply an unfiltered index in your own model.
+
+Retention purge also starts from the processed-delivery index. It selects and deletes eligible parent
+messages in bounded batches, and retains a message until every consumer delivery is older than the cutoff.
 
 ### Tracing across the commit boundary
 

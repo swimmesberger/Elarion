@@ -28,6 +28,8 @@ public static class RoleLeaseServiceCollectionExtensions {
             throw new ArgumentException("Role partition names must not end with ':'.", nameof(configure));
         }
 
+        ValidateRoleName(GetPartitionRole(options.Name, options.PartitionCount - 1), nameof(configure));
+
         var instanceId = $"{Environment.MachineName}:{Guid.CreateVersion7():N}";
         for (var partition = 0; partition < options.PartitionCount; partition++) {
             var role = GetPartitionRole(options.Name, partition);
@@ -87,6 +89,7 @@ public static class RoleLeaseServiceCollectionExtensions {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.RoleName);
+        ValidateRoleName(options.RoleName, nameof(options));
         if (options.LeaseDuration <= options.RenewInterval + options.HeldSafetyMargin) {
             throw new ArgumentException(
                 $"RoleLeaseOptions.LeaseDuration for role '{options.RoleName}' must exceed RenewInterval + "
@@ -122,5 +125,14 @@ public static class RoleLeaseServiceCollectionExtensions {
             serviceProvider.GetRequiredService<TimeProvider>(),
             serviceProvider.GetRequiredService<ILogger<RoleLeaseHeartbeatService<TDbContext>>>()));
         return services;
+    }
+
+    private static void ValidateRoleName(string roleName, string parameterName) {
+        if (roleName.Length > RoleLeaseOptions.MaximumRoleNameLength) {
+            throw new ArgumentException(
+                $"Role name '{roleName}' is {roleName.Length} characters; PostgreSQL role names must be "
+                + $"at most {RoleLeaseOptions.MaximumRoleNameLength} characters.",
+                parameterName);
+        }
     }
 }

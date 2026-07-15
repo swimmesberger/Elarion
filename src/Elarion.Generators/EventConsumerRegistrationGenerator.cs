@@ -99,6 +99,16 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor DuplicateConsumerIdentity = new(
+        id: "ELEVT006",
+        title: "Event consumers have the same durable identity",
+        messageFormat:
+        "Event consumer identity '{0}' is produced by multiple [ConsumeEvent] declarations. "
+        + "A service may have only one consumer method with a given name for an event type; rename or split a declaration.",
+        category: "Elarion.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     private enum ParameterKind {
         Message,
         Context,
@@ -129,7 +139,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         // The DI service key a handler-form consumer is registered under (its FQN, matching the handler
         // generator's keyed registration) so multiple consumers of one event resolve distinctly; null for
         // method-form consumers, which resolve their concrete [Service] type and never collide.
-        string? ConsumerKey);
+        string? ConsumerKey,
+        LocationInfo Location);
 
     /// <summary>A discovered consumer: either a registration model or the diagnostics that rejected it.</summary>
     private sealed record ConsumerResult(EventConsumerInfo? Consumer, EquatableArray<DiagnosticInfo> Diagnostics);
@@ -179,6 +190,26 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
 
             consumers.Sort(static (left, right) =>
                 string.Compare(left.HintName, right.HintName, StringComparison.Ordinal));
+
+            var duplicateIds = consumers
+                .GroupBy(BuildConsumerId, StringComparer.Ordinal)
+                .Where(static group => group.Count() > 1)
+                .ToArray();
+            foreach (var duplicate in duplicateIds) {
+                foreach (var consumer in duplicate) {
+                    spc.ReportDiagnostic(DiagnosticInfo.Create(
+                        DuplicateConsumerIdentity,
+                        consumer.Location,
+                        duplicate.Key).ToDiagnostic());
+                }
+            }
+
+            if (duplicateIds.Length > 0) {
+                var ids = new HashSet<string>(
+                    duplicateIds.Select(static group => group.Key),
+                    StringComparer.Ordinal);
+                consumers.RemoveAll(consumer => ids.Contains(BuildConsumerId(consumer)));
+            }
 
             if (consumers.Count == 0) {
                 return;
@@ -414,7 +445,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             parameters,
             hintName,
             IsHandler: false,
-            ConsumerKey: null);
+            ConsumerKey: null,
+            LocationInfo.From(location));
     }
 
     private static EventConsumerInfo? TryCreateHandlerConsumer(
@@ -501,7 +533,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             ImmutableArray<ParameterKind>.Empty,
             hintName,
             IsHandler: true,
-            ConsumerKey: type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+            ConsumerKey: type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            LocationInfo.From(location));
     }
 
     private static bool TryResolveParameters(
@@ -660,11 +693,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine();
         sb.AppendLine("        services.AddSingleton(new global::Elarion.Abstractions.Messaging.EventSubscriptionDescriptor");
         sb.AppendLine("        {");
-        var owner = consumer.IsHandler ? consumer.ConsumerKey! : consumer.ServiceTypeFqn;
-        var parameterShape = consumer.IsHandler
-            ? string.Empty
-            : ":" + string.Join(",", consumer.Parameters.Select(static parameter => parameter.ToString()));
-        var consumerId = $"{owner.Replace("global::", string.Empty)}.{consumer.MethodName}({consumer.EventTypeFqn.Replace("global::", string.Empty)}{parameterShape})";
+        var consumerId = BuildConsumerId(consumer);
         sb.AppendLine($"            ConsumerId = {FormatStringLiteral(consumerId)},");
         sb.AppendLine($"            EventType = typeof({consumer.EventTypeFqn}),");
         sb.AppendLine($"            Plane = global::Elarion.Abstractions.Messaging.EventPlane.{consumer.Plane},");
@@ -679,6 +708,11 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         }
 
         sb.AppendLine("        });");
+    }
+
+    private static string BuildConsumerId(EventConsumerInfo consumer) {
+        var owner = consumer.IsHandler ? consumer.ConsumerKey! : consumer.ServiceTypeFqn;
+        return $"{owner.Replace("global::", string.Empty)}.{consumer.MethodName}({consumer.EventTypeFqn.Replace("global::", string.Empty)})";
     }
 
     private static void AppendSubscriberInvoke(StringBuilder sb, EventConsumerInfo consumer) {

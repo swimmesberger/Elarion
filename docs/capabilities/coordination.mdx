@@ -63,6 +63,9 @@ builder.Services.AddElarionPostgreSqlRoleLease<AppDbContext>(options => {
 Duplicate registration of the same role in one process fails at startup. The defaults are sized so
 the old holder stops acting before a successor may legitimately take over:
 
+Role names are validated against the lease table's 128-character limit during registration. Fixed
+partitions validate their generated `{name}:partition-N` roles before adding any services.
+
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `LeaseDuration` | 30 s | How long one successful acquisition remains valid; also the crash-failover bound. |
@@ -171,13 +174,25 @@ app.UseElarionPartitionHolderProxy(
 The resolver reads raw path/query/header state. Missing affinity keys return 400; holder failures use
 the same bounded 503 behavior as the coarse-role proxy.
 
+When the target subsystem uses scoped affinity, pass that same stable scope. Virtual-sharded actors
+hash their logical actor name (the `[Actor(Name = ...)]` value, or the class name without `Actor`) and
+canonical key together, so actor ingress must use the scoped overload:
+
+```csharp
+app.UseElarionPartitionHolderProxy(
+    "actors",
+    "Order",
+    context => context.Request.Path.Value?.Split('/').LastOrDefault(),
+    "/orders");
+```
+
 ## Actor home is a specialized role
 
 `AddElarionPostgreSqlActorHome<TDbContext>()` composes the same mechanism under the reserved
 `"actors"` role for `[Actor(Placement = ActorPlacementMode.SingleHome)]` actors. Calls on other instances fail rather than
 forwarding through the actor runtime; host-owned HTTP prefixes can use
 `UseElarionRoleHolderProxy("actors", ...)` to reach a single home, or
-`UseElarionPartitionHolderProxy("actors", ...)` for virtual-sharded ingress. See [Actors](/docs/concepts/actors) for
+`UseElarionPartitionHolderProxy("actors", actorName, ...)` for virtual-sharded ingress. See [Actors](/docs/concepts/actors) for
 the placement and migration boundaries.
 
 ## Failure behavior

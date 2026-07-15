@@ -90,7 +90,9 @@ public sealed class OutboxDeliveryService(
         await using var pollScope = scopeFactory.CreateAsyncScope();
 
         var store = pollScope.ServiceProvider.GetRequiredService<IOutboxStore>();
-        var heldRoles = pollScope.ServiceProvider.GetService<IRoleLeaseRegistry>()?.Leases
+        var roleLeases = pollScope.ServiceProvider.GetService<IRoleLeaseRegistry>()?.Leases
+            .ToDictionary(static lease => lease.Role, StringComparer.Ordinal);
+        var heldRoles = roleLeases?.Values
             .Where(static lease => lease.IsHeld)
             .Select(static lease => lease.Role)
             .ToArray() ?? [];
@@ -107,6 +109,23 @@ public sealed class OutboxDeliveryService(
         foreach (var delivery in claimed)
         {
             ct.ThrowIfCancellationRequested();
+            if (delivery.TargetRole is { } targetRole
+                && (roleLeases is null
+                    || !roleLeases.TryGetValue(targetRole, out var targetLease)
+                    || !targetLease.IsHeld)) {
+                if (!await store.ReleaseClaimAsync(delivery.Id, lockId, ct).ConfigureAwait(false)) {
+                    LogLeaseLost(delivery);
+                }
+                else {
+                    logger.LogInformation(
+                        "Released outbox delivery {DeliveryId} for role '{Role}' because this process no longer holds the role.",
+                        delivery.Id,
+                        targetRole);
+                }
+
+                continue;
+            }
+
             await DeliverAsync(store, lockId, delivery, ct).ConfigureAwait(false);
         }
 

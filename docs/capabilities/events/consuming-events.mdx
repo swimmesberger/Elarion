@@ -121,6 +121,11 @@ Beyond the message parameter, a method-form consumer may optionally declare — 
 Both are supplied by the runtime; omit what you don't need, and use `[ConsumeEvent(Order = n)]` to order
 fan-out subscribers. (The handler form takes the event and an optional `CancellationToken`.)
 
+The durable consumer identity is `{service}.{method}({event type})`. Runtime-supplied context and
+`CancellationToken` parameters are intentionally excluded, so adding or removing either does not orphan
+pending outbox deliveries or inbox claims. Two overloads on the same service with the same method name and
+event type would share that identity and are rejected by `ELEVT006`; rename or split one consumer.
+
 A class-level `[ConsumeEvent]` on a non-handler class, or a method-form consumer not on a `[Service]`, is
 reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`.
 

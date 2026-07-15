@@ -33,6 +33,13 @@ public interface IOutboxStore
         CancellationToken ct);
 
     /// <summary>
+    /// Releases a still-owned claim without recording an attempt or applying retry backoff.
+    /// Used when this process loses a delivery's target role after claiming it but before dispatch.
+    /// </summary>
+    /// <returns><see langword="true"/> when the claim was released; otherwise the lease was already lost.</returns>
+    ValueTask<bool> ReleaseClaimAsync(Guid deliveryId, Guid lockId, CancellationToken ct);
+
+    /// <summary>
     /// Marks the consumer delivery complete and clears its lease while <paramref name="lockId"/> still owns it.
     /// </summary>
     /// <remarks>
@@ -67,6 +74,9 @@ public interface IOutboxStore
     /// <returns><see langword="true"/> when the row was updated; <see langword="false"/> when the lease was lost.</returns>
     ValueTask<bool> MarkPermanentlyFailedAsync(Guid deliveryId, Guid lockId, string error, CancellationToken ct);
 
-    /// <summary>Permanently deletes messages whose every delivery completed before <paramref name="olderThanUtc"/>.</summary>
+    /// <summary>
+    /// Permanently deletes messages whose every delivery completed before <paramref name="olderThanUtc"/>,
+    /// using bounded batches internally.
+    /// </summary>
     ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct);
 }

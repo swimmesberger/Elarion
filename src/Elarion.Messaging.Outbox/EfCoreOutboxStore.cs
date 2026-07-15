@@ -6,6 +6,8 @@ namespace Elarion.Messaging.Outbox;
 public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOptions options, TimeProvider timeProvider)
     : IOutboxStore
     where TDbContext : DbContext {
+    private const int PurgeBatchSize = 1_000;
+
     /// <inheritdoc />
     public void Append(OutboxMessage message) {
         ArgumentNullException.ThrowIfNull(message);
@@ -62,6 +64,19 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
             .ThenBy(delivery => delivery.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> ReleaseClaimAsync(Guid deliveryId, Guid lockId, CancellationToken ct) {
+        var rows = await dbContext.Set<OutboxDelivery>()
+            .Where(delivery => delivery.Id == deliveryId && delivery.LockId == lockId)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(delivery => delivery.LockId, (Guid?)null)
+                    .SetProperty(delivery => delivery.LockedUntilUtc, (DateTimeOffset?)null),
+                ct)
+            .ConfigureAwait(false);
+        return rows > 0;
     }
 
     /// <inheritdoc />
@@ -124,11 +139,38 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
     }
 
     /// <inheritdoc />
-    public async ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) =>
-        await dbContext.Set<OutboxMessage>()
-            .Where(message => message.Deliveries.Count != 0
-                && message.Deliveries.All(delivery =>
-                    delivery.ProcessedOnUtc != null && delivery.ProcessedOnUtc < olderThanUtc))
-            .ExecuteDeleteAsync(ct)
-            .ConfigureAwait(false);
+    public async ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) {
+        var purged = 0;
+        while (true) {
+            // Start from the processed-delivery index. NOT EXISTS rejects a message when any sibling
+            // delivery is pending or too recent; Take bounds both the candidate query and parent DELETE.
+            var candidates = await dbContext.Set<OutboxDelivery>()
+                .AsNoTracking()
+                .Where(delivery => delivery.ProcessedOnUtc != null
+                    && delivery.ProcessedOnUtc < olderThanUtc
+                    && !dbContext.Set<OutboxDelivery>().Any(sibling =>
+                        sibling.MessageId == delivery.MessageId
+                        && (sibling.ProcessedOnUtc == null || sibling.ProcessedOnUtc >= olderThanUtc)))
+                .OrderBy(delivery => delivery.ProcessedOnUtc)
+                .ThenBy(delivery => delivery.Id)
+                .Select(delivery => delivery.MessageId)
+                .Take(PurgeBatchSize)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            if (candidates.Count == 0) {
+                return purged;
+            }
+
+            var messageIds = candidates.Distinct().ToArray();
+            purged += await dbContext.Set<OutboxMessage>()
+                .Where(message => messageIds.Contains(message.Id))
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+
+            if (candidates.Count < PurgeBatchSize) {
+                return purged;
+            }
+        }
+    }
 }

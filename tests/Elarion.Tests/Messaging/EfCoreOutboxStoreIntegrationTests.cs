@@ -73,6 +73,27 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
     }
 
     [Fact]
+    public async Task ReleaseClaim_WithCurrentLockToken_MakesDeliveryImmediatelyClaimable() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var context = fixture.CreateContext();
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
+        var delivery = await SeedAsync(context, "actors");
+
+        var firstLock = Guid.NewGuid();
+        await store.ClaimPendingAsync(firstLock, DateTimeOffset.UtcNow.AddMinutes(2), 10, ["actors"], Ct);
+
+        (await store.ReleaseClaimAsync(delivery.Id, firstLock, Ct)).Should().BeTrue();
+        var row = await context.Set<OutboxDelivery>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
+        row.LockId.Should().BeNull();
+        row.LockedUntilUtc.Should().BeNull();
+        row.Attempts.Should().Be(0);
+
+        var secondLock = Guid.NewGuid();
+        (await store.ClaimPendingAsync(secondLock, DateTimeOffset.UtcNow.AddMinutes(2), 10, ["actors"], Ct))
+            .Should().ContainSingle().Which.Id.Should().Be(delivery.Id);
+    }
+
+    [Fact]
     public async Task MarkFailed_SetsVisibilityTimeout_ExcludingFromNextClaim() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var context = fixture.CreateContext();
@@ -126,5 +147,34 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
         (await store.ClaimPendingAsync(
             Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, ["actors:partition-3"], Ct))
             .Should().ContainSingle().Which.Id.Should().Be(delivery.Id);
+    }
+
+    [Fact]
+    public async Task PurgeProcessed_DeletesOnlyMessagesWhoseEveryDeliveryIsOld() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var context = fixture.CreateContext();
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
+        var eligible = await SeedAsync(context);
+        eligible.ProcessedOnUtc = cutoff.AddMinutes(-1);
+
+        var blocked = await SeedAsync(context);
+        blocked.ProcessedOnUtc = cutoff.AddMinutes(-1);
+        blocked.Message.Deliveries.Add(new OutboxDelivery {
+            Id = Guid.CreateVersion7(),
+            MessageId = blocked.MessageId,
+            OccurredOnUtc = blocked.OccurredOnUtc,
+            ConsumerId = "second-consumer",
+            ProcessedOnUtc = cutoff.AddMinutes(1),
+            Message = blocked.Message
+        });
+        await context.SaveChangesAsync(Ct);
+        var eligibleMessageId = eligible.MessageId;
+        var blockedMessageId = blocked.MessageId;
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
+
+        (await store.PurgeProcessedAsync(cutoff, Ct)).Should().BeGreaterThanOrEqualTo(1);
+
+        (await context.Set<OutboxMessage>().AnyAsync(message => message.Id == eligibleMessageId, Ct)).Should().BeFalse();
+        (await context.Set<OutboxMessage>().AnyAsync(message => message.Id == blockedMessageId, Ct)).Should().BeTrue();
     }
 }

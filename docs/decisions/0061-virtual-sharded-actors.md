@@ -52,7 +52,7 @@ transparent calls from any process, is the Orleans/Akka.NET/Proto.Actor trigger.
 - A deployment can add processes without changing the configured shard count.
 - Role leases provide failover and let one process hold several shards, but they do not guarantee an
   even distribution; ownership follows lease acquisition order.
-- HTTP can use `UseElarionPartitionHolderProxy`; connection ingress remains application-composed. The
+- HTTP can use `UseElarionPartitionHolderProxy("actors", actorName, ...)`; connection ingress remains application-composed. The
   resolver seam is provider-neutral, so another coordination backend can replace PostgreSQL.
 - Each virtual shard adds one role heartbeat. The default of 16 is sized for the 1–10-node tier and
   can be adjusted when a workload needs fewer or more partitions.

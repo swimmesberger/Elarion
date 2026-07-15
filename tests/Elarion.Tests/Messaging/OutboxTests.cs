@@ -471,6 +471,55 @@ public sealed class OutboxDeliveryServiceTests
     }
 
     [Fact]
+    public async Task RoleLostAfterBatchClaim_ReleasesRemainingDeliveryWithoutDispatchOrBackoff()
+    {
+        var store = new FakeOutboxStore();
+        var first = WithTargetRole(Message(new OutboxTestEvent(1, "first"), out var firstId), "actors");
+        var second = WithTargetRole(Message(new OutboxTestEvent(2, "second"), out var secondId), "actors");
+        store.Pending.Enqueue([first, second]);
+        var lease = new MutableRoleLease { Role = "actors", IsHeld = true };
+        var calls = 0;
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IOutboxStore>(store);
+        services.AddSingleton<IRoleLeaseRegistry>(new FakeRoleLeaseRegistry(lease));
+        await using var provider = services.BuildServiceProvider();
+        var options = new OutboxOptions { PollingInterval = TimeSpan.FromMilliseconds(20) };
+        var dispatcher = new OutboxEventDispatcher(
+            new OutboxConsumerCatalog([
+                new EventSubscriptionDescriptor {
+                    ConsumerId = "consumer",
+                    EventType = typeof(OutboxTestEvent),
+                    Plane = EventPlane.Integration,
+                    ServiceType = typeof(object),
+                    InvokeAsync = (_, _, _, _) => {
+                        calls++;
+                        lease.IsHeld = false;
+                        return ValueTask.CompletedTask;
+                    }
+                }
+            ]),
+            options,
+            OutboxTestJson.Instance,
+            NullLogger<OutboxEventDispatcher>.Instance);
+        var service = new OutboxDeliveryService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            dispatcher,
+            options,
+            new FakeTimeProvider(),
+            NullLogger<OutboxDeliveryService>.Instance);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => store.Released.Count == 1);
+        await service.StopAsync(TestContext.Current.CancellationToken);
+
+        calls.Should().Be(1);
+        store.Processed.Should().ContainSingle().Which.Should().Be((firstId, store.LastLockId));
+        store.Released.Should().ContainSingle().Which.Should().Be((secondId, store.LastLockId));
+        store.Failed.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task RetentionPurge_RunsOncePerPurgeInterval_NotEveryIdlePoll()
     {
         var store = new FakeOutboxStore();
@@ -593,6 +642,15 @@ public sealed class OutboxDeliveryServiceTests
         ConsumerId = "consumer",
         Message = message
     };
+
+    private static OutboxDelivery WithTargetRole(OutboxDelivery delivery, string targetRole) => new() {
+        Id = delivery.Id,
+        MessageId = delivery.MessageId,
+        OccurredOnUtc = delivery.OccurredOnUtc,
+        ConsumerId = delivery.ConsumerId,
+        TargetRole = targetRole,
+        Message = delivery.Message
+    };
 }
 
 public sealed class OutboxServiceCollectionExtensionsTests
@@ -642,6 +700,7 @@ internal sealed class FakeOutboxStore : IOutboxStore
     public List<OutboxMessage> Appended { get; } = [];
     public Queue<IReadOnlyList<OutboxDelivery>> Pending { get; } = new();
     public List<(Guid Id, Guid LockId)> Processed { get; } = [];
+    public List<(Guid Id, Guid LockId)> Released { get; } = [];
     public List<(Guid Id, Guid LockId, string Error, DateTimeOffset RetryVisibleAfterUtc)> Failed { get; } = [];
     public List<(Guid Id, Guid LockId, string Error)> PermanentlyFailed { get; } = [];
     public TaskCompletionSource Signal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -689,6 +748,17 @@ internal sealed class FakeOutboxStore : IOutboxStore
         if (FinalizeSucceeds)
         {
             Processed.Add((id, lockId));
+        }
+
+        Signal.TrySetResult();
+        return ValueTask.FromResult(FinalizeSucceeds);
+    }
+
+    public ValueTask<bool> ReleaseClaimAsync(Guid id, Guid lockId, CancellationToken ct)
+    {
+        if (FinalizeSucceeds)
+        {
+            Released.Add((id, lockId));
         }
 
         Signal.TrySetResult();

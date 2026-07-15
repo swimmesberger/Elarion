@@ -140,6 +140,9 @@ internal sealed class CapturingStore : IOutboxStore {
         IReadOnlyCollection<string> heldRoles,
         CancellationToken ct) => throw new NotSupportedException();
 
+    public ValueTask<bool> ReleaseClaimAsync(Guid deliveryId, Guid lockId, CancellationToken ct) =>
+        throw new NotSupportedException();
+
     public ValueTask<bool> MarkProcessedAsync(
         Guid deliveryId,
         Guid lockId,

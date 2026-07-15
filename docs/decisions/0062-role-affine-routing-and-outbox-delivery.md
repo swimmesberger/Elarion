@@ -42,7 +42,8 @@ child per integration consumer, atomically in the publisher's transaction. Each 
 - its own claim lease, attempts, backoff, completion, and error state.
 
 Workers claim a delivery only when `TargetRole` is null or the local process currently holds that
-role. Ordinary consumers remain unbound. Generated actor consumers target the actor-home role for
+role, and recheck that lease immediately before each dispatch. A claim whose role was lost is released
+without an attempt or backoff so the new holder can take it immediately. Ordinary consumers remain unbound. Generated actor consumers target the actor-home role for
 `SingleHome`, or the key's partition role for `VirtualShards`. Role failover changes claim eligibility
 without rewriting pending rows. `OutboxOptions.DeliveryGate` is removed.
 
@@ -56,12 +57,20 @@ stable id. Every publishing process must therefore have the same generated consu
 same role-partition configuration, even when `RunDeliveryWorker` is false. This homogeneous catalog is
 the deliberate greenfield contract; dynamically heterogeneous fleets need a real broker/catalog.
 
+Method-form consumer ids contain only the service, method, and event type. Framework-injected context
+and cancellation parameters do not participate, so adding one does not rename durable deliveries or
+inbox claims. Overloads that would produce the same id are a generator error (`ELEVT006`). Retention
+purging is delivery-index-driven and deletes eligible parent messages in bounded batches.
+
 ### HTTP resolves a role before execution
 
 `UseElarionPartitionHolderProxy(partition, affinityKey, prefixes)` selects a partition role from each
 matching request and reuses ADR-0050's one-hop proxy. HTTP needs the holder's advertised address;
 outbox delivery does not. The affinity resolver runs before routing and therefore reads the raw path,
 query, or headers. A missing key is a `400`; an unknown/unreachable holder remains `503 + Retry-After`.
+The scoped overload `UseElarionPartitionHolderProxy(partition, affinityScope, affinityKey, prefixes)`
+uses the same two-component hash as actor placement; virtual-sharded actor ingress passes the logical
+actor name as `affinityScope`.
 
 This is role affinity, not a generic RPC or load-balancing layer. Other legitimate consumers include
 device-connection owners, ordered-stream sequencers, and nodes attached to local hardware. Stateless
