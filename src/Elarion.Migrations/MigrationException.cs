@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>
 /// A migration configuration or validation failure: invalid script resources, a checksum mismatch

@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>
 /// A script failed while executing. For a transactional script the transaction — including its history

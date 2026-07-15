@@ -1,0 +1,1 @@
+CREATE TABLE mig_points (id INTEGER PRIMARY KEY);

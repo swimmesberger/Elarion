@@ -42,7 +42,9 @@
     <Project Path="src/Elarion.Devices.EntityFrameworkCore.Generators/Elarion.Devices.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />
+    <Project Path="src/Elarion.Migrations/Elarion.Migrations.csproj" />
     <Project Path="src/Elarion.Migrations.PostgreSql/Elarion.Migrations.PostgreSql.csproj" />
+    <Project Path="src/Elarion.Migrations.Sqlite/Elarion.Migrations.Sqlite.csproj" />
     <Project Path="src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />
     <Project Path="src/Elarion.Messaging.Outbox.Generators/Elarion.Messaging.Outbox.Generators.csproj" />
     <Project Path="src/Elarion.Paging/Elarion.Paging.csproj" />

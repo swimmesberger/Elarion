@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>One problem found by <see cref="IMigrationRunner.ValidateAsync"/>.</summary>
 public sealed record MigrationValidationError {

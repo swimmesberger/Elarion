@@ -1,6 +1,5 @@
+using Elarion.Migrations;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
@@ -10,13 +9,13 @@ namespace Elarion.Migrations.PostgreSql;
 public static class MigrationsServiceCollectionExtensions {
     /// <summary>
     /// Registers <see cref="IMigrationRunner"/> plus — unless
-    /// <see cref="PostgreSqlMigrationOptions.ApplyOnStartup"/> is disabled — a hosted service that
-    /// applies pending migrations before the host reports ready and fails startup on error. Register it
-    /// before other hosted services that expect the schema (hosted services start in registration order).
+    /// <see cref="MigrationOptions.ApplyOnStartup"/> is disabled — a hosted service that applies pending
+    /// migrations before the host reports ready and fails startup on error. Register it before other
+    /// hosted services that expect the schema (hosted services start in registration order).
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="connectionString">The connection string of the database to migrate; the runner opens one dedicated connection per run.</param>
-    /// <param name="configure">Configures the options; must add at least one script source via <see cref="PostgreSqlMigrationOptions.AddScripts"/>.</param>
+    /// <param name="configure">Configures the options; must add at least one script source via <see cref="MigrationOptions.AddScripts"/>.</param>
     /// <returns>The same service collection for chaining.</returns>
     /// <example>
     /// <code>
@@ -43,7 +42,7 @@ public static class MigrationsServiceCollectionExtensions {
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="dataSource">The data source of the database to migrate.</param>
-    /// <param name="configure">Configures the options; must add at least one script source via <see cref="PostgreSqlMigrationOptions.AddScripts"/>.</param>
+    /// <param name="configure">Configures the options; must add at least one script source via <see cref="MigrationOptions.AddScripts"/>.</param>
     /// <returns>The same service collection for chaining.</returns>
     public static IServiceCollection AddElarionPostgreSqlMigrations(
         this IServiceCollection services,
@@ -59,31 +58,12 @@ public static class MigrationsServiceCollectionExtensions {
     private static IServiceCollection AddCore(
         IServiceCollection services,
         Action<PostgreSqlMigrationOptions> configure,
-        Func<PostgreSqlMigrationOptions, IServiceProvider, PostgreSqlMigrationRunner> runnerFactory) {
+        Func<PostgreSqlMigrationOptions, IServiceProvider, IMigrationRunner> runnerFactory) {
         ArgumentNullException.ThrowIfNull(configure);
-
-        // Fail loud on a second registration: silently keeping the first would leave the second
-        // database unmigrated. One runner per host; a second database is a second host concern.
-        if (services.Any(descriptor => descriptor.ServiceType == typeof(IMigrationRunner))) {
-            throw new InvalidOperationException(
-                "AddElarionPostgreSqlMigrations was already called on this service collection; the runner migrates exactly one database.");
-        }
 
         var options = new PostgreSqlMigrationOptions();
         configure(options);
-        if (options.ScriptSources.Count == 0) {
-            throw new InvalidOperationException(
-                "AddElarionPostgreSqlMigrations requires at least one script source; call options.AddScripts(assembly, resourceNamePrefix).");
-        }
 
-        services.AddSingleton(options);
-        services.AddSingleton<IMigrationRunner>(provider => runnerFactory(
-            provider.GetRequiredService<PostgreSqlMigrationOptions>(), provider));
-
-        if (options.ApplyOnStartup) {
-            services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PostgreSqlMigrationHostedService>());
-        }
-
-        return services;
+        return services.AddElarionMigrationRunner(options, provider => runnerFactory(options, provider));
     }
 }

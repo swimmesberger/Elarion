@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>
 /// Content normalization and checksumming (ADR-0057): SHA-256 over BOM-stripped, CRLF→LF-normalized
@@ -11,7 +11,7 @@ namespace Elarion.Migrations.PostgreSql;
 internal static class MigrationChecksum {
     /// <summary>Strips a leading BOM and normalizes CRLF to LF.</summary>
     public static string Normalize(string content) {
-        if (content.StartsWith('\uFEFF')) {
+        if (content.Length > 0 && content[0] == '﻿') {
             content = content[1..];
         }
 

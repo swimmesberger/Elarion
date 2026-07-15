@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>
 /// The history contains an unresolved failed migration (a <c>-- elarion: no-transaction</c> script that

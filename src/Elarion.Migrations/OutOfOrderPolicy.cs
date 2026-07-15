@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Migrations;
 
 /// <summary>
 /// What <see cref="IMigrationRunner.MigrateAsync"/> does with a pending script whose version is below an
