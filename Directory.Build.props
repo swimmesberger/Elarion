@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <VersionPrefix>0.2.5</VersionPrefix>
+    <VersionPrefix>0.2.6</VersionPrefix>
     <Authors>Simon Wimmesberger</Authors>
     <Company>swimmesberger</Company>
     <Copyright>Copyright (c) Simon Wimmesberger</Copyright>
