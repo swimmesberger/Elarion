@@ -45,6 +45,7 @@ public static class OutboxServiceCollectionExtensions
         services.AddElarionIdempotency();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton(options);
+        services.TryAddSingleton<OutboxConsumerCatalog>();
         services.TryAddSingleton<OutboxEventDispatcher>();
 
         services.TryAddScoped<IOutboxStore, EfCoreOutboxStore<TDbContext>>();

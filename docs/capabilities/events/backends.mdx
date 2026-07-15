@@ -219,11 +219,12 @@ Role-bound deliveries are different: every worker may run, but it claims a deliv
 `VirtualShards` actor consumers populate that role automatically; failover transfers eligibility without
 HTTP forwarding or a global delivery gate.
 
-The deliveries table has a **partial (filtered) claim index** (`processed_on_utc IS NULL`, or
-`"ProcessedOnUtc" IS NULL` with `snakeCase: false`), so the
-worker's "oldest undelivered first" scan stays a tiny indexed probe regardless of how many delivered rows
-await retention purge. Filtered indexes are supported on PostgreSQL, SQL Server, and SQLite; on MySQL,
-supply an unfiltered index in your own model.
+The deliveries table copies the envelope's publish time into each delivery and has a **partial (filtered)
+claim index** over `(target_role, occurred_on_utc, id)` where `processed_on_utc IS NULL` (PascalCase
+equivalents with `snakeCase: false`). The worker's "oldest eligible delivery first" scan therefore stays
+on the delivery table and does not join/sort through the parent envelope; completed rows awaiting retention
+purge are absent from the index. Filtered indexes are supported on PostgreSQL, SQL Server, and SQLite; on
+MySQL, supply an unfiltered index in your own model.
 
 ### Tracing across the commit boundary
 

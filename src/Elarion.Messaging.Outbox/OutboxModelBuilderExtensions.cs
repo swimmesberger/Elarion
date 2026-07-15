@@ -72,7 +72,7 @@ public static class OutboxModelBuilderExtensions
             builder.HasIndex(delivery => delivery.ProcessedOnUtc)
                 .HasDatabaseName(snakeCase ? $"ix_{deliveryTable}_purge" : $"IX_{deliveryTable}_Purge")
                 .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
-            builder.HasIndex(delivery => new { delivery.TargetRole, delivery.LockedUntilUtc })
+            builder.HasIndex(delivery => new { delivery.TargetRole, delivery.OccurredOnUtc, delivery.Id })
                 .HasDatabaseName(snakeCase ? $"ix_{deliveryTable}_claim" : $"IX_{deliveryTable}_Claim")
                 .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
 
@@ -81,6 +81,8 @@ public static class OutboxModelBuilderExtensions
                 .ValueGeneratedNever();
             builder.Property(delivery => delivery.MessageId)
                 .HasColumnName(snakeCase ? "message_id" : "MessageId");
+            builder.Property(delivery => delivery.OccurredOnUtc)
+                .HasColumnName(snakeCase ? "occurred_on_utc" : "OccurredOnUtc");
             builder.Property(delivery => delivery.ConsumerId)
                 .HasColumnName(snakeCase ? "consumer_id" : "ConsumerId")
                 .HasMaxLength(512)

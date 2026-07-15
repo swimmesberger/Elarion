@@ -8,6 +8,11 @@ public sealed class OutboxDelivery {
     /// <summary>The parent message identifier.</summary>
     public required Guid MessageId { get; init; }
 
+    /// <summary>
+    /// Publish time copied from the parent envelope so the pending-delivery claim remains an ordered index probe.
+    /// </summary>
+    public required DateTimeOffset OccurredOnUtc { get; init; }
+
     /// <summary>The source-generated stable consumer identity.</summary>
     public required string ConsumerId { get; init; }
 

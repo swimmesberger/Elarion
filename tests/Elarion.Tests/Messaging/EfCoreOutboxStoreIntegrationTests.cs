@@ -23,6 +23,7 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
         var delivery = new OutboxDelivery {
             Id = Guid.CreateVersion7(),
             MessageId = message.Id,
+            OccurredOnUtc = message.OccurredOnUtc,
             ConsumerId = "test-consumer",
             TargetRole = targetRole,
             Message = message

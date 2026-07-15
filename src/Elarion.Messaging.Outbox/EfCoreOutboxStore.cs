@@ -30,7 +30,7 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
                 && delivery.Attempts < maxAttempts
                 && (delivery.LockedUntilUtc == null || delivery.LockedUntilUtc < now)
                 && (delivery.TargetRole == null || roles.Contains(delivery.TargetRole)))
-            .OrderBy(delivery => delivery.Message.OccurredOnUtc)
+            .OrderBy(delivery => delivery.OccurredOnUtc)
             .ThenBy(delivery => delivery.Id)
             .Take(batchSize)
             .Select(delivery => delivery.Id)
@@ -58,7 +58,7 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
             .AsNoTracking()
             .Include(delivery => delivery.Message)
             .Where(delivery => candidateIds.Contains(delivery.Id) && delivery.LockId == lockId)
-            .OrderBy(delivery => delivery.Message.OccurredOnUtc)
+            .OrderBy(delivery => delivery.OccurredOnUtc)
             .ThenBy(delivery => delivery.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);

@@ -107,7 +107,7 @@ public sealed class EventTelemetryTests {
         var store = new FakeOutboxStore();
         var bus = new OutboxIntegrationEventBus(
             store,
-            [Subscriber<OutboxTestEvent>(EventPlane.Integration)],
+            new OutboxConsumerCatalog([Subscriber<OutboxTestEvent>(EventPlane.Integration)]),
             EmptyProvider.Instance,
             new OutboxOptions(),
             OutboxTestJson.Instance,
@@ -193,7 +193,7 @@ public sealed class EventTelemetryTests {
         await using var provider = services.BuildServiceProvider();
 
         var dispatcher = new OutboxEventDispatcher(
-            [
+            new OutboxConsumerCatalog([
                 new EventSubscriptionDescriptor {
                     ConsumerId = "telemetry-consumer",
                     EventType = typeof(OutboxTestEvent),
@@ -201,7 +201,7 @@ public sealed class EventTelemetryTests {
                     ServiceType = typeof(object),
                     InvokeAsync = consumer
                 }
-            ],
+            ]),
             new OutboxOptions(),
             OutboxTestJson.Instance,
             NullLogger<OutboxEventDispatcher>.Instance);
@@ -255,6 +255,7 @@ public sealed class EventTelemetryTests {
     private static OutboxDelivery Delivery(OutboxMessage message) => new() {
         Id = Guid.CreateVersion7(),
         MessageId = message.Id,
+        OccurredOnUtc = message.OccurredOnUtc,
         ConsumerId = "telemetry-consumer",
         Message = message
     };

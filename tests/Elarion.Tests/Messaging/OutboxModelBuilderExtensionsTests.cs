@@ -38,6 +38,25 @@ public sealed class OutboxModelBuilderExtensionsTests {
     }
 
     [Fact]
+    public void UseElarionOutbox_AddsOrderedPartialClaimIndex() {
+        var modelBuilder = new ModelBuilder(new ConventionSet());
+        modelBuilder.UseElarionOutbox();
+        var model = modelBuilder.FinalizeModel();
+
+        var delivery = model.FindEntityType(typeof(OutboxDelivery))!;
+        delivery.FindProperty(nameof(OutboxDelivery.OccurredOnUtc))!.GetColumnName()
+            .Should().Be("occurred_on_utc");
+        var claimIndex = delivery.GetIndexes().Single(index =>
+            index.Properties.Select(property => property.Name).SequenceEqual([
+                nameof(OutboxDelivery.TargetRole),
+                nameof(OutboxDelivery.OccurredOnUtc),
+                nameof(OutboxDelivery.Id)
+            ]));
+        claimIndex.GetDatabaseName().Should().Be("ix_elarion_outbox_deliveries_claim");
+        claimIndex.GetFilter().Should().Be("processed_on_utc IS NULL");
+    }
+
+    [Fact]
     public void UseElarionOutbox_CustomTableAndSchema_AreApplied() {
         var modelBuilder = new ModelBuilder(new ConventionSet());
         modelBuilder.UseElarionOutbox("app_outbox", "messaging");
@@ -63,6 +82,7 @@ public sealed class OutboxModelBuilderExtensionsTests {
 
         var delivery = model.FindEntityType(typeof(OutboxDelivery))!;
         delivery.GetTableName().Should().Be("ElarionOutboxDeliveries");
+        delivery.FindProperty(nameof(OutboxDelivery.OccurredOnUtc))!.GetColumnName().Should().Be("OccurredOnUtc");
         delivery.FindProperty(nameof(OutboxDelivery.ProcessedOnUtc))!.GetColumnName().Should().Be("ProcessedOnUtc");
         var purgeIndex = delivery.GetIndexes()
             .Single(index => index.Properties.Count == 1

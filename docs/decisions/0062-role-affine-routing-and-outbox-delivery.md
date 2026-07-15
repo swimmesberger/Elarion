@@ -38,6 +38,7 @@ child per integration consumer, atomically in the publisher's transaction. Each 
 
 - a source-generated stable `ConsumerId`;
 - an optional `TargetRole` selected from the actual event;
+- the envelope's publish time, copied so ordered claims remain a delivery-table index probe;
 - its own claim lease, attempts, backoff, completion, and error state.
 
 Workers claim a delivery only when `TargetRole` is null or the local process currently holds that

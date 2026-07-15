@@ -38,39 +38,22 @@ public sealed class OutboxEventDispatcher
 {
     private readonly ILogger<OutboxEventDispatcher> _logger;
     private readonly JsonSerializerOptions _serializerOptions;
-    private readonly Dictionary<string, EventSubscriptionDescriptor> _consumersById = new(StringComparer.Ordinal);
+    private readonly OutboxConsumerCatalog _consumerCatalog;
 
     /// <summary>Builds the integration-event consumer index from the registered descriptors.</summary>
     public OutboxEventDispatcher(
-        IEnumerable<EventSubscriptionDescriptor> descriptors,
+        OutboxConsumerCatalog consumerCatalog,
         OutboxOptions options,
         IElarionJsonSerialization jsonSerialization,
         ILogger<OutboxEventDispatcher> logger)
     {
-        ArgumentNullException.ThrowIfNull(descriptors);
+        ArgumentNullException.ThrowIfNull(consumerCatalog);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(jsonSerialization);
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
         _serializerOptions = options.SerializerOptions ?? jsonSerialization.Options;
-
-        foreach (var descriptor in descriptors)
-        {
-            if (descriptor.Plane is not EventPlane.Integration || descriptor.InvokeAsync is null)
-            {
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(descriptor.ConsumerId)) {
-                throw new InvalidOperationException(
-                    $"Integration-event consumer '{descriptor.ServiceType}' has no stable ConsumerId.");
-            }
-
-            if (!_consumersById.TryAdd(descriptor.ConsumerId, descriptor)) {
-                throw new InvalidOperationException(
-                    $"Integration-event consumer id '{descriptor.ConsumerId}' is registered more than once.");
-            }
-        }
+        _consumerCatalog = consumerCatalog;
     }
 
     /// <summary>
@@ -87,7 +70,7 @@ public sealed class OutboxEventDispatcher
         CancellationToken ct)
     {
         var message = delivery.Message;
-        if (!_consumersById.TryGetValue(delivery.ConsumerId, out var descriptor)
+        if (!_consumerCatalog.TryGetConsumer(delivery.ConsumerId, out var descriptor)
             || descriptor.EventType.FullName != message.EventType)
         {
             _logger.LogError(

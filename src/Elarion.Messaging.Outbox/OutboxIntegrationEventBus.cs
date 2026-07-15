@@ -17,7 +17,7 @@ namespace Elarion.Messaging.Outbox;
 /// </remarks>
 public sealed class OutboxIntegrationEventBus(
     IOutboxStore store,
-    IEnumerable<EventSubscriptionDescriptor> descriptors,
+    OutboxConsumerCatalog consumerCatalog,
     IServiceProvider serviceProvider,
     OutboxOptions options,
     IElarionJsonSerialization jsonSerialization,
@@ -32,30 +32,10 @@ public sealed class OutboxIntegrationEventBus(
 
         EventTelemetry.RecordPublish(typeof(TEvent).Name, EventPlane.Integration);
 
-        var consumers = descriptors
-            .Where(descriptor => descriptor.Plane is EventPlane.Integration
-                && descriptor.EventType == typeof(TEvent)
-                && descriptor.InvokeAsync is not null)
-            .OrderBy(descriptor => descriptor.Order)
-            .ToArray();
+        var consumers = consumerCatalog.GetConsumerArray(typeof(TEvent));
         if (consumers.Length == 0) {
             throw new InvalidOperationException(
                 $"Integration event '{typeof(TEvent)}' has no registered consumers and cannot be written to the outbox.");
-        }
-
-        var duplicate = consumers
-            .Where(descriptor => !string.IsNullOrWhiteSpace(descriptor.ConsumerId))
-            .GroupBy(descriptor => descriptor.ConsumerId, StringComparer.Ordinal)
-            .FirstOrDefault(group => group.Count() > 1);
-        if (duplicate is not null) {
-            throw new InvalidOperationException(
-                $"Integration-event consumer id '{duplicate.Key}' is registered more than once.");
-        }
-
-        var missingId = consumers.FirstOrDefault(descriptor => string.IsNullOrWhiteSpace(descriptor.ConsumerId));
-        if (missingId is not null) {
-            throw new InvalidOperationException(
-                $"Integration-event consumer '{missingId.ServiceType}' has no stable ConsumerId.");
         }
 
         var payload = JsonSerializer.Serialize(@event, options.SerializerOptions ?? jsonSerialization.Options);
@@ -73,6 +53,10 @@ public sealed class OutboxIntegrationEventBus(
             TraceParent = Activity.Current?.Id
         };
 
+        if (message.Deliveries is List<OutboxDelivery> deliveries) {
+            deliveries.EnsureCapacity(consumers.Length);
+        }
+
         foreach (var descriptor in consumers) {
             var targetRole = descriptor.ResolveDeliveryRole?.Invoke(serviceProvider, @event);
             if (targetRole is not null) {
@@ -82,6 +66,7 @@ public sealed class OutboxIntegrationEventBus(
             message.Deliveries.Add(new OutboxDelivery {
                 Id = Guid.CreateVersion7(),
                 MessageId = messageId,
+                OccurredOnUtc = message.OccurredOnUtc,
                 ConsumerId = descriptor.ConsumerId,
                 TargetRole = targetRole,
                 Message = message

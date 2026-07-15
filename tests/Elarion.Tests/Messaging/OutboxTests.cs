@@ -34,7 +34,7 @@ public sealed class OutboxIntegrationEventBusTests
         var store = new FakeOutboxStore();
         var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-02T03:04:05Z"));
         var bus = new OutboxIntegrationEventBus(
-            store, [Descriptor()], EmptyProvider.Instance,
+            store, Catalog(Descriptor()), EmptyProvider.Instance,
             new OutboxOptions(), OutboxTestJson.Instance, time);
 
         await bus.PublishAsync(new OutboxTestEvent(7, "alice"), TestContext.Current.CancellationToken);
@@ -43,7 +43,9 @@ public sealed class OutboxIntegrationEventBusTests
         message.EventType.Should().Be(typeof(OutboxTestEvent).FullName);
         message.OccurredOnUtc.Should().Be(time.GetUtcNow());
         message.CorrelationId.Should().NotBe(Guid.Empty);
-        message.Deliveries.Should().ContainSingle().Which.ConsumerId.Should().Be("consumer");
+        var delivery = message.Deliveries.Should().ContainSingle().Subject;
+        delivery.ConsumerId.Should().Be("consumer");
+        delivery.OccurredOnUtc.Should().Be(message.OccurredOnUtc);
 
         var roundTripped = JsonSerializer.Deserialize<OutboxTestEvent>(message.Payload, OutboxTestJson.Instance.Options);
         roundTripped.Should().Be(new OutboxTestEvent(7, "alice"));
@@ -53,7 +55,7 @@ public sealed class OutboxIntegrationEventBusTests
     public async Task PublishAsync_NullEvent_Throws()
     {
         var bus = new OutboxIntegrationEventBus(
-            new FakeOutboxStore(), [Descriptor()], EmptyProvider.Instance,
+            new FakeOutboxStore(), Catalog(Descriptor()), EmptyProvider.Instance,
             new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
 
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
@@ -70,7 +72,7 @@ public sealed class OutboxIntegrationEventBusTests
                 ((OutboxTestEvent)@event).Id == 7 ? "actors:partition-3" : null
         };
         var bus = new OutboxIntegrationEventBus(
-            store, [local, homed], EmptyProvider.Instance,
+            store, Catalog(local, homed), EmptyProvider.Instance,
             new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
 
         await bus.PublishAsync(new OutboxTestEvent(7, "alice"), TestContext.Current.CancellationToken);
@@ -86,7 +88,7 @@ public sealed class OutboxIntegrationEventBusTests
     public async Task PublishAsync_WithoutRegisteredConsumer_FailsBeforePersisting() {
         var store = new FakeOutboxStore();
         var bus = new OutboxIntegrationEventBus(
-            store, [], EmptyProvider.Instance,
+            store, Catalog(), EmptyProvider.Instance,
             new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
 
         var act = async () => await bus.PublishAsync(
@@ -101,6 +103,47 @@ public sealed class OutboxIntegrationEventBusTests
         EventType = typeof(OutboxTestEvent),
         Plane = EventPlane.Integration,
         ServiceType = typeof(object),
+        InvokeAsync = static (_, _, _, _) => ValueTask.CompletedTask
+    };
+
+    private static OutboxConsumerCatalog Catalog(params EventSubscriptionDescriptor[] descriptors) =>
+        new(descriptors);
+}
+
+public sealed class OutboxConsumerCatalogTests {
+    [Fact]
+    public void Constructor_IndexesAndOrdersConsumersOnce() {
+        var second = Descriptor("second", order: 20);
+        var first = Descriptor("first", order: 10);
+
+        var catalog = new OutboxConsumerCatalog([second, first]);
+
+        catalog.GetConsumers(typeof(OutboxTestEvent)).Select(descriptor => descriptor.ConsumerId)
+            .Should().Equal("first", "second");
+        catalog.TryGetConsumer("second", out var found).Should().BeTrue();
+        found.Should().BeSameAs(second);
+    }
+
+    [Fact]
+    public void Constructor_DuplicateConsumerId_Throws() {
+        var act = () => new OutboxConsumerCatalog([Descriptor("same"), Descriptor("same")]);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*registered more than once*");
+    }
+
+    [Fact]
+    public void Constructor_MissingConsumerId_Throws() {
+        var act = () => new OutboxConsumerCatalog([Descriptor("")]);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*no stable ConsumerId*");
+    }
+
+    private static EventSubscriptionDescriptor Descriptor(string consumerId, int order = 0) => new() {
+        ConsumerId = consumerId,
+        EventType = typeof(OutboxTestEvent),
+        Plane = EventPlane.Integration,
+        ServiceType = typeof(object),
+        Order = order,
         InvokeAsync = static (_, _, _, _) => ValueTask.CompletedTask
     };
 }
@@ -253,7 +296,7 @@ public sealed class OutboxEventDispatcherTests
 
     private static OutboxEventDispatcher CreateDispatcher(EventSubscriberInvokeDelegate invoke) =>
         new(
-            [
+            new OutboxConsumerCatalog([
                 new EventSubscriptionDescriptor
                 {
                     ConsumerId = "consumer",
@@ -262,7 +305,7 @@ public sealed class OutboxEventDispatcherTests
                     ServiceType = typeof(object),
                     InvokeAsync = invoke
                 }
-            ],
+            ]),
             new OutboxOptions(),
             OutboxTestJson.Instance,
             NullLogger<OutboxEventDispatcher>.Instance);
@@ -279,6 +322,7 @@ public sealed class OutboxEventDispatcherTests
     private static OutboxDelivery CreateDelivery(OutboxMessage message) => new() {
         Id = Guid.CreateVersion7(),
         MessageId = message.Id,
+        OccurredOnUtc = message.OccurredOnUtc,
         ConsumerId = "consumer",
         Message = message
     };
@@ -371,6 +415,7 @@ public sealed class OutboxDeliveryServiceTests
         delivery = new OutboxDelivery {
             Id = delivery.Id,
             MessageId = delivery.MessageId,
+            OccurredOnUtc = delivery.OccurredOnUtc,
             ConsumerId = delivery.ConsumerId,
             TargetRole = "actors",
             Message = delivery.Message
@@ -388,7 +433,7 @@ public sealed class OutboxDeliveryServiceTests
         services.AddSingleton<IRoleLeaseRegistry>(new FakeRoleLeaseRegistry(lease));
         await using var provider = services.BuildServiceProvider();
         var dispatcher = new OutboxEventDispatcher(
-            [
+            new OutboxConsumerCatalog([
                 new EventSubscriptionDescriptor
                 {
                     ConsumerId = "consumer",
@@ -397,7 +442,7 @@ public sealed class OutboxDeliveryServiceTests
                     ServiceType = typeof(object),
                     InvokeAsync = (_, _, _, _) => ValueTask.CompletedTask
                 }
-            ],
+            ]),
             options,
             OutboxTestJson.Instance,
             NullLogger<OutboxEventDispatcher>.Instance);
@@ -440,7 +485,8 @@ public sealed class OutboxDeliveryServiceTests
         services.AddSingleton<IOutboxStore>(store);
         await using var provider = services.BuildServiceProvider();
         var dispatcher = new OutboxEventDispatcher(
-            [], options, OutboxTestJson.Instance, NullLogger<OutboxEventDispatcher>.Instance);
+            new OutboxConsumerCatalog([]), options, OutboxTestJson.Instance,
+            NullLogger<OutboxEventDispatcher>.Instance);
         var service = new OutboxDeliveryService(
             provider.GetRequiredService<IServiceScopeFactory>(),
             dispatcher,
@@ -495,7 +541,7 @@ public sealed class OutboxDeliveryServiceTests
         await using var provider = services.BuildServiceProvider();
 
         var dispatcher = new OutboxEventDispatcher(
-            [
+            new OutboxConsumerCatalog([
                 new EventSubscriptionDescriptor
                 {
                     ConsumerId = "consumer",
@@ -504,7 +550,7 @@ public sealed class OutboxDeliveryServiceTests
                     ServiceType = typeof(object),
                     InvokeAsync = recordingDispatcher
                 }
-            ],
+            ]),
             options,
             OutboxTestJson.Instance,
             NullLogger<OutboxEventDispatcher>.Instance);
@@ -534,6 +580,7 @@ public sealed class OutboxDeliveryServiceTests
         return new OutboxDelivery {
             Id = id,
             MessageId = message.Id,
+            OccurredOnUtc = message.OccurredOnUtc,
             ConsumerId = "consumer",
             Message = message
         };
@@ -542,6 +589,7 @@ public sealed class OutboxDeliveryServiceTests
     private static OutboxDelivery DeliveryFor(OutboxMessage message) => new() {
         Id = Guid.CreateVersion7(),
         MessageId = message.Id,
+        OccurredOnUtc = message.OccurredOnUtc,
         ConsumerId = "consumer",
         Message = message
     };
