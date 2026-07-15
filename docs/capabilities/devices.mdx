@@ -81,11 +81,15 @@ app.MapPost("/devices/redeem", async (RedeemBody body, IDevicePairingService pai
 
 Redeeming a code issued for an **already-provisioned device id rotates its key** — issuing that
 code is the re-key authorization (device reset, lost key), so re-pairing is just "issue a new code
-for the same id".
+for the same id". Reissuing for the same id atomically supersedes every earlier pending code, so a
+stale screen/photo cannot later rotate a newly established key. A pending device can also revoke its
+capability without deleting its identity: call `IDevicePairingService.RevokeAsync(deviceId)`. Revoked,
+expired, unknown, and used codes all redeem as the same `null` result.
 
 Expired codes are tiny rows swept by `IPairingCodeStore.DeleteExpiredAsync` — schedule it with a
-`[ScheduledJob]`. Revocation is `IDeviceKeyStore.RemoveAsync(deviceId)`: the device can no longer
-authenticate (to force the point immediately, look up its live connections with
+`[ScheduledJob]`. The EF Core provider adds an index on pending-code `device_id`; add/apply the
+corresponding migration when upgrading an existing database. Revoking established credentials is
+still `IDeviceKeyStore.RemoveAsync(deviceId)`: the device can no longer authenticate (to force the point immediately, look up its live connections with
 `registry.GetForPrincipal(deviceId)` and close each adapter connection).
 
 ## Connect-time authentication

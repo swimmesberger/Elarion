@@ -249,6 +249,26 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     [Fact]
+    public async Task CriticalProtocolInitialization_FailureUnregistersBeforeFramedMessages() {
+        var ct = TestContext.Current.CancellationToken;
+        var services = new ServiceCollection();
+        services.AddElarionConnections();
+        await using var provider = services.BuildServiceProvider();
+        var registry = provider.GetRequiredService<IClientConnectionRegistry>();
+        var handler = new OpeningFailureTcpHandler();
+        await using var link = InMemoryTcpLink.Start(handler, registry, o => o.Framer = new DelimitedTcpFramer((byte)'\n'));
+
+        (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
+        await link.Client.SendTextAsync("device:opening", ct);
+        (await link.Client.ReceiveTextAsync(ct)).Should().Be("welcome");
+        await link.ServerCompletion.WaitAsync(ct);
+
+        handler.Protocol!.Opened.Should().Be(1);
+        handler.Protocol.Messages.Should().Be(0);
+        registry.Connections.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Listener_MaxConcurrentConnections_ShedsExcessAndRecoversWhenASlotFrees() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartListenerHostAsync<ChallengeTcpHandler>(
@@ -770,6 +790,35 @@ public sealed class TcpConnectionAdapterTests {
                 throw new InvalidOperationException("teardown failure");
             }
 
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class OpeningFailureTcpHandler : TcpConnectionHandler {
+        public OpeningFailureTcpProtocol? Protocol { get; private set; }
+
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake, CancellationToken ct) {
+            await handshake.SendTextAsync("challenge", ct);
+            var reply = await handshake.ReceiveTextAsync(ct);
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
+            await handshake.SendTextAsync("welcome", ct);
+            return new ClientConnectionTicket { Principal = new ClaimsPrincipal(new ClaimsIdentity("device")), PrincipalId = reply[7..] };
+        }
+
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) => Protocol = new OpeningFailureTcpProtocol();
+    }
+
+    private sealed class OpeningFailureTcpProtocol : IClientConnectionProtocol {
+        public int Opened { get; private set; }
+        public int Messages { get; private set; }
+
+        public ValueTask OnOpenedAsync(ClientConnection connection, CancellationToken ct) {
+            Opened++;
+            throw new InvalidOperationException("required setup failed");
+        }
+
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            Messages++;
             return ValueTask.CompletedTask;
         }
     }

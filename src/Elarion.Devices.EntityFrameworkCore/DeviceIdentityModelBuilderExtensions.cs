@@ -53,6 +53,8 @@ public static class DeviceIdentityModelBuilderExtensions {
                 .HasColumnName(snakeCase ? "created_on_utc" : "CreatedOnUtc");
             // The expired-code sweep's scan column, mirroring the staged-upload/idempotency stores.
             builder.HasIndex(entity => entity.ExpiresOnUtc);
+            // Atomic reissue deletes older codes for this device after its collision-safe insert.
+            builder.HasIndex(entity => entity.DeviceId);
         });
         return modelBuilder;
     }

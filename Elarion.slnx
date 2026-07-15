@@ -35,6 +35,7 @@
     <Project Path="src/Elarion.ClientEvents.PostgreSql/Elarion.ClientEvents.PostgreSql.csproj" />
     <Project Path="src/Elarion.Connections/Elarion.Connections.csproj" />
     <Project Path="src/Elarion.Connections.AspNetCore/Elarion.Connections.AspNetCore.csproj" />
+    <Project Path="src/Elarion.Connections.AspNetCore.Simulation/Elarion.Connections.AspNetCore.Simulation.csproj" />
     <Project Path="src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj" />
     <Project Path="src/Elarion.Connections.Simulation/Elarion.Connections.Simulation.csproj" />
     <Project Path="src/Elarion.Devices/Elarion.Devices.csproj" />

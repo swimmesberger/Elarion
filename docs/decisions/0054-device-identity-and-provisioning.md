@@ -34,10 +34,13 @@ stores + bundled `[GenerateElarionDeviceIdentity]` generator, ELDEV001):
   Crockford-style human-typeable alphabet — validated normalization-stable and duplicate-free so
   issued codes are always redeemable and unbiased —, TTL, single-use; the device id is pre-assigned
   at issue so the issuer can attach it to domain state) and redeem (atomic single-winner claim — one
-  `DELETE … RETURNING` on the EF store — → mint key; unknown/expired/used are indistinguishable).
+  `DELETE … RETURNING` on the EF store — → mint key; unknown/expired/used/revoked are indistinguishable).
   **Re-pairing rotates**: a code issued for an already-provisioned device id replaces its key at
   redeem — issuing that code is the re-key authorization (device reset, lost key), so the flow needs
-  no separate rotate API. Codes are stored **hashed** (SHA-256), so a leaked table yields nothing
+  no separate rotate API. Reissue atomically supersedes earlier pending codes for that id, while its
+  collision-safe insert-first ordering cannot destroy a valid code after a generated hash collision.
+  `RevokeAsync(deviceId)` removes pending authorization only, and the EF store indexes `device_id`
+  for supersession/revocation. Codes are stored **hashed** (SHA-256), so a leaked table yields nothing
   redeemable. The enforcement point for "capability values are never v7."
 - **`HmacChallengeVerifier`**: nonce issue + constant-time response verification
   (`CryptographicOperations.FixedTimeEquals`; unknown ids pay the same MAC cost as known ones), shaped

@@ -45,6 +45,12 @@ internal static class DeviceIdentityEntitySql {
             $"{column(nameof(DevicePairingCodeEntity.ExpiresOnUtc))} AS {sqlHelper.DelimitIdentifier(nameof(ClaimedPairingCodeRow.ExpiresOnUtc))}";
     }
 
+    public static string BuildCodeSupersedeSql(DbContext context) {
+        var (table, column, _) = Resolve(context, typeof(DevicePairingCodeEntity));
+        return $"DELETE FROM {table} WHERE {column(nameof(DevicePairingCodeEntity.DeviceId))} = {{0}} " +
+            $"AND {column(nameof(DevicePairingCodeEntity.CodeHash))} <> {{1}}";
+    }
+
     private static (string Table, Func<string, string> Column, ISqlGenerationHelper SqlHelper) Resolve(
         DbContext context,
         Type clrType) {

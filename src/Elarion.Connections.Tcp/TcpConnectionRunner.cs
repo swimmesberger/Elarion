@@ -109,6 +109,9 @@ internal static class TcpConnectionRunner {
                 // Registration lives inside this try: RegisterAsync mutates the index before dispatching
                 // observers, so an abort mid-registration must still reach the unregister in finally.
                 await registry.RegisterAsync(connection, ct);
+                // Required codec setup is visible to observers but runs before any framed message. A
+                // failure is handled by this connection's normal OnClosed/unregister teardown.
+                await connection.Protocol.OnOpenedAsync(identity, ct);
                 await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             }
             catch (Exception failure) {

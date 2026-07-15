@@ -8,12 +8,19 @@ namespace Elarion.Devices;
 /// </summary>
 public interface IPairingCodeStore {
     /// <summary>
-    /// Stores a pending code. Returns <see langword="false"/> when an entry with the same code
-    /// hash already exists — live or expired-but-unswept — and the issuer retries with a fresh code.
+    /// Atomically stores a pending code and supersedes every earlier pending code for the same device.
+    /// Returns <see langword="false"/> when an entry with the same code hash already exists — live or
+    /// expired-but-unswept — and leaves all existing entries untouched, so the issuer retries with a
+    /// fresh code without accidentally revoking a valid capability after a hash collision.
     /// </summary>
     /// <param name="entry">The pending code entry.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    ValueTask<bool> TryCreateAsync(PairingCodeEntry entry, CancellationToken cancellationToken = default);
+    ValueTask<bool> TryReplaceAsync(PairingCodeEntry entry, CancellationToken cancellationToken = default);
+
+    /// <summary>Revokes every pending pairing code for <paramref name="deviceId"/>. A concurrent claim
+    /// remains single-winner: either it consumes the code first or this call removes it first.</summary>
+    /// <returns>How many pending codes were revoked.</returns>
+    ValueTask<int> RevokeAsync(string deviceId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Atomically consumes the entry with <paramref name="codeHash"/> and returns it, or
