@@ -40,7 +40,7 @@ public sealed class DevicePairingService(
 
         for (var attempt = 0; attempt < IssueAttempts; attempt++) {
             var code = PairingCodes.Generate(provisioningOptions.CodeAlphabet, provisioningOptions.CodeLength);
-            var created = await pairingCodes.TryCreateAsync(
+            var created = await pairingCodes.TryReplaceAsync(
                     new PairingCodeEntry {
                         // Normalized before hashing so issue and redeem always hash the same
                         // string (options validation additionally pins the alphabet to
@@ -59,6 +59,12 @@ public sealed class DevicePairingService(
         throw new InvalidOperationException(
             $"Could not issue a unique pairing code after {IssueAttempts} attempts; "
             + "the code space is exhausted or the store is misbehaving.");
+    }
+
+    /// <inheritdoc />
+    public ValueTask<int> RevokeAsync(string deviceId, CancellationToken cancellationToken = default) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        return pairingCodes.RevokeAsync(deviceId, cancellationToken);
     }
 
     /// <inheritdoc />

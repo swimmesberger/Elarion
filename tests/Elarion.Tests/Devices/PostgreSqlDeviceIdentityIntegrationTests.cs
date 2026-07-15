@@ -51,8 +51,8 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         var store = provider.GetRequiredService<IPairingCodeStore>();
         var entry = NewEntry(expiresIn: TimeSpan.FromMinutes(5));
 
-        (await store.TryCreateAsync(entry, TestToken)).Should().BeTrue();
-        (await store.TryCreateAsync(entry with { DeviceId = NewDeviceId() }, TestToken)).Should().BeFalse();
+        (await store.TryReplaceAsync(entry, TestToken)).Should().BeTrue();
+        (await store.TryReplaceAsync(entry with { DeviceId = NewDeviceId() }, TestToken)).Should().BeFalse();
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IPairingCodeStore>();
         var entry = NewEntry(expiresIn: TimeSpan.FromMinutes(5));
-        await store.TryCreateAsync(entry, TestToken);
+        await store.TryReplaceAsync(entry, TestToken);
 
         var claimed = await store.ClaimAsync(entry.CodeHash, DateTimeOffset.UtcNow, TestToken);
         claimed.Should().NotBeNull();
@@ -77,7 +77,7 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IPairingCodeStore>();
         var entry = NewEntry(expiresIn: TimeSpan.FromMinutes(5));
-        await store.TryCreateAsync(entry, TestToken);
+        await store.TryReplaceAsync(entry, TestToken);
 
         var claims = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ =>
             store.ClaimAsync(entry.CodeHash, DateTimeOffset.UtcNow, TestToken).AsTask()));
@@ -91,7 +91,7 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IPairingCodeStore>();
         var entry = NewEntry(expiresIn: TimeSpan.FromMinutes(-1));
-        await store.TryCreateAsync(entry, TestToken);
+        await store.TryReplaceAsync(entry, TestToken);
 
         (await store.ClaimAsync(entry.CodeHash, DateTimeOffset.UtcNow, TestToken)).Should().BeNull();
     }
@@ -103,8 +103,8 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         var store = provider.GetRequiredService<IPairingCodeStore>();
         var expired = NewEntry(expiresIn: TimeSpan.FromMinutes(-1));
         var live = NewEntry(expiresIn: TimeSpan.FromMinutes(5));
-        await store.TryCreateAsync(expired, TestToken);
-        await store.TryCreateAsync(live, TestToken);
+        await store.TryReplaceAsync(expired, TestToken);
+        await store.TryReplaceAsync(live, TestToken);
 
         var removed = await store.DeleteExpiredAsync(DateTimeOffset.UtcNow, TestToken);
 

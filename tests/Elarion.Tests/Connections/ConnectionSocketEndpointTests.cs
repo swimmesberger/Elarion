@@ -6,13 +6,9 @@ using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
 using Elarion.Connections.AspNetCore;
+using Elarion.Connections.AspNetCore.Simulation;
 using Elarion.Connections.Simulation;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Elarion.Tests.Connections;
@@ -154,6 +150,21 @@ public sealed class ConnectionSocketEndpointTests {
     }
 
     [Fact]
+    public async Task CriticalProtocolInitialization_FailureClosesAndUnregistersBeforeAnyFrame() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync<OpeningFailureHandler>(ct);
+        using var socket = await host.ConnectAsync(ct);
+        await CompleteHandshakeAsync(socket, "dev-opening", ct);
+
+        var disconnected = await host.Observer.Disconnected.Task.WaitAsync(ct);
+        var protocol = host.Services.GetRequiredService<OpeningFailureHandler>().Protocol!;
+        protocol.Opened.Should().Be(1);
+        protocol.Messages.Should().Be(0);
+        (await protocol.Closed.Task.WaitAsync(ct)).ConnectionId.Should().Be(disconnected.ConnectionId);
+        host.Registry.Connections.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task PerConnectionSettings_ServeDifferentTiersOnOneRoute() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync<TieredHandler>(ct);
@@ -211,40 +222,26 @@ public sealed class ConnectionSocketEndpointTests {
     private static async Task<SocketTestHost> StartAsync<THandler>(
         CancellationToken ct, Action<ElarionConnectionSocketOptions>? configure = null)
         where THandler : WebSocketConnectionHandler, new() {
-        var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Logging.ClearProviders();
-        builder.Services.AddElarionConnections();
-        builder.Services.AddSingleton<THandler>();
-        builder.Services.AddSingleton<AwaitableConnectionObserver>();
-        builder.Services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
-
-        var app = builder.Build();
-        app.UseWebSockets();
-        app.MapElarionConnectionSocket<THandler>("/ws", configure);
-        await app.StartAsync(ct);
-
-        var httpBase = app.Services.GetRequiredService<IServer>()
-            .Features.Get<IServerAddressesFeature>()!.Addresses.First();
-        return new SocketTestHost(app, httpBase);
+        var host = await WebSocketTestHost.StartAsync<THandler>("/ws", ct, services => {
+            services.AddSingleton<AwaitableConnectionObserver>();
+            services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
+        }, configure);
+        return new SocketTestHost(host);
     }
 
-    private sealed class SocketTestHost(WebApplication app, string httpBase) : IAsyncDisposable {
-        public string HttpBase { get; } = httpBase;
+    // Test-specific observer convenience over the reusable real-adapter host.
+    private sealed class SocketTestHost(WebSocketTestHost host) : IAsyncDisposable {
+        public string HttpBase => host.HttpBase;
 
-        public IServiceProvider Services => app.Services;
+        public IServiceProvider Services => host.Services;
 
-        public IClientConnectionRegistry Registry => app.Services.GetRequiredService<IClientConnectionRegistry>();
+        public IClientConnectionRegistry Registry => host.Registry;
 
-        public AwaitableConnectionObserver Observer => app.Services.GetRequiredService<AwaitableConnectionObserver>();
+        public AwaitableConnectionObserver Observer => Services.GetRequiredService<AwaitableConnectionObserver>();
 
-        public async Task<ClientWebSocket> ConnectAsync(CancellationToken ct, string query = "") {
-            var socket = new ClientWebSocket();
-            await socket.ConnectAsync(new Uri(HttpBase.Replace("http://", "ws://") + "/ws" + query), ct);
-            return socket;
-        }
+        public Task<ClientWebSocket> ConnectAsync(CancellationToken ct, string query = "") => host.ConnectAsync(ct, query);
 
-        public async ValueTask DisposeAsync() => await app.DisposeAsync();
+        public ValueTask DisposeAsync() => host.DisposeAsync();
     }
 
     /// <summary>The device-gateway shape: an in-socket challenge/response handshake and an echo codec.</summary>
@@ -307,6 +304,42 @@ public sealed class ConnectionSocketEndpointTests {
 
         public ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) {
             Closed.TrySetResult((connection, reason));
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class OpeningFailureHandler : WebSocketConnectionHandler {
+        public OpeningFailureProtocol? Protocol { get; private set; }
+
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(WebSocketHandshakeContext handshake, CancellationToken ct) {
+            await handshake.SendTextAsync("challenge", ct);
+            var reply = await handshake.ReceiveTextAsync(ct);
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
+            await handshake.SendTextAsync("welcome", ct);
+            return new ClientConnectionTicket { Principal = new ClaimsPrincipal(new ClaimsIdentity("device")), PrincipalId = reply[7..] };
+        }
+
+        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
+            Protocol = new OpeningFailureProtocol();
+    }
+
+    private sealed class OpeningFailureProtocol : IClientConnectionProtocol {
+        public int Opened { get; private set; }
+        public int Messages { get; private set; }
+        public TaskCompletionSource<ClientConnection> Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask OnOpenedAsync(ClientConnection connection, CancellationToken ct) {
+            Opened++;
+            throw new InvalidOperationException("actor attachment failed");
+        }
+
+        public ValueTask OnTextAsync(string message, CancellationToken ct) {
+            Messages++;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) {
+            Closed.TrySetResult(connection);
             return ValueTask.CompletedTask;
         }
     }

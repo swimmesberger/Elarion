@@ -173,6 +173,17 @@ public sealed class DevicePairingServiceTests {
         (await _keys.GetKeyAsync("gateway-7", TestToken))!.Value.ToArray().Should().Equal(second.Key.ToArray());
     }
 
+    [Fact]
+    public async Task Reissue_SupersedesTheEarlierPendingCode_AndRevocationMakesCodesUnredeemable() {
+        var service = CreateService();
+        var first = await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = "gateway-pending" }, TestToken);
+        var second = await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = "gateway-pending" }, TestToken);
+
+        (await service.RedeemAsync(first.Code, TestToken)).Should().BeNull();
+        (await service.RevokeAsync(second.DeviceId, TestToken)).Should().Be(1);
+        (await service.RedeemAsync(second.Code, TestToken)).Should().BeNull();
+    }
+
     [Theory]
     [InlineData("abcdefghjkmnpqrstvwxyz23456789")] // lowercase: not normalization-stable
     [InlineData("ABCD-EFGH23456789")]              // separator: stripped by normalization

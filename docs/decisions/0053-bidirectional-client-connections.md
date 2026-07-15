@@ -57,6 +57,11 @@ beyond what each existing primitive already states**, which is what keeps UDP ho
 
 ## Decision
 
+Adapters register a connection first, preserving the established observer view of the live registry,
+then await `IClientConnectionProtocol.OnOpenedAsync` exactly once before they deliver regular frames.
+Observer failures remain isolated; an opening failure is connection-fatal and follows the normal
+`OnClosedAsync` then unregister teardown.
+
 ### Doctrine: when a connection is justified (mandatory, the transport litmus)
 
 **Default to request/reply + client events.** A bidirectional connection is justified only when the need

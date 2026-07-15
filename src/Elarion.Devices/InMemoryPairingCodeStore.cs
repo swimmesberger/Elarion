@@ -8,11 +8,39 @@ namespace Elarion.Devices;
 /// </summary>
 public sealed class InMemoryPairingCodeStore : IPairingCodeStore {
     private readonly ConcurrentDictionary<string, PairingCodeEntry> _entries = new(StringComparer.Ordinal);
+    private readonly object _mutationLock = new();
 
     /// <inheritdoc />
-    public ValueTask<bool> TryCreateAsync(PairingCodeEntry entry, CancellationToken cancellationToken = default) {
+    public ValueTask<bool> TryReplaceAsync(PairingCodeEntry entry, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(entry);
-        return ValueTask.FromResult(_entries.TryAdd(entry.CodeHash, entry));
+        lock (_mutationLock) {
+            if (!_entries.TryAdd(entry.CodeHash, entry)) {
+                return ValueTask.FromResult(false);
+            }
+
+            foreach (var (hash, existing) in _entries) {
+                if (hash != entry.CodeHash && existing.DeviceId == entry.DeviceId) {
+                    _entries.TryRemove(new KeyValuePair<string, PairingCodeEntry>(hash, existing));
+                }
+            }
+
+            return ValueTask.FromResult(true);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<int> RevokeAsync(string deviceId, CancellationToken cancellationToken = default) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        var removed = 0;
+        lock (_mutationLock) {
+            foreach (var (hash, entry) in _entries) {
+                if (entry.DeviceId == deviceId && _entries.TryRemove(new KeyValuePair<string, PairingCodeEntry>(hash, entry))) {
+                    removed++;
+                }
+            }
+        }
+
+        return ValueTask.FromResult(removed);
     }
 
     /// <inheritdoc />

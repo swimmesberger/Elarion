@@ -19,6 +19,14 @@ public interface IDevicePairingService {
     ValueTask<PairingCode> IssueAsync(PairingCodeIssueOptions? options = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Revokes outstanding pairing authorization for a device. A revoked code is indistinguishable from
+    /// an unknown, expired, or already-used code at redemption. Reissuing for the device also supersedes
+    /// any prior pending code.
+    /// </summary>
+    /// <returns>How many pending codes were revoked.</returns>
+    ValueTask<int> RevokeAsync(string deviceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Redeems a code: atomically consumes it, mints the device key, stores it, and returns the
     /// credentials — or <see langword="null"/> when the code is unknown, expired, or already used
     /// (deliberately indistinguishable). Input is normalized (case, separators, whitespace), so

@@ -15,7 +15,7 @@ namespace Elarion.Connections.AspNetCore;
 /// Maps a WebSocket connection endpoint: accept → the handler's handshake (reject closes with
 /// <c>PolicyViolation</c>, nothing registered) → mint the <see cref="ClientConnection"/> → register with the
 /// kernel registry (observers fire — the client-events bridge and any presence projection hook in here) →
-/// one receive loop dispatching complete messages to the connection's codec → unregister on any exit. The
+/// awaited protocol initialization → one receive loop dispatching complete messages to the connection's codec → unregister on any exit. The
 /// app supplies exactly two things via its <see cref="WebSocketConnectionHandler"/>: the authenticator and
 /// the codec.
 /// </summary>
@@ -118,6 +118,9 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             // Registration lives inside this try: RegisterAsync mutates the index before dispatching
             // observers, so an abort mid-registration must still reach the unregister in finally.
             await registry.RegisterAsync(connection, ct);
+            // Critical codec setup is intentionally after registration (ordinary observers can see the
+            // link) but before the first frame. Unlike observers it is awaited and fatal on failure.
+            await connection.Protocol.OnOpenedAsync(identity, ct);
             await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             await CloseSafelyAsync(socket, WebSocketCloseStatus.NormalClosure, "closing", ct);
         }

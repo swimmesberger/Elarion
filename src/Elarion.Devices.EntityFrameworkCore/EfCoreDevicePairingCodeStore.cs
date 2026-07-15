@@ -21,24 +21,54 @@ public sealed class EfCoreDevicePairingCodeStore<TDbContext>(
     TimeProvider timeProvider) : IPairingCodeStore
     where TDbContext : DbContext {
     private static readonly ConcurrentDictionary<IModel, string> InsertSqlCache = new();
+    private static readonly ConcurrentDictionary<IModel, string> SupersedeSqlCache = new();
     private static readonly ConcurrentDictionary<IModel, string> ClaimSqlCache = new();
 
     /// <inheritdoc />
-    public async ValueTask<bool> TryCreateAsync(PairingCodeEntry entry, CancellationToken cancellationToken = default) {
+    public async ValueTask<bool> TryReplaceAsync(PairingCodeEntry entry, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(entry);
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
-        var sql = InsertSqlCache.GetOrAdd(
+        var insertSql = InsertSqlCache.GetOrAdd(
             dbContext.Model,
             static (_, context) => DeviceIdentityEntitySql.BuildCodeInsertSql(context),
             dbContext);
-        var inserted = await dbContext.Database
-            .ExecuteSqlRawAsync(
-                sql,
-                [entry.CodeHash, entry.DeviceId, entry.ExpiresAt, timeProvider.GetUtcNow()],
-                cancellationToken)
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        // Serialize reissues for one device across nodes. The pairing-code table deliberately cannot
+        // make DeviceId unique (the new hash must be inserted before old codes are removed to preserve
+        // collision safety), so this transaction-scoped PostgreSQL lock is the per-device fence.
+        await dbContext.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))", [entry.DeviceId], cancellationToken)
             .ConfigureAwait(false);
-        return inserted == 1;
+        // Insert first: when the astronomically unlikely code-hash collision occurs, DO NOTHING and
+        // roll back without touching the device's currently valid code.
+        var inserted = await dbContext.Database.ExecuteSqlRawAsync(
+            insertSql, [entry.CodeHash, entry.DeviceId, entry.ExpiresAt, timeProvider.GetUtcNow()], cancellationToken)
+            .ConfigureAwait(false);
+        if (inserted != 1) {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        var supersedeSql = SupersedeSqlCache.GetOrAdd(
+            dbContext.Model,
+            static (_, context) => DeviceIdentityEntitySql.BuildCodeSupersedeSql(context),
+            dbContext);
+        await dbContext.Database.ExecuteSqlRawAsync(supersedeSql, [entry.DeviceId, entry.CodeHash], cancellationToken)
+            .ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> RevokeAsync(string deviceId, CancellationToken cancellationToken = default) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
+        return await dbContext.Set<DevicePairingCodeEntity>()
+            .Where(entity => entity.DeviceId == deviceId)
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />

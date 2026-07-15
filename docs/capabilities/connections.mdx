@@ -104,6 +104,20 @@ Everything after the handshake is framework: the connection is minted (v7 id, `T
 "websocket"`), registered, observed, pumped, and unregistered on every exit path — client close,
 abrupt death, oversized message (`MessageTooBig`), codec exception (logged, closed), host shutdown.
 
+### Required opening work
+
+`IClientConnectionObserver.OnConnectedAsync` remains best-effort: observers are deliberately
+failure-isolated and suit presence/client-event projections. A codec that cannot process frames until
+it has completed required work (for example, attaching the authenticated link to a keyed device actor)
+implements `IClientConnectionProtocol.OnOpenedAsync`. It runs exactly once **after registry
+registration and observer visibility, before the first inbound frame**. It is awaited; a failure or
+cancellation closes the link, calls `OnClosedAsync`, and unregisters it without delivering a frame.
+
+For tests, choose the lowest faithful tier: `SimulatedClientConnection` for kernel/observer work,
+`InMemoryTcpLink` (or loopback TCP) for a framed TCP lifecycle, and the separate
+`Elarion.Connections.AspNetCore.Simulation` package's `WebSocketTestHost` for a real Kestrel upgrade,
+handshake, codec, and close path.
+
 Settings can vary **per connection on one route**: override
 `ConfigureConnectionAsync(HttpContext, …)` and return `WebSocketConnectionSettings` (size cap, idle
 window, keep-alive interval, transport tag — nulls inherit the endpoint options), resolved from the

@@ -49,6 +49,7 @@
     <ProjectReference Include="../../src/Elarion.ClientEvents.PostgreSql/Elarion.ClientEvents.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Connections/Elarion.Connections.csproj" />
     <ProjectReference Include="../../src/Elarion.Connections.AspNetCore/Elarion.Connections.AspNetCore.csproj" />
+    <ProjectReference Include="../../src/Elarion.Connections.AspNetCore.Simulation/Elarion.Connections.AspNetCore.Simulation.csproj" />
     <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj" />
     <ProjectReference Include="../../src/Elarion.Connections.Simulation/Elarion.Connections.Simulation.csproj" />
     <ProjectReference Include="../../src/Elarion.Devices/Elarion.Devices.csproj" />

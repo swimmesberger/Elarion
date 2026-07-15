@@ -19,6 +19,23 @@ namespace Elarion.Connections;
 /// counters, the pending-request map an <see cref="InvokeAsync"/> implementation correlates on).
 /// </remarks>
 public interface IClientConnectionProtocol {
+    /// <summary>
+    /// Performs required per-connection initialization after the connection has been registered and its
+    /// <see cref="ClientConnection"/> is consequently visible to lifecycle observers, but before the
+    /// adapter delivers any regular inbound message. This is the mounting point for work which must
+    /// succeed for the connection to be usable, such as attaching an authenticated gateway link to its
+    /// keyed actor. It is called exactly once for every successfully registered connection.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="IClientConnectionObserver.OnConnectedAsync"/>, this call is awaited: throwing
+    /// (including cancellation from the connection lifetime token) is connection-fatal. The adapter then
+    /// runs normal <see cref="OnClosedAsync"/> and unregister teardown; no inbound message is delivered.
+    /// The default deliberately does nothing so existing codecs remain source-compatible.
+    /// </remarks>
+    /// <param name="connection">The registered connection identity.</param>
+    /// <param name="ct">The connection's lifetime token.</param>
+    ValueTask OnOpenedAsync(ClientConnection connection, CancellationToken ct) => ValueTask.CompletedTask;
+
     /// <summary>Handles one complete inbound text message.</summary>
     /// <param name="message">The reassembled message.</param>
     /// <param name="ct">The connection's lifetime token.</param>

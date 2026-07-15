@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Real Kestrel and ClientWebSocket test harness for Elarion's WebSocket connection adapter.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Connections.AspNetCore\Elarion.Connections.AspNetCore.csproj" />
+    <ProjectReference Include="..\Elarion.Connections\Elarion.Connections.csproj" />
+  </ItemGroup>
+</Project>
