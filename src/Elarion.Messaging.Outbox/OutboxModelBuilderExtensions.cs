@@ -19,31 +19,35 @@ public static class OutboxModelBuilderExtensions
     /// </param>
     /// <param name="schema">The schema, or <see langword="null"/> to use the provider's default schema.</param>
     /// <param name="snakeCase">Whether to use snake_case table/column names. Defaults to <see langword="true"/>.</param>
-    /// <param name="deliveryTableName">The per-consumer delivery table name, or <see langword="null"/> for the default.</param>
     /// <returns>The same model builder for chaining.</returns>
     public static ModelBuilder UseElarionOutbox(
         this ModelBuilder modelBuilder,
         string? tableName = null,
         string? schema = null,
-        bool snakeCase = true,
-        string? deliveryTableName = null)
+        bool snakeCase = true)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
         var table = tableName ?? (snakeCase ? "elarion_outbox_messages" : "ElarionOutboxMessages");
-        var deliveryTable = deliveryTableName
-            ?? (snakeCase ? "elarion_outbox_deliveries" : "ElarionOutboxDeliveries");
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
-        ArgumentException.ThrowIfNullOrWhiteSpace(deliveryTable);
 
         modelBuilder.Entity<OutboxMessage>(builder =>
         {
             builder.ToTable(table, schema);
             builder.HasKey(message => message.Id);
+            builder.HasIndex(message => message.ProcessedOnUtc)
+                .HasDatabaseName(snakeCase ? $"ix_{table}_purge" : $"IX_{table}_Purge")
+                .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
+            builder.HasIndex(message => new { message.TargetRole, message.OccurredOnUtc, message.Id })
+                .HasDatabaseName(snakeCase ? $"ix_{table}_claim" : $"IX_{table}_Claim")
+                .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
 
             builder.Property(message => message.Id)
                 .HasColumnName(snakeCase ? "id" : "Id")
                 .ValueGeneratedNever();
+
+            builder.Property(message => message.MessageId)
+                .HasColumnName(snakeCase ? "message_id" : "MessageId");
 
             builder.Property(message => message.OccurredOnUtc)
                 .HasColumnName(snakeCase ? "occurred_on_utc" : "OccurredOnUtc");
@@ -63,48 +67,23 @@ public static class OutboxModelBuilderExtensions
                 .HasColumnName(snakeCase ? "trace_parent" : "TraceParent")
                 .HasMaxLength(55);
 
-        });
+            builder.Property(message => message.ConsumerIdsJson)
+                .HasColumnName(snakeCase ? "consumer_ids" : "ConsumerIds");
 
-        modelBuilder.Entity<OutboxDelivery>(builder => {
-            builder.ToTable(deliveryTable, schema);
-            builder.HasKey(delivery => delivery.Id);
-            builder.HasIndex(delivery => new { delivery.MessageId, delivery.ConsumerId }).IsUnique();
-            builder.HasIndex(delivery => delivery.ProcessedOnUtc)
-                .HasDatabaseName(snakeCase ? $"ix_{deliveryTable}_purge" : $"IX_{deliveryTable}_Purge")
-                .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
-            builder.HasIndex(delivery => new { delivery.TargetRole, delivery.OccurredOnUtc, delivery.Id })
-                .HasDatabaseName(snakeCase ? $"ix_{deliveryTable}_claim" : $"IX_{deliveryTable}_Claim")
-                .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
-
-            builder.Property(delivery => delivery.Id)
-                .HasColumnName(snakeCase ? "id" : "Id")
-                .ValueGeneratedNever();
-            builder.Property(delivery => delivery.MessageId)
-                .HasColumnName(snakeCase ? "message_id" : "MessageId");
-            builder.Property(delivery => delivery.OccurredOnUtc)
-                .HasColumnName(snakeCase ? "occurred_on_utc" : "OccurredOnUtc");
-            builder.Property(delivery => delivery.ConsumerId)
-                .HasColumnName(snakeCase ? "consumer_id" : "ConsumerId")
-                .HasMaxLength(512)
-                .IsRequired();
-            builder.Property(delivery => delivery.TargetRole)
+            builder.Property(message => message.TargetRole)
                 .HasColumnName(snakeCase ? "target_role" : "TargetRole")
                 .HasMaxLength(200);
-            builder.Property(delivery => delivery.Attempts)
-                .HasColumnName(snakeCase ? "attempts" : "Attempts");
-            builder.Property(delivery => delivery.ProcessedOnUtc)
-                .HasColumnName(snakeCase ? "processed_on_utc" : "ProcessedOnUtc");
-            builder.Property(delivery => delivery.LockId)
-                .HasColumnName(snakeCase ? "lock_id" : "LockId");
-            builder.Property(delivery => delivery.LockedUntilUtc)
-                .HasColumnName(snakeCase ? "locked_until_utc" : "LockedUntilUtc");
-            builder.Property(delivery => delivery.Error)
-                .HasColumnName(snakeCase ? "error" : "Error");
 
-            builder.HasOne(delivery => delivery.Message)
-                .WithMany(message => message.Deliveries)
-                .HasForeignKey(delivery => delivery.MessageId)
-                .OnDelete(DeleteBehavior.Cascade);
+            builder.Property(message => message.Attempts)
+                .HasColumnName(snakeCase ? "attempts" : "Attempts");
+            builder.Property(message => message.ProcessedOnUtc)
+                .HasColumnName(snakeCase ? "processed_on_utc" : "ProcessedOnUtc");
+            builder.Property(message => message.LockId)
+                .HasColumnName(snakeCase ? "lock_id" : "LockId");
+            builder.Property(message => message.LockedUntilUtc)
+                .HasColumnName(snakeCase ? "locked_until_utc" : "LockedUntilUtc");
+            builder.Property(message => message.Error)
+                .HasColumnName(snakeCase ? "error" : "Error");
         });
 
         return modelBuilder;

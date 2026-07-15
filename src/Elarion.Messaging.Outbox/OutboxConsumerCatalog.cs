@@ -14,6 +14,8 @@ public sealed class OutboxConsumerCatalog {
     private static readonly EventSubscriptionDescriptor[] None = [];
 
     private readonly Dictionary<Type, EventSubscriptionDescriptor[]> _consumersByEventType;
+    private readonly Dictionary<string, EventSubscriptionDescriptor[]> _consumersByEventTypeName;
+    private readonly HashSet<Type> _roleRoutedEventTypes = [];
     private readonly Dictionary<string, EventSubscriptionDescriptor> _consumersById = new(StringComparer.Ordinal);
 
     /// <summary>Builds and validates the durable consumer index.</summary>
@@ -45,10 +47,21 @@ public sealed class OutboxConsumerCatalog {
         }
 
         _consumersByEventType = new Dictionary<Type, EventSubscriptionDescriptor[]>(byEventType.Count);
+        _consumersByEventTypeName = new Dictionary<string, EventSubscriptionDescriptor[]>(byEventType.Count, StringComparer.Ordinal);
         foreach (var (eventType, consumers) in byEventType) {
-            _consumersByEventType.Add(
-                eventType,
-                consumers.OrderBy(static descriptor => descriptor.Order).ToArray());
+            var ordered = consumers.OrderBy(static descriptor => descriptor.Order).ToArray();
+            _consumersByEventType.Add(eventType, ordered);
+            if (ordered.Any(static descriptor => descriptor.ResolveDeliveryRole is not null)) {
+                _roleRoutedEventTypes.Add(eventType);
+            }
+
+            var eventTypeName = eventType.FullName
+                ?? throw new InvalidOperationException(
+                    $"Integration event '{eventType}' has no full name and cannot be persisted.");
+            if (!_consumersByEventTypeName.TryAdd(eventTypeName, ordered)) {
+                throw new InvalidOperationException(
+                    $"Integration event type name '{eventTypeName}' is registered more than once.");
+            }
         }
     }
 
@@ -60,6 +73,11 @@ public sealed class OutboxConsumerCatalog {
 
     internal EventSubscriptionDescriptor[] GetConsumerArray(Type eventType) =>
         _consumersByEventType.TryGetValue(eventType, out var consumers) ? consumers : None;
+
+    internal bool TryGetConsumerArray(string eventTypeName, out EventSubscriptionDescriptor[] consumers) =>
+        _consumersByEventTypeName.TryGetValue(eventTypeName, out consumers!);
+
+    internal bool HasDeliveryRoleResolvers(Type eventType) => _roleRoutedEventTypes.Contains(eventType);
 
     /// <summary>Looks up one durable consumer by its stable identity.</summary>
     public bool TryGetConsumer(string consumerId, out EventSubscriptionDescriptor descriptor) {

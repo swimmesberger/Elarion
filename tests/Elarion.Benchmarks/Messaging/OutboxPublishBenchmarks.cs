@@ -10,21 +10,21 @@ namespace Elarion.Benchmarks.Messaging;
 
 /// <summary>
 /// Measures the synchronous request-path work of publishing an outbox event before <c>SaveChanges</c>.
-/// <c>LegacySingleRow</c> is the previous message-only shape; <c>RoleAffine</c> adds the independently
-/// persisted consumer deliveries. PostgreSQL I/O is deliberately excluded: the benchmark isolates the
+/// <c>LegacySingleRow</c> is the previous message-only shape; <c>TargetGrouped</c> is the production
+/// target-group envelope path. PostgreSQL I/O is deliberately excluded: the benchmark isolates the
 /// framework CPU/allocation delta while integration tests cover the relational mappings and claim path.
 ///
 ///   dotnet run --project tests/Elarion.Benchmarks -c Release -- --filter "*OutboxPublish*"
 /// </summary>
 [MemoryDiagnoser]
 public class OutboxPublishBenchmarks {
-    [Params(1, 3)]
+    [Params(1, 3, 10, 30)]
     public int ConsumerCount { get; set; }
 
     private readonly OutboxBenchmarkEvent _event = new(7, "alice");
     private CapturingStore _legacyStore = null!;
-    private CapturingStore _roleAffineStore = null!;
-    private OutboxIntegrationEventBus _roleAffineBus = null!;
+    private CapturingStore _targetGroupedStore = null!;
+    private OutboxIntegrationEventBus _targetGroupedBus = null!;
     private IElarionJsonSerialization _json = null!;
 
     [GlobalSetup]
@@ -34,13 +34,13 @@ public class OutboxPublishBenchmarks {
             .BuildServiceProvider()
             .GetRequiredService<IElarionJsonSerialization>();
         _legacyStore = new CapturingStore();
-        _roleAffineStore = new CapturingStore();
+        _targetGroupedStore = new CapturingStore();
 
         var descriptors = Enumerable.Range(0, ConsumerCount)
             .Select(index => Descriptor($"consumer-{index}"))
             .ToArray();
-        _roleAffineBus = new OutboxIntegrationEventBus(
-            _roleAffineStore,
+        _targetGroupedBus = new OutboxIntegrationEventBus(
+            _targetGroupedStore,
             new OutboxConsumerCatalog(descriptors),
             EmptyProvider.Instance,
             new OutboxOptions(),
@@ -50,8 +50,10 @@ public class OutboxPublishBenchmarks {
 
     [Benchmark(Baseline = true)]
     public OutboxMessage LegacySingleRow() {
+        var id = Guid.CreateVersion7();
         var message = new OutboxMessage {
-            Id = Guid.CreateVersion7(),
+            Id = id,
+            MessageId = id,
             OccurredOnUtc = TimeProvider.System.GetUtcNow(),
             EventType = typeof(OutboxBenchmarkEvent).FullName!,
             Payload = JsonSerializer.Serialize(_event, _json.Options),
@@ -63,9 +65,9 @@ public class OutboxPublishBenchmarks {
     }
 
     [Benchmark]
-    public OutboxMessage RoleAffine() {
-        _roleAffineBus.PublishAsync(_event).GetAwaiter().GetResult();
-        return _roleAffineStore.Last!;
+    public OutboxMessage TargetGrouped() {
+        _targetGroupedBus.PublishAsync(_event).GetAwaiter().GetResult();
+        return _targetGroupedStore.Last!;
     }
 
     private static EventSubscriptionDescriptor Descriptor(string consumerId) => new() {
@@ -133,7 +135,7 @@ internal sealed class CapturingStore : IOutboxStore {
 
     public void Append(OutboxMessage message) => Last = message;
 
-    public ValueTask<IReadOnlyList<OutboxDelivery>> ClaimPendingAsync(
+    public ValueTask<IReadOnlyList<OutboxMessage>> ClaimPendingAsync(
         Guid lockId,
         DateTimeOffset leaseUntil,
         int batchSize,

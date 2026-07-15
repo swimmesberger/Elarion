@@ -126,8 +126,10 @@ public sealed class EventTelemetryTests {
 
         using var publisherActivity = new Activity("command").Start();
         var correlationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var message = new OutboxMessage {
-            Id = Guid.NewGuid(),
+            Id = messageId,
+            MessageId = messageId,
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
@@ -137,7 +139,7 @@ public sealed class EventTelemetryTests {
         publisherActivity.Stop();
 
         var store = new FakeOutboxStore();
-        store.Pending.Enqueue([Delivery(message)]);
+        store.Pending.Enqueue([message]);
         await RunDeliveryUntilSignaledAsync(store, (_, _, _, _) => ValueTask.CompletedTask);
 
         // The collector listens globally on the shared source; scope to this test's correlation id so
@@ -166,13 +168,15 @@ public sealed class EventTelemetryTests {
 
         var correlationId = Guid.NewGuid();
         var store = new FakeOutboxStore();
-        store.Pending.Enqueue([Delivery(new OutboxMessage {
-            Id = Guid.NewGuid(),
+        var messageId = Guid.NewGuid();
+        store.Pending.Enqueue([new OutboxMessage {
+            Id = messageId,
+            MessageId = messageId,
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
             CorrelationId = correlationId,
-        })]);
+        }]);
         await RunDeliveryUntilSignaledAsync(store, (_, _, _, _) => throw new InvalidOperationException("boom"));
 
         // Scoped to this test's correlation id — see OutboxDelivery_ConsumeSpan for why.
@@ -251,14 +255,6 @@ public sealed class EventTelemetryTests {
             ServiceType = typeof(Recorder),
             InvokeAsync = (_, _, _, _) => throw new InvalidOperationException("boom")
         };
-
-    private static OutboxDelivery Delivery(OutboxMessage message) => new() {
-        Id = Guid.CreateVersion7(),
-        MessageId = message.Id,
-        OccurredOnUtc = message.OccurredOnUtc,
-        ConsumerId = "telemetry-consumer",
-        Message = message
-    };
 
     private sealed class Recorder {
         private readonly SemaphoreSlim _signal = new(0);

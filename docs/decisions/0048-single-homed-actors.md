@@ -71,12 +71,12 @@ single-instance / local-dev case) — the inbox precedent (no store → un-dedup
 failure). The actor system logs one warning per such actor so a multi-instance misconfiguration is
 visible.
 
-### The work follows the lease — per-consumer role affinity, not call forwarding
+### The work follows the lease — target-group role affinity, not call forwarding
 
 ADR-0062 replaces the original whole-worker `DeliveryGate`. Generated actor consumer descriptors name
-the actor-home role, and publishing persists it on that consumer's independent `OutboxDelivery`. A
-worker can claim the delivery only while its local role registry says it holds `"actors"`. Other
-consumers of the same event remain unbound or target their own roles.
+the actor-home role, and publishing groups that consumer into an `OutboxMessage` envelope for the role. A
+worker can claim the group only while its local role registry says it holds `"actors"`. Other
+consumers of the same event remain in an unbound group or target their own roles.
 
 ```csharp
 services.AddElarionPostgreSqlActorHome<AppDbContext>();

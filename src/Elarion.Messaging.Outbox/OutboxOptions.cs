@@ -13,7 +13,7 @@ public sealed class OutboxOptions
     /// </summary>
     /// <remarks>
     /// Set to <see langword="false"/> on an instance that should publish but not claim. Publishing still
-    /// requires the complete generated consumer catalog because fan-out and target-role resolution happen
+    /// requires the complete generated consumer catalog because target grouping and role resolution happen
     /// when the message is recorded.
     /// </remarks>
     public bool RunDeliveryWorker { get; set; } = true;
@@ -29,13 +29,13 @@ public sealed class OutboxOptions
     public int BatchSize { get; set; } = 100;
 
     /// <summary>
-    /// The maximum number of attempts before one consumer delivery is left for inspection and no longer retried.
+    /// The maximum number of attempts before one target group is left for inspection and no longer retried.
     /// Defaults to 10.
     /// </summary>
     public int MaxDeliveryAttempts { get; set; } = 10;
 
     /// <summary>
-    /// How long a claimed consumer delivery stays leased before another eligible worker may reclaim it.
+    /// How long a claimed target group stays leased before another eligible worker may reclaim it.
     /// </summary>
     /// <remarks>
     /// A crashed worker's in-flight messages are retried once their lease expires, so this also bounds crash-recovery

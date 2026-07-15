@@ -63,7 +63,6 @@ public sealed class ElarionOutboxGenerator : IIncrementalGenerator {
         string HintName,
         bool SnakeCase,
         string? TableName,
-        string? DeliveryTableName,
         string? Schema,
         bool Emit,
         EquatableArray<DiagnosticInfo> Diagnostics);
@@ -75,7 +74,6 @@ public sealed class ElarionOutboxGenerator : IIncrementalGenerator {
 
         var snakeCase = true;
         string? tableName = null;
-        string? deliveryTableName = null;
         string? schema = null;
         if (ctx.Attributes.Length > 0) {
             foreach (var namedArgument in ctx.Attributes[0].NamedArguments) {
@@ -85,9 +83,6 @@ public sealed class ElarionOutboxGenerator : IIncrementalGenerator {
                         break;
                     case "TableName" when namedArgument.Value.Value is string table:
                         tableName = table;
-                        break;
-                    case "DeliveryTableName" when namedArgument.Value.Value is string deliveryTable:
-                        deliveryTableName = deliveryTable;
                         break;
                     case "Schema" when namedArgument.Value.Value is string schemaValue:
                         schema = schemaValue;
@@ -118,7 +113,6 @@ public sealed class ElarionOutboxGenerator : IIncrementalGenerator {
             hintName,
             snakeCase,
             tableName,
-            deliveryTableName,
             schema,
             Emit: hasGenerateDbSets,
             diagnostics.ToImmutable());
@@ -140,7 +134,6 @@ public sealed class ElarionOutboxGenerator : IIncrementalGenerator {
         sb.AppendLine($"partial class {target.ContextName}");
         sb.AppendLine("{");
         sb.AppendLine($"    public DbSet<{OutboxNamespace}.OutboxMessage> OutboxMessages => Set<{OutboxNamespace}.OutboxMessage>();");
-        sb.AppendLine($"    public DbSet<{OutboxNamespace}.OutboxDelivery> OutboxDeliveries => Set<{OutboxNamespace}.OutboxDelivery>();");
         sb.AppendLine();
         sb.AppendLine("    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
         sb.AppendLine("    // end of ConfigureEntities, so it composes with the other [GenerateElarion*] features.");
@@ -148,7 +141,6 @@ public sealed class ElarionOutboxGenerator : IIncrementalGenerator {
         sb.AppendLine($"        {OutboxNamespace}.OutboxModelBuilderExtensions.UseElarionOutbox(");
         sb.AppendLine(
             $"            modelBuilder, tableName: {SourceLiterals.String(target.TableName)}, " +
-            $"deliveryTableName: {SourceLiterals.String(target.DeliveryTableName)}, " +
             $"schema: {SourceLiterals.String(target.Schema)}, snakeCase: {(target.SnakeCase ? "true" : "false")});");
         sb.AppendLine("}");
 

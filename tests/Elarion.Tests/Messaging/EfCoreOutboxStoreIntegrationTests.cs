@@ -10,28 +10,22 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
     : IClassFixture<PostgreSqlOutboxStoreFixture> {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private async Task<OutboxDelivery> SeedAsync(
+    private async Task<OutboxMessage> SeedAsync(
         OutboxIntegrationDbContext context,
         string? targetRole = null) {
+        var id = Guid.CreateVersion7();
         var message = new OutboxMessage {
-            Id = Guid.CreateVersion7(),
+            Id = id,
+            MessageId = id,
             OccurredOnUtc = DateTimeOffset.UtcNow,
             EventType = "Test.Event",
             Payload = "{}",
-            CorrelationId = Guid.CreateVersion7()
+            CorrelationId = Guid.CreateVersion7(),
+            TargetRole = targetRole
         };
-        var delivery = new OutboxDelivery {
-            Id = Guid.CreateVersion7(),
-            MessageId = message.Id,
-            OccurredOnUtc = message.OccurredOnUtc,
-            ConsumerId = "test-consumer",
-            TargetRole = targetRole,
-            Message = message
-        };
-        message.Deliveries.Add(delivery);
         context.Add(message);
         await context.SaveChangesAsync(Ct);
-        return delivery;
+        return message;
     }
 
     [Fact]
@@ -46,7 +40,7 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
         claimed.Should().ContainSingle().Which.Id.Should().Be(delivery.Id);
 
         (await store.MarkProcessedAsync(delivery.Id, Guid.NewGuid(), DateTimeOffset.UtcNow, Ct)).Should().BeFalse();
-        var row = await context.Set<OutboxDelivery>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
+        var row = await context.Set<OutboxMessage>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
         row.ProcessedOnUtc.Should().BeNull();
         row.LockId.Should().Be(lockId);
     }
@@ -66,7 +60,7 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
 
         (await store.MarkFailedAsync(delivery.Id, lockA, "stale", DateTimeOffset.UtcNow, Ct)).Should().BeFalse();
         (await store.MarkProcessedAsync(delivery.Id, lockA, DateTimeOffset.UtcNow, Ct)).Should().BeFalse();
-        var row = await context.Set<OutboxDelivery>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
+        var row = await context.Set<OutboxMessage>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
         row.LockId.Should().Be(lockB);
 
         (await store.MarkProcessedAsync(delivery.Id, lockB, DateTimeOffset.UtcNow, Ct)).Should().BeTrue();
@@ -83,7 +77,7 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
         await store.ClaimPendingAsync(firstLock, DateTimeOffset.UtcNow.AddMinutes(2), 10, ["actors"], Ct);
 
         (await store.ReleaseClaimAsync(delivery.Id, firstLock, Ct)).Should().BeTrue();
-        var row = await context.Set<OutboxDelivery>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
+        var row = await context.Set<OutboxMessage>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
         row.LockId.Should().BeNull();
         row.LockedUntilUtc.Should().BeNull();
         row.Attempts.Should().Be(0);
@@ -107,7 +101,7 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
         (await store.ClaimPendingAsync(Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, [], Ct))
             .Should().BeEmpty();
 
-        var row = await context.Set<OutboxDelivery>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
+        var row = await context.Set<OutboxMessage>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
         row.Attempts.Should().Be(1);
         row.LockId.Should().BeNull();
         row.LockedUntilUtc.Should().BeCloseTo(retryAfter, TimeSpan.FromSeconds(1));
@@ -127,7 +121,7 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
         (await store.ClaimPendingAsync(Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, [], Ct))
             .Should().BeEmpty();
 
-        var row = await context.Set<OutboxDelivery>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
+        var row = await context.Set<OutboxMessage>().AsNoTracking().SingleAsync(d => d.Id == delivery.Id, Ct);
         row.Attempts.Should().Be(options.MaxDeliveryAttempts);
         row.Error.Should().Be("unresolvable");
     }
@@ -150,31 +144,23 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
     }
 
     [Fact]
-    public async Task PurgeProcessed_DeletesOnlyMessagesWhoseEveryDeliveryIsOld() {
+    public async Task PurgeProcessed_DeletesOnlyOldCompletedTargetGroups() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var context = fixture.CreateContext();
         var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
         var eligible = await SeedAsync(context);
         eligible.ProcessedOnUtc = cutoff.AddMinutes(-1);
 
-        var blocked = await SeedAsync(context);
-        blocked.ProcessedOnUtc = cutoff.AddMinutes(-1);
-        blocked.Message.Deliveries.Add(new OutboxDelivery {
-            Id = Guid.CreateVersion7(),
-            MessageId = blocked.MessageId,
-            OccurredOnUtc = blocked.OccurredOnUtc,
-            ConsumerId = "second-consumer",
-            ProcessedOnUtc = cutoff.AddMinutes(1),
-            Message = blocked.Message
-        });
+        var retained = await SeedAsync(context);
+        retained.ProcessedOnUtc = cutoff.AddMinutes(1);
         await context.SaveChangesAsync(Ct);
-        var eligibleMessageId = eligible.MessageId;
-        var blockedMessageId = blocked.MessageId;
+        var eligibleGroupId = eligible.Id;
+        var retainedGroupId = retained.Id;
         var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
 
         (await store.PurgeProcessedAsync(cutoff, Ct)).Should().BeGreaterThanOrEqualTo(1);
 
-        (await context.Set<OutboxMessage>().AnyAsync(message => message.Id == eligibleMessageId, Ct)).Should().BeFalse();
-        (await context.Set<OutboxMessage>().AnyAsync(message => message.Id == blockedMessageId, Ct)).Should().BeTrue();
+        (await context.Set<OutboxMessage>().AnyAsync(message => message.Id == eligibleGroupId, Ct)).Should().BeFalse();
+        (await context.Set<OutboxMessage>().AnyAsync(message => message.Id == retainedGroupId, Ct)).Should().BeTrue();
     }
 }

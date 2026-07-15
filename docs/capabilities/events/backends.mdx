@@ -18,7 +18,7 @@ transactional outbox**. (For the plane model itself, see the [events overview](/
 | | In-memory (`Elarion.Messaging.InMemory`) | EF Core outbox (`Elarion.Messaging.Outbox`) |
 | --- | --- | --- |
 | Durability | best-effort; flushed-but-undelivered events are **lost on crash** | **at-least-once**; survives restarts |
-| How it captures | a per-scope buffer flushed after commit | an immutable message plus per-consumer delivery rows in the **same transaction** as your data |
+| How it captures | a per-scope buffer flushed after commit | one immutable envelope per distinct target role in the **same transaction** as your data |
 | Delivery | a hosted channel pump (`EventDispatchPump`) | a hosted worker that polls, leases, dispatches, retries (`OutboxDeliveryService`) |
 | EF Core | needs interceptors on your `DbContext` (registered for you) | needs the outbox table on your `DbContext` |
 | Use when | events are advisory and loss is acceptable | events drive real side effects that must happen |
@@ -79,18 +79,17 @@ separately.
 ```csharp title="BillingDbContext.cs"
 protected override void OnModelCreating(ModelBuilder modelBuilder) {
     base.OnModelCreating(modelBuilder);
-    modelBuilder.UseElarionOutbox();   // adds message + per-consumer delivery tables
+    modelBuilder.UseElarionOutbox();   // adds the target-group envelope table
 }
 ```
 
 `UseElarionOutbox` takes optional `tableName` and `schema` parameters plus a `snakeCase` toggle
-(default `true`; `false` switches the table/column/index names to PascalCase — the defaults become
-`ElarionOutboxMessages` / `ElarionOutboxDeliveries`), for example
-`modelBuilder.UseElarionOutbox("app_outbox", "app", deliveryTableName: "app_outbox_deliveries")`.
+(default `true`; `false` switches the table/column/index names to PascalCase — the default becomes
+`ElarionOutboxMessages`), for example `modelBuilder.UseElarionOutbox("app_outbox", "app")`.
 
 On a `[GenerateDbSets]` context you can skip the hand-written call entirely: annotate the context with
-`[GenerateElarionOutbox]` (optionally with `SnakeCase`/`TableName`/`DeliveryTableName`/`Schema`) and the bundled generator
-emits both DbSets and applies the same model configuration through the EF generator's
+`[GenerateElarionOutbox]` (optionally with `SnakeCase`/`TableName`/`Schema`) and the bundled generator
+emits the DbSet and applies the same model configuration through the EF generator's
 model-config seam (`ELOBX001` if `[GenerateDbSets]` is missing):
 
 ```csharp title="BillingDbContext.cs"
@@ -112,9 +111,9 @@ builder.Services.AddElarionOutbox<BillingDbContext>(o => {
     // Event payloads use the canonical IElarionJsonSerialization by default (contributed by AddElarion) —
     // register your event DTOs in a module JSON context. Set o.SerializerOptions only to override.
     // o.PollingInterval    = TimeSpan.FromSeconds(1);  // idle poll interval
-    // o.BatchSize          = 100;                       // consumer deliveries claimed per poll
-    // o.LeaseDuration      = TimeSpan.FromMinutes(2);   // claim lease before another worker may reclaim
-    // o.MaxDeliveryAttempts = 10;                       // attempts before one delivery is left for inspection
+    // o.BatchSize          = 100;                       // target groups claimed per poll
+    // o.LeaseDuration      = TimeSpan.FromMinutes(2);   // group lease before another worker may reclaim
+    // o.MaxDeliveryAttempts = 10;                       // attempts before one group is left for inspection
     // o.BaseRetryDelay     = TimeSpan.FromSeconds(5);   // backoff base: a failed message is invisible for BaseRetryDelay × 2^(attempts-1)
     // o.MaxRetryDelay      = TimeSpan.FromHours(1);     // ceiling on the exponential retry backoff
     // o.RetentionPeriod    = TimeSpan.FromDays(7);     // null = keep delivered rows forever
@@ -144,7 +143,7 @@ Consumer **descriptors** are registered separately — automatically and feature
 `[GenerateModuleBootstrapper]` (see [Module gating](/docs/capabilities/events#module-gating)), or
 explicitly via the generated `Add{Assembly}EventConsumers()`. If you only publish integration events you
 don't need the in-memory tier at all — the outbox and the consumer descriptors are enough. Publishing
-requires the descriptors because it creates one delivery per consumer and resolves any target role.
+requires the descriptors because it resolves consumers into target groups before persistence.
 
 </Step>
 
@@ -168,21 +167,27 @@ requires the descriptors because it creates one delivery per consumer and resolv
 
 ### How delivery stays safe
 
-The `OutboxDeliveryService` claims pending **consumer deliveries** with a provider-neutral conditional
+The `OutboxDeliveryService` claims pending **target-group envelopes** with a provider-neutral conditional
 `ExecuteUpdate` lease and a short `LeaseDuration`, dispatches each on an isolated scope, then finalizes
-and purges. A crashed worker's in-flight delivery is retried once its lease expires. A delivery that
+and purges. A crashed worker's in-flight group is retried once its lease expires. A group that
 fails past `MaxDeliveryAttempts` is left for inspection and no longer retried. Defaults are tuned for
 low/single-instance deployments — in multi-instance deployments keep `LeaseDuration` comfortably above the
 time to deliver a full `BatchSize` batch.
 
 **Delivery is not atomic with your consumers.** Each handler-form consumer commits its **own**
-transaction; the worker then finalizes that consumer's delivery — a separate lease-guarded write on the
-worker's connection. A crash between the consumer's commit and finalize can redeliver that consumer,
-but a failed sibling no longer re-runs deliveries already completed. The **built-in inbox** absorbs the
+transaction; the worker then finalizes the target group — a separate lease-guarded write on the
+worker's connection. A crash between a consumer's commit and group finalize can redeliver consumers in
+that group. The **built-in inbox** absorbs the
 remaining at-least-once window for handler-form consumers by default — each consumer claims
 the message id inside its own transaction, so a redelivery is acknowledged instead of re-run (pair with
 `AddElarionIdempotencyEntityFrameworkCore` so claims survive restarts) — see
 [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
+
+**The common path stays one row.** When an event has no role-routed consumer, publish does not enumerate
+handlers or persist consumer ids: an immutable startup catalog answers that case in O(1). Delivery uses one
+lease, one payload deserialization, one scope, ordered sequential invocation, and one finalize regardless of
+consumer count. Multiple rows and duplicated payloads appear only when one publish genuinely resolves to
+multiple execution targets.
 
 **Finalizing is lease-guarded.** Every finalize — mark delivered, mark failed, or park — is conditioned on
 the finalizing worker still owning the lease it claimed under. If a worker stalls past its lease and another
@@ -195,15 +200,15 @@ overlapping redelivery.
 batch at full poll frequency — head-of-line blocking is avoided and retries back off. Set `BaseRetryDelay`
 to `TimeSpan.Zero` to retry on the next poll instead.
 
-**Unresolvable deliveries are parked, not dropped.** A missing `ConsumerId`, incompatible event-type
-rename, or null payload parks only that delivery. New publishes fail immediately when no consumer is
+**Unresolvable groups are parked, not dropped.** A missing `ConsumerId`, incompatible event-type
+rename, or null payload parks only that target group. New publishes fail immediately when no consumer is
 registered, so malformed fan-out is caught before `SaveChanges`.
 
 ### Where the worker runs
 
-Every publishing instance must register the same generated consumer catalog because publish-time fan-out
-stores stable consumer ids and target roles. `RunDeliveryWorker = false` is still available for a fixed
-publish-only process, but it disables claiming only; it does not remove the catalog requirement:
+Every publishing instance must register the same generated consumer catalog because publish-time grouping
+stores target roles and, for role-routed events, stable consumer ids. `RunDeliveryWorker = false` is still
+available for a fixed publish-only process, but it disables claiming only; it does not remove the catalog requirement:
 
 ```csharp title="Program.cs (web node)"
 builder.Services.AddElarionOutbox<BillingDbContext>(o =>
@@ -214,22 +219,21 @@ builder.Services.AddElarionOutbox<BillingDbContext>(o =>
 { "Outbox": { "RunDeliveryWorker": false } }   // the worker-role instance leaves the default (true)
 ```
 
-Role-bound deliveries are different: every worker may run, but it claims a delivery only when its
+Role-bound groups are different: every worker may run, but it claims a group only when its
 `TargetRole` is null or appears in the local `IRoleLeaseRegistry` as held. Generated `SingleHome` and
 `VirtualShards` actor consumers populate that role automatically; failover transfers eligibility without
 HTTP forwarding or a global delivery gate. The worker rechecks the live lease immediately before each
-dispatch; if ownership changed after the batch claim, it releases that delivery without incrementing its
+dispatch; if ownership changed after the batch claim, it releases that group without incrementing its
 attempt count or applying backoff so the new holder can claim it immediately.
 
-The deliveries table copies the envelope's publish time into each delivery and has a **partial (filtered)
-claim index** over `(target_role, occurred_on_utc, id)` where `processed_on_utc IS NULL` (PascalCase
+The envelope table has a **partial (filtered) claim index** over `(target_role, occurred_on_utc, id)` where
+`processed_on_utc IS NULL` (PascalCase
 equivalents with `snakeCase: false`). The worker's "oldest eligible delivery first" scan therefore stays
-on the delivery table and does not join/sort through the parent envelope; completed rows awaiting retention
-purge are absent from the index. Filtered indexes are supported on PostgreSQL, SQL Server, and SQLite; on
+on one table; completed rows awaiting retention purge are absent from the index. Filtered indexes are
+supported on PostgreSQL, SQL Server, and SQLite; on
 MySQL, supply an unfiltered index in your own model.
 
-Retention purge also starts from the processed-delivery index. It selects and deletes eligible parent
-messages in bounded batches, and retains a message until every consumer delivery is older than the cutoff.
+Retention purge starts from the processed-envelope index and deletes eligible groups in bounded batches.
 
 ### Tracing across the commit boundary
 

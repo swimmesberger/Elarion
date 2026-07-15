@@ -32,7 +32,7 @@ public delegate string? EventDeliveryRoleResolver(IServiceProvider serviceProvid
 /// </remarks>
 public sealed record EventSubscriptionDescriptor {
     /// <summary>
-    /// Stable identity of this consumer. Durable outbox fan-out stores it with each independent delivery.
+    /// Stable identity of this consumer. Durable outbox fan-out stores it when one publish splits into target groups.
     /// </summary>
     public string ConsumerId { get; init; } = string.Empty;
 

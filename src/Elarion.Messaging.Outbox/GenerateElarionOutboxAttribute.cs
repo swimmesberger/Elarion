@@ -27,12 +27,6 @@ public sealed class GenerateElarionOutboxAttribute : Attribute {
     /// </summary>
     public string? TableName { get; set; }
 
-    /// <summary>
-    /// The delivery table name, or <c>null</c> for the default
-    /// (<c>elarion_outbox_deliveries</c> / <c>ElarionOutboxDeliveries</c>).
-    /// </summary>
-    public string? DeliveryTableName { get; set; }
-
     /// <summary>The schema, or <c>null</c> for the provider's default schema.</summary>
     public string? Schema { get; set; }
 }

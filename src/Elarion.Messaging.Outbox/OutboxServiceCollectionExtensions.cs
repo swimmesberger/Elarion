@@ -25,7 +25,7 @@ public static class OutboxServiceCollectionExtensions
     /// registered separately (for example via <c>AddElarionDomainEventBus</c> for Plane A and the generated
     /// <c>Add{Assembly}EventConsumers</c>). Consumers must be idempotent because delivery is at-least-once.
     /// Set <see cref="OutboxOptions.RunDeliveryWorker"/> to <see langword="false"/> on publisher-only instances;
-    /// they still register the complete descriptor catalog used to create per-consumer deliveries.
+    /// they still register the complete descriptor catalog used to create target-group envelopes.
     /// </remarks>
     public static IServiceCollection AddElarionOutbox<TDbContext>(
         this IServiceCollection services,
@@ -54,7 +54,7 @@ public static class OutboxServiceCollectionExtensions
         // integration bus was registered for the domain plane's sake.
         services.AddScoped<IIntegrationEventBus, OutboxIntegrationEventBus>();
 
-        // Publisher-only nodes may opt out of claiming while retaining publish-time fan-out metadata.
+        // Publisher-only nodes may opt out of claiming while retaining publish-time target metadata.
         if (options.RunDeliveryWorker)
         {
             services.AddHostedService<OutboxDeliveryService>();

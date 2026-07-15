@@ -8,13 +8,13 @@ using Microsoft.Extensions.Logging;
 namespace Elarion.Messaging.Outbox;
 
 /// <summary>
-/// Polls the outbox, claims eligible per-consumer deliveries, dispatches them on isolated scopes, and
+/// Polls the outbox, claims eligible target-group envelopes, dispatches them on isolated scopes, and
 /// finalizes each — the durable, after-commit delivery tier.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Delivery is at-least-once: a message redelivers if the worker crashes after dispatch but before finalizing, or if
-/// a consumer throws (only that delivery retries until <see cref="OutboxOptions.MaxDeliveryAttempts"/>). Consumers
+/// a consumer throws (only that target group retries until <see cref="OutboxOptions.MaxDeliveryAttempts"/>). Consumers
 /// must still be idempotent across crash windows. A claim lease lets a crashed worker's deliveries be reclaimed,
 /// and the conditional claim makes running multiple instances safe.
 /// </para>
@@ -106,35 +106,34 @@ public sealed class OutboxDeliveryService(
             heldRoles,
             ct).ConfigureAwait(false);
 
-        foreach (var delivery in claimed)
+        foreach (var group in claimed)
         {
             ct.ThrowIfCancellationRequested();
-            if (delivery.TargetRole is { } targetRole
+            if (group.TargetRole is { } targetRole
                 && (roleLeases is null
                     || !roleLeases.TryGetValue(targetRole, out var targetLease)
                     || !targetLease.IsHeld)) {
-                if (!await store.ReleaseClaimAsync(delivery.Id, lockId, ct).ConfigureAwait(false)) {
-                    LogLeaseLost(delivery);
+                if (!await store.ReleaseClaimAsync(group.Id, lockId, ct).ConfigureAwait(false)) {
+                    LogLeaseLost(group);
                 }
                 else {
                     logger.LogInformation(
-                        "Released outbox delivery {DeliveryId} for role '{Role}' because this process no longer holds the role.",
-                        delivery.Id,
+                        "Released outbox delivery group {GroupId} for role '{Role}' because this process no longer holds the role.",
+                        group.Id,
                         targetRole);
                 }
 
                 continue;
             }
 
-            await DeliverAsync(store, lockId, delivery, ct).ConfigureAwait(false);
+            await DeliverAsync(store, lockId, group, ct).ConfigureAwait(false);
         }
 
         return claimed.Count;
     }
 
-    private async Task DeliverAsync(IOutboxStore store, Guid lockId, OutboxDelivery delivery, CancellationToken ct)
+    private async Task DeliverAsync(IOutboxStore store, Guid lockId, OutboxMessage message, CancellationToken ct)
     {
-        var message = delivery.Message;
         // Parent the consume span on the traceparent persisted at publish time, so delivery stays in the
         // publishing operation's trace even on another worker instance or after a restart.
         ActivityContext.TryParse(message.TraceParent, null, isRemote: true, out var traceParent);
@@ -146,9 +145,10 @@ public sealed class OutboxDeliveryService(
             activity.SetTag("messaging.event.type", message.EventType);
             activity.SetTag("messaging.event.plane", "integration");
             activity.SetTag("messaging.correlation_id", message.CorrelationId);
-            activity.SetTag("messaging.outbox.consumer_id", delivery.ConsumerId);
-            activity.SetTag("messaging.outbox.target_role", delivery.TargetRole);
-            activity.SetTag("messaging.outbox.attempt", delivery.Attempts + 1);
+            activity.SetTag("messaging.message.id", message.MessageId);
+            activity.SetTag("messaging.outbox.delivery_group_id", message.Id);
+            activity.SetTag("messaging.outbox.target_role", message.TargetRole);
+            activity.SetTag("messaging.outbox.attempt", message.Attempts + 1);
         }
 
         var startTimestamp = Stopwatch.GetTimestamp();
@@ -157,7 +157,7 @@ public sealed class OutboxDeliveryService(
             OutboxDispatchOutcome outcome;
             await using (var consumerScope = scopeFactory.CreateAsyncScope())
             {
-                outcome = await dispatcher.DispatchAsync(consumerScope.ServiceProvider, delivery, ct).ConfigureAwait(false);
+                outcome = await dispatcher.DispatchAsync(consumerScope.ServiceProvider, message, ct).ConfigureAwait(false);
             }
 
             if (outcome is OutboxDispatchOutcome.Unresolvable)
@@ -165,13 +165,13 @@ public sealed class OutboxDeliveryService(
                 // The event type resolves to no consumer or the payload is null — a retry can never succeed, so park
                 // the message for inspection instead of redelivering it every poll (the dispatcher already logged why).
                 var parked = await store.MarkPermanentlyFailedAsync(
-                    delivery.Id,
+                    message.Id,
                     lockId,
                     "Event type unresolvable or payload null; parked for inspection.",
                     ct).ConfigureAwait(false);
                 if (!parked)
                 {
-                    LogLeaseLost(delivery);
+                    LogLeaseLost(message);
                 }
 
                 EventTelemetry.RecordDelivery(
@@ -179,9 +179,9 @@ public sealed class OutboxDeliveryService(
                 return;
             }
 
-            if (!await store.MarkProcessedAsync(delivery.Id, lockId, timeProvider.GetUtcNow(), ct).ConfigureAwait(false))
+            if (!await store.MarkProcessedAsync(message.Id, lockId, timeProvider.GetUtcNow(), ct).ConfigureAwait(false))
             {
-                LogLeaseLost(delivery);
+                LogLeaseLost(message);
             }
 
             EventTelemetry.RecordDelivery(
@@ -203,30 +203,30 @@ public sealed class OutboxDeliveryService(
                 message.EventType, "failed", Stopwatch.GetElapsedTime(startTimestamp));
             logger.LogError(
                 ex,
-                "Delivery {DeliveryId} of outbox message {MessageId} to {ConsumerId} ({EventType}, correlation {CorrelationId}) failed on attempt {Attempt}.",
-                delivery.Id,
+                "Delivery group {GroupId} of outbox message {MessageId} for role {TargetRole} ({EventType}, correlation {CorrelationId}) failed on attempt {Attempt}.",
                 message.Id,
-                delivery.ConsumerId,
+                message.MessageId,
+                message.TargetRole,
                 message.EventType,
                 message.CorrelationId,
-                delivery.Attempts + 1);
-            var retryVisibleAfter = timeProvider.GetUtcNow() + ComputeBackoff(delivery.Attempts + 1);
-            if (!await store.MarkFailedAsync(delivery.Id, lockId, Describe(ex), retryVisibleAfter, ct).ConfigureAwait(false))
+                message.Attempts + 1);
+            var retryVisibleAfter = timeProvider.GetUtcNow() + ComputeBackoff(message.Attempts + 1);
+            if (!await store.MarkFailedAsync(message.Id, lockId, Describe(ex), retryVisibleAfter, ct).ConfigureAwait(false))
             {
-                LogLeaseLost(delivery);
+                LogLeaseLost(message);
             }
         }
     }
 
-    private void LogLeaseLost(OutboxDelivery delivery) =>
+    private void LogLeaseLost(OutboxMessage message) =>
         // Zero rows updated means our lease expired and another worker legitimately reclaimed the message while we
         // were dispatching. Finalizing anyway would wipe the new owner's active lease and cause overlapping
         // redelivery, so we skip and let the current owner finalize it.
         logger.LogWarning(
-            "Outbox delivery {DeliveryId} for message {MessageId} ({EventType}) lease was lost before finalizing; another worker reclaimed it. Skipping finalize.",
-            delivery.Id,
-            delivery.MessageId,
-            delivery.Message.EventType);
+            "Outbox delivery group {GroupId} for message {MessageId} ({EventType}) lease was lost before finalizing; another worker reclaimed it. Skipping finalize.",
+            message.Id,
+            message.MessageId,
+            message.EventType);
 
     /// <summary>Exponential backoff for the next attempt: <c>BaseRetryDelay × 2^(attempt-1)</c>, capped at <see cref="OutboxOptions.MaxRetryDelay"/>.</summary>
     private TimeSpan ComputeBackoff(int attempt)

@@ -1,8 +1,9 @@
 # ADR-0022: Inbox pattern for integration-event consumers (idempotent consumers)
 
-> **Resolution update (ADR-0062):** the outbox now stores and retries one delivery per consumer.
-> Sibling failure no longer replays completed siblings. The inbox remains default-on because the
-> crash window between a consumer commit and its delivery finalize is still at-least-once. Historical
+> **Resolution update (ADR-0062):** the outbox now stores and retries one envelope per distinct target
+> role. Consumers sharing a target keep the original shared retry boundary; groups targeting different
+> roles finalize independently. The inbox remains default-on because sibling failure and the crash window
+> between a consumer commit and its group finalize are still at-least-once. Historical
 > whole-message analysis below explains the design this ADR originally hardened.
 
 - Status: Accepted
@@ -169,13 +170,13 @@ the commit (the ADR-0021 cooperative-recipient caveat, transitively). Per consum
 | Domain-event (Plane A), either form | **Never** — the decorator must not attach | Runs inline in the publisher's transaction; exactly-once by atomicity. |
 | Integration, **method-form** | Unavailable | No pipeline to attach to. Convert to handler-form when dedup matters. |
 | Integration, handler-form, **in-memory bus** | Low value | Best-effort tier: no redelivery across a crash; the inbox guards only in-process multi-delivery. |
-| Integration, handler-form, **outbox** | **Default-on** (decision B), opt-out | Delivery is at-least-once per consumer: a crash after the consumer commit but before delivery finalize can run that consumer again. |
+| Integration, handler-form, **outbox** | **Default-on** (decision B), opt-out | Delivery is at-least-once per consumer: a later consumer in the same target group may fail, or a crash may occur after commit but before group finalize. |
 | …whose only effect is a call to a sink that dedups on a caller-supplied key | Legitimate opt-out | Keying the sink call on the **message id** already makes that effect exactly-once; the inbox would only save the wasted duplicate call. |
 | …whose effect is naturally idempotent (a pure upsert on a business key) | Legitimate opt-out | Redelivery converges by itself. |
 
-Why default-on rather than opt-in: even after ADR-0062 removed sibling replays, a worker can crash after
-the consumer commits but before its independent delivery is finalized, causing that consumer to run
-again. Under an at-least-once contract dedup remains the pit of success. Re-examined
+Why default-on rather than opt-in: ADR-0062 preserves the original shared retry boundary among consumers
+with the same target, and a worker can also crash after a consumer commits but before the group is finalized,
+causing that consumer to run again. Under an at-least-once contract dedup remains the pit of success. Re-examined
 post-implementation against "most consumers can be written idempotently, so opt-in like `[Idempotent]`", and
 upheld on three grounds: **(a) asymmetric loss** — the inbox on an already-convergent consumer wastes two writes
 inside an existing transaction (reclaimable, visibly, via `[AllowDuplicates]`), while a missing inbox on a

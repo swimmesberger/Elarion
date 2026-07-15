@@ -1,4 +1,4 @@
-# ADR-0062: Role-affine routing and per-consumer outbox delivery
+# ADR-0062: Role-affine routing and target-group outbox delivery
 
 - Status: Accepted
 - Date: 2026-07-15
@@ -31,26 +31,39 @@ Actors are an adapter over that primitive. `AddElarionPostgreSqlActorSharding<TD
 the `"actors"` partition and `IActorPlacementResolver` adds the actor name as an affinity scope. The
 same partition can therefore be resolved by actor calls, generated event delivery, and ingress.
 
-### Durable fan-out is one delivery row per consumer
+### Durable fan-out is one envelope per distinct target
 
-An `OutboxMessage` is the immutable event envelope. Publishing also inserts one `OutboxDelivery`
-child per integration consumer, atomically in the publisher's transaction. Each delivery stores:
+Publishing groups the event's ordered integration consumers by their resolved `TargetRole` and inserts
+one `OutboxMessage` envelope per distinct target, atomically in the publisher's transaction. A null role
+is one ordinary unbound group. Each envelope stores the payload, target role, claim lease, attempts,
+backoff, completion, and error state. Envelopes created by one publish share a logical `MessageId`; their
+separate `Id` values are lease/finalize identities. When a publish splits, each envelope also stores the
+stable consumer ids in invocation order.
 
-- a source-generated stable `ConsumerId`;
-- an optional `TargetRole` selected from the actual event;
-- the envelope's publish time, copied so ordered claims remain a delivery-table index probe;
-- its own claim lease, attempts, backoff, completion, and error state.
+The common case is deliberately the original single-row shape: if no consumer declares role routing,
+the immutable catalog answers that in O(1), publishing writes exactly one envelope, and no consumer-id
+metadata is serialized. Delivery resolves the catalog's already ordered consumer array, deserializes the
+payload once, creates one scope, invokes all consumers sequentially, and performs one finalize. This path
+does not depend on process count, so single-node and multi-node deployments have identical behavior.
 
-Workers claim a delivery only when `TargetRole` is null or the local process currently holds that
-role, and recheck that lease immediately before each dispatch. A claim whose role was lost is released
-without an attempt or backoff so the new holder can take it immediately. Ordinary consumers remain unbound. Generated actor consumers target the actor-home role for
-`SingleHome`, or the key's partition role for `VirtualShards`. Role failover changes claim eligibility
-without rewriting pending rows. `OutboxOptions.DeliveryGate` is removed.
+Workers claim an envelope only when `TargetRole` is null or the local process currently holds that role,
+and recheck that lease immediately before dispatch. A claim whose role was lost is released without an
+attempt or backoff so the new holder can take it immediately. Ordinary consumers remain unbound. Generated
+actor consumers target the actor-home role for `SingleHome`, or the key's partition role for
+`VirtualShards`. Role failover changes claim eligibility without rewriting pending rows.
+`OutboxOptions.DeliveryGate` is removed.
 
-Retries and finalization are per consumer. A failed sibling no longer re-runs consumers that already
-completed. The original `OutboxMessage.Id` remains the inbox/idempotency key, so at-least-once crash
-windows are still absorbed per `(consumer, message)`. Cross-consumer execution order is not promised;
-`Order` only makes delivery-row creation deterministic and remains meaningful to the in-memory bus.
+Retries and finalization are per target group. Consumers sharing a target retain source-generated order
+and the original outbox's shared failure boundary: if a later consumer fails, an earlier one may run again
+when the group retries. Groups targeting different roles finalize independently and do not replay each
+other. The shared `MessageId` remains the inbox/idempotency key, so at-least-once crash and group-retry
+windows are absorbed per `(consumer, message)` for handler-form consumers.
+
+The request-path benchmark guards the near-zero-cost constraint. On .NET 10/Apple M4 Pro, the no-routing
+path measured 561 ns versus 538 ns for the historical single-row baseline with one consumer (1.04×), and
+601 ns versus 546 ns with 30 consumers (1.10×). Both allocated 280 B. The consumer-count increase creates
+no rows, objects, or allocations; the remaining delta is the fixed telemetry/catalog branch. The benchmark
+is `OutboxPublishBenchmarks` and excludes database I/O, where both paths write the same single row.
 
 Publishing fails before persistence when the event has no registered consumer or a consumer has no
 stable id. Every publishing process must therefore have the same generated consumer catalog and the
@@ -60,7 +73,7 @@ the deliberate greenfield contract; dynamically heterogeneous fleets need a real
 Method-form consumer ids contain only the service, method, and event type. Framework-injected context
 and cancellation parameters do not participate, so adding one does not rename durable deliveries or
 inbox claims. Overloads that would produce the same id are a generator error (`ELEVT006`). Retention
-purging is delivery-index-driven and deletes eligible parent messages in bounded batches.
+purging is envelope-index-driven and deletes completed groups in bounded batches.
 
 ### HTTP resolves a role before execution
 
@@ -79,9 +92,11 @@ work and per-item distributed locks remain outside the abstraction.
 ## Consequences
 
 - Actor `[ConsumeEvent]` works with both `SingleHome` and `VirtualShards` without HTTP forwarding.
-- One event can target several roles because placement belongs to each consumer delivery.
-- The outbox schema is intentionally breaking: applications add the deliveries table and migrate or
-  drain old message-only rows before deployment.
+- One event can target several roles because placement is resolved per consumer and persisted per target group.
+- The outbox schema is intentionally breaking, but remains one table: applications migrate or drain old
+  message-only rows before deployment.
+- The common unbound path remains one row and one dispatch/finalize cycle regardless of consumer count;
+  payload duplication and extra rows are proportional only to the number of distinct execution targets.
 - Role partitions add one heartbeat per partition and are still the small 1–10-node recipe. They do
   not add membership, automatic balancing, activation migration, or transparent actor calls.
 - HTTP and background work share target selection but keep transport-specific behavior separate.

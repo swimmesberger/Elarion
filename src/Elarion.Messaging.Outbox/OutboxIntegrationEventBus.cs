@@ -40,41 +40,78 @@ public sealed class OutboxIntegrationEventBus(
 
         var payload = JsonSerializer.Serialize(@event, options.SerializerOptions ?? jsonSerialization.Options);
         var messageId = Guid.CreateVersion7();
-        var message = new OutboxMessage
-        {
-            Id = messageId,
-            OccurredOnUtc = timeProvider.GetUtcNow(),
-            EventType = typeof(TEvent).FullName
-                ?? throw new InvalidOperationException($"Integration event '{typeof(TEvent)}' has no full name and cannot be persisted."),
-            Payload = payload,
-            CorrelationId = Guid.CreateVersion7(),
-            // Activity.Id is the W3C traceparent; persisting it keeps the after-commit delivery span
-            // in the publishing operation's trace even across a restart or another worker instance.
-            TraceParent = Activity.Current?.Id
-        };
+        var occurredOnUtc = timeProvider.GetUtcNow();
+        var eventType = typeof(TEvent).FullName
+            ?? throw new InvalidOperationException(
+                $"Integration event '{typeof(TEvent)}' has no full name and cannot be persisted.");
+        var correlationId = Guid.CreateVersion7();
+        var traceParent = Activity.Current?.Id;
 
-        if (message.Deliveries is List<OutboxDelivery> deliveries) {
-            deliveries.EnsureCapacity(consumers.Length);
+        // Most events have no role-routed consumers. The catalog records that once at startup so this path remains
+        // one envelope, one append and O(1) with respect to consumer count.
+        if (!consumerCatalog.HasDeliveryRoleResolvers(typeof(TEvent))) {
+            store.Append(new OutboxMessage {
+                Id = messageId,
+                MessageId = messageId,
+                OccurredOnUtc = occurredOnUtc,
+                EventType = eventType,
+                Payload = payload,
+                CorrelationId = correlationId,
+                TraceParent = traceParent
+            });
+            return ValueTask.CompletedTask;
         }
 
+        var groups = new List<DeliveryGroup>();
+        var groupByRole = new Dictionary<string, int>(StringComparer.Ordinal);
+        var unboundGroup = -1;
         foreach (var descriptor in consumers) {
             var targetRole = descriptor.ResolveDeliveryRole?.Invoke(serviceProvider, @event);
             if (targetRole is not null) {
                 ArgumentException.ThrowIfNullOrWhiteSpace(targetRole);
             }
 
-            message.Deliveries.Add(new OutboxDelivery {
-                Id = Guid.CreateVersion7(),
+            int groupIndex;
+            if (targetRole is null) {
+                if (unboundGroup < 0) {
+                    unboundGroup = groups.Count;
+                    groups.Add(new DeliveryGroup(null));
+                }
+
+                groupIndex = unboundGroup;
+            }
+            else if (!groupByRole.TryGetValue(targetRole, out groupIndex)) {
+                groupIndex = groups.Count;
+                groupByRole.Add(targetRole, groupIndex);
+                groups.Add(new DeliveryGroup(targetRole));
+            }
+
+            groups[groupIndex].ConsumerIds.Add(descriptor.ConsumerId);
+        }
+
+        for (var index = 0; index < groups.Count; index++) {
+            var group = groups[index];
+            store.Append(new OutboxMessage {
+                // Keep the common one-group shape identical to the historical outbox: its row id is
+                // also the logical message id. Additional target groups get their own lease identity.
+                Id = index == 0 ? messageId : Guid.CreateVersion7(),
                 MessageId = messageId,
-                OccurredOnUtc = message.OccurredOnUtc,
-                ConsumerId = descriptor.ConsumerId,
-                TargetRole = targetRole,
-                Message = message
+                OccurredOnUtc = occurredOnUtc,
+                EventType = eventType,
+                Payload = payload,
+                CorrelationId = correlationId,
+                TraceParent = traceParent,
+                ConsumerIdsJson = OutboxConsumerIds.Serialize(group.ConsumerIds),
+                TargetRole = group.TargetRole
             });
         }
 
-        store.Append(message);
-
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DeliveryGroup(string? targetRole) {
+        public string? TargetRole { get; } = targetRole;
+
+        public List<string> ConsumerIds { get; } = [];
     }
 }

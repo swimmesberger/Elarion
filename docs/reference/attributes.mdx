@@ -640,13 +640,12 @@ See [Audit trail](/docs/concepts/auditing).
 ### `[GenerateElarionOutbox]`
 
 - **Package:** `Elarion.Messaging.Outbox` · **Applies to:** class
-- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits `DbSet<OutboxMessage>` and `DbSet<OutboxDelivery>` and applies the transactional-outbox model configuration through the EF generator's model-config seam. The hand-written equivalent is `modelBuilder.UseElarionOutbox()`. Requires `[GenerateDbSets]` (else `ELOBX001`).
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits `DbSet<OutboxMessage>` and applies the transactional-outbox model configuration through the EF generator's model-config seam. The hand-written equivalent is `modelBuilder.UseElarionOutbox()`. Requires `[GenerateDbSets]` (else `ELOBX001`).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `SnakeCase` | `bool` (init) | `true` | Whether table/column/index names use snake_case. |
 | `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_outbox_messages` / `ElarionOutboxMessages` depending on `SnakeCase`). |
-| `DeliveryTableName` | `string?` (init) | `null` | The per-consumer delivery table name, or `null` for `elarion_outbox_deliveries` / `ElarionOutboxDeliveries`. |
 | `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
 See [Event bus backends](/docs/capabilities/events/backends).

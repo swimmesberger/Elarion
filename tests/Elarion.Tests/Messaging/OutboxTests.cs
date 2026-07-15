@@ -43,9 +43,9 @@ public sealed class OutboxIntegrationEventBusTests
         message.EventType.Should().Be(typeof(OutboxTestEvent).FullName);
         message.OccurredOnUtc.Should().Be(time.GetUtcNow());
         message.CorrelationId.Should().NotBe(Guid.Empty);
-        var delivery = message.Deliveries.Should().ContainSingle().Subject;
-        delivery.ConsumerId.Should().Be("consumer");
-        delivery.OccurredOnUtc.Should().Be(message.OccurredOnUtc);
+        message.MessageId.Should().Be(message.Id);
+        message.ConsumerIdsJson.Should().BeNull();
+        message.TargetRole.Should().BeNull();
 
         var roundTripped = JsonSerializer.Deserialize<OutboxTestEvent>(message.Payload, OutboxTestJson.Instance.Options);
         roundTripped.Should().Be(new OutboxTestEvent(7, "alice"));
@@ -63,7 +63,7 @@ public sealed class OutboxIntegrationEventBusTests
     }
 
     [Fact]
-    public async Task PublishAsync_CreatesOneIndependentDeliveryPerConsumer_WithRoleAffinity() {
+    public async Task PublishAsync_CreatesOneEnvelopePerDistinctTarget_WithSharedMessageIdentity() {
         var store = new FakeOutboxStore();
         var local = Descriptor() with { ConsumerId = "local" };
         var homed = Descriptor() with {
@@ -71,17 +71,38 @@ public sealed class OutboxIntegrationEventBusTests
             ResolveDeliveryRole = static (_, @event) =>
                 ((OutboxTestEvent)@event).Id == 7 ? "actors:partition-3" : null
         };
+        var secondHomed = homed with { ConsumerId = "homed-2", Order = 1 };
         var bus = new OutboxIntegrationEventBus(
-            store, Catalog(local, homed), EmptyProvider.Instance,
+            store, Catalog(local, homed, secondHomed), EmptyProvider.Instance,
             new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
 
         await bus.PublishAsync(new OutboxTestEvent(7, "alice"), TestContext.Current.CancellationToken);
 
-        var deliveries = store.Appended.Should().ContainSingle().Subject.Deliveries;
-        deliveries.Should().HaveCount(2);
-        deliveries.Single(delivery => delivery.ConsumerId == "local").TargetRole.Should().BeNull();
-        deliveries.Single(delivery => delivery.ConsumerId == "homed").TargetRole
-            .Should().Be("actors:partition-3");
+        store.Appended.Should().HaveCount(2);
+        var localEnvelope = store.Appended.Single(message => message.TargetRole is null);
+        var homedEnvelope = store.Appended.Single(message => message.TargetRole == "actors:partition-3");
+        localEnvelope.ConsumerIdsJson.Should().Be("[\"local\"]");
+        homedEnvelope.ConsumerIdsJson.Should().Be("[\"homed\",\"homed-2\"]");
+        localEnvelope.MessageId.Should().Be(homedEnvelope.MessageId);
+        localEnvelope.Id.Should().NotBe(homedEnvelope.Id);
+        localEnvelope.Payload.Should().Be(homedEnvelope.Payload);
+    }
+
+    [Fact]
+    public async Task PublishAsync_ManyConsumersForOneTarget_RemainsOneEnvelopeWithoutConsumerMetadata() {
+        var store = new FakeOutboxStore();
+        var descriptors = Enumerable.Range(0, 30)
+            .Select(index => Descriptor() with { ConsumerId = $"consumer-{index}", Order = index })
+            .ToArray();
+        var bus = new OutboxIntegrationEventBus(
+            store, Catalog(descriptors), EmptyProvider.Instance,
+            new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
+
+        await bus.PublishAsync(new OutboxTestEvent(7, "alice"), TestContext.Current.CancellationToken);
+
+        var envelope = store.Appended.Should().ContainSingle().Subject;
+        envelope.ConsumerIdsJson.Should().BeNull();
+        envelope.TargetRole.Should().BeNull();
     }
 
     [Fact]
@@ -240,6 +261,7 @@ public sealed class OutboxEventDispatcherTests
         var message = new OutboxMessage
         {
             Id = Guid.NewGuid(),
+            MessageId = Guid.NewGuid(),
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = "Some.Unregistered.Type",
             Payload = "{}",
@@ -247,7 +269,7 @@ public sealed class OutboxEventDispatcherTests
         };
         var outcome = await dispatcher.DispatchAsync(
             EmptyProvider.Instance,
-            CreateDelivery(message),
+            message,
             TestContext.Current.CancellationToken);
 
         invoked.Should().BeFalse();
@@ -267,6 +289,7 @@ public sealed class OutboxEventDispatcherTests
         var message = new OutboxMessage
         {
             Id = Guid.NewGuid(),
+            MessageId = Guid.NewGuid(),
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = "null",
@@ -274,7 +297,7 @@ public sealed class OutboxEventDispatcherTests
         };
         var outcome = await dispatcher.DispatchAsync(
             EmptyProvider.Instance,
-            CreateDelivery(message),
+            message,
             TestContext.Current.CancellationToken);
 
         invoked.Should().BeFalse();
@@ -294,6 +317,52 @@ public sealed class OutboxEventDispatcherTests
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("boom");
     }
 
+    [Fact]
+    public async Task DispatchAsync_SoleGroup_InvokesAllConsumersInCatalogOrder() {
+        var calls = new List<string>();
+        var dispatcher = new OutboxEventDispatcher(
+            new OutboxConsumerCatalog([
+                Descriptor("second", 20, calls),
+                Descriptor("first", 10, calls)
+            ]),
+            new OutboxOptions(),
+            OutboxTestJson.Instance,
+            NullLogger<OutboxEventDispatcher>.Instance);
+
+        await dispatcher.DispatchAsync(
+            EmptyProvider.Instance,
+            CreateDelivery(new OutboxTestEvent(1, "x"), Guid.NewGuid()),
+            TestContext.Current.CancellationToken);
+
+        calls.Should().Equal("first", "second");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_SplitGroupWithUnknownConsumer_DoesNotPartiallyInvoke() {
+        var calls = new List<string>();
+        var message = CreateDelivery(new OutboxTestEvent(1, "x"), Guid.NewGuid());
+        message = new OutboxMessage {
+            Id = message.Id,
+            MessageId = message.MessageId,
+            OccurredOnUtc = message.OccurredOnUtc,
+            EventType = message.EventType,
+            Payload = message.Payload,
+            CorrelationId = message.CorrelationId,
+            ConsumerIdsJson = "[\"known\",\"removed\"]"
+        };
+        var dispatcher = new OutboxEventDispatcher(
+            new OutboxConsumerCatalog([Descriptor("known", 0, calls)]),
+            new OutboxOptions(),
+            OutboxTestJson.Instance,
+            NullLogger<OutboxEventDispatcher>.Instance);
+
+        var outcome = await dispatcher.DispatchAsync(
+            EmptyProvider.Instance, message, TestContext.Current.CancellationToken);
+
+        outcome.Should().Be(OutboxDispatchOutcome.Unresolvable);
+        calls.Should().BeEmpty();
+    }
+
     private static OutboxEventDispatcher CreateDispatcher(EventSubscriberInvokeDelegate invoke) =>
         new(
             new OutboxConsumerCatalog([
@@ -310,22 +379,29 @@ public sealed class OutboxEventDispatcherTests
             OutboxTestJson.Instance,
             NullLogger<OutboxEventDispatcher>.Instance);
 
-    private static OutboxDelivery CreateDelivery(OutboxTestEvent @event, Guid correlationId) =>
-        CreateDelivery(new OutboxMessage {
-        Id = Guid.CreateVersion7(),
-        OccurredOnUtc = DateTimeOffset.UnixEpoch,
-        EventType = typeof(OutboxTestEvent).FullName!,
-        Payload = JsonSerializer.Serialize(@event, OutboxTestJson.Instance.Options),
-        CorrelationId = correlationId
-    });
-
-    private static OutboxDelivery CreateDelivery(OutboxMessage message) => new() {
-        Id = Guid.CreateVersion7(),
-        MessageId = message.Id,
-        OccurredOnUtc = message.OccurredOnUtc,
-        ConsumerId = "consumer",
-        Message = message
+    private static EventSubscriptionDescriptor Descriptor(string id, int order, List<string> calls) => new() {
+        ConsumerId = id,
+        EventType = typeof(OutboxTestEvent),
+        Plane = EventPlane.Integration,
+        ServiceType = typeof(object),
+        Order = order,
+        InvokeAsync = (_, _, _, _) => {
+            calls.Add(id);
+            return ValueTask.CompletedTask;
+        }
     };
+
+    private static OutboxMessage CreateDelivery(OutboxTestEvent @event, Guid correlationId) {
+        var id = Guid.CreateVersion7();
+        return new OutboxMessage {
+            Id = id,
+            MessageId = id,
+            OccurredOnUtc = DateTimeOffset.UnixEpoch,
+            EventType = typeof(OutboxTestEvent).FullName!,
+            Payload = JsonSerializer.Serialize(@event, OutboxTestJson.Instance.Options),
+            CorrelationId = correlationId
+        };
+    }
 }
 
 public sealed class OutboxDeliveryServiceTests
@@ -377,13 +453,14 @@ public sealed class OutboxDeliveryServiceTests
         var store = new FakeOutboxStore();
         store.Pending.Enqueue(
         [
-            DeliveryFor(new OutboxMessage {
+            new OutboxMessage {
                 Id = Guid.NewGuid(),
+                MessageId = Guid.NewGuid(),
                 OccurredOnUtc = DateTimeOffset.UnixEpoch,
                 EventType = "Some.Unregistered.Type",
                 Payload = "{}",
                 CorrelationId = Guid.NewGuid()
-            })
+            }
         ]);
 
         await RunUntilSignaledAsync(store, new OutboxOptions { PollingInterval = TimeSpan.FromMilliseconds(20) },
@@ -412,13 +489,16 @@ public sealed class OutboxDeliveryServiceTests
     {
         var store = new FakeOutboxStore();
         var delivery = Message(new OutboxTestEvent(1, "a"), out var id);
-        delivery = new OutboxDelivery {
+        delivery = new OutboxMessage {
             Id = delivery.Id,
             MessageId = delivery.MessageId,
             OccurredOnUtc = delivery.OccurredOnUtc,
-            ConsumerId = delivery.ConsumerId,
+            EventType = delivery.EventType,
+            Payload = delivery.Payload,
+            CorrelationId = delivery.CorrelationId,
+            TraceParent = delivery.TraceParent,
+            ConsumerIdsJson = delivery.ConsumerIdsJson,
             TargetRole = "actors",
-            Message = delivery.Message
         };
         store.Pending.Enqueue([delivery]);
         var timeProvider = new FakeTimeProvider();
@@ -616,40 +696,29 @@ public sealed class OutboxDeliveryServiceTests
         await service.StopAsync(TestContext.Current.CancellationToken);
     }
 
-    private static OutboxDelivery Message(OutboxTestEvent @event, out Guid id)
+    private static OutboxMessage Message(OutboxTestEvent @event, out Guid id)
     {
-        var message = new OutboxMessage {
-            Id = Guid.CreateVersion7(),
+        id = Guid.CreateVersion7();
+        return new OutboxMessage {
+            Id = id,
+            MessageId = id,
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(@event, OutboxTestJson.Instance.Options),
             CorrelationId = Guid.NewGuid()
         };
-        id = Guid.CreateVersion7();
-        return new OutboxDelivery {
-            Id = id,
-            MessageId = message.Id,
-            OccurredOnUtc = message.OccurredOnUtc,
-            ConsumerId = "consumer",
-            Message = message
-        };
     }
 
-    private static OutboxDelivery DeliveryFor(OutboxMessage message) => new() {
-        Id = Guid.CreateVersion7(),
-        MessageId = message.Id,
-        OccurredOnUtc = message.OccurredOnUtc,
-        ConsumerId = "consumer",
-        Message = message
-    };
-
-    private static OutboxDelivery WithTargetRole(OutboxDelivery delivery, string targetRole) => new() {
+    private static OutboxMessage WithTargetRole(OutboxMessage delivery, string targetRole) => new() {
         Id = delivery.Id,
         MessageId = delivery.MessageId,
         OccurredOnUtc = delivery.OccurredOnUtc,
-        ConsumerId = delivery.ConsumerId,
+        EventType = delivery.EventType,
+        Payload = delivery.Payload,
+        CorrelationId = delivery.CorrelationId,
+        TraceParent = delivery.TraceParent,
+        ConsumerIdsJson = delivery.ConsumerIdsJson,
         TargetRole = targetRole,
-        Message = delivery.Message
     };
 }
 
@@ -698,7 +767,7 @@ public sealed class OutboxServiceCollectionExtensionsTests
 internal sealed class FakeOutboxStore : IOutboxStore
 {
     public List<OutboxMessage> Appended { get; } = [];
-    public Queue<IReadOnlyList<OutboxDelivery>> Pending { get; } = new();
+    public Queue<IReadOnlyList<OutboxMessage>> Pending { get; } = new();
     public List<(Guid Id, Guid LockId)> Processed { get; } = [];
     public List<(Guid Id, Guid LockId)> Released { get; } = [];
     public List<(Guid Id, Guid LockId, string Error, DateTimeOffset RetryVisibleAfterUtc)> Failed { get; } = [];
@@ -722,7 +791,7 @@ internal sealed class FakeOutboxStore : IOutboxStore
 
     public void Append(OutboxMessage message) => Appended.Add(message);
 
-    public ValueTask<IReadOnlyList<OutboxDelivery>> ClaimPendingAsync(
+    public ValueTask<IReadOnlyList<OutboxMessage>> ClaimPendingAsync(
         Guid lockId,
         DateTimeOffset leaseUntil,
         int batchSize,
@@ -732,12 +801,12 @@ internal sealed class FakeOutboxStore : IOutboxStore
         LastLockId = lockId;
         Interlocked.Increment(ref _claimCalls);
         if (Pending.Count == 0) {
-            return ValueTask.FromResult<IReadOnlyList<OutboxDelivery>>([]);
+            return ValueTask.FromResult<IReadOnlyList<OutboxMessage>>([]);
         }
 
         var next = Pending.Peek();
         if (next.Any(delivery => delivery.TargetRole is not null && !heldRoles.Contains(delivery.TargetRole))) {
-            return ValueTask.FromResult<IReadOnlyList<OutboxDelivery>>([]);
+            return ValueTask.FromResult<IReadOnlyList<OutboxMessage>>([]);
         }
 
         return ValueTask.FromResult(Pending.Dequeue());

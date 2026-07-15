@@ -99,7 +99,7 @@ services.AddElarionOutbox<AppDbContext>();
 ```
 
 Facade calls on a non-home instance fail with `ActorNotHomedException`; they are never silently
-forwarded. Each generated actor-consumer delivery records the `"actors"` target role, so only the
+forwarded. Each generated actor-consumer target group records the `"actors"` target role, so only the
 holder can claim it. HTTP/SSE routes that must execute on the home can use the
 [role-holder proxy](/docs/capabilities/coordination). During failover, deliveries wait until a home exists.
 

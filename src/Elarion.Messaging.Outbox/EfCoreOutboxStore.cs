@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Elarion.Messaging.Outbox;
 
-/// <summary>EF Core transactional storage for immutable messages and per-consumer deliveries.</summary>
+/// <summary>EF Core transactional storage for role-grouped outbox envelopes.</summary>
 public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOptions options, TimeProvider timeProvider)
     : IOutboxStore
     where TDbContext : DbContext {
@@ -15,7 +15,7 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
     }
 
     /// <inheritdoc />
-    public async ValueTask<IReadOnlyList<OutboxDelivery>> ClaimPendingAsync(
+    public async ValueTask<IReadOnlyList<OutboxMessage>> ClaimPendingAsync(
         Guid lockId,
         DateTimeOffset leaseUntil,
         int batchSize,
@@ -26,16 +26,16 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
         var maxAttempts = options.MaxDeliveryAttempts;
         var roles = heldRoles.Count == 0 ? [] : heldRoles.ToArray();
 
-        var candidateIds = await dbContext.Set<OutboxDelivery>()
+        var candidateIds = await dbContext.Set<OutboxMessage>()
             .AsNoTracking()
-            .Where(delivery => delivery.ProcessedOnUtc == null
-                && delivery.Attempts < maxAttempts
-                && (delivery.LockedUntilUtc == null || delivery.LockedUntilUtc < now)
-                && (delivery.TargetRole == null || roles.Contains(delivery.TargetRole)))
-            .OrderBy(delivery => delivery.OccurredOnUtc)
-            .ThenBy(delivery => delivery.Id)
+            .Where(message => message.ProcessedOnUtc == null
+                && message.Attempts < maxAttempts
+                && (message.LockedUntilUtc == null || message.LockedUntilUtc < now)
+                && (message.TargetRole == null || roles.Contains(message.TargetRole)))
+            .OrderBy(message => message.OccurredOnUtc)
+            .ThenBy(message => message.Id)
             .Take(batchSize)
-            .Select(delivery => delivery.Id)
+            .Select(message => message.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -43,37 +43,36 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
             return [];
         }
 
-        await dbContext.Set<OutboxDelivery>()
-            .Where(delivery => candidateIds.Contains(delivery.Id)
-                && delivery.ProcessedOnUtc == null
-                && delivery.Attempts < maxAttempts
-                && (delivery.LockedUntilUtc == null || delivery.LockedUntilUtc < now)
-                && (delivery.TargetRole == null || roles.Contains(delivery.TargetRole)))
+        await dbContext.Set<OutboxMessage>()
+            .Where(message => candidateIds.Contains(message.Id)
+                && message.ProcessedOnUtc == null
+                && message.Attempts < maxAttempts
+                && (message.LockedUntilUtc == null || message.LockedUntilUtc < now)
+                && (message.TargetRole == null || roles.Contains(message.TargetRole)))
             .ExecuteUpdateAsync(
                 setters => setters
-                    .SetProperty(delivery => delivery.LockId, lockId)
-                    .SetProperty(delivery => delivery.LockedUntilUtc, leaseUntil),
+                    .SetProperty(message => message.LockId, lockId)
+                    .SetProperty(message => message.LockedUntilUtc, leaseUntil),
                 ct)
             .ConfigureAwait(false);
 
-        return await dbContext.Set<OutboxDelivery>()
+        return await dbContext.Set<OutboxMessage>()
             .AsNoTracking()
-            .Include(delivery => delivery.Message)
-            .Where(delivery => candidateIds.Contains(delivery.Id) && delivery.LockId == lockId)
-            .OrderBy(delivery => delivery.OccurredOnUtc)
-            .ThenBy(delivery => delivery.Id)
+            .Where(message => candidateIds.Contains(message.Id) && message.LockId == lockId)
+            .OrderBy(message => message.OccurredOnUtc)
+            .ThenBy(message => message.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async ValueTask<bool> ReleaseClaimAsync(Guid deliveryId, Guid lockId, CancellationToken ct) {
-        var rows = await dbContext.Set<OutboxDelivery>()
-            .Where(delivery => delivery.Id == deliveryId && delivery.LockId == lockId)
+    public async ValueTask<bool> ReleaseClaimAsync(Guid groupId, Guid lockId, CancellationToken ct) {
+        var rows = await dbContext.Set<OutboxMessage>()
+            .Where(message => message.Id == groupId && message.LockId == lockId)
             .ExecuteUpdateAsync(
                 setters => setters
-                    .SetProperty(delivery => delivery.LockId, (Guid?)null)
-                    .SetProperty(delivery => delivery.LockedUntilUtc, (DateTimeOffset?)null),
+                    .SetProperty(message => message.LockId, (Guid?)null)
+                    .SetProperty(message => message.LockedUntilUtc, (DateTimeOffset?)null),
                 ct)
             .ConfigureAwait(false);
         return rows > 0;
@@ -81,18 +80,18 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
 
     /// <inheritdoc />
     public async ValueTask<bool> MarkProcessedAsync(
-        Guid deliveryId,
+        Guid groupId,
         Guid lockId,
         DateTimeOffset processedOnUtc,
         CancellationToken ct) {
-        var rows = await dbContext.Set<OutboxDelivery>()
-            .Where(delivery => delivery.Id == deliveryId && delivery.LockId == lockId)
+        var rows = await dbContext.Set<OutboxMessage>()
+            .Where(message => message.Id == groupId && message.LockId == lockId)
             .ExecuteUpdateAsync(
                 setters => setters
-                    .SetProperty(delivery => delivery.ProcessedOnUtc, processedOnUtc)
-                    .SetProperty(delivery => delivery.LockId, (Guid?)null)
-                    .SetProperty(delivery => delivery.LockedUntilUtc, (DateTimeOffset?)null)
-                    .SetProperty(delivery => delivery.Error, (string?)null),
+                    .SetProperty(message => message.ProcessedOnUtc, processedOnUtc)
+                    .SetProperty(message => message.LockId, (Guid?)null)
+                    .SetProperty(message => message.LockedUntilUtc, (DateTimeOffset?)null)
+                    .SetProperty(message => message.Error, (string?)null),
                 ct)
             .ConfigureAwait(false);
         return rows > 0;
@@ -100,19 +99,19 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
 
     /// <inheritdoc />
     public async ValueTask<bool> MarkFailedAsync(
-        Guid deliveryId,
+        Guid groupId,
         Guid lockId,
         string error,
         DateTimeOffset retryVisibleAfterUtc,
         CancellationToken ct) {
-        var rows = await dbContext.Set<OutboxDelivery>()
-            .Where(delivery => delivery.Id == deliveryId && delivery.LockId == lockId)
+        var rows = await dbContext.Set<OutboxMessage>()
+            .Where(message => message.Id == groupId && message.LockId == lockId)
             .ExecuteUpdateAsync(
                 setters => setters
-                    .SetProperty(delivery => delivery.Attempts, delivery => delivery.Attempts + 1)
-                    .SetProperty(delivery => delivery.Error, error)
-                    .SetProperty(delivery => delivery.LockId, (Guid?)null)
-                    .SetProperty(delivery => delivery.LockedUntilUtc, retryVisibleAfterUtc),
+                    .SetProperty(message => message.Attempts, message => message.Attempts + 1)
+                    .SetProperty(message => message.Error, error)
+                    .SetProperty(message => message.LockId, (Guid?)null)
+                    .SetProperty(message => message.LockedUntilUtc, retryVisibleAfterUtc),
                 ct)
             .ConfigureAwait(false);
         return rows > 0;
@@ -120,19 +119,19 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
 
     /// <inheritdoc />
     public async ValueTask<bool> MarkPermanentlyFailedAsync(
-        Guid deliveryId,
+        Guid groupId,
         Guid lockId,
         string error,
         CancellationToken ct) {
         var maxAttempts = options.MaxDeliveryAttempts;
-        var rows = await dbContext.Set<OutboxDelivery>()
-            .Where(delivery => delivery.Id == deliveryId && delivery.LockId == lockId)
+        var rows = await dbContext.Set<OutboxMessage>()
+            .Where(message => message.Id == groupId && message.LockId == lockId)
             .ExecuteUpdateAsync(
                 setters => setters
-                    .SetProperty(delivery => delivery.Attempts, maxAttempts)
-                    .SetProperty(delivery => delivery.Error, error)
-                    .SetProperty(delivery => delivery.LockId, (Guid?)null)
-                    .SetProperty(delivery => delivery.LockedUntilUtc, (DateTimeOffset?)null),
+                    .SetProperty(message => message.Attempts, maxAttempts)
+                    .SetProperty(message => message.Error, error)
+                    .SetProperty(message => message.LockId, (Guid?)null)
+                    .SetProperty(message => message.LockedUntilUtc, (DateTimeOffset?)null),
                 ct)
             .ConfigureAwait(false);
         return rows > 0;
@@ -142,18 +141,13 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
     public async ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) {
         var purged = 0;
         while (true) {
-            // Start from the processed-delivery index. NOT EXISTS rejects a message when any sibling
-            // delivery is pending or too recent; Take bounds both the candidate query and parent DELETE.
-            var candidates = await dbContext.Set<OutboxDelivery>()
+            var candidates = await dbContext.Set<OutboxMessage>()
                 .AsNoTracking()
-                .Where(delivery => delivery.ProcessedOnUtc != null
-                    && delivery.ProcessedOnUtc < olderThanUtc
-                    && !dbContext.Set<OutboxDelivery>().Any(sibling =>
-                        sibling.MessageId == delivery.MessageId
-                        && (sibling.ProcessedOnUtc == null || sibling.ProcessedOnUtc >= olderThanUtc)))
-                .OrderBy(delivery => delivery.ProcessedOnUtc)
-                .ThenBy(delivery => delivery.Id)
-                .Select(delivery => delivery.MessageId)
+                .Where(message => message.ProcessedOnUtc != null
+                    && message.ProcessedOnUtc < olderThanUtc)
+                .OrderBy(message => message.ProcessedOnUtc)
+                .ThenBy(message => message.Id)
+                .Select(message => message.Id)
                 .Take(PurgeBatchSize)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
@@ -162,9 +156,8 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
                 return purged;
             }
 
-            var messageIds = candidates.Distinct().ToArray();
             purged += await dbContext.Set<OutboxMessage>()
-                .Where(message => messageIds.Contains(message.Id))
+                .Where(message => candidates.Contains(message.Id))
                 .ExecuteDeleteAsync(ct)
                 .ConfigureAwait(false);
 
