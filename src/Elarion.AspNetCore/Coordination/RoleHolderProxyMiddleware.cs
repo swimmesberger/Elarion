@@ -12,12 +12,13 @@ namespace Elarion.AspNetCore;
 /// double-execution hazard; the original request — auth headers included — replays verbatim against
 /// the same application on the holder.
 /// </summary>
-internal sealed class RoleHolderProxyMiddleware(
-    IRoleLease lease,
-    PathString[] pathPrefixes,
-    HttpMessageInvoker client,
-    ILogger logger,
-    TimeSpan? responseHeadersTimeout = null) {
+internal readonly record struct RoleHolderTarget(string Role, bool IsHeld, string? CurrentHolderAddress);
+
+internal sealed class RoleHolderProxyMiddleware {
+    private readonly Func<HttpContext, RoleHolderTarget?> _resolveTarget;
+    private readonly PathString[] _pathPrefixes;
+    private readonly HttpMessageInvoker _client;
+    private readonly ILogger _logger;
     /// <summary>Marks a forwarded request so a mid-failover receiver answers 503 instead of re-forwarding.</summary>
     public const string ProxiedHeaderName = "Elarion-Role-Proxied";
 
@@ -36,7 +37,33 @@ internal sealed class RoleHolderProxyMiddleware(
     /// </summary>
     public static readonly TimeSpan DefaultResponseHeadersTimeout = TimeSpan.FromSeconds(30);
 
-    private readonly TimeSpan _responseHeadersTimeout = responseHeadersTimeout ?? DefaultResponseHeadersTimeout;
+    private readonly TimeSpan _responseHeadersTimeout;
+
+    public RoleHolderProxyMiddleware(
+        IRoleLease lease,
+        PathString[] pathPrefixes,
+        HttpMessageInvoker client,
+        ILogger logger,
+        TimeSpan? responseHeadersTimeout = null)
+        : this(
+            _ => new RoleHolderTarget(lease.Role, lease.IsHeld, lease.CurrentHolderAddress),
+            pathPrefixes,
+            client,
+            logger,
+            responseHeadersTimeout) { }
+
+    public RoleHolderProxyMiddleware(
+        Func<HttpContext, RoleHolderTarget?> resolveTarget,
+        PathString[] pathPrefixes,
+        HttpMessageInvoker client,
+        ILogger logger,
+        TimeSpan? responseHeadersTimeout = null) {
+        _resolveTarget = resolveTarget;
+        _pathPrefixes = pathPrefixes;
+        _client = client;
+        _logger = logger;
+        _responseHeadersTimeout = responseHeadersTimeout ?? DefaultResponseHeadersTimeout;
+    }
 
     // Hop-by-hop headers never cross a proxy (RFC 9110 §7.6.1); Host is set from the target. Headers the
     // message's own Connection header nominates are hop-by-hop too and are stripped per message.
@@ -46,15 +73,9 @@ internal sealed class RoleHolderProxyMiddleware(
     ];
 
     public async Task InvokeAsync(HttpContext context, RequestDelegate next) {
-        // The holder's fast path: one lock-free lease check, then out of the way.
-        if (lease.IsHeld) {
-            await next(context);
-            return;
-        }
-
         var path = context.Request.Path;
         var matches = false;
-        foreach (var prefix in pathPrefixes) {
+        foreach (var prefix in _pathPrefixes) {
             if (path.StartsWithSegments(prefix)) {
                 matches = true;
                 break;
@@ -66,26 +87,40 @@ internal sealed class RoleHolderProxyMiddleware(
             return;
         }
 
-        if (context.Request.Headers.ContainsKey(ProxiedHeaderName)) {
-            // Already forwarded once and this instance still isn't the holder: the lease is mid-failover.
-            // Never re-forward — one hop, bounded.
-            await Reject(context, $"The '{lease.Role}' role lease is moving between instances; retry shortly.");
+        var target = _resolveTarget(context);
+        if (target is null) {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(
+                "The request does not contain a valid role-partition affinity key.",
+                context.RequestAborted);
             return;
         }
 
-        var address = lease.CurrentHolderAddress;
+        if (target.Value.IsHeld) {
+            await next(context);
+            return;
+        }
+
+        if (context.Request.Headers.ContainsKey(ProxiedHeaderName)) {
+            // Already forwarded once and this instance still isn't the holder: the lease is mid-failover.
+            // Never re-forward — one hop, bounded.
+            await Reject(context, $"The '{target.Value.Role}' role lease is moving between instances; retry shortly.");
+            return;
+        }
+
+        var address = target.Value.CurrentHolderAddress;
         if (address is null) {
             await Reject(
                 context,
-                $"The '{lease.Role}' role holder is unknown or does not advertise an address. Register "
+                $"The '{target.Value.Role}' role holder is unknown or does not advertise an address. Register "
                 + "AddElarionInstanceAddress() (or set RoleLeaseOptions.AdvertisedAddress) on every instance.");
             return;
         }
 
-        await ProxyAsync(context, address);
+        await ProxyAsync(context, target.Value.Role, address);
     }
 
-    private async Task ProxyAsync(HttpContext context, string address) {
+    private async Task ProxyAsync(HttpContext context, string role, string address) {
         var request = context.Request;
         var targetUri = new Uri(
             address.TrimEnd('/') + request.PathBase + request.Path + request.QueryString,
@@ -107,7 +142,7 @@ internal sealed class RoleHolderProxyMiddleware(
             }
         }
 
-        upstreamRequest.Headers.TryAddWithoutValidation(ProxiedHeaderName, lease.Role);
+        upstreamRequest.Headers.TryAddWithoutValidation(ProxiedHeaderName, role);
 
         HttpResponseMessage upstreamResponse;
         // Bounds time-to-response-headers (SocketsHttpHandler has no such knob and HttpMessageInvoker no default
@@ -116,7 +151,7 @@ internal sealed class RoleHolderProxyMiddleware(
         headersTimeout.CancelAfter(_responseHeadersTimeout);
         try {
             // HttpMessageInvoker streams: the response returns after headers, bodies flow through.
-            upstreamResponse = await client.SendAsync(upstreamRequest, headersTimeout.Token);
+            upstreamResponse = await _client.SendAsync(upstreamRequest, headersTimeout.Token);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
             return; // the caller went away; nothing to answer
@@ -124,23 +159,23 @@ internal sealed class RoleHolderProxyMiddleware(
         catch (OperationCanceledException) {
             // Our own headers deadline fired: the holder accepted (or black-holed) the connection but never
             // answered — same bounded failure contract as an unreachable holder.
-            logger.LogWarning(
+            _logger.LogWarning(
                 "Proxying to the '{Role}' role holder at {Address} timed out after {Timeout}.",
-                lease.Role, address, _responseHeadersTimeout);
+                role, address, _responseHeadersTimeout);
             await Reject(
                 context,
-                $"The '{lease.Role}' role holder at '{address}' did not respond within "
+                $"The '{role}' role holder at '{address}' did not respond within "
                 + $"{_responseHeadersTimeout.TotalSeconds:0.###} s. Retry shortly.");
             return;
         }
         catch (HttpRequestException ex) {
             // Covers connection failures including SocketsHttpHandler's ConnectTimeout (a crashed node or
             // dropped SYNs no longer hangs — the handler is configured with DefaultConnectTimeout).
-            logger.LogWarning(
-                ex, "Proxying to the '{Role}' role holder at {Address} failed.", lease.Role, address);
+            _logger.LogWarning(
+                ex, "Proxying to the '{Role}' role holder at {Address} failed.", role, address);
             await Reject(
                 context,
-                $"The '{lease.Role}' role holder at '{address}' is unreachable (failover takes up to the "
+                $"The '{role}' role holder at '{address}' is unreachable (failover takes up to the "
                 + "lease duration; the address refreshes each renew interval). Retry shortly.");
             return;
         }

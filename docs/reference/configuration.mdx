@@ -165,7 +165,7 @@ tier and its background `OutboxDeliveryService`:
 
 | Option | Default |
 | --- | --- |
-| `RunDeliveryWorker` | `true` (set `false` on publish-only nodes in heterogeneous topologies — run delivery only where **all** integration consumers are registered) |
+| `RunDeliveryWorker` | `true` (`false` disables claiming only; publishers still require the complete generated consumer catalog for fan-out/role resolution) |
 | `PollingInterval` | `1 second` |
 | `BatchSize` | `100` |
 | `MaxDeliveryAttempts` | `10` |

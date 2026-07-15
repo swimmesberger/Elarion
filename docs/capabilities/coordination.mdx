@@ -9,7 +9,7 @@ being coordinated:
 | Need | Primitive | Coordination key |
 | --- | --- | --- |
 | Run one recurring occurrence across the cluster | [Scheduler claim](/docs/capabilities/scheduling/multi-node) | Job + due time |
-| Deliver one integration message at a time | [Outbox lease](/docs/capabilities/events/backends) | Message |
+| Deliver one integration consumer invocation at a time | [Outbox delivery lease](/docs/capabilities/events/backends) | Message + consumer |
 | Make exactly one instance hold a long-lived application role | **Role lease** | Role name |
 
 A role lease answers a coarse question such as “which instance is the maintenance coordinator?” It
@@ -72,6 +72,23 @@ the old holder stops acting before a successor may legitimately take over:
 | `AdvertisedAddress` | `null` | Explicit holder address for proxying; otherwise an `IInstanceAddressProvider` may supply it. |
 
 `LeaseDuration` must be greater than `RenewInterval + HeldSafetyMargin`.
+
+## Register a fixed role partition
+
+When a stable key should select one of several coarse roles without configuring process count, register
+a fixed partition. One process may hold several partitions; this does not add automatic balancing:
+
+```csharp
+builder.Services.AddElarionPostgreSqlRolePartition<AppDbContext>(partition => {
+    partition.Name = "devices";
+    partition.PartitionCount = 16;
+});
+```
+
+Resolve the keyed `IRolePartition` and call `Resolve(key)` (or `Resolve(scope, key)`) for the locally
+cached role/holder/address view. Roles are named `devices:partition-0` through
+`devices:partition-15`. `IRoleLeaseRegistry` exposes all configured leases to infrastructure such as
+role-affine outbox claiming.
 
 ## Gate every cycle
 
@@ -142,12 +159,25 @@ is not registered (for example in single-instance development), the call install
 The prefix list is intentionally the same rule a future ingress or service mesh would own. When
 external routing can target the holder directly, remove the in-app proxy rather than layering both.
 
+For a key-selected role, use the partition overload before routing:
+
+```csharp
+app.UseElarionPartitionHolderProxy(
+    "devices",
+    context => context.Request.Headers["X-Device-Id"].FirstOrDefault(),
+    "/device-api");
+```
+
+The resolver reads raw path/query/header state. Missing affinity keys return 400; holder failures use
+the same bounded 503 behavior as the coarse-role proxy.
+
 ## Actor home is a specialized role
 
 `AddElarionPostgreSqlActorHome<TDbContext>()` composes the same mechanism under the reserved
 `"actors"` role for `[Actor(Placement = ActorPlacementMode.SingleHome)]` actors. Calls on other instances fail rather than
 forwarding through the actor runtime; host-owned HTTP prefixes can use
-`UseElarionRoleHolderProxy("actors", ...)` to reach the home. See [Actors](/docs/concepts/actors) for
+`UseElarionRoleHolderProxy("actors", ...)` to reach a single home, or
+`UseElarionPartitionHolderProxy("actors", ...)` for virtual-sharded ingress. See [Actors](/docs/concepts/actors) for
 the placement and migration boundaries.
 
 ## Failure behavior

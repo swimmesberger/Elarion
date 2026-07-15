@@ -134,8 +134,9 @@ reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`.
 ## Handling duplicates
 
 Integration delivery is **at-least-once**: a consumer can see the same message more than once — a worker
-crash after the consumer ran but before the message was finalized, a fan-out consumer that threw and
-retried the whole message, or a lease that expired under multiple instances. There is no exactly-once
+crash after the consumer ran but before its delivery was finalized, or a lease that expired under
+multiple instances. Outbox retries are independent per consumer, so a failed sibling no longer re-runs
+completed siblings. There is no exactly-once
 *delivery*; exactly-once *effect* comes from deduplication on the consumer side. Every redelivery carries
 the **same** `IEventContext.MessageId` (the durable message identity — for the outbox, the row's id), so
 that id is the deduplication key. (`CorrelationId` is a *tracing* identifier — don't key dedup on it.)

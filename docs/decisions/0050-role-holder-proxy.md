@@ -67,10 +67,18 @@ lease, the holder pays one volatile-read check per request; only the proxy path 
 prefixes) pays the forwarding hop — the inefficiency is the explicitly accepted price of not
 configuring an ingress yet.
 
+### Partition-aware ingress (ADR-0062)
+
+`UseElarionPartitionHolderProxy(partition, affinityKey, prefixes)` applies the same before-routing,
+one-hop rule after resolving a fixed role partition from each request key. The resolver reads raw
+path/query/header state because routing has not run. A missing key returns 400; a known key follows
+the selected role's holder address and loop/failover behavior. This shares role selection with actors
+and outbox delivery without turning the actor runtime into a remote-call subsystem.
+
 ### What stays out
 
 - **Actor-call forwarding** — unchanged red line (ADR-0048). This proxies HTTP requests to a role
-  holder; it does not place actors, serialize actor messages, or route per key.
+  holder; the partition overload may route by an ingress key, but it does not serialize actor calls.
 - **Exception-driven transparent replay** (catch `ActorNotHomedException`, re-send the request):
   rejected — by then the handler may have executed side effects locally; replaying means double
   execution. Routing the decision before anything runs is the entire safety argument.

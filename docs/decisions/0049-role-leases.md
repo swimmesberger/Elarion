@@ -14,8 +14,8 @@ ADR-0048 shipped leader election on PostgreSQL under an actor-specific name (`IA
 application-clock-only rule, the undershooting `IsHeld`, release-on-shutdown, the heartbeat — and
 "exactly one instance runs X" is a primitive applications keep reinventing badly (advisory locks that
 don't survive connection loss, cron-plus-hope). Elarion also has framework-internal consumers waiting:
-the outbox `DeliveryGate` is already a generic delegate that just happened to be fed by the actor
-lease, and the every-node periodic workers (idempotency purge, blob/staged-upload GC) do duplicated —
+the outbox needs a provider-neutral local ownership view for role-affine claims, and the every-node
+periodic workers (idempotency purge, blob/staged-upload GC) do duplicated —
 safe but pointless — work. A non-actor app wanting leader election should not reference
 `Elarion.Actors.PostgreSql`.
 
@@ -48,8 +48,8 @@ This completes a coordination taxonomy on the one Postgres: **scheduler claims**
 ## Consequences
 
 - Applications get first-class leader election on the database they already run: register a role,
-  inject the keyed `IRoleLease`, gate a polling loop on `IsHeld`. The outbox `DeliveryGate` composes
-  with any role, not just the actor home.
+  inject the keyed `IRoleLease`, and gate work on `IsHeld`. ADR-0062's `IRoleLeaseRegistry` lets the
+  outbox claim deliveries targeting any locally held role.
 - Framework periodic workers (idempotency purge, blob GC) *can* later accept an optional role gate —
   deliberately not done now; duplication there is idempotent and harmless at the tier.
 - One more package pair (runtime + bundled generator), justified by the dependency-direction fix: the

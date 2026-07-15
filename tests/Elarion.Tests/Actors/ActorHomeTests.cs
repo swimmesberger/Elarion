@@ -107,7 +107,7 @@ public sealed class ActorHomeTests {
         (await home.Ping(TestToken)).Should().Be(1);
         var act = async () => await nonHome.Ping(TestToken);
         var exception = (await act.Should().ThrowAsync<ActorNotHomedException>()).Which;
-        exception.PlacementRole.Should().Be("actors:shard-1");
+        exception.PlacementRole.Should().Be("actors:partition-1");
         exception.CurrentHolder.Should().Be("node-a");
     }
 
@@ -134,6 +134,8 @@ public sealed class ActorHomeTests {
         });
 
     private sealed class FakeHomeLease : IActorHomeLease {
+        public string Role => "actors";
+
         public bool IsHeld { get; set; }
 
         public string? CurrentHolder { get; set; }
@@ -150,8 +152,8 @@ public sealed class ActorHomeTests {
     private sealed class FakePlacementResolver : IActorPlacementResolver {
         public ActorPlacementResolution Resolve(string actorName, string key) =>
             key == "a"
-                ? new(true, "node-a", "http://node-a", "actors:shard-0")
-                : new(false, "node-a", "http://node-a", "actors:shard-1");
+                ? new(true, "node-a", "http://node-a", "actors:partition-0")
+                : new(false, "node-a", "http://node-a", "actors:partition-1");
     }
 
     public interface IPinger : IActorFacade<string> {

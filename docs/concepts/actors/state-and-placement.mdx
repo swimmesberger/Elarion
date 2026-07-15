@@ -95,15 +95,13 @@ The recommended authoritative shape uses the PostgreSQL-backed `"actors"` role l
 public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options);
 
 services.AddElarionPostgreSqlActorHome<AppDbContext>();
-services.AddElarionOutbox<AppDbContext>(o =>
-    o.DeliveryGate = (sp, _) => ValueTask.FromResult(
-        sp.GetRequiredService<IActorHomeLease>().IsHeld));
+services.AddElarionOutbox<AppDbContext>();
 ```
 
 Facade calls on a non-home instance fail with `ActorNotHomedException`; they are never silently
-forwarded. Integration-event delivery follows the lease, and HTTP/SSE routes that must execute on the
-home can use the [role-holder proxy](/docs/capabilities/coordination). During failover, outbox messages
-wait until a home exists.
+forwarded. Each generated actor-consumer delivery records the `"actors"` target role, so only the
+holder can claim it. HTTP/SSE routes that must execute on the home can use the
+[role-holder proxy](/docs/capabilities/coordination). During failover, deliveries wait until a home exists.
 
 ## Fixed virtual-shard placement
 
@@ -117,12 +115,12 @@ public sealed class OrderActor(IActorContext<Guid> context) { /* ... */ }
 services.AddElarionPostgreSqlActorSharding<AppDbContext>(); // 16 shards by default
 ```
 
-The PostgreSQL recipe creates `actors:shard-0` through `actors:shard-15` as ordinary role leases. A
+The PostgreSQL recipe creates `actors:partition-0` through `actors:partition-15` as ordinary role leases. A
 process may own multiple shards, and a new process can acquire unowned shards after failover. The shard
 is selected by a stable hash of the actor name and canonical key text; the process count is irrelevant.
-There is no rebalancing, activation draining, or transparent forwarding, and virtual-sharded actors
-cannot use generated `[ConsumeEvent]` relays because the existing outbox path is not shard-routed. Use
-shard-aware ingress, or choose `SingleHome` when integration-event delivery through the home is required.
+There is no rebalancing, activation draining, or transparent actor-call forwarding. Generated
+`[ConsumeEvent]` relays resolve the event's actor key and persist their partition role on that
+consumer's outbox delivery. HTTP can use `UseElarionPartitionHolderProxy` with the same affinity key.
 
 If calls must be transparently routed to arbitrary actor homes, keys need partitioned placement, or the
 deployment exceeds roughly ten nodes, replace this runtime with Orleans, Akka.NET, or Proto.Actor rather

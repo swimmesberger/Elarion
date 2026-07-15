@@ -52,6 +52,7 @@ public sealed class PostgreSqlOutboxStoreFixture : IAsyncLifetime {
 public sealed class OutboxIntegrationDbContext(DbContextOptions<OutboxIntegrationDbContext> options)
     : DbContext(options) {
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<OutboxDelivery> OutboxDeliveries => Set<OutboxDelivery>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder) => modelBuilder.UseElarionOutbox();
 }

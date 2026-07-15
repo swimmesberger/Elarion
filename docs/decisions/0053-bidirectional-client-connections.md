@@ -169,7 +169,7 @@ Two multi-node deltas are acknowledged and deliberately deferred, not designed a
   node; there is no "spread 3,000 device twins evenly across 3 nodes." That is sharding — a placement
   directory, rebalancing on membership change, and connection draining — and it will not grow out of the
   single-home default (ADR-0025). When a deployment actually needs it, the choices are, in order:
-  partition by hand (N roles over ADR-0049 leases — `"actors:shard-0"`…`"actors:shard-2"`, key→shard by
+  use a fixed role partition (ADR-0062 — `"actors:partition-0"`…`"actors:partition-2"`, key→partition by
   stable hash, each shard's prefix home-routed), or the Orleans trigger (real placement, activation
   rebalancing, and directory — adopted whole). ADR-0061 now promotes the fixed partitioned-role
   pattern as an opt-in actor recipe; connection ingress still needs an application-composed

@@ -12,7 +12,7 @@ public sealed class PostgreSqlActorShardingOptions {
 
     /// <summary>
     /// Prefix for the generated role names. Shards are registered as
-    /// <c>{RolePrefix}:shard-0</c>, <c>{RolePrefix}:shard-1</c>, and so on.
+    /// <c>{RolePrefix}:partition-0</c>, <c>{RolePrefix}:partition-1</c>, and so on.
     /// </summary>
     public string RolePrefix { get; set; } = "actors";
 

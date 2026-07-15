@@ -105,7 +105,13 @@ public sealed class EventTelemetryTests {
     [Fact]
     public async Task OutboxPublish_PersistsTraceParent() {
         var store = new FakeOutboxStore();
-        var bus = new OutboxIntegrationEventBus(store, new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
+        var bus = new OutboxIntegrationEventBus(
+            store,
+            [Subscriber<OutboxTestEvent>(EventPlane.Integration)],
+            EmptyProvider.Instance,
+            new OutboxOptions(),
+            OutboxTestJson.Instance,
+            TimeProvider.System);
 
         using var publisherActivity = new Activity("command").Start();
         await bus.PublishAsync(new OutboxTestEvent(1, "a"), TestContext.Current.CancellationToken);
@@ -131,7 +137,7 @@ public sealed class EventTelemetryTests {
         publisherActivity.Stop();
 
         var store = new FakeOutboxStore();
-        store.Pending.Enqueue([message]);
+        store.Pending.Enqueue([Delivery(message)]);
         await RunDeliveryUntilSignaledAsync(store, (_, _, _, _) => ValueTask.CompletedTask);
 
         // The collector listens globally on the shared source; scope to this test's correlation id so
@@ -160,13 +166,13 @@ public sealed class EventTelemetryTests {
 
         var correlationId = Guid.NewGuid();
         var store = new FakeOutboxStore();
-        store.Pending.Enqueue([new OutboxMessage {
+        store.Pending.Enqueue([Delivery(new OutboxMessage {
             Id = Guid.NewGuid(),
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
             CorrelationId = correlationId,
-        }]);
+        })]);
         await RunDeliveryUntilSignaledAsync(store, (_, _, _, _) => throw new InvalidOperationException("boom"));
 
         // Scoped to this test's correlation id — see OutboxDelivery_ConsumeSpan for why.
@@ -189,6 +195,7 @@ public sealed class EventTelemetryTests {
         var dispatcher = new OutboxEventDispatcher(
             [
                 new EventSubscriptionDescriptor {
+                    ConsumerId = "telemetry-consumer",
                     EventType = typeof(OutboxTestEvent),
                     Plane = EventPlane.Integration,
                     ServiceType = typeof(object),
@@ -226,6 +233,7 @@ public sealed class EventTelemetryTests {
 
     private static EventSubscriptionDescriptor Subscriber<TEvent>(EventPlane plane) =>
         new() {
+            ConsumerId = $"subscriber:{typeof(TEvent).FullName}:{plane}",
             EventType = typeof(TEvent),
             Plane = plane,
             ServiceType = typeof(Recorder),
@@ -237,11 +245,19 @@ public sealed class EventTelemetryTests {
 
     private static EventSubscriptionDescriptor Throwing<TEvent>(EventPlane plane) =>
         new() {
+            ConsumerId = $"throwing:{typeof(TEvent).FullName}:{plane}",
             EventType = typeof(TEvent),
             Plane = plane,
             ServiceType = typeof(Recorder),
             InvokeAsync = (_, _, _, _) => throw new InvalidOperationException("boom")
         };
+
+    private static OutboxDelivery Delivery(OutboxMessage message) => new() {
+        Id = Guid.CreateVersion7(),
+        MessageId = message.Id,
+        ConsumerId = "telemetry-consumer",
+        Message = message
+    };
 
     private sealed class Recorder {
         private readonly SemaphoreSlim _signal = new(0);

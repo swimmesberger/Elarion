@@ -660,6 +660,12 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine();
         sb.AppendLine("        services.AddSingleton(new global::Elarion.Abstractions.Messaging.EventSubscriptionDescriptor");
         sb.AppendLine("        {");
+        var owner = consumer.IsHandler ? consumer.ConsumerKey! : consumer.ServiceTypeFqn;
+        var parameterShape = consumer.IsHandler
+            ? string.Empty
+            : ":" + string.Join(",", consumer.Parameters.Select(static parameter => parameter.ToString()));
+        var consumerId = $"{owner.Replace("global::", string.Empty)}.{consumer.MethodName}({consumer.EventTypeFqn.Replace("global::", string.Empty)}{parameterShape})";
+        sb.AppendLine($"            ConsumerId = {FormatStringLiteral(consumerId)},");
         sb.AppendLine($"            EventType = typeof({consumer.EventTypeFqn}),");
         sb.AppendLine($"            Plane = global::Elarion.Abstractions.Messaging.EventPlane.{consumer.Plane},");
         sb.AppendLine($"            ServiceType = typeof({consumer.ServiceTypeFqn}),");

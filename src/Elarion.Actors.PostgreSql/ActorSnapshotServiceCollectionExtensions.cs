@@ -33,8 +33,8 @@ public static class ActorSnapshotServiceCollectionExtensions {
     /// instance as the actor home, enforcing <c>[Actor(Placement = ActorPlacementMode.SingleHome)]</c>.
     /// <typeparamref name="TDbContext"/> must map the role lease table — annotate the context with
     /// <c>[GenerateElarionRoleLeases]</c> or call <c>modelBuilder.UseElarionRoleLeases()</c>. To
-    /// make integration-event delivery follow the lease, gate the outbox: <c>o.DeliveryGate =
-    /// (sp, _) => ValueTask.FromResult(sp.GetRequiredService&lt;IActorHomeLease&gt;().IsHeld);</c>
+    /// Generated actor event consumers record this role on their per-consumer outbox delivery, so
+    /// only the current home can claim it (ADR-0062).
     /// </summary>
     public static IServiceCollection AddElarionPostgreSqlActorHome<TDbContext>(
         this IServiceCollection services,

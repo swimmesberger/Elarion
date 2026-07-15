@@ -6,8 +6,8 @@ namespace Elarion.Messaging.Outbox;
 /// <remarks>
 /// One row is written into the caller's <see cref="Microsoft.EntityFrameworkCore.DbContext"/> per
 /// <see cref="Elarion.Abstractions.Messaging.IIntegrationEventBus.PublishAsync{TEvent}"/> call and committed
-/// atomically with the business data. A background delivery worker later claims, dispatches, and finalizes each row.
-/// The payload is immutable once written; only the delivery-tracking columns are updated.
+/// atomically with the business data. One <see cref="OutboxDelivery"/> child is recorded per
+/// consumer; workers claim and retry those deliveries independently.
 /// </remarks>
 public sealed class OutboxMessage
 {
@@ -34,18 +34,6 @@ public sealed class OutboxMessage
     /// </summary>
     public string? TraceParent { get; init; }
 
-    /// <summary>The number of delivery attempts made so far.</summary>
-    public int Attempts { get; set; }
-
-    /// <summary>When the message was delivered, in UTC, or <c>null</c> while pending.</summary>
-    public DateTimeOffset? ProcessedOnUtc { get; set; }
-
-    /// <summary>The identifier of the worker currently holding the delivery lease, or <c>null</c> when unclaimed.</summary>
-    public Guid? LockId { get; set; }
-
-    /// <summary>When the current delivery lease expires, in UTC, after which another worker may reclaim the message.</summary>
-    public DateTimeOffset? LockedUntilUtc { get; set; }
-
-    /// <summary>The last delivery error, truncated for diagnostics, or <c>null</c> when never failed.</summary>
-    public string? Error { get; set; }
+    /// <summary>The independently leased deliveries, one for each integration-event consumer.</summary>
+    public ICollection<OutboxDelivery> Deliveries { get; init; } = [];
 }

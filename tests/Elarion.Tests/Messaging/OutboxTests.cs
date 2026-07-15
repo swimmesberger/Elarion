@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AwesomeAssertions;
 using Elarion.Abstractions.Idempotency;
+using Elarion.Abstractions.Coordination;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Serialization;
 using Elarion.Idempotency;
@@ -32,7 +33,9 @@ public sealed class OutboxIntegrationEventBusTests
     {
         var store = new FakeOutboxStore();
         var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-02T03:04:05Z"));
-        var bus = new OutboxIntegrationEventBus(store, new OutboxOptions(), OutboxTestJson.Instance, time);
+        var bus = new OutboxIntegrationEventBus(
+            store, [Descriptor()], EmptyProvider.Instance,
+            new OutboxOptions(), OutboxTestJson.Instance, time);
 
         await bus.PublishAsync(new OutboxTestEvent(7, "alice"), TestContext.Current.CancellationToken);
 
@@ -40,7 +43,7 @@ public sealed class OutboxIntegrationEventBusTests
         message.EventType.Should().Be(typeof(OutboxTestEvent).FullName);
         message.OccurredOnUtc.Should().Be(time.GetUtcNow());
         message.CorrelationId.Should().NotBe(Guid.Empty);
-        message.ProcessedOnUtc.Should().BeNull();
+        message.Deliveries.Should().ContainSingle().Which.ConsumerId.Should().Be("consumer");
 
         var roundTripped = JsonSerializer.Deserialize<OutboxTestEvent>(message.Payload, OutboxTestJson.Instance.Options);
         roundTripped.Should().Be(new OutboxTestEvent(7, "alice"));
@@ -49,11 +52,57 @@ public sealed class OutboxIntegrationEventBusTests
     [Fact]
     public async Task PublishAsync_NullEvent_Throws()
     {
-        var bus = new OutboxIntegrationEventBus(new FakeOutboxStore(), new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
+        var bus = new OutboxIntegrationEventBus(
+            new FakeOutboxStore(), [Descriptor()], EmptyProvider.Instance,
+            new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
 
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
             await bus.PublishAsync<OutboxTestEvent>(null!, TestContext.Current.CancellationToken));
     }
+
+    [Fact]
+    public async Task PublishAsync_CreatesOneIndependentDeliveryPerConsumer_WithRoleAffinity() {
+        var store = new FakeOutboxStore();
+        var local = Descriptor() with { ConsumerId = "local" };
+        var homed = Descriptor() with {
+            ConsumerId = "homed",
+            ResolveDeliveryRole = static (_, @event) =>
+                ((OutboxTestEvent)@event).Id == 7 ? "actors:partition-3" : null
+        };
+        var bus = new OutboxIntegrationEventBus(
+            store, [local, homed], EmptyProvider.Instance,
+            new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
+
+        await bus.PublishAsync(new OutboxTestEvent(7, "alice"), TestContext.Current.CancellationToken);
+
+        var deliveries = store.Appended.Should().ContainSingle().Subject.Deliveries;
+        deliveries.Should().HaveCount(2);
+        deliveries.Single(delivery => delivery.ConsumerId == "local").TargetRole.Should().BeNull();
+        deliveries.Single(delivery => delivery.ConsumerId == "homed").TargetRole
+            .Should().Be("actors:partition-3");
+    }
+
+    [Fact]
+    public async Task PublishAsync_WithoutRegisteredConsumer_FailsBeforePersisting() {
+        var store = new FakeOutboxStore();
+        var bus = new OutboxIntegrationEventBus(
+            store, [], EmptyProvider.Instance,
+            new OutboxOptions(), OutboxTestJson.Instance, TimeProvider.System);
+
+        var act = async () => await bus.PublishAsync(
+            new OutboxTestEvent(7, "alice"), TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*no registered consumers*");
+        store.Appended.Should().BeEmpty();
+    }
+
+    private static EventSubscriptionDescriptor Descriptor() => new() {
+        ConsumerId = "consumer",
+        EventType = typeof(OutboxTestEvent),
+        Plane = EventPlane.Integration,
+        ServiceType = typeof(object),
+        InvokeAsync = static (_, _, _, _) => ValueTask.CompletedTask
+    };
 }
 
 public sealed class OutboxEventDispatcherTests
@@ -73,7 +122,7 @@ public sealed class OutboxEventDispatcherTests
         var correlationId = Guid.NewGuid();
         await dispatcher.DispatchAsync(
             EmptyProvider.Instance,
-            CreateMessage(new OutboxTestEvent(7, "alice"), correlationId),
+            CreateDelivery(new OutboxTestEvent(7, "alice"), correlationId),
             TestContext.Current.CancellationToken);
 
         received.Should().Be(new OutboxTestEvent(7, "alice"));
@@ -93,12 +142,12 @@ public sealed class OutboxEventDispatcherTests
             return ValueTask.CompletedTask;
         });
 
-        var message = CreateMessage(new OutboxTestEvent(7, "alice"), Guid.NewGuid());
-        await dispatcher.DispatchAsync(EmptyProvider.Instance, message, TestContext.Current.CancellationToken);
+        var delivery = CreateDelivery(new OutboxTestEvent(7, "alice"), Guid.NewGuid());
+        await dispatcher.DispatchAsync(EmptyProvider.Instance, delivery, TestContext.Current.CancellationToken);
 
         // The durable, redelivery-stable identity a consumer keys downstream dedup on (ADR-0022) — distinct
         // from the correlation id, which is a tracing identifier.
-        receivedContext!.MessageId.Should().Be(message.Id);
+        receivedContext!.MessageId.Should().Be(delivery.MessageId);
     }
 
     [Fact]
@@ -116,10 +165,10 @@ public sealed class OutboxEventDispatcherTests
             return ValueTask.CompletedTask;
         });
 
-        var message = CreateMessage(new OutboxTestEvent(7, "alice"), Guid.NewGuid());
-        await dispatcher.DispatchAsync(scope.ServiceProvider, message, TestContext.Current.CancellationToken);
+        var delivery = CreateDelivery(new OutboxTestEvent(7, "alice"), Guid.NewGuid());
+        await dispatcher.DispatchAsync(scope.ServiceProvider, delivery, TestContext.Current.CancellationToken);
 
-        seededKey.Should().Be(message.Id.ToString("N"));
+        seededKey.Should().Be(delivery.MessageId.ToString("N"));
     }
 
     [Fact]
@@ -129,7 +178,7 @@ public sealed class OutboxEventDispatcherTests
 
         var outcome = await dispatcher.DispatchAsync(
             EmptyProvider.Instance,
-            CreateMessage(new OutboxTestEvent(1, "x"), Guid.NewGuid()),
+            CreateDelivery(new OutboxTestEvent(1, "x"), Guid.NewGuid()),
             TestContext.Current.CancellationToken);
 
         outcome.Should().Be(OutboxDispatchOutcome.Delivered);
@@ -153,7 +202,10 @@ public sealed class OutboxEventDispatcherTests
             Payload = "{}",
             CorrelationId = Guid.NewGuid()
         };
-        var outcome = await dispatcher.DispatchAsync(EmptyProvider.Instance, message, TestContext.Current.CancellationToken);
+        var outcome = await dispatcher.DispatchAsync(
+            EmptyProvider.Instance,
+            CreateDelivery(message),
+            TestContext.Current.CancellationToken);
 
         invoked.Should().BeFalse();
         outcome.Should().Be(OutboxDispatchOutcome.Unresolvable);
@@ -177,7 +229,10 @@ public sealed class OutboxEventDispatcherTests
             Payload = "null",
             CorrelationId = Guid.NewGuid()
         };
-        var outcome = await dispatcher.DispatchAsync(EmptyProvider.Instance, message, TestContext.Current.CancellationToken);
+        var outcome = await dispatcher.DispatchAsync(
+            EmptyProvider.Instance,
+            CreateDelivery(message),
+            TestContext.Current.CancellationToken);
 
         invoked.Should().BeFalse();
         outcome.Should().Be(OutboxDispatchOutcome.Unresolvable);
@@ -190,7 +245,7 @@ public sealed class OutboxEventDispatcherTests
 
         var act = async () => await dispatcher.DispatchAsync(
             EmptyProvider.Instance,
-            CreateMessage(new OutboxTestEvent(1, "x"), Guid.NewGuid()),
+            CreateDelivery(new OutboxTestEvent(1, "x"), Guid.NewGuid()),
             TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("boom");
@@ -201,6 +256,7 @@ public sealed class OutboxEventDispatcherTests
             [
                 new EventSubscriptionDescriptor
                 {
+                    ConsumerId = "consumer",
                     EventType = typeof(OutboxTestEvent),
                     Plane = EventPlane.Integration,
                     ServiceType = typeof(object),
@@ -211,13 +267,20 @@ public sealed class OutboxEventDispatcherTests
             OutboxTestJson.Instance,
             NullLogger<OutboxEventDispatcher>.Instance);
 
-    private static OutboxMessage CreateMessage(OutboxTestEvent @event, Guid correlationId) => new()
-    {
-        Id = Guid.NewGuid(),
+    private static OutboxDelivery CreateDelivery(OutboxTestEvent @event, Guid correlationId) =>
+        CreateDelivery(new OutboxMessage {
+        Id = Guid.CreateVersion7(),
         OccurredOnUtc = DateTimeOffset.UnixEpoch,
         EventType = typeof(OutboxTestEvent).FullName!,
         Payload = JsonSerializer.Serialize(@event, OutboxTestJson.Instance.Options),
         CorrelationId = correlationId
+    });
+
+    private static OutboxDelivery CreateDelivery(OutboxMessage message) => new() {
+        Id = Guid.CreateVersion7(),
+        MessageId = message.Id,
+        ConsumerId = "consumer",
+        Message = message
     };
 }
 
@@ -241,9 +304,9 @@ public sealed class OutboxDeliveryServiceTests
     public async Task FailedConsumer_MarksFailedWithBackoffVisibilityTimeout()
     {
         var store = new FakeOutboxStore();
-        var message = Message(new OutboxTestEvent(1, "a"), out var id);
-        message.Attempts = 0;
-        store.Pending.Enqueue([message]);
+        var delivery = Message(new OutboxTestEvent(1, "a"), out var id);
+        delivery.Attempts = 0;
+        store.Pending.Enqueue([delivery]);
         var now = DateTimeOffset.Parse("2026-01-02T03:04:05Z");
         var options = new OutboxOptions
         {
@@ -270,14 +333,13 @@ public sealed class OutboxDeliveryServiceTests
         var store = new FakeOutboxStore();
         store.Pending.Enqueue(
         [
-            new OutboxMessage
-            {
+            DeliveryFor(new OutboxMessage {
                 Id = Guid.NewGuid(),
                 OccurredOnUtc = DateTimeOffset.UnixEpoch,
                 EventType = "Some.Unregistered.Type",
                 Payload = "{}",
                 CorrelationId = Guid.NewGuid()
-            }
+            })
         ]);
 
         await RunUntilSignaledAsync(store, new OutboxOptions { PollingInterval = TimeSpan.FromMilliseconds(20) },
@@ -302,30 +364,34 @@ public sealed class OutboxDeliveryServiceTests
     }
 
     [Fact]
-    public async Task ClosedDeliveryGate_SkipsClaiming_OpenGateDelivers()
+    public async Task RoleBoundDelivery_WaitsUntilThisProcessHoldsTheRole()
     {
         var store = new FakeOutboxStore();
-        store.Pending.Enqueue([Message(new OutboxTestEvent(1, "a"), out var id)]);
+        var delivery = Message(new OutboxTestEvent(1, "a"), out var id);
+        delivery = new OutboxDelivery {
+            Id = delivery.Id,
+            MessageId = delivery.MessageId,
+            ConsumerId = delivery.ConsumerId,
+            TargetRole = "actors",
+            Message = delivery.Message
+        };
+        store.Pending.Enqueue([delivery]);
         var timeProvider = new FakeTimeProvider();
-        var gateOpen = false;
-        var gateConsulted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var lease = new MutableRoleLease { Role = "actors" };
         var options = new OutboxOptions
         {
-            PollingInterval = TimeSpan.FromMilliseconds(20),
-            DeliveryGate = (_, _) =>
-            {
-                gateConsulted.TrySetResult();
-                return ValueTask.FromResult(Volatile.Read(ref gateOpen));
-            }
+            PollingInterval = TimeSpan.FromMilliseconds(20)
         };
 
         var services = new ServiceCollection();
         services.AddSingleton<IOutboxStore>(store);
+        services.AddSingleton<IRoleLeaseRegistry>(new FakeRoleLeaseRegistry(lease));
         await using var provider = services.BuildServiceProvider();
         var dispatcher = new OutboxEventDispatcher(
             [
                 new EventSubscriptionDescriptor
                 {
+                    ConsumerId = "consumer",
                     EventType = typeof(OutboxTestEvent),
                     Plane = EventPlane.Integration,
                     ServiceType = typeof(object),
@@ -343,14 +409,12 @@ public sealed class OutboxDeliveryServiceTests
             NullLogger<OutboxDeliveryService>.Instance);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
-        await gateConsulted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => store.ClaimCalls >= 1);
 
-        // Closed gate: the cycle ended before anything was claimed — the message stays pending
-        // for whichever instance's gate opens (e.g. the actor home lease holder, ADR-0048).
-        store.LastLockId.Should().Be(Guid.Empty);
         store.Pending.Should().HaveCount(1);
+        store.Processed.Should().BeEmpty();
 
-        Volatile.Write(ref gateOpen, true);
+        lease.IsHeld = true;
         while (!store.Signal.Task.IsCompleted)
         {
             timeProvider.Advance(options.PollingInterval);
@@ -434,6 +498,7 @@ public sealed class OutboxDeliveryServiceTests
             [
                 new EventSubscriptionDescriptor
                 {
+                    ConsumerId = "consumer",
                     EventType = typeof(OutboxTestEvent),
                     Plane = EventPlane.Integration,
                     ServiceType = typeof(object),
@@ -456,18 +521,30 @@ public sealed class OutboxDeliveryServiceTests
         await service.StopAsync(TestContext.Current.CancellationToken);
     }
 
-    private static OutboxMessage Message(OutboxTestEvent @event, out Guid id)
+    private static OutboxDelivery Message(OutboxTestEvent @event, out Guid id)
     {
-        id = Guid.NewGuid();
-        return new OutboxMessage
-        {
-            Id = id,
+        var message = new OutboxMessage {
+            Id = Guid.CreateVersion7(),
             OccurredOnUtc = DateTimeOffset.UnixEpoch,
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(@event, OutboxTestJson.Instance.Options),
             CorrelationId = Guid.NewGuid()
         };
+        id = Guid.CreateVersion7();
+        return new OutboxDelivery {
+            Id = id,
+            MessageId = message.Id,
+            ConsumerId = "consumer",
+            Message = message
+        };
     }
+
+    private static OutboxDelivery DeliveryFor(OutboxMessage message) => new() {
+        Id = Guid.CreateVersion7(),
+        MessageId = message.Id,
+        ConsumerId = "consumer",
+        Message = message
+    };
 }
 
 public sealed class OutboxServiceCollectionExtensionsTests
@@ -515,7 +592,7 @@ public sealed class OutboxServiceCollectionExtensionsTests
 internal sealed class FakeOutboxStore : IOutboxStore
 {
     public List<OutboxMessage> Appended { get; } = [];
-    public Queue<IReadOnlyList<OutboxMessage>> Pending { get; } = new();
+    public Queue<IReadOnlyList<OutboxDelivery>> Pending { get; } = new();
     public List<(Guid Id, Guid LockId)> Processed { get; } = [];
     public List<(Guid Id, Guid LockId, string Error, DateTimeOffset RetryVisibleAfterUtc)> Failed { get; } = [];
     public List<(Guid Id, Guid LockId, string Error)> PermanentlyFailed { get; } = [];
@@ -538,15 +615,25 @@ internal sealed class FakeOutboxStore : IOutboxStore
 
     public void Append(OutboxMessage message) => Appended.Add(message);
 
-    public ValueTask<IReadOnlyList<OutboxMessage>> ClaimPendingAsync(
+    public ValueTask<IReadOnlyList<OutboxDelivery>> ClaimPendingAsync(
         Guid lockId,
         DateTimeOffset leaseUntil,
         int batchSize,
+        IReadOnlyCollection<string> heldRoles,
         CancellationToken ct)
     {
         LastLockId = lockId;
         Interlocked.Increment(ref _claimCalls);
-        return ValueTask.FromResult(Pending.Count > 0 ? Pending.Dequeue() : (IReadOnlyList<OutboxMessage>)[]);
+        if (Pending.Count == 0) {
+            return ValueTask.FromResult<IReadOnlyList<OutboxDelivery>>([]);
+        }
+
+        var next = Pending.Peek();
+        if (next.Any(delivery => delivery.TargetRole is not null && !heldRoles.Contains(delivery.TargetRole))) {
+            return ValueTask.FromResult<IReadOnlyList<OutboxDelivery>>([]);
+        }
+
+        return ValueTask.FromResult(Pending.Dequeue());
     }
 
     public ValueTask<bool> MarkProcessedAsync(Guid id, Guid lockId, DateTimeOffset processedOnUtc, CancellationToken ct)
@@ -592,6 +679,16 @@ internal sealed class FakeOutboxStore : IOutboxStore
         Interlocked.Increment(ref _purgeCalls);
         return ValueTask.FromResult(0);
     }
+}
+
+internal sealed class FakeRoleLeaseRegistry(params IRoleLease[] leases) : IRoleLeaseRegistry {
+    public IReadOnlyCollection<IRoleLease> Leases { get; } = leases;
+}
+
+internal sealed class MutableRoleLease : IRoleLease {
+    public required string Role { get; init; }
+    public bool IsHeld { get; set; }
+    public string? CurrentHolder => null;
 }
 
 internal sealed class EmptyProvider : IServiceProvider

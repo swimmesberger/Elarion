@@ -22,13 +22,17 @@ public sealed class PostgreSqlActorShardingTests {
             .Where(static descriptor => descriptor.ServiceType == typeof(IRoleLease) && descriptor.IsKeyedService)
             .Select(static descriptor => descriptor.ServiceKey)
             .ToArray();
-        roleKeys.Should().BeEquivalentTo(new object?[] { "actors:shard-0", "actors:shard-1", "actors:shard-2" });
+        roleKeys.Should().BeEquivalentTo(new object?[] {
+            "actors:partition-0", "actors:partition-1", "actors:partition-2"
+        });
 
         using var provider = services.BuildServiceProvider();
         var resolver = provider.GetRequiredService<IActorPlacementResolver>();
         var shard = ActorVirtualShard.GetShardIndex("Order", "42", 3);
 
-        resolver.Resolve("Order", "42").Role.Should().Be($"actors:shard-{shard}");
+        resolver.Resolve("Order", "42").Role.Should().Be($"actors:partition-{shard}");
+
+        provider.GetRequiredKeyedService<IRolePartition>("actors").PartitionCount.Should().Be(3);
     }
 
     private sealed class ShardingDbContext(DbContextOptions<ShardingDbContext> options) : DbContext(options);

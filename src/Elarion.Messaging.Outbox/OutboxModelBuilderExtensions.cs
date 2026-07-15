@@ -19,35 +19,27 @@ public static class OutboxModelBuilderExtensions
     /// </param>
     /// <param name="schema">The schema, or <see langword="null"/> to use the provider's default schema.</param>
     /// <param name="snakeCase">Whether to use snake_case table/column names. Defaults to <see langword="true"/>.</param>
+    /// <param name="deliveryTableName">The per-consumer delivery table name, or <see langword="null"/> for the default.</param>
     /// <returns>The same model builder for chaining.</returns>
     public static ModelBuilder UseElarionOutbox(
         this ModelBuilder modelBuilder,
         string? tableName = null,
         string? schema = null,
-        bool snakeCase = true)
+        bool snakeCase = true,
+        string? deliveryTableName = null)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
         var table = tableName ?? (snakeCase ? "elarion_outbox_messages" : "ElarionOutboxMessages");
+        var deliveryTable = deliveryTableName
+            ?? (snakeCase ? "elarion_outbox_deliveries" : "ElarionOutboxDeliveries");
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentException.ThrowIfNullOrWhiteSpace(deliveryTable);
 
         modelBuilder.Entity<OutboxMessage>(builder =>
         {
             builder.ToTable(table, schema);
             builder.HasKey(message => message.Id);
-
-            // Partial index over pending rows only: the worker's "oldest undelivered first" scan stays a tiny indexed
-            // probe regardless of how many delivered rows await retention purge. Filtered indexes are supported by
-            // PostgreSQL, SQL Server, and SQLite; on MySQL, replace this with an unfiltered index in your own model.
-            // The PascalCase filter quotes the identifier because unquoted identifiers fold to lower case on PostgreSQL.
-            builder.HasIndex(message => message.OccurredOnUtc)
-                .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
-
-            // Partial index over delivered rows so the retention purge's `processed_on_utc < cutoff` delete stays
-            // an indexed probe instead of a sequential scan over the whole table.
-            builder.HasIndex(message => message.ProcessedOnUtc)
-                .HasDatabaseName(snakeCase ? $"ix_{table}_purge" : $"IX_{table}_Purge")
-                .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
 
             builder.Property(message => message.Id)
                 .HasColumnName(snakeCase ? "id" : "Id")
@@ -71,20 +63,46 @@ public static class OutboxModelBuilderExtensions
                 .HasColumnName(snakeCase ? "trace_parent" : "TraceParent")
                 .HasMaxLength(55);
 
-            builder.Property(message => message.Attempts)
+        });
+
+        modelBuilder.Entity<OutboxDelivery>(builder => {
+            builder.ToTable(deliveryTable, schema);
+            builder.HasKey(delivery => delivery.Id);
+            builder.HasIndex(delivery => new { delivery.MessageId, delivery.ConsumerId }).IsUnique();
+            builder.HasIndex(delivery => delivery.ProcessedOnUtc)
+                .HasDatabaseName(snakeCase ? $"ix_{deliveryTable}_purge" : $"IX_{deliveryTable}_Purge")
+                .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
+            builder.HasIndex(delivery => new { delivery.TargetRole, delivery.LockedUntilUtc })
+                .HasDatabaseName(snakeCase ? $"ix_{deliveryTable}_claim" : $"IX_{deliveryTable}_Claim")
+                .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
+
+            builder.Property(delivery => delivery.Id)
+                .HasColumnName(snakeCase ? "id" : "Id")
+                .ValueGeneratedNever();
+            builder.Property(delivery => delivery.MessageId)
+                .HasColumnName(snakeCase ? "message_id" : "MessageId");
+            builder.Property(delivery => delivery.ConsumerId)
+                .HasColumnName(snakeCase ? "consumer_id" : "ConsumerId")
+                .HasMaxLength(512)
+                .IsRequired();
+            builder.Property(delivery => delivery.TargetRole)
+                .HasColumnName(snakeCase ? "target_role" : "TargetRole")
+                .HasMaxLength(200);
+            builder.Property(delivery => delivery.Attempts)
                 .HasColumnName(snakeCase ? "attempts" : "Attempts");
-
-            builder.Property(message => message.ProcessedOnUtc)
+            builder.Property(delivery => delivery.ProcessedOnUtc)
                 .HasColumnName(snakeCase ? "processed_on_utc" : "ProcessedOnUtc");
-
-            builder.Property(message => message.LockId)
+            builder.Property(delivery => delivery.LockId)
                 .HasColumnName(snakeCase ? "lock_id" : "LockId");
-
-            builder.Property(message => message.LockedUntilUtc)
+            builder.Property(delivery => delivery.LockedUntilUtc)
                 .HasColumnName(snakeCase ? "locked_until_utc" : "LockedUntilUtc");
-
-            builder.Property(message => message.Error)
+            builder.Property(delivery => delivery.Error)
                 .HasColumnName(snakeCase ? "error" : "Error");
+
+            builder.HasOne(delivery => delivery.Message)
+                .WithMany(message => message.Deliveries)
+                .HasForeignKey(delivery => delivery.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         return modelBuilder;

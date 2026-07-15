@@ -82,7 +82,7 @@ bidirectional connection, or device identity chain is actually the consistency b
 | Package | Add it when |
 | --- | --- |
 | `Elarion.Actors` | A live in-memory resource, hot ephemeral state, or decide-once coordinator needs a keyed mailbox and generated typed facade. Placement is explicit through `ActorPlacementMode.Local`, `SingleHome`, or fixed `VirtualShards` (ADR-0061). |
-| `Elarion.Actors.PostgreSql` | Actor snapshots need PostgreSQL durability/query access, single-homed actors need the `"actors"` role binding, or virtual-sharded actors need fixed `actors:shard-N` role leases via `AddElarionPostgreSqlActorSharding<TDbContext>()`. |
+| `Elarion.Actors.PostgreSql` | Actor snapshots need PostgreSQL durability/query access, single-homed actors need the `"actors"` role binding, or virtual-sharded actors need fixed `actors:partition-N` role leases via `AddElarionPostgreSqlActorSharding<TDbContext>()`. |
 | `Elarion.Connections` | A bidirectional client/device link needs the node-local registry, protocol codec seam, bounded server invocation, and client-event bridge. |
 | `Elarion.Connections.AspNetCore` | A device/client gateway needs the WebSocket lifecycle adapter with app-owned authentication and codec. |
 | `Elarion.Connections.Tcp` | A proprietary protocol needs hosted TCP listen/dial, reconnect, framing, idle handling, or runtime-managed endpoints. |

@@ -3,7 +3,7 @@ namespace Elarion.Abstractions.Coordination;
 /// <summary>
 /// A cluster-wide <b>role lease</b> (ADR-0049): time-bounded, self-renewing single-holder election
 /// for a named role — "which instance <em>is</em> X right now". The coarse third member of Elarion's
-/// coordination taxonomy (scheduler claims = per work item, outbox leases = per message, role lease =
+/// coordination taxonomy (scheduler claims = per work item, outbox leases = per consumer delivery, role lease =
 /// per role): an application holds a handful of long-lived roles, never per-key locks.
 /// </summary>
 /// <remarks>

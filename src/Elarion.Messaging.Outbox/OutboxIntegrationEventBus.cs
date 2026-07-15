@@ -17,6 +17,8 @@ namespace Elarion.Messaging.Outbox;
 /// </remarks>
 public sealed class OutboxIntegrationEventBus(
     IOutboxStore store,
+    IEnumerable<EventSubscriptionDescriptor> descriptors,
+    IServiceProvider serviceProvider,
     OutboxOptions options,
     IElarionJsonSerialization jsonSerialization,
     TimeProvider timeProvider)
@@ -30,10 +32,37 @@ public sealed class OutboxIntegrationEventBus(
 
         EventTelemetry.RecordPublish(typeof(TEvent).Name, EventPlane.Integration);
 
+        var consumers = descriptors
+            .Where(descriptor => descriptor.Plane is EventPlane.Integration
+                && descriptor.EventType == typeof(TEvent)
+                && descriptor.InvokeAsync is not null)
+            .OrderBy(descriptor => descriptor.Order)
+            .ToArray();
+        if (consumers.Length == 0) {
+            throw new InvalidOperationException(
+                $"Integration event '{typeof(TEvent)}' has no registered consumers and cannot be written to the outbox.");
+        }
+
+        var duplicate = consumers
+            .Where(descriptor => !string.IsNullOrWhiteSpace(descriptor.ConsumerId))
+            .GroupBy(descriptor => descriptor.ConsumerId, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null) {
+            throw new InvalidOperationException(
+                $"Integration-event consumer id '{duplicate.Key}' is registered more than once.");
+        }
+
+        var missingId = consumers.FirstOrDefault(descriptor => string.IsNullOrWhiteSpace(descriptor.ConsumerId));
+        if (missingId is not null) {
+            throw new InvalidOperationException(
+                $"Integration-event consumer '{missingId.ServiceType}' has no stable ConsumerId.");
+        }
+
         var payload = JsonSerializer.Serialize(@event, options.SerializerOptions ?? jsonSerialization.Options);
-        store.Append(new OutboxMessage
+        var messageId = Guid.CreateVersion7();
+        var message = new OutboxMessage
         {
-            Id = Guid.CreateVersion7(),
+            Id = messageId,
             OccurredOnUtc = timeProvider.GetUtcNow(),
             EventType = typeof(TEvent).FullName
                 ?? throw new InvalidOperationException($"Integration event '{typeof(TEvent)}' has no full name and cannot be persisted."),
@@ -42,7 +71,24 @@ public sealed class OutboxIntegrationEventBus(
             // Activity.Id is the W3C traceparent; persisting it keeps the after-commit delivery span
             // in the publishing operation's trace even across a restart or another worker instance.
             TraceParent = Activity.Current?.Id
-        });
+        };
+
+        foreach (var descriptor in consumers) {
+            var targetRole = descriptor.ResolveDeliveryRole?.Invoke(serviceProvider, @event);
+            if (targetRole is not null) {
+                ArgumentException.ThrowIfNullOrWhiteSpace(targetRole);
+            }
+
+            message.Deliveries.Add(new OutboxDelivery {
+                Id = Guid.CreateVersion7(),
+                MessageId = messageId,
+                ConsumerId = descriptor.ConsumerId,
+                TargetRole = targetRole,
+                Message = message
+            });
+        }
+
+        store.Append(message);
 
         return ValueTask.CompletedTask;
     }

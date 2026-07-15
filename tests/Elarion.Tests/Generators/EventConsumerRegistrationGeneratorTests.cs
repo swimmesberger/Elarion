@@ -414,6 +414,10 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             "serviceProvider.GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Events.NotifyBilling\");");
         generated.Should().Contain(
             "serviceProvider.GetRequiredKeyedService<global::Elarion.Abstractions.IHandler<global::Sample.Events.InvoiceCreated, global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>>>(\"global::Sample.Events.ReindexInvoice\");");
+        generated.Should().Contain(
+            "ConsumerId = \"Sample.Events.NotifyBilling.HandleAsync(Sample.Events.InvoiceCreated)\"");
+        generated.Should().Contain(
+            "ConsumerId = \"Sample.Events.ReindexInvoice.HandleAsync(Sample.Events.InvoiceCreated)\"");
     }
 
     [Fact]

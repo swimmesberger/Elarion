@@ -1,5 +1,10 @@
 # ADR-0022: Inbox pattern for integration-event consumers (idempotent consumers)
 
+> **Resolution update (ADR-0062):** the outbox now stores and retries one delivery per consumer.
+> Sibling failure no longer replays completed siblings. The inbox remains default-on because the
+> crash window between a consumer commit and its delivery finalize is still at-least-once. Historical
+> whole-message analysis below explains the design this ADR originally hardened.
+
 - Status: Accepted
 - Date: 2026-07-01 (proposed) · 2026-07-04 (accepted, implemented)
 - Related: [ADR-0021](0021-idempotency.md) (the idempotency store/decorator this reuses),
@@ -164,14 +169,13 @@ the commit (the ADR-0021 cooperative-recipient caveat, transitively). Per consum
 | Domain-event (Plane A), either form | **Never** — the decorator must not attach | Runs inline in the publisher's transaction; exactly-once by atomicity. |
 | Integration, **method-form** | Unavailable | No pipeline to attach to. Convert to handler-form when dedup matters. |
 | Integration, handler-form, **in-memory bus** | Low value | Best-effort tier: no redelivery across a crash; the inbox guards only in-process multi-delivery. |
-| Integration, handler-form, **outbox** | **Default-on** (decision B), opt-out | Delivery is at-least-once *and* retry is per-message: one failing consumer re-runs every already-succeeded sibling consumer of the same event. |
+| Integration, handler-form, **outbox** | **Default-on** (decision B), opt-out | Delivery is at-least-once per consumer: a crash after the consumer commit but before delivery finalize can run that consumer again. |
 | …whose only effect is a call to a sink that dedups on a caller-supplied key | Legitimate opt-out | Keying the sink call on the **message id** already makes that effect exactly-once; the inbox would only save the wasted duplicate call. |
 | …whose effect is naturally idempotent (a pure upsert on a business key) | Legitimate opt-out | Redelivery converges by itself. |
 
-Why default-on rather than opt-in: the routine duplicate source is **not a crash** —
-`OutboxEventDispatcher.DispatchAsync` propagates any consumer failure so the **whole message** is retried,
-re-invoking consumers that already succeeded. One buggy or transiently-failing sibling consumer re-runs every
-healthy consumer on every backoff attempt; under that contract dedup must be the pit of success. Re-examined
+Why default-on rather than opt-in: even after ADR-0062 removed sibling replays, a worker can crash after
+the consumer commits but before its independent delivery is finalized, causing that consumer to run
+again. Under an at-least-once contract dedup remains the pit of success. Re-examined
 post-implementation against "most consumers can be written idempotently, so opt-in like `[Idempotent]`", and
 upheld on three grounds: **(a) asymmetric loss** — the inbox on an already-convergent consumer wastes two writes
 inside an existing transaction (reclaimable, visibly, via `[AllowDuplicates]`), while a missing inbox on a

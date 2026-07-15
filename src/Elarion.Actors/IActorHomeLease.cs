@@ -19,6 +19,9 @@ namespace Elarion.Actors;
 /// transparent conflict retry (ADR-0047) make the overlap loud and lossless rather than corrupting.
 /// </remarks>
 public interface IActorHomeLease {
+    /// <summary>The coarse role that homes these actors.</summary>
+    string Role { get; }
+
     /// <summary>Whether this instance currently holds the actor home role.</summary>
     bool IsHeld { get; }
 
