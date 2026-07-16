@@ -45,22 +45,27 @@ public sealed class GrpcHandlerInvokerTests {
         var principal = new ClaimsPrincipal(
             new ClaimsIdentity([new Claim("sub", "grpc-user")], authenticationType: "grpc"));
         var captured = new ScopeCapture();
+        ServerCallContext? principalFactoryContext = null;
         using var provider = new ServiceCollection()
             .AddScoped<ScopeProbe>()
             .AddSingleton(captured)
             .AddSingleton<IDispatchScopeInitializer, ScopeProbeInitializer>()
             .AddScoped<IHandler<ApplicationRequest, Result<ApplicationResponse>>, ScopeObservingHandler>()
+            .AddElarionGrpcTransport(context => {
+                principalFactoryContext = context;
+                return principal;
+            })
             .BuildServiceProvider();
+        var invoker = provider.GetRequiredService<GrpcHandlerInvoker>();
 
-        var response = await GrpcHandlerInvoker.InvokeUnaryAsync<WireRequest, WireResponse, ApplicationRequest, ApplicationResponse>(
-            provider,
+        var response = await invoker.InvokeUnaryAsync(
             new WireRequest("input"),
             callContext,
-            principal,
             static wire => new ApplicationRequest(wire.Value + "-mapped"),
-            static application => new WireResponse(application.Value + "-mapped"));
+            static (ApplicationResponse application) => new WireResponse(application.Value + "-mapped"));
 
         response.Value.Should().Be("input-mapped-mapped");
+        principalFactoryContext.Should().BeSameAs(callContext);
         captured.Principal.Should().BeSameAs(principal);
         captured.CallContext.Should().BeSameAs(callContext);
     }
@@ -70,8 +75,9 @@ public sealed class GrpcHandlerInvokerTests {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "grpc"));
         using var provider = new ServiceCollection()
             .AddScoped<IHandler<ApplicationRequest, Result<ApplicationResponse>>, MappingHandler>()
+            .AddElarionGrpcTransport(_ => principal)
             .BuildServiceProvider();
-        var service = new GeneratedUnaryService(provider, principal);
+        var service = new GeneratedUnaryService(provider.GetRequiredService<GrpcHandlerInvoker>());
 
         var response = await service.Unary(
             new WireRequest("input"),
@@ -85,17 +91,16 @@ public sealed class GrpcHandlerInvokerTests {
         var translator = new RecordingTranslator();
         using var provider = new ServiceCollection()
             .AddSingleton<IAppErrorTranslator<RpcException>>(translator)
-            .AddElarionGrpcTransport()
+            .AddElarionGrpcTransport(_ => new ClaimsPrincipal())
             .AddScoped<IHandler<ApplicationRequest, Result<ApplicationResponse>>, FailingHandler>()
             .BuildServiceProvider();
+        var invoker = provider.GetRequiredService<GrpcHandlerInvoker>();
 
-        var action = async () => await GrpcHandlerInvoker.InvokeUnaryAsync<WireRequest, WireResponse, ApplicationRequest, ApplicationResponse>(
-            provider,
+        var action = async () => await invoker.InvokeUnaryAsync(
             new WireRequest("ignored"),
             new TestServerCallContext(CancellationToken.None),
-            new ClaimsPrincipal(),
             static wire => new ApplicationRequest(wire.Value),
-            static application => new WireResponse(application.Value));
+            static (ApplicationResponse application) => new WireResponse(application.Value));
 
         var exception = await action.Should().ThrowAsync<RpcException>();
         exception.Which.Status.Detail.Should().Be("custom translator");
@@ -110,29 +115,42 @@ public sealed class GrpcHandlerInvokerTests {
             .AddScoped<InnerHandler>()
             .AddScoped<IHandler<ApplicationRequest, Result<ApplicationResponse>>>(sp =>
                 new RecordingDecorator(sp.GetRequiredService<InnerHandler>(), sp.GetRequiredService<CallLog>()))
+            .AddElarionGrpcTransport(_ => new ClaimsPrincipal())
             .BuildServiceProvider();
+        var invoker = provider.GetRequiredService<GrpcHandlerInvoker>();
 
-        var response = await GrpcHandlerInvoker.InvokeUnaryAsync<WireRequest, WireResponse, ApplicationRequest, ApplicationResponse>(
-            provider,
+        var response = await invoker.InvokeUnaryAsync(
             new WireRequest("value"),
             new TestServerCallContext(CancellationToken.None),
-            new ClaimsPrincipal(),
             static wire => new ApplicationRequest(wire.Value),
-            static application => new WireResponse(application.Value));
+            static (ApplicationResponse application) => new WireResponse(application.Value));
 
         response.Value.Should().Be("value");
         calls.Calls.Should().Equal("decorator", "handler");
     }
 
     [Fact]
-    public void AddElarionGrpcTransport_PreservesCustomTranslator() {
+    public void AddElarionGrpcTransport_PreservesCustomTranslator_AndRegistersInvoker() {
         var custom = new RecordingTranslator();
+        var principal = new ClaimsPrincipal();
         using var provider = new ServiceCollection()
             .AddSingleton<IAppErrorTranslator<RpcException>>(custom)
-            .AddElarionGrpcTransport()
+            .AddElarionGrpcTransport(_ => principal)
             .BuildServiceProvider();
 
         provider.GetRequiredService<IAppErrorTranslator<RpcException>>().Should().BeSameAs(custom);
+        provider.GetRequiredService<IGrpcPrincipalFactory>()
+            .CreatePrincipal(new TestServerCallContext(CancellationToken.None)).Should().BeSameAs(principal);
+        provider.GetRequiredService<GrpcHandlerInvoker>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AddElarionGrpcTransport_InstanceOverload_RegistersPrincipalFactory() {
+        using var provider = new ServiceCollection()
+            .AddElarionGrpcTransport(new TestPrincipalFactory())
+            .BuildServiceProvider();
+
+        provider.GetRequiredService<IGrpcPrincipalFactory>().Should().BeOfType<TestPrincipalFactory>();
     }
 
     private sealed record WireRequest(string Value);
@@ -185,19 +203,17 @@ public sealed class GrpcHandlerInvokerTests {
         public abstract Task<WireResponse> Unary(WireRequest request, ServerCallContext context);
     }
 
-    private sealed class GeneratedUnaryService(
-        IServiceProvider services,
-        ClaimsPrincipal principal) : GeneratedUnaryServiceBase {
-        public override async Task<WireResponse> Unary(WireRequest request, ServerCallContext context) {
-            return await GrpcHandlerInvoker.InvokeUnaryAsync<
-                WireRequest, WireResponse, ApplicationRequest, ApplicationResponse>(
-                services,
+    private sealed class GeneratedUnaryService(GrpcHandlerInvoker grpc) : GeneratedUnaryServiceBase {
+        public override Task<WireResponse> Unary(WireRequest request, ServerCallContext context) =>
+            grpc.InvokeUnaryAsync(
                 request,
                 context,
-                principal,
                 static wire => new ApplicationRequest(wire.Value + "-request"),
-                static application => new WireResponse(application.Value + "-response"));
-        }
+                static (ApplicationResponse application) => new WireResponse(application.Value + "-response"));
+    }
+
+    private sealed class TestPrincipalFactory : IGrpcPrincipalFactory {
+        public ClaimsPrincipal CreatePrincipal(ServerCallContext context) => new();
     }
 
     private sealed class MappingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>> {

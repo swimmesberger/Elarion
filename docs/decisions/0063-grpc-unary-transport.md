@@ -18,17 +18,20 @@ field mappings would couple modules to field numbering, presence, and versioning
 
 Ship `Elarion.Grpc`, a host-neutral package with a typed unary entry point:
 
-- `GrpcHandlerInvoker.InvokeUnaryAsync` accepts explicit wire-to-application and application-to-wire
-  delegates, an already-authenticated `ClaimsPrincipal`, and the exact `ServerCallContext`. It creates a
-  new `DispatchScopeContext`, stores both boundary values, flows the gRPC cancellation token, and calls
-  `HandlerInvoker`; it never resolves a raw handler or scans for service methods.
+- The injectable `GrpcHandlerInvoker.InvokeUnaryAsync` accepts the wire request, exact `ServerCallContext`,
+  and explicit wire-to-application/application-to-wire delegates. The wire request plus one typed response
+  lambda let C# infer all four types, so a generated override contains no framework generic list. The invoker
+  asks the narrow `IGrpcPrincipalFactory` for the principal already authenticated by the host, creates a new
+  `DispatchScopeContext`, stores both boundary values, flows cancellation, and calls `HandlerInvoker`; it
+  never resolves a raw handler or scans for service methods.
 - `GrpcAppErrorTranslator` maps `Validation`, `NotFound`, `Conflict`, `Forbidden`, `Unauthorized`,
   `BusinessRule`, and `Internal` to stable gRPC statuses. `RpcException.Status.Detail` receives the
   application message and the `elarion-error-kind` trailer carries a normalized lower-case kind. Unknown
   future kinds fail-safe as `Internal`.
-- `AddElarionGrpcTransport()` optionally registers the default translator with `TryAdd` semantics. It
-  does not register or configure a gRPC host. Applications replace the translator by registering
-  `IAppErrorTranslator<RpcException>` themselves.
+- `AddElarionGrpcTransport(context => principal)` registers the invoker, principal factory, and default
+  translator with `TryAdd` semantics. A reflection-free overload accepts an `IGrpcPrincipalFactory`
+  instance. Neither overload registers or configures a gRPC host. Applications replace the translator by
+  registering `IAppErrorTranslator<RpcException>` first.
 
 The package depends outwardly on `Elarion`, `Elarion.Abstractions`, `Grpc.Core.Api`, and the
 dependency-light `Microsoft.Extensions.DependencyInjection.Abstractions` contract package. It contains no

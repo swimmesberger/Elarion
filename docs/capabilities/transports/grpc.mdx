@@ -9,52 +9,53 @@ hosting and authentication; each service override owns its protobuf-to-applicati
 owns the easy-to-miss boundary mechanics: a fresh dispatch scope, the calling principal, the exact
 `ServerCallContext`, cancellation, the decorated handler pipeline, and stable error translation.
 
-## Install and register the error translator
+## Install and register the transport
 
 ```xml
 <PackageReference Include="Elarion.Grpc" Version="0.2.5" />
 ```
 
-Register the optional default translator during host composition. This is intentionally separate from
-the gRPC server registration, so an ASP.NET Core host may call its normal `services.AddGrpc()` alongside
-it, while another host can choose a different implementation entirely:
+Register the transport once with a delegate that returns the principal already authenticated by the
+host. This stays separate from gRPC server registration: an ASP.NET Core host calls its normal
+`services.AddGrpc()` alongside it, while another host can supply its own principal source:
 
 ```csharp
-services.AddElarionGrpcTransport();
+services.AddElarionGrpcTransport(context => context.GetHttpContext().User);
 ```
 
-The helper uses `TryAdd` semantics. Register a singleton `IAppErrorTranslator<RpcException>` first to
-replace the default mapping; `GrpcHandlerInvoker` consumes that registration.
+That registers the injectable `GrpcHandlerInvoker`, `IGrpcPrincipalFactory`, and the default error
+translator with `TryAdd` semantics. For a host-specific implementation instead of a delegate, pass an
+`IGrpcPrincipalFactory` instance to `AddElarionGrpcTransport(...)`. Authentication itself still happens
+in the host; the factory only returns its result for the current call. Register an
+`IAppErrorTranslator<RpcException>` first to replace the default mapping.
 
 ## Map a generated service explicitly
 
-The generated service base is a normal host concern. Its override validates/authenticates the caller,
-then delegates the typed mapping and pipeline invocation:
+The generated service base is a normal host concern. Inject the invoker and keep both mappings explicit.
+The request value anchors the wire-request type; one application-response annotation lets C# infer the
+remaining types, so the override has no generic argument list:
 
 ```csharp
-using System.Security.Claims;
 using Elarion.Grpc;
 using Grpc.Core;
 
-public sealed class ClientsGrpcService(IServiceProvider services) : Clients.ClientsBase {
-    public override async Task<GetClientReply> GetClient(
+public sealed class ClientsGrpcService(GrpcHandlerInvoker grpc) : Clients.ClientsBase {
+    public override Task<GetClientReply> GetClient(
         GetClientRequest request,
-        ServerCallContext context) {
-        ClaimsPrincipal principal = Authenticate(context); // application/host owned
-
-        return await GrpcHandlerInvoker.InvokeUnaryAsync<
-            GetClientRequest, GetClientReply, GetClient.Query, GetClient.Response>(
-            services,
+        ServerCallContext context) =>
+        grpc.InvokeUnaryAsync(
             request,
             context,
-            principal,
-            wire => new GetClient.Query { Id = Guid.Parse(wire.Id) },
-            app => new GetClientReply { Id = app.Id.ToString(), Name = app.Name });
-    }
+            static wire => new GetClient.Query { Id = Guid.Parse(wire.Id) },
+            static (GetClient.Response application) => new GetClientReply {
+                Id = application.Id.ToString(),
+                Name = application.Name,
+            });
 }
 ```
 
-That call creates a fresh `DispatchScopeContext`, stores the supplied `ClaimsPrincipal` and the exact
+That call asks `IGrpcPrincipalFactory` for the host-authenticated principal, creates a fresh
+`DispatchScopeContext`, stores that principal and the exact
 `ServerCallContext`, and invokes `HandlerInvoker`. The handler is therefore resolved from DI through its
 generated decorator chain—authorization, validation, transactions, resilience, and observability stay
 identical to the other transports. `ServerCallContext.CancellationToken` is the handler cancellation
@@ -111,7 +112,7 @@ streams as appropriate. Do not wrap an Elarion stream in a gRPC call ad hoc.
 - `Elarion` core and `Elarion.Abstractions` do not reference gRPC.
 - No `HandlerTransports` value is added: gRPC overrides are typed and application-owned, rather than
   entries in the name-routed JSON-RPC/MCP bus.
-- Authentication stays host-owned. Pass the resulting principal explicitly; there is no mandatory
-  gRPC-specific principal factory.
+- Authentication stays host-owned. `IGrpcPrincipalFactory` is deliberately only the synchronous capture
+  seam for a principal the host has already authenticated; it is configured once rather than per method.
 
 For a non-gRPC adapter, see [writing a custom transport](/docs/capabilities/transports/custom-transports).

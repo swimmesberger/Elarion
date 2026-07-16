@@ -29,8 +29,8 @@ Protocols remain host-neutral where possible; ASP.NET packages own only their wi
 | Package | Add it when |
 | --- | --- |
 | `Elarion.JsonRpc` | Handlers need the transport-neutral JSON-RPC dispatcher, MCP tool model, envelopes, telemetry, or schema export. |
+| `Elarion.Grpc` | A gRPC service override needs an injected typed invoker with explicit protobuf/application mapping, one host-configured principal source, a correctly seeded dispatch scope, and stable `AppError` → `RpcException` translation without an ASP.NET gRPC hosting dependency. |
 | `Elarion.AspNetCore` | An ASP.NET host exposes JSON-RPC, `[HttpEndpoint]`, files, ordered or request-driven SSE streams, current user middleware, or the role-holder proxy. |
-| `Elarion.Grpc` | A gRPC service override needs explicit protobuf/application mapping, a correctly seeded handler dispatch scope, and stable `AppError` → `RpcException` translation without taking an ASP.NET gRPC hosting dependency. |
 | `Elarion.AspNetCore.OpenApi` | `[HttpEndpoint]` routes should appear in OpenAPI with canonical schema and idempotency metadata. |
 | `Elarion.AspNetCore.Mcp` | Handlers should be exposed as an MCP server over Streamable HTTP. This is the only package referencing the MCP SDK. |
 | `Elarion.AspNetCore.SchemaGeneration` | An ASP.NET build should export `rpc-schema.json` for client generation. |

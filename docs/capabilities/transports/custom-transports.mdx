@@ -140,7 +140,7 @@ AOT-safe binding. A reusable feature therefore ships a concrete `MapElarionX(rou
 ## Packaging boundary
 
 A non-HTTP adapter references `Elarion` and `Elarion.Abstractions`. Add `Elarion.JsonRpc` only when serving
-its JSON-RPC/MCP protocol adapters, `Elarion.Grpc` for its unary gRPC helper, and `Elarion.AspNetCore` only
+its JSON-RPC/MCP protocol adapters, `Elarion.Grpc` for its injected unary gRPC invoker, and `Elarion.AspNetCore` only
 when hosting in ASP.NET Core. Core must never reference the new adapter.
 
 ## Complete console example

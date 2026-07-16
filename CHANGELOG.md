@@ -12,14 +12,15 @@ minor releases may include breaking changes.
 
 ### Added
 - **Unary gRPC transport adapter (ADR-0063).** New **`Elarion.Grpc`** is a host-neutral,
-  `Grpc.Core.Api`-only package for generated gRPC service overrides: `GrpcHandlerInvoker` takes explicit
-  protobuf/application mapper delegates plus the host-authenticated `ClaimsPrincipal` and exact
-  `ServerCallContext`, seeds a fresh dispatch scope, flows cancellation, and invokes the decorated handler
-  chain through `HandlerInvoker`. Failed `Result<T>` values use the replaceable
-  `IAppErrorTranslator<RpcException>` seam; the default `GrpcAppErrorTranslator` has stable status mapping
-  and an `elarion-error-kind` trailer. `AddElarionGrpcTransport()` is an optional `TryAdd` registration for
-  that translator only—it never configures a gRPC host. No generated proto contracts, reflection field
-  mapping, `HandlerTransports` flag, rich validation protobuf details, or streaming ship in phase one.
+  package whose only gRPC dependency is `Grpc.Core.Api`: the injected `GrpcHandlerInvoker`
+  takes the request, exact `ServerCallContext`, and explicit protobuf/application mapper lambdas (the
+  request plus one typed response lambda infer every generic type); `IGrpcPrincipalFactory` captures host
+  authentication once instead of repeating it per method. The invoker seeds a fresh dispatch scope, flows
+  cancellation, and invokes the decorated handler chain through `HandlerInvoker`. Failed `Result<T>` values
+  use the replaceable `IAppErrorTranslator<RpcException>` seam; the default `GrpcAppErrorTranslator` has stable
+  status mapping and an `elarion-error-kind` trailer. `AddElarionGrpcTransport(...)` registers these host-neutral adapter
+  services with `TryAdd` semantics—it never configures a gRPC host. No generated proto contracts, reflection
+  field mapping, `HandlerTransports` flag, rich validation protobuf details, or streaming ship in phase one.
 - **The SQL migration runner is now database-neutral, with a SQLite provider** (ADR-0060). The EF-free
   (NativeAOT) migration runner splits into `Elarion.Migrations` — the database-neutral engine (script
   discovery, SHA-256 normalized checksums, versioning, out-of-order/repeatable planning, the roll-forward

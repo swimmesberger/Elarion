@@ -27,7 +27,7 @@ client generation. You only install the pieces you use.
 | `Elarion.Blobs` | Application | Provider-neutral blob storage contracts and DTOs. |
 | `Elarion.Blobs.PostgreSql` | Infrastructure / host | PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O. |
 | `Elarion.JsonRpc` | Host | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
-| `Elarion.Grpc` | gRPC service project | Unary typed-direct handler invocation and stable `AppError` → `RpcException` translation. Bring your own gRPC host and generated protobuf contracts. |
+| `Elarion.Grpc` | gRPC service project | Injected unary typed-direct invocation, one host-configured principal source, and stable `AppError` → `RpcException` translation. Bring your own gRPC host and generated protobuf contracts. |
 | `Elarion.AspNetCore` | Host | ASP.NET Core JSON-RPC endpoint mapping, batch execution, and current-user middleware. |
 | `Elarion.AspNetCore.SchemaGeneration` | Host (build tooling) | MSBuild target that exports `rpc-schema.json` during `dotnet build`. |
 | `Elarion.EntityFrameworkCore` | Application | Marker attributes for generated `DbSet`s and entity inclusion. **Bundles the EF Core source generator** (`DbSet` properties, entity configuration, keyset pagination). |
