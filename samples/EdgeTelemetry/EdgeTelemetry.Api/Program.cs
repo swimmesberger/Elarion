@@ -3,6 +3,7 @@ using EdgeTelemetry.Api.Modules.Telemetry;
 using EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 using Elarion.Abstractions;
 using Elarion.AspNetCore;
+using Elarion.AspNetCore.Streams;
 using Elarion.Diagnostics;
 using Elarion.Migrations.PostgreSql;
 using Elarion.Sql;
@@ -20,10 +21,11 @@ using OpenTelemetry.Trace;
 //   Elarion.Sql                   (ADR-0058)  [SqlRecord] generated mappers + safe SQL interpolation
 //
 // No EF, no reflection, no runtime codegen: handler registrations come from the generated module
-// bootstrapper, mappers and JSON contracts are source-generated, and the HTTP endpoints below are
-// hand-authored in this compilation so ASP.NET Core's Request Delegate Generator compiles the
-// binding ahead of time too (the ADR-0031 REST pattern — a source generator cannot see another
-// generator's output, so generated maps would fall back to the runtime delegate factory).
+// bootstrapper, while mappers and JSON contracts are source-generated. The ordinary unary endpoints
+// below are hand-authored in this compilation, so ASP.NET Core's Request Delegate Generator compiles
+// their binding ahead of time (the ADR-0031 REST pattern). The streaming endpoint is a custom transport:
+// its host callback parses route/query values, and MapElarionHandlerStream maps an explicit AOT-safe
+// RequestDelegate that invokes the callback and writes native SSE.
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -50,7 +52,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 // The generated bootstrapper: registers the Telemetry module's handlers as typed
 // IHandler<TRequest, Result<TResponse>> services and contributes the module's JSON context to the
-// canonical options (ADR-0023). With no decorator attributes, only the always-on ObservabilityDecorator
+// canonical options (ADR-0023). With no functional decorator attributes, only the always-on ObservabilityDecorator
 // wraps them (ADR-0059: merged tracing + user-context enrichment — the Elarion.Handlers spans/metrics
 // below, near-zero cost with no listener); gate decorators (authorization, validation, …) attach per attribute.
 builder.Services.AddElarion(builder.Configuration);
@@ -98,7 +100,7 @@ var app = builder.Build();
 
 app.MapGet("/healthz", () => Results.Text("ok"));
 
-// Hand-authored, RDG-visible endpoints: each is one line of translation — bind, call the handler
+// Hand-authored, RDG-visible unary endpoints: each is one line of translation — bind, call the handler
 // typed-directly, render the Result<T> (success → 200, AppError.Validation → 400,
 // AppError.NotFound → 404 problem details) via ElarionHttpResults.
 app.MapPost("/readings", static async (
@@ -121,6 +123,18 @@ app.MapGet("/devices/{deviceId}/history", static async (
     CancellationToken ct,
     int limit = 100) =>
     ElarionHttpResults.ToResult(await history.HandleAsync(new GetReadingHistory.Query(deviceId, metric, limit), ct)));
+
+// Unlike /history's buffered JSON array, this finite export leaves the Npgsql reader open while native SSE
+// serializes each row. This host-owned callback manually parses route/query values; the custom extension
+// invokes it through an explicit AOT-safe RequestDelegate and owns framing. The handler rejects invalid
+// input before the adapter commits SSE headers.
+app.MapElarionHandlerStream<ExportReadingHistory.Query, ReadingRow>(
+    "/devices/{deviceId}/history/stream",
+    static (context, _) => ValueTask.FromResult(new ExportReadingHistory.Query(
+        context.Request.RouteValues["deviceId"]?.ToString() ?? string.Empty,
+        context.Request.Query["metric"].ToString(),
+        context.Request.Query.TryGetValue("limit", out var rawLimit)
+            && int.TryParse(rawLimit, out var limit) ? limit : 0)));
 
 app.MapGet("/devices/{deviceId}/stats", static async (
     string deviceId,

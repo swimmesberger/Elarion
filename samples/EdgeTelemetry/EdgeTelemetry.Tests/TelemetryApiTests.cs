@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using AwesomeAssertions;
 using EdgeTelemetry.Api.Modules.Telemetry;
 using Microsoft.AspNetCore.Hosting;
@@ -70,6 +71,15 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
 
         using var client = _factory!.CreateClient();
 
+        // Stream startup errors stay ordinary HTTP problems: SSE headers are not committed until the handler
+        // accepts the request, so an invalid limit cannot turn into a half-open stream.
+        using var invalidStream = await client.GetAsync(
+            "/devices/edge-1/history/stream?metric=temperature&limit=0", Ct);
+        invalidStream.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var missingLimit = await client.GetAsync(
+            "/devices/edge-1/history/stream?metric=temperature", Ct);
+        missingLimit.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
         var recordedAt = new DateTimeOffset(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
         ReadingInput[] batch = [
             new() { DeviceId = "edge-1", Metric = "temperature", Value = 21.5, RecordedAt = recordedAt },
@@ -106,6 +116,42 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
             "/devices/edge-1/history?metric=temperature&limit=1", TelemetryJsonContext.Default.ListReadingRow, Ct);
         history.Should().ContainSingle(reading => reading.Value == 23.0);
 
+        // The export is finite SSE, not a buffered JSON array: consume it to completion and parse every row
+        // through the same source-generated ReadingRow metadata as the rest of the sample.
+        using var streamRequest = new HttpRequestMessage(
+            HttpMethod.Get, "/devices/edge-1/history/stream?metric=temperature&limit=2");
+        using var streamResponse = await client.SendAsync(streamRequest, HttpCompletionOption.ResponseHeadersRead, Ct);
+        streamResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        streamResponse.Content.Headers.ContentType!.MediaType.Should().Be("text/event-stream");
+
+        var exported = new List<ReadingRow>();
+        var streamLines = new List<string>();
+        string? eventType = null;
+        await using var stream = await streamResponse.Content.ReadAsStreamAsync(Ct);
+        using var reader = new StreamReader(stream);
+        while (await reader.ReadLineAsync(Ct) is { } line) {
+            streamLines.Add(line);
+            if (line.StartsWith("event: ", StringComparison.Ordinal)) {
+                eventType = line["event: ".Length..];
+                continue;
+            }
+
+            if (!line.StartsWith("data: ", StringComparison.Ordinal)
+                || eventType == "elarion.keepAlive"
+                || line.Length == "data: ".Length) {
+                if (line.Length == 0) {
+                    eventType = null;
+                }
+                continue;
+            }
+
+            var reading = JsonSerializer.Deserialize(line["data: ".Length..], TelemetryJsonContext.Default.ReadingRow);
+            exported.Add(reading!);
+        }
+
+        exported.Select(reading => reading.Value).Should().Equal(23.0, 21.5);
+        streamLines.Should().NotContain(line => line.StartsWith("id: ", StringComparison.Ordinal));
+
         // Hourly stats: the projection [SqlRecord] binds the aggregate SELECT.
         var stats = await client.GetFromJsonAsync(
             "/devices/edge-1/stats?metric=temperature&hours=87600", TelemetryJsonContext.Default.ListMetricBucket, Ct);
@@ -120,6 +166,7 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
         handlerSpans.Should().Contain("handle IngestReadings");
         handlerSpans.Should().Contain("handle GetLatestReading");
         handlerSpans.Should().Contain("handle GetReadingHistory");
+        handlerSpans.Should().Contain("stream ExportReadingHistory");
         handlerSpans.Should().Contain("handle GetMetricStats");
         spans.Should().Contain(s => s.Source == "Npgsql", "the SQL command spans nest under the handler spans");
     }

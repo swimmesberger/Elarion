@@ -65,9 +65,10 @@ public static class StreamEndpointRouteBuilderExtensions {
     }
 
     /// <summary>
-    /// Maps a request-driven <see cref="IStreamHandler{TRequest,TItem}"/> as SSE. The host owns binding,
-    /// routing, and authorization through <paramref name="requestFactory"/>; this adapter owns only the typed
-    /// stream invocation and canonical JSON wire leg. Startup failures are written as normal Elarion problems
+    /// Maps a request-driven <see cref="IStreamHandler{TRequest,TItem}"/> as SSE. The
+    /// <paramref name="requestFactory"/> owns request binding; the host owns routing and optional endpoint-level
+    /// policy. After this adapter seeds the handler context from <c>HttpContext.User</c>, the generated stream
+    /// pipeline owns handler/business authorization. Startup failures are written as normal Elarion problems
     /// before SSE headers are committed.
     /// </summary>
     /// <typeparam name="TRequest">The handler request type.</typeparam>
@@ -80,18 +81,21 @@ public static class StreamEndpointRouteBuilderExtensions {
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(requestFactory);
 
-        return endpoints.MapGet(pattern, async (HttpContext context) => {
+        return (RouteHandlerBuilder)endpoints.MapGet(pattern, (RequestDelegate)(async context => {
             var request = await requestFactory(context, context.RequestAborted).ConfigureAwait(false);
             var dispatch = new DispatchScopeContext();
             dispatch.Set<ClaimsPrincipal>(context.User);
             var started = await StreamHandlerInvoker.InvokeAsync<TRequest, TItem>(
                 context.RequestServices, request, dispatch, context.RequestAborted).ConfigureAwait(false);
             if (!started.IsSuccess) {
-                return ElarionHttpResults.ToProblem(started.Error);
+                await ElarionHttpResults.ToProblem(started.Error).ExecuteAsync(context).ConfigureAwait(false);
+                return;
             }
 
-            return (IResult)new HandlerStreamSseResult<TItem>(started.Value, GetTimeProvider(context));
-        });
+            await new HandlerStreamSseResult<TItem>(started.Value, GetTimeProvider(context))
+                .ExecuteAsync(context)
+                .ConfigureAwait(false);
+        }));
     }
 
     private static long? ResumePoint(HttpRequest request) {
