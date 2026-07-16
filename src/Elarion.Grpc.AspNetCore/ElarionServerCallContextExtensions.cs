@@ -6,6 +6,21 @@ namespace Elarion.Grpc.AspNetCore;
 /// <summary>ASP.NET Core grpc-dotnet convenience methods for invoking Elarion handlers.</summary>
 public static class ElarionServerCallContextExtensions {
     /// <summary>
+    /// Invokes an application request directly using this call's request services and authenticated principal.
+    /// </summary>
+    /// <typeparam name="TRequest">The application handler request type.</typeparam>
+    /// <typeparam name="TResponse">The application handler success type.</typeparam>
+    /// <param name="context">The grpc-dotnet call context.</param>
+    /// <param name="request">The application request to dispatch.</param>
+    /// <returns>The successful application response.</returns>
+    /// <exception cref="RpcException">The registered translator's representation of a failed result.</exception>
+    public static Task<TResponse> InvokeElarionAsync<TRequest, TResponse>(
+        this ServerCallContext context,
+        TRequest request)
+        where TRequest : notnull =>
+        GetInvoker(context).InvokeUnaryAsync<TRequest, TResponse>(request, context);
+
+    /// <summary>
     /// Maps and invokes a unary Elarion handler using this call's request services and authenticated principal.
     /// </summary>
     /// <typeparam name="TWireRequest">The generated protobuf request type.</typeparam>
@@ -24,9 +39,11 @@ public static class ElarionServerCallContextExtensions {
         Func<TWireRequest, TRequest> mapRequest,
         Func<TResponse, TWireResponse> mapResponse)
         where TRequest : notnull {
-        ArgumentNullException.ThrowIfNull(context);
+        return GetInvoker(context).InvokeUnaryAsync(wireRequest, context, mapRequest, mapResponse);
+    }
 
-        var invoker = context.GetHttpContext().RequestServices.GetRequiredService<GrpcHandlerInvoker>();
-        return invoker.InvokeUnaryAsync(wireRequest, context, mapRequest, mapResponse);
+    private static GrpcHandlerInvoker GetInvoker(ServerCallContext context) {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.GetHttpContext().RequestServices.GetRequiredService<GrpcHandlerInvoker>();
     }
 }

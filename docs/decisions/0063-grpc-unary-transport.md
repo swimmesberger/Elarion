@@ -18,10 +18,11 @@ field mappings would couple modules to field numbering, presence, and versioning
 
 Ship `Elarion.Grpc`, a host-neutral package with a typed unary entry point:
 
-- The injectable `GrpcHandlerInvoker.InvokeUnaryAsync` accepts the wire request, exact `ServerCallContext`,
-  and explicit wire-to-application/application-to-wire delegates. The wire request plus one typed response
-  lambda let C# infer all four types, so a generated override contains no framework generic list. The invoker
-  asks the narrow `IGrpcPrincipalFactory` for the principal already authenticated by the host, creates a new
+- The injectable `GrpcHandlerInvoker.InvokeUnaryAsync<TRequest,TResponse>` primarily accepts an
+  already-mapped application request plus the exact `ServerCallContext`, and returns the application response.
+  A second convenience overload accepts the wire request plus explicit wire-to-application and
+  application-to-wire delegates for callers that prefer one expression. The invoker asks the narrow
+  `IGrpcPrincipalFactory` for the principal already authenticated by the host, creates a new
   `DispatchScopeContext`, stores both boundary values, flows cancellation, and calls `HandlerInvoker`; it
   never resolves a raw handler or scans for service methods.
 - `GrpcAppErrorTranslator` maps `Validation`, `NotFound`, `Conflict`, `Forbidden`, `Unauthorized`,
@@ -42,9 +43,10 @@ Ship `Elarion.Grpc.AspNetCore` as the conventional composition layer for the sta
 
 - `services.AddGrpc().AddElarion()` registers the neutral adapter and captures the principal from the
   call's already-authenticated `HttpContext.User`.
-- `ServerCallContext.InvokeElarionAsync(...)` resolves `GrpcHandlerInvoker` from that call's
-  `HttpContext.RequestServices`, so a generated service override needs no injected framework helper. The
-  request, context, and two explicit mapper lambdas remain visible at the wire boundary.
+- `ServerCallContext.InvokeElarionAsync<TRequest,TResponse>(request)` resolves `GrpcHandlerInvoker` from that
+  call's `HttpContext.RequestServices`, so a generated service override needs no injected framework helper or
+  mapper delegates. Protobuf-to-application and application-to-protobuf mapping remain ordinary explicit code
+  immediately around the dispatch. The mapper-delegate overload remains available for compact overrides.
 - This package alone references `Grpc.AspNetCore.Server` and the ASP.NET Core shared framework. It adds no
   interceptor, middleware, service scanning, generated contract, or automatic mapping.
 
@@ -63,7 +65,8 @@ one.
   transports while keeping application DTOs independent of protobuf.
 - The normal ASP.NET Core service override has no constructor or per-call principal plumbing; custom hosts
   retain the explicit injectable seam.
-- Every method has deliberate mapping code; this is accepted because mapping is the wire-contract seam.
+- Every method has deliberate mapping code around dispatch; this is accepted because mapping is the
+  wire-contract seam.
 - Streaming is not implemented. Server/client/duplex streaming requires a whole-call scope, upfront vs
   post-first-item failure semantics, trailer-based terminal errors, and cancellation through the entire
   stream. It follows the distinct stream-contract work already deferred by ADR-0044 rather than widening

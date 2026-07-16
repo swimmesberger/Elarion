@@ -53,10 +53,8 @@ public sealed class GrpcAspNetCoreConventionTests {
         var callContext = new TestServerCallContext(CancellationToken.None);
         callContext.UserState["__HttpContext"] = httpContext;
 
-        var action = async () => await callContext.InvokeElarionAsync(
-            new WireRequest("ignored"),
-            static wire => new ApplicationRequest(wire.Value),
-            static (ApplicationResponse application) => new WireResponse(application.Value));
+        var action = async () => await callContext.InvokeElarionAsync<ApplicationRequest, ApplicationResponse>(
+            new ApplicationRequest("ignored"));
 
         var exception = await action.Should().ThrowAsync<RpcException>();
         exception.Which.StatusCode.Should().Be(StatusCode.NotFound);
@@ -94,11 +92,11 @@ public sealed class GrpcAspNetCoreConventionTests {
     }
 
     private sealed class GeneratedUnaryService : GeneratedUnaryServiceBase {
-        public override Task<WireResponse> Unary(WireRequest request, ServerCallContext context) =>
-            context.InvokeElarionAsync(
-                request,
-                static wire => new ApplicationRequest(wire.Value + "-request"),
-                static (ApplicationResponse application) => new WireResponse(application.Value + "-response"));
+        public override async Task<WireResponse> Unary(WireRequest request, ServerCallContext context) {
+            var response = await context.InvokeElarionAsync<ApplicationRequest, ApplicationResponse>(
+                new ApplicationRequest(request.Value + "-request"));
+            return new WireResponse(response.Value + "-response");
+        }
     }
 
     private sealed class MappingHandler(CallCapture capture)

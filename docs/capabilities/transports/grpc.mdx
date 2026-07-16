@@ -31,32 +31,49 @@ default mapping.
 
 For a non-ASP.NET host, reference `Elarion.Grpc` directly and call
 `services.AddElarionGrpcTransport(context => principal)` (or pass an `IGrpcPrincipalFactory`). Inject
-`GrpcHandlerInvoker` into the service and use its equivalent `InvokeUnaryAsync(...)` method.
+`GrpcHandlerInvoker` into the service and use its equivalent
+`InvokeUnaryAsync<TRequest,TResponse>(request, context)` method.
 
 ## Map a generated service explicitly
 
-The generated service base remains a normal host concern. With grpc-dotnet, invoke through the supplied
-`ServerCallContext`; its `HttpContext.RequestServices` supplies the configured invoker, so the service has
-no Elarion constructor dependency. Keep both mappings explicit. The request value anchors the wire-request
-type; one application-response annotation lets C# infer the remaining types, so the override has no
-generic argument list:
+The generated service base remains a normal host concern. Map the protobuf request into the application
+request, dispatch it, then map the application response into the protobuf reply. With grpc-dotnet, the
+supplied `ServerCallContext` resolves the configured invoker from `HttpContext.RequestServices`, so the
+service has no Elarion constructor dependency and neither mapping needs a delegate:
 
 ```csharp
 using Elarion.Grpc.AspNetCore;
 using Grpc.Core;
 
 public sealed class ClientsGrpcService : Clients.ClientsBase {
-    public override Task<GetClientReply> GetClient(
+    public override async Task<GetClientReply> GetClient(
         GetClientRequest request,
-        ServerCallContext context) =>
-        context.InvokeElarionAsync(
-            request,
-            static wire => new GetClient.Query { Id = Guid.Parse(wire.Id) },
-            static (GetClient.Response application) => new GetClientReply {
-                Id = application.Id.ToString(),
-                Name = application.Name,
-            });
+        ServerCallContext context) {
+        var application = await context.InvokeElarionAsync<GetClient.Query, GetClient.Response>(
+            new GetClient.Query { Id = Guid.Parse(request.Id) });
+
+        return new GetClientReply {
+            Id = application.Id.ToString(),
+            Name = application.Name,
+        };
+    }
 }
+```
+
+C# does not use a method's return type to infer generic arguments, so the application response type must
+appear in this delegate-free call. The request/response pair is the same pair declared by
+`IHandler<TRequest, Result<TResponse>>`; resolving it remains compile-time typed and reflection-free.
+
+For a short expression-bodied override, the mapper overload remains available:
+
+```csharp
+return context.InvokeElarionAsync(
+    request,
+    static wire => new GetClient.Query { Id = Guid.Parse(wire.Id) },
+    static (GetClient.Response application) => new GetClientReply {
+        Id = application.Id.ToString(),
+        Name = application.Name,
+    });
 ```
 
 That call resolves the invoker from the current grpc-dotnet request services, captures the already

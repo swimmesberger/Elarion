@@ -10,16 +10,52 @@ namespace Elarion.Grpc;
 /// authentication application-owned.
 /// </summary>
 /// <remarks>
-/// The hosting application configures an <see cref="IGrpcPrincipalFactory"/> once. Each service method then supplies
-/// only its generated request, the exact <see cref="ServerCallContext"/>, and explicit mappings between wire and
-/// application types. This adapter creates the per-call dispatch context, flows cancellation, then uses
-/// <see cref="HandlerInvoker"/> so the decorated handler chain remains the only path to application code. It does
-/// not host gRPC or infer protobuf mappings. Streaming calls are intentionally outside this unary-only API.
+/// The hosting application configures an <see cref="IGrpcPrincipalFactory"/> once. A service method can pass its
+/// already-mapped application request and exact <see cref="ServerCallContext"/>, or use the convenience overload
+/// with explicit wire/application mappings. This adapter creates the per-call dispatch context, flows cancellation,
+/// then uses <see cref="HandlerInvoker"/> so the decorated handler chain remains the only path to application code.
+/// It does not host gRPC or infer protobuf mappings. Streaming calls are intentionally outside this unary-only API.
 /// </remarks>
 public sealed class GrpcHandlerInvoker(
     IServiceProvider services,
     IGrpcPrincipalFactory principalFactory,
     IAppErrorTranslator<RpcException> errorTranslator) {
+    /// <summary>
+    /// Invokes an application request directly, returning its successful application response or throwing the
+    /// translated <see cref="RpcException"/> for a failed <see cref="Result{T}"/>.
+    /// </summary>
+    /// <typeparam name="TRequest">The application handler request type.</typeparam>
+    /// <typeparam name="TResponse">The application handler success type.</typeparam>
+    /// <param name="request">The application request to dispatch.</param>
+    /// <param name="callContext">The exact gRPC context for this call.</param>
+    /// <returns>The successful application response.</returns>
+    /// <exception cref="RpcException">The registered gRPC translator's representation of a failed result.</exception>
+    public async Task<TResponse> InvokeUnaryAsync<TRequest, TResponse>(
+        TRequest request,
+        ServerCallContext callContext)
+        where TRequest : notnull {
+        ArgumentNullException.ThrowIfNull(callContext);
+
+        var principal = principalFactory.CreatePrincipal(callContext);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        var context = new DispatchScopeContext();
+        context.Set(principal);
+        context.Set(callContext);
+
+        var result = await HandlerInvoker.InvokeAsync<TRequest, TResponse>(
+            services,
+            request,
+            context,
+            callContext.CancellationToken).ConfigureAwait(false);
+
+        if (result.IsSuccess) {
+            return result.Value;
+        }
+
+        throw errorTranslator.Translate(result.Error);
+    }
+
     /// <summary>
     /// Maps and invokes a unary gRPC request, returning its mapped success response or throwing the translated
     /// <see cref="RpcException"/> for a failed <see cref="Result{T}"/>.
@@ -44,23 +80,9 @@ public sealed class GrpcHandlerInvoker(
         ArgumentNullException.ThrowIfNull(mapRequest);
         ArgumentNullException.ThrowIfNull(mapResponse);
 
-        var principal = principalFactory.CreatePrincipal(callContext);
-        ArgumentNullException.ThrowIfNull(principal);
-
-        var context = new DispatchScopeContext();
-        context.Set(principal);
-        context.Set(callContext);
-
-        var result = await HandlerInvoker.InvokeAsync<TRequest, TResponse>(
-            services,
+        var response = await InvokeUnaryAsync<TRequest, TResponse>(
             mapRequest(wireRequest),
-            context,
-            callContext.CancellationToken).ConfigureAwait(false);
-
-        if (result.IsSuccess) {
-            return mapResponse(result.Value);
-        }
-
-        throw errorTranslator.Translate(result.Error);
+            callContext).ConfigureAwait(false);
+        return mapResponse(response);
     }
 }
