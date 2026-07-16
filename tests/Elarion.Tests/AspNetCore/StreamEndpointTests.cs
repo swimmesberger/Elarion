@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text;
 using System.Text.Json.Serialization;
 using AwesomeAssertions;
 using Elarion.Abstractions;
@@ -11,7 +10,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
@@ -125,27 +123,25 @@ public sealed class StreamEndpointTests {
     }
 
     [Fact]
-    public async Task RequestDrivenStreamWriter_WritesKeepAliveWhileOneMoveNextRemainsPending() {
+    public async Task RequestDrivenStreamEvents_EmitKeepAliveWhileOneMoveNextRemainsPending() {
         var time = new NotifyingFakeTimeProvider();
         var gate = new BlockingExportGate();
-        var context = new DefaultHttpContext();
-        await using var responseBody = new MemoryStream();
-        context.Response.Body = responseBody;
-        var writing = StreamEndpointRouteBuilderExtensions.WriteHandlerStreamAsync(
-            context.Response,
+        await using var enumerator = StreamEndpointRouteBuilderExtensions.StreamHandlerEventsAsync(
             new BlockingExportStream(gate),
             StreamEndpointTestContext.Default.TestQuote,
             time,
-            Ct);
+            Ct).GetAsyncEnumerator(Ct);
+        var moving = enumerator.MoveNextAsync().AsTask();
         try {
             await gate.Entered.Task.WaitAsync(Ct);
             await time.TimerCreated.Task.WaitAsync(Ct);
             time.Advance(TimeSpan.FromSeconds(15));
-            await Task.Yield();
-            Encoding.UTF8.GetString(responseBody.ToArray()).Should().Be("event: elarion.keepAlive\ndata: \n\n");
+            (await moving.WaitAsync(Ct)).Should().BeTrue();
+            enumerator.Current.EventType.Should().Be("elarion.keepAlive");
+            enumerator.Current.Data.Should().BeEmpty();
 
             gate.Release.TrySetResult();
-            await writing;
+            (await enumerator.MoveNextAsync()).Should().BeFalse();
             gate.MoveNextCount.Should().Be(1);
             gate.DisposeCount.Should().Be(1);
         } finally {
@@ -155,19 +151,18 @@ public sealed class StreamEndpointTests {
     }
 
     [Fact]
-    public async Task RequestDrivenStreamWriter_CancellationSettlesPendingMoveBeforeDisposal() {
+    public async Task RequestDrivenStreamEvents_CancellationSettlesPendingMoveBeforeDisposal() {
         var gate = new SerializedCleanupGate();
         using var cancelled = new CancellationTokenSource();
-        var context = new DefaultHttpContext();
-        await using var responseBody = new MemoryStream();
-        context.Response.Body = responseBody;
-        var writing = StreamEndpointRouteBuilderExtensions.WriteHandlerStreamAsync(
-            context.Response, new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
-            TimeProvider.System, cancelled.Token);
+        await using var enumerator = StreamEndpointRouteBuilderExtensions.StreamHandlerEventsAsync(
+            new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
+            TimeProvider.System, cancelled.Token).GetAsyncEnumerator(cancelled.Token);
+        var moving = enumerator.MoveNextAsync().AsTask();
 
         await gate.Entered.Task.WaitAsync(Ct);
         cancelled.Cancel();
-        await writing.WaitAsync(Ct);
+        (await moving.WaitAsync(Ct)).Should().BeFalse();
+        await enumerator.DisposeAsync();
 
         gate.MoveNextCount.Should().Be(1);
         gate.DisposeCount.Should().Be(1);
@@ -175,21 +170,19 @@ public sealed class StreamEndpointTests {
     }
 
     [Fact]
-    public async Task RequestDrivenStreamWriter_WriteFailureSettlesPendingMoveBeforeDisposal() {
+    public async Task RequestDrivenStreamEvents_ConsumerFailureSettlesPendingMoveBeforeDisposal() {
         var gate = new SerializedCleanupGate();
         var time = new NotifyingFakeTimeProvider();
-        var context = new DefaultHttpContext();
-        await using var responseBody = new ThrowingWriteStream();
-        context.Response.Body = responseBody;
-        var writing = StreamEndpointRouteBuilderExtensions.WriteHandlerStreamAsync(
-            context.Response, new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
-            time, Ct);
+        var enumerator = StreamEndpointRouteBuilderExtensions.StreamHandlerEventsAsync(
+            new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
+            time, Ct).GetAsyncEnumerator(Ct);
+        var moving = enumerator.MoveNextAsync().AsTask();
 
         await gate.Entered.Task.WaitAsync(Ct);
         await time.TimerCreated.Task.WaitAsync(Ct);
         time.Advance(TimeSpan.FromSeconds(15));
-        Func<Task> act = () => writing;
-        await act.Should().ThrowAsync<IOException>();
+        (await moving.WaitAsync(Ct)).Should().BeTrue();
+        await enumerator.DisposeAsync();
 
         gate.MoveNextCount.Should().Be(1);
         gate.DisposeCount.Should().Be(1);
@@ -197,16 +190,13 @@ public sealed class StreamEndpointTests {
     }
 
     [Fact]
-    public async Task RequestDrivenStreamWriter_TimerFailureSettlesPendingMoveBeforeDisposal() {
+    public async Task RequestDrivenStreamEvents_TimerFailureSettlesPendingMoveBeforeDisposal() {
         var gate = new SerializedCleanupGate();
-        var context = new DefaultHttpContext();
-        await using var responseBody = new MemoryStream();
-        context.Response.Body = responseBody;
-        var writing = StreamEndpointRouteBuilderExtensions.WriteHandlerStreamAsync(
-            context.Response, new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
-            new ThrowingTimeProvider(), Ct);
+        await using var enumerator = StreamEndpointRouteBuilderExtensions.StreamHandlerEventsAsync(
+            new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
+            new ThrowingTimeProvider(), Ct).GetAsyncEnumerator(Ct);
 
-        Func<Task> act = () => writing;
+        Func<Task> act = () => enumerator.MoveNextAsync().AsTask();
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("timer failure");
 
         gate.MoveNextCount.Should().Be(1);
@@ -388,11 +378,6 @@ public sealed class StreamEndpointTests {
                 return ValueTask.CompletedTask;
             }
         }
-    }
-
-    private sealed class ThrowingWriteStream : MemoryStream {
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
-            ValueTask.FromException(new IOException("write failure"));
     }
 
     private sealed class ThrowingTimeProvider : TimeProvider {

@@ -70,7 +70,8 @@ Streamed responses use a **distinct handler contract**, not a widening of `IHand
   distinguishable.
 - **Transport mapping is asymmetric, and that is accepted**: the initial imperative HTTP helper maps typed
   handlers to SSE and takes a host-owned request binder. It awaits startup before committing response headers,
-  writes canonical source-generated JSON items, and retains the invocation scope through enumeration.
+  writes canonical source-generated JSON items through ASP.NET Core's native
+  `TypedResults.ServerSentEvents`, and retains the invocation scope through enumeration.
   JSON-RPC 2.0 and MCP have no standard streaming result shape; no bespoke dialect is invented.
 
 ### Streaming requests: rejected as a handler contract

@@ -110,7 +110,8 @@ Generated stream registration is module-gated like unary handlers, but has an in
 Authorization, feature gates, validation, observability, and context enrichment apply; caching, idempotency,
 transactions, audit, and unary resilience do not. Use `StreamHandlerInvoker.InvokeAsync` in a typed custom
 transport: its accepted invocation owns the DI scope until enumeration completes, faults, cancels, or is disposed.
-`MapElarionHandlerStream` is the explicit SSE adapter. JSON-RPC and MCP remain single-response. This cold
+`MapElarionHandlerStream` is the explicit SSE adapter and delegates framing to ASP.NET Core's native
+`TypedResults.ServerSentEvents`. JSON-RPC and MCP remain single-response. This cold
 request response is distinct from an actor `StreamHub`, which is the hot, sequenced, resumable model.
 
 ## Command vs. query

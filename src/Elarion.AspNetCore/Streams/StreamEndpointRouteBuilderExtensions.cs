@@ -80,65 +80,18 @@ public static class StreamEndpointRouteBuilderExtensions {
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(requestFactory);
 
-        return (RouteHandlerBuilder)endpoints.MapGet(pattern, async context => {
+        return endpoints.MapGet(pattern, async (HttpContext context) => {
             var request = await requestFactory(context, context.RequestAborted).ConfigureAwait(false);
             var dispatch = new DispatchScopeContext();
             dispatch.Set<ClaimsPrincipal>(context.User);
             var started = await StreamHandlerInvoker.InvokeAsync<TRequest, TItem>(
                 context.RequestServices, request, dispatch, context.RequestAborted).ConfigureAwait(false);
             if (!started.IsSuccess) {
-                await ElarionHttpResults.ToProblem(started.Error).ExecuteAsync(context).ConfigureAwait(false);
-                return;
+                return ElarionHttpResults.ToProblem(started.Error);
             }
 
-            await using var invocation = started.Value;
-            context.Response.ContentType = "text/event-stream";
-            context.Response.Headers.CacheControl = "no-cache";
-            var typeInfo = context.RequestServices.GetRequiredService<IElarionJsonSerialization>().GetTypeInfo<TItem>();
-            try {
-                await WriteHandlerStreamAsync(context.Response, invocation, typeInfo, GetTimeProvider(context), context.RequestAborted)
-                    .ConfigureAwait(false);
-            } catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
-                // Browser disconnects are normal termination; the invocation finally releases the stream scope.
-            } catch {
-                // SSE cannot change to an HTTP problem once items have been written. Abort to make the terminal
-                // fault visible to the client instead of falsely signalling a clean completion.
-                context.Abort();
-            }
+            return (IResult)new HandlerStreamSseResult<TItem>(started.Value, GetTimeProvider(context));
         });
-    }
-
-    // SSE data is line-oriented. WriteIndented JSON contains newlines, and an unprefixed continuation line would
-    // terminate the event or be interpreted as a field by an EventSource client. Prefix every serialized line;
-    // accept either LF or CRLF from a caller-configured canonical JsonSerializerOptions instance.
-    private static async ValueTask WriteSseDataAsync(
-        HttpResponse response,
-        string payload,
-        CancellationToken ct,
-        string? eventType = null) {
-        if (eventType is not null) {
-            await response.WriteAsync("event: ", ct).ConfigureAwait(false);
-            await response.WriteAsync(eventType, ct).ConfigureAwait(false);
-            await response.WriteAsync("\n", ct).ConfigureAwait(false);
-        }
-
-        var offset = 0;
-        while (offset <= payload.Length) {
-            var newline = payload.IndexOfAny(['\r', '\n'], offset);
-            var end = newline < 0 ? payload.Length : newline;
-            await response.WriteAsync("data: ", ct).ConfigureAwait(false);
-            await response.WriteAsync(payload.Substring(offset, end - offset), ct).ConfigureAwait(false);
-            await response.WriteAsync("\n", ct).ConfigureAwait(false);
-
-            if (newline < 0)
-                break;
-
-            offset = newline + 1;
-            if (payload[newline] == '\r' && offset < payload.Length && payload[offset] == '\n')
-                offset++;
-        }
-
-        await response.WriteAsync("\n", ct).ConfigureAwait(false);
     }
 
     private static long? ResumePoint(HttpRequest request) {
@@ -210,12 +163,18 @@ public static class StreamEndpointRouteBuilderExtensions {
         return MoveWaitResult.MoveCompleted;
     }
 
-    internal static async Task WriteHandlerStreamAsync<T>(
-        HttpResponse response,
+    private static IResult CreateHandlerStreamResult<T>(
         IAsyncEnumerable<T> source,
         JsonTypeInfo<T> typeInfo,
         TimeProvider timeProvider,
-        CancellationToken ct) {
+        CancellationToken ct) =>
+        TypedResults.ServerSentEvents(StreamHandlerEventsAsync(source, typeInfo, timeProvider, ct));
+
+    internal static async IAsyncEnumerable<SseItem<string>> StreamHandlerEventsAsync<T>(
+        IAsyncEnumerable<T> source,
+        JsonTypeInfo<T> typeInfo,
+        TimeProvider timeProvider,
+        [EnumeratorCancellation] CancellationToken ct) {
         using var enumerationCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         await using var enumerator = source.GetAsyncEnumerator(enumerationCts.Token);
         Task<bool>? pendingMove = null;
@@ -224,23 +183,42 @@ public static class StreamEndpointRouteBuilderExtensions {
                 pendingMove ??= enumerator.MoveNextAsync().AsTask();
                 var wait = await WaitForNextAsync(pendingMove, timeProvider, ct).ConfigureAwait(false);
                 if (wait == MoveWaitResult.Cancelled)
-                    return;
+                    yield break;
                 if (wait == MoveWaitResult.KeepAlive) {
-                    await WriteSseDataAsync(response, string.Empty, ct, KeepAliveEventType).ConfigureAwait(false);
-                    await response.Body.FlushAsync(ct).ConfigureAwait(false);
+                    yield return new SseItem<string>(string.Empty, KeepAliveEventType);
                     continue;
                 }
 
                 var hasNext = await pendingMove.ConfigureAwait(false);
                 pendingMove = null;
                 if (!hasNext)
-                    return;
+                    yield break;
 
-                await WriteSseDataAsync(response, JsonSerializer.Serialize(enumerator.Current, typeInfo), ct).ConfigureAwait(false);
-                await response.Body.FlushAsync(ct).ConfigureAwait(false);
+                yield return new SseItem<string>(JsonSerializer.Serialize(enumerator.Current, typeInfo));
             }
         } finally {
             await SettlePendingMoveAsync(pendingMove, enumerationCts).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class HandlerStreamSseResult<T>(
+        StreamHandlerInvocation<T> invocation,
+        TimeProvider timeProvider) : IResult {
+        public async Task ExecuteAsync(HttpContext context) {
+            await using var ownedInvocation = invocation;
+            var typeInfo = context.RequestServices.GetRequiredService<IElarionJsonSerialization>().GetTypeInfo<T>();
+            try {
+                await CreateHandlerStreamResult(
+                        invocation, typeInfo, timeProvider, context.RequestAborted)
+                    .ExecuteAsync(context)
+                    .ConfigureAwait(false);
+            } catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
+                // Browser disconnects are normal termination; disposing the result releases the stream scope.
+            } catch {
+                // SSE cannot change to an HTTP problem once items have been written. Abort to make the terminal
+                // fault visible to the client instead of falsely signalling a clean completion.
+                context.Abort();
+            }
         }
     }
 
