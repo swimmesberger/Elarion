@@ -1,4 +1,4 @@
-# ADR-0063: gRPC ships as a typed unary transport adapter
+# ADR-0063: gRPC ships as typed unary and server-streaming transport adapters
 
 - Status: Accepted
 - Date: 2026-07-16
@@ -16,7 +16,8 @@ field mappings would couple modules to field numbering, presence, and versioning
 
 ## Decision
 
-Ship `Elarion.Grpc`, a host-neutral package with a typed unary entry point:
+Ship `Elarion.Grpc`, a host-neutral package with typed unary and request-driven server-streaming entry
+points:
 
 - The injectable `GrpcHandlerInvoker.InvokeUnaryAsync<TRequest,TResponse>` primarily accepts an
   already-mapped application request plus the exact `ServerCallContext`, and returns the application response.
@@ -25,6 +26,13 @@ Ship `Elarion.Grpc`, a host-neutral package with a typed unary entry point:
   `IGrpcPrincipalFactory` for the principal already authenticated by the host, creates a new
   `DispatchScopeContext`, stores both boundary values, flows cancellation, and calls `HandlerInvoker`; it
   never resolves a raw handler or scans for service methods.
+- `GrpcStreamHandlerInvoker.InvokeServerStreamingAsync<TRequest,TItem>` applies the same principal,
+  dispatch-scope, and cancellation boundary to `StreamHandlerInvoker`. It returns the accepted
+  `StreamHandlerInvocation<TItem>`, whose scope stays alive through one enumeration and must be disposed.
+  Its convenience overload maps a wire request and writes explicitly mapped items to an
+  `IServerStreamWriter<TWireItem>`. A failed startup `Result` translates before an item is written;
+  exceptions during lazy enumeration propagate as the gRPC call's terminal fault because a started stream
+  cannot become a different response.
 - `GrpcAppErrorTranslator` maps `Validation`, `NotFound`, `Conflict`, `Forbidden`, `Unauthorized`,
   `BusinessRule`, and `Internal` to stable gRPC statuses. `RpcException.Status.Detail` receives the
   application message and the `elarion-error-kind` trailer carries a normalized lower-case kind. Unknown
@@ -47,6 +55,10 @@ Ship `Elarion.Grpc.AspNetCore` as the conventional composition layer for the sta
   call's `HttpContext.RequestServices`, so a generated service override needs no injected framework helper or
   mapper delegates. Protobuf-to-application and application-to-protobuf mapping remain ordinary explicit code
   immediately around the dispatch. The mapper-delegate overload remains available for compact overrides.
+- `ServerCallContext.InvokeElarionStreamAsync<TRequest,TItem>(request)` resolves
+  `GrpcStreamHandlerInvoker` from the same request services. The generated service owns protobuf item
+  mapping and uses `await using` around the returned invocation; a writer overload is available for a
+  compact override.
 - This package alone references `Grpc.AspNetCore.Server` and the ASP.NET Core shared framework. It adds no
   interceptor, middleware, service scanning, generated contract, or automatic mapping.
 
@@ -61,13 +73,13 @@ one.
 
 ## Consequences
 
-- Unary gRPC services retain the same current-user seeding and decorator pipeline as other handler
-  transports while keeping application DTOs independent of protobuf.
+- Unary and request-driven server-streaming gRPC services retain the same current-user seeding and decorated
+  handler pipeline as other handler transports while keeping application DTOs independent of protobuf.
 - The normal ASP.NET Core service override has no constructor or per-call principal plumbing; custom hosts
   retain the explicit injectable seam.
 - Every method has deliberate mapping code around dispatch; this is accepted because mapping is the
   wire-contract seam.
-- Streaming is not implemented. Server/client/duplex streaming requires a whole-call scope, upfront vs
-  post-first-item failure semantics, trailer-based terminal errors, and cancellation through the entire
-  stream. It follows the distinct stream-contract work already deferred by ADR-0044 rather than widening
-  this unary adapter.
+- Client and duplex streaming remain out of scope. They require an inbound-message contract, whole-call
+  scope/lifetime rules, backpressure, and a deliberate model for errors after either side has started.
+  Server streaming is limited to the existing cold `IStreamHandler<TRequest,TItem>` seam; it does not
+  automatically project ordered streams or client events.

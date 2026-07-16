@@ -29,8 +29,8 @@ Protocols remain host-neutral where possible; ASP.NET packages own only their wi
 | Package | Add it when |
 | --- | --- |
 | `Elarion.JsonRpc` | Handlers need the transport-neutral JSON-RPC dispatcher, MCP tool model, envelopes, telemetry, or schema export. |
-| `Elarion.Grpc` | A custom gRPC host needs typed application-request invocation, optional inline mapper delegates, one host-configured principal source, a correctly seeded dispatch scope, and stable `AppError` → `RpcException` translation without an ASP.NET dependency. |
-| `Elarion.Grpc.AspNetCore` | A grpc-dotnet ASP.NET Core host wants `AddGrpc().AddElarion()` and `ServerCallContext.InvokeElarionAsync<TRequest,TResponse>(request)`, with `HttpContext.User` and `RequestServices` adopted automatically. This is the recommended gRPC host package. |
+| `Elarion.Grpc` | A custom gRPC host needs typed unary or request-driven server-stream invocation, optional inline mapper delegates, one host-configured principal source, a correctly seeded dispatch scope, and stable startup `AppError` → `RpcException` translation without an ASP.NET dependency. |
+| `Elarion.Grpc.AspNetCore` | A grpc-dotnet ASP.NET Core host wants `AddGrpc().AddElarion()` plus `ServerCallContext.InvokeElarionAsync`/`InvokeElarionStreamAsync`, with `HttpContext.User` and `RequestServices` adopted automatically. This is the recommended gRPC host package. |
 | `Elarion.AspNetCore` | An ASP.NET host exposes JSON-RPC, `[HttpEndpoint]`, files, ordered or request-driven SSE streams, current user middleware, or the role-holder proxy. |
 | `Elarion.AspNetCore.OpenApi` | `[HttpEndpoint]` routes should appear in OpenAPI with canonical schema and idempotency metadata. |
 | `Elarion.AspNetCore.Mcp` | Handlers should be exposed as an MCP server over Streamable HTTP. This is the only package referencing the MCP SDK. |

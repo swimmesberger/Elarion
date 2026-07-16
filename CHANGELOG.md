@@ -8,6 +8,16 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **gRPC request-driven server streaming (ADR-0063).** `Elarion.Grpc` now adapts the existing cold
+  `IStreamHandler<TRequest,TItem>` seam through `GrpcStreamHandlerInvoker`, preserving principal and exact
+  `ServerCallContext` scope seeding, decorated stream-handler resolution, call cancellation, and scope
+  lifetime through enumeration. Failed startup results use the existing stable `AppError` → `RpcException`
+  translation before the response starts; post-start lazy enumeration faults remain terminal gRPC call
+  faults. grpc-dotnet hosts use
+  `ServerCallContext.InvokeElarionStreamAsync<TRequest,TItem>(request)` after
+  `services.AddGrpc().AddElarion()`. Client and duplex streaming remain deliberately out of scope.
+
 ## [0.2.5] - 2026-07-15
 
 ### Added

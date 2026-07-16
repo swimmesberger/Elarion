@@ -1,6 +1,6 @@
 ---
 title: Transports
-description: Map a handler over HTTP, JSON-RPC, MCP, or explicit unary gRPC service methods while keeping application logic transport-neutral.
+description: Map a handler over HTTP, JSON-RPC, MCP, or explicit unary/server-streaming gRPC service methods while keeping application logic transport-neutral.
 ---
 
 A handler is transport-neutral: a request in, a `Result<T>` out, with no knowledge of how it was
@@ -20,7 +20,7 @@ override deliberately owns protobuf mapping while `Elarion.Grpc` preserves the s
     Operation-shaped methods from `[Handler]`, with a build-time schema and a typed TypeScript client.
   </Card>
   <Card title="gRPC" href="/docs/capabilities/transports/grpc">
-    Explicit unary protobuf mappings over the standard ASP.NET Core grpc-dotnet host, with a host-neutral seam.
+    Explicit unary and request-driven server-streaming protobuf mappings over the standard ASP.NET Core grpc-dotnet host.
   </Card>
   <Card title="MCP" href="/docs/capabilities/transports/mcp">
     The same `[Handler]` operations exposed to AI agents as Model Context Protocol tools.

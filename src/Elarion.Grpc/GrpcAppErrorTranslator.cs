@@ -4,7 +4,7 @@ using Grpc.Core;
 namespace Elarion.Grpc;
 
 /// <summary>
-/// The default <see cref="IAppErrorTranslator{TError}"/> for the unary gRPC transport. It maps Elarion
+/// The default <see cref="IAppErrorTranslator{TError}"/> for the gRPC transport. It maps Elarion
 /// <see cref="AppError"/> values to stable gRPC status codes and carries the normalized error kind in the
 /// <c>elarion-error-kind</c> response trailer.
 /// </summary>
@@ -12,7 +12,8 @@ namespace Elarion.Grpc;
 /// Validation detail payloads are deliberately not serialized in phase one. The trailer preserves the error
 /// category now; a future version can add a stable protobuf detail contract without changing this mapping.
 /// </remarks>
-public sealed class GrpcAppErrorTranslator : IAppErrorTranslator<RpcException> {
+public sealed class GrpcAppErrorTranslator : IAppErrorTranslator<RpcException>
+{
     /// <summary>The stable lower-case metadata key carrying the normalized Elarion error kind.</summary>
     public const string ErrorKindTrailerKey = "elarion-error-kind";
 
@@ -20,10 +21,12 @@ public sealed class GrpcAppErrorTranslator : IAppErrorTranslator<RpcException> {
     public static GrpcAppErrorTranslator Default { get; } = new();
 
     /// <inheritdoc />
-    public RpcException Translate(AppError error) {
+    public RpcException Translate(AppError error)
+    {
         ArgumentNullException.ThrowIfNull(error);
 
-        var (statusCode, kind) = error.Kind switch {
+        var (statusCode, kind) = error.Kind switch
+        {
             ErrorKind.Validation => (StatusCode.InvalidArgument, "validation"),
             ErrorKind.NotFound => (StatusCode.NotFound, "not-found"),
             ErrorKind.Conflict => (StatusCode.AlreadyExists, "conflict"),

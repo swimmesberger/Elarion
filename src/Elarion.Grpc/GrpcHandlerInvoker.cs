@@ -14,12 +14,14 @@ namespace Elarion.Grpc;
 /// already-mapped application request and exact <see cref="ServerCallContext"/>, or use the convenience overload
 /// with explicit wire/application mappings. This adapter creates the per-call dispatch context, flows cancellation,
 /// then uses <see cref="HandlerInvoker"/> so the decorated handler chain remains the only path to application code.
-/// It does not host gRPC or infer protobuf mappings. Streaming calls are intentionally outside this unary-only API.
+/// It does not host gRPC or infer protobuf mappings. Request-driven server streams use
+/// <see cref="GrpcStreamHandlerInvoker"/>.
 /// </remarks>
 public sealed class GrpcHandlerInvoker(
     IServiceProvider services,
     IGrpcPrincipalFactory principalFactory,
-    IAppErrorTranslator<RpcException> errorTranslator) {
+    IAppErrorTranslator<RpcException> errorTranslator)
+{
     /// <summary>
     /// Invokes an application request directly, returning its successful application response or throwing the
     /// translated <see cref="RpcException"/> for a failed <see cref="Result{T}"/>.
@@ -33,7 +35,8 @@ public sealed class GrpcHandlerInvoker(
     public async Task<TResponse> InvokeUnaryAsync<TRequest, TResponse>(
         TRequest request,
         ServerCallContext callContext)
-        where TRequest : notnull {
+        where TRequest : notnull
+    {
         ArgumentNullException.ThrowIfNull(callContext);
 
         var principal = principalFactory.CreatePrincipal(callContext);
@@ -49,7 +52,8 @@ public sealed class GrpcHandlerInvoker(
             context,
             callContext.CancellationToken).ConfigureAwait(false);
 
-        if (result.IsSuccess) {
+        if (result.IsSuccess)
+        {
             return result.Value;
         }
 
@@ -75,7 +79,8 @@ public sealed class GrpcHandlerInvoker(
         ServerCallContext callContext,
         Func<TWireRequest, TRequest> mapRequest,
         Func<TResponse, TWireResponse> mapResponse)
-        where TRequest : notnull {
+        where TRequest : notnull
+    {
         ArgumentNullException.ThrowIfNull(callContext);
         ArgumentNullException.ThrowIfNull(mapRequest);
         ArgumentNullException.ThrowIfNull(mapResponse);

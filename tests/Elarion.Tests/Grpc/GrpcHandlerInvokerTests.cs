@@ -9,7 +9,8 @@ using Xunit;
 
 namespace Elarion.Tests.Grpc;
 
-public sealed class GrpcHandlerInvokerTests {
+public sealed class GrpcHandlerInvokerTests
+{
     [Theory]
     [InlineData(ErrorKind.Validation, StatusCode.InvalidArgument, "validation")]
     [InlineData(ErrorKind.NotFound, StatusCode.NotFound, "not-found")]
@@ -21,7 +22,8 @@ public sealed class GrpcHandlerInvokerTests {
     public void Translate_MapsKnownKindsToStableStatusAndTrailer(
         ErrorKind kind,
         StatusCode expectedStatus,
-        string expectedTrailerValue) {
+        string expectedTrailerValue)
+    {
         var exception = GrpcAppErrorTranslator.Default.Translate(new AppError { Kind = kind, Message = "detail" });
 
         exception.StatusCode.Should().Be(expectedStatus);
@@ -30,7 +32,8 @@ public sealed class GrpcHandlerInvokerTests {
     }
 
     [Fact]
-    public void Translate_UnknownFutureKind_FailsSafeAsInternal() {
+    public void Translate_UnknownFutureKind_FailsSafeAsInternal()
+    {
         var exception = GrpcAppErrorTranslator.Default.Translate(
             new AppError { Kind = (ErrorKind)999, Message = "detail" });
 
@@ -39,7 +42,8 @@ public sealed class GrpcHandlerInvokerTests {
     }
 
     [Fact]
-    public async Task InvokeUnaryAsync_MapsRequestAndResponse_AndSeedsExactBoundaryStateAndCancellation() {
+    public async Task InvokeUnaryAsync_MapsRequestAndResponse_AndSeedsExactBoundaryStateAndCancellation()
+    {
         using var cancellation = new CancellationTokenSource();
         var callContext = new TestServerCallContext(cancellation.Token);
         var principal = new ClaimsPrincipal(
@@ -51,7 +55,8 @@ public sealed class GrpcHandlerInvokerTests {
             .AddSingleton(captured)
             .AddSingleton<IDispatchScopeInitializer, ScopeProbeInitializer>()
             .AddScoped<IHandler<ApplicationRequest, Result<ApplicationResponse>>, ScopeObservingHandler>()
-            .AddElarionGrpcTransport(context => {
+            .AddElarionGrpcTransport(context =>
+            {
                 principalFactoryContext = context;
                 return principal;
             })
@@ -71,7 +76,8 @@ public sealed class GrpcHandlerInvokerTests {
     }
 
     [Fact]
-    public async Task GeneratedServiceOverride_AwaitsInvokerAndMapsSuccessfulResponse() {
+    public async Task GeneratedServiceOverride_AwaitsInvokerAndMapsSuccessfulResponse()
+    {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "grpc"));
         using var provider = new ServiceCollection()
             .AddScoped<IHandler<ApplicationRequest, Result<ApplicationResponse>>, MappingHandler>()
@@ -87,7 +93,8 @@ public sealed class GrpcHandlerInvokerTests {
     }
 
     [Fact]
-    public async Task InvokeUnaryAsync_FailureUsesRegisteredTranslator() {
+    public async Task InvokeUnaryAsync_FailureUsesRegisteredTranslator()
+    {
         var translator = new RecordingTranslator();
         using var provider = new ServiceCollection()
             .AddSingleton<IAppErrorTranslator<RpcException>>(translator)
@@ -108,7 +115,8 @@ public sealed class GrpcHandlerInvokerTests {
     }
 
     [Fact]
-    public async Task InvokeUnaryAsync_ResolvesDecoratedHandlerChain() {
+    public async Task InvokeUnaryAsync_ResolvesDecoratedHandlerChain()
+    {
         var calls = new CallLog();
         using var provider = new ServiceCollection()
             .AddSingleton(calls)
@@ -130,7 +138,8 @@ public sealed class GrpcHandlerInvokerTests {
     }
 
     [Fact]
-    public void AddElarionGrpcTransport_PreservesCustomTranslator_AndRegistersInvoker() {
+    public void AddElarionGrpcTransport_PreservesCustomTranslator_AndRegistersInvokers()
+    {
         var custom = new RecordingTranslator();
         var principal = new ClaimsPrincipal();
         using var provider = new ServiceCollection()
@@ -142,10 +151,12 @@ public sealed class GrpcHandlerInvokerTests {
         provider.GetRequiredService<IGrpcPrincipalFactory>()
             .CreatePrincipal(new TestServerCallContext(CancellationToken.None)).Should().BeSameAs(principal);
         provider.GetRequiredService<GrpcHandlerInvoker>().Should().NotBeNull();
+        provider.GetRequiredService<GrpcStreamHandlerInvoker>().Should().NotBeNull();
     }
 
     [Fact]
-    public void AddElarionGrpcTransport_InstanceOverload_RegistersPrincipalFactory() {
+    public void AddElarionGrpcTransport_InstanceOverload_RegistersPrincipalFactory()
+    {
         using var provider = new ServiceCollection()
             .AddElarionGrpcTransport(new TestPrincipalFactory())
             .BuildServiceProvider();
@@ -161,24 +172,29 @@ public sealed class GrpcHandlerInvokerTests {
 
     private sealed record ApplicationResponse(string Value);
 
-    private sealed class ScopeProbe {
+    private sealed class ScopeProbe
+    {
         public ClaimsPrincipal? Principal { get; set; }
 
         public ServerCallContext? CallContext { get; set; }
     }
 
-    private sealed class ScopeCapture {
+    private sealed class ScopeCapture
+    {
         public ClaimsPrincipal? Principal { get; set; }
 
         public ServerCallContext? CallContext { get; set; }
     }
 
-    private sealed class CallLog {
+    private sealed class CallLog
+    {
         public List<string> Calls { get; } = [];
     }
 
-    private sealed class ScopeProbeInitializer : IDispatchScopeInitializer {
-        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
+    private sealed class ScopeProbeInitializer : IDispatchScopeInitializer
+    {
+        public void Initialize(IServiceProvider callScope, DispatchScopeContext context)
+        {
             var probe = callScope.GetRequiredService<ScopeProbe>();
             context.TryGet(out ClaimsPrincipal? principal).Should().BeTrue();
             context.TryGet(out ServerCallContext? callContext).Should().BeTrue();
@@ -190,8 +206,10 @@ public sealed class GrpcHandlerInvokerTests {
         }
     }
 
-    private sealed class ScopeObservingHandler(ScopeProbe probe) : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
-        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) {
+    private sealed class ScopeObservingHandler(ScopeProbe probe) : IHandler<ApplicationRequest, Result<ApplicationResponse>>
+    {
+        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct)
+        {
             probe.Principal!.FindFirst("sub")!.Value.Should().Be("grpc-user");
             probe.CallContext.Should().BeOfType<TestServerCallContext>();
             ct.Should().Be(probe.CallContext!.CancellationToken);
@@ -199,11 +217,13 @@ public sealed class GrpcHandlerInvokerTests {
         }
     }
 
-    private abstract class GeneratedUnaryServiceBase {
+    private abstract class GeneratedUnaryServiceBase
+    {
         public abstract Task<WireResponse> Unary(WireRequest request, ServerCallContext context);
     }
 
-    private sealed class GeneratedUnaryService(GrpcHandlerInvoker grpc) : GeneratedUnaryServiceBase {
+    private sealed class GeneratedUnaryService(GrpcHandlerInvoker grpc) : GeneratedUnaryServiceBase
+    {
         public override Task<WireResponse> Unary(WireRequest request, ServerCallContext context) =>
             grpc.InvokeUnaryAsync(
                 request,
@@ -212,22 +232,27 @@ public sealed class GrpcHandlerInvokerTests {
                 static (ApplicationResponse application) => new WireResponse(application.Value + "-response"));
     }
 
-    private sealed class TestPrincipalFactory : IGrpcPrincipalFactory {
+    private sealed class TestPrincipalFactory : IGrpcPrincipalFactory
+    {
         public ClaimsPrincipal CreatePrincipal(ServerCallContext context) => new();
     }
 
-    private sealed class MappingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
+    private sealed class MappingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>>
+    {
         public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) =>
             ValueTask.FromResult<Result<ApplicationResponse>>(new ApplicationResponse(request.Value));
     }
 
-    private sealed class FailingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
+    private sealed class FailingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>>
+    {
         public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) =>
             ValueTask.FromResult<Result<ApplicationResponse>>(AppError.NotFound("not here"));
     }
 
-    private sealed class InnerHandler(CallLog calls) : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
-        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) {
+    private sealed class InnerHandler(CallLog calls) : IHandler<ApplicationRequest, Result<ApplicationResponse>>
+    {
+        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct)
+        {
             calls.Calls.Add("handler");
             return ValueTask.FromResult<Result<ApplicationResponse>>(new ApplicationResponse(request.Value));
         }
@@ -235,23 +260,28 @@ public sealed class GrpcHandlerInvokerTests {
 
     private sealed class RecordingDecorator(
         IHandler<ApplicationRequest, Result<ApplicationResponse>> inner,
-        CallLog calls) : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
-        public async ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) {
+        CallLog calls) : IHandler<ApplicationRequest, Result<ApplicationResponse>>
+    {
+        public async ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct)
+        {
             calls.Calls.Add("decorator");
             return await inner.HandleAsync(request, ct);
         }
     }
 
-    private sealed class RecordingTranslator : IAppErrorTranslator<RpcException> {
+    private sealed class RecordingTranslator : IAppErrorTranslator<RpcException>
+    {
         public AppError? Translated { get; private set; }
 
-        public RpcException Translate(AppError error) {
+        public RpcException Translate(AppError error)
+        {
             Translated = error;
             return new RpcException(new Status(StatusCode.Aborted, "custom translator"));
         }
     }
 
-    private sealed class TestServerCallContext(CancellationToken cancellationToken) : ServerCallContext {
+    private sealed class TestServerCallContext(CancellationToken cancellationToken) : ServerCallContext
+    {
         protected override string MethodCore => "/test.Service/Method";
 
         protected override string HostCore => "localhost";

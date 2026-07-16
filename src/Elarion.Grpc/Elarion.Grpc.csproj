@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Typed unary gRPC transport adapter for Elarion handlers: explicit wire mapping, dispatch-scope seeding, and AppError to RpcException translation without a hosting dependency.</Description>
+    <Description>Typed unary and request-driven server-streaming gRPC transport adapter for Elarion handlers: explicit wire mapping, dispatch-scope seeding, and AppError to RpcException translation without a hosting dependency.</Description>
     <PackageTags>elarion;grpc;transport;handler-pipeline;dotnet</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>

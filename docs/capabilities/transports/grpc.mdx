@@ -1,9 +1,10 @@
 ---
 title: gRPC
-description: Add unary gRPC service methods over Elarion handlers with explicit protobuf mapping, scoped identity, and stable AppError status translation.
+description: Add unary and request-driven server-streaming gRPC service methods over Elarion handlers with explicit protobuf mapping, scoped identity, and stable AppError status translation.
 ---
 
-Elarion's gRPC support has two layers. `Elarion.Grpc` is the host-neutral unary adapter;
+Elarion's gRPC support has two layers. `Elarion.Grpc` is the host-neutral unary and request-driven
+server-streaming adapter;
 `Elarion.Grpc.AspNetCore` is the recommended convention layer for the standard grpc-dotnet ASP.NET Core
 server. Neither generates `.proto` files, scans services, or infers wire fields. Each service override
 owns its protobuf-to-application mapping, while Elarion owns the easy-to-miss boundary mechanics: a fresh
@@ -31,8 +32,9 @@ default mapping.
 
 For a non-ASP.NET host, reference `Elarion.Grpc` directly and call
 `services.AddElarionGrpcTransport(context => principal)` (or pass an `IGrpcPrincipalFactory`). Inject
-`GrpcHandlerInvoker` into the service and use its equivalent
-`InvokeUnaryAsync<TRequest,TResponse>(request, context)` method.
+`GrpcHandlerInvoker` or `GrpcStreamHandlerInvoker` into the service and use their equivalent
+`InvokeUnaryAsync<TRequest,TResponse>(request, context)` or
+`InvokeServerStreamingAsync<TRequest,TItem>(request, context)` methods.
 
 ## Map a generated service explicitly
 
@@ -112,20 +114,61 @@ mapping is stable:
 contract. The kind trailer is preserved now; structured validation details remain a future additive
 transport decision.
 
-## Unary boundary and streaming
+## Server streaming
 
-This package ships **unary only**. Server, client, and duplex streaming are not a convenience overload:
-they require a whole-call DI scope lifetime, a distinct application stream contract, and a truthful
-failure protocol. Before the first item, authorization/validation/not-found failures can translate to a
-normal gRPC status; after headers or an item, failure has to terminate through trailers/status and cannot
-replace an already-started response. Cancellation must remain connected to `ServerCallContext` for the
-entire enumeration.
+Request-driven `IStreamHandler<TRequest,TItem>` is available as a gRPC **server stream**. It is a cold,
+request-bound stream: the handler accepts the application request once and returns either an upfront
+`Result` failure or an accepted `IAsyncEnumerable<TItem>`. It is not a generic projection of
+`StreamHub<T>` or a client-event feed.
 
-Those constraints match the deferred stream design in
-[ADR-0044](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0044-streaming-requests-and-responses.md).
-Until a dedicated stream handler contract and lifetime model exist, use unary calls, batch commands,
-staged blobs for streaming bytes, client events for re-query hints/progress, or Elarion's ordered SSE
-streams as appropriate. Do not wrap an Elarion stream in a gRPC call ad hoc.
+Keep the application mapping in the generated service override and hold the returned invocation for the
+whole enumeration:
+
+```csharp
+public override async Task WatchClients(
+    WatchClientsRequest request,
+    IServerStreamWriter<ClientChangedReply> responseStream,
+    ServerCallContext context) {
+    await using var stream = await context.InvokeElarionStreamAsync<
+        WatchClients.Query, WatchClients.Item>(
+        new WatchClients.Query { TenantId = Guid.Parse(request.TenantId) });
+
+    await foreach (var item in stream.WithCancellation(context.CancellationToken)) {
+        await responseStream.WriteAsync(new ClientChangedReply {
+            Id = item.Id.ToString(),
+            Name = item.Name,
+        });
+    }
+}
+```
+
+`GrpcStreamHandlerInvoker` seeds the same principal and exact `ServerCallContext` as unary dispatch,
+then calls `StreamHandlerInvoker`. The accepted invocation owns its fresh dispatch scope until normal
+completion, cancellation, fault, or disposal; `await using` is therefore required. The gRPC cancellation
+token is passed when the handler starts and when the stream is enumerated.
+
+The optional writer overload can keep a conventional override short:
+
+```csharp
+return context.InvokeElarionStreamAsync(
+    request,
+    responseStream,
+    static wire => new WatchClients.Query { TenantId = Guid.Parse(wire.TenantId) },
+    static (WatchClients.Item item) => new ClientChangedReply {
+        Id = item.Id.ToString(),
+        Name = item.Name,
+    });
+```
+
+A failed stream startup is translated through `IAppErrorTranslator<RpcException>` before any item is
+written. Once grpc-dotnet has started the response, a lazy enumeration exception terminates that gRPC call;
+the adapter does not try to retrofit it into an `AppError` response. Make item-level failures explicit in
+the stream item contract when a consumer must observe them.
+
+Client and duplex streaming remain out of scope. They need a distinct inbound-message and scope-lifetime
+model, including how caller messages participate in handler decoration and how bidirectional cancellation,
+backpressure, and post-response failures are represented. Use unary/batched commands, staged blobs,
+`Elarion.Connections`, or a purpose-built protocol adapter until that design exists.
 
 ## Boundaries
 

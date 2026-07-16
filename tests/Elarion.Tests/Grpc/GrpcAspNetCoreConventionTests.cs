@@ -11,9 +11,11 @@ using Xunit;
 
 namespace Elarion.Tests.Grpc;
 
-public sealed class GrpcAspNetCoreConventionTests {
+public sealed class GrpcAspNetCoreConventionTests
+{
     [Fact]
-    public async Task AddElarion_AndContextExtension_UseAspNetCoreCallConventions() {
+    public async Task AddElarion_AndContextExtension_UseAspNetCoreCallConventions()
+    {
         using var cancellation = new CancellationTokenSource();
         var principal = new ClaimsPrincipal(
             new ClaimsIdentity([new Claim("sub", "aspnet-grpc-user")], authenticationType: "grpc"));
@@ -27,7 +29,8 @@ public sealed class GrpcAspNetCoreConventionTests {
         grpc.AddElarion().Should().BeSameAs(grpc);
 
         using var provider = services.BuildServiceProvider();
-        var httpContext = new DefaultHttpContext {
+        var httpContext = new DefaultHttpContext
+        {
             RequestServices = provider,
             User = principal,
         };
@@ -44,7 +47,8 @@ public sealed class GrpcAspNetCoreConventionTests {
     }
 
     [Fact]
-    public async Task InvokeElarionAsync_TranslatesFailedResult() {
+    public async Task InvokeElarionAsync_TranslatesFailedResult()
+    {
         var services = new ServiceCollection()
             .AddScoped<IHandler<ApplicationRequest, Result<ApplicationResponse>>, FailingHandler>();
         services.AddGrpc().AddElarion();
@@ -61,6 +65,39 @@ public sealed class GrpcAspNetCoreConventionTests {
         exception.Which.Trailers.GetValue(GrpcAppErrorTranslator.ErrorKindTrailerKey).Should().Be("not-found");
     }
 
+    [Fact]
+    public async Task InvokeElarionStreamAsync_UsesAspNetCorePrincipalAndRequestServices()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var principal = new ClaimsPrincipal(
+            new ClaimsIdentity([new Claim("sub", "aspnet-grpc-stream-user")], authenticationType: "grpc"));
+        var capture = new CallCapture();
+        var services = new ServiceCollection()
+            .AddSingleton(capture)
+            .AddSingleton<IDispatchScopeInitializer, CaptureInitializer>()
+            .AddScoped<IStreamHandler<ApplicationRequest, ApplicationResponse>, StreamingHandler>();
+        services.AddGrpc().AddElarion();
+        using var provider = services.BuildServiceProvider();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = provider,
+            User = principal,
+        };
+        var callContext = new TestServerCallContext(cancellation.Token);
+        callContext.UserState["__HttpContext"] = httpContext;
+
+        await using var stream = await callContext.InvokeElarionStreamAsync<ApplicationRequest, ApplicationResponse>(
+            new ApplicationRequest("input"));
+        var values = new List<string>();
+        await foreach (var item in stream.WithCancellation(cancellation.Token))
+            values.Add(item.Value);
+
+        values.Should().Equal("input-1", "input-2");
+        capture.Principal.Should().BeSameAs(principal);
+        capture.CallContext.Should().BeSameAs(callContext);
+        capture.CancellationToken.Should().Be(cancellation.Token);
+    }
+
     private sealed record WireRequest(string Value);
 
     private sealed record WireResponse(string Value);
@@ -69,7 +106,8 @@ public sealed class GrpcAspNetCoreConventionTests {
 
     private sealed record ApplicationResponse(string Value);
 
-    private sealed class CallCapture {
+    private sealed class CallCapture
+    {
         public ClaimsPrincipal? Principal { get; set; }
 
         public ServerCallContext? CallContext { get; set; }
@@ -77,8 +115,10 @@ public sealed class GrpcAspNetCoreConventionTests {
         public CancellationToken CancellationToken { get; set; }
     }
 
-    private sealed class CaptureInitializer : IDispatchScopeInitializer {
-        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
+    private sealed class CaptureInitializer : IDispatchScopeInitializer
+    {
+        public void Initialize(IServiceProvider callScope, DispatchScopeContext context)
+        {
             var capture = callScope.GetRequiredService<CallCapture>();
             context.TryGet(out ClaimsPrincipal? principal).Should().BeTrue();
             context.TryGet(out ServerCallContext? callContext).Should().BeTrue();
@@ -87,12 +127,15 @@ public sealed class GrpcAspNetCoreConventionTests {
         }
     }
 
-    private abstract class GeneratedUnaryServiceBase {
+    private abstract class GeneratedUnaryServiceBase
+    {
         public abstract Task<WireResponse> Unary(WireRequest request, ServerCallContext context);
     }
 
-    private sealed class GeneratedUnaryService : GeneratedUnaryServiceBase {
-        public override async Task<WireResponse> Unary(WireRequest request, ServerCallContext context) {
+    private sealed class GeneratedUnaryService : GeneratedUnaryServiceBase
+    {
+        public override async Task<WireResponse> Unary(WireRequest request, ServerCallContext context)
+        {
             var response = await context.InvokeElarionAsync<ApplicationRequest, ApplicationResponse>(
                 new ApplicationRequest(request.Value + "-request"));
             return new WireResponse(response.Value + "-response");
@@ -100,19 +143,42 @@ public sealed class GrpcAspNetCoreConventionTests {
     }
 
     private sealed class MappingHandler(CallCapture capture)
-        : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
-        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) {
+        : IHandler<ApplicationRequest, Result<ApplicationResponse>>
+    {
+        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct)
+        {
             capture.CancellationToken = ct;
             return ValueTask.FromResult<Result<ApplicationResponse>>(new ApplicationResponse(request.Value));
         }
     }
 
-    private sealed class FailingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
+    private sealed class FailingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>>
+    {
         public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) =>
             ValueTask.FromResult<Result<ApplicationResponse>>(AppError.NotFound("not here"));
     }
 
-    private sealed class TestServerCallContext(CancellationToken cancellationToken) : ServerCallContext {
+    private sealed class StreamingHandler(CallCapture capture)
+        : IStreamHandler<ApplicationRequest, ApplicationResponse>
+    {
+        public ValueTask<Result<IAsyncEnumerable<ApplicationResponse>>> HandleAsync(
+            ApplicationRequest request,
+            CancellationToken ct)
+        {
+            capture.CancellationToken = ct;
+            return ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationResponse>>.Success(Values(request)));
+        }
+
+        private static async IAsyncEnumerable<ApplicationResponse> Values(ApplicationRequest request)
+        {
+            yield return new ApplicationResponse(request.Value + "-1");
+            await Task.Yield();
+            yield return new ApplicationResponse(request.Value + "-2");
+        }
+    }
+
+    private sealed class TestServerCallContext(CancellationToken cancellationToken) : ServerCallContext
+    {
         protected override string MethodCore => "/test.Service/Method";
 
         protected override string HostCore => "localhost";

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>ASP.NET Core grpc-dotnet conventions for Elarion unary handlers: host composition, authenticated principal capture, and ServerCallContext invocation.</Description>
+    <Description>ASP.NET Core grpc-dotnet conventions for Elarion unary and request-driven server-streaming handlers: host composition, authenticated principal capture, and ServerCallContext invocation.</Description>
     <PackageTags>elarion;grpc;aspnetcore;transport;handler-pipeline;dotnet</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
