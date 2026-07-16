@@ -527,7 +527,7 @@ public sealed partial class HandlerRegistrationGenerator {
     // ADR-0012 Tier 1: a [RequireResource] references the resource id by a compile-checked path on the request.
     // The path is validated against the request type and emitted as a typed accessor; an unresolvable path is
     // ELAUTH002 (never a runtime surprise).
-    private static EquatableArray<ResourceBindingInfo> BuildResourceBindings(
+    internal static EquatableArray<ResourceBindingInfo> BuildResourceBindings(
         ClassDeclarationSyntax classDecl,
         INamedTypeSymbol classSymbol,
         ITypeSymbol requestType,
@@ -571,7 +571,7 @@ public sealed partial class HandlerRegistrationGenerator {
         return builder.ToImmutable();
     }
 
-    private static bool ResourcePathResolves(ITypeSymbol requestType, string path) {
+    internal static bool ResourcePathResolves(ITypeSymbol requestType, string path) {
         if (string.IsNullOrWhiteSpace(path))
             return false;
 
@@ -594,7 +594,7 @@ public sealed partial class HandlerRegistrationGenerator {
     private static IPropertySymbol? FindPublicInstanceProperty(ITypeSymbol type, string name) {
         for (ITypeSymbol? current = type; current is not null; current = current.BaseType) {
             foreach (var member in current.GetMembers(name)) {
-                if (member is IPropertySymbol { IsStatic: false, GetMethod: not null } property &&
+                if (member is IPropertySymbol { IsStatic: false, GetMethod: { DeclaredAccessibility: Accessibility.Public } } property &&
                     property.DeclaredAccessibility == Accessibility.Public) {
                     return property;
                 }
@@ -785,12 +785,12 @@ public sealed partial class HandlerRegistrationGenerator {
             }
         }
 
-        return true;
+        return gateAttributes.Any(HasEffectiveFeatureName);
     }
 
     // The feature names are the trailing `params string[]` constructor argument, which Roslyn surfaces as a single
     // array-kind TypedConstant regardless of which [FeatureGate] constructor was used.
-    private static bool HasBlankFeatureName(AttributeData attribute) {
+    internal static bool HasBlankFeatureName(AttributeData attribute) {
         if (attribute.ConstructorArguments.Length == 0)
             return true;
 
@@ -804,5 +804,14 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         return false;
+    }
+
+    internal static bool HasEffectiveFeatureName(AttributeData attribute) {
+        if (attribute.ConstructorArguments.Length == 0)
+            return false;
+
+        var featuresArg = attribute.ConstructorArguments[attribute.ConstructorArguments.Length - 1];
+        return featuresArg.Kind == TypedConstantKind.Array &&
+            featuresArg.Values.Any(static value => value.Value is string feature && !string.IsNullOrWhiteSpace(feature));
     }
 }

@@ -210,6 +210,59 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
+    public void StreamOnlyAnnotatedRequest_EmitsResolverAndWarnsWithoutValidationPackage()
+    {
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+
+                public sealed record ExportRequest([StringLength(8)] string Name);
+                public sealed class ExportHandler : IStreamHandler<ExportRequest, string> {
+                    public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(ExportRequest request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                    private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
+                }
+            }
+            """;
+
+        GetGenerated(Run(source), "AppValidatableInfoResolver.g.cs")
+            .Should().Contain("typeof(global::Sample.App.ExportRequest)");
+        Run(source, excludeElarionValidationReference: true).Diagnostics
+            .Should().Contain(diagnostic => diagnostic.Id == "ELVAL002");
+        AssertGeneratedOutputCompiles(source);
+    }
+
+    [Fact]
+    public void DualShapeHandler_EmitsBothDistinctValidatableRequestRoots_AndWarnsForBothWithoutValidation()
+    {
+        const string source = Preamble +
+            """
+
+            namespace Sample.App {
+                [AppModule("App")]
+                public static class AppModule { }
+                public sealed record UnaryRequest([StringLength(8)] string Name);
+                public sealed record StreamRequest([Range(1, 9)] int Page);
+                public sealed class DualHandler : IHandler<UnaryRequest, Result<string>>, IStreamHandler<StreamRequest, string> {
+                    public ValueTask<Result<string>> HandleAsync(UnaryRequest request, CancellationToken ct) => ValueTask.FromResult(Result<string>.Success("ok"));
+                    public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(StreamRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                    private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
+                }
+            }
+            """;
+
+        var generated = GetGenerated(Run(source), "AppValidatableInfoResolver.g.cs");
+        generated.Should().Contain("typeof(global::Sample.App.UnaryRequest)")
+            .And.Contain("typeof(global::Sample.App.StreamRequest)");
+        Run(source, excludeElarionValidationReference: true).Diagnostics
+            .Count(diagnostic => diagnostic.Id == "ELVAL002").Should().Be(2);
+        AssertGeneratedOutputCompiles(source);
+    }
+
+    [Fact]
     public void PrefixSiblingNamespace_IsNotAssignedToModule()
     {
         // Regression guard mirroring the module-scoping conventions: 'Sample.Modules.BillingPlus' must not

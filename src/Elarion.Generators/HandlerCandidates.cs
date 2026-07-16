@@ -6,7 +6,8 @@ namespace Elarion.Generators;
 
 /// <summary>
 /// Shared stage-one handler-candidate discovery (ADR-0006): identifies a concrete, non-generic
-/// <c>IHandler&lt;TRequest, TResponse&gt;</c> implementation per class node and carries only its CLR metadata
+/// <c>IHandler&lt;TRequest, TResponse&gt;</c> or <c>IStreamHandler&lt;TRequest, TItem&gt;</c> implementation per class
+/// node and carries only its CLR metadata
 /// name, so the per-tree stage stays cached per syntax tree and a later compilation-combined stage re-resolves
 /// the symbol fresh. Used by <see cref="HandlerRegistrationGenerator"/> and
 /// <see cref="ValidationResolverGenerator"/> so the two can never disagree about what counts as a handler.
@@ -14,7 +15,7 @@ namespace Elarion.Generators;
 internal static class HandlerCandidates
 {
     /// <summary>
-    /// Identifies a concrete handler class and returns its CLR metadata name, or <see langword="null"/> for
+    /// Identifies a concrete unary or stream handler class and returns its CLR metadata name, or <see langword="null"/> for
     /// every other class. Only the metadata name is carried — the caller's stage two re-resolves the symbol
     /// from the current compilation, so no attribute or pipeline state is read against a potentially stale
     /// tree here.
@@ -36,7 +37,8 @@ internal static class HandlerCandidates
         if (classSymbol.IsGenericType)
             return null;
 
-        if (HandlerShape.FindHandlerInterface(classSymbol) is null)
+        if (HandlerShape.FindHandlerInterface(classSymbol) is null &&
+            HandlerShape.FindStreamHandlerInterface(classSymbol) is null)
             return null;
 
         // Elarion's own pipeline decorators implement IHandler<,> but are wiring, not registrable handlers.

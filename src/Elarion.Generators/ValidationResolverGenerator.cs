@@ -150,41 +150,38 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
             if (classSymbol.IsAbstract || classSymbol.IsGenericType)
                 continue;
 
-            var handlerInterface = HandlerShape.FindHandlerInterface(classSymbol);
-            if (handlerInterface is null)
-                continue;
-
-            var requestType = handlerInterface.TypeArguments[0];
-            if (!ValidatableTypeWalker.IsValidatable(requestType, walkContext))
-                continue;
-
-            if (!hasElarionValidation)
-            {
-                // The attributes would flow into every exported schema surface yet nothing would enforce
-                // them — that must be a visible choice, never a silent one (ADR-0027).
-                diagnostics.Add(DiagnosticInfo.Create(
-                    ValidationNotEnforcedDescriptor,
-                    LocationInfo.From(classSymbol),
-                    classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                    requestType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
-                continue;
-            }
-
             var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
             var module = ModuleScanner.FindBest(handlerNamespace, modules);
             if (module is null)
                 continue;
 
-            if (!moduleRoots.TryGetValue(module, out var roots))
-            {
-                roots = new List<ITypeSymbol>();
-                moduleRoots[module] = roots;
-            }
+            // A dual-shape handler has two independent request contracts. Discover both roots rather than
+            // choosing unary first; deduplication below retains the shared-root case.
+            foreach (var handlerInterface in new[] {
+                HandlerShape.FindHandlerInterface(classSymbol),
+                HandlerShape.FindStreamHandlerInterface(classSymbol)
+            }.Where(static candidate => candidate is not null).Cast<INamedTypeSymbol>()) {
+                var requestType = handlerInterface.TypeArguments[0];
+                if (!ValidatableTypeWalker.IsValidatable(requestType, walkContext))
+                    continue;
 
-            // Requests are deduped per module; two modules sharing a request type each register it (their
-            // resolvers are independent and cross-resolver duplicates are harmless — first-match-wins).
-            if (!roots.Contains(requestType, SymbolEqualityComparer.Default))
-                roots.Add(requestType);
+                if (!hasElarionValidation) {
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        ValidationNotEnforcedDescriptor,
+                        LocationInfo.From(classSymbol),
+                        classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        requestType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
+                    continue;
+                }
+
+                if (!moduleRoots.TryGetValue(module, out var roots)) {
+                    roots = new List<ITypeSymbol>();
+                    moduleRoots[module] = roots;
+                }
+
+                if (!roots.Contains(requestType, SymbolEqualityComparer.Default))
+                    roots.Add(requestType);
+            }
         }
 
         if (moduleRoots.Count == 0)

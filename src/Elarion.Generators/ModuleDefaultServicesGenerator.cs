@@ -73,7 +73,7 @@ public sealed class ModuleDefaultServicesGenerator : IIncrementalGenerator
         sb.AppendLine($"public static partial class {className}");
         sb.AppendLine("{");
         sb.AppendLine(
-            "    /// <summary>Registers all generated default services for this module (handlers, services, validators, scheduled jobs, event consumers).</summary>");
+            "    /// <summary>Registers all generated default services for this module (handlers, stream handlers, services, validators, scheduled jobs, event consumers).</summary>");
         sb.AppendLine($"    public static {services} ConfigureDefaultServices({services} services)");
         sb.AppendLine("    {");
         foreach (var method in ModuleDefaultsEmitter.PartialMethods)

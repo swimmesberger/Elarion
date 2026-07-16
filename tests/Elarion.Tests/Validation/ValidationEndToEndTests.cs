@@ -27,13 +27,15 @@ public sealed class ValidationEndToEndTests {
     private const string Source =
         """
         using System.ComponentModel.DataAnnotations;
+        using System.Collections.Generic;
         using System.Threading;
         using System.Threading.Tasks;
         using Elarion.Abstractions;
         using Elarion.Abstractions.Modules;
+        using Elarion.Abstractions.Authorization;
         using Elarion.Abstractions.Results;
 
-        [assembly: UseElarion]
+        [assembly: GenerateModuleHandlers]
 
         namespace Sample.App {
             [AppModule("App")]
@@ -50,6 +52,17 @@ public sealed class ValidationEndToEndTests {
             public sealed class CreateClientHandler : IHandler<CreateClientCommand, Result<Unit>> {
                 public ValueTask<Result<Unit>> HandleAsync(CreateClientCommand request, CancellationToken ct) =>
                     ValueTask.FromResult(Result<Unit>.Success(default));
+            }
+
+            public sealed record ExportClientsRequest {
+                [Range(1, 100)] public int Page { get; init; }
+            }
+
+            [AllowAnonymous]
+            public sealed class ExportClientsHandler : IStreamHandler<ExportClientsRequest, string> {
+                public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(ExportClientsRequest request, CancellationToken ct) =>
+                    ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                private static async IAsyncEnumerable<string> Values() { yield return "ok"; await Task.Yield(); }
             }
         }
         """;
@@ -81,6 +94,30 @@ public sealed class ValidationEndToEndTests {
             handlerInterface, handler, CreateCommand(requestType!, name: "Acme Inc.", email: "billing@acme.test"));
 
         validResult.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task StreamRequest_FailsThroughGeneratedStreamValidationPipeline() {
+        var assembly = CompileAndLoad();
+        var services = new ServiceCollection();
+        services.AddElarionValidation();
+        ConfigureGeneratedModuleServices(assembly, services);
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var requestType = assembly.GetType("Sample.App.ExportClientsRequest")!;
+        var streamType = typeof(IStreamHandler<,>).MakeGenericType(requestType, typeof(string));
+        var request = Activator.CreateInstance(requestType)!;
+        requestType.GetProperty("Page")!.SetValue(request, 0);
+
+        var boxedValueTask = streamType.GetMethod("HandleAsync")!.Invoke(
+            scope.ServiceProvider.GetRequiredService(streamType), [request, Ct])!;
+        var task = (Task)boxedValueTask.GetType().GetMethod("AsTask")!.Invoke(boxedValueTask, null)!;
+        await task;
+        var result = task.GetType().GetProperty("Result")!.GetValue(task)!;
+
+        ((bool)result.GetType().GetProperty("IsSuccess")!.GetValue(result)!).Should().BeFalse();
+        var error = result.GetType().GetProperty("Error")!.GetValue(result)!;
+        error.GetType().GetProperty("Kind")!.GetValue(error).Should().Be(ErrorKind.Validation);
     }
 
     /// <summary>Calls the generated module skeleton exactly like a host bootstrapper would:
@@ -124,6 +161,7 @@ public sealed class ValidationEndToEndTests {
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
                 new HandlerRegistrationGenerator(),
+                new StreamHandlerRegistrationGenerator(),
                 new ValidationResolverGenerator(),
                 new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);

@@ -12,6 +12,7 @@ namespace Elarion.Generators;
 internal static class HandlerShape
 {
     private const string HandlerInterfaceDisplay = "Elarion.Abstractions.IHandler<TRequest, TResponse>";
+    private const string StreamHandlerInterfaceDisplay = "Elarion.Abstractions.IStreamHandler<TRequest, TItem>";
     private const string ResultDisplay = "Elarion.Abstractions.Result<T>";
 
     public enum Failure
@@ -62,6 +63,18 @@ internal static class HandlerShape
         foreach (var iface in type.AllInterfaces)
         {
             if (iface.OriginalDefinition.ToDisplayString() == HandlerInterfaceDisplay)
+                return iface;
+        }
+
+        return null;
+    }
+
+    /// <summary>Finds the request/item shape of a request-driven stream handler.</summary>
+    public static INamedTypeSymbol? FindStreamHandlerInterface(INamedTypeSymbol type)
+    {
+        foreach (var iface in type.AllInterfaces)
+        {
+            if (iface.OriginalDefinition.ToDisplayString() == StreamHandlerInterfaceDisplay)
                 return iface;
         }
 

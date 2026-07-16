@@ -25,6 +25,7 @@ transport-neutral `HandlerDispatcher` when messages route by operation name.
 | `HandlerDispatcher` | `Elarion.Abstractions.Dispatch` | Named request/reply bus with no wire format |
 | `DispatchScopeContext`, `CreateDispatchScope`, `SeedScope` | `Elarion.Abstractions.Dispatch` | Per-call scope-seeding rail |
 | `HandlerInvoker` | `Elarion` | Typed scope + resolve + invoke + dispose helper |
+| `IStreamHandler<TRequest,TItem>`, `StreamHandlerInvoker` | `Elarion.Abstractions`, `Elarion` | Typed startup + scoped server-streaming invocation |
 | `ICurrentUser`, `IAuthorizer` | `Elarion.Abstractions` | Transport-neutral identity and authorization |
 | `IAppErrorTranslator<TError>` | `Elarion.Abstractions` | Protocol-specific error translation |
 
@@ -82,6 +83,21 @@ var response = await dispatcher.DispatchAsync(
 
 Both paths resolve the decorated handler and therefore retain tracing, validation, authorization,
 feature gates, resilience, caching, idempotency, transactions, and auditing configured for that handler.
+
+## Invoke a server-streaming handler
+
+For an explicit server-streaming-capable transport (such as a future gRPC server-streaming adapter), invoke the
+typed seam. Startup errors are normal `AppError`s; keep the accepted invocation alive while writing items:
+
+```csharp
+var started = await StreamHandlerInvoker.InvokeAsync<ExportRequest, ExportRow>(provider, request, context, ct);
+if (!started.IsSuccess) return MapError(started.Error);
+await using var stream = started.Value;
+await foreach (var row in stream.WithCancellation(ct)) await WriteItemAsync(row, ct);
+```
+
+`MapElarionHandlerStream` is the shipped ASP.NET SSE adapter. JSON-RPC and MCP are deliberately single-response;
+client and duplex streams belong to a transport-specific protocol or `Elarion.Connections`, not this contract.
 
 ## Map application errors
 

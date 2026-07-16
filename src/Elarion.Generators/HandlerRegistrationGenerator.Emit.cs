@@ -104,7 +104,17 @@ public sealed partial class HandlerRegistrationGenerator {
 
     private static void AppendDecoratedRegistration(StringBuilder sb, HandlerInfo handler) {
         // The concrete handler stays unkeyed either way — BuildPipeline resolves the inner handler from it.
-        sb.AppendLine($"        services.Add(new ServiceDescriptor(typeof({handler.HandlerFqn}), typeof({handler.HandlerFqn}), lifetime));");
+        // A dual unary/stream handler is emitted by two generators; first registration wins deliberately so
+        // direct public registration calls cannot turn its concrete lifetime into last-registration-wins.
+        sb.AppendLine("        var __handlerLifetime = lifetime;");
+        sb.AppendLine("        var __hasConcreteRegistration = false;");
+        sb.AppendLine("        foreach (var descriptor in services) {");
+        sb.AppendLine($"            if (descriptor.IsKeyedService || descriptor.ServiceType != typeof({handler.HandlerFqn})) continue;");
+        sb.AppendLine("            __handlerLifetime = descriptor.Lifetime;");
+        sb.AppendLine("            __hasConcreteRegistration = true;");
+        sb.AppendLine("            break;");
+        sb.AppendLine("        }");
+        sb.AppendLine($"        if (!__hasConcreteRegistration) services.Add(new ServiceDescriptor(typeof({handler.HandlerFqn}), typeof({handler.HandlerFqn}), __handlerLifetime));");
 
         var interfaceType = $"global::Elarion.Abstractions.IHandler<{handler.RequestFqn}, {handler.ResponseFqn}>";
         // Normal case builds the decorator chain synchronously; a variant-dependent handler registers the
@@ -119,7 +129,7 @@ public sealed partial class HandlerRegistrationGenerator {
             sb.AppendLine("        services.Add(new ServiceDescriptor(");
             sb.AppendLine($"            typeof({interfaceType}),");
             sb.AppendLine($"            sp => {factory},");
-            sb.AppendLine("            lifetime));");
+            sb.AppendLine("            __handlerLifetime));");
         } else {
             // Event consumer (ADR-0046): keyed by the handler's identity so any number of consumers — hand-written
             // or generated actor relays — coexist for one event without colliding on the shared interface. The
@@ -128,7 +138,7 @@ public sealed partial class HandlerRegistrationGenerator {
             sb.AppendLine($"            typeof({interfaceType}),");
             sb.AppendLine($"            {FormatStringLiteral(handler.EventConsumerKey)},");
             sb.AppendLine($"            (sp, __key) => {factory},");
-            sb.AppendLine("            lifetime));");
+            sb.AppendLine("            __handlerLifetime));");
         }
     }
 
@@ -618,7 +628,7 @@ public sealed partial class HandlerRegistrationGenerator {
         return "new[] { " + string.Join(", ", values.Select(FormatStringLiteral)) + " }";
     }
 
-    private static string FormatStringLiteral(string value) =>
+    internal static string FormatStringLiteral(string value) =>
         SymbolDisplay.FormatLiteral(value, quote: true);
 
     private static string EscapeIdentifier(string identifier) =>

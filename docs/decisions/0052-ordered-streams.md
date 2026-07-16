@@ -2,8 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-07-12
-- Related: [ADR-0044](0044-streaming-requests-and-responses.md) (streaming handler responses — still
-  deferred; this ADR realizes the producer-side half), [ADR-0043](0043-client-events.md) (the at-most-once
+- Related: [ADR-0044](0044-streaming-requests-and-responses.md) (request-driven streaming handlers; this ADR
+  realizes the producer-owned half), [ADR-0043](0043-client-events.md) (the at-most-once
   hint/state tier this deliberately does not replace), [ADR-0042](0042-actors.md) (the mailbox is the
   sequencer), [ADR-0048](0048-single-homed-actors.md)/[ADR-0050](0050-role-holder-proxy.md) (why every
   node can reach the producer without a distributed protocol), [ADR-0025](0025-scale-positioning.md)
@@ -124,10 +124,9 @@ ordered sibling for consumers that want the full sequence).
 - **A per-subscriber reliable queue (durable offsets in Postgres).** Rejected at this tier — consumer
   offsets in the database is Kafka-shaped machinery; the ring + `Last-Event-ID` covers the reconnect
   window, and beyond it the consumer re-converges explicitly.
-- **`IStreamHandler<TRequest, TItem>` now.** Still deferred exactly as ADR-0044 decided — that contract is
-  for request-driven streams through the handler pipeline (LLM tokens, row export). This ADR covers the
-  producer-owned live stream; when `IStreamHandler` arrives it will *consume* the same primitives
-  (`StreamHub`, the SSE leg).
+- **Making request-driven streams a substitute for this hub.** Rejected — `IStreamHandler<TRequest, TItem>`
+  is a cold request pipeline for exports and token output. This ADR's producer-owned live stream retains the
+  sequencer, replay, and resume semantics that the request-driven contract intentionally does not provide.
 
 ## Consequences
 

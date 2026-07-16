@@ -1,15 +1,20 @@
 using System.Net;
+using System.Text;
 using System.Text.Json.Serialization;
 using AwesomeAssertions;
+using Elarion.Abstractions;
 using Elarion.Abstractions.Serialization;
+using Elarion.AspNetCore;
 using Elarion.AspNetCore.Streams;
 using Elarion.Streams;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace Elarion.Tests.AspNetCore;
@@ -82,6 +87,133 @@ public sealed class StreamEndpointTests {
         body.Should().Contain("id: 1").And.Contain("\"price\":100");
     }
 
+    [Fact]
+    public async Task RequestDrivenStream_MapsUpfrontFailureBeforeSseHeaders() {
+        await using var host = await StartRequestDrivenAsync(reject: true);
+
+        using var response = await host.Client.GetAsync("/export", Ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+    }
+
+    [Fact]
+    public async Task RequestDrivenStream_WritesCanonicalItemsAndCompletes() {
+        await using var host = await StartRequestDrivenAsync(reject: false);
+
+        using var response = await host.Client.GetAsync("/export", Ct);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("text/event-stream");
+        body.Should().Be("data: {\"symbol\":\"ELN\",\"price\":100}\n\n");
+    }
+
+    [Fact]
+    public async Task RequestDrivenStream_IndentedCanonicalJsonPrefixesEverySseDataLine() {
+        await using var host = await StartRequestDrivenAsync(reject: false, writeIndented: true);
+
+        using var response = await host.Client.GetAsync("/export", Ct);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+
+        body.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Should().OnlyContain(line => line.StartsWith("data: ", StringComparison.Ordinal));
+        // EventSource joins data lines with LF before delivering the event's data payload.
+        var reassembled = string.Join("\n", body.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line["data: ".Length..]));
+        reassembled.Should().Be("{\n  \"symbol\": \"ELN\",\n  \"price\": 100\n}");
+    }
+
+    [Fact]
+    public async Task RequestDrivenStreamWriter_WritesKeepAliveWhileOneMoveNextRemainsPending() {
+        var time = new NotifyingFakeTimeProvider();
+        var gate = new BlockingExportGate();
+        var context = new DefaultHttpContext();
+        await using var responseBody = new MemoryStream();
+        context.Response.Body = responseBody;
+        var writing = StreamEndpointRouteBuilderExtensions.WriteHandlerStreamAsync(
+            context.Response,
+            new BlockingExportStream(gate),
+            StreamEndpointTestContext.Default.TestQuote,
+            time,
+            Ct);
+        try {
+            await gate.Entered.Task.WaitAsync(Ct);
+            await time.TimerCreated.Task.WaitAsync(Ct);
+            time.Advance(TimeSpan.FromSeconds(15));
+            await Task.Yield();
+            Encoding.UTF8.GetString(responseBody.ToArray()).Should().Be("event: elarion.keepAlive\ndata: \n\n");
+
+            gate.Release.TrySetResult();
+            await writing;
+            gate.MoveNextCount.Should().Be(1);
+            gate.DisposeCount.Should().Be(1);
+        } finally {
+            // Always release the blocked source so a failed assertion cannot leave the writer running.
+            gate.Release.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task RequestDrivenStreamWriter_CancellationSettlesPendingMoveBeforeDisposal() {
+        var gate = new SerializedCleanupGate();
+        using var cancelled = new CancellationTokenSource();
+        var context = new DefaultHttpContext();
+        await using var responseBody = new MemoryStream();
+        context.Response.Body = responseBody;
+        var writing = StreamEndpointRouteBuilderExtensions.WriteHandlerStreamAsync(
+            context.Response, new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
+            TimeProvider.System, cancelled.Token);
+
+        await gate.Entered.Task.WaitAsync(Ct);
+        cancelled.Cancel();
+        await writing.WaitAsync(Ct);
+
+        gate.MoveNextCount.Should().Be(1);
+        gate.DisposeCount.Should().Be(1);
+        gate.ConcurrentDisposeCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RequestDrivenStreamWriter_WriteFailureSettlesPendingMoveBeforeDisposal() {
+        var gate = new SerializedCleanupGate();
+        var time = new NotifyingFakeTimeProvider();
+        var context = new DefaultHttpContext();
+        await using var responseBody = new ThrowingWriteStream();
+        context.Response.Body = responseBody;
+        var writing = StreamEndpointRouteBuilderExtensions.WriteHandlerStreamAsync(
+            context.Response, new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
+            time, Ct);
+
+        await gate.Entered.Task.WaitAsync(Ct);
+        await time.TimerCreated.Task.WaitAsync(Ct);
+        time.Advance(TimeSpan.FromSeconds(15));
+        Func<Task> act = () => writing;
+        await act.Should().ThrowAsync<IOException>();
+
+        gate.MoveNextCount.Should().Be(1);
+        gate.DisposeCount.Should().Be(1);
+        gate.ConcurrentDisposeCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RequestDrivenStreamWriter_TimerFailureSettlesPendingMoveBeforeDisposal() {
+        var gate = new SerializedCleanupGate();
+        var context = new DefaultHttpContext();
+        await using var responseBody = new MemoryStream();
+        context.Response.Body = responseBody;
+        var writing = StreamEndpointRouteBuilderExtensions.WriteHandlerStreamAsync(
+            context.Response, new SerializedCleanupStream(gate), StreamEndpointTestContext.Default.TestQuote,
+            new ThrowingTimeProvider(), Ct);
+
+        Func<Task> act = () => writing;
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("timer failure");
+
+        gate.MoveNextCount.Should().Be(1);
+        gate.DisposeCount.Should().Be(1);
+        gate.ConcurrentDisposeCount.Should().Be(0);
+    }
+
     private static async Task PublishAsync(StreamHub<TestQuote> hub, params decimal[] prices) {
         foreach (var price in prices) {
             await hub.PublishAsync(new TestQuote { Symbol = "ELN", Price = price }, Ct);
@@ -93,6 +225,7 @@ public sealed class StreamEndpointTests {
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
         builder.Services.AddElarionJson();
+        builder.Services.AddElarionHttpJson();
         builder.Services.ConfigureElarionJson(static options =>
             options.TypeInfoResolvers.Add(StreamEndpointTestContext.Default));
 
@@ -103,6 +236,24 @@ public sealed class StreamEndpointTests {
                     Replay = StreamReplay.Available, ResumeAfterSequence = after,
                 })
                 : null);
+        await app.StartAsync(Ct);
+        return new TestHost(app);
+    }
+
+    private static async Task<TestHost> StartRequestDrivenAsync(bool reject, bool writeIndented = false) {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        builder.Services.AddElarionJson();
+        builder.Services.AddElarionHttpJson();
+        builder.Services.ConfigureElarionJson(options => {
+            options.TypeInfoResolvers.Add(StreamEndpointTestContext.Default);
+            if (writeIndented)
+                options.PostConfigure = json => json.WriteIndented = true;
+        });
+        builder.Services.AddScoped<IStreamHandler<ExportRequest, TestQuote>>(_ => new ExportHandler(reject));
+        var app = builder.Build();
+        app.MapElarionHandlerStream<ExportRequest, TestQuote>("/export", static (_, _) => ValueTask.FromResult(new ExportRequest()));
         await app.StartAsync(Ct);
         return new TestHost(app);
     }
@@ -145,6 +296,124 @@ public sealed class StreamEndpointTests {
 
         [JsonPropertyName("price")]
         public required decimal Price { get; init; }
+    }
+
+    private sealed record ExportRequest;
+
+    private sealed class ExportHandler(bool reject) : IStreamHandler<ExportRequest, TestQuote> {
+        public ValueTask<Result<IAsyncEnumerable<TestQuote>>> HandleAsync(ExportRequest request, CancellationToken ct) =>
+            reject
+                ? ValueTask.FromResult<Result<IAsyncEnumerable<TestQuote>>>(AppError.NotFound("missing"))
+                : ValueTask.FromResult(Result<IAsyncEnumerable<TestQuote>>.Success(Items()));
+
+        private static async IAsyncEnumerable<TestQuote> Items() {
+            yield return new TestQuote { Symbol = "ELN", Price = 100m };
+            await Task.Yield();
+        }
+    }
+
+    private sealed class BlockingExportGate {
+        private int _disposeCount;
+        private int _moveNextCount;
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int DisposeCount => _disposeCount;
+        public int MoveNextCount => _moveNextCount;
+        public void MoveNextCalled() => Interlocked.Increment(ref _moveNextCount);
+        public void Disposed() => Interlocked.Increment(ref _disposeCount);
+    }
+
+    private sealed class BlockingExportStream(BlockingExportGate gate) : IAsyncEnumerable<TestQuote> {
+        public IAsyncEnumerator<TestQuote> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
+            new Enumerator(gate, cancellationToken);
+
+        private sealed class Enumerator(BlockingExportGate gate, CancellationToken cancellationToken) : IAsyncEnumerator<TestQuote> {
+            public TestQuote Current => throw new InvalidOperationException("The blocked stream does not yield items.");
+
+            public async ValueTask<bool> MoveNextAsync() {
+                gate.MoveNextCalled();
+                gate.Entered.TrySetResult();
+                await gate.Release.Task.WaitAsync(cancellationToken);
+                return false;
+            }
+
+            public ValueTask DisposeAsync() {
+                gate.Disposed();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
+    private sealed class SerializedCleanupGate {
+        private int _activeMoves;
+        private int _concurrentDisposeCount;
+        private int _disposeCount;
+        private int _moveNextCount;
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int ConcurrentDisposeCount => _concurrentDisposeCount;
+        public int DisposeCount => _disposeCount;
+        public int MoveNextCount => _moveNextCount;
+        public void MoveStarted() {
+            Interlocked.Increment(ref _moveNextCount);
+            Interlocked.Increment(ref _activeMoves);
+            Entered.TrySetResult();
+        }
+        public void MoveEnded() => Interlocked.Decrement(ref _activeMoves);
+        public void Disposed() {
+            if (Volatile.Read(ref _activeMoves) != 0)
+                Interlocked.Increment(ref _concurrentDisposeCount);
+            Interlocked.Increment(ref _disposeCount);
+        }
+    }
+
+    private sealed class SerializedCleanupStream(SerializedCleanupGate gate) : IAsyncEnumerable<TestQuote> {
+        public IAsyncEnumerator<TestQuote> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
+            new Enumerator(gate, cancellationToken);
+
+        private sealed class Enumerator(SerializedCleanupGate gate, CancellationToken cancellationToken) : IAsyncEnumerator<TestQuote> {
+            public TestQuote Current => throw new InvalidOperationException("The blocked stream does not yield items.");
+
+            public async ValueTask<bool> MoveNextAsync() {
+                gate.MoveStarted();
+                try {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return false;
+                } finally {
+                    gate.MoveEnded();
+                }
+            }
+
+            public ValueTask DisposeAsync() {
+                gate.Disposed();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
+    private sealed class ThrowingWriteStream : MemoryStream {
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromException(new IOException("write failure"));
+    }
+
+    private sealed class ThrowingTimeProvider : TimeProvider {
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+            throw new InvalidOperationException("timer failure");
+    }
+
+    private sealed class NotifyingFakeTimeProvider : TimeProvider {
+        private readonly FakeTimeProvider _inner = new();
+        public TaskCompletionSource TimerCreated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Advance(TimeSpan delta) => _inner.Advance(delta);
+        public override DateTimeOffset GetUtcNow() => _inner.GetUtcNow();
+        public override long GetTimestamp() => _inner.GetTimestamp();
+        public override TimeZoneInfo LocalTimeZone => _inner.LocalTimeZone;
+        public override long TimestampFrequency => _inner.TimestampFrequency;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) {
+            TimerCreated.TrySetResult();
+            return _inner.CreateTimer(callback, state, dueTime, period);
+        }
     }
 
     private sealed class TestHost(WebApplication app) : IAsyncDisposable {
