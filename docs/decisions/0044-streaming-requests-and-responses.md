@@ -1,7 +1,7 @@
-# ADR-0044: Streaming requests and responses — deferred, with the design pre-decided
+# ADR-0044: Request-driven server-streaming handlers
 
-- Status: Proposed (producer-side live streams since realized by [ADR-0052](0052-ordered-streams.md);
-  `IStreamHandler` remains deferred; the deferred bidirectional-transport question is taken up by
+- Status: Accepted (HTTP/SSE server-streaming foundation; producer-owned live streams remain covered by
+  [ADR-0052](0052-ordered-streams.md); bidirectional transports remain in
   [ADR-0053](0053-bidirectional-client-connections.md))
 - Date: 2026-07-06
 - Related: [ADR-0043](0043-client-events.md) (server-push of facts; the ephemeral progress tier),
@@ -35,7 +35,8 @@ Two structural facts constrain any design:
 
 - **`Result<T>` states success or failure once, upfront.** A stream can fail after item 400. The error
   channel of a streaming response is structurally different: upfront `Result` for
-  authorization/validation/not-found, then a terminal error frame mid-stream. Bolting
+  authorization/validation/not-found, then transport-specific termination (the initial SSE adapter aborts the
+  connection). Bolting
   `Result<IAsyncEnumerable<T>>` onto `IHandler` would misrepresent that contract the same way routing
   client events through `IIntegrationEventBus` would have misrepresented Plane B's guarantee (ADR-0043).
 - **The decorator pipeline is per-request.** Authorization, feature gating, validation, idempotency, and
@@ -44,33 +45,34 @@ Two structural facts constrain any design:
 
 ## Decision
 
-**Ship nothing now.** Every currently named use case has a shipped or already-decided answer. The rest of
-this ADR pre-decides the design for when real demand arrives (realistically: the first token-streaming
-feature in a consuming app), and records why the alternatives lose.
+Ship the server-streaming foundation only. This is a distinct interaction shape: transports opt in explicitly,
+starting with HTTP/SSE. JSON-RPC and MCP remain single-shot and unsupported. The typed invocation seam is all
+the default packages ship: a future application or adapter package may adopt gRPC server streaming through it,
+while gRPC itself (including client and duplex streaming) remains a deliberate non-goal for default packages.
 
-### Streaming responses: deferred, shape pre-decided
+### Streaming responses
 
-When demanded, streamed responses arrive as a **distinct handler contract**, not a widening of
-`IHandler`:
+Streamed responses use a **distinct handler contract**, not a widening of `IHandler`:
 
 - `IStreamHandler<TRequest, TItem>` — the request is a normal DTO; the response is a stream of `TItem`.
   Semantics: the pipeline (tracing → authorization → feature gate → validation) runs **before the first
-  item** and can reject with a normal upfront `Result`; after the first item, failure is a **terminal
-  error frame** on the stream, never a replaced `Result`.
-- `[Cacheable]` and `[Idempotent]` are **analyzer-rejected** on stream handlers — there is no envelope to
-  replay. The transaction decorator does not attach; a stream handler that writes owns its own boundaries
-  explicitly.
+  item** and can reject with a normal upfront `Result`; after the first item, SSE has no framework error
+  envelope, so a fault aborts the connection rather than replacing the accepted response.
+- Stream handlers have their own decorator pipeline. A `[DecoratorList]` can contain both unary and stream
+  decorators; generation selects only the interface-compatible shape and preserves its relative order. Stream
+  authorization, feature gates, validation, and observability attach as stream wrappers. Caching, idempotency,
+  cache invalidation, transaction, unary resilience, and unary audit never attach to a stream pipeline.
+  A dual-shape class consequently has two independent pipelines.
 - **Scope lifetime is the pipeline's job**: lazy enumeration outlives the handler invocation, so the
   dispatch infrastructure must keep the DI scope (and therefore the `DbContext`) open until the stream
   completes or the client disconnects. This is the real engineering cost and the reason the contract is
   its own interface — the generator can wire the different lifetime only if the shape is statically
   distinguishable.
-- **Transport mapping is asymmetric, and that is accepted**: HTTP serves streams natively
-  (`TypedResults.ServerSentEvents` or NDJSON — the same machinery as client events). JSON-RPC 2.0 has
-  **no standard streaming**; MCP tool results are single-shot (its progress notifications are a sideband,
-  not a result stream). A stream handler is therefore **HTTP-only via `HandlerTransports`** — the existing
-  opt-out mechanism — rather than the framework inventing a bespoke streaming JSON-RPC dialect the TS
-  client would then have to own.
+- **Transport mapping is asymmetric, and that is accepted**: the initial imperative HTTP helper maps typed
+  handlers to SSE and takes a host-owned request binder. It awaits startup before committing response headers,
+  writes canonical source-generated JSON items through ASP.NET Core's native
+  `TypedResults.ServerSentEvents`, and retains the invocation scope through enumeration.
+  JSON-RPC 2.0 and MCP have no standard streaming result shape; no bespoke dialect is invented.
 
 ### Streaming requests: rejected as a handler contract
 
@@ -111,23 +113,28 @@ incremental streaming features on the defaults (ADR-0025 discipline).
   generator.
 - **A streaming JSON-RPC dialect** (notification-based partial results tied to the request id, as LSP's
   `$/progress` does). Rejected — nonstandard, every client must implement the dialect, and the TS
-  generator would own a protocol no one else speaks. HTTP already has two standard framings (SSE, NDJSON).
+  generator would own a protocol no one else speaks. The shipped adapter uses SSE; another framing is a future
+  adapter decision.
 - **SignalR as a fourth transport** (native `ChannelReader`/`IAsyncEnumerable` both directions). Rejected
   as a default — whole-transport adoption behind a future seam if ever needed; see above.
 - **`ChannelReader<TFact>`/`IAsyncEnumerable<TFact>` request parameters.** Rejected — the pipeline
   ambiguity above; batch commands and JSON-RPC batch are the shipped answers.
-- **gRPC streaming.** Rejected for the same reason as the S3 wire protocol on blobs: a deliberate
-  non-goal; adopting gRPC is a transport decision, not a streaming feature.
+- **A default gRPC streaming package.** Rejected for the same reason as the S3 wire protocol on blobs: gRPC is
+  a deliberate non-goal for default packages. An application may still adopt server streaming in its own adapter
+  over the typed invocation seam; that transport decision is separate from this framework contract.
 
 ## Consequences
 
-- Nothing ships; no package, no API surface, no diagnostics. This ADR exists so the four problems stay
-  separated and the pre-decided design is the starting point when demand arrives.
+- `IStreamHandler<TRequest,TItem>` returns an upfront `Result<IAsyncEnumerable<TItem>>`: startup rejection is
+  distinct from lazy completion, cancellation, and fault. `StreamHandlerInvoker` returns an accepted invocation
+  lease that owns its DI scope until enumeration ends or is explicitly disposed.
+- ADR-0052's actor/`StreamHub` streams remain producer-owned, sequenced and resumable. Request-driven handler
+  streams are not a replacement for that hot-stream model: use the actor SSE leg when a single sequencer and
+  resume semantics are required; use this contract for a request's deferred response (exports, token output).
 - The batch-command pattern (list-carrying DTO, client-side flush) becomes the documented recommendation
   for high-frequency client-to-server facts.
-- When streamed responses are built: new `IStreamHandler<TRequest, TItem>` contract in Abstractions, new
-  analyzer rules (stream handler + `[Cacheable]`/`[Idempotent]` → error; stream handler on a non-HTTP
-  transport → error), pipeline-owned scope lifetime, HTTP/SSE + NDJSON mapping, and schema/TS-client
-  support — in that order, as stacked PRs.
+- The initial slice deliberately ships no schema/TypeScript-client surface, NDJSON adapter, or analyzer rule
+  beyond the generator's normal compile-time registration checks. A future transport owns its own framing and
+  contract projection rather than being implied by this handler shape.
 - Accepted asymmetry: JSON-RPC and MCP callers never see streamed responses; a handler that streams is an
   HTTP-only handler by declaration.

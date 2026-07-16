@@ -227,7 +227,7 @@ public sealed partial class HandlerRegistrationGenerator {
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
-    private static readonly DiagnosticDescriptor ResourceIdPathNotFound = new(
+    internal static readonly DiagnosticDescriptor ResourceIdPathNotFound = new(
         "ELAUTH002",
         "RequireResource id path does not resolve",
         "Handler '{0}' declares [RequireResource] with Id path '{1}', which does not resolve to a property on "
@@ -246,7 +246,7 @@ public sealed partial class HandlerRegistrationGenerator {
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
-    private static readonly DiagnosticDescriptor EmptyFeatureGateDescriptor = new(
+    internal static readonly DiagnosticDescriptor EmptyFeatureGateDescriptor = new(
         "ELFEAT002",
         "FeatureGate declares no feature name",
         "Handler '{0}' declares a [FeatureGate] with no feature name (or a blank one); the gate has no effect",

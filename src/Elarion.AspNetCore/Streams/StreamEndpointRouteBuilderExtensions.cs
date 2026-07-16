@@ -56,7 +56,7 @@ public static class StreamEndpointRouteBuilderExtensions {
 
             var typeInfo = context.RequestServices.GetRequiredService<IElarionJsonSerialization>().GetTypeInfo<T>();
             return (IResult)TypedResults.ServerSentEvents(
-                StreamAsync(stream, typeInfo, context.RequestAborted));
+                StreamAsync(stream, typeInfo, GetTimeProvider(context), context.RequestAborted));
         });
     }
 
@@ -72,52 +72,125 @@ public static class StreamEndpointRouteBuilderExtensions {
     private static async IAsyncEnumerable<SseItem<string>> StreamAsync<T>(
         IAsyncEnumerable<StreamItem<T>> source,
         JsonTypeInfo<T> typeInfo,
+        TimeProvider timeProvider,
         [EnumeratorCancellation] CancellationToken ct) {
-        await using var enumerator = source.GetAsyncEnumerator(ct);
+        using var enumerationCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        await using var enumerator = source.GetAsyncEnumerator(enumerationCts.Token);
         Task<bool>? pendingMove = null;
-        while (true) {
-            bool hasNext;
-            (hasNext, pendingMove) = await WaitForNextAsync(enumerator, pendingMove, ct);
-            if (pendingMove is not null) {
-                yield return new SseItem<string>(string.Empty, KeepAliveEventType);
-                continue;
-            }
-
-            if (!hasNext) {
-                yield break;
-            }
-
-            var item = enumerator.Current;
-            yield return new SseItem<string>(JsonSerializer.Serialize(item.Value, typeInfo)) {
-                EventId = item.Sequence.ToString(CultureInfo.InvariantCulture),
-            };
-        }
-    }
-
-    // yield is illegal inside try/catch, so the waiting lives here. The pending MoveNext is threaded
-    // through because a keep-alive tick must not abandon it — a second concurrent MoveNextAsync on one
-    // enumerator is invalid. A non-null returned task means "keep-alive fired, the move is still pending".
-    // The enumerator-shaped twin of ClientEventEndpointsExtensions.WaitForNextAsync (channel-shaped) —
-    // fix a bug in one, check the other.
-    private static async Task<(bool HasNext, Task<bool>? PendingMove)> WaitForNextAsync<T>(
-        IAsyncEnumerator<StreamItem<T>> enumerator, Task<bool>? pendingMove, CancellationToken ct) {
         try {
-            pendingMove ??= enumerator.MoveNextAsync().AsTask();
-            if (!pendingMove.IsCompleted) {
-                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var winner = await Task.WhenAny(pendingMove, Task.Delay(KeepAliveInterval, delayCts.Token));
-                if (winner != pendingMove) {
-                    return (false, pendingMove);
+            while (true) {
+                pendingMove ??= enumerator.MoveNextAsync().AsTask();
+                var wait = await WaitForNextAsync(pendingMove, timeProvider, ct).ConfigureAwait(false);
+                if (wait == MoveWaitResult.Cancelled)
+                    yield break;
+                if (wait == MoveWaitResult.KeepAlive) {
+                    yield return new SseItem<string>(string.Empty, KeepAliveEventType);
+                    continue;
                 }
 
-                delayCts.Cancel();
-            }
+                var hasNext = await pendingMove.ConfigureAwait(false);
+                pendingMove = null;
+                if (!hasNext)
+                    yield break;
 
-            return (await pendingMove, null);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) {
-            // The client disconnected — the normal end of an SSE stream, not an error.
-            return (false, null);
+                var item = enumerator.Current;
+                yield return new SseItem<string>(JsonSerializer.Serialize(item.Value, typeInfo)) {
+                    EventId = item.Sequence.ToString(CultureInfo.InvariantCulture),
+                };
+            }
+        } finally {
+            // A response-writer failure can dispose this iterator while a keep-alive leaves MoveNext pending.
+            // Cancel and settle that exact move before the await-using disposes the enumerator: concurrent
+            // MoveNextAsync/DisposeAsync calls are outside the IAsyncEnumerator contract.
+            await SettlePendingMoveAsync(pendingMove, enumerationCts).ConfigureAwait(false);
         }
     }
+
+    // yield is illegal inside try/catch, so the waiting lives here. The caller owns the one pending MoveNext
+    // across keep-alive ticks: starting a second concurrent move or disposing before that move settles is invalid.
+    // The enumerator-shaped twin of ClientEventEndpointsExtensions.WaitForNextAsync (channel-shaped) —
+    // fix a bug in one, check the other.
+    private static async Task<MoveWaitResult> WaitForNextAsync(
+        Task<bool> pendingMove,
+        TimeProvider timeProvider,
+        CancellationToken ct) {
+        if (pendingMove.IsCompleted)
+            return ct.IsCancellationRequested ? MoveWaitResult.Cancelled : MoveWaitResult.MoveCompleted;
+
+        using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var delay = Task.Delay(KeepAliveInterval, timeProvider, delayCts.Token);
+        var winner = await Task.WhenAny(pendingMove, delay).ConfigureAwait(false);
+        if (ct.IsCancellationRequested)
+            return MoveWaitResult.Cancelled;
+        if (winner != pendingMove)
+            return MoveWaitResult.KeepAlive;
+
+        delayCts.Cancel();
+        return MoveWaitResult.MoveCompleted;
+    }
+
+    internal static IResult CreateHandlerStreamResult<T>(
+        IAsyncEnumerable<T> source,
+        JsonTypeInfo<T> typeInfo,
+        TimeProvider timeProvider,
+        CancellationToken ct) =>
+        TypedResults.ServerSentEvents(StreamHandlerEventsAsync(source, typeInfo, timeProvider, ct));
+
+    internal static async IAsyncEnumerable<SseItem<string>> StreamHandlerEventsAsync<T>(
+        IAsyncEnumerable<T> source,
+        JsonTypeInfo<T> typeInfo,
+        TimeProvider timeProvider,
+        [EnumeratorCancellation] CancellationToken ct) {
+        using var enumerationCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        await using var enumerator = source.GetAsyncEnumerator(enumerationCts.Token);
+        Task<bool>? pendingMove = null;
+        try {
+            while (true) {
+                pendingMove ??= enumerator.MoveNextAsync().AsTask();
+                var wait = await WaitForNextAsync(pendingMove, timeProvider, ct).ConfigureAwait(false);
+                if (wait == MoveWaitResult.Cancelled)
+                    yield break;
+                if (wait == MoveWaitResult.KeepAlive) {
+                    yield return new SseItem<string>(string.Empty, KeepAliveEventType);
+                    continue;
+                }
+
+                var hasNext = await pendingMove.ConfigureAwait(false);
+                pendingMove = null;
+                if (!hasNext)
+                    yield break;
+
+                yield return new SseItem<string>(JsonSerializer.Serialize(enumerator.Current, typeInfo));
+            }
+        } finally {
+            await SettlePendingMoveAsync(pendingMove, enumerationCts).ConfigureAwait(false);
+        }
+    }
+
+    private static async ValueTask SettlePendingMoveAsync(Task<bool>? pendingMove, CancellationTokenSource enumerationCts) {
+        if (pendingMove is null)
+            return;
+
+        try {
+            enumerationCts.Cancel();
+        } catch {
+            // A cancellation callback failure must not skip settling the active MoveNext. The terminal response
+            // path already owns the primary failure; safety here is serializing cleanup and observing the task.
+        }
+        try {
+            _ = await pendingMove.ConfigureAwait(false);
+        } catch {
+            // The terminal path already owns the primary response/timer/cancellation outcome. Awaiting here is
+            // solely to serialize enumerator cleanup and observe the pending task before DisposeAsync.
+        }
+    }
+
+    private enum MoveWaitResult {
+        MoveCompleted,
+        KeepAlive,
+        Cancelled,
+    }
+
+    private static TimeProvider GetTimeProvider(HttpContext context) =>
+        context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System;
 }

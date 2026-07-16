@@ -107,20 +107,20 @@ public sealed partial class HandlerRegistrationGenerator {
         return null;
     }
 
-    private static readonly DiagnosticDescriptor NonPublicAppliesToPredicate = new(
+    internal static readonly DiagnosticDescriptor NonPublicAppliesToPredicate = new(
         "ELPIPE001",
         "Decorator AppliesTo predicate must be public",
         "Decorator '{0}' declares an 'AppliesTo' predicate that is not public; make it a "
-        + "'public static bool AppliesTo(HandlerMetadata handler)' so the generated registration can call it",
+        + "'public static bool AppliesTo({1} handler)' so the generated registration can call it",
         "Elarion.Generators",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
-    private static readonly DiagnosticDescriptor UnsupportedAppliesToSignature = new(
+    internal static readonly DiagnosticDescriptor UnsupportedAppliesToSignature = new(
         "ELPIPE002",
         "Decorator AppliesTo predicate has an unsupported signature",
         "Decorator '{0}' declares an 'AppliesTo' method with an unsupported signature; the only attachment "
-        + "predicate is 'public static bool AppliesTo(Elarion.Abstractions.Pipeline.HandlerMetadata handler)' "
+        + "predicate is 'public static bool AppliesTo({1} handler)' "
         + "(use handler.RequestType for request-based checks)",
         "Elarion.Generators",
         DiagnosticSeverity.Error,
@@ -161,13 +161,13 @@ public sealed partial class HandlerRegistrationGenerator {
             var predicate = DecoratorPredicate.Detect(definition, compilation, out var predicateLocation);
             if (predicate == DecoratorPredicate.Result.NotPublic) {
                 diagnostics.Add(DiagnosticInfo.Create(
-                    NonPublicAppliesToPredicate, predicateLocation, definition.Name));
+                    NonPublicAppliesToPredicate, predicateLocation, definition.Name, "HandlerMetadata"));
                 continue;
             }
 
             if (predicate == DecoratorPredicate.Result.UnsupportedSignature) {
                 diagnostics.Add(DiagnosticInfo.Create(
-                    UnsupportedAppliesToSignature, predicateLocation, definition.Name));
+                    UnsupportedAppliesToSignature, predicateLocation, definition.Name, "HandlerMetadata"));
                 continue;
             }
 
@@ -292,4 +292,3 @@ public sealed partial class HandlerRegistrationGenerator {
         candidateNamespace == scopeNamespace ||
         candidateNamespace.StartsWith(scopeNamespace + ".", StringComparison.Ordinal);
 }
-

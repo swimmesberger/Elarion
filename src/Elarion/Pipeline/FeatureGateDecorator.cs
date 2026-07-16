@@ -79,7 +79,7 @@ public sealed class FeatureGateDecorator<TRequest, TResponse>(
     private static Gate[] Parse(Type handlerType) =>
         handlerType.GetCustomAttributes<FeatureGateAttribute>(inherit: true)
             .Select(static attribute => new Gate(
-                attribute.Features.ToArray(),
+                attribute.Features.Where(static feature => !string.IsNullOrWhiteSpace(feature)).ToArray(),
                 attribute.Requirement,
                 attribute.Negate))
             .ToArray();

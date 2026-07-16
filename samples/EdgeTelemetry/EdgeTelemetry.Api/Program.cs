@@ -20,10 +20,11 @@ using OpenTelemetry.Trace;
 //   Elarion.Sql                   (ADR-0058)  [SqlRecord] generated mappers + safe SQL interpolation
 //
 // No EF, no reflection, no runtime codegen: handler registrations come from the generated module
-// bootstrapper, mappers and JSON contracts are source-generated, and the HTTP endpoints below are
-// hand-authored in this compilation so ASP.NET Core's Request Delegate Generator compiles the
-// binding ahead of time too (the ADR-0031 REST pattern — a source generator cannot see another
-// generator's output, so generated maps would fall back to the runtime delegate factory).
+// bootstrapper, while mappers and JSON contracts are source-generated. The ordinary unary endpoints
+// below are hand-authored in this compilation, so ASP.NET Core's Request Delegate Generator compiles
+// their binding ahead of time (the ADR-0031 REST pattern). The streaming endpoint follows the same shape:
+// a direct MapGet owns generated route/query binding, while ElarionHttpResults owns stream invocation,
+// startup-error translation, and native SSE.
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -50,7 +51,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 // The generated bootstrapper: registers the Telemetry module's handlers as typed
 // IHandler<TRequest, Result<TResponse>> services and contributes the module's JSON context to the
-// canonical options (ADR-0023). With no decorator attributes, only the always-on ObservabilityDecorator
+// canonical options (ADR-0023). With no functional decorator attributes, only the always-on ObservabilityDecorator
 // wraps them (ADR-0059: merged tracing + user-context enrichment — the Elarion.Handlers spans/metrics
 // below, near-zero cost with no listener); gate decorators (authorization, validation, …) attach per attribute.
 builder.Services.AddElarion(builder.Configuration);
@@ -98,7 +99,7 @@ var app = builder.Build();
 
 app.MapGet("/healthz", () => Results.Text("ok"));
 
-// Hand-authored, RDG-visible endpoints: each is one line of translation — bind, call the handler
+// Hand-authored, RDG-visible unary endpoints: each is one line of translation — bind, call the handler
 // typed-directly, render the Result<T> (success → 200, AppError.Validation → 400,
 // AppError.NotFound → 404 problem details) via ElarionHttpResults.
 app.MapPost("/readings", static async (
@@ -121,6 +122,16 @@ app.MapGet("/devices/{deviceId}/history", static async (
     CancellationToken ct,
     int limit = 100) =>
     ElarionHttpResults.ToResult(await history.HandleAsync(new GetReadingHistory.Query(deviceId, metric, limit), ct)));
+
+// Unlike /history's buffered JSON array, this finite export leaves the Npgsql reader open while native SSE
+// serializes each row. Direct MapGet keeps route/query binding visible to RDG; the lazy result starts the
+// decorated stream only when ASP.NET executes it and can still return a normal problem before SSE headers.
+app.MapGet("/devices/{deviceId}/history/stream", static (
+    string deviceId,
+    string metric,
+    int limit) =>
+    ElarionHttpResults.ToStreamResult<ExportReadingHistory.Query, ReadingRow>(
+        new ExportReadingHistory.Query(deviceId, metric, limit)));
 
 app.MapGet("/devices/{deviceId}/stats", static async (
     string deviceId,

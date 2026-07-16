@@ -13,7 +13,7 @@ These packages stay independent of ASP.NET Core, EF Core, and provider infrastru
 
 | Package | Add it when |
 | --- | --- |
-| `Elarion.Abstractions` | A contract-only assembly needs handlers, results, attributes, seams, canonical JSON, or generation triggers without runtime behavior. |
+| `Elarion.Abstractions` | A contract-only assembly needs handlers (including request-driven `IStreamHandler<,>`), results, attributes, seams, canonical JSON, or generation triggers without runtime behavior. |
 | `Elarion` | An application assembly needs modules, handlers, decorators, scheduling, streams, buffering, current user, or source generation. This is the normal starting package and bundles `Elarion.Generators`. |
 | `Elarion.Validation` | DataAnnotations on requests must be enforced at runtime through `Microsoft.Extensions.Validation`. |
 | `Elarion.Resilience` | `[Resilient]` handlers or deferred scheduler retries need the Polly-backed default runner. |
@@ -29,7 +29,7 @@ Protocols remain host-neutral where possible; ASP.NET packages own only their wi
 | Package | Add it when |
 | --- | --- |
 | `Elarion.JsonRpc` | Handlers need the transport-neutral JSON-RPC dispatcher, MCP tool model, envelopes, telemetry, or schema export. |
-| `Elarion.AspNetCore` | An ASP.NET host exposes JSON-RPC, `[HttpEndpoint]`, files, ordered SSE streams, current user middleware, or the role-holder proxy. |
+| `Elarion.AspNetCore` | An ASP.NET host exposes JSON-RPC, `[HttpEndpoint]`, files, ordered or request-driven SSE streams, current user middleware, or the role-holder proxy. |
 | `Elarion.AspNetCore.OpenApi` | `[HttpEndpoint]` routes should appear in OpenAPI with canonical schema and idempotency metadata. |
 | `Elarion.AspNetCore.Mcp` | Handlers should be exposed as an MCP server over Streamable HTTP. This is the only package referencing the MCP SDK. |
 | `Elarion.AspNetCore.SchemaGeneration` | An ASP.NET build should export `rpc-schema.json` for client generation. |

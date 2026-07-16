@@ -6,9 +6,14 @@ is **cold-start speed and footprint** — edge boxes, scale-to-zero deployments,
 lifetimes — and the business logic lives in **`[Handler]` classes like every Elarion app**: dropping
 EF for this tier does not mean dropping the programming model.
 
+Recent history has two deliberately different read shapes: `/history` buffers a bounded JSON array for
+ordinary UI queries, while `/history/stream` is a finite, cold SSE export. The latter keeps its PostgreSQL
+reader open and emits each row as it is enumerated, so its memory use stays O(1) with respect to result size.
+
 ```
-POST /readings … GET /devices/{id}/stats     hand-authored minimal-API endpoints (RDG-compiled),
-        │                                    one line each: bind → handler → Result<T> to HTTP
+POST /readings … GET /devices/{id}/stats     hand-authored unary endpoints (RDG-compiled),
+GET /devices/{id}/history/stream             direct MapGet (RDG binding) → lazy SSE IResult
+        │                                    bind → handler → Result<T> or streamed rows
         ▼
 [Handler] classes ([AppModule] Telemetry)    registered by the GENERATED module bootstrapper
         │                                    (AddElarion) — one always-on observability decorator only;
@@ -26,12 +31,13 @@ Elarion.Migrations.PostgreSql  (ADR-0057)    the schema half: embedded V__ scrip
 ```
 
 No EF, no reflection, no runtime code generation. Handler registrations come from the generated
-bootstrapper, row mappers and JSON contracts are source-generated, and the endpoints are hand-authored
-in the host compilation so **ASP.NET Core's Request Delegate Generator** compiles the binding ahead of
-time too — that placement is deliberate (the ADR-0031 REST pattern): a Roslyn source generator cannot
-see another generator's output, so endpoints emitted by a generator would silently fall back to the
-runtime delegate factory. `JsonSerializerIsReflectionEnabledByDefault=false` holds for the whole
-process. If a row type doesn't map, the **build** fails (`ELSQL001`–`ELSQL007`) — there is no
+bootstrapper, while row mappers and JSON contracts are source-generated. The ordinary unary endpoints
+are hand-authored in the host compilation so **ASP.NET Core's Request Delegate Generator** compiles their
+binding ahead of time — that placement is deliberate (the ADR-0031 REST pattern). The request-driven
+stream follows the same pattern: its direct typed `MapGet` lets RDG bind route/query values, then returns
+`ElarionHttpResults.ToStreamResult`, whose lazy `IResult` owns the decorated handler invocation, startup-error
+translation, and native `TypedResults.ServerSentEvents` framing. `JsonSerializerIsReflectionEnabledByDefault=false` holds for
+the whole process. If a row type doesn't map, the **build** fails (`ELSQL001`–`ELSQL007`) — there is no
 reflection fallback to limp along on, which is the property that makes NativeAOT safe here at all.
 
 And because `Elarion.Sql` is hand-written SQL, the extension needs **zero framework support**:
@@ -79,7 +85,8 @@ curl -X POST localhost:5217/readings -H 'Content-Type: application/json' -d '[
 # → {"written":2}   — POST the same batch again: {"written":0}, idempotent by constraint
 
 curl "localhost:5217/devices/edge-1/latest?metric=temperature"
-curl "localhost:5217/devices/edge-1/history?metric=temperature&limit=50"
+curl "localhost:5217/devices/edge-1/history?metric=temperature&limit=50"          # buffered JSON array
+curl -N "localhost:5217/devices/edge-1/history/stream?metric=temperature&limit=50" # finite SSE export
 curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time_bucket rollup
 ```
 
@@ -97,8 +104,12 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   `db.InsertManyAsync(rows, " ON CONFLICT DO NOTHING")` — the helper owns the transaction and the
   reused prepared command (retransmitted device batches insert nothing). `GetMetricStats` is the
   "full power of SQL" leg — `time_bucket` + aggregates stay SQL, `{ReadingRow.Table}` splices the
-  source table. Failures are `Result` values (`AppError.NotFound`, `AppError.Validation`),
-  not exceptions. With no decorator attributes only the always-on `ObservabilityDecorator` wraps the
+  source table. `GetReadingHistory` buffers the small `/history` UI response, while
+  `ExportReadingHistory` returns `IStreamHandler` plus `QueryUnbufferedAsync`: the finite `/history/stream`
+  SSE export is cold (one query per request), unbuffered, and holds its connection/reader only until the
+  consumer completes or disconnects. It is intentionally unlike [LiveQuotes](../LiveQuotes), whose
+  producer-owned `StreamHub` is hot, ordered, and resumable. Failures are `Result` values (`AppError.NotFound`, `AppError.Validation`),
+  not exceptions. With no functional decorator attributes only the always-on `ObservabilityDecorator` wraps the
   handlers (ADR-0059: merged tracing + user-context enrichment — the `Elarion.Handlers` span +
   `handler.execution.duration` metric per call, near-zero cost when nothing listens); add `[Idempotent]`
   or `[RequirePermission]` later and only then does a gate decorator join the chain.
@@ -112,8 +123,11 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
 - **`Program.cs`** — the slim builder plus `AddElarion(configuration)` (the generated bootstrapper:
   module-gated handler registrations + JSON contexts), `AddElarionHttpJson()` (canonical JSON onto
   minimal-API binding, ProblemDetails included), `AddElarionSqlMappers()`, and
-  `AddElarionPostgreSqlMigrations(dataSource, …)` for schema-before-traffic. Each endpoint is one
+  `AddElarionPostgreSqlMigrations(dataSource, …)` for schema-before-traffic. Each unary endpoint is one
   line: bind → typed handler call → `ElarionHttpResults.ToResult` (200 / 400 / 404 ProblemDetails).
+  The stream endpoint is the same RDG-visible shape: its typed `MapGet` builds the request and returns
+  `ElarionHttpResults.ToStreamResult`; that lazy result owns native SSE framing and invocation lifetime,
+  while the generated stream handler owns validation and SQL.
 - **`EdgeTelemetry.Tests`** — the whole slice end-to-end against real TimescaleDB (Testcontainers,
   Docker-gated skip): startup migrates (extension + hypertable included), ingest flows through the
   handler pipeline into the generated mapper, a retransmit writes zero rows, and the rollup reads

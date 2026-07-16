@@ -5,6 +5,8 @@ using System.Reflection;
 using AwesomeAssertions;
 using Elarion.Abstractions.Serialization;
 using Elarion.Abstractions.Validation;
+using Elarion.Abstractions;
+using Elarion.Pipeline;
 using Elarion.Validation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Validation;
@@ -77,6 +79,23 @@ public sealed class MicrosoftRequestValidatorTests {
         var result = await validator.ValidateAsync(typeof(CreateClientRequest), request, Ct);
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task StreamValidationDecorator_RejectsInvalidRequestThroughMicrosoftRequestValidator() {
+        await using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var handler = new StreamValidationDecorator<CreateClientRequest, string>(
+            new RecordingStreamHandler(), scope.ServiceProvider.GetRequiredService<IRequestValidator>());
+
+        var result = await handler.HandleAsync(new CreateClientRequest {
+            Name = "ab", Priority = 1, Address = new AddressDto { Street = "ok" },
+        }, Ct);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error!.Kind.Should().Be(ErrorKind.Validation);
+        result.Error.Data.Should().BeOfType<ValidationErrorData>()
+            .Which.FieldErrors.Should().ContainKey("name");
     }
 
     [Fact]
@@ -174,6 +193,13 @@ public sealed class MicrosoftRequestValidatorTests {
     private sealed record UnannotatedRequest;
 
     private sealed record PathInjectingRequest;
+
+    private sealed class RecordingStreamHandler : IStreamHandler<CreateClientRequest, string> {
+        public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(CreateClientRequest request, CancellationToken ct) =>
+            ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+
+        private static async IAsyncEnumerable<string> Values() { yield return "unexpected"; await Task.Yield(); }
+    }
 
     /// <summary>
     /// Injects arbitrary CLR error paths (the shapes the M.E.Validation walker produces for case-colliding

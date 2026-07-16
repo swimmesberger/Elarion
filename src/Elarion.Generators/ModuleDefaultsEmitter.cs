@@ -25,6 +25,7 @@ internal static class ModuleDefaultsEmitter
     public const string ClassSuffix = "ElarionModuleServices";
 
     public const string AddHandlersMethod = "AddHandlers";
+    public const string AddStreamHandlersMethod = "AddStreamHandlers";
     public const string AddServicesMethod = "AddServices";
     public const string AddVariantServicesMethod = "AddVariantServices";
     public const string AddValidatorsMethod = "AddValidators";
@@ -43,6 +44,7 @@ internal static class ModuleDefaultsEmitter
     public static readonly string[] PartialMethods =
     [
         AddHandlersMethod,
+        AddStreamHandlersMethod,
         AddServicesMethod,
         AddVariantServicesMethod,
         AddValidatorsMethod,

@@ -99,6 +99,30 @@ for stable public or wire-facing contracts.
 The handler registration generator emits an `Add{HandlerName}()` method and aggregates them into the
 module's `Add{Module}Handlers()` method. You never register a handler by hand.
 
+## Request-driven server streams
+
+An operation with a deferred response implements `IStreamHandler<TRequest, TItem>`, not `IHandler`. Its upfront
+`Result<IAsyncEnumerable<TItem>>` accepts or rejects before a transport commits its response; thereafter items
+remain lazy and completion, cancellation, and faults belong to the enumerator.
+
+Generated stream registration is module-gated like unary handlers, but has an independent pipeline. A mixed
+`[DecoratorList]` retains only decorators implementing `IStreamHandler<,>` and preserves their relative order.
+Authorization, feature gates, validation, observability, and context enrichment apply; caching, idempotency,
+transactions, audit, and unary resilience do not. Use `StreamHandlerInvoker.InvokeAsync` in a typed custom
+transport: its accepted invocation owns the DI scope until enumeration completes, faults, cancels, or is disposed.
+For SSE, bind the request in a direct minimal-API `MapGet` lambda and return
+`ElarionHttpResults.ToStreamResult<TRequest, TItem>(request)`. Keeping `MapGet` in the host compilation lets
+ASP.NET Core's Request Delegate Generator own route and query binding; the lazy result owns decorated handler
+invocation, canonical JSON, startup-error translation, and native `TypedResults.ServerSentEvents` framing.
+
+```csharp
+endpoints.MapGet("reports/{reportId}/export", static (Guid reportId) =>
+    ElarionHttpResults.ToStreamResult<ExportRows.Query, ExportRow>(new(reportId)));
+```
+
+JSON-RPC and MCP remain single-response. This cold
+request response is distinct from an actor `StreamHub`, which is the hot, sequenced, resumable model.
+
 ## Command vs. query
 
 A request declares its CQRS kind by implementing a marker interface (optional, but it is the only

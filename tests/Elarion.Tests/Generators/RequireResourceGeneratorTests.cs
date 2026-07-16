@@ -71,6 +71,16 @@ public sealed class RequireResourceGeneratorTests
         result.Diagnostics.Should().Contain(d => d.Id == "ELAUTH002");
     }
 
+    [Fact]
+    public void RequireResource_PrivateGetter_ReportsElauth002()
+    {
+        var privateGetter = Source.Replace(
+            "public System.Guid Id { get; init; }",
+            "public System.Guid Id { private get; init; }");
+
+        Run(privateGetter).Diagnostics.Should().Contain(diagnostic => diagnostic.Id == "ELAUTH002");
+    }
+
     private static GeneratorDriverRunResult Run(string source)
     {
         var compilation = CSharpCompilation.Create(

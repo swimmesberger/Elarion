@@ -38,33 +38,39 @@ internal static class DecoratorPredicate
     private const string HandlerMetadataMetadataName = "Elarion.Abstractions.Pipeline.HandlerMetadata";
 
     public static Result Detect(INamedTypeSymbol decoratorDefinition, Compilation compilation, out Location? location)
+        => Detect(decoratorDefinition, compilation, HandlerMetadataMetadataName, out location);
+
+    /// <summary>Detects a predicate for the supplied metadata contract.</summary>
+    public static Result Detect(INamedTypeSymbol decoratorDefinition, Compilation compilation, string metadataName, out Location? location)
     {
         location = null;
 
-        var handlerMetadata = compilation.GetTypeByMetadataName(HandlerMetadataMetadataName);
+        var handlerMetadata = compilation.GetTypeByMetadataName(metadataName);
         if (handlerMetadata is null)
             return Result.None;
 
-        foreach (var member in decoratorDefinition.GetMembers(AppliesToMethodName))
+        var members = decoratorDefinition.GetMembers(AppliesToMethodName);
+        if (members.Length == 0)
+            return Result.None;
+
+        // A member named AppliesTo is an intended predicate. Silently ignoring a malformed overload would
+        // attach the decorator unconditionally, which is a fail-open pipeline configuration error.
+        foreach (var member in members)
         {
-            if (member is not IMethodSymbol
-                {
-                    IsStatic: true,
-                    ReturnType.SpecialType: SpecialType.System_Boolean,
-                    Parameters.Length: 1,
-                } method)
-            {
-                continue;
-            }
-
-            location = method.Locations.FirstOrDefault();
-
-            if (!SymbolEqualityComparer.Default.Equals(method.Parameters[0].Type, handlerMetadata))
+            location = member.Locations.FirstOrDefault();
+            if (member is not IMethodSymbol method)
                 return Result.UnsupportedSignature;
 
-            return method.DeclaredAccessibility == Accessibility.Public ? Result.Conditional : Result.NotPublic;
+            if (method.DeclaredAccessibility != Accessibility.Public)
+                return Result.NotPublic;
+
+            if (!method.IsStatic || method.ReturnType.SpecialType != SpecialType.System_Boolean ||
+                method.Parameters.Length != 1 ||
+                !SymbolEqualityComparer.Default.Equals(method.Parameters[0].Type, handlerMetadata))
+                return Result.UnsupportedSignature;
         }
 
-        return Result.None;
+        location = members[0].Locations.FirstOrDefault();
+        return Result.Conditional;
     }
 }
