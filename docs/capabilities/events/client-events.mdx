@@ -33,12 +33,17 @@ Client events are one tier in the event story; pick by *who must see the fact an
 | A server-side reaction that must not be missed (email, billing, sync) | An [integration event](/docs/capabilities/events) — at-least-once, inboxed |
 | A change that must commit atomically with the command | A [domain event](/docs/capabilities/events) — same transaction |
 | Live progress of one long-running command | Client events, [the ephemeral tier](#progress-the-ephemeral-tier) |
+| One request returns a lazy export, token output, or tail query | [`IStreamHandler`](/docs/capabilities/transports/server-streaming) — a cold request response |
+| Every browser-visible item needs ordering, completion, and reconnect resume | An actor-owned [ordered stream](/docs/capabilities/events/streams) |
 | A dashboard where seconds of staleness are fine | Polling a [keyset query](/docs/capabilities/pagination) — less machinery |
 | Config/settings values that reload live | [`ISettingsManager.Watch`](/docs/concepts/settings) — not an event topic |
 
 The line to hold: a client event may be **dropped** (closed laptop, full buffer, reconnect gap) and the
-system must stay correct because the client re-queries. The moment a fact must not be missed, it belongs on
-the integration plane consumed server-side — push the *consequence* to browsers as a hint afterwards.
+system must stay correct because the client re-queries. A deferred response to one request is instead a cold
+[`IStreamHandler`](/docs/capabilities/transports/server-streaming); a browser-visible sequence whose elements,
+completion, and resume behavior are data is an actor-owned [ordered stream](/docs/capabilities/events/streams).
+The moment a server-side fact must not be missed, it belongs on the integration plane — push the *consequence*
+to browsers as a hint afterwards.
 
 **The happy path**, end to end: declare an `IClientEvent` contract in the module (topic registration is
 generated), project the integration event onto it in a `[ConsumeEvent]` method, map

@@ -3,15 +3,19 @@ title: Transports
 description: Map a handler over HTTP, JSON-RPC, MCP, or explicit unary/server-streaming gRPC service methods while keeping application logic transport-neutral.
 ---
 
-A handler is transport-neutral: a request in, a `Result<T>` out, with no knowledge of how it was
-called. A **transport** is what puts that handler on the network. HTTP, JSON-RPC, and MCP are peer
-surfaces selected from one handler definition. gRPC is an additional typed adapter: its generated service
-override deliberately owns protobuf mapping while `Elarion.Grpc` preserves the same dispatch pipeline;
+A handler is transport-neutral: it accepts an application request with no knowledge of how it was called.
+A unary handler returns `Result<T>`; an explicit server-stream handler returns a lazy response sequence. A
+**transport** is what puts that handler on the network. HTTP, JSON-RPC, and MCP are peer surfaces selected
+from one unary handler definition. gRPC is an additional typed adapter: its generated service override
+deliberately owns protobuf mapping while `Elarion.Grpc` preserves the same dispatch pipeline;
 `Elarion.Grpc.AspNetCore` supplies the conventional grpc-dotnet host composition.
 
 <Cards>
   <Card title="HTTP endpoints" href="/docs/capabilities/transports/http-endpoints">
     REST-style routes generated from `[HttpEndpoint]` — verbs, route binding, and RFC 7807 errors.
+  </Card>
+  <Card title="Request-driven streaming" href="/docs/capabilities/transports/server-streaming">
+    A cold, lazy response to one request over SSE or gRPC — exports, token output, and tail queries.
   </Card>
   <Card title="OpenAPI" href="/docs/capabilities/transports/openapi">
     An OpenAPI document for the `[HttpEndpoint]` routes — schema and client parity with JSON-RPC.
@@ -29,11 +33,13 @@ override deliberately owns protobuf mapping while `Elarion.Grpc` preserves the s
 
 ## The shared handler shape
 
-Every transport ultimately invokes a handler implementing `IHandler<TRequest, Result<TResponse>>`. The
-request and response types may be nested inside the handler or declared top-level — the nesting carries no
-meaning. The transport unwraps the success value from `Result<T>` and maps an `AppError` to its own failure
-representation centrally, so the handler never encodes protocol concerns. gRPC adds explicit generated
-protobuf-to-application mapping in the service override; see [gRPC](/docs/capabilities/transports/grpc).
+Unary transports invoke `IHandler<TRequest, Result<TResponse>>`; the request and response types may be
+nested inside the handler or declared top-level — the nesting carries no meaning. The transport unwraps the
+success value from `Result<T>` and maps an `AppError` to its own failure representation centrally, so the
+handler never encodes protocol concerns. HTTP/SSE and gRPC can also explicitly invoke
+`IStreamHandler<TRequest, TItem>` for a [cold request-driven response](/docs/capabilities/transports/server-streaming).
+gRPC adds explicit generated protobuf-to-application mapping in the service override; see
+[gRPC](/docs/capabilities/transports/grpc).
 
 JSON-RPC and MCP share a single identity. A handler opts into them with one `[Handler("module.action")]`
 attribute (the operation name is optional — `[Handler]` alone is valid and the name is inferred by

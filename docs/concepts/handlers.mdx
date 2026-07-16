@@ -101,9 +101,11 @@ module's `Add{Module}Handlers()` method. You never register a handler by hand.
 
 ## Request-driven server streams
 
-An operation with a deferred response implements `IStreamHandler<TRequest, TItem>`, not `IHandler`. Its upfront
-`Result<IAsyncEnumerable<TItem>>` accepts or rejects before a transport commits its response; thereafter items
-remain lazy and completion, cancellation, and faults belong to the enumerator.
+A **cold, request-driven** operation with a deferred response implements `IStreamHandler<TRequest, TItem>`, not
+`IHandler`. Its upfront `Result<IAsyncEnumerable<TItem>>` accepts or rejects before a transport commits its
+response; thereafter items remain lazy and completion, cancellation, and faults belong to the enumerator. Use it
+when one request owns one response sequence; see [request-driven server streaming](/docs/capabilities/transports/server-streaming)
+for the full choice between this contract, client events, actor-owned `StreamHub`, and connections.
 
 Generated stream registration is module-gated like unary handlers, but has an independent pipeline. A mixed
 `[DecoratorList]` retains only decorators implementing `IStreamHandler<,>` and preserves their relative order.

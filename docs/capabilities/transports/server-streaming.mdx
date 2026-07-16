@@ -1,0 +1,146 @@
+---
+title: Request-driven server streaming
+description: Stream one request's lazy response over SSE or gRPC with IStreamHandler — and choose it deliberately over client events, ordered streams, or connections.
+icon: Radio
+---
+
+`IStreamHandler<TRequest, TItem>` serves a **cold, request-driven response**: one caller starts one
+lazy sequence. Use it when the response itself is a sequence — a row-by-row export, token output, or a
+tail/watch query. It is not a catch-all realtime API.
+
+## Choose the delivery contract
+
+The word “stream” describes several intentionally different contracts. Start with the recovery behavior
+the consumer needs, not the wire protocol:
+
+| Need | Choose | Producer and lifetime | What the consumer can rely on | It does **not** provide |
+| --- | --- | --- | --- | --- |
+| One request returns a deferred sequence | **`IStreamHandler`** | Cold; each request owns a new enumeration | Upfront accept/reject, then lazy completion, cancellation, and faults | Shared producer, ordering across requests, replay, or resume |
+| Every item from one live producer matters | [Actor-owned `StreamHub`](/docs/capabilities/events/streams) | Hot; one sequencer per key owns the hub | Ordered items, completion, bounded replay, and reconnect resume | Durable history beyond the retained hub and its activation epoch |
+| A browser should refresh after a change | [Client events](/docs/capabilities/events/client-events) | Hot fan-out from any publisher/node | At-most-once hint; an authorized re-query converges | Replay, gap-free sequence delivery, or a delivery receipt |
+| The conversation itself is interactive or stateful | [Client connections](/docs/capabilities/connections) | Long-lived, codec-owned link | Per-connection conversation and explicit request/reply when the protocol supports it | A pub/sub, ordered-stream, or durable-message guarantee |
+
+Use this selection flow:
+
+1. Is the output the deferred response to **one request**? Use `IStreamHandler`.
+2. Otherwise, does a missed item make the consumer **wrong**, and can one live producer own the sequence?
+   Use an actor-owned `StreamHub`.
+3. Otherwise, can a recipient re-query authoritative state after a loss? Use client events.
+4. Separately, if either direction needs an interactive/stateful conversation, add a connection as the
+   carrier. A connection does not replace the delivery contract above.
+
+For machine consumers that must process every independently durable business fact, use an
+[integration event](/docs/capabilities/events) and its outbox instead of holding a client connection.
+
+## The handler contract
+
+A stream handler is a distinct shape, rather than a widened unary handler:
+
+```csharp
+using System.Runtime.CompilerServices;
+
+public sealed class ExportRows(AppDbContext db)
+    : IStreamHandler<ExportRows.Query, ExportRows.Row> {
+    public sealed record Query : IQuery {
+        public required Guid ReportId { get; init; }
+    }
+
+    public sealed record Row(Guid Id, string Value);
+
+    public ValueTask<Result<IAsyncEnumerable<Row>>> HandleAsync(Query query, CancellationToken ct) {
+        if (query.ReportId == Guid.Empty) {
+            return ValueTask.FromResult<Result<IAsyncEnumerable<Row>>>(
+                AppError.Validation("A report id is required."));
+        }
+
+        return ValueTask.FromResult(Result<IAsyncEnumerable<Row>>.Success(ReadRows(query, ct)));
+    }
+
+    private async IAsyncEnumerable<Row> ReadRows(
+        Query query,
+        [EnumeratorCancellation] CancellationToken ct) {
+        await foreach (var row in db.ExportRows(query.ReportId).WithCancellation(ct)) {
+            yield return new Row(row.Id, row.Value);
+        }
+    }
+}
+```
+
+`HandleAsync` accepts or rejects the request **before** a transport commits its response. On success,
+the `IAsyncEnumerable<TItem>` remains lazy: completion, cancellation, and faults belong to its
+enumeration. The generator discovers the handler under its module and gives it a separate, module-gated
+stream pipeline.
+
+<Callout type="info">
+  A stream handler is not exposed by <code>[Handler]</code> over JSON-RPC/MCP and it is not a generated
+  <code>[HttpEndpoint]</code> route. JSON-RPC and MCP remain single-response. HTTP/SSE and gRPC expose this
+  contract explicitly.
+</Callout>
+
+## HTTP/SSE: map the request directly
+
+Put the explicit route in the owning module's `MapEndpoints` hook. The direct `MapGet` call is deliberate:
+ASP.NET Core's Request Delegate Generator sees the route and query parameters, while Elarion owns typed
+stream invocation, canonical JSON, and SSE framing.
+
+```csharp
+[AppModule("Reports")]
+public static partial class ReportsModule {
+    public static void MapEndpoints(IEndpointRouteBuilder endpoints) {
+        endpoints.MapGet("reports/{reportId}/export", static (Guid reportId) =>
+            ElarionHttpResults.ToStreamResult<ExportRows.Query, ExportRows.Row>(new() {
+                ReportId = reportId,
+            }));
+    }
+}
+```
+
+The host still maps all module-owned routes through `MapElarionEndpoints`, and it calls
+`AddElarionHttpJson()` so minimal APIs use the same canonical, source-generated JSON resolver chain as
+the rest of Elarion. Register the item type in the module or host JSON context as usual.
+
+`ToStreamResult` starts the decorated handler only when ASP.NET executes the result:
+
+- A validation, authorization, feature-gate, or not-found failure becomes the normal Elarion problem
+  response **before** SSE headers are committed.
+- Once accepted, normal completion ends the stream; a disconnect cancels it; a lazy fault ends the
+  connection. There is no second `Result` envelope after items begin.
+- The accepted invocation retains its fresh DI/dispatch scope until enumeration completes, faults,
+  cancels, or is disposed. A stream can therefore retain its `DbContext` and reader for its full duration;
+  use a finite, intentional resource lifetime rather than an accidental infinite response.
+- Normal SSE items have no shared sequence, replay ring, or `Last-Event-ID` resume behavior. If those are
+  required, the response is a hot producer-owned `StreamHub`, not this contract.
+
+See [HTTP endpoints](/docs/capabilities/transports/http-endpoints) for ordinary generated unary routes.
+The complete working cold-export example is [EdgeTelemetry](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry),
+which contrasts its unbuffered `/history/stream` response with a buffered JSON query.
+
+## Pipeline and transport boundaries
+
+Stream handlers retain the request gates that decide whether a stream may begin:
+
+- **Applies:** authorization, feature gates, validation, observability, and context enrichment.
+- **Does not apply automatically:** unary transactions, caching and invalidation, idempotency, resilience,
+  and audit. Do not infer a retry or transaction around a long lazy enumeration from attributes intended
+  for a unary request.
+
+For a custom server-streaming transport, call
+`StreamHandlerInvoker.InvokeAsync<TRequest, TItem>`. On success, `await using` its returned invocation
+while writing items; it owns the fresh scope until enumeration ends. Dispose an accepted invocation that
+you never enumerate, and never return its bare sequence after releasing the scope. The
+[custom transports guide](/docs/capabilities/transports/custom-transports) shows the adapter shape.
+
+HTTP/SSE and [gRPC server streaming](/docs/capabilities/transports/grpc#server-streaming) support this
+cold request shape. gRPC uses the same invocation lifetime, but maps a startup `AppError` to gRPC status
+before it writes an item. Client and duplex streaming are deliberately out of scope.
+
+## When to use the neighbouring realtime APIs instead
+
+- **Client events:** use for committed facts, live progress, or latest-wins state when a missed message only
+  leaves a browser stale and re-querying repairs it. They remain the default browser-push tier.
+- **`StreamHub`:** use when each item is data, completion matters, and a single actor can sequence a live
+  producer per key. The [LiveQuotes sample](https://github.com/swimmesberger/Elarion/tree/main/samples/LiveQuotes)
+  deliberately uses client events for its dashboard and a resumable `StreamHub` for every accepted tick.
+- **Connections:** use only when the link itself is stateful or client input is latency-interactive. They can
+  carry client-event subscriptions, but they do not turn an at-most-once hint into an ordered replayable
+  stream.
