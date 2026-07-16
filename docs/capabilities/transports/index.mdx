@@ -1,11 +1,12 @@
 ---
 title: Transports
-description: Map the same handler over HTTP, JSON-RPC, or MCP — three peer transports that share one handler shape and differ only in how they reach the network.
+description: Map a handler over HTTP, JSON-RPC, MCP, or explicit unary gRPC service methods while keeping application logic transport-neutral.
 ---
 
 A handler is transport-neutral: a request in, a `Result<T>` out, with no knowledge of how it was
-called. A **transport** is what puts that handler on the network. Elarion offers three, and they are
-peers — the same handler can be exposed over any combination of them with no change to its body.
+called. A **transport** is what puts that handler on the network. HTTP, JSON-RPC, and MCP are peer
+surfaces selected from one handler definition. gRPC is an additional typed adapter: its generated service
+override deliberately owns protobuf mapping while `Elarion.Grpc` preserves the same dispatch pipeline.
 
 <Cards>
   <Card title="HTTP endpoints" href="/docs/capabilities/transports/http-endpoints">
@@ -17,6 +18,9 @@ peers — the same handler can be exposed over any combination of them with no c
   <Card title="JSON-RPC" href="/docs/capabilities/transports/json-rpc">
     Operation-shaped methods from `[Handler]`, with a build-time schema and a typed TypeScript client.
   </Card>
+  <Card title="gRPC" href="/docs/capabilities/transports/grpc">
+    Explicit unary protobuf mappings that retain Elarion's typed handler pipeline without choosing a host.
+  </Card>
   <Card title="MCP" href="/docs/capabilities/transports/mcp">
     The same `[Handler]` operations exposed to AI agents as Model Context Protocol tools.
   </Card>
@@ -24,11 +28,11 @@ peers — the same handler can be exposed over any combination of them with no c
 
 ## The shared handler shape
 
-All three transports read the same thing: a handler implementing
-`IHandler<TRequest, Result<TResponse>>`. The request and response types may be nested inside the
-handler or declared top-level — the nesting carries no meaning. The transport unwraps the success
-value from `Result<T>` and maps an `AppError` to its own failure representation centrally, so the
-handler never encodes protocol concerns.
+Every transport ultimately invokes a handler implementing `IHandler<TRequest, Result<TResponse>>`. The
+request and response types may be nested inside the handler or declared top-level — the nesting carries no
+meaning. The transport unwraps the success value from `Result<T>` and maps an `AppError` to its own failure
+representation centrally, so the handler never encodes protocol concerns. gRPC adds explicit generated
+protobuf-to-application mapping in the service override; see [gRPC](/docs/capabilities/transports/grpc).
 
 JSON-RPC and MCP share a single identity. A handler opts into them with one `[Handler("module.action")]`
 attribute (the operation name is optional — `[Handler]` alone is valid and the name is inferred by
@@ -68,7 +72,7 @@ They are not exclusive. A handler can be a REST endpoint, a JSON-RPC method, and
 
 ## Wiring
 
-All three transports are **module-scoped and feature-flag-gated** when a host opts into
+HTTP, JSON-RPC, and MCP are **module-scoped and feature-flag-gated** when a host opts into
 `[GenerateModuleBootstrapper]`: a disabled module disappears from every transport at once. See
 [Hosting & composition](/docs/capabilities/hosting) for how the generated bootstrapper maps each
 transport into the host.

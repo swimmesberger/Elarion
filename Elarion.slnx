@@ -63,6 +63,7 @@
     <Project Path="src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj" />
     <Project Path="src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj" />
     <Project Path="src/Elarion.Idempotency.EntityFrameworkCore/Elarion.Idempotency.EntityFrameworkCore.csproj" />
+    <Project Path="src/Elarion.Grpc/Elarion.Grpc.csproj" />
     <Project Path="src/Elarion.Idempotency.EntityFrameworkCore.Generators/Elarion.Idempotency.EntityFrameworkCore.Generators.csproj" />
     <Project Path="src/Elarion.Auditing.EntityFrameworkCore/Elarion.Auditing.EntityFrameworkCore.csproj" />
     <Project Path="src/Elarion.Auditing.EntityFrameworkCore.Generators/Elarion.Auditing.EntityFrameworkCore.Generators.csproj" />

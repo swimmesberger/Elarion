@@ -83,3 +83,4 @@ designs that are not yet implemented.
 - [ADR-0060: A database-neutral migration core, and a SQLite provider](0060-database-neutral-migration-core.md)
 - [ADR-0061: Virtual-sharded actors — fixed role partitions without a cluster](0061-virtual-sharded-actors.md)
 - [ADR-0062: Role-affine routing and target-group outbox delivery](0062-role-affine-routing-and-outbox-delivery.md)
+- [ADR-0063: gRPC ships as a typed unary transport adapter](0063-grpc-unary-transport.md)
