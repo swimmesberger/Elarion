@@ -3,508 +3,396 @@
 Canonical agent and contributor guidance. Tool entry points point here and must not duplicate content:
 `CLAUDE.md` imports this file (`@AGENTS.md`); `.github/copilot-instructions.md` points here; and
 `.github/instructions/csharp.instructions.md` scopes the **C# coding standards** section to `**/*.cs` for
-Copilot. Add or change guidance **here**, not in the pointer files.
+Copilot. Add or change mandatory repository guidance here, not in the pointer files.
 
 Elarion is a reusable .NET application framework. Keep it independent of every downstream application: do
-not mention, depend on, or optimize for any consuming app by name. Application domain code, database
-conventions, UI frameworks, and deployment quirks belong in consuming repositories.
+not mention, depend on, or optimize for a consuming app by name. Application domain code, database
+conventions, UI frameworks, deployment quirks, and application-specific generators belong in consuming
+repositories.
 
-This file is agent orientation + conventions. The full per-package purpose/dependency table lives in
-[`docs/reference/packages.mdx`](docs/reference/packages.mdx); the "why" behind every decision lives in the
-linked ADRs (`docs/decisions/`) and concept docs (`docs/concepts/`). Prefer editing those for depth; keep
-this file to the rules an agent must follow.
+This file states the rules an agent needs while changing the framework. Use the owning source for detail:
 
-**Scale positioning.** Elarion targets small-to-mid apps — roughly **1–10 nodes, vertical-first, on the one
-PostgreSQL the app already runs**. Shipped defaults (scheduler claims, outbox leases, settings
-`LISTEN/NOTIFY`, the `UNLOGGED` L2 cache) must work at that tier and need not scale beyond it. A concern
-that only appears past ~10 nodes is resolved by **replacing the seam** (`IScheduledOccurrenceCoordinator`,
-`ISettingsChangeSource`, `IIntegrationEventBus`, `IBlobStore`, `IHandlerCache`, …) with a dedicated job
-engine/broker — never by growing a default's complexity or config surface. Design test for any new default:
-"does it cover 10 nodes on one Postgres?" (ADR-0025). **Postgres extensions are composition, not
-scale-out** (ADR-0056): a specialized workload (time-series, vector search) is a documented extension
-*recipe* over the one Postgres, never an Elarion subsystem; recipes may assume extensions, packages must
-keep working without them (posture + image guidance: `docs/capabilities/postgres-extensions.mdx`; worked
-recipe: `docs/capabilities/time-series.mdx`).
+| Need | Canonical source |
+| --- | --- |
+| Package selection and dependencies | [`docs/reference/packages.mdx`](docs/reference/packages.mdx) |
+| Current behavior and public API | [`docs/concepts/`](docs/concepts/) and [`docs/capabilities/`](docs/capabilities/) |
+| Attributes, diagnostics, and configuration | [`docs/reference/`](docs/reference/) |
+| Design rationale, trade-offs, and rejected alternatives | [`docs/decisions/`](docs/decisions/) — ADRs are rationale, not necessarily current API |
+| Build, validation, and contributor workflow | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Release operation | [`RELEASING.md`](RELEASING.md) |
+| Mechanical formatting | [`.editorconfig`](.editorconfig) |
 
-**Actor placement API.** Actor placement is a single enum on `[Actor]`/`ActorOptions`:
-`ActorPlacementMode.Local` (default), `SingleHome`, or `VirtualShards` (ADR-0061). The old boolean
-`SingleHomed` surface is intentionally not retained; use `Placement = ActorPlacementMode.SingleHome`.
+**Scale positioning.** Elarion targets small-to-mid apps: roughly **1–10 nodes, vertical-first, on the
+one PostgreSQL the application already runs**. Shipped defaults must work at that tier, but need not scale
+past it. If a concern appears only beyond that tier, replace the relevant seam with a dedicated job engine,
+broker, cache, or actor system; do not grow a default's complexity or configuration surface. Test every new
+default with: “does it cover ten nodes on one Postgres?” (ADR-0025). PostgreSQL extensions are composition,
+not scale-out (ADR-0056): document extension recipes, but keep packages usable without extensions.
+
+**Actor placement API.** Actor placement is `ActorPlacementMode.Local` (default), `SingleHome`, or
+`VirtualShards` on `[Actor]`/`ActorOptions` (ADR-0061). Do not reintroduce the legacy `SingleHomed` boolean;
+use `Placement = ActorPlacementMode.SingleHome`.
 
 ## Package layout
 
-One line each; see [`packages.mdx`](docs/reference/packages.mdx) for entry points + dependency shapes and the
-ADRs for mechanics. Trigger diagnostics are in parentheses.
+[`docs/reference/packages.mdx`](docs/reference/packages.mdx) is the canonical grouped public-package
+reference. Start an application/module assembly with `Elarion`, then add only the provider and host adapters
+it uses. Add `Elarion.Abstractions` only to contract-only assemblies that cannot take runtime behavior.
 
-- `Elarion.Abstractions` — implementation-neutral contracts: handler interfaces (`IHandler<TRequest,TResponse>` + the `IHandler<T>` no-content sugar), `Result<T>`/`Result`/`Unit` (`Unit` in `Elarion.Abstractions.Results`, not the root namespace), `ElarionFile` (the **in-memory small-file payload** for downloads *and* uploads, deliberately bytes-only — content + content type + file name; fixed base64 JSON envelope via `ElarionFileJsonConverter`, seeded in `ElarionFrameworkJsonContext`; large files use the staged-blob tier instead, ADR-0039), CQRS markers (`IRequest`/`ICommand`/`IQuery`), pagination (`Page<T>`, keyset/offset requests), scheduling, variable substitution (`IVariableSource`/`IObservableVariableSource`, Spring `${key:-default}`), messaging markers/buses, the authorization + feature-flag + variant + validation + auditing building blocks (attributes + seams — no provider deps; the pipeline **decorators** moved to `Elarion` core, ADR-0034), the named handler bus (`HandlerDispatcher`) + per-call dispatch-scope rail (`Elarion.Abstractions.Dispatch`), canonical JSON (`ElarionJsonOptions`/`IElarionJsonSerialization`/`AddElarionJson`, no `M.E.Options` dep), and source-gen triggers. No runtime-integration deps.
-- `Elarion` — runtime primitives: the pipeline **decorators** (`Elarion.Pipeline` — observability (`ObservabilityDecorator`, the always-on outermost merge of tracing + context enrichment over a static `HandlerObservability` core, ADR-0059), authorization, feature-gate, validation, idempotency, resilience, caching, audit (two-position: success recorder inside the tx, outcome observer outside authorization, ADR-0045) + `HandlerTelemetry`; moved out of Abstractions, ADR-0034), modules, current-user, default `ClaimsAuthorizer`, in-memory scheduler + domain event bus, resilience policy catalog, session bootstrap (`Elarion.Session`, ADR-0030), default-on user-context trace/log enrichment (`AddElarionUserContextEnrichment` + `IHandlerContextEnricher` seam, ADR-0033), and **ordered streams** (`Elarion.Streams` namespace, ADR-0052): `StreamHub<T>` — hot ordered completable broadcast, atomic replay-then-live (`ReplayCapacity` ring; default 1 = BehaviorSubject), `ResumeAfterSequence` (gap beyond the ring = visible sequence jump, never a silent hole), per-subscriber overflow `DropOldest`/`Wait`/`Cancel`, `Complete`/`Fail`; BCL-only. **Client events stay the default; a stream needs a single live sequencer per key** — litmus: a lost message makes the consumer *wrong* (sequence is the data) ⇒ stream; merely *stale* (latest-wins, re-query heals) ⇒ client events; no sequencer ⇒ not a stream. Also **data-rate shaping helpers** (`Elarion.Buffering`, ADR-0055; BCL-only, no DI, `TimeProvider`-driven): `WriteBehindBuffer<T>` — batch loss-tolerant samples by count/interval (whichever first), bounded drop-oldest, single-flight, explicit `FlushAsync` + flush-on-dispose, failed flush drops its batch (rethrown from `FlushAsync`, else `onFlushError`), natural delegate = ADR-0051 `ExecuteInsertAsync`; `KeyedConflater<TKey,TValue>` — latest-wins per key at most once per `MinInterval` (leading emit immediate, trailing emit so conflation never ends stale), per-key serialized emits, idle keys retire, dispose flushes pending, natural delegate = client-event publish. Deliberately these two shapes and no more — needs beyond them (windows/joins/replay) mean adopting a real reactive library whole. **Bundles the `Elarion.Generators` analyzer** — the single home; reference `Elarion` directly in any assembly needing the generator (analyzer assets aren't transitive). Transport-agnostic + dependency-light (ADR-0017): pulls only `Elarion.Abstractions` + `Microsoft.Extensions.*` *Abstractions*; heavy provider defaults are opt-in siblings.
-- `Elarion.Caching` — HybridCache-backed `IHandlerCache` default (`AddElarionHandlerCaching`); pulls `M.E.Caching.Hybrid`. The `[Cacheable]`/`[CacheInvalidate]` seam stays in Abstractions (ADR-0004/0017).
-- `Elarion.Caching.PostgreSql` — recommended **L2**: a Postgres `UNLOGGED` table behind HybridCache (`AddElarionPostgreSqlHandlerCaching`, `UseWAL=false`), reusing your Postgres instead of Redis (ADR-0020). Not `IsAotCompatible`.
-- `Elarion.Resilience` — Polly-backed `IResiliencePipelineRunner` default (`AddElarionResilience`); pulls `M.E.Resilience`. Catalog/metadata stay in Abstractions; `ResilienceDecorator` lives in `Elarion` core (ADR-0017/0034).
-- `Elarion.Actors` — in-memory actor runtime (ADR-0042): plain `[Actor]` classes become keyed, mailbox-protected state machines with **source-generated typed facades**. **Use-case rule (mandatory, docs "When (not) to use an actor"): default to the database** — optimistic concurrency/constraints/`[Idempotent]`/jobs solve classical web-app concurrency, most apps need zero actors; an actor is justified only when the consistency unit is a live in-memory thing: (1) owns a stateful external resource/connection (socket, ordered per-tenant API client), (2) hot ephemeral loss-tolerant state (live telemetry, presence, progress, write-behind buffers — no snapshot), (3) an event-driven decide-once coordinator (the snapshot + single-homing shape); if it sketches as a table with a version column, use the table. (`IActorSystem.Get<IOrderFulfillment>(orderId)` — facade = class name minus `Actor`, prefixed `I`). Keyed via an `IActorContext<TKey>` ctor param (else singleton); virtual activation + idle passivation (default 5 min) with `IActorLifecycle` load/flush hooks; per-activation DI scope; non-reentrant default + `[Reentrant]` Orleans-style turn interleaving (no `ReenterAfter` — rejected); per-call timeout (default 30 s) is the deadlock backstop; backpressure = Wait/Fail only (no drops — calls are request/reply); no decorator pipeline (handlers stay the gate; actors are module-internal, ELMOD002). **Integration events reach actors via `[ConsumeEvent]` on an actor method** — the generator emits the inbox-deduped relay that routes into the mailbox (ADR-0046, supersedes the ADR-0042 hand-written-relay rule): key inferred from the single event property assignable to `TKey` or named with `[ActorKey(nameof(Evt.Prop))]`; the relay calls the public facade (same as a hand-written relay — no generation-only enqueue path), so the consumed method is `public`/dual-purpose (ELACT009 otherwise); integration-events-only. `ActorRegistrationGenerator` in `Elarion.Generators` (`[GenerateActors]`/`[UseElarion]`; per-module `Add{Module}Actors` via the `AddActors` hook; ELACT001–006, 008–010). **State snapshotting (ADR-0047)**: an `IActorState<TState>` ctor param gives the activation durable state — loaded before `OnActivateAsync`, written only by explicit `WriteStateAsync` (passivation never flushes), `ClearStateAsync` deletes, `ReadStateAsync` refreshes; members deliberately mirror Orleans' `IPersistentState<T>` names (`RecordExists`/`Etag` included) so state call sites migrate to Orleans unchanged — keep any new member Orleans-named; provider seam `IActorSnapshotStore` (canonical-JSON text payload + opaque ETag; NOT Orleans-mirrored — providers get replaced at migration, not ported); on an ETag conflict (= two nodes host one key) the stale activation **passivates and the turn transparently re-runs once** on a fresh activation that loaded the winning snapshot — only a second consecutive conflict surfaces as `ActorSnapshotConcurrencyException` (every conflict warns + counts `actor.snapshot.conflicts`); corollary: a conflicted turn executes twice, so side effects before the write are at-least-once (put them after the write or make them idempotent); **state design rule (mandatory)**: the state record is the query contract — interpretation (constants/derived flags) + pure transitions live ON the record (shared by actor, `IActorStateReader`, SQL), actor methods only apply→write→side-effect, shape evolution = tolerant record properties (never `OnActivateAsync` migration — fixes only the home's view); **write cadence decides query meaning**: write-through → reader is DB-fresh (the only cadence where the reader is a first-class query path); checkpointing → reader is bounded-stale (warm-restart mechanism, never a "live" view); real-time observation of hot in-memory state = PUSH via client events from the home (Postgres fan-out reaches every instance) — never reader polling; service-side pull of live actor memory = the Orleans trigger; the state type must be in a registered `JsonSerializerContext`; snapshot writes never join a business transaction. **Stream methods (ADR-0052)**: an actor method returning `IAsyncEnumerable<T>` = a facade stream (Orleans 7+ grain shape) — attach is a mailbox turn, enumeration off-mailbox (`ActorStreams.Defer`, one attach per enumeration); no `CancellationToken` param and no `[ConsumeEvent]` on stream methods (ELACT012 — the turn token is pooled; the facade adds the trailing token); a live enumeration retains the activation against IDLE passivation (refCount lifetime; idle window restarts when the last consumer leaves), while correctness passivations (snapshot conflict, shutdown) ignore retention — so a `StreamHub` still dies with its activation: `Complete()` it in `OnDeactivateAsync`; re-activation = new hub = new sequence epoch (resume is within-one-hub-lifetime). Telemetry source/meter `Elarion.Actors`; exceptions cross the mailbox unwrapped with actor-side stack traces. **Single-node by design** — need a cluster: swap to Orleans/Akka.NET/Proto.Actor, never grow this default (ADR-0025).
-- `Elarion.Actors.PostgreSql` — PostgreSQL actor snapshot store (ADR-0047) + actor placement (ADR-0048/0061): `elarion_actor_snapshots` (jsonb payload — actor state stays SQL-inspectable; `version bigint` = the ETag) behind `IActorSnapshotStore` + `IActorStateReader`; `AddElarionPostgreSqlActorHome<T>` binds `SingleHome` to the `"actors"` role, while `AddElarionPostgreSqlActorSharding<T>` binds `VirtualShards` to fixed `actors:partition-N` roles through the general Coordination partition primitive. Calls elsewhere fail with `ActorNotHomedException`; generated outbox deliveries target the corresponding home/partition role per consumer (ADR-0062). Not `IsAotCompatible`.
-- `Elarion.Coordination.PostgreSql` — PostgreSQL **role leases and fixed role partitions** (ADR-0049/0062): heartbeat-renewed single-holder election per named role (`elarion_role_leases`; fail-closed) plus `AddElarionPostgreSqlRolePartition<T>` → keyed `IRolePartition` over `{name}:partition-N` roles, independent of process count. `IRoleLeaseRegistry` exposes locally held roles to role-affine workers. Lease rows carry the holder's advertised address for HTTP routing (ADR-0050). Coarse roles only — not distributed locks, membership, or automatic balancing. Not `IsAotCompatible`.
-- `Elarion.Validation` — `M.E.Validation`-backed `IRequestValidator` default (`AddElarionValidation`, also calls `AddElarionJson`); runtime base only (`ExcludeAssets="analyzers"` — Elarion's `ValidationResolverGenerator` supplies metadata). App references it to enforce validation + silence `ELVAL002`. `IsAotCompatible` (ADR-0027).
-- `Elarion.Scheduling.EntityFrameworkCore` — cross-instance scheduler coordination over EF/Postgres: per-occurrence claim rows → exactly one node runs each recurring occurrence (`AddElarionSchedulerEntityFrameworkCore<T>`; `UseElarionSchedulerClaims`/`[GenerateElarionSchedulerClaims]`, ELSCH001). `[ScheduledJob(Placement=JobPlacement.EveryNode)]` opts out. Fail-closed (ADR-0025).
-- `Elarion.FeatureFlags.OpenFeature` — OpenFeature-backed `IFeatureFlagService` default (`AddElarionOpenFeature`, bring your provider) + `ICurrentUser`→`EvaluationContext` mapping, no `HttpContext`.
-- `Elarion.FeatureFlags.FeatureManagement` — batteries-included config-driven flags via the M.FeatureManagement OpenFeature provider (`AddElarionFeatureManagement(config)`), ADR-0016.
-- `Elarion.Blobs` — provider-neutral, streaming-first blob contracts: `IBlobStore` (`SaveAsync`/`OpenReadAsync`→disposable `BlobDownload`/metadata/delete/exists), ergonomic `byte[]`/file helpers as extensions, the **upload lifecycle** (`BlobLifecycleState` Pending/Committed, `IBlobLifecycle` — `CommitAsync` inside the caller's tx, `DeleteExpiredPendingAsync` GC), and the **protocol-neutral staged (resumable) upload seam** (`IStagedUploadStore`: offset-guarded `AppendAsync`, explicit idempotent `CompleteAsync`→Pending blob, nullable `Length` for deferred-length/RUFH; expiry policy arrives as data, ADR-0035) with the in-memory default + the provider-neutral `StagedUploadGarbageCollector`/`BlobGarbageCollector`, and **prefix+delimiter listing** (`ListAsync`/`ListContainersAsync` → virtual-directory roll-up, opaque continuation tokens, `BlobMetadata.State`; a browse/ops surface, never real directories or an app-query path, ADR-0036). Stays S3-free.
-- `Elarion.Blobs.PostgreSql` — Postgres blob storage via EF model config + Npgsql streaming I/O (`AddElarionPostgreSqlBlobStore<T>`; `UseElarionBlobStorage`/`[GenerateElarionBlobStorage]`, ELBLB001; streaming reads **clone the context's connection** — no `NpgsqlDataSource` registration or connection string, ADR-0041). Implements `IBlobLifecycle` (partial index over pending rows) and the durable `IStagedUploadStore` (bytea staging, conditional-append offset guard; `AddElarionPostgreSqlStagedUploads<T>`; `UseElarionStagedUploads`/`[GenerateElarionStagedUploads]`, ELBLB002).
-- `Elarion.Blobs.AspNetCore` — direct blob-transfer endpoints: upload (`MapElarionBlobUploads`: POST bytes→Pending `BlobRef`, DELETE→owner cancel; content-type allow-list + size cap, fits FilePond/`fetch`) and the owner-scoped streaming download (`MapElarionBlobDownloads`: GET /{blobId}, exact-owner fail-closed → 404; the staged-blob export leg, ADR-0039).
-- `Elarion.Blobs.Tus` — **tus 1.0** resumable upload transport (`MapElarionResumableBlobUploads`); the recommended transport (Uppy/`tus-js-client`). A pure protocol adapter over `IStagedUploadStore` (all policy in `ResumableBlobUploadOptions`, handed to the store as instants); completed upload → Pending blob, ref in `Elarion-Blob-Ref`.
-- `Elarion.Blobs.Azure` — Azure Blob Storage backend: `AzureBlobStore` (`IBlobStore`+`IBlobLifecycle` via blob metadata, ETag-guarded commit/GC) and the native `AzureStagedUploadStore` (one append blob per session, server-side `If-Append-Position-Equal` offset guard, completion = server-side copy; `AddElarionAzureBlobStore`/`AddElarionAzureStagedUploads`). Zero protocol knowledge — the ADR-0035 seam-validation exercise. Not `IsAotCompatible`-flagged.
-- `Elarion.ClientEvents` — client events (ADR-0043): after-commit facts projected to browsers as **at-most-once hints** (light payloads — ids/refs; client converges by re-query). Contracts in Abstractions (`IClientEvent` marker, `IClientEventPublisher.PublishAsync(evt, scope)`, `ClientEventScope` Global/User/Resource, fail-closed `IClientEventSubscriptionAuthorizer`); this package owns the topic catalog (`AddElarionClientEvents(e => e.AddTopic<T>("module.event", t => t.RequirePermission(…)))` — opt-in by enumeration, unregistered publish fails loud; under `[UseElarion]`/`[GenerateClientEventTopics]` the registration is **generated per module**: topic inferred `{module}.{name}` (trailing `Event` stripped, `[ClientEvent("…")]` overrides), contract-level `[RequirePermission]`/`[RequireRole]` become subscribe-time requirements, `[AllowAnyResource]` declares the resource segment a routing key — skips the authorizer seam, per-topic so a global allow-all never opens future entitlement topics —, `[SubscriptionObserver<T>]` wires the producer-side lifecycle, ELCEV001–ELCEV003), **producer-side lifecycle** (Rx-shaped, no Rx dep: `IClientEventSubscriptionObserver.OnSubscribedAsync` + per-subscriber `IClientEventSubscriberSink` = the BehaviorSubject-style greeting/initial value — producer decides, reconnect re-greets, so streams self-converge; `OnInterestChangedAsync` = RefCount with linger-debounced last-watcher departure, default 5 s; pull sibling `IClientEventInterest.HasSubscribers` for skip-unobserved-work — safe because the greeting covers late arrivals; interest is node-local by design, authoritative via the ADR-0050 home routing; publish never returns subscriber counts), the canonical-JSON publisher, and the in-process registry behind the replaceable `IClientEventBroadcaster`/`IClientEventLocalDelivery` seams. Recommended producer: method-form `[ConsumeEvent]` projection (post-commit for free); direct in-handler publish = the ephemeral progress tier. `IsAotCompatible`.
-- `Elarion.ClientEvents.PostgreSql` — cross-node client-event fan-out over `LISTEN/NOTIFY` (`AddElarionPostgreSqlClientEvents`, the ADR-0024 listener pattern): every publish = `pg_notify`, every node (publisher included — one delivery path) delivers to its own browsers via a dedicated LISTEN connection; after a reconnect it pushes `elarion.connected` (`ClientEventControlEvents`) to all local subscribers via `IClientEventLocalDelivery.DeliverToAll` so clients re-query; >8 KB NOTIFY payloads fail loud at publish. ~1–10 nodes; past that replace `IClientEventBroadcaster` (ADR-0025). Not `IsAotCompatible`.
-- `Elarion.ClientEvents.AspNetCore` — the SSE transport over the native `TypedResults.ServerSentEvents`: `MapElarionClientEvents(route)` (GET, `subscriptions` query param = JSON array of `{topic, resource?}`), fail-closed subscribe-time auth (401 unauthenticated; unknown topic / failed topic requirement / resource scope without passing authorizer → 404, never leaking existence; `[AllowAnyResource]` topics skip the authorizer), user scope always the caller's own; control signals are named events (`elarion.connected` on open = re-query hint, `elarion.keepAlive` on 15 s idle).
-- `Elarion.Connections` — bidirectional client-connection kernel (ADR-0053): contracts in `Elarion.Abstractions.Connections` (`ClientConnection` — opaque id, connect-time principal, `PrincipalId` = user id for browsers / **device id for device links** (a device's parallel channels each register under it), bounded `Transport` tag, opaque metadata; `IClientConnectionRegistry` **node-local by design**; `IClientConnectionObserver`; `IClientConnectionSink` — at-most-once `SendAsync` + `InvokeAsync` faulting explicitly via `ClientConnectionClosedException`/timeout, never silently — bounded by a 30 s kernel default (`ElarionConnectionsOptions.DefaultInvokeTimeout`, per-call `Timeout` wins, `null` = no default)). Kernel ships the registry default (observers run after the index mutation, failure-isolated; duplicate register throws, unregister idempotent), the transport-neutral codec seam `IClientConnectionProtocol` (complete inbound messages, sequential per connection; outbound encoding codec-owned, fail-loud defaults; framing is the ADAPTER's job — WS frames natively, TCP owns a framer, datagrams are messages), `ClientConnectionTicket`, and `ClientConnectionEventBridge` (any adapter = a peer delivery leg of SSE: same resolver/catalog/auth, `elarion.connected` greeting per subscribe, subscriptions die with their connection). **When-to-use litmus (mandatory)**: default to request/reply + client events; a connection is justified only for (1) interactive-rate client→server where batch commands' flush latency fails, (2) connection-is-the-state (device links — pair with a digital-twin actor keyed by device id), (3) server→client RPC. Synthetic (socket-less) connections are first-class — the contracts never assume a socket. No placement/balancing: multi-node = co-locate ingress with the single-homed home (ADR-0048/0050); spreading twins across nodes is sharding (partitioned roles recipe or Orleans). Meter `Elarion.Connections` (`connection.active/opened/closed`, `connection.event_subscriptions.active`). `IsAotCompatible`.
-- `Elarion.Connections.AspNetCore` — the WebSocket adapter, device-gateway-shaped (doubles as the ADR-0053 seam-validation exercise): `MapElarionConnectionSocket<THandler>(route, options)` owns accept → app handshake (`WebSocketConnectionHandler.AuthenticateAsync` over `WebSocketHandshakeContext` — HTTP-level token or in-socket challenge/response; null → `PolicyViolation` close, nothing registered) → register → single receive loop (reassembly, `MaxMessageBytes` → `MessageTooBig`; codec exception logs + closes) → unregister on every exit. `WebSocketClientConnection` = the sink + serialized raw `SendTextAsync`/`SendBinaryAsync` for proprietary codecs; **per-connection settings** via `WebSocketConnectionHandler.ConfigureConnectionAsync(HttpContext)` → `WebSocketConnectionSettings` (size cap/idle/keep-alive/transport, resolved from the upgrade request before accept — one route serves tiers/device families); dynamic bindings need no manager here — routes ARE the bindings (wildcard route + authenticator consults the binding row; unknown → reject). Requires `app.UseWebSockets()` + `AddElarionConnections()`. A JSON-RPC-over-connection protocol (consuming `HandlerTransports.Connection`) and the SignalR adapter are deliberately deferred until demand.
-- `Elarion.Connections.Tcp` — the raw-socket adapter (BCL sockets, no ASP.NET): hosted **listener** (`AddElarionTcpConnectionListener<THandler>`) and **dial-out** (`AddElarionTcpConnectionDialer<THandler>`, jittered exponential reconnect — the gateway initiates the device link) over the same handler/codec seams; TCP has no message boundaries, so the adapter owns framing via the `TcpMessageFramer` seam — **boundaries only**: bytes are bytes on TCP, every inbound message reaches the codec's `OnBinaryAsync` as a raw slice and text decoding is the codec's one-liner (WS keeps both legs — text-vs-binary is a real frame property there); built-ins `LengthPrefixedTcpFramer` + `DelimitedTcpFramer` (telegram/line framing, start delimiter skips line noise), `MaxMessageBytes` enforced buffer-side; **benchmarked at raw-socket parity both directions** — 0 B/message end-to-end on binary delivery AND on `SendBinaryAsync` (per-connection frame buffer reused under the send lock — the proxy/forward hot loop is allocation-free on both halves), idle-armed ≈ free (sync-completion fast path skips all timer/Task machinery), a codec that wants strings pays one decode per message (`*Tcp*` in `tests/Elarion.Benchmarks`); sockets default `NoDelay=true` (Nagle+delayed-ACK stalls serial request/reply telegrams; endpoint + per-connection override); `HandshakeTimeout` (10 s) bounds unauthenticated slots; each Add call = one endpoint (deliberately not idempotent — many ports/devices); **runtime-managed bindings** via `AddElarionTcpConnectionEndpoints()` → `TcpConnectionEndpoints.ApplyListenerAsync/ApplyDialerAsync(name, configure)` (upsert: old endpoint + its connections torn down BEFORE new settings take effect — a binding change = reconnect under the new settings, direction flips listen↔dial included; `RemoveAsync` unbinds; host shutdown tears all down; **binding health is advertised** — `Statuses`/`GetStatus` + `StatusChanged` event: listener bind failure = `Faulted` with reason (state, not just a log), dialer between attempts = `Dialing` with last error; project onto a client event for admin UIs); **per-connection settings** via `TcpConnectionHandler.ConfigureConnectionAsync(TcpConnectionPeer)` → `TcpConnectionSettings` (framer/limits/idle/transport overrides, resolved before any byte so the framer governs the handshake — the binding-config lookup point when device families share one port). Kernel also ships opt-in conversation helpers both field gateways hand-rolled: `ConnectionInbox<TMessage>` (predicate waiters over buffered inbound, timeout, `Complete` faults waiters) + `ConnectionPendingRequests<TKey,TResponse>` (seq→completion correlation, `FailAll` on teardown — the natural `InvokeAsync` backing), and the idle hook (`IdleTimeout` option → codec `OnIdleAsync` per silent window; protocol keepalives/dead-link detection). `IsAotCompatible`.
-- `Elarion.Connections.Simulation` — simulation/test utilities every gateway suite AND runnable dev/demo simulator otherwise hand-rolls: `SimulatedClientConnection` (in-memory `IClientConnectionSink` double — awaitable `Sent` channel, `InvokeResponder`, `Close()` → subsequent sends fault with `ClientConnectionClosedException`; registers with the REAL registry, dogfooding the no-socket contract), `AwaitableConnectionObserver` (TCS-based connect/disconnect assertions + `Reset` for reconnect scenarios), `TcpSimulatorClient` (framed client for simulated devices/peers: `ConnectAsync`/`FromConnected`/`FromStream`), and **`InMemoryTcpLink`** — the socket-free default: runs the FULL TCP lifecycle (settings→handshake→framing→registry→codec→idle) over an `InMemoryDuplexStream` pair (no OS sockets/ports; deterministic `ServerConnection` + `ServerCompletion` awaits). Real sockets are for integration-testing the adapters themselves. `IsAotCompatible`.
-- `Elarion.Devices` — device identity + provisioning chain (ADR-0054), the handshake companion to the connections stack: `IDevicePairingService` (issue = CSPRNG code over a Crockford-style typeable alphabet, TTL, **device id pre-assigned at issue** for issuer-side correlation; redeem = atomic single-use claim → mint CSPRNG key, **re-pairing rotates**: a code issued for a provisioned id replaces its key at redeem; unknown/expired/used deliberately indistinguishable; codes stored **SHA-256-hashed**, plain code exists only in the issue response; alphabet validated normalization-stable + duplicate-free), seams `IDeviceKeyStore`/`IPairingCodeStore` (in-memory impls are an explicit opt-in `AddElarionInMemoryDeviceIdentityStores` — durable identity never defaults volatile), `HmacChallengeVerifier` (per-connection nonce, constant-time compare, unknown ids pay the same MAC cost; static `ComputeResponse` = the device/simulator half) returning the ticket inputs (principal + `PrincipalId` = device id), and `DevicePrincipal` (claim shape `elarion:device` + NameIdentifier so `[RequirePermission]`/auditing work unchanged). `AddElarionDeviceIdentity(configure?)` — repeat calls compose onto one options instance. The rate-limited anonymous redeem endpoint stays app-owned; inventory/OTA/mTLS are non-goals. BCL crypto only; `IsAotCompatible`.
-- `Elarion.Devices.EntityFrameworkCore` — durable device identity stores (ADR-0054): `elarion_device_keys` + `elarion_device_pairing_codes` behind the seams (`AddElarionDeviceIdentityEntityFrameworkCore<T>` = whole chain + stores; `UseElarionDeviceIdentity`/`[GenerateElarionDeviceIdentity]`, ELDEV001). Singleton stores, fresh DI scope per operation (handshakes/redeems run outside handler scopes); change-tracker-free writes (key put = `INSERT … ON CONFLICT DO UPDATE` — re-pairing rotates; claim = one `DELETE … RETURNING` — the PK constraint is the cross-node single-winner fence); expired-code GC = `IPairingCodeStore.DeleteExpiredAsync` (schedule it; sweep column indexed). Not `IsAotCompatible`.
-- `Elarion.JsonRpc` — JSON-RPC + MCP **protocol adapters** over the shared `HandlerDispatcher` (`JsonRpcDispatcher`/`McpDispatcher`, filtered by `HandlerTransports`): envelopes, telemetry, schema export, `Result`→`RpcError` (`AppErrorMapper`). ASP.NET-free. The bus + dispatch-scope rail live in Abstractions.
-- `Elarion.AspNetCore` — ASP.NET JSON-RPC/endpoints/current-user/JSON plus the **role-holder proxy** (ADR-0050/0062): `UseElarionRoleHolderProxy(role, prefixes)` routes a coarse role; `UseElarionPartitionHolderProxy(partition, affinityKey, prefixes)` resolves a role per request key, and its scoped overload must receive the logical actor name for virtual-sharded actor ingress. Both decide BEFORE routing, proxy one hop to the advertised holder, preserve streams, and fail boundedly with the loop guard; no exception-driven replay/retries/queueing. `AddElarionInstanceAddress()` supplies the advertised address. Also owns the ordered-stream SSE endpoint (ADR-0052).
-- `Elarion.AspNetCore.Identity` — optional ASP.NET Identity **host wiring** (`AddElarionIdentity<TUser,TRole,TDbContext>` over the app's plain `DbContext`); maps `ICurrentUser` to Identity claims. Model lives in the EF-only sibling below.
-- `Elarion.EntityFrameworkCore.Identity` — **web-free Identity model** (`[GenerateElarionIdentity<…>]`/`ApplyElarionIdentity`, ELIDN001); emits the seven Identity DbSets + snake_case model with no `FrameworkReference` — a data layer composes Identity without the ASP.NET shared framework.
-- `Elarion.AspNetCore.Mcp` — MCP server over Streamable HTTP (`AddElarionMcp`/`MapElarionMcp`), the `McpDispatcher` filtered to `HandlerTransports.Mcp`. Only package referencing the `ModelContextProtocol` SDK.
-- `Elarion.AspNetCore.OpenApi` — opt-in OpenAPI for `[HttpEndpoint]` over `Microsoft.AspNetCore.OpenApi` (`AddElarionOpenApi`/`app.MapOpenApi()`). Owns only what Microsoft can't: canonical-JSON wiring, clean operationIds, and the `Idempotency-Key`/`x-elarion-idempotent` transformer. Only package referencing `Microsoft.AspNetCore.OpenApi` (ADR-0026).
-- `Elarion.AspNetCore.SchemaGeneration` — MSBuild package + host-launching tool that exports `rpc-schema.json` at build.
-- `Elarion.EntityFrameworkCore` — EF marker attributes: `[EntityConfiguration]` (on an `IEntityTypeConfiguration<T>` — drives both the `DbSet<T>` and its `Configure`, no separate entity marker), `[GenerateDbSets]` (on the concrete partial `DbContext`), assembly `[UseElarionEntityFrameworkCore(Provider=…)]`. Runtime-dep-free; **bundles the EF generator** (ELEFC001).
-- `Elarion.EntityFrameworkCore.BulkOperations` — provider-neutral **bulk operations** (ADR-0051): `ExecuteInsertAsync` on `DbSet<T>` — set-based, non-tracking, `IEnumerable` + streaming `IAsyncEnumerable` overloads, optional `BulkInsertOptions` bag, returns the row count, joins the ambient `Database.CurrentTransaction`; aligned with the dotnet/efcore #27333/#29897 design sketch so a future native EF API is a rename. Store-generated columns are omitted and never fetched back; client value generators don't run (callers assign keys — ADR-0038 v7 Guids). Seam `IBulkInsertProvider` + shared `BulkInsertTargetResolver` column rules (converters honored; complex properties (value objects) flatten with null propagation; TPH discriminator constant supported; TPT/entity-splitting, owned, complex-collection, and non-discriminator shadow shapes fail loud). Opt-in upsert via the options bag (`OnConflict = DoNothing|Update`, `ConflictProperties` for an alternate unique target, validated against the model before touching the DB). No generator, no app-DI registration — the extension resolves the provider from the EF internal service provider. Deps: `EFCore.Relational` only.
-- `Elarion.BulkOperations.PostgreSql` — the binary-COPY `IBulkInsertProvider` (ADR-0051): registered EF-natively as an options extension — `options.UseNpgsql(…).UseElarionPostgreSqlBulkOperations()`. COPY runs on the context's **own** connection (all-or-nothing; rolls back with the caller's transaction; no second connection channel, ADR-0041 principle); compiled per-column typed writers with inlined value converters, cached per (model, entity type) — benchmarked at raw-`NpgsqlBinaryImporter` parity in time **and** allocations, ~12× `SaveChanges` at 100k rows (`tests/Elarion.Benchmarks`, `*BulkInsert*`). Upsert (`OnConflict != Throw`) stages the COPY into a per-call temp table + `INSERT … SELECT … ON CONFLICT` — the default direct path stays untouched. `RETURNING` deliberately out of scope. Not `IsAotCompatible`.
-- `Elarion.Paging` — keyset + offset pagination: `[Keyset<TEntity>]` (dedicated partial class), `IKeysetDefinition<T>`, cursor codec, `SortMap`/`SortMapBuilder`, `IQueryable` → `Page<T>`. Also the **data-level auth list filter** (Leg B, ADR-0013): `[ResourceFilter<TEntity>]` + `IQueryable.WhereAuthorized(spec, user)` → generated predicate applied *before* paging (ELRES001–005).
-- `Elarion.Authorization.EntityFrameworkCore` — **grants backend** (resource sharing, ADR-0013): a generic `ResourceGrant` table keyed by `(resourceType, resourceId, principalKind, principalId, operation)`, `IResourceGrantStore`, grants-backed `IResourceAuthorizer` (`[RequireResource]` default), `IResourceGrantSource` (`AddElarionResourceAuthorization<T>`; `ApplyElarionResourceGrants`/`[GenerateElarionResourceGrants]`, ELRG001). Auth-provider-neutral (keys off `ICurrentUser` strings).
-- `Elarion.Settings` — runtime key/value settings, swappable both sides: sink `ISettingsStore` (`SettingsScope` = open `(Kind,Owner)`, hierarchical `:` key, optimistic concurrency) + listen seam `ISettingsChangeSource`/`…Publisher` (`IChangeToken`); consumer `ISettingsManager` (typed via source-gen `JsonTypeInfo<T>`, per-user scope from `ICurrentUser`, fail-closed). Default in-process (`AddElarionSettings`), ADR-0011.
-- `Elarion.Settings.EntityFrameworkCore` — EF settings store (`AddElarionSettingsEntityFrameworkCore<T>`; `UseElarionSettings`/`[GenerateElarionSettings]`, ELSET001). Change-tracker-free writes (`ExecuteUpdate`/raw `INSERT`); announces via `IEfCoreSettingsChangeNotifier` (default in-process, skips ambient-tx writes).
-- `Elarion.Settings.Configuration` — consuming-side `IConfiguration` adapter over the `Global` scope with `IChangeToken` reload (`AddElarionSettingsConfiguration`); a `BackgroundService` loads once DI exists. Global scope only.
-- `Elarion.Settings.PostgreSql` — **cross-instance settings changes** over `LISTEN/NOTIFY` (`AddElarionPostgreSqlSettingsChanges`, ADR-0024): one dedicated LISTEN connection/node; the EF store swaps in a `pg_notify` notifier so writes are commit-gated. Not `IsAotCompatible`.
-- `Elarion.Messaging.InMemory` — best-effort in-memory integration (Plane B) bus, commit-gated by the DbContext tx (`AddElarionInMemoryIntegrationEventBus<T>` / `AddElarionInMemoryEventBus<T>`). Non-durable outbox sibling; the `<T>` overload auto-attaches its interceptors.
-- `Elarion.Messaging.Outbox` — EF transactional outbox (ADR-0062): one independently leased/retried `OutboxMessage` envelope per distinct target role, inserted atomically with business data. The common all-unbound path stays one row, one deserialize, one scope, and one finalize regardless of consumer count; target splitting is paid only when consumers actually resolve to different roles. Generated descriptors supply stable consumer ids and optional target roles; workers claim unbound groups or those targeting a locally held role, so `SingleHome`/`VirtualShards` actor consumers follow placement without HTTP forwarding. Consumers sharing a target retain generated order and one retry boundary (matching the original single-row outbox); split groups finalize independently and share `MessageId` as their inbox key. Publishing requires the complete consumer catalog; `RunDeliveryWorker=false` disables only claiming. `UseElarionOutbox`/`[GenerateElarionOutbox]` map/generate the single table.
-- `Elarion.Migrations` — the **database-neutral** SQL migration engine for **EF-free (NativeAOT) hosts** (ADR-0057/ADR-0060; EF tier keeps EF migrations — never a competing default; ships no framework-table scripts). Owns the whole script model + policy: embedded `V{version}__{description}.sql`/`R__{description}.sql` discovery (timestamp versions recommended; version segments in file names use single underscores — resource names split on dots), fail-closed total validation, SHA-256 checksums over BOM-stripped CRLF→LF-normalized content (line-ending churn never invalidates; genuine mismatch names script + both hashes + the two legal fixes), out-of-order/repeatable planning, and the roll-forward `MigrationRunner`: each versioned script's `elarion_schema_history` row commits **in the script's own transaction** — failed transactional migration = no row, rerun after fixing, **no repair command exists**; `-- elarion: no-transaction` (leading comment block; unknown directive = validation error) for DDL a database forbids in a transaction, and only such a failure records a failed row (versioned scripts only; a failed repeatable records nothing and reruns) → subsequent runs fail closed naming `ResolveFailedAsync(version, Retry \| MarkApplied)`. Out-of-order default `Warn` (applied + recorded in true `installed_rank` order; `Deny` opt-in); explicit `BaselineAsync` only (empty history); undo/placeholders/dialect *settings*/tiering rejected — a new engine is a new **provider package**, never a config flag (ADR-0025). Drives a provider through the `IMigrationDatabase`/`IMigrationSession` seam (contracts live here, no Abstractions seam); `AddElarionMigrationRunner(options, runnerFactory)` = shared one-runner guard + migrate-before-ready hosted service. Contains **no** driver. Deps: `M.E.*` abstractions; `IsAotCompatible`.
-- `Elarion.Migrations.PostgreSql` — PostgreSQL provider (ADR-0057/ADR-0060): one dedicated connection + **session-level** `pg_advisory_lock` (never xact-scoped — the Flyway `CREATE INDEX CONCURRENTLY` hang; session scope survives crashes), `to_regclass` existence check, and the dollar-quote/comment/string-aware statement splitter for the `no-transaction` path (`CREATE INDEX CONCURRENTLY`, …). The **multi-node** PostgreSQL AOT tier. `AddElarionPostgreSqlMigrations(connectionString \| dataSource, o => o.AddScripts(assembly, prefix))` / `PostgreSqlMigrationRunner` (`ApplyOnStartup=false` opts out). Deps: `Npgsql` + `Elarion.Migrations` + `M.E.*` abstractions; `IsAotCompatible`.
-- `Elarion.Migrations.Sqlite` — SQLite provider (ADR-0060): the **single-node / edge** AOT tier (one file per node — the multi-node lock concern does not exist). Serializes concurrent runners with a per-file **in-process** lock (SQLite is single-process; `LockTimeout` bounds the wait, `busy_timeout` backstops cross-process) — `locking_mode = EXCLUSIVE` is rejected (two connections deadlock promoting to exclusive). SQLite's full transactional DDL keeps the history-row-commits-with-its-script invariant identical; the rarely-needed `no-transaction` path runs in autocommit; `CommandTimeout` doesn't apply (no statement timeout). `AddElarionSqliteMigrations(connectionString, o => o.AddScripts(assembly, prefix))` / `SqliteMigrationRunner`. Tests run in-process (no Docker). Deps: `Microsoft.Data.Sqlite` (patched `SQLitePCLRaw` bundle) + `Elarion.Migrations` + `M.E.*` abstractions; `IsAotCompatible`.
-- `Elarion.Sql` — AOT-native SQL row mapping for EF-free hosts (ADR-0058), the access half of the AOT tier (ADR-0057 is the schema half; EF tier untouched — chosen by tier, not preference): `[SqlRecord]` → generated sealed `{Type}SqlMapper : ISqlRowMapper<T>` (bundled generator, ADR-0006-conformant) with `Ordinals` resolved by name once per result set then synchronous typed `GetFieldValue<T>` reads (no name lookups, no boxing, no per-column await), typed `BindParameters` (params named like columns), `TableName`/`Columns.*`/`Columns.All`/`Columns.AllParameters`/`Columns.AllAssignments` constants + the clause-free statement constants `Insert` (full-row) and `Select` (list prefix) — pure column enumeration, NEVER a predicate/clause (compose as consts: `Insert + " ON CONFLICT DO NOTHING"`; the boilerplate/DSL line), static `Instance`, a per-assembly `AddElarionSqlMappers` registration, and a **self-mapping** partial (`ISqlRecord<T>`: static-abstract `SqlMapper`/`InsertCommandText` + typed `Table`/`Select` fragments) so `db.QueryAsync<Order>($"{Order.Select} WHERE …")` resolves the mapper from the type — no mapper argument, no `:raw`. Row must be `partial` (ELSQL010); no member named SqlMapper/Table/Select (ELSQL011). `[SqlJson]` rides the canonical accessor (ADR-0023, `jsonb` under `[assembly: UseElarionSql(Provider = SqlProvider.Npgsql)]`); self-mapping JSON rows read it from a process-global ambient (`ElarionSqlJson`) installed at startup by a hosted service `AddElarionSqlMappers` registers for JSON assemblies (justifies a `Hosting.Abstractions` dep; lazy read, no init-order fragility). `[SqlColumn]`/`[SqlIgnore]` per property; snake_case default both names. **No interception, no reflection twin — unmapped type = compile error** (`ELSQL001`–`ELSQL011`), the deliberate inversion of Dapper.AOT's call-site interception (its indirection fallback is architectural, disqualifying for AOT-first). Positional records construct through the primary ctor; nominal `required`/`init` records via object initializer. Full-power-of-SQL surface: `new SqlStatement($"…")` interpolation binds values as `@pN` parameters at compile time (collections expand for `IN`, **empty collections throw**; a `SqlStatement` hole splices as a composable fragment with renumbered params; **no `:raw` and no `SqlStatement(string)`** — a raw string always parameterizes, trusted identifiers use `SqlStatement.Verbatim(col)`; `Empty`/`operator+` compose), `SqlWhere` = the no-DSL optional-filter accumulator (`WHERE (a) AND (b)` or nothing; kills WHERE 1=1; reusable across page + count(*)), plus `DbDataSource`/`DbConnection` extensions: reads (`QueryAsync`/`QueryFirstOrDefaultAsync`/`QuerySingleOrDefaultAsync` throws on >1/`QueryUnbufferedAsync` streaming), scalars/non-query, writes (`InsertAsync`/`InsertManyAsync` owns the one-tx reused-command loop + `sqlSuffix` for ON CONFLICT — a convenience batch, NOT bulk COPY; use ADR-0051 for that). **Benchmarked at hand-written-ADO.NET parity** in time and allocations, with Dapper/Dapper.AOT/EF no-tracking columns (`*SqlMapping*` in `tests/Elarion.Benchmarks`, the ADR-0051 discipline). NOT an ORM: no LINQ, no change tracking, no CRUD statement gen, no query-builder DSL (rejected as LINQ-to-SQL-by-another-name). Schema-derived metamodel + drift verification (design-time snapshot tool → `elarion-sql-schema.json` AdditionalFile) is committed but sequenced after v1. Deps: `Elarion.Abstractions` + `M.E.DependencyInjection.Abstractions` + `M.E.Hosting.Abstractions`; `IsAotCompatible`.
-- `Elarion.EntityFrameworkCore.UnitOfWork` — framework EF transaction boundary: `EfUnitOfWork<T>` over the EF-free `IUnitOfWork` seam (PostgreSQL `SET LOCAL lock_timeout` + savepoints) (`AddElarionUnitOfWork<T>`). The framework `TransactionDecorator` (`AppliesTo` = `ICommand`/`IIntegrationEvent`, not `[Idempotent]`/inboxed consumers) composes it (ADR-0021).
-- `Elarion.Idempotency.EntityFrameworkCore` — durable idempotency store: `INSERT … ON CONFLICT DO NOTHING` **inside the caller's tx** (composite-PK constraint is the cross-node fence, no external lock; `55P03` lock_timeout → 409) (`AddElarionIdempotencyEntityFrameworkCore<T>`; `ApplyElarionIdempotencyKeys`/`[GenerateElarionIdempotencyKeys]`, ELIDEMEF001). `[Idempotent]` + seams + in-memory default live in Abstractions/`Elarion` (ADR-0021). Also backs the **inbox** rows (`IdempotencyScope.Consumer`, ADR-0022).
-- `Elarion.Auditing.EntityFrameworkCore` — durable **audit trail** (ADR-0045): one append-only `AuditLogEntry` per `[Auditable]` handler invocation (who/what/resource+parent/outcome/correlation; action = the compile-resolved wire name). Success records ride the caller's tx (the `IAuditTrail.RecordAsync` **record factory** lets the sink flush pending writes so change capture contributes first); denials/failures write detached (survive rollback); idempotent replays record nothing. Field diffs via a `SaveChangesInterceptor` + additive `IAuditChangeContributor` seam (`[Audited]` entity opt-in + `[AuditIgnore]`, fail-closed; `ExecuteUpdate`/raw SQL invisible — handler fills `IAuditScope`). `[Auditable]`/`[ElarionAuditDefaults]` (commands-only defaults) in Abstractions; decorators in core, soft-attached on `IAuditTrail`. `AddElarionAuditingEntityFrameworkCore<T>`; `UseElarionAuditing`/`[GenerateElarionAuditing]`, ELAUD001; retention **off by default** (opt-in purge worker). Querying/display app-owned.
-- `Elarion.Generators` — Roslyn generators (handlers, services, modules, RPC/HTTP/MCP maps via `AppModuleDiscoveryGenerator`, validation resolvers, resilience policies, scheduled jobs, event consumers, client-event topics, permission catalog, per-module `ConfigureDefaultServices`). `HandlerRegistrationGenerator` auto-attaches the authorization → feature-gate → validation decorators (see the model sections). Hosts `ModuleApiGenerator` + `ModuleBoundaryAnalyzer` (ELMOD002). **`IsPackable=false`** — bundled into `Elarion`.
-- `Elarion.EntityFrameworkCore.Generators` — EF generators: `DbContextGenerator` (DbSets + `ConfigureEntities` + the `OnEntitiesConfigured` seam other feature generators implement; cross-assembly via `EntityConfigurationManifest`; `ConfigureEntities` ends with the **client-assigned Guid key pass** — single-property Guid PKs of the discovered entities' assemblies → `ValueGeneratedNever`, navigation children covered, explicit config/store defaults/value generators win, ADR-0038), the `[Keyset]` emitter (provider-aware row-value seek under Npgsql), and `[ResourceFilter]` (ELKEY005). **`IsPackable=false`** — bundled into `Elarion.EntityFrameworkCore`.
-- `@swimmesberger/elarion-jsonrpc-client-generator` — TS CLI/library: schema → method contracts, constraint-aware Zod params/result schemas, a params-pre-validating fetch client (`validateParams:false` opts out), native `File` mapping for `x-elarion-file` payloads (params take a `File`, results materialize one; base64 conversion at the call boundary, file-free schemas byte-identical), and the typed client-event subscription client from the schema's `events` block (ADR-0043: `events-client.ts` — topic-typed `createElarionEvents` over one `EventSource`, Zod-validated payloads, `$client.onConnected` = re-query hint; event-free schemas byte-identical). Zod v3+v4. `src/elarion-jsonrpc-client-generator`.
-- `@swimmesberger/elarion-contributions` — the **frontend contribution model** (ADR-0032 + its 2026-07 addendum): typed extension-point tokens (`defineExtensionPoint<TItem,TContext>` — the frontend `[ModuleContract]`; `ItemOf`/`ContextOf` extract the declared types), declarative module manifests (`defineModule` + `contribute(point, items)`; manifest-level `when` ANDs into every item), the `when` evaluator (`{module?,permission?,flag?,role?}`, AND, fail-closed — **UX projection, never security**; axes typed **strictly** against the app vocabulary: typo = compile error, omitted/`never` axis rejects every use), the deterministic `createContributionRegistry` (generic over the vocabulary; **throws on duplicate co-visible ids per point** — ids double as render keys, prefix `{module}.{item}`), `createContributionKit<Vocabulary>()` (axes optional — a no-auth app binds `{module}` only), and `createStaticCapabilities` (the no-snapshot `CapabilityReader`: modules/permissions/roles default `"all"`, flags none). Zero-dep core; `/react` bindings (`ContributionProvider`/`useContributions`/`<ExtensionSlot>` — its `context` prop is checked against the point's `TContext` and handed to the render prop; React optional peer); `/angular` bindings (`provideContributions`/`injectContributions`→`Signal`, `@angular/core` optional peer — decorator/template-free so it ships in the one package with no ng-packagr; app renders with `@for` or a self-owned `*extensionSlot` directive over `injectContributions`); `/tanstack-router` ships one helper — `redirectUnless(when, to)`/`createRouteGuards<V>()` — and no other routing machinery. Point payload shapes are app-owned (no framework `NavItem` — rejected as not framework-worthy; the modular-sidebar/shadcn recipe is in [frontend-modules](docs/concepts/frontend-modules.mdx)). Recommended composition (post-#71/#72): **manifests discovered** via `import.meta.glob("./modules/*/index.ts", {eager:true, import:"default"})`, **routes registered statically** (`routes: readonly AnyRoute[]` per module, one typed `addChildren` line — a glob-composed tree degrades `Link to` *and* `useLoaderData`/`useParams`; glob-routes + `AnyRouter` is the documented alternative). Vite adopters need `resolve.dedupe: ["react","react-dom"]` + `optimizeDeps.include` (documented; no package-side lever). TanStack Start (SSR) shim + no-auth recipe live in the concept doc. `src/elarion-contributions`.
+- Core packages stay independent of ASP.NET Core, EF Core, and concrete providers. Provider/host packages
+  are opt-in siblings, not dependencies pulled into `Elarion` or `Elarion.Abstractions`.
+- Choose a host tier deliberately: EF applications retain EF migrations; EF-free NativeAOT hosts pair
+  `Elarion.Sql` with `Elarion.Migrations` and exactly one migration provider.
+- `Elarion` bundles `Elarion.Generators`, and `Elarion.EntityFrameworkCore` bundles its EF generator.
+  Analyzer assets are not transitive: every assembly that needs a bundled generator must reference the
+  appropriate public package directly.
+- Generator implementation projects are bundled implementation details, not independently selectable
+  packages. Do not reconstruct a second package catalog here.
+- Package-specific API shape, dependencies, supported providers, and typical references belong in the
+  package reference. Read the relevant capability page before adding actors, connections, blobs, devices,
+  migrations, a transport, or frontend tooling.
 
 ## Architecture boundaries
 
-- Core packages stay reusable and domain-neutral — no consuming-app names, domain logic, or app deps.
-- `Elarion.Abstractions` must not depend on runtime-integration packages, and holds **contracts only** — interfaces, attributes, markers, and data records. Concrete behavior (the pipeline decorators, `HandlerTelemetry`, default impls) lives in `Elarion` core or an opt-in sibling; core is granted `InternalsVisibleTo` as the reference implementation (ADR-0034).
-- `Elarion` core is **dependency-light** (only Abstractions + `M.E.*` *Abstractions*) and **transport-agnostic** (no protocol/host/ASP.NET/EF package, not even `Elarion.JsonRpc`). A heavy provider default lives in its own opt-in sibling; the seam stays in Abstractions, the pipeline **decorator lives in `Elarion` core** (ADR-0017/0034). Do not reintroduce a concrete third-party runtime dep into core/Abstractions.
-- Two layers sit above core: **protocol** packages (`Elarion.JsonRpc` — format + dispatcher, no wire) and **host** packages (`Elarion.AspNetCore*` — bind a protocol to a wire). Hosts depend on protocols, not vice versa.
-- Event bus split stays: Abstractions owns the messaging contracts + plane split; `Elarion` owns only the in-memory impl. An alternative backend implements `IIntegrationEventBus` (the only broker-portable plane).
-- `Elarion.Blobs` stays provider-neutral and S3-free (lifecycle + staging seam in core; upload protocols are HTTP-layer adapters over `IStagedUploadStore` — tus today, RUFH/tus-2.0 as a future adapter over the same seam). A provider ships blob store + staging store as a matched pair. The S3 wire protocol is a deliberate non-goal.
-- Authorization, feature-flag gating, and request validation each follow the same **seam/impl split**: attribute + seam in Abstractions, the auto-attached **decorator in `Elarion` core** (no provider dep, ADR-0034); the heavy default in an opt-in package. Swapping a provider must never touch a `[FeatureGate]`/`[Require*]`/DTO. Validation uses standard `System.ComponentModel.DataAnnotations` — **no Elarion validation attribute, no FluentValidation dep anywhere** (app-owned decorator only). Business rules live in handlers, never a pre-handler validator (ADR-0027).
-- `Elarion.AspNetCore.OpenApi` is the only package referencing `Microsoft.AspNetCore.OpenApi`; the base HTTP transport + generator stay OpenAPI-free. No Elarion OpenAPI MSBuild package, no bespoke HTTP client generator (ADR-0026).
-- `Elarion.AspNetCore.Identity` owns only host wiring; the web-free model is in `Elarion.EntityFrameworkCore.Identity`. The app composes Identity via `[GenerateElarionIdentity]`, not `IdentityDbContext` inheritance. Auth providers only populate `ICurrentUser`.
-- EF packages own only markers, pagination primitives, and generation. Keep `Elarion.EntityFrameworkCore` markers-only; EF-dependent pagination runtime is in `Elarion.Paging`; provider-neutral pagination contracts (`Page<T>`, requests) stay in Abstractions.
-- **Seam contracts are designed for the strongest impl**, never vetoed by pre-1.0 compat or a single-node/test tier (a weaker tier implements the closest semantics + documents the delta). Prefer an optional `XyzOptions? options = null` over repeatedly widening signatures.
-- Prefer compile-time generation over runtime reflection scanning; preserve trimming/AOT friendliness on framework paths.
+- Core packages remain reusable and domain-neutral. Do not add consuming-app names, application domain
+  types, host-specific UI code, deployment conventions, or application infrastructure to Elarion packages.
+- `Elarion.Abstractions` holds implementation-neutral contracts: interfaces, attributes, markers, and data
+  records. It has no runtime-integration dependencies. Concrete behavior, defaults, pipeline decorators, and
+  telemetry live in dependency-light `Elarion` core or an opt-in sibling (ADR-0034).
+- `Elarion` core remains dependency-light and transport-neutral: it depends on Abstractions and
+  `Microsoft.Extensions.*` abstractions, not ASP.NET, EF, a protocol package, or a concrete third-party
+  runtime provider. Heavy defaults belong in opt-in siblings; keep their seam in Abstractions and their
+  decorator in core where appropriate (ADR-0017).
+- Preserve the protocol/host split. Protocol packages define a format and dispatcher without binding a wire;
+  host packages bind protocol behavior to ASP.NET, sockets, or another hosting environment. Hosts may depend
+  on protocols, never the reverse.
+- Provider-neutral cores own provider-neutral contracts. Blobs remain streaming-first and S3-wire-free;
+  upload protocols are adapters over the staged-upload seam. Connections, client events, settings, migrations,
+  and integration messaging expose replaceable seams rather than assuming a single provider.
+- Authorization, feature gating, and request validation use the same seam/implementation shape: attribute
+  and contract in Abstractions, transport-neutral decorator in core, provider default in an opt-in package.
+  Swapping a provider must not change a handler attribute or DTO.
+- Validation uses standard `System.ComponentModel.DataAnnotations`. Do not add an Elarion validation
+  attribute or a FluentValidation dependency. Business rules belong in handlers/domain services, not a
+  pre-handler validator.
+- `Elarion.AspNetCore.OpenApi` is the only package that references `Microsoft.AspNetCore.OpenApi`; do not
+  leak OpenAPI into the base HTTP transport or introduce an Elarion OpenAPI MSBuild/client-generator package.
+  Identity's web-free model stays in `Elarion.EntityFrameworkCore.Identity`; the ASP.NET package owns only
+  host wiring.
+- EF packages own EF mapping, EF generation, and EF-specific runtime behavior. Provider-neutral contracts
+  such as results, pagination requests, and unit-of-work seams stay outside the EF layer. NativeAOT SQL stays
+  EF-free; do not blur the two host tiers.
+- Design every seam for its strongest intended implementation, never for pre-1.0 compatibility or a weak
+  test/single-node implementation. A weaker implementation provides the closest semantics and documents the
+  difference. Prefer an optional options bag to repeatedly widening signatures.
+- Prefer compile-time generation over runtime reflection scanning. Framework paths must preserve trimming
+  and AOT friendliness; a reflection fallback is an explicit, isolated opt-in, not a quiet default.
 
 ## Source generator conventions
 
-A generator runs on **every keystroke**, so incrementality is correctness. Full rationale + rejected
-alternatives: [ADR-0006](docs/decisions/0006-incremental-source-generator-conventions.md). Copy a reference
-generator (`AppModuleDiscoveryGenerator`, `ElarionManifestGenerator`, `ModuleDefaultServicesGenerator`, any
-of the six registration generators), not the old "scan and emit" shape. When adding/changing any generator:
+Generators run on every keystroke, so incrementality is correctness. Read
+[ADR-0006](docs/decisions/0006-incremental-source-generator-conventions.md) for rationale, and copy a
+current reference generator (`AppModuleDiscoveryGenerator`, `ElarionManifestGenerator`,
+`ModuleDefaultServicesGenerator`, or a registration generator), not the old “scan and emit” shape.
 
-- **Discover through the syntax provider**, never off `CompilationProvider`: `ForAttributeWithMetadataName`
-  for attribute triggers (branch on `ctx.TargetSymbol` for methods vs types), or a predicate-filtered
-  `CreateSyntaxProvider` for structural triggers. Never `RegisterSourceOutput(CompilationProvider, …)` with a
-  `foreach (SyntaxTrees)` scan.
-- **Every pipeline value must be value-equatable.** `ImmutableArray<T>.Equals` is reference equality — use
-  `EquatableArray<T>` for every collection field, nested all the way down. Carry **strings** (FQNs via
-  `SymbolDisplayFormat.FullyQualifiedFormat`), never `ISymbol`/`Compilation`/`SyntaxNode`/`Location`/`object?[]`.
-- **Diagnostics are data.** Transforms stay pure (no `spc.ReportDiagnostic`): return
-  `EquatableArray<DiagnosticInfo>` (built with `DiagnosticInfo.Create` + `LocationInfo`) and report in the
-  `RegisterSourceOutput` callback.
-- **Reuse shared discovery.** `ModuleProviders.CollectModules` + `ModuleScanner.FindBest`/`IsInScope`; gate
-  assembly opt-ins with `ModuleProviders.HasTrigger`. Do not hand-roll a `ModuleInfo`/module scan/namespace matcher.
-- **Output is a byte-identical contract, and caching is tested.** Preserve every emit-time `OrderBy`/`Sort`
-  (provider order is unspecified). Tag collect/combine nodes with `.WithTrackingName` and add a
-  `GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit` test — the only check that catches a re-introduced
-  non-equatable model. Run the generator's `*GeneratorTests.cs` after each change.
-- **AOT/trim + cross-assembly.** Emit concrete statically-typed code (no reflection/open generics in hot paths).
-  For cross-assembly discovery, emit/read `[assembly: AssemblyMetadata]` via `MetadataReferencesProvider`
-  (`ElarionManifest` + `EntityConfigurationManifest` are the examples; `ElarionManifestReader` is the reader to copy),
-  never scan referenced symbol trees.
+When adding or changing a generator:
 
-## Handler dispatch and transports
+- **Discover through a syntax provider, never by scanning `CompilationProvider`.** Use
+  `ForAttributeWithMetadataName` for attribute triggers (branch on `ctx.TargetSymbol` for methods versus
+  types), or a predicate-filtered `CreateSyntaxProvider` for structural triggers. Never enumerate
+  `SyntaxTrees` from `RegisterSourceOutput(CompilationProvider, …)`.
+- **Make every pipeline value value-equatable.** `ImmutableArray<T>.Equals` is reference equality; use
+  `EquatableArray<T>` for every collection field, including nested collections. Carry immutable facts and
+  fully qualified strings, not `ISymbol`, `Compilation`, `SyntaxNode`, `Location`, or `object?[]` through a
+  pipeline.
+- **Treat diagnostics as data.** Transforms stay pure and return `EquatableArray<DiagnosticInfo>` built with
+  `DiagnosticInfo.Create` and `LocationInfo`; report diagnostics only in the final
+  `RegisterSourceOutput` callback. Do not call `spc.ReportDiagnostic` from a transform.
+- **Reuse shared discovery.** Use `ModuleProviders.CollectModules`, `ModuleScanner.FindBest`/`IsInScope`, and
+  `ModuleProviders.HasTrigger`. Do not hand-roll module scanning, namespace matching, or assembly-trigger
+  detection.
+- **Make emitted output deterministic and prove caching.** Provider order is unspecified, so preserve
+  emit-time sorting. Tag collect/combine nodes with `.WithTrackingName`; add
+  `GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit`; and run the affected `*GeneratorTests.cs` suite.
+  Generated text is a byte-identical contract, not an incidental implementation detail.
+- **Emit concrete AOT-safe code.** Avoid reflection and open generics in generated hot paths. For
+  cross-assembly discovery, emit/read assembly metadata through `MetadataReferencesProvider` using the
+  existing Elarion/EF manifests; never scan referenced symbol trees.
+- Add new analyzer diagnostics to `AnalyzerReleases.Unshipped.md` (RS2008) and preserve stable diagnostic
+  behavior. Prefer a clear compile-time error over a delayed, silent runtime fallback.
 
-`[Handler("module.action")]` (name optional — inferred `{module}.{operation}`), `[HttpEndpoint(verb?, "route")]`,
-and MCP are **three parallel first-class optional transports over one handler definition**. Request/response
-are read from `IHandler<TRequest, Result<TResponse>>` (success unwrapped from `Result<T>`), so they may be
-nested or top-level. `[GenerateModuleBootstrapper]` is the **single wiring path** (see [Module-aware transport
-gating](#module-aware-transport-gating)); there is no flat, ungated map.
+## Framework invariants
 
-- **JSON-RPC + MCP** share the `[Handler]` identity and differ only by the `HandlerTransports` flag
-  (`JsonRpc`/`Mcp`/`Connection`/`All`, default `All` — `Connection` gates exposure to bidirectional connection adapters, one flag for all of them by design, ADR-0053). Both are **adapters over the shared `HandlerDispatcher`**
-  (`JsonRpcDispatcher`/`McpDispatcher` in `Elarion.JsonRpc`), each serving the subset its flag selects — one
-  registry, built once. `[McpHandler(ToolName=…)]` customizes only the tool name. No resolvable shape → `ELRPC002`.
-- **HTTP/REST** is a separate opt-in (`[HttpEndpoint]`) because it needs route/verb/param binding. Verb precedence:
-  explicit verb → CQRS marker (`ICommand`→POST, `IQuery`→GET) → else `ELHTTP004`. The generator emits concrete-typed
-  minimal-API lambdas that **resolve the handler typed-directly** (route pins the type — HTTP never goes through the
-  bus) and translate `Result<T>` via `ElarionHttpResults` (RFC 7807 on failure). Per-property binding
-  (`[FromRoute]`/`IFormFile`/…) is the DTO's opt-in, detected structurally. No resolvable shape → `ELHTTP001`.
-  **Files are two-tiered** (ADR-0039). Small (≲4 MB): `ElarionFile` in the request/response — HTTP maps
-  `ToFileResult` (`TypedResults.Bytes`; octet-stream + `format: binary` OpenAPI via marker), JSON-RPC/MCP ride the
-  fixed base64 envelope (`{contentType, fileName?, data}`, both directions — a request property is an upload; schema
-  marks it `x-elarion-file`, the TS client maps it to a **native `File`**); composes with `[Cacheable]`/`[Idempotent]`
-  (envelope replay). Large: **staged blobs** — upload via tus/direct endpoints → handler gets the pending `BlobRef` and
-  streams from `IBlobStore`; exports = handler saves a pending owner-scoped blob and returns the ref, client streams it
-  from `MapElarionBlobDownloads`; never-committed blobs expire via GC (temp-file semantics). `IFormFile` stays the
-  HTTP-multipart escape hatch.
-- **OpenAPI** is the REST contract (`Elarion.AspNetCore.OpenApi`, ADR-0026): thin over `Microsoft.AspNetCore.OpenApi`,
-  owning only canonical-JSON wiring, clean operationIds, and the idempotency transformer. Client-gen is off-the-shelf
-  (`openapi-typescript`/Kiota); build-time export reuses `Microsoft.Extensions.ApiDescription.Server`.
-- Schema/client chain: `[Handler]` → `rpc-schema.json` (`Elarion.AspNetCore.SchemaGeneration`) → the TS client generator.
-  Generated TS stays portable (browser + NodeNext), standard `fetch`, `AbortSignal`.
+### Modules, handlers, and transports
 
-**In-process, always call handlers typed-directly** — inject `IHandler<TRequest, Result<TResponse>>`, inject
-`IHandlerSender` + `SendAsync<,>` (typed mediator, resolves from the ambient scope; `AddElarionHandlerSender`), use
-`HandlerInvoker.InvokeAsync<,>` (fresh scope), or the typed `[GenerateModuleApi]` facade across modules — so a rename
-is a compile error. The named bus is a **transport seam** (routes a wire *string* to a handler): it's injectable and
-`DispatchAsync(name, …)` works, but it takes `object`/returns `Result<object>`, so use it only when you must dispatch
-by a dynamic name. The event bus is pub/sub-only (no request/reply).
+- A handler is the framework's use-case boundary. JSON-RPC, MCP, and HTTP are parallel optional projections
+  of one handler definition; HTTP is explicit because routing and binding are transport-specific. Keep
+  handler behavior transport-neutral.
+- `[GenerateModuleBootstrapper]` and the generated module registration/mapping path are canonical. Modules
+  own handlers, services, validators, jobs, consumers, actors, and client-event topics by namespace. Do not
+  add flat, ungated handler maps or manually duplicate generated default registrations.
+- Core modules map unconditionally; feature modules are enabled through configuration and must disappear
+  consistently from registration, validation, HTTP, JSON-RPC, and MCP when disabled. A host still declares a
+  core module even if it has no feature modules.
+- In-process request/reply is always typed: inject `IHandler<TRequest, Result<TResponse>>`, use
+  `IHandlerSender`, `HandlerInvoker`, or a typed generated module API. The named `HandlerDispatcher` is a
+  transport seam for dynamic wire names, not a normal application mediator. Event buses are pub/sub only and
+  never implement request/reply.
+- HTTP handlers resolve the typed handler directly and translate `Result` through framework HTTP helpers.
+  Keep endpoint conventions in the host; do not infer host authorization policy from handler attributes.
+- Small, in-memory files use `ElarionFile`; large exports/uploads use the staged-blob tier. Consult the file
+  and blob capability docs before changing envelope, ownership, lifecycle, or resumable-upload behavior.
+- The schema/client chain is `[Handler]` → `rpc-schema.json` → generated TypeScript. Do not hand-write a
+  parallel JSON-RPC fetch client or a second transport registry.
 
-## JSON serialization model
+### Serialization and AOT
 
-Every subsystem reads **one canonical `JsonSerializerOptions`** via `IElarionJsonSerialization` (ADR-0023).
+- All framework subsystems obtain canonical JSON through `IElarionJsonSerialization`, never a bare
+  `JsonSerializerOptions` from DI. Configure framework JSON through `AddElarionJson`/
+  `ConfigureElarionJson`; this prevents collisions with host JSON configuration.
+- Source-generated metadata is the default and expected path. Fix a missing type by contributing its type
+  info resolver/context. Do not casually enable reflection fallback to make a missing contract work.
+- Resolver composition is ordered and first-match-wins. Transport envelope contexts, generated module
+  contexts, and host contexts must use the established contributor seam; read the serialization capability
+  page before changing resolver ordering or reflection behavior.
 
-- `ElarionJsonOptions` (`Elarion.Abstractions.Serialization`) is the composed config: naming knobs, an **ordered**
-  `TypeInfoResolvers` list, `EnableReflectionFallback`, `PostConfigure`. Plain mutable bag — **no `M.E.Options` dep**.
-- `IElarionJsonSerialization` materializes + **freezes** (`MakeReadOnly()`) one `JsonSerializerOptions` on first access;
-  exposes `Options`/`GetTypeInfo<T>()`. Subsystems depend on this accessor, **never a bare `JsonSerializerOptions` in
-  DI** (so Elarion never collides with a host's own registration).
-- Composition is a **contributor seam**: `AddElarionJson()` registers the accessor (idempotent); `ConfigureElarionJson(o
-  => …)` accumulates. Transports insert their envelope context first (`Insert(0, …)`); generated `AddElarion` adds module
-  contexts; host adds extras. Resolver order is **first-match-wins**; `OverrideTypeInfoResolvers` composes ahead of all.
-- **AOT-strict by default** (matches `JsonSerializerIsReflectionEnabledByDefault=false`): a type missing from every
-  source-gen context throws rather than reflecting, unless `EnableReflectionFallback` is set (isolated in a suppressed
-  helper so core stays `IsAotCompatible`).
+### Authorization, feature gates, and validation
 
-## Authorization model
+- Authorization is declarative, transport-neutral, provider-independent, and enforced in the handler
+  pipeline. Hosts authenticate and populate `ICurrentUser`; handlers express authorization requirements.
+  Never move a business authorization decision solely into an HTTP endpoint or frontend condition.
+- Requirement kinds compose as documented. Unauthenticated and forbidden outcomes remain normal `Result`/
+  `AppError` values, not exceptions. A provider replacement must not require changing `[Require*]` contracts.
+- Feature gates are runtime handler gates, distinct from compile-time module enablement. A closed feature
+  returns the documented generic not-found outcome so its name is not leaked. Use a feature variant when
+  selection differs between concurrent requests; use a configuration variant when one process-wide choice is
+  configured. Prefer a strategy service over swapping a handler implementation.
+- Client capability/session data and frontend contribution `when` conditions are read-only UX projections.
+  They may hide or adapt UI, but never enforce a permission or feature decision; the handler gate remains the
+  authority.
+- Validation is two-tier. Standard DataAnnotations express wire-contract rules and flow to schema surfaces;
+  NRT plus `required` expresses requiredness. Cross-field, conditional, asynchronous, and database/business
+  rules live in the handler or a domain service and return `AppError.Validation`/`Conflict` **inside the
+  transaction**. A pre-handler async check is a TOCTOU bug.
+- The validation provider receives wire-named paths and produces structured errors. Do not reintroduce runtime
+  attribute scanning where generated validation metadata exists. See the authorization, feature-flag,
+  client-capability, and validation concepts for exact attribute/provider APIs.
 
-Declarative, transport-neutral, provider-independent — runs in the handler pipeline, same under every transport
-([ADR-0009](docs/decisions/0009-authorization-building-blocks.md), [concept](docs/concepts/authorization.mdx)).
+### Events, modules, and cross-module communication
 
-- Class-level attributes: `[RequirePermission(resource, verb)]` (K8s-RBAC; sugar for a `{resource}.{verb}` claim of
-  `PermissionClaimType`, open `Verbs` vocabulary), `[RequireRole]`, `[RequireClaim(type, values…)]` (values OR; empty =
-  presence), `[RequirePolicy("name")]`, `[AllowAnonymous]`. Different kinds AND; multiple of one kind AND; OR only inside
-  one `[RequireClaim]`.
-- `HandlerRegistrationGenerator` auto-attaches `AuthorizationDecorator` as the outermost functional gate (just inside
-  the observability decorator's handler span) when a handler carries a `Require*`/`[RequirePolicy]` attribute; assembly/`[AppModule]`-scoped
-  `[ElarionAuthorizationDefaults]` flips to deny-by-default (most-specific-wins). Reads requirements via `HandlerMetadata`
-  (never `inner.GetType()`); guarded by `IResultFailureFactory<TResponse>` else `ELAUTH001`.
-- Default `ClaimsAuthorizer` (`AddElarionAuthorization`) evaluates against `ICurrentUser` + `IAuthorizationPolicy`
-  instances, no ASP.NET. Unauthenticated → `AppError.Unauthorized` (401); denied → `Forbidden` (403). Named policy =
-  `[AuthorizationPolicy("name")]` (auto-registered per module, `ELPOL001`/`ELPOL002`) or `AddElarionAuthorizationPolicy`.
-- Authentication is a host concern that only populates `ICurrentUser` (Identity, or Entra/OIDC-JWT via
-  `AddElarionCurrentUser`). Permission catalog: `PermissionCatalogGenerator` emits the compile-time `ElarionPermissions`
-  static (root namespace; `All`/`Roles`/`ByModule`/`ByResource`/`ByVerb` + typed accessors) + the runtime
-  `IPermissionCatalog` from `[RequirePermission]`/`[RequireRole]`. Triggers `[UseElarion]`/`[GeneratePermissionCatalog]`;
-  guarded handler under no module → `ELPERM001`, colliding accessor → `ELPERM002`.
+- Events have two transaction-defined planes. Domain events are inline in the caller's scope and transaction:
+  consumers share the transaction and a failure fails the command. Integration events are recorded with the
+  caller's unit of work and delivered after commit in an independent scope; they are the only broker-portable
+  plane. An event belongs to exactly one plane.
+- An event bus is pub/sub. A non-`Unit` result is request/reply and belongs behind a typed handler call,
+  not a consumer. Prefer handler-form consumers when the full pipeline is needed; use method-form consumers
+  only for lightweight side effects that do not require it.
+- Durable integration delivery needs an outbox. Handler-form integration consumers are inbox-deduped when a
+  durable idempotency store is registered; opting out declares redelivery safe. Method-form consumers and
+  external side effects still need explicit idempotency reasoning around the message id.
+- All generated event consumers, scheduled jobs, and other discovered module content remain module-scoped and
+  feature-gated. Do not bypass generated catalog/registration paths to make a consumer run in a disabled
+  module.
+- Synchronous cross-module calls use a published `[ModuleContract]`; implementations remain internal. Solve
+  a boundary violation with a genuine contract, a platform capability port outside modules, or a shared-kernel
+  type outside modules—never another module's internal handler/service type. `ELMOD002` is location-based;
+  track any new analyzer diagnostics in `AnalyzerReleases.Unshipped.md`.
+- A generated module API is an in-process, typed facade over a module's handlers, not a transport or a way
+  to make an internal module surface public. Mapping from a published contract to a module's handler DTOs is
+  the module's responsibility.
 
-## Feature flag model
+### Actors, connections, and live updates
 
-Gates a handler at run time; declarative, transport-neutral, provider-agnostic — distinct from compile-time module
-gating ([ADR-0016](docs/decisions/0016-feature-flag-gating.md), [concept](docs/concepts/feature-flags.mdx)).
+- **Default to the database.** Optimistic concurrency, constraints, `[Idempotent]`, jobs, and normal
+  request/reply solve classical web-app concurrency. An actor is justified only when the consistency unit is
+  a live in-memory thing: a stateful external resource/connection, hot loss-tolerant ephemeral state, or an
+  event-driven decide-once coordinator. If it sketches as a table with a version column, use the table.
+- Actor methods apply a pure state transition, write durable state explicitly when required, then perform a
+  side effect. State records are query contracts: keep interpretation and pure transitions on the state type,
+  not in an activation-only migration. Snapshot conflicts can replay a turn, so side effects before a write
+  must be idempotent or moved after the write. Read the actor state/placement concept before changing actor
+  lifecycle, snapshots, routing, or streaming.
+- Default to request/reply plus client events. A bidirectional connection is justified only for interactive
+  command rates, a connection that is itself state (such as a device link), or server-to-client RPC. The
+  registry is node-local; multi-node ingress is co-located with the actor home/role holder rather than made
+  into an implicit balancer.
+- Client events are at-most-once, latest-wins re-query hints. Keep their payloads light and make clients
+  converge by re-querying; they are not a durable event plane. Use an ordered stream only when losing a
+  message makes the consumer wrong and a single live sequencer exists for that key. If a missed update only
+  makes the consumer stale, use a client event instead.
+- Connection adapters own framing and transport lifecycle; codecs own protocol encoding/decoding. Socket-less
+  simulated connections are first-class. Use the simulation package for gateway behavior tests; reserve real
+  sockets for adapter integration tests.
+- Device pairing/authentication, actor placement, role routing, and cross-node client-event fan-out are
+  security/correctness-sensitive seams. Preserve fail-closed behavior; consult the capability and ADR docs
+  before changing identity, leases, proxying, or durable delivery targeting.
 
-- `[FeatureGate("name")]` (class-level, `AllowMultiple`): one+ names, optional `FeatureRequirement` (`All` default/`Any`),
-  optional `Negate`. Stacked attributes AND.
-- Auto-attached `FeatureGateDecorator` sits **just inside the authorization gate** (so a disabled feature is never revealed
-  to an unauthenticated caller). `ELFEAT001` (response can't represent failure), `ELFEAT002` (no name). Closed gate →
-  `AppError.NotFound` with a **generic** message (echoing the name would leak what the 404 hides).
-- Calls the boolean `IFeatureFlagService.IsEnabledAsync` seam (Abstractions, no provider dep); targeting is ambient from
-  `ICurrentUser`. Default targets **OpenFeature** (`Elarion.FeatureFlags.OpenFeature`); batteries-included =
-  `Elarion.FeatureFlags.FeatureManagement`. Replace the backend wholesale by registering a different `IFeatureFlagService`.
-- **Variant injection** (ADR-0019): ships a different *implementation* per allocated variant. The consuming handler is
-  transparent; only impls carry `[FeatureVariant("feature", Variant="x")]` (a **modifier on `[Service]`** — contract(s)
-  come from `[Service]`, not repeated; `[FeatureVariant]` without `[Service]` → `ELVAR007`). Async selection + sync ctor →
-  the generator wraps such handlers in the `AsyncResolvedHandler` proxy (warms into a per-scope `VariantResolutionCache`).
-  `IFeatureVariantService.GetVariantAsync` accessor; imperative escape hatch `IVariantServiceProvider<T>` (`ELVAR001`,
-  `ELVAR003`–`ELVAR007`). Requires an OpenFeature provider surfacing the variant name (the FeatureManagement default
-  doesn't yet — boolean gating unaffected). Vary handler behavior by a variant **strategy service**, not by swapping the handler.
-- **Configuration-selected variants** (ADR-0028): the process-global sibling — selection by *what is configured*, not
-  *who asks*. `[ConfigurationVariant("Email:Backend", Value="office365")]` (also a `[Service]` modifier; one axis per
-  contract, `ELVAR008`) picks by a plain `IConfiguration` value (case-insensitive, default fallback). **Synchronous** — no
-  proxy/warm-up; handlers keep the plain registration; each new DI scope observes the current value. Manual:
-  `AddElarionConfigurationVariantService<T>(key, defaultKey)` (blank key → `ELVAR009`). **Choose the axis by who decides**:
-  differs between two concurrent requests → `[FeatureVariant]`; one answer per process → `[ConfigurationVariant]`; when in
-  doubt start configuration-selected.
-- **Variant registry** (ADR-0029): a named default (`Value` + `IsDefault=true`, both axes) is fallback *and* selectable
-  (two defaults → `ELVAR001`). `VariantCatalogGenerator` (`[UseElarion]`/`[GenerateVariantCatalog]`) emits the
-  `ElarionVariants` static (accessor classes with value `const string`s usable in `[AllowedValues]`, + `VariantDescriptor`
-  data), cross-assembly via the manifest; accessor collision → `ELVAR010`. Variants under no module are **platform** variants
-  (`Module=null`). Generator registers **nothing** — host seeds `AddElarionVariantCatalog(ElarionVariants.All)` + optionally
-  `AddElarionVariantValidation()` (startup/reload check; `Strict` fails startup). **Switch-ownership happy path**: in-module
-  strategies use their module's declarations; switchable adapters default to **port-owned vocabulary** (consts beside the
-  port, referenced by adapter attributes + the admin DTO's `[AllowedValues]`). **Pinning** (`[FromKeyedServices(ElarionVariants.X.Y)]`,
-  both axes) bypasses selection (handler discovery skips pinned params); pin via the vocabulary consts, never raw strings.
+### Persistence, blobs, and SQL
 
-## Client capability bootstrap
+- Application handlers inject the concrete `DbContext`; do not introduce repositories or an `IAppDbContext`
+  abstraction. The generator owns discovered `DbSet`s and entity configuration application.
+- `Guid` entity keys are client-assigned and use the repository's v7 GUID convention. Preserve the model's
+  `ValueGeneratedNever` behavior; explicit configuration or a store-generated default wins where designed.
+- Bulk inserts, SQL mapping, migrations, settings, blobs, and auditing each have deliberate transaction and
+  provider seams. Preserve ambient-transaction behavior and connection ownership; do not add a second
+  connection/data source merely for convenience.
+- Blob contracts remain provider-neutral and streaming-first. Pending blobs are temporary until committed in
+  the caller's transaction; owner checks fail closed; staged uploads are protocol-neutral. Listing is a
+  browse/operations surface, not a substitute for an application query model.
+- The AOT SQL tier is not an ORM: no change tracking, LINQ, reflection fallback, or query-builder DSL. SQL
+  interpolation binds values; only explicit trusted identifier fragments are verbatim. Use real bulk COPY for
+  bulk throughput rather than growing convenience batch APIs into a second bulk subsystem.
+- The migration core is database-neutral and roll-forward only. A provider is a new package, not a dialect
+  configuration flag; keep no-transaction behavior explicit and fail closed on an unresolved migration.
 
-One **read-only UX projection** so a frontend can hide/adapt UI — **never an enforcement boundary** (the handler's
-`[RequirePermission]`/`[FeatureGate]` is still the real gate). ADR-0030/0032, [concept](docs/concepts/client-capabilities.mdx).
+### TypeScript client and frontend contributions
 
-- `[ClientFeatures("a","b")]` on an `[AppModule]` declares the flag/variant names that module **exposes to the client**
-  (opt-in by enumeration — an internal flag never reaches the wire; a disabled module exposes nothing). A listed name needs
-  no `[FeatureGate]` behind it. Collected into `configuration.GetClientCapabilityManifest()`, cross-assembly via the manifest.
-- `SessionHandler` (`Elarion.Session`) composes manifest + `IFeatureFlagService` + `IFeatureVariantService` + `ICurrentUser`
-  → `SessionResponse { user, modules, flags, variants }` (flag/variant + auth deps optional). Wiring follows the imperative
-  seam (ADR-0031): `AddElarionSession(manifest)` (self-registers `SessionJsonContext` into the canonical JSON), the bus
-  `MapElarionSession()` (a `HandlerDispatcher.Map` over `"elarion.session"`, chained into the host's `RegisterHandlers`), and
-  the concrete REST `MapElarionSession(route)` in `Elarion.AspNetCore`.
-- **Typed vocabulary** (ADR-0032): the exported schema carries an optional `capabilities` block (enabled modules +
-  `[ClientFeatures]`, structured `[RequirePermission]`/`[RequireRole]` catalog, roles; omitted → byte-identical) built by
-  `JsonRpcSchemaExporter.Generate(…, JsonRpcSchemaExportOptions)`, auto-resolved from DI (`ClientCapabilityManifest` lives in
-  `Elarion.Abstractions.Modules`; `IPermissionCatalog`). The TS generator turns it into typed constants + literal unions in
-  `session-client.ts` (`string` fallback on older schemas) — the frontend `ElarionPermissions`. Non-goals: no
-  micro-frontends/module federation, no C#-declared UI, no UI kit.
-- The bus seam `HandlerDispatcher.Map` is the general way to expose a handler whose class the host does not own
-  (framework-shipped/third-party/startup-decided); REST stays a concrete hand-authored `MapElarionX(route)` per handler
-  (RDG/AOT-safe — no generic HTTP map), ADR-0031.
-
-## Validation model
-
-Two-tier; the line is **what a wire contract can express**, not "simple vs complex"
-([ADR-0027](docs/decisions/0027-declarative-request-validation.md), [concept](docs/concepts/validation.mdx)).
-
-- **Tier 1** = standard `System.ComponentModel.DataAnnotations` on the request DTO (`[Range]`, length attrs,
-  `[RegularExpression]`, `[EmailAddress]`, `[Url]`, `[Base64String]`, `[AllowedValues]`), enforced at runtime **and**
-  exported to every schema surface (JSON-RPC, MCP, OpenAPI, Zod). Requiredness = NRT + `required` (no `[Required]`). Reusable
-  custom constraints subclass a mapped attribute.
-- **Tier 2** = cross-field/conditional/async/DB checks in the **handler** (or a domain `[Service]`), returning
-  `AppError.Validation`/`Conflict` through `Result<T>`, **inside the transaction** (a pre-handler async check is TOCTOU).
-- Auto-attached `ValidationDecorator` sits just inside the feature gate (observability → authorization → feature gate →
-  **validation** → `[DefaultPipeline]` → handler), only when the request graph carries validation attributes (zero cost
-  otherwise). `ELVAL001` (response can't represent failure), `ELVAL002` (warning: attributes present but `Elarion.Validation`
-  not referenced — documented but unenforced).
-- Seam `IRequestValidator` (`Elarion.Abstractions.Validation`) → `RequestValidationErrors?` with `FieldErrors` keyed by
-  **wire-named field path** (canonical JSON naming, indexers preserved: `deliveries[1].street`). HTTP → RFC 7807 `errors`;
-  JSON-RPC → `error.data`. Default impl `Elarion.Validation`; `ValidationResolverGenerator` emits per-module resolvers with
-  **constant-constructed attribute arrays** (no runtime attribute reflection).
-
-## Module-aware transport gating
-
-All three transports become **module-scoped + feature-flag-gated** under `[assembly: GenerateModuleBootstrapper]`, which
-emits the fixed-name `ElarionBootstrapper` static (framework-owned name, ADR-0018 — never declare a partial).
-`AppModuleDiscoveryGenerator` discovers modules, transport handlers, and `[ResourceFilter]` specs from referenced
-assemblies' Elarion manifests **and from the bootstrapper compilation itself** (a single-project host — Program +
-modules in one csproj — wires transports the same way; current-compilation entries win deduplication), matches each
-handler to a module by longest-prefix namespace, and emits:
-
-- per-module `Map{Module}Http`, `Add{Module}Handlers` (with transport flags), `Get{Module}McpMetadata`;
-- aggregates `services.AddElarion(config)`, `endpoints.MapElarion(config)`, `dispatcher.RegisterHandlers(config)` (builds the
-  one shared bus), `config.GetMcpMetadata()`, `GetAllJsonTypeInfoResolvers()`, `IsModuleEnabled(name)`.
-
-Core modules map unconditionally; feature modules gate on `Modules:{Name}:Enabled` (a disabled module disappears across
-services, validation, endpoints, RPC, MCP). A handler under no module is mapped ungated + warned (`ELHTTP003`/`ELRPC001`).
-A "no modules" host still declares one core `[AppModule]`. Per-endpoint auth/conventions are the host's job (the module's
-optional static `ConfigureEndpointGroup` hook + the per-module extension method on a configured group); the generator never
-reads `[Authorize]`/`[AllowAnonymous]`. A web-free module assembly declares neither endpoint hook (`IEndpointRouteBuilder`
-is shared-framework) — a `[ModuleEndpoints("Name")]` static class (host compilation or referenced manifest) supplies the
-same hooks, called inside the module's gate after the module's own (contributors in type-name order, group hooks chained);
-unknown module → `ELMOD004`, hook-less class → `ELMOD005` (ADR-0040). RPC/MCP gating needs `IConfiguration` at compose time — use the config-aware
-overloads (`AddJsonRpc(serializerOptions, ElarionBootstrapper.RegisterHandlers)`, `AddElarionMcp(config.GetMcpMetadata(),
-serializerOptions, RegisterHandlers, configure)` — same delegate to both, bus built once).
-
-## Event / messaging model
-
-Two planes, each its own interface in `Elarion.Abstractions.Messaging`, organized by **relationship to the transaction**
-([ADR-0001](docs/decisions/0001-event-transaction-phase.md)). Marker interfaces bind each event to one plane; a type
-carrying both is rejected. Pub/sub-only — a non-`Unit` `Result<T>` is request/reply and is rejected
-(`ELEVT005` handler-form, `ELEVT002` method-form) — [ADR-0010](docs/decisions/0010-event-bus-is-pub-sub-only.md).
-
-- **Plane A — domain (`IDomainEventBus`)**: dispatched **inline in the caller's scope/transaction** (consumers share the
-  `DbContext`, commit atomically, a failure fails the command). Fans out in ascending `[ConsumeEvent(Order=…)]`. Never
-  broker-portable. A domain consumer must not open its own transaction/resilience scope (the `TransactionDecorator`'s
-  `AppliesTo` matches only `ICommand`/`IIntegrationEvent`, so it never attaches to a domain-event handler).
-- **Plane B — integration (`IIntegrationEventBus`)**: recorded in the caller's unit of work, delivered **after commit** on a
-  separate scope, retried independently (a failure never fails the command; a rollback discards). The **only broker-portable
-  plane**. Backends: in-memory (`Elarion.Messaging.InMemory`, best-effort) and the durable EF outbox (`Elarion.Messaging.Outbox`).
-- `[ConsumeEvent]`, two forms — **handler form preferred**: a class implementing `IHandler<TEvent, Result<Unit>>` (the sugar
-  `IHandler<TEvent>`) whose request *is* the event, with the full decorator pipeline; a failed `Result` → `EventConsumerFailedException`.
-  **Method form** = a lightweight side effect on a `[Service]` (no pipeline), returning `void`/`Task`/`ValueTask` or the
-  non-generic `Result` (throw / failed `Result` to fail); optional `IEventContext`/`CancellationToken` params supplied by the runtime.
-- **Inbox (ADR-0022)**: handler-form integration consumers are **deduped by default** — a `Consumer`-scoped reuse of the
-  ADR-0021 `IdempotencyDecorator`, keyed `(consumer identity, IEventContext.MessageId)`, claimed in the consumer's own
-  transaction (it replaces `TransactionDecorator` there), `WaitThenReplay` on races, soft-attached (no `IIdempotencyStore`
-  registered → un-deduped, never a resolution failure). `[AllowDuplicates]` opts out (the consumer-side `[AllowAnonymous]`:
-  declares redelivery harmless, plain transaction returns; ELINBX001 off-plane). Claims expire after a fixed 24 h (transport-
-  scoped invariant, deliberately no per-consumer knob). Domain + method-form consumers are never inboxed; pass `MessageId`
-  as a downstream idempotency key to close the foreign-side-effect window.
-- `EventConsumerRegistrationGenerator` (`[GenerateEventConsumers]`/`[UseElarion]`) discovers consumers, validates signatures
-  (`ELEVT001`/`ELEVT002`/`ELEVT005`; duplicate durable service+method+event identity → `ELEVT006`), emits a per-module `Add{Module}EventConsumers` wired into `ConfigureDefaultServices`.
-  Module-scoped only — a consumer under no module → `ELEVT003`. The scheduler is symmetric (`SchedulerRegistrationGenerator`,
-  a job under no module → `ELSG010`). Both are module-feature-gated.
-
-## Module default services
-
-Under `[GenerateModuleBootstrapper]`, each module's discovered handlers/services/validators/jobs/consumers/actors are registered +
-gated automatically via a cross-generator partial-method aggregation:
-
-- `ModuleDefaultServicesGenerator` emits, per `[AppModule]`, a `{ModuleType}ElarionModuleServices.ConfigureDefaultServices`
-  calling the `static partial void` hooks (`AddHandlers`/`AddServices`/`AddVariantServices`/`AddValidators`/`AddScheduledJobs`/`AddEventConsumers`/`AddAuthorizationPolicies`/`AddPermissions`/`AddModuleApi`/`AddActors`/`AddClientEvents`).
-  Each category generator contributes a filler; unimplemented hooks elide to no-ops.
-- `AddElarion` calls `{Module}.ConfigureDefaultServices(services)` gated by `IsModuleEnabled`, **before** the module's optional
-  hand-written `ConfigureServices` (now reserved for non-generated registrations). For a referenced module predating the
-  skeleton generator, the host probes for the public sibling.
-
-## Cross-module communication
-
-Direct synchronous module-to-module calls go through a **published contract**, not another module's internals or a direct
-typed handler call ([ADR-0002](docs/decisions/0002-cross-module-communication.md)). Mapping between a contract's DTOs and a
-module's handler DTOs is the module's concern (no generated forwarder, no mapper dep).
-
-- `[ModuleContract]` marks a module's published cross-module surface (interface/class); the impl stays `internal`. Applies to
-  **every** module incl. `Kind=Core` (no core exemption — the analyzer reads only the module name).
-- `ModuleBoundaryAnalyzer` (`ELMOD002`, warning) is **location-based**: anything under an `[AppModule]` is module-internal and
-  may only be referenced cross-module through a `[ModuleContract]`; anything outside every module is shareable. Inspects the
-  dependency surface (ctor params, fields, properties). Resolve a flag one of three ways: a `[ModuleContract]` (a genuine,
-  sparingly-used cross-module domain call); a platform-capability **port** outside the modules with its adapter in
-  infrastructure (like `IEmailSender`); or move shared value types to the **shared kernel** (under no module). Track new
-  analyzer diagnostics in `AnalyzerReleases.Unshipped.md` (RS2008).
-- `[GenerateModuleApi]` (optional) generates a typed in-process API over a module's own handlers so intra-module code (a
-  contract impl) can call them by name — **not a transport** (dispatches typed-direct through the full pipeline, absent from
-  the schema; module-internal). Membership mirrors `[EntityConfiguration]`/`[GenerateDbSets]` scope but **opt-out** (every
-  non-excluded handler is in the default facade); `[ModuleApi]` configures (`Exclude`, scope tags). `ELAPI001` (partial),
-  `ELAPI002` (top-level), `ELAPI003` (not under a module, warning), `ELAPI004` (duplicate method).
-
-## TypeScript client + frontend contributions
-
-- **JSON-RPC client** (`src/elarion-jsonrpc-client-generator`): deterministic output, ergonomic direct API
-  (`rpc.clients.get(params, options)`) + a generic transport primitive, tuple-aware batch typing. Runtime validation via
-  generated Zod by default, **both directions** (`rpcResultSchemas` + `rpcParamsSchemas`; `validateParams:false` opts out).
-  Constraint-aware emitter (schema keywords → Zod, Zod v3+v4). Type-checks under browser + NodeNext. No React/TanStack/Vite
-  import from generated runtime code.
-- **Frontend contributions** (`src/elarion-contributions`, ADR-0032): the review-isolation model for the frontend — see the
-  package line above + [frontend-modules](docs/concepts/frontend-modules.mdx). `when` is a UX projection, never security; the
-  point payload shape is app-owned; the shell + route composition + module discovery are app-owned; the framework ships the
-  kernel + `/react` + `/angular` bindings + the one `/tanstack-router` guard.
+- Generated TypeScript output is deterministic and portable: keep the ergonomic direct API and generic
+  transport primitive, tuple-aware batching, Zod validation, browser support, and NodeNext support. Generated
+  runtime code must not import React, TanStack, Vite, or an application framework.
+- The contributions package supplies typed extension points and capability-aware UX composition, not a UI kit,
+  route system, or security model. Applications own point payloads, module discovery, shell composition, and
+  route composition. Duplicate co-visible contribution ids are an error because they are render keys.
+- Frontend `when` axes remain strict against the application's declared vocabulary and fail closed for omitted
+  axes. They are still UX projections; server-side authorization and feature gates protect the action.
 
 ## C# coding standards
 
-Applies to `**/*.cs` (Copilot scopes this section via `.github/instructions/csharp.instructions.md`).
+Applies to `**/*.cs` (Copilot scopes this section through
+`.github/instructions/csharp.instructions.md`).
 
 ### Style
-- Latest C# supported by the repo (currently C# 14).
-- Classes `sealed` unless intentionally designed for inheritance (document the contract when extensible).
-- Immutable records for DTOs/options/data containers; prefer nominal property-based records with `required` + `init`
-  (nullable `init` for optional). Positional records only for tiny internal helpers/tests.
-- Read-only collection types (`IReadOnlyList<T>`, `ImmutableArray<T>`, …) for immutable public surfaces.
-- Primary constructors for DI services when they stay concise.
-- Mint `Guid` ids with `Guid.CreateVersion7()`, not `Guid.NewGuid()` (entities own their ids — the model
-  declares Guid PKs `ValueGeneratedNever`, ADR-0038). v7's load-bearing benefit is **persisted-index
-  locality** plus a debuggable embedded timestamp; for never-persisted ids it's uniformity, not necessity —
-  still prefer it (ids migrate into persistence, and v7 costs nothing). **Never where guessability is a
-  security concern**: v7 leaks creation time and carries only 74 random bits, so capability-style values
-  (share codes, pairing codes, tokens) use v4 or a real CSPRNG token — and an id must never be the only
-  gate anyway (owner/auth checks are, fail-closed). Documented convention, not build-enforced.
+
+- Use the latest C# supported by the repository (currently C# 14).
+- Make classes `sealed` unless they intentionally support inheritance; document the extensibility contract.
+- Use immutable records for DTOs, options, and data containers. Prefer nominal property-based records with
+  `required` and `init` properties (nullable `init` for optional values); reserve positional records for tiny
+  internal helpers and tests.
+- Use read-only collection types (`IReadOnlyList<T>`, `ImmutableArray<T>`, and similar) for immutable public
+  surfaces. Use concise primary constructors for DI services.
+- Mint general identifiers with `Guid.CreateVersion7()`, not `Guid.NewGuid()`. Its important benefit for
+  persisted values is index locality plus a debuggable timestamp; use it for never-persisted identifiers too
+  for consistency. Never use v7 where guessability matters: it leaks creation time and has 74 random bits.
+  Capability-style codes, tokens, and sharing values use v4 or a real CSPRNG token, and an id is never the
+  only authorization gate.
 
 ### Naming
-- PascalCase for types/methods/public members; `_camelCase` private instance fields; `camelCase` locals/params;
-  PascalCase static readonly + consts. `I`-prefix interfaces, `T`-prefix type params.
+
+- Use PascalCase for types, methods, and public members; `_camelCase` for private instance fields; camelCase
+  for locals and parameters; PascalCase for constants/static readonly members. Interfaces begin with `I` and
+  type parameters with `T`.
 
 ### Formatting
-- `.editorconfig` is the source of truth. File-scoped namespaces, single-line usings, opening braces on the same line.
-- Early returns over deep nesting; pattern matching / switch expressions / `nameof` where they clarify; final `return` on its own line.
+
+- `.editorconfig` is the source of truth. Use file-scoped namespaces, single-line usings, and opening braces
+  on the same line.
+- Prefer early returns to deep nesting. Use pattern matching, switch expressions, and `nameof` when they
+  clarify intent; leave the final `return` on its own line.
 
 ### Comments and public API docs
-- XML docs on public APIs (`<example>`/`<code>` where non-obvious). Regular comments only for intent/constraints/non-obvious
-  tradeoffs — do not restate obvious code. Document a non-obvious compat/source-gen/AOT/perf pattern with its *why*.
+
+- Public APIs need XML documentation; include `<example>`/`<code>` for non-obvious APIs. Comments explain
+  intent, constraints, or non-obvious trade-offs, never restate code. Document *why* for a non-obvious
+  compatibility, source-generation, AOT, or performance pattern.
 
 ### Nullable reference types
-- Non-nullable by default; validate nullability at entry points. `is null`/`is not null` (not `==`/`!=`). Trust the type
-  system — no redundant null checks.
+
+- Non-nullable is the default. Validate nullability at entry points, use `is null`/`is not null`, and trust
+  the type system instead of adding redundant null checks.
 
 ### Async and background work
-- No unobserved fire-and-forget. Thread `CancellationToken` through async flows (no `CancellationToken.None` without a
-  documented reason). Long-lived/background work is owned by a host-managed abstraction (`IHostedService`, scheduler, explicit
-  queue/loop), not hidden in a helper. Handle `OperationCanceledException` deliberately — do not log expected cancellation as error.
+
+- Do not fire-and-forget unobserved work. Thread `CancellationToken` through async flows; use
+  `CancellationToken.None` only with a documented reason. Long-lived work belongs to a host-managed
+  `IHostedService`, scheduler, explicit queue, or loop, not a hidden helper. Handle expected
+  `OperationCanceledException` deliberately and do not log it as an error.
 
 ### Telemetry
-- **Follow the OTel semantic conventions wherever one exists.** Duration histograms record "seconds as a floating
-  point number with the highest precision available" (unit `s`) — never milliseconds — with the semconv bucket
-  boundaries supplied via `InstrumentAdvice<double>` (the SDK's default buckets are ms-scaled and useless for
-  second-valued histograms). Telemetry `Record*` helpers take `TimeSpan`, so the unit decision lives in one place
-  per meter class. When semconv defines a name (e.g. `rpc.server.call.duration`), adopt it instead of minting a
-  parallel one; custom names/attributes use a namespaced prefix (`elarion.*`). Metric tags stay **bounded**
-  (type/operation/outcome names — never keys, payloads, or user identity); high-cardinality identity (actor key,
-  user id) goes on **spans only**. Explicitly unit-suffixed span tags (`*_ms`) are exempt from the seconds rule —
-  they are self-describing.
+
+- Follow OpenTelemetry semantic conventions when they exist. Duration histograms record floating-point
+  **seconds** (`s`), never milliseconds, and use semconv bucket boundaries through
+  `InstrumentAdvice<double>`; SDK default buckets are millisecond-scaled and unsuitable for seconds-valued
+  histograms. `Record*` helpers take `TimeSpan` so this unit decision lives in one place per meter.
+- Reuse semconv names such as `rpc.server.call.duration`; namespace custom names and attributes with
+  `elarion.*`. Metric tags stay bounded (type, operation, outcome), never payloads, keys, or user identity.
+  Put high-cardinality identity on spans only. Explicitly unit-suffixed span tags such as `*_ms` are
+  self-describing and exempt from the seconds rule.
 
 ## Testing
 
-- Add regression tests when fixing bugs. Follow nearby naming/capitalization; no `Arrange`/`Act`/`Assert` comments.
-- Keep tests deterministic (no timing-sensitivity unless the test is specifically about concurrency/scheduling).
-- Source-generator changes: add/update generator tests, keep emitted output deterministic + inspectable.
-- Test database behavior against **real PostgreSQL via Testcontainers**, never the EF Core **InMemory** provider: InMemory
-  silently diverges (e.g. it skips `SaveChanges`' affected-rows check, so a zero-row `UPDATE` passes there but throws on
-  Postgres — the ADR-0038 client-assigned-key trap), so a green InMemory test is false confidence. Use a Docker-gated
-  fixture (e.g. `PostgreSqlBlobStoreFixture`): spin up a real container when Docker is available, **skip** (never fail) when
-  not, so `dotnet test` stays green Docker-free. Tag `[Trait("Category", "Integration")]`. (`Microsoft.EntityFrameworkCore.InMemory`
-  is deliberately absent from `Directory.Packages.props` — do not add it.)
+- Add a regression test for every bug fix. Follow nearby naming/capitalization and avoid
+  `Arrange`/`Act`/`Assert` comments.
+- Keep tests deterministic. Timing-sensitive tests are appropriate only when concurrency, scheduling, or a
+  timing contract is itself under test.
+- Generator changes require generator tests, inspectable deterministic output, and the incremental cache test
+  described above. Run the affected generator suite after each change.
+- Test database behavior against **real PostgreSQL through Testcontainers**, never EF Core InMemory. InMemory
+  diverges from PostgreSQL semantics and produces false confidence. Use Docker-gated fixtures: start a real
+  container when Docker is available and **skip**, rather than fail, when it is not. Tag integration tests
+  `[Trait("Category", "Integration")]`. `Microsoft.EntityFrameworkCore.InMemory` is deliberately absent from
+  `Directory.Packages.props`; do not add it.
+- Hot-path changes need the relevant benchmark in `tests/Elarion.Benchmarks`; connection, actor, SQL-mapping,
+  and bulk-operation claims require measured evidence, not an allocation intuition. TypeScript generator
+  changes also require generating a representative schema and NodeNext type-checking emitted client files.
 
 ## Development and validation
+
+The complete contributor workflow is in [`CONTRIBUTING.md`](CONTRIBUTING.md). Run the relevant checks before
+requesting review; the normal baseline is:
 
 ```bash
 dotnet restore Elarion.slnx
 dotnet build Elarion.slnx --configuration Release
 dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release
 dotnet pack Elarion.slnx --configuration Release --no-build
-dotnet run --project tests/Elarion.Benchmarks -c Release    # hot-path microbenchmarks (gate for ADR-0042 optimizations)
 
 cd src/elarion-jsonrpc-client-generator
 npm ci && npm run build && npm test && npm pack --dry-run
 ```
 
-When changing the TS generator, also generate from a representative `rpc-schema.json` and type-check the emitted
-`rpc-types.ts`/`rpc-schemas.ts`/`rpc-client.ts` under `moduleResolution: NodeNext`.
+Run `dotnet run --project tests/Elarion.Benchmarks -c Release` for relevant performance-sensitive changes.
+When changing the TypeScript generator, generate from a representative `rpc-schema.json` and type-check
+`rpc-types.ts`, `rpc-schemas.ts`, and `rpc-client.ts` under `moduleResolution: NodeNext`.
 
 ## Documentation website
 
-Marketing + rendered docs live in `website/` (Next.js + [Fumadocs](https://fumadocs.dev), static export to GitHub Pages).
-Content is **not** duplicated there — `website/source.config.ts` points Fumadocs at the top-level `docs/` (the single source
-of truth). Static assets live in `docs/public/` (mirrored into `website/public/` by a sync script; only `website/public/CNAME`
-is committed) — put new images in `docs/public/`, never `website/public/`.
+Marketing and rendered docs live in `website/`, but top-level `docs/` is the sole content source: Fumadocs
+reads it through `website/source.config.ts`. Put static assets in `docs/public/`, never `website/public/`;
+only `website/public/CNAME` is committed. New pages need a relevant `meta.json` entry, and new MDX components
+beyond the existing standard set need registration in `website/components/mdx.tsx`. `icon:` frontmatter must
+name a valid Lucide icon.
 
 ```bash
-cd website && npm install && npm run build   # static export to website/out (npm run dev for localhost:3000)
+cd website && npm install && npm run build
 ```
 
-Served at `elarion.wimmesberger.dev` (no base path; `website/public/CNAME`). When adding a doc page, drop the `.mdx` under
-`docs/` and list it in the relevant `meta.json`; register any Fumadocs MDX component beyond `Card`/`Cards`/`Callout`/`Step(s)`
-in `website/components/mdx.tsx`; `icon:` frontmatter must be a valid Lucide name. Pushes to `main` touching `website/**` or
-`docs/**` trigger `deploy-docs.yml`.
+The static export is `website/out`; `npm run dev` serves localhost. Pushes to `main` that touch `docs/**` or
+`website/**` trigger `deploy-docs.yml`.
 
 ## Pull requests
 
-Prefer **stacked PRs** for any change large enough to be hard to review: an ordered chain where each PR targets the branch
-below it and only the bottom targets `main`, merged bottom-up ([guide](https://github.github.com/gh-stack/)). Keep each layer
-small, single-purpose, and green.
+Prefer stacked PRs when a change is too large for one focused review: each layer is small, single-purpose, and
+green; each PR targets the preceding branch; only the bottom targets `main`; merge bottom-up.
 
-**Guardrails against stranding a stacked PR** (a real incident — a PR merged into an orphaned base that never reached `main`,
-shown as MERGED but its content absent):
-- **One branch per PR** — never reuse a head branch across PRs (it defeats GitHub's auto-retarget/auto-delete).
-- **"MERGED" ≠ "on `main`."** Before treating a stacked PR as done, verify the content landed:
+Avoid stranding a stack:
+
+- Use one branch per PR; never reuse a head branch.
+- **“MERGED” is not “on `main`.”** Before treating work as complete, verify
   `git merge-base --is-ancestor <pr-head-sha> origin/main`, or confirm the base chain terminates at `main`.
-- **After a base PR merges, confirm each dependent PR retargeted** to `main`/the next unmerged base; retarget by hand if not.
-- **Do not delete or reuse a base branch** while any open PR still targets it.
+- After a base merges, confirm every dependent PR retargeted to `main` or the next unmerged base; retarget it
+  manually when necessary.
+- Do not delete or reuse a base branch while an open PR still targets it.
 
 ## Publishing
 
-Trusted publishing / OIDC. `<VersionPrefix>` in `Directory.Build.props` is the single source of truth for the *next* version
-([RELEASING.md](RELEASING.md)). NuGet via `NuGet/login` + the `NUGET_USER` var/secret; npm via trusted publishers. Pushes to
-`main` publish preview packages (`{VersionPrefix}-preview.{run}.{attempt}`). The **Release** workflow promotes the current
-`VersionPrefix` to a stable release (syncs doc versions, rolls the changelog, tags `v<version>`, bumps to the next patch,
-creates the GitHub Release → fires `publish.yml`); it runs as a GitHub App to bypass branch protection + trigger publish.
-Keep workflow changes tokenless unless a registry requires otherwise (the release-identity App is the deliberate exception).
+Trusted publishing uses OIDC. `<VersionPrefix>` in `Directory.Build.props` is the source of truth for the
+next version; see [`RELEASING.md`](RELEASING.md). Pushes to `main` publish
+`{VersionPrefix}-preview.{run}.{attempt}`. The Release workflow promotes the current version to stable,
+synchronizes doc version literals, rolls the changelog, tags `v<version>`, bumps the next patch, and creates
+the GitHub Release that triggers stable publishing. It uses a GitHub App intentionally to bypass protection
+and trigger the downstream workflow; keep other workflow changes tokenless unless a registry requires
+credentials.
 
-**GitHub Actions:** when adding/editing a workflow, look up the **latest** version of every `uses:` action first and pin to
-it (remembered version numbers go stale and trigger runner deprecation warnings).
+**GitHub Actions:** whenever adding or editing a workflow, look up the latest release of **every** `uses:`
+action first and pin it. Do not rely on remembered versions: stale action pins cause runner deprecation
+warnings and avoidable breakage.
