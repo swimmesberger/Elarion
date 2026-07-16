@@ -11,6 +11,11 @@ custom adapter has four responsibilities:
 3. Invoke the handler through DI so the full decorator pipeline runs.
 4. Translate `Result<T>` and `AppError` to the wire protocol.
 
+For unary or request-driven server-streaming gRPC service methods, use the shipped
+[gRPC adapter](/docs/capabilities/transports/grpc): it owns
+the scope seeding, cancellation flow, and default `RpcException` mapping while the generated service
+override retains explicit protobuf/application mapping. Other transports can follow this guide directly.
+
 JSON-RPC and MCP are protocols; ASP.NET Core is one possible host. A gRPC server, CLI, queue consumer, or
 custom socket host can invoke the same handlers without referencing `Elarion.AspNetCore`.
 
@@ -86,8 +91,8 @@ feature gates, resilience, caching, idempotency, transactions, and auditing conf
 
 ## Invoke a server-streaming handler
 
-For an explicit server-streaming-capable transport (such as a future gRPC server-streaming adapter), invoke the
-typed seam. Startup errors are normal `AppError`s; keep the accepted invocation alive while writing items:
+For an explicit server-streaming-capable transport (including Elarion's gRPC server-streaming adapter), invoke
+the typed seam. Startup errors are normal `AppError`s; keep the accepted invocation alive while writing items:
 
 ```csharp
 var started = await StreamHandlerInvoker.InvokeAsync<ExportRequest, ExportRow>(provider, request, context, ct);
@@ -136,8 +141,8 @@ AOT-safe binding. A reusable feature therefore ships a concrete `MapElarionX(rou
 ## Packaging boundary
 
 A non-HTTP adapter references `Elarion` and `Elarion.Abstractions`. Add `Elarion.JsonRpc` only when serving
-its JSON-RPC/MCP protocol adapters, and `Elarion.AspNetCore` only when hosting in ASP.NET Core. Core must
-never reference the new adapter.
+its JSON-RPC/MCP protocol adapters, `Elarion.Grpc` for its injected unary/server-streaming gRPC invokers, and `Elarion.AspNetCore` only
+when hosting in ASP.NET Core. Core must never reference the new adapter.
 
 ## Complete console example
 

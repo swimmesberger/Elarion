@@ -8,9 +8,35 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **gRPC request-driven server streaming (ADR-0063).** `Elarion.Grpc` now adapts the existing cold
+  `IStreamHandler<TRequest,TItem>` seam through `GrpcStreamHandlerInvoker`, preserving principal and exact
+  `ServerCallContext` scope seeding, decorated stream-handler resolution, call cancellation, and scope
+  lifetime through enumeration. Failed startup results use the existing stable `AppError` → `RpcException`
+  translation before the response starts; post-start lazy enumeration faults remain terminal gRPC call
+  faults. grpc-dotnet hosts use
+  `ServerCallContext.InvokeElarionStreamAsync<TRequest,TItem>(request)` after
+  `services.AddGrpc().AddElarion()`. Client and duplex streaming remain deliberately out of scope.
+
 ## [0.2.5] - 2026-07-15
 
 ### Added
+- **Unary gRPC transport adapter (ADR-0063).** New **`Elarion.Grpc`** is a host-neutral
+  package whose only gRPC dependency is `Grpc.Core.Api`: the injected `GrpcHandlerInvoker`
+  primarily takes an already-mapped application request plus the exact `ServerCallContext` and returns the
+  application response; a convenience overload retains inline protobuf/application mapper lambdas.
+  `IGrpcPrincipalFactory` captures host
+  authentication once instead of repeating it per method. The invoker seeds a fresh dispatch scope, flows
+  cancellation, and invokes the decorated handler chain through `HandlerInvoker`. Failed `Result<T>` values
+  use the replaceable `IAppErrorTranslator<RpcException>` seam; the default `GrpcAppErrorTranslator` has stable
+  status mapping and an `elarion-error-kind` trailer. `AddElarionGrpcTransport(...)` registers these host-neutral adapter
+  services with `TryAdd` semantics—it never configures a gRPC host. No generated proto contracts, reflection
+  field mapping, `HandlerTransports` flag, rich validation protobuf details, or streaming ship in phase one.
+  The recommended grpc-dotnet host path is the companion **`Elarion.Grpc.AspNetCore`** package:
+  `services.AddGrpc().AddElarion()` adopts `HttpContext.User`, and
+  `ServerCallContext.InvokeElarionAsync<TRequest,TResponse>(request)` uses the call's `RequestServices`,
+  removing constructor, principal, and mapping-delegate plumbing while preserving explicit
+  protobuf/application mapping in the service method.
 - **The SQL migration runner is now database-neutral, with a SQLite provider** (ADR-0060). The EF-free
   (NativeAOT) migration runner splits into `Elarion.Migrations` — the database-neutral engine (script
   discovery, SHA-256 normalized checksums, versioning, out-of-order/repeatable planning, the roll-forward

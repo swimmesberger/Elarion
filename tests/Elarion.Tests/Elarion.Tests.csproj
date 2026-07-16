@@ -13,6 +13,7 @@
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="xunit.v3.mtp-v2" />
     <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Grpc.Core.Api" />
     <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
@@ -29,6 +30,8 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
     <ProjectReference Include="../../src/Elarion/Elarion.csproj" />
+    <ProjectReference Include="../../src/Elarion.Grpc/Elarion.Grpc.csproj" />
+    <ProjectReference Include="../../src/Elarion.Grpc.AspNetCore/Elarion.Grpc.AspNetCore.csproj" />
     <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj" />
     <ProjectReference Include="../../src/Elarion.Actors.PostgreSql/Elarion.Actors.PostgreSql.csproj" />
     <ProjectReference Include="../../src/Elarion.Actors.PostgreSql.Generators/Elarion.Actors.PostgreSql.Generators.csproj" />

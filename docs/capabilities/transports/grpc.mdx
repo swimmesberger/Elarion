@@ -1,0 +1,186 @@
+---
+title: gRPC
+description: Add unary and request-driven server-streaming gRPC service methods over Elarion handlers with explicit protobuf mapping, scoped identity, and stable AppError status translation.
+---
+
+Elarion's gRPC support has two layers. `Elarion.Grpc` is the host-neutral unary and request-driven
+server-streaming adapter;
+`Elarion.Grpc.AspNetCore` is the recommended convention layer for the standard grpc-dotnet ASP.NET Core
+server. Neither generates `.proto` files, scans services, or infers wire fields. Each service override
+owns its protobuf-to-application mapping, while Elarion owns the easy-to-miss boundary mechanics: a fresh
+dispatch scope, the calling principal, the exact `ServerCallContext`, cancellation, the decorated handler
+pipeline, and stable error translation.
+
+## Install and register the transport
+
+```xml
+<PackageReference Include="Elarion.Grpc.AspNetCore" Version="0.2.5" />
+```
+
+Compose Elarion onto grpc-dotnet's normal server builder. ASP.NET Core authentication populates
+`HttpContext.User`; Elarion adopts that principal for every handler dispatch:
+
+```csharp
+using Elarion.Grpc.AspNetCore;
+
+builder.Services.AddGrpc().AddElarion();
+```
+
+Continue to map generated services normally with `app.MapGrpcService<TService>()`; Elarion does not scan or
+map service classes. Register an `IAppErrorTranslator<RpcException>` before this call to replace the
+default mapping.
+
+For a non-ASP.NET host, reference `Elarion.Grpc` directly and call
+`services.AddElarionGrpcTransport(context => principal)` (or pass an `IGrpcPrincipalFactory`). Inject
+`GrpcHandlerInvoker` or `GrpcStreamHandlerInvoker` into the service and use their equivalent
+`InvokeUnaryAsync<TRequest,TResponse>(request, context)` or
+`InvokeServerStreamingAsync<TRequest,TItem>(request, context)` methods.
+
+## Map a generated service explicitly
+
+The generated service base remains a normal host concern. Map the protobuf request into the application
+request, dispatch it, then map the application response into the protobuf reply. With grpc-dotnet, the
+supplied `ServerCallContext` resolves the configured invoker from `HttpContext.RequestServices`, so the
+service has no Elarion constructor dependency and neither mapping needs a delegate:
+
+```csharp
+using Elarion.Grpc.AspNetCore;
+using Grpc.Core;
+
+public sealed class ClientsGrpcService : Clients.ClientsBase {
+    public override async Task<GetClientReply> GetClient(
+        GetClientRequest request,
+        ServerCallContext context) {
+        var application = await context.InvokeElarionAsync<GetClient.Query, GetClient.Response>(
+            new GetClient.Query { Id = Guid.Parse(request.Id) });
+
+        return new GetClientReply {
+            Id = application.Id.ToString(),
+            Name = application.Name,
+        };
+    }
+}
+```
+
+C# does not use a method's return type to infer generic arguments, so the application response type must
+appear in this delegate-free call. The request/response pair is the same pair declared by
+`IHandler<TRequest, Result<TResponse>>`; resolving it remains compile-time typed and reflection-free.
+
+For a short expression-bodied override, the mapper overload remains available:
+
+```csharp
+return context.InvokeElarionAsync(
+    request,
+    static wire => new GetClient.Query { Id = Guid.Parse(wire.Id) },
+    static (GetClient.Response application) => new GetClientReply {
+        Id = application.Id.ToString(),
+        Name = application.Name,
+    });
+```
+
+That call resolves the invoker from the current grpc-dotnet request services, captures the already
+authenticated `HttpContext.User`, creates a fresh `DispatchScopeContext`, stores that principal and the
+exact `ServerCallContext`, and invokes `HandlerInvoker`. The handler is therefore resolved from DI through its
+generated decorator chain—authorization, validation, transactions, resilience, and observability stay
+identical to the other transports. `ServerCallContext.CancellationToken` is the handler cancellation
+token. A host that uses `AddElarionClaimsCurrentUser()` gets its usual `ICurrentUser` mapping from the
+captured principal.
+
+The service method remains the deliberate seam for proto-field presence, versioning, and application
+DTO choices. Do not expose generated protobuf messages in a handler and do not add a generic automatic
+field mapper: both obscure wire-contract decisions and undermine AOT friendliness.
+
+## Failures
+
+A failed `Result<T>` becomes an `RpcException` through `IAppErrorTranslator<RpcException>`. The default
+mapping is stable:
+
+| `AppError.Kind` | gRPC status | `elarion-error-kind` trailer |
+| --- | --- | --- |
+| `Validation` | `InvalidArgument` | `validation` |
+| `NotFound` | `NotFound` | `not-found` |
+| `Conflict` | `AlreadyExists` | `conflict` |
+| `Forbidden` | `PermissionDenied` | `forbidden` |
+| `Unauthorized` | `Unauthenticated` | `unauthorized` |
+| `BusinessRule` | `FailedPrecondition` | `business-rule` |
+| `Internal` | `Internal` | `internal` |
+
+`RpcException.Status.Detail` is the `AppError.Message`. The lower-case
+`elarion-error-kind` metadata key is the machine-readable compatibility surface. An unknown future
+`ErrorKind` maps fail-safe to `Internal` and `internal`; it is never exposed as an unknown wire value.
+
+`AppError.Validation` may contain field errors, but phase one intentionally does not serialize them as
+`google.rpc.Status` or any other rich protobuf detail. Such data needs a stable, versioned protobuf
+contract. The kind trailer is preserved now; structured validation details remain a future additive
+transport decision.
+
+## Server streaming
+
+Request-driven `IStreamHandler<TRequest,TItem>` is available as a gRPC **server stream**. It is a cold,
+request-bound stream: the handler accepts the application request once and returns either an upfront
+`Result` failure or an accepted `IAsyncEnumerable<TItem>`. It is not a generic projection of
+`StreamHub<T>` or a client-event feed.
+
+Keep the application mapping in the generated service override and hold the returned invocation for the
+whole enumeration:
+
+```csharp
+public override async Task WatchClients(
+    WatchClientsRequest request,
+    IServerStreamWriter<ClientChangedReply> responseStream,
+    ServerCallContext context) {
+    await using var stream = await context.InvokeElarionStreamAsync<
+        WatchClients.Query, WatchClients.Item>(
+        new WatchClients.Query { TenantId = Guid.Parse(request.TenantId) });
+
+    await foreach (var item in stream.WithCancellation(context.CancellationToken)) {
+        await responseStream.WriteAsync(new ClientChangedReply {
+            Id = item.Id.ToString(),
+            Name = item.Name,
+        });
+    }
+}
+```
+
+`GrpcStreamHandlerInvoker` seeds the same principal and exact `ServerCallContext` as unary dispatch,
+then calls `StreamHandlerInvoker`. The accepted invocation owns its fresh dispatch scope until normal
+completion, cancellation, fault, or disposal; `await using` is therefore required. The gRPC cancellation
+token is passed when the handler starts and when the stream is enumerated.
+
+The optional writer overload can keep a conventional override short:
+
+```csharp
+return context.InvokeElarionStreamAsync(
+    request,
+    responseStream,
+    static wire => new WatchClients.Query { TenantId = Guid.Parse(wire.TenantId) },
+    static (WatchClients.Item item) => new ClientChangedReply {
+        Id = item.Id.ToString(),
+        Name = item.Name,
+    });
+```
+
+A failed stream startup is translated through `IAppErrorTranslator<RpcException>` before any item is
+written. Once grpc-dotnet has started the response, a lazy enumeration exception terminates that gRPC call;
+the adapter does not try to retrofit it into an `AppError` response. Make item-level failures explicit in
+the stream item contract when a consumer must observe them.
+
+Client and duplex streaming remain out of scope. They need a distinct inbound-message and scope-lifetime
+model, including how caller messages participate in handler decoration and how bidirectional cancellation,
+backpressure, and post-response failures are represented. Use unary/batched commands, staged blobs,
+`Elarion.Connections`, or a purpose-built protocol adapter until that design exists.
+
+## Boundaries
+
+- `Elarion.Grpc` references `Elarion`, `Elarion.Abstractions`, `Grpc.Core.Api`, and the
+  dependency-light `Microsoft.Extensions.DependencyInjection.Abstractions` contract package.
+- `Elarion.Grpc.AspNetCore` references `Elarion.Grpc`, `Grpc.AspNetCore.Server`, and the ASP.NET Core shared
+  framework. Only this composition package calls `GetHttpContext()`.
+- `Elarion` core and `Elarion.Abstractions` do not reference gRPC.
+- No `HandlerTransports` value is added: gRPC overrides are typed and application-owned, rather than
+  entries in the name-routed JSON-RPC/MCP bus.
+- Authentication stays host-owned. `IGrpcPrincipalFactory` is deliberately only the synchronous capture
+  seam for a principal the host has already authenticated. The ASP.NET convention supplies it from
+  `HttpContext.User`; custom hosts configure it once rather than per method.
+
+For a non-gRPC adapter, see [writing a custom transport](/docs/capabilities/transports/custom-transports).

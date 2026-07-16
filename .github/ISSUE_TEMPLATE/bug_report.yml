@@ -16,6 +16,7 @@ body:
         - Elarion
         - Elarion.Generators
         - Elarion.JsonRpc
+        - Elarion.Grpc
         - Elarion.AspNetCore
         - Elarion.AspNetCore.SchemaGeneration
         - Elarion.EntityFrameworkCore
