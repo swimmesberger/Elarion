@@ -12,8 +12,8 @@ reader open and emits each row as it is enumerated, so its memory use stays O(1)
 
 ```
 POST /readings … GET /devices/{id}/stats     hand-authored unary endpoints (RDG-compiled),
-GET /devices/{id}/history/stream             host callback + explicit AOT-safe RequestDelegate → SSE
-        │                                    bind/parse → handler → Result<T> or streamed rows
+GET /devices/{id}/history/stream             direct MapGet (RDG binding) → lazy SSE IResult
+        │                                    bind → handler → Result<T> or streamed rows
         ▼
 [Handler] classes ([AppModule] Telemetry)    registered by the GENERATED module bootstrapper
         │                                    (AddElarion) — one always-on observability decorator only;
@@ -34,9 +34,9 @@ No EF, no reflection, no runtime code generation. Handler registrations come fro
 bootstrapper, while row mappers and JSON contracts are source-generated. The ordinary unary endpoints
 are hand-authored in the host compilation so **ASP.NET Core's Request Delegate Generator** compiles their
 binding ahead of time — that placement is deliberate (the ADR-0031 REST pattern). The request-driven
-stream uses the custom `MapElarionHandlerStream` extension instead: its host-owned callback manually
-parses route/query values, and the helper maps an explicit AOT-safe `RequestDelegate` and delegates framing
-to native `TypedResults.ServerSentEvents`. `JsonSerializerIsReflectionEnabledByDefault=false` holds for
+stream follows the same pattern: its direct typed `MapGet` lets RDG bind route/query values, then returns
+`ElarionHttpResults.ToStreamResult`, whose lazy `IResult` owns the decorated handler invocation, startup-error
+translation, and native `TypedResults.ServerSentEvents` framing. `JsonSerializerIsReflectionEnabledByDefault=false` holds for
 the whole process. If a row type doesn't map, the **build** fails (`ELSQL001`–`ELSQL007`) — there is no
 reflection fallback to limp along on, which is the property that makes NativeAOT safe here at all.
 
@@ -125,9 +125,9 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   minimal-API binding, ProblemDetails included), `AddElarionSqlMappers()`, and
   `AddElarionPostgreSqlMigrations(dataSource, …)` for schema-before-traffic. Each unary endpoint is one
   line: bind → typed handler call → `ElarionHttpResults.ToResult` (200 / 400 / 404 ProblemDetails).
-  The streaming exception is still thin host-owned binding: the callback manually parses route/query
-  values and builds the request; `MapElarionHandlerStream` invokes it through an explicit AOT-safe
-  `RequestDelegate` and owns native SSE framing, while the generated stream handler owns validation and SQL.
+  The stream endpoint is the same RDG-visible shape: its typed `MapGet` builds the request and returns
+  `ElarionHttpResults.ToStreamResult`; that lazy result owns native SSE framing and invocation lifetime,
+  while the generated stream handler owns validation and SQL.
 - **`EdgeTelemetry.Tests`** — the whole slice end-to-end against real TimescaleDB (Testcontainers,
   Docker-gated skip): startup migrates (extension + hypertable included), ingest flows through the
   handler pipeline into the generated mapper, a retransmit writes zero rows, and the rollup reads

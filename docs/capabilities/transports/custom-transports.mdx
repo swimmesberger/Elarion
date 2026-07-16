@@ -96,8 +96,10 @@ await using var stream = started.Value;
 await foreach (var row in stream.WithCancellation(ct)) await WriteItemAsync(row, ct);
 ```
 
-`MapElarionHandlerStream` is the shipped ASP.NET SSE adapter; it uses the native
-`TypedResults.ServerSentEvents` framing. JSON-RPC and MCP are deliberately single-response;
+The ASP.NET SSE adapter is `ElarionHttpResults.ToStreamResult<TRequest, TItem>(request)`: return it from a
+direct `MapGet` lambda so the host compiler's Request Delegate Generator owns binding. The lazy result uses
+native `TypedResults.ServerSentEvents` framing and does not start the handler until ASP.NET executes it.
+JSON-RPC and MCP are deliberately single-response;
 client and duplex streams belong to a transport-specific protocol or `Elarion.Connections`, not this contract.
 
 ## Map application errors

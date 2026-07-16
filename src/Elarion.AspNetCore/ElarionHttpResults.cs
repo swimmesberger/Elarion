@@ -1,6 +1,12 @@
+using System.Security.Claims;
+using Elarion;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Dispatch;
+using Elarion.Abstractions.Serialization;
+using Elarion.AspNetCore.Streams;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.AspNetCore;
 
@@ -47,6 +53,20 @@ public static class ElarionHttpResults {
         return TypedResults.Bytes(file.Bytes, file.ContentType, file.FileName);
     }
 
+    /// <summary>
+    /// Returns a lazy SSE result for a request-driven <see cref="IStreamHandler{TRequest,TItem}"/>. Bind the
+    /// request with a direct minimal-API <c>MapGet</c> lambda so ASP.NET Core's Request Delegate Generator owns
+    /// route and query binding. The decorated stream is started only when ASP.NET executes this result; startup
+    /// failures remain normal ProblemDetails responses, and an accepted invocation owns its scope until
+    /// enumeration completes, faults, or is cancelled.
+    /// </summary>
+    /// <typeparam name="TRequest">The handler request type.</typeparam>
+    /// <typeparam name="TItem">The streamed item type, present in a canonical source-generated JSON context.</typeparam>
+    /// <param name="request">The request passed to the generated stream-handler pipeline.</param>
+    public static IResult ToStreamResult<TRequest, TItem>(TRequest request)
+        where TRequest : notnull =>
+        new StreamHandlerSseResult<TRequest, TItem>(request);
+
     /// <summary>Converts an <see cref="AppError"/> into an RFC 7807 ProblemDetails <see cref="IResult"/>.</summary>
     public static IResult ToProblem(AppError error) {
         var statusCode = HttpAppErrorMapper.MapToStatusCode(error.Kind);
@@ -77,4 +97,34 @@ public static class ElarionHttpResults {
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+    private sealed class StreamHandlerSseResult<TRequest, TItem>(TRequest request) : IResult
+        where TRequest : notnull {
+        public async Task ExecuteAsync(HttpContext context) {
+            var dispatch = new DispatchScopeContext();
+            dispatch.Set<ClaimsPrincipal>(context.User);
+            var started = await StreamHandlerInvoker.InvokeAsync<TRequest, TItem>(
+                context.RequestServices, request, dispatch, context.RequestAborted).ConfigureAwait(false);
+            if (!started.IsSuccess) {
+                await ToProblem(started.Error).ExecuteAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            await using var invocation = started.Value;
+            var typeInfo = context.RequestServices.GetRequiredService<IElarionJsonSerialization>().GetTypeInfo<TItem>();
+            var timeProvider = context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System;
+            try {
+                await StreamEndpointRouteBuilderExtensions.CreateHandlerStreamResult(
+                        invocation, typeInfo, timeProvider, context.RequestAborted)
+                    .ExecuteAsync(context)
+                    .ConfigureAwait(false);
+            } catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
+                // Browser disconnects are normal termination; disposing the result releases the stream scope.
+            } catch {
+                // SSE cannot change to an HTTP problem once items have been written. Abort to make the terminal
+                // fault visible to the client instead of falsely signalling a clean completion.
+                context.Abort();
+            }
+        }
+    }
 }

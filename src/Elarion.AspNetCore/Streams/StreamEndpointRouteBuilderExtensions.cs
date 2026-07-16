@@ -2,12 +2,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
-using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using Elarion;
-using Elarion.Abstractions;
-using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Serialization;
 using Elarion.Streams;
 using Microsoft.AspNetCore.Builder;
@@ -62,40 +58,6 @@ public static class StreamEndpointRouteBuilderExtensions {
             return (IResult)TypedResults.ServerSentEvents(
                 StreamAsync(stream, typeInfo, GetTimeProvider(context), context.RequestAborted));
         });
-    }
-
-    /// <summary>
-    /// Maps a request-driven <see cref="IStreamHandler{TRequest,TItem}"/> as SSE. The
-    /// <paramref name="requestFactory"/> owns request binding; the host owns routing and optional endpoint-level
-    /// policy. After this adapter seeds the handler context from <c>HttpContext.User</c>, the generated stream
-    /// pipeline owns handler/business authorization. Startup failures are written as normal Elarion problems
-    /// before SSE headers are committed.
-    /// </summary>
-    /// <typeparam name="TRequest">The handler request type.</typeparam>
-    /// <typeparam name="TItem">The streamed item type, present in a canonical source-generated JSON context.</typeparam>
-    public static RouteHandlerBuilder MapElarionHandlerStream<TRequest, TItem>(
-        this IEndpointRouteBuilder endpoints,
-        [StringSyntax("Route")] string pattern,
-        Func<HttpContext, CancellationToken, ValueTask<TRequest>> requestFactory)
-        where TRequest : notnull {
-        ArgumentNullException.ThrowIfNull(endpoints);
-        ArgumentNullException.ThrowIfNull(requestFactory);
-
-        return (RouteHandlerBuilder)endpoints.MapGet(pattern, (RequestDelegate)(async context => {
-            var request = await requestFactory(context, context.RequestAborted).ConfigureAwait(false);
-            var dispatch = new DispatchScopeContext();
-            dispatch.Set<ClaimsPrincipal>(context.User);
-            var started = await StreamHandlerInvoker.InvokeAsync<TRequest, TItem>(
-                context.RequestServices, request, dispatch, context.RequestAborted).ConfigureAwait(false);
-            if (!started.IsSuccess) {
-                await ElarionHttpResults.ToProblem(started.Error).ExecuteAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            await new HandlerStreamSseResult<TItem>(started.Value, GetTimeProvider(context))
-                .ExecuteAsync(context)
-                .ConfigureAwait(false);
-        }));
     }
 
     private static long? ResumePoint(HttpRequest request) {
@@ -167,7 +129,7 @@ public static class StreamEndpointRouteBuilderExtensions {
         return MoveWaitResult.MoveCompleted;
     }
 
-    private static IResult CreateHandlerStreamResult<T>(
+    internal static IResult CreateHandlerStreamResult<T>(
         IAsyncEnumerable<T> source,
         JsonTypeInfo<T> typeInfo,
         TimeProvider timeProvider,
@@ -202,27 +164,6 @@ public static class StreamEndpointRouteBuilderExtensions {
             }
         } finally {
             await SettlePendingMoveAsync(pendingMove, enumerationCts).ConfigureAwait(false);
-        }
-    }
-
-    private sealed class HandlerStreamSseResult<T>(
-        StreamHandlerInvocation<T> invocation,
-        TimeProvider timeProvider) : IResult {
-        public async Task ExecuteAsync(HttpContext context) {
-            await using var ownedInvocation = invocation;
-            var typeInfo = context.RequestServices.GetRequiredService<IElarionJsonSerialization>().GetTypeInfo<T>();
-            try {
-                await CreateHandlerStreamResult(
-                        invocation, typeInfo, timeProvider, context.RequestAborted)
-                    .ExecuteAsync(context)
-                    .ConfigureAwait(false);
-            } catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
-                // Browser disconnects are normal termination; disposing the result releases the stream scope.
-            } catch {
-                // SSE cannot change to an HTTP problem once items have been written. Abort to make the terminal
-                // fault visible to the client instead of falsely signalling a clean completion.
-                context.Abort();
-            }
         }
     }
 

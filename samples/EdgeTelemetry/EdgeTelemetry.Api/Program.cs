@@ -3,7 +3,6 @@ using EdgeTelemetry.Api.Modules.Telemetry;
 using EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 using Elarion.Abstractions;
 using Elarion.AspNetCore;
-using Elarion.AspNetCore.Streams;
 using Elarion.Diagnostics;
 using Elarion.Migrations.PostgreSql;
 using Elarion.Sql;
@@ -23,9 +22,9 @@ using OpenTelemetry.Trace;
 // No EF, no reflection, no runtime codegen: handler registrations come from the generated module
 // bootstrapper, while mappers and JSON contracts are source-generated. The ordinary unary endpoints
 // below are hand-authored in this compilation, so ASP.NET Core's Request Delegate Generator compiles
-// their binding ahead of time (the ADR-0031 REST pattern). The streaming endpoint is a custom transport:
-// its host callback parses route/query values, and MapElarionHandlerStream maps an explicit AOT-safe
-// RequestDelegate that invokes the callback and writes native SSE.
+// their binding ahead of time (the ADR-0031 REST pattern). The streaming endpoint follows the same shape:
+// a direct MapGet owns generated route/query binding, while ElarionHttpResults owns stream invocation,
+// startup-error translation, and native SSE.
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -125,16 +124,14 @@ app.MapGet("/devices/{deviceId}/history", static async (
     ElarionHttpResults.ToResult(await history.HandleAsync(new GetReadingHistory.Query(deviceId, metric, limit), ct)));
 
 // Unlike /history's buffered JSON array, this finite export leaves the Npgsql reader open while native SSE
-// serializes each row. This host-owned callback manually parses route/query values; the custom extension
-// invokes it through an explicit AOT-safe RequestDelegate and owns framing. The handler rejects invalid
-// input before the adapter commits SSE headers.
-app.MapElarionHandlerStream<ExportReadingHistory.Query, ReadingRow>(
-    "/devices/{deviceId}/history/stream",
-    static (context, _) => ValueTask.FromResult(new ExportReadingHistory.Query(
-        context.Request.RouteValues["deviceId"]?.ToString() ?? string.Empty,
-        context.Request.Query["metric"].ToString(),
-        context.Request.Query.TryGetValue("limit", out var rawLimit)
-            && int.TryParse(rawLimit, out var limit) ? limit : 0)));
+// serializes each row. Direct MapGet keeps route/query binding visible to RDG; the lazy result starts the
+// decorated stream only when ASP.NET executes it and can still return a normal problem before SSE headers.
+app.MapGet("/devices/{deviceId}/history/stream", static (
+    string deviceId,
+    string metric,
+    int limit) =>
+    ElarionHttpResults.ToStreamResult<ExportReadingHistory.Query, ReadingRow>(
+        new ExportReadingHistory.Query(deviceId, metric, limit)));
 
 app.MapGet("/devices/{deviceId}/stats", static async (
     string deviceId,

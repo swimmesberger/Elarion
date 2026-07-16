@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
@@ -120,6 +121,30 @@ public sealed class StreamEndpointTests {
         var reassembled = string.Join("\n", body.Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line["data: ".Length..]));
         reassembled.Should().Be("{\n  \"symbol\": \"ELN\",\n  \"price\": 100\n}");
+    }
+
+    [Fact]
+    public async Task RequestDrivenStream_DoesNotStartWhenAnEndpointFilterReplacesTheResult() {
+        var starts = new HandlerStarts();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        builder.Services.AddSingleton(starts);
+        builder.Services.AddScoped<IStreamHandler<ExportRequest, TestQuote>, CountingExportHandler>();
+        var app = builder.Build();
+        app.MapGet("/export", static () =>
+                ElarionHttpResults.ToStreamResult<ExportRequest, TestQuote>(new ExportRequest()))
+            .AddEndpointFilter(static async (context, next) => {
+                _ = await next(context);
+                return Results.NoContent();
+            });
+        await app.StartAsync(Ct);
+        await using var host = new TestHost(app);
+
+        using var response = await host.Client.GetAsync("/export", Ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        starts.Count.Should().Be(0);
     }
 
     [Fact]
@@ -243,7 +268,8 @@ public sealed class StreamEndpointTests {
         });
         builder.Services.AddScoped<IStreamHandler<ExportRequest, TestQuote>>(_ => new ExportHandler(reject));
         var app = builder.Build();
-        app.MapElarionHandlerStream<ExportRequest, TestQuote>("/export", static (_, _) => ValueTask.FromResult(new ExportRequest()));
+        app.MapGet("/export", static () =>
+            ElarionHttpResults.ToStreamResult<ExportRequest, TestQuote>(new ExportRequest()));
         await app.StartAsync(Ct);
         return new TestHost(app);
     }
@@ -295,6 +321,26 @@ public sealed class StreamEndpointTests {
             reject
                 ? ValueTask.FromResult<Result<IAsyncEnumerable<TestQuote>>>(AppError.NotFound("missing"))
                 : ValueTask.FromResult(Result<IAsyncEnumerable<TestQuote>>.Success(Items()));
+
+        private static async IAsyncEnumerable<TestQuote> Items() {
+            yield return new TestQuote { Symbol = "ELN", Price = 100m };
+            await Task.Yield();
+        }
+    }
+
+    private sealed class HandlerStarts {
+        private int _count;
+        public int Count => Volatile.Read(ref _count);
+        public void Record() => Interlocked.Increment(ref _count);
+    }
+
+    private sealed class CountingExportHandler(HandlerStarts starts) : IStreamHandler<ExportRequest, TestQuote> {
+        public ValueTask<Result<IAsyncEnumerable<TestQuote>>> HandleAsync(
+            ExportRequest request,
+            CancellationToken ct) {
+            starts.Record();
+            return ValueTask.FromResult(Result<IAsyncEnumerable<TestQuote>>.Success(Items()));
+        }
 
         private static async IAsyncEnumerable<TestQuote> Items() {
             yield return new TestQuote { Symbol = "ELN", Price = 100m };
