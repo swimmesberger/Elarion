@@ -11,7 +11,7 @@ minor releases may include breaking changes.
 ## [0.2.5] - 2026-07-15
 
 ### Added
-- **Unary gRPC transport adapter (ADR-0063).** New **`Elarion.Grpc`** is a host-neutral,
+- **Unary gRPC transport adapter (ADR-0063).** New **`Elarion.Grpc`** is a host-neutral
   package whose only gRPC dependency is `Grpc.Core.Api`: the injected `GrpcHandlerInvoker`
   takes the request, exact `ServerCallContext`, and explicit protobuf/application mapper lambdas (the
   request plus one typed response lambda infer every generic type); `IGrpcPrincipalFactory` captures host
@@ -21,6 +21,10 @@ minor releases may include breaking changes.
   status mapping and an `elarion-error-kind` trailer. `AddElarionGrpcTransport(...)` registers these host-neutral adapter
   services with `TryAdd` semantics—it never configures a gRPC host. No generated proto contracts, reflection
   field mapping, `HandlerTransports` flag, rich validation protobuf details, or streaming ship in phase one.
+  The recommended grpc-dotnet host path is the companion **`Elarion.Grpc.AspNetCore`** package:
+  `services.AddGrpc().AddElarion()` adopts `HttpContext.User`, and
+  `ServerCallContext.InvokeElarionAsync(...)` uses the call's `RequestServices`, removing constructor and
+  per-method principal plumbing while preserving explicit protobuf/application mapping.
 - **The SQL migration runner is now database-neutral, with a SQLite provider** (ADR-0060). The EF-free
   (NativeAOT) migration runner splits into `Elarion.Migrations` — the database-neutral engine (script
   discovery, SHA-256 normalized checksums, versioning, out-of-order/repeatable planning, the roll-forward

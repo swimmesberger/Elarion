@@ -3,49 +3,54 @@ title: gRPC
 description: Add unary gRPC service methods over Elarion handlers with explicit protobuf mapping, scoped identity, and stable AppError status translation.
 ---
 
-`Elarion.Grpc` is a small, host-neutral adapter for unary gRPC methods. It does not add
-`Grpc.AspNetCore`, generate `.proto` files, scan services, or infer wire fields. The host owns gRPC
-hosting and authentication; each service override owns its protobuf-to-application mapping. The package
-owns the easy-to-miss boundary mechanics: a fresh dispatch scope, the calling principal, the exact
-`ServerCallContext`, cancellation, the decorated handler pipeline, and stable error translation.
+Elarion's gRPC support has two layers. `Elarion.Grpc` is the host-neutral unary adapter;
+`Elarion.Grpc.AspNetCore` is the recommended convention layer for the standard grpc-dotnet ASP.NET Core
+server. Neither generates `.proto` files, scans services, or infers wire fields. Each service override
+owns its protobuf-to-application mapping, while Elarion owns the easy-to-miss boundary mechanics: a fresh
+dispatch scope, the calling principal, the exact `ServerCallContext`, cancellation, the decorated handler
+pipeline, and stable error translation.
 
 ## Install and register the transport
 
 ```xml
-<PackageReference Include="Elarion.Grpc" Version="0.2.5" />
+<PackageReference Include="Elarion.Grpc.AspNetCore" Version="0.2.5" />
 ```
 
-Register the transport once with a delegate that returns the principal already authenticated by the
-host. This stays separate from gRPC server registration: an ASP.NET Core host calls its normal
-`services.AddGrpc()` alongside it, while another host can supply its own principal source:
+Compose Elarion onto grpc-dotnet's normal server builder. ASP.NET Core authentication populates
+`HttpContext.User`; Elarion adopts that principal for every handler dispatch:
 
 ```csharp
-services.AddElarionGrpcTransport(context => context.GetHttpContext().User);
+using Elarion.Grpc.AspNetCore;
+
+builder.Services.AddGrpc().AddElarion();
 ```
 
-That registers the injectable `GrpcHandlerInvoker`, `IGrpcPrincipalFactory`, and the default error
-translator with `TryAdd` semantics. For a host-specific implementation instead of a delegate, pass an
-`IGrpcPrincipalFactory` instance to `AddElarionGrpcTransport(...)`. Authentication itself still happens
-in the host; the factory only returns its result for the current call. Register an
-`IAppErrorTranslator<RpcException>` first to replace the default mapping.
+Continue to map generated services normally with `app.MapGrpcService<TService>()`; Elarion does not scan or
+map service classes. Register an `IAppErrorTranslator<RpcException>` before this call to replace the
+default mapping.
+
+For a non-ASP.NET host, reference `Elarion.Grpc` directly and call
+`services.AddElarionGrpcTransport(context => principal)` (or pass an `IGrpcPrincipalFactory`). Inject
+`GrpcHandlerInvoker` into the service and use its equivalent `InvokeUnaryAsync(...)` method.
 
 ## Map a generated service explicitly
 
-The generated service base is a normal host concern. Inject the invoker and keep both mappings explicit.
-The request value anchors the wire-request type; one application-response annotation lets C# infer the
-remaining types, so the override has no generic argument list:
+The generated service base remains a normal host concern. With grpc-dotnet, invoke through the supplied
+`ServerCallContext`; its `HttpContext.RequestServices` supplies the configured invoker, so the service has
+no Elarion constructor dependency. Keep both mappings explicit. The request value anchors the wire-request
+type; one application-response annotation lets C# infer the remaining types, so the override has no
+generic argument list:
 
 ```csharp
-using Elarion.Grpc;
+using Elarion.Grpc.AspNetCore;
 using Grpc.Core;
 
-public sealed class ClientsGrpcService(GrpcHandlerInvoker grpc) : Clients.ClientsBase {
+public sealed class ClientsGrpcService : Clients.ClientsBase {
     public override Task<GetClientReply> GetClient(
         GetClientRequest request,
         ServerCallContext context) =>
-        grpc.InvokeUnaryAsync(
+        context.InvokeElarionAsync(
             request,
-            context,
             static wire => new GetClient.Query { Id = Guid.Parse(wire.Id) },
             static (GetClient.Response application) => new GetClientReply {
                 Id = application.Id.ToString(),
@@ -54,9 +59,9 @@ public sealed class ClientsGrpcService(GrpcHandlerInvoker grpc) : Clients.Client
 }
 ```
 
-That call asks `IGrpcPrincipalFactory` for the host-authenticated principal, creates a fresh
-`DispatchScopeContext`, stores that principal and the exact
-`ServerCallContext`, and invokes `HandlerInvoker`. The handler is therefore resolved from DI through its
+That call resolves the invoker from the current grpc-dotnet request services, captures the already
+authenticated `HttpContext.User`, creates a fresh `DispatchScopeContext`, stores that principal and the
+exact `ServerCallContext`, and invokes `HandlerInvoker`. The handler is therefore resolved from DI through its
 generated decorator chain—authorization, validation, transactions, resilience, and observability stay
 identical to the other transports. `ServerCallContext.CancellationToken` is the handler cancellation
 token. A host that uses `AddElarionClaimsCurrentUser()` gets its usual `ICurrentUser` mapping from the
@@ -109,10 +114,13 @@ streams as appropriate. Do not wrap an Elarion stream in a gRPC call ad hoc.
 
 - `Elarion.Grpc` references `Elarion`, `Elarion.Abstractions`, `Grpc.Core.Api`, and the
   dependency-light `Microsoft.Extensions.DependencyInjection.Abstractions` contract package.
+- `Elarion.Grpc.AspNetCore` references `Elarion.Grpc`, `Grpc.AspNetCore.Server`, and the ASP.NET Core shared
+  framework. Only this composition package calls `GetHttpContext()`.
 - `Elarion` core and `Elarion.Abstractions` do not reference gRPC.
 - No `HandlerTransports` value is added: gRPC overrides are typed and application-owned, rather than
   entries in the name-routed JSON-RPC/MCP bus.
 - Authentication stays host-owned. `IGrpcPrincipalFactory` is deliberately only the synchronous capture
-  seam for a principal the host has already authenticated; it is configured once rather than per method.
+  seam for a principal the host has already authenticated. The ASP.NET convention supplies it from
+  `HttpContext.User`; custom hosts configure it once rather than per method.
 
 For a non-gRPC adapter, see [writing a custom transport](/docs/capabilities/transports/custom-transports).
