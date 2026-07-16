@@ -3,11 +3,12 @@ title: Client connections
 description: Long-lived bidirectional links — device gateways and interactive clients — over a transport-neutral kernel; the app writes only the handshake and the codec.
 ---
 
-Most realtime needs don't need a connection: server→client facts are
-[client events](/docs/capabilities/events/client-events), ordered outputs are
-[streams](/docs/capabilities/events/streams), and client→server calls are
-[transports](/docs/capabilities/transports). A **connection** is for the cases those deliberately
-don't cover — when the conversation itself is stateful or latency-interactive:
+Most realtime needs don't need a connection. A deferred response to one request is
+[request-driven streaming](/docs/capabilities/transports/server-streaming); server→client facts are
+[client events](/docs/capabilities/events/client-events); and producer-owned ordered outputs are
+[streams](/docs/capabilities/events/streams). A **connection** is a stateful, bidirectional carrier for the
+cases those deliberately don't cover — when the conversation itself is stateful or latency-interactive. It
+does not add replay, ordering, or delivery guarantees to the contract it carries:
 
 1. **Interactive rate** — client→server messages are frequent *and* per-message latency is part of
    the UX (collaboration ops, live input, telemetry ingest where batching's flush window is itself

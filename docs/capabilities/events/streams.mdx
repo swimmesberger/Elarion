@@ -24,12 +24,17 @@ and per-key connections don't scale to a 100-symbol screen.
 
 | You need | Producer shape | Use |
 | --- | --- | --- |
+| One request returns a lazy export, token output, or tail query | One caller owns one response | [`IStreamHandler`](/docs/capabilities/transports/server-streaming) |
 | Invalidation hints ("re-query") | Any handler, any node, post-commit | [Client events](/docs/capabilities/events/client-events) |
 | Latest-wins live state | Live producer, versioned payload | Client events (payload tier + greeting) |
 | Every element, machine consumer | Any handler | [Integration events / outbox](/docs/capabilities/events/backends) |
 | Every element in order, completion, resume | One sequencer per key (a homed actor) | **Streams (this page)** |
 
 No sequencer → no ordering source → not a stream. If latest-wins is enough, stay on the payload tier.
+
+`StreamHub` is not merely an SSE implementation. It is a shared, producer-owned sequence/replay/resume
+contract; use a cold [`IStreamHandler`](/docs/capabilities/transports/server-streaming) when one request
+simply owns one lazy response and no shared sequence exists.
 
 ## The primitive: `StreamHub<T>`
 

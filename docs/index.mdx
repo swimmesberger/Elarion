@@ -103,11 +103,15 @@ simplest shape whose correctness contract fits:
     Use a handler for bounded request/reply work. It is the transport-facing gate for authorization,
     validation, transactions, idempotency, resilience, caching, and audit policy.
   </Card>
+  <Card title="Deferred response to one request" href="/docs/capabilities/transports/server-streaming">
+    Use a cold stream when one request returns lazy output such as an export, token output, or tail query.
+  </Card>
   <Card title="Browser needs to refresh" href="/docs/capabilities/events/client-events">
     Publish a client event when a lost message merely leaves the UI stale and re-querying converges.
   </Card>
   <Card title="Sequence is the data" href="/docs/capabilities/events/streams">
-    Use an ordered stream when a missing item makes the consumer wrong and one live sequencer owns the key.
+    Use an ordered stream when a missing item makes the consumer wrong and one live producer owns the key,
+    sequence, replay window, and resume behavior.
   </Card>
   <Card title="Conversation is stateful" href="/docs/capabilities/connections">
     Use a connection for interactive-rate client input, device links, or server-to-client request/reply.

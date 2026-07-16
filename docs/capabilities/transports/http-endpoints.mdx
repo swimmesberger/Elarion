@@ -54,6 +54,25 @@ interface (the success type is unwrapped from `Result<T>`); the types may be nes
 `204 No Content`; a [`Result<ElarionFile>`](#files-downloads-and-uploads) response is served as a binary
 file download; otherwise success returns `200 OK` with the JSON response body.
 
+## Request-driven SSE responses
+
+`[HttpEndpoint]` generates a unary request/reply route. A response that is itself a lazy sequence instead
+implements `IStreamHandler<TRequest, TItem>` and is mapped explicitly in the owning module's `MapEndpoints`
+hook with a direct `MapGet` and `ElarionHttpResults.ToStreamResult`. This preserves ASP.NET Core's Request
+Delegate Generator binding for route/query parameters; it is intentional, not a missing generated endpoint.
+
+```csharp
+endpoints.MapGet("reports/{reportId}/export", static (Guid reportId) =>
+    ElarionHttpResults.ToStreamResult<ExportRows.Query, ExportRows.Row>(new() {
+        ReportId = reportId,
+    }));
+```
+
+The request stream still uses canonical source-generated JSON after `AddElarionHttpJson()`, but it is not an
+OpenAPI/JSON-RPC/MCP operation. Read [request-driven server streaming](/docs/capabilities/transports/server-streaming)
+for the choice between this cold per-request shape, client events, and actor-owned ordered streams, plus its
+scope and failure semantics.
+
 ## Hosting
 
 `[HttpEndpoint]` handlers are mapped through the generated module bootstrapper, so they are

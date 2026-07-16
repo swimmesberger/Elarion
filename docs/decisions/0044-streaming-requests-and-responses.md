@@ -138,3 +138,10 @@ incremental streaming features on the defaults (ADR-0025 discipline).
   contract projection rather than being implied by this handler shape.
 - Accepted asymmetry: JSON-RPC and MCP callers never see streamed responses; a handler that streams is an
   HTTP-only handler by declaration.
+
+## Implementation note (2026-07-16)
+
+The HTTP-only and future-gRPC wording above records this decision's original implementation context. Since
+then, [ADR-0063](0063-grpc-unary-transport.md) has shipped an explicit gRPC server-streaming adapter over
+this same request-driven contract. JSON-RPC and MCP remain single-response; the current transport inventory
+is documented in [request-driven server streaming](/docs/capabilities/transports/server-streaming).
