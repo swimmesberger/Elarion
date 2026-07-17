@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Elarion.Connections.Simulation" />
+    <InternalsVisibleTo Include="Elarion.Tests" />
   </ItemGroup>
 
   <ItemGroup>

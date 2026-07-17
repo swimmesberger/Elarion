@@ -148,6 +148,12 @@ public class TcpSendBenchmarks {
 
         public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
             ValueTask.CompletedTask;
+
+        public ValueTask OnIdentityPromotedAsync(
+            ClientConnection previous,
+            ClientConnection current,
+            CancellationToken ct = default) =>
+            ValueTask.CompletedTask;
     }
 
     public sealed class PassiveHandler : TcpConnectionHandler {

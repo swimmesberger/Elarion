@@ -41,6 +41,30 @@ public static class ConnectionsServiceCollectionExtensions {
                 "DefaultInvokeTimeout must be positive, Timeout.InfiniteTimeSpan, or null.", nameof(configure));
         }
 
+        if (options.MaxIdentityMetadataEntries < 0) {
+            throw new ArgumentException("MaxIdentityMetadataEntries must be non-negative.", nameof(configure));
+        }
+
+        if (options.MaxIdentityMetadataKeyLength <= 0) {
+            throw new ArgumentException("MaxIdentityMetadataKeyLength must be positive.", nameof(configure));
+        }
+
+        if (options.MaxIdentityMetadataValueLength < 0) {
+            throw new ArgumentException("MaxIdentityMetadataValueLength must be non-negative.", nameof(configure));
+        }
+
+        if (options.MaxPrincipalIdentities <= 0) {
+            throw new ArgumentException("MaxPrincipalIdentities must be positive.", nameof(configure));
+        }
+
+        if (options.MaxPrincipalClaims < 0) {
+            throw new ArgumentException("MaxPrincipalClaims must be non-negative.", nameof(configure));
+        }
+
+        if (options.MaxPrincipalActorDepth < 0) {
+            throw new ArgumentException("MaxPrincipalActorDepth must be non-negative.", nameof(configure));
+        }
+
         if (existing is null) {
             services.AddSingleton(options);
         }
@@ -64,4 +88,10 @@ internal sealed class ClientConnectionEventBridgeObserver(ClientConnectionEventB
 
     public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
         bridge.OnDisconnectedAsync(connection, ct);
+
+    public ValueTask OnIdentityPromotedAsync(
+        ClientConnection previous,
+        ClientConnection current,
+        CancellationToken ct = default) =>
+        bridge.OnIdentityPromotedAsync(previous, current, ct);
 }

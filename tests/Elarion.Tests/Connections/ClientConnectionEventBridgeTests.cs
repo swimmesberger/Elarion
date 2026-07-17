@@ -7,6 +7,7 @@ using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Serialization;
 using Elarion.ClientEvents;
 using Elarion.Connections;
+using Elarion.Connections.Simulation;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -33,7 +34,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
         var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
 
         var result = await bridge.SubscribeAsync(
-            Connection("conn-1", "user-1"), [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
+            Sink("conn-1", "user-1"), [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
             static (_, _) => ValueTask.CompletedTask, ct);
 
         result.Status.Should().Be(ClientEventSubscriptionStatus.Unauthenticated);
@@ -47,7 +48,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
         var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
 
         var result = await bridge.SubscribeAsync(
-            Connection("conn-1", "user-1"), [new ClientEventSubscriptionRequest { Topic = "test.doesNotExist" }],
+            Sink("conn-1", "user-1"), [new ClientEventSubscriptionRequest { Topic = "test.doesNotExist" }],
             static (_, _) => ValueTask.CompletedTask, ct);
 
         result.Status.Should().Be(ClientEventSubscriptionStatus.NotFound);
@@ -61,7 +62,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
         var delivered = Channel.CreateUnbounded<ClientEventEnvelope>();
 
         var result = await bridge.SubscribeAsync(
-            Connection("conn-1", "user-1"), [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
+            Sink("conn-1", "user-1"), [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
             (envelope, deliveryCt) => delivered.Writer.WriteAsync(envelope, deliveryCt), ct);
         result.Status.Should().Be(ClientEventSubscriptionStatus.Resolved);
         using var subscription = result.Subscription!;
@@ -78,6 +79,41 @@ public sealed partial class ClientConnectionEventBridgeTests {
     }
 
     [Fact]
+    public async Task IdentityPromotion_DisposesSubscriptionsAndAllowsResubscription() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var provider = BuildProvider(new FakeCurrentUser("user-1", isAuthenticated: true));
+        var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
+        var registry = provider.GetRequiredService<IClientConnectionRegistry>();
+        var sink = ClientConnectionRegistryTests.AnonymousSink("conn-1");
+        await registry.RegisterAsync(sink, ct);
+        var delivered = Channel.CreateUnbounded<ClientEventEnvelope>();
+
+        var initial = await bridge.SubscribeAsync(
+            sink, [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
+            (envelope, deliveryCt) => delivered.Writer.WriteAsync(envelope, deliveryCt), ct);
+        initial.Status.Should().Be(ClientEventSubscriptionStatus.Resolved);
+        (await delivered.Reader.ReadAsync(ct)).Topic.Should().Be(ClientEventControlEvents.Connected);
+
+        (await registry.PromoteAsync("conn-1", new ClientConnectionIdentity {
+            Principal = new System.Security.Claims.ClaimsPrincipal(
+                new System.Security.Claims.ClaimsIdentity(authenticationType: "test")),
+            PrincipalId = "user-1",
+        }, ct)).Should().Be(ClientConnectionPromotionStatus.Promoted);
+        await initial.Subscription!.Completion.WaitAsync(ct);
+
+        await provider.GetRequiredService<IClientEventPublisher>()
+            .PublishAsync(new InvoiceChanged { InvoiceId = Guid.CreateVersion7() }, ClientEventScope.Global, ct);
+        delivered.Reader.Count.Should().Be(0);
+
+        var replacement = await bridge.SubscribeAsync(
+            sink, [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
+            (envelope, deliveryCt) => delivered.Writer.WriteAsync(envelope, deliveryCt), ct);
+        replacement.Status.Should().Be(ClientEventSubscriptionStatus.Resolved);
+        using var subscription = replacement.Subscription!;
+        (await delivered.Reader.ReadAsync(ct)).Topic.Should().Be(ClientEventControlEvents.Connected);
+    }
+
+    [Fact]
     public async Task ConnectionUnregistration_DisposesItsSubscriptions() {
         var ct = TestContext.Current.CancellationToken;
         await using var provider = BuildProvider(new FakeCurrentUser("user-1", isAuthenticated: true));
@@ -88,7 +124,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
         var delivered = Channel.CreateUnbounded<ClientEventEnvelope>();
 
         var result = await bridge.SubscribeAsync(
-            sink.Connection, [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
+            sink, [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
             (envelope, deliveryCt) => delivered.Writer.WriteAsync(envelope, deliveryCt), ct);
         (await delivered.Reader.ReadAsync(ct)).Topic.Should().Be(ClientEventControlEvents.Connected);
 
@@ -109,8 +145,8 @@ public sealed partial class ClientConnectionEventBridgeTests {
         return services.BuildServiceProvider();
     }
 
-    private static ClientConnection Connection(string connectionId, string userId) =>
-        ClientConnectionRegistryTests.Sink(connectionId, userId).Connection;
+    private static SimulatedClientConnection Sink(string connectionId, string userId) =>
+        ClientConnectionRegistryTests.Sink(connectionId, userId);
 
     private sealed class FakeCurrentUser(string userId, bool isAuthenticated) : ICurrentUser {
         public string UserId => userId;

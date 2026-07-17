@@ -18,14 +18,24 @@ public sealed record TcpConnectionSettings {
     /// prefixes for another). Applies to the handshake too — it is chosen before any byte is read.</summary>
     public TcpMessageFramer? Framer { get; init; }
 
-    /// <summary>This connection's message size cap.</summary>
-    public int? MaxMessageBytes { get; init; }
+    /// <summary>This connection's maximum total inbound framed wire bytes (prefix/header/body/trailer included).</summary>
+    public int? MaxInboundFrameBytes { get; init; }
+
+    /// <summary>This connection's maximum total outbound framed wire bytes (prefix/header/body/trailer included).</summary>
+    public int? MaxOutboundFrameBytes { get; init; }
 
     /// <summary>This connection's initial receive-buffer size (device families differ in frame size).</summary>
     public int? InitialReadBufferBytes { get; init; }
 
     /// <summary>This connection's initial send frame-buffer size.</summary>
     public int? InitialSendBufferBytes { get; init; }
+
+    /// <summary>
+    /// This connection's TLS policy selected from the peer before any application byte is exchanged. The
+    /// policy kind must match the endpoint direction. Set it to override or enable endpoint TLS; there is no
+    /// per-connection plaintext downgrade sentinel.
+    /// </summary>
+    public TcpTlsOptions? Tls { get; init; }
 
     /// <summary>This connection's idle window for the codec's <c>OnIdleAsync</c> (device families differ
     /// in poll cadence).</summary>

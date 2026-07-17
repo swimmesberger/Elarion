@@ -16,23 +16,41 @@ public class ElarionTcpConnectionOptions {
 
     /// <summary>
     /// The initial size of the per-connection receive buffer (default
-    /// <see cref="DefaultReadBufferBytes"/>). It grows on demand (up to <see cref="MaxMessageBytes"/>-sized
-    /// messages) and is <b>retained for the connection's lifetime</b> — size it down for fleets of
-    /// small-telegram devices (memory footprint), up to the largest expected frame for known-large
-    /// protocols (skips the regrowth copies).
+    /// <see cref="DefaultReadBufferBytes"/>). It grows on demand up to <see cref="MaxInboundFrameBytes"/> and is
+    /// <b>retained for the connection's lifetime</b> — size it down for fleets of small-telegram devices
+    /// (memory footprint), up to the largest expected frame for known-large protocols (skips regrowth
+    /// copies). Must be positive and no larger than <see cref="MaxInboundFrameBytes"/>.
     /// </summary>
     public int InitialReadBufferBytes { get; set; } = DefaultReadBufferBytes;
 
     /// <summary>
     /// The initial size of the per-connection send frame buffer (default
     /// <see cref="DefaultSendBufferBytes"/>). Grows to the largest framed message the connection sends and
-    /// is retained; same sizing guidance as <see cref="InitialReadBufferBytes"/>.
+    /// is retained; same sizing guidance as <see cref="InitialReadBufferBytes"/>. Must be positive and no
+    /// larger than <see cref="MaxOutboundFrameBytes"/>.
     /// </summary>
     public int InitialSendBufferBytes { get; set; } = DefaultSendBufferBytes;
 
-    /// <summary>The maximum unconsumed buffer (≈ largest message) before the connection is closed
-    /// (default 1 MiB). Bulk payloads belong in the staged-blob tier, not a frame.</summary>
-    public int MaxMessageBytes { get; set; } = 1024 * 1024;
+    /// <summary>
+    /// The maximum total unconsumed framed wire bytes for one inbound message (prefix/header/body/trailer
+    /// included; default 1 MiB). The receive buffer and every stream read are hard-capped at this value.
+    /// Bulk payloads belong in the staged-blob tier, not a frame.
+    /// </summary>
+    public int MaxInboundFrameBytes { get; set; } = 1024 * 1024;
+
+    /// <summary>
+    /// The maximum total framed wire bytes for one outbound message (prefix/header/body/trailer included;
+    /// default 1 MiB). Stage 1 checks the completed frame before writing it; it does not yet bound the
+    /// temporary framing buffer's allocation mechanics.
+    /// </summary>
+    public int MaxOutboundFrameBytes { get; set; } = 1024 * 1024;
+
+    /// <summary>
+    /// Optional TLS upgrade policy. Listener endpoints require <see cref="TcpServerTlsOptions"/>; dialers
+    /// require <see cref="TcpClientTlsOptions"/>. TLS completes before framing and framed authentication, and
+    /// a configured endpoint never falls back to plaintext after TLS failure.
+    /// </summary>
+    public TcpTlsOptions? Tls { get; set; }
 
     /// <summary>See the WebSocket adapter's equivalent: when set, the codec's <c>OnIdleAsync</c> fires per
     /// elapsed window without inbound traffic — the protocol-keepalive/dead-link hook.</summary>

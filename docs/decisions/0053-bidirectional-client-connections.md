@@ -62,6 +62,50 @@ then await `IClientConnectionProtocol.OnOpenedAsync` exactly once before they de
 Observer failures remain isolated; an opening failure is connection-fatal and follows the normal
 `OnClosedAsync` then unregister teardown.
 
+The TCP adapter's establishment order is fixed: raw TCP → optional TLS handshake → application framer →
+framed application authentication → registration → `OnOpenedAsync` → regular messages. A TLS failure never
+reaches the framer, application authenticator, registry, or lifecycle observers, and a TLS-configured dialer
+never retries the same endpoint as plaintext. Platform certificate validation remains fail-closed; an
+explicit validation bypass is test-only configuration, not a production convenience.
+
+A connection may register anonymously and later perform one atomic, one-way promotion to an authenticated
+identity. Stable connection facts (`ConnectionId`, transport, and establishment time) never change. The
+principal, principal id, identity metadata, and revision form one immutable snapshot and are replaced
+together through a registry-owned `ClientConnectionState`. Adapters expose that state but cannot mutate it;
+only the registry's internal friend API can register, promote, or mark it disconnected. Promotion accepts only anonymous/no-id →
+authenticated/non-empty-id; demotion, user switching, and a second promotion are rejected. Inputs are cloned
+and metadata is defensively copied and bounded. An in-flight dispatch retains the snapshot captured at its
+boundary; a later dispatch observes the promoted snapshot. Promotion observers run after commit with the
+same failure isolation as lifecycle observers, and a failure cannot roll the identity back. Existing client-
+event subscriptions are disposed on promotion so the peer must resubscribe under the new authorization
+context.
+
+TCP framing limits count total unconsumed wire-frame bytes, including prefix, variable header, body, and
+trailer. Custom framers are stateless and thread-safe when shared by an endpoint; negotiated state belongs in
+a per-connection framer. The adapter validates every framer result before advancing indices, rejects complete
+oversized frames as well as incomplete ones, and never grows or reads beyond the configured frame budget.
+Outbound framed bytes have a separate hard maximum.
+
+One internal lifetime controller owns each TCP connection's `Open → Closing → Closed` transition, first close
+reason, I/O cancellation, writer admission and drain, raw transport abort, once-only protocol close,
+once-only unregistration, disposal, and terminal completion. Endpoint shutdown stops accept/redial first,
+requests graceful close, waits its configured grace period, force-aborts remaining raw transports, and then
+awaits every runner task. It never returns while hidden connection tasks remain alive.
+
+Outbound TCP delivery is bounded FIFO with one physical writer. Capacity includes in-progress work;
+saturation fails deterministically and conversation/RPC frames are never silently dropped. Send completion
+means the complete framed message was written to the stream, not merely queued. Cancellation before dequeue
+withdraws the frame; cancellation or failure during a physical write aborts the connection because a partial
+frame may have corrupted stream boundaries. Closing settles every admitted send exactly once. A correlated
+request registers before send and removes/faults its pending entry when admission or writing fails.
+
+Connection-to-handler dispatch remains an explicit adapter operation over the existing dispatch rails. It
+captures `IClientConnectionSink.Connection` exactly once, seeds the exact `ClaimsPrincipal` and
+`ClientConnection` snapshot plus typed application call metadata, and invokes typed unary/stream handlers
+through `HandlerInvoker`/`StreamHandlerInvoker`. Named decoded dispatch first requires a route exposed through
+`HandlerTransports.Connection`. The helper does not serialize, map protobuf, construct request types through
+reflection, translate protocol status codes, or create a second route registry.
+
 ### Doctrine: when a connection is justified (mandatory, the transport litmus)
 
 **Default to request/reply + client events.** A bidirectional connection is justified only when the need
@@ -85,9 +129,11 @@ latency-interactive"** → connection.
 The neutral tier defines *what* travels — named requests, replies, topic-scoped events — never *how it is
 framed, encoded, negotiated, or reconnected*. Contracts (Abstractions, per ADR-0034):
 
-- **`ClientConnection`** — identity record: opaque `ConnectionId`, the authenticated principal captured at
-  connect, an opaque metadata bag (`IReadOnlyDictionary<string, string>` — adapters stuff their specifics
-  here, the foundation never reads it), `ConnectedAt`. No socket, no hub context, no transport handle.
+- **`ClientConnection`** — stable connection facts plus the current immutable, revisioned identity snapshot:
+  opaque `ConnectionId`, transport, `ConnectedAt`, principal, principal id, and an opaque bounded metadata bag
+  (`IReadOnlyDictionary<string, string>` — adapters stuff their specifics here, the foundation never reads
+  it). No socket, no hub context, no transport handle. The initial snapshot may be anonymous; promotion
+  atomically replaces the whole identity snapshot exactly once.
 - **`IClientConnectionRegistry`** — **node-local by design** (the same posture as client-event interest):
   register/unregister, lookup by id, enumerate by principal. It is deliberately *not* a cluster directory —
   authoritative cross-node addressing composes from single-homed actors + the role-holder proxy
@@ -127,12 +173,14 @@ A client→server message over a connection is a **named dispatch**, and that se
 - **Fire-and-forget ingest** is a command whose reply the adapter discards (JSON-RPC notification shape).
   ADR-0044's rule stands: a fact arriving from a client is a command; the connection removes per-call HTTP
   overhead, it does not create a new handler contract. No `ChannelReader` handlers.
-- **Principal seeding rides the existing dispatch-scope rail**: the adapter authenticates once at connect
-  (handshake — adapter-owned), captures the principal into `ClientConnection`, and seeds every dispatch
+- **Principal seeding rides the existing dispatch-scope rail**: the adapter captures the current immutable
+  identity snapshot at the message boundary and seeds that principal and `ClientConnection` into the dispatch
   scope via `DispatchScopeContext`/`IDispatchScopeInitializer` — the same mechanism the outbox uses to seed
-  `MessageId`. Authorization still evaluates per dispatch against those claims, so permission changes bind
-  at the next call; credential *expiry* terminating the connection is adapter policy. This is the SSE
-  subscribe-time-auth posture, stated once at the foundation.
+  `MessageId`. The initial snapshot may come from connect-time authentication or be anonymous until a framed
+  application exchange promotes it. Authorization evaluates per dispatch against the captured claims; a
+  promotion racing that dispatch affects the next call, never changes the current scope underneath it.
+  Credential *expiry* terminating the connection is adapter policy. Client-event subscription authorization
+  is reevaluated by disposing subscriptions on promotion and requiring the peer to resubscribe.
 
 Corollary worth naming: because `JsonRpcDispatcher` is ASP.NET-free by design (ADR-0017's protocol/host
 split), a socket adapter that frames JSON-RPC over TCP or WebSocket needs almost nothing beyond the
@@ -188,6 +236,15 @@ by `[Idempotent]` when the adapter may retransmit; `InvokeAsync` is at-most-once
 reliable adapter (SignalR, TCP) simply never exercises the loss cases; a UDP adapter implements the closest
 semantics and documents the delta — the "seams designed for the strongest impl" rule read in reverse:
 the *guarantee floor* is set so the weakest honest transport can stand on it.
+
+### Observability and sensitive data
+
+Connection telemetry uses bounded stage and outcome vocabularies. TLS handshake, framing rejection, identity
+promotion, outbound saturation, idle activity, and graceful/forced shutdown are observable, but metric tags
+never contain connection or principal ids, payloads, endpoint addresses, operation names, certificate
+subjects/thumbprints, arbitrary exception type names, or raw exception messages. Duration histograms record
+floating-point seconds with semantic-convention bucket advice. Sensitive TLS material, credentials, private
+keys, certificate passwords, and decrypted application bytes are never logged.
 
 ### Encoding
 

@@ -30,21 +30,21 @@ public sealed class ClientConnectionEventBridge(
     ILogger<ClientConnectionEventBridge>? logger = null) : IClientConnectionObserver {
     private readonly ILogger<ClientConnectionEventBridge> _logger =
         logger ?? NullLogger<ClientConnectionEventBridge>.Instance;
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<ClientConnectionEventSubscription, byte>> _byConnection =
+    private readonly ConcurrentDictionary<string, ConnectionSubscriptions> _byConnection =
         new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Resolves <paramref name="requests"/> for <paramref name="connection"/>'s principal and, on success,
-    /// starts delivering matched envelopes (greeting first) through <paramref name="deliver"/> until the
-    /// returned subscription is disposed or the connection unregisters.
+    /// Captures <paramref name="connection"/>'s current snapshot, resolves <paramref name="requests"/> under
+    /// that principal, and on success starts delivering matched envelopes (greeting first) until the returned
+    /// subscription is disposed, the identity changes, or the connection unregisters.
     /// </summary>
-    /// <param name="connection">The connection subscribing (its principal authorizes the requests, its id
-    /// ties the subscription's lifetime).</param>
+    /// <param name="connection">The live connection sink. A detached identity snapshot is insufficient because
+    /// subscription registration must synchronize with promotion and disconnect.</param>
     /// <param name="requests">The requested subscriptions, as parsed by the adapter.</param>
     /// <param name="deliver">The adapter's framing callback.</param>
     /// <param name="ct">A cancellation token observed during resolution.</param>
     public async ValueTask<ClientConnectionEventSubscribeResult> SubscribeAsync(
-        ClientConnection connection,
+        IClientConnectionSink connection,
         IReadOnlyList<ClientEventSubscriptionRequest> requests,
         ClientEventDelivery deliver,
         CancellationToken ct = default) {
@@ -52,9 +52,10 @@ public sealed class ClientConnectionEventBridge(
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(deliver);
 
+        var snapshot = connection.Connection;
         ClientEventSubscriptionResolution resolution;
         var boundary = new DispatchScopeContext();
-        boundary.Set(connection.Principal);
+        boundary.Set(snapshot.Principal);
         await using (var scope = services.CreateDispatchScope(boundary)) {
             var resolver = scope.ServiceProvider.GetRequiredService<ClientEventSubscriptionResolver>();
             resolution = await resolver.ResolveAsync(requests, ct);
@@ -65,21 +66,26 @@ public sealed class ClientConnectionEventBridge(
         }
 
         var source = services.GetRequiredService<IClientEventSubscriptionSource>();
-        var connectionId = connection.ConnectionId;
-        var subscriptions = _byConnection.GetOrAdd(connectionId, static _ => new ConcurrentDictionary<ClientConnectionEventSubscription, byte>());
+        var connectionId = snapshot.ConnectionId;
+        var subscriptions = _byConnection.GetOrAdd(
+            connectionId, _ => new ConnectionSubscriptions(connection.ConnectionState));
         var subscription = new ClientConnectionEventSubscription(
-            source.Subscribe(resolution.Subscriptions), deliver,
-            onFinished: self => Untrack(connectionId, self), _logger);
-        subscriptions.TryAdd(subscription, 0);
-        ConnectionTelemetry.ActiveEventSubscriptions.Add(1);
+            source.Subscribe(resolution.Subscriptions),
+            (envelope, deliveryCt) => DeliverIfCurrentAsync(
+                connection.ConnectionState, snapshot.IdentityRevision, deliver, envelope, deliveryCt),
+            onFinished: self => Untrack(connectionId, subscriptions, self), _logger);
+        bool start;
+        lock (subscriptions.Gate) {
+            subscriptions.Items.TryAdd(subscription, 0);
+            ConnectionTelemetry.ActiveEventSubscriptions.Add(1);
+            start = connection.ConnectionState.IsCurrent(snapshot.IdentityRevision);
+        }
 
-        // A disconnect can race the subscribe: OnDisconnectedAsync may have swept the set between GetOrAdd
-        // and TryAdd. Detect it and end the newborn subscription instead of leaking a pump on a dead link.
-        if (!_byConnection.TryGetValue(connectionId, out var current) || !ReferenceEquals(current, subscriptions)) {
-            subscription.Dispose();
+        if (start) {
+            subscription.Start();
         }
         else {
-            subscription.Start();
+            subscription.Dispose();
         }
 
         return new ClientConnectionEventSubscribeResult {
@@ -89,36 +95,89 @@ public sealed class ClientConnectionEventBridge(
     }
 
     /// <inheritdoc />
-    public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
-        ValueTask.CompletedTask;
+    public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
+        ArgumentNullException.ThrowIfNull(connection);
+        _byConnection.TryAdd(
+            connection.Connection.ConnectionId,
+            new ConnectionSubscriptions(connection.ConnectionState));
+        return ValueTask.CompletedTask;
+    }
 
     /// <inheritdoc />
     public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
         ArgumentNullException.ThrowIfNull(connection);
-        if (_byConnection.TryRemove(connection.ConnectionId, out var subscriptions)) {
-            foreach (var subscription in subscriptions.Keys) {
-                subscription.Dispose();
-            }
-        }
-
+        CloseSubscriptions(connection.ConnectionId);
         return ValueTask.CompletedTask;
     }
 
-    private void Untrack(string connectionId, ClientConnectionEventSubscription subscription) {
+    /// <inheritdoc />
+    public ValueTask OnIdentityPromotedAsync(
+        ClientConnection previous,
+        ClientConnection current,
+        CancellationToken ct = default) {
+        ArgumentNullException.ThrowIfNull(previous);
+        ArgumentNullException.ThrowIfNull(current);
+        InvalidateSubscriptions(previous.ConnectionId);
+        return ValueTask.CompletedTask;
+    }
+
+    private static ValueTask DeliverIfCurrentAsync(
+        ClientConnectionState state,
+        long identityRevision,
+        ClientEventDelivery deliver,
+        ClientEventEnvelope envelope,
+        CancellationToken ct) {
+        if (!state.IsCurrent(identityRevision)) {
+            throw new ClientConnectionClosedException(state.Current.ConnectionId);
+        }
+
+        return deliver(envelope, ct);
+    }
+
+    private void InvalidateSubscriptions(string connectionId) {
+        if (!_byConnection.TryGetValue(connectionId, out var subscriptions)) {
+            return;
+        }
+
+        DisposeTracked(subscriptions);
+    }
+
+    private void CloseSubscriptions(string connectionId) {
+        if (_byConnection.TryRemove(connectionId, out var subscriptions)) {
+            DisposeTracked(subscriptions);
+        }
+    }
+
+    private static void DisposeTracked(ConnectionSubscriptions subscriptions) {
+        ClientConnectionEventSubscription[] dispose;
+        lock (subscriptions.Gate) {
+            dispose = [.. subscriptions.Items.Keys];
+            subscriptions.Items.Clear();
+        }
+
+        foreach (var subscription in dispose) {
+            subscription.Dispose();
+        }
+    }
+
+    private void Untrack(
+        string connectionId,
+        ConnectionSubscriptions subscriptions,
+        ClientConnectionEventSubscription subscription) {
         // Runs exactly once per subscription (the subscription's dispose is once-guarded), so the gauge
-        // stays balanced even on the subscribe-vs-disconnect race path.
+        // stays balanced even on promotion/disconnect races.
         ConnectionTelemetry.ActiveEventSubscriptions.Add(-1);
-        if (_byConnection.TryGetValue(connectionId, out var subscriptions)) {
-            subscriptions.TryRemove(subscription, out _);
-            if (subscriptions.IsEmpty) {
-                // Drop the empty set so a connection id never leaves a permanent entry behind (e.g. a
-                // subscribe issued after the connection already unregistered). Pair-conditioned removal:
-                // a concurrent subscribe that re-created or grabbed the set is protected by the
-                // ReferenceEquals re-check in SubscribeAsync.
-                _byConnection.TryRemove(
-                    new KeyValuePair<string, ConcurrentDictionary<ClientConnectionEventSubscription, byte>>(
-                        connectionId, subscriptions));
+        lock (subscriptions.Gate) {
+            subscriptions.Items.TryRemove(subscription, out _);
+            if (subscriptions.Items.IsEmpty && !subscriptions.ConnectionIsRegistered) {
+                _byConnection.TryRemove(new KeyValuePair<string, ConnectionSubscriptions>(connectionId, subscriptions));
             }
         }
+    }
+
+    private sealed class ConnectionSubscriptions(ClientConnectionState state) {
+        public Lock Gate { get; } = new();
+        public ConcurrentDictionary<ClientConnectionEventSubscription, byte> Items { get; } = [];
+        public bool ConnectionIsRegistered => state.IsRegistered;
     }
 }

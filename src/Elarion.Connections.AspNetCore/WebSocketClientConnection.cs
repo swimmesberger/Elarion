@@ -18,13 +18,16 @@ public sealed class WebSocketClientConnection : IClientConnectionSink {
 
     internal WebSocketClientConnection(
         ClientConnection connection, WebSocket socket, TimeSpan? defaultInvokeTimeout) {
-        Connection = connection;
+        ConnectionState = new ClientConnectionState(connection);
         _socket = socket;
         _defaultInvokeTimeout = defaultInvokeTimeout;
     }
 
     /// <inheritdoc />
-    public ClientConnection Connection { get; }
+    public ClientConnectionState ConnectionState { get; }
+
+    /// <inheritdoc />
+    public ClientConnection Connection => ConnectionState.Current;
 
     internal void AttachProtocol(IClientConnectionProtocol protocol) => _protocol = protocol;
 
@@ -79,8 +82,9 @@ public sealed class WebSocketClientConnection : IClientConnectionSink {
     }
 
     private async ValueTask SendCoreAsync(ReadOnlyMemory<byte> payload, WebSocketMessageType type, CancellationToken ct) {
+        var connection = Connection;
         if (_socket.State != WebSocketState.Open) {
-            throw new ClientConnectionClosedException(Connection.ConnectionId);
+            throw new ClientConnectionClosedException(connection.ConnectionId);
         }
 
         await _sendLock.WaitAsync(ct);
@@ -96,10 +100,10 @@ public sealed class WebSocketClientConnection : IClientConnectionSink {
             }
         }
         catch (WebSocketException failure) {
-            throw new ClientConnectionClosedException(Connection.ConnectionId, failure);
+            throw new ClientConnectionClosedException(connection.ConnectionId, failure);
         }
         catch (ObjectDisposedException failure) {
-            throw new ClientConnectionClosedException(Connection.ConnectionId, failure);
+            throw new ClientConnectionClosedException(connection.ConnectionId, failure);
         }
         finally {
             _sendLock.Release();

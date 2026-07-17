@@ -34,18 +34,21 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
         string? connectionId = null,
         ClaimsPrincipal? principal = null,
         IReadOnlyDictionary<string, string>? metadata = null) {
-        Connection = new ClientConnection {
+        ConnectionState = new ClientConnectionState(new ClientConnection {
             ConnectionId = connectionId ?? Guid.CreateVersion7().ToString("N"),
             Transport = transport,
             Principal = principal ?? new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "test")),
             PrincipalId = principalId,
             ConnectedAt = DateTimeOffset.UtcNow,
             Metadata = metadata ?? ReadOnlyDictionary<string, string>.Empty,
-        };
+        });
     }
 
     /// <inheritdoc />
-    public ClientConnection Connection { get; }
+    public ClientConnectionState ConnectionState { get; }
+
+    /// <inheritdoc />
+    public ClientConnection Connection => ConnectionState.Current;
 
     /// <summary>Everything sent through the neutral sink, in order; completes when <see cref="Close"/>d.</summary>
     public ChannelReader<SentMessage> Sent => _sent.Reader;
@@ -82,7 +85,8 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
         where TPayload : class {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(payload);
-        ThrowIfClosed();
+        var connection = Connection;
+        ThrowIfClosed(connection);
         _sent.Writer.TryWrite(new SentMessage(name, payload));
         return ValueTask.CompletedTask;
     }
@@ -93,7 +97,8 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
         where TRequest : class {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(request);
-        ThrowIfClosed();
+        var connection = Connection;
+        ThrowIfClosed(connection);
         if (InvokeResponder is not { } responder) {
             throw new NotSupportedException(
                 "Set SimulatedClientConnection.InvokeResponder to answer InvokeAsync in this test.");
@@ -109,9 +114,9 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
         return (TResponse)response;
     }
 
-    private void ThrowIfClosed() {
+    private void ThrowIfClosed(ClientConnection connection) {
         if (IsClosed) {
-            throw new ClientConnectionClosedException(Connection.ConnectionId);
+            throw new ClientConnectionClosedException(connection.ConnectionId);
         }
     }
 

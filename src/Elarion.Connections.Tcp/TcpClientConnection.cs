@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Text;
 using Elarion.Abstractions.Connections;
 
@@ -18,23 +17,27 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     // Reused under the send lock (writes are serialized anyway), so the steady-state send path is
     // allocation-free — the proxy/forwarder hot loop (receive one link, send another) stays zero-cost on
     // both halves. Grows to the largest framed message this connection ever sent and is retained.
-    private readonly ArrayBufferWriter<byte> _sendBuffer;
+    private readonly BoundedArrayBufferWriter _sendBuffer;
     private readonly TimeSpan? _defaultInvokeTimeout;
     private IClientConnectionProtocol? _protocol;
 
     internal TcpClientConnection(
         ClientConnection connection, Stream stream, TcpMessageFramer framer,
-        int initialSendBufferBytes, TimeSpan? defaultInvokeTimeout, Action closeTransport) {
-        Connection = connection;
+        int initialSendBufferBytes, int maxOutboundMessageBytes, TimeSpan? defaultInvokeTimeout,
+        Action closeTransport) {
+        ConnectionState = new ClientConnectionState(connection);
         _stream = stream;
         _framer = framer;
-        _sendBuffer = new ArrayBufferWriter<byte>(initialSendBufferBytes);
+        _sendBuffer = new BoundedArrayBufferWriter(initialSendBufferBytes, maxOutboundMessageBytes);
         _defaultInvokeTimeout = defaultInvokeTimeout;
         _closeTransport = closeTransport;
     }
 
     /// <inheritdoc />
-    public ClientConnection Connection { get; }
+    public ClientConnectionState ConnectionState { get; }
+
+    /// <inheritdoc />
+    public ClientConnection Connection => ConnectionState.Current;
 
     internal void AttachProtocol(IClientConnectionProtocol protocol) => _protocol = protocol;
 
@@ -48,13 +51,20 @@ public sealed class TcpClientConnection : IClientConnectionSink {
         return SendBinaryAsync(Encoding.UTF8.GetBytes(message), ct);
     }
 
-    /// <summary>Sends one message through the endpoint's framer; at-most-once, faults with
-    /// <see cref="ClientConnectionClosedException"/> when the link is gone.</summary>
+    /// <summary>
+    /// Sends one message through the endpoint's framer; at-most-once, faults with
+    /// <see cref="ClientConnectionClosedException"/> when the link is gone or
+    /// <see cref="TcpOutboundFrameTooLargeException"/> when framing exceeds
+    /// <see cref="ElarionTcpConnectionOptions.MaxOutboundFrameBytes"/>. An oversized frame is rejected before
+    /// any bytes are written and does not close the connection.
+    /// </summary>
     public async ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) {
+        var connection = Connection;
         await _sendLock.WaitAsync(ct);
         try {
             _sendBuffer.ResetWrittenCount();
             _framer.WriteMessage(message.Span, _sendBuffer);
+
             try {
                 await _stream.WriteAsync(_sendBuffer.WrittenMemory, ct);
             }
@@ -67,10 +77,10 @@ public sealed class TcpClientConnection : IClientConnectionSink {
             }
         }
         catch (IOException failure) {
-            throw new ClientConnectionClosedException(Connection.ConnectionId, failure);
+            throw new ClientConnectionClosedException(connection.ConnectionId, failure);
         }
         catch (ObjectDisposedException failure) {
-            throw new ClientConnectionClosedException(Connection.ConnectionId, failure);
+            throw new ClientConnectionClosedException(connection.ConnectionId, failure);
         }
         finally {
             _sendLock.Release();

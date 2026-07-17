@@ -41,6 +41,22 @@ public interface IClientConnectionRegistry {
     /// <param name="ct">A cancellation token observed while notifying observers.</param>
     ValueTask UnregisterAsync(string connectionId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Atomically promotes one registered anonymous connection to the authenticated
+    /// <paramref name="identity"/> and then notifies promotion observers. The supported transition is exactly
+    /// anonymous/no principal id at revision zero → authenticated/non-empty principal id at revision one.
+    /// Concurrent attempts have one winner; validation or compare/exchange failure leaves the prior snapshot
+    /// unchanged. Observer failure after commit is isolated and does not roll the identity back.
+    /// </summary>
+    /// <param name="connectionId">The live connection to promote.</param>
+    /// <param name="identity">The complete authenticated replacement identity.</param>
+    /// <param name="ct">A cancellation token observed while notifying observers after a successful commit.</param>
+    /// <returns>The promotion outcome.</returns>
+    ValueTask<ClientConnectionPromotionStatus> PromoteAsync(
+        string connectionId,
+        ClientConnectionIdentity identity,
+        CancellationToken ct = default);
+
     /// <summary>Looks up a live connection on this node by id.</summary>
     /// <param name="connectionId">The connection id to resolve.</param>
     /// <param name="connection">The sink, when the connection is currently registered here.</param>
