@@ -9,7 +9,10 @@ namespace Elarion.Connections.Tcp;
 /// <summary>
 /// The endpoint loop bodies, shared by the composition-time hosted services and the runtime
 /// <see cref="TcpConnectionEndpoints"/> manager so both paths behave identically. Both loops run until
-/// cancelled and never throw.
+/// cancelled and never throw. Teardown is deterministic and never abandons a connection task: stop
+/// accepting/redialing, request graceful close everywhere, wait the endpoint's
+/// <see cref="ElarionTcpConnectionOptions.ShutdownGracePeriod"/>, force-abort the stragglers' raw
+/// transports, then await every runner to completion.
 /// </summary>
 internal static class TcpEndpointLoops {
     /// <summary>Accepts sockets on the listening endpoint and drives each through the shared runner.</summary>
@@ -37,6 +40,7 @@ internal static class TcpEndpointLoops {
         reportState?.Invoke(TcpEndpointState.Listening, null);
         options.OnListening?.Invoke((IPEndPoint)listener.LocalEndpoint);
 
+        var live = new TcpLiveConnectionSet();
         var running = new ConcurrentDictionary<Task, byte>();
         try {
             while (!ct.IsCancellationRequested) {
@@ -64,9 +68,9 @@ internal static class TcpEndpointLoops {
                     continue;
                 }
 
-                // The runner never throws; tracking exists only so teardown can await open connections.
+                // The runner never throws; tracking exists so teardown can await every open connection.
                 var run = TcpConnectionRunner.RunAsync(
-                    client, options, handler, registry, defaultInvokeTimeout, timeProvider, logger, ct);
+                    client, options, handler, registry, defaultInvokeTimeout, timeProvider, logger, ct, live);
                 running[run] = 0;
                 _ = run.ContinueWith(
                     finished => running.TryRemove(finished, out _),
@@ -75,12 +79,7 @@ internal static class TcpEndpointLoops {
         }
         finally {
             listener.Stop();
-            try {
-                await Task.WhenAll(running.Keys).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
-            }
-            catch (TimeoutException) {
-                // Connections that ignore cancellation get abandoned at teardown rather than blocking it.
-            }
+            await ShutDownConnectionsAsync(live, running.Keys, options.ShutdownGracePeriod, timeProvider);
         }
     }
 
@@ -94,6 +93,7 @@ internal static class TcpEndpointLoops {
         ILogger logger,
         CancellationToken ct,
         Action<TcpEndpointState, string?>? reportState = null) {
+        var live = new TcpLiveConnectionSet();
         var failedAttempts = 0;
         while (!ct.IsCancellationRequested) {
             var client = new TcpClient();
@@ -101,9 +101,19 @@ internal static class TcpEndpointLoops {
                 await client.ConnectAsync(options.Host!, options.Port, ct);
                 reportState?.Invoke(TcpEndpointState.Connected, null);
                 var sessionStart = timeProvider.GetTimestamp();
-                // The runner owns and disposes the client, and never throws.
-                await TcpConnectionRunner.RunAsync(
-                    client, options, handler, registry, defaultInvokeTimeout, timeProvider, logger, ct);
+                // The runner owns and disposes the client, and never throws. It is awaited through the
+                // shutdown helper below when cancellation arrives mid-session, so a redial-loop stop can
+                // never abandon a live connection task.
+                var run = TcpConnectionRunner.RunAsync(
+                    client, options, handler, registry, defaultInvokeTimeout, timeProvider, logger, ct, live);
+                try {
+                    await run.WaitAsync(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+                    await ShutDownConnectionsAsync(live, [run], options.ShutdownGracePeriod, timeProvider);
+                    return;
+                }
+
                 // A session that ended almost immediately (rejected handshake, instant server close) is a
                 // failure for backoff purposes — otherwise a misconfigured credential hammers the device
                 // at the minimum delay forever. A real session resets the backoff.
@@ -134,6 +144,22 @@ internal static class TcpEndpointLoops {
             catch (OperationCanceledException) {
                 break;
             }
+        }
+    }
+
+    // Graceful close first, bounded grace, forced abort for stragglers, then an unbounded await: every
+    // connection runs its ordered teardown (codec close, unregistration, disposal) before the endpoint
+    // loop returns — the registry is empty of this endpoint's connections when stop completes.
+    private static async Task ShutDownConnectionsAsync(
+        TcpLiveConnectionSet live, IEnumerable<Task> running, TimeSpan gracePeriod, TimeProvider timeProvider) {
+        live.RequestGracefulCloseAll();
+        var runners = Task.WhenAll(running);
+        try {
+            await runners.WaitAsync(gracePeriod, timeProvider);
+        }
+        catch (TimeoutException) {
+            live.AbortAll();
+            await runners;
         }
     }
 

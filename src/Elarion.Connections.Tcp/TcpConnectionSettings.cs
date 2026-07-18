@@ -30,6 +30,9 @@ public sealed record TcpConnectionSettings {
     /// <summary>This connection's initial send frame-buffer size.</summary>
     public int? InitialSendBufferBytes { get; init; }
 
+    /// <summary>This connection's bounded outbound send capacity (queued plus in-progress).</summary>
+    public int? MaxPendingSends { get; init; }
+
     /// <summary>
     /// This connection's TLS policy selected from the peer before any application byte is exchanged. The
     /// policy kind must match the endpoint direction. Set it to override or enable endpoint TLS; there is no

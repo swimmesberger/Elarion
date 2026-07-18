@@ -24,10 +24,11 @@ public class ElarionTcpConnectionOptions {
     public int InitialReadBufferBytes { get; set; } = DefaultReadBufferBytes;
 
     /// <summary>
-    /// The initial size of the per-connection send frame buffer (default
-    /// <see cref="DefaultSendBufferBytes"/>). Grows to the largest framed message the connection sends and
-    /// is retained; same sizing guidance as <see cref="InitialReadBufferBytes"/>. Must be positive and no
-    /// larger than <see cref="MaxOutboundFrameBytes"/>.
+    /// The initial size of the per-connection pooled send frame buffer (default
+    /// <see cref="DefaultSendBufferBytes"/>). It grows on demand up to <see cref="MaxOutboundFrameBytes"/>
+    /// for a large frame and is trimmed back afterwards — the connection never retains the largest frame
+    /// it ever sent. Size it to the typical frame so steady-state sends skip regrowth. Must be positive
+    /// and no larger than <see cref="MaxOutboundFrameBytes"/>.
     /// </summary>
     public int InitialSendBufferBytes { get; set; } = DefaultSendBufferBytes;
 
@@ -44,6 +45,22 @@ public class ElarionTcpConnectionOptions {
     /// temporary framing buffer's allocation mechanics.
     /// </summary>
     public int MaxOutboundFrameBytes { get; set; } = 1024 * 1024;
+
+    /// <summary>
+    /// The maximum outbound sends admitted per connection at once — queued plus in-progress (default 256).
+    /// At capacity a send fails deterministically with <see cref="TcpSendQueueFullException"/> before any
+    /// frame memory is allocated; admitted conversation/RPC frames are never silently dropped. This bounds
+    /// the waiter population a slow or stalled peer can accumulate.
+    /// </summary>
+    public int MaxPendingSends { get; set; } = 256;
+
+    /// <summary>
+    /// How long a closing connection may drain its admitted outbound sends — and endpoint shutdown may
+    /// wait for graceful connection teardown — before the raw transport is force-aborted (default 5 s).
+    /// Shutdown never abandons a connection task: after this grace period stragglers are aborted and then
+    /// awaited to completion.
+    /// </summary>
+    public TimeSpan ShutdownGracePeriod { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Optional TLS upgrade policy. Listener endpoints require <see cref="TcpServerTlsOptions"/>; dialers

@@ -170,7 +170,7 @@ public sealed class ConnectionHandlerInvokerTests {
         success.IsSuccess.Should().BeTrue();
         success.Value.Should().BeOfType<Response>().Which.Connection.Should().BeSameAs(snapshot);
         connectionCalls.Should().Be(1);
-        sink.ReadCount.Should().Be(4);
+        sink.ReadCount.Should().Be(3);
         hidden.IsSuccess.Should().BeFalse();
         unknown.IsSuccess.Should().BeFalse();
         hidden.Error.Kind.Should().Be(ErrorKind.NotFound);
@@ -179,6 +179,8 @@ public sealed class ConnectionHandlerInvokerTests {
         jsonRpcCalls.Should().Be(0);
         await wrongType.Should().ThrowAsync<ArgumentException>().WithMessage("*decoded request*Request*WrongRequest*");
         connectionCalls.Should().Be(1);
+        // Every named call — including the rejected decode — captured the snapshot exactly once.
+        sink.ReadCount.Should().Be(4);
     }
 
     [Fact]

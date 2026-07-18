@@ -725,14 +725,8 @@ public sealed class TcpConnectionAdapterTests {
     [Fact]
     public async Task ClientConnection_MaliciousFramerCannotAllocatePastOutboundLimit() {
         await using var stream = new RecordingWriteStream();
-        var connection = new TcpClientConnection(
-            new ClientConnection {
-                ConnectionId = "bounded-outbound",
-                Transport = "test",
-                Principal = new ClaimsPrincipal(new ClaimsIdentity()),
-                ConnectedAt = DateTimeOffset.UtcNow,
-            }, stream, new GreedyTcpFramer(), initialSendBufferBytes: 4, maxOutboundMessageBytes: 8,
-            defaultInvokeTimeout: null, closeTransport: () => { });
+        var (connection, _) = CreateStandaloneConnection(
+            stream, new GreedyTcpFramer(), initialSendBufferBytes: 4, maxOutboundMessageBytes: 8);
 
         var send = async () => await connection.SendBinaryAsync(
             new byte[] { 1 }, TestContext.Current.CancellationToken);
@@ -744,15 +738,8 @@ public sealed class TcpConnectionAdapterTests {
     [Fact]
     public async Task ClientConnection_OutboundExactLimitWrites_AndOneByteOverDoesNotWrite() {
         await using var stream = new RecordingWriteStream();
-        var connection = new TcpClientConnection(
-            new ClientConnection {
-                ConnectionId = "outbound",
-                Transport = "test",
-                Principal = new ClaimsPrincipal(new ClaimsIdentity()),
-                ConnectedAt = DateTimeOffset.UtcNow,
-            }, stream,
-            new LengthPrefixedTcpFramer(), initialSendBufferBytes: 4, maxOutboundMessageBytes: 8,
-            defaultInvokeTimeout: null, closeTransport: () => { });
+        var (connection, _) = CreateStandaloneConnection(
+            stream, new LengthPrefixedTcpFramer(), initialSendBufferBytes: 4, maxOutboundMessageBytes: 8);
 
         await connection.SendBinaryAsync(new byte[] { 1, 2, 3, 4 }, TestContext.Current.CancellationToken);
         stream.Writes.Should().ContainSingle().Which.Should().HaveCount(8);
@@ -761,6 +748,25 @@ public sealed class TcpConnectionAdapterTests {
             new byte[] { 1, 2, 3, 4, 5 }, TestContext.Current.CancellationToken);
         await oversized.Should().ThrowAsync<TcpOutboundFrameTooLargeException>();
         stream.Writes.Should().ContainSingle();
+    }
+
+    /// <summary>A sink over a bare stream — the writer/lifetime wiring the runner normally performs,
+    /// for tests that exercise the outbound path without a full connection lifecycle.</summary>
+    internal static (TcpClientConnection Connection, TcpConnectionLifetime Lifetime) CreateStandaloneConnection(
+        Stream stream, TcpMessageFramer framer, int initialSendBufferBytes, int maxOutboundMessageBytes,
+        int maxPendingSends = 8) {
+        var identity = new ClientConnection {
+            ConnectionId = "standalone",
+            Transport = "test",
+            Principal = new ClaimsPrincipal(new ClaimsIdentity()),
+            ConnectedAt = DateTimeOffset.UtcNow,
+        };
+        var lifetime = new TcpConnectionLifetime(stream, CancellationToken.None);
+        var writer = new TcpOutboundWriter(
+            stream, framer, initialSendBufferBytes, maxOutboundMessageBytes, maxPendingSends,
+            identity.ConnectionId, identity.Transport, lifetime);
+        lifetime.AttachWriter(writer);
+        return (new TcpClientConnection(identity, writer, lifetime, defaultInvokeTimeout: null), lifetime);
     }
 
     private static Task<TcpTestHost> StartListenerHostAsync(CancellationToken ct, TimeSpan? idleTimeout = null) =>
@@ -1063,9 +1069,12 @@ public sealed class TcpConnectionAdapterTests {
 
     private sealed class CompleteFrameFramer : TcpMessageFramer {
         public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
-            consumed = buffer.Length;
-            message = buffer;
-            return buffer.Length == 5;
+            // Completes only once the whole 5-byte frame arrived; incomplete bytes stay buffered (not
+            // noise), so an oversized frame accumulates against the reader's cap.
+            var complete = buffer.Length == 5;
+            consumed = complete ? buffer.Length : 0;
+            message = complete ? buffer : default;
+            return complete;
         }
 
         public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) => output.Write(payload);

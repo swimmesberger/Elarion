@@ -28,6 +28,11 @@
     <EmbeddedResource Include="Migrations/SqliteScripts/**/*.sql" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Long-running-test detection: with diagnostics on, the runner names any test exceeding the
+         threshold — a hanging test is identified instead of silently stalling the whole run. -->
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
     <ProjectReference Include="../../src/Elarion/Elarion.csproj" />
     <ProjectReference Include="../../src/Elarion.Grpc/Elarion.Grpc.csproj" />

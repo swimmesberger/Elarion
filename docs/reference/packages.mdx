@@ -87,8 +87,9 @@ bidirectional connection, or device identity chain is actually the consistency b
 | `Elarion.Actors.PostgreSql` | Actor snapshots need PostgreSQL durability/query access, single-homed actors need the `"actors"` role binding, or virtual-sharded actors need fixed `actors:partition-N` role leases via `AddElarionPostgreSqlActorSharding<TDbContext>()`. |
 | `Elarion.Connections` | A bidirectional client/device link needs the node-local registry, protocol codec seam, bounded server invocation, and client-event bridge. |
 | `Elarion.Connections.AspNetCore` | A device/client gateway needs the WebSocket lifecycle adapter with app-owned authentication and codec. |
-| `Elarion.Connections.Tcp` | A proprietary protocol needs hosted TCP listen/dial, reconnect, framing, idle handling, or runtime-managed endpoints. |
+| `Elarion.Connections.Tcp` | A proprietary protocol needs hosted TCP listen/dial, TLS-before-framing, reconnect, framing, bounded outbound delivery, idle handling, or runtime-managed endpoints. |
 | `Elarion.Connections.Simulation` | Connection tests or developer simulators need in-memory sinks, observers, framed clients, or the socket-free full TCP lifecycle. |
+| `Elarion.Connections.AspNetCore.Simulation` | WebSocket adapter tests need a real Kestrel upgrade, handshake, codec, and close path via `WebSocketTestHost`. |
 | `Elarion.Devices` | Device provisioning needs pairing codes, key-store seams, HMAC challenge verification, and the canonical device principal. |
 | `Elarion.Devices.EntityFrameworkCore` | Device keys and single-use pairing codes need durable EF/PostgreSQL stores. |
 

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using Elarion.Abstractions.Connections;
 
 namespace Elarion.Connections.Diagnostics;
 
@@ -42,6 +43,25 @@ public static class ConnectionTelemetry {
         MeterInstance.CreateUpDownCounter<long>(
             "connection.event_subscriptions.active",
             description: "Number of live client-event subscriptions delivered over connections");
+
+    /// <summary>Counts identity promotion attempts by transport and bounded outcome
+    /// (<c>promoted</c>/<c>already_authenticated</c>/<c>not_found</c>).</summary>
+    public static readonly Counter<long> IdentityPromotions =
+        MeterInstance.CreateCounter<long>(
+            "connection.identity_promotions",
+            description: "Total number of connection identity promotion attempts by outcome");
+
+    internal static void RecordPromotion(string transport, ClientConnectionPromotionStatus status) =>
+        IdentityPromotions.Add(1, new TagList {
+            { "elarion.connection.transport", transport },
+            {
+                "elarion.connection.promotion.outcome", status switch {
+                    ClientConnectionPromotionStatus.Promoted => "promoted",
+                    ClientConnectionPromotionStatus.AlreadyAuthenticated => "already_authenticated",
+                    _ => "not_found",
+                }
+            }
+        });
 
     internal static void RecordOpened(string transport) {
         var tags = new TagList { { "elarion.connection.transport", transport } };

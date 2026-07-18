@@ -14,6 +14,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Elarion.Connections.Simulation" />
     <InternalsVisibleTo Include="Elarion.Tests" />
+    <InternalsVisibleTo Include="Elarion.Benchmarks" />
   </ItemGroup>
 
   <ItemGroup>

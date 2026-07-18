@@ -61,8 +61,12 @@ public sealed partial class ClientConnectionEventBridgeTests {
         var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
         var delivered = Channel.CreateUnbounded<ClientEventEnvelope>();
 
+        // Delivery starts only for a REGISTERED connection (the identity/lifecycle checks are
+        // registry-owned) — an unregistered sink's subscription is disposed instead of started.
+        var sink = Sink("conn-1", "user-1");
+        await provider.GetRequiredService<IClientConnectionRegistry>().RegisterAsync(sink, ct);
         var result = await bridge.SubscribeAsync(
-            Sink("conn-1", "user-1"), [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
+            sink, [new ClientEventSubscriptionRequest { Topic = "test.invoiceChanged" }],
             (envelope, deliveryCt) => delivered.Writer.WriteAsync(envelope, deliveryCt), ct);
         result.Status.Should().Be(ClientEventSubscriptionStatus.Resolved);
         using var subscription = result.Subscription!;

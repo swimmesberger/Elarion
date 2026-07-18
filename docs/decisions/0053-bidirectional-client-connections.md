@@ -89,15 +89,23 @@ Outbound framed bytes have a separate hard maximum.
 One internal lifetime controller owns each TCP connection's `Open → Closing → Closed` transition, first close
 reason, I/O cancellation, writer admission and drain, raw transport abort, once-only protocol close,
 once-only unregistration, disposal, and terminal completion. Endpoint shutdown stops accept/redial first,
-requests graceful close, waits its configured grace period, force-aborts remaining raw transports, and then
+requests graceful close, waits its configured grace period (`ShutdownGracePeriod`, 5 s default — the same
+window that bounds one connection's outbound drain), force-aborts remaining raw transports, and then
 awaits every runner task. It never returns while hidden connection tasks remain alive.
 
-Outbound TCP delivery is bounded FIFO with one physical writer. Capacity includes in-progress work;
-saturation fails deterministically and conversation/RPC frames are never silently dropped. Send completion
-means the complete framed message was written to the stream, not merely queued. Cancellation before dequeue
-withdraws the frame; cancellation or failure during a physical write aborts the connection because a partial
-frame may have corrupted stream boundaries. Closing settles every admitted send exactly once. A correlated
-request registers before send and removes/faults its pending entry when admission or writing fails.
+Outbound TCP delivery is bounded FIFO with one physical writer. Capacity (`MaxPendingSends`, 256 default)
+includes in-progress work; saturation fails deterministically with `TcpSendQueueFullException` before any
+frame memory is allocated, and conversation/RPC frames are never silently dropped. Frame memory is pooled
+and budget-capped and is trimmed after oversized frames or batches — a connection never retains the largest
+frame it ever sent. Send completion means the complete framed message was written to the stream, not merely
+queued. The uncontended send writes inline and allocation-free; under contention the drainer coalesces
+queued frames into one physical write per batch (bounded by a flush threshold), preserving FIFO while
+amortizing syscalls and TLS records. Cancellation before a frame is activated withdraws it; a frame the
+drainer has activated always completes (the batch write is connection-owned); cancellation or failure during
+an inline physical write aborts the connection because a partial frame may have corrupted stream boundaries.
+Closing settles every admitted send exactly once. A correlated request registers before send and
+removes/faults its pending entry when admission or writing fails
+(`ConnectionPendingRequests<TKey,TResponse>.SendAndWaitAsync`).
 
 Connection-to-handler dispatch remains an explicit adapter operation over the existing dispatch rails. It
 captures `IClientConnectionSink.Connection` exactly once, seeds the exact `ClaimsPrincipal` and

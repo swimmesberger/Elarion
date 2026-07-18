@@ -9,6 +9,28 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Hardened TCP connection runtime (ADR-0053).** The TCP adapter now owns the full secure-establishment
+  and delivery lifecycle: optional **TLS before framing** (`TcpServerTlsOptions`/`TcpClientTlsOptions` over
+  explicit BCL authentication options, fail-closed platform validation, separate handshake timeout, no
+  plaintext fallback), **atomic one-way identity promotion** (`IClientConnectionRegistry.PromoteAsync` over
+  a revisioned immutable `ClientConnectionState` snapshot — anonymous → authenticated exactly once, inputs
+  cloned and bounded, client-event subscriptions disposed so peers resubscribe under the new identity), a
+  **deterministic close lifetime** (internal `Open → Closing → Closed` controller: first close reason wins,
+  codec `OnClosedAsync`/unregistration/disposal run exactly once, and endpoint shutdown gracefully closes,
+  waits `ShutdownGracePeriod`, force-aborts stragglers, then awaits every connection task — never
+  abandoning one), and a **bounded FIFO outbound writer** (`MaxPendingSends` admission that fails
+  deterministically with `TcpSendQueueFullException` before allocating, completion only after the physical
+  stream write, cancellation withdrawal before activation, connection abort on mid-write cancellation, and
+  pooled frame buffers that never retain the largest frame). Under contention the drainer coalesces queued
+  frames into one physical write — benchmarked at 0.65× the raw-socket floor with four producers and 0 B
+  per uncontended send — and total inbound/outbound frame limits count complete wire bytes. Frame limits,
+  send capacity, and TLS policy are all overridable per connection. `ConnectionHandlerInvoker` (in
+  `Elarion`) dispatches decoded connection traffic through the existing typed/streaming invokers with
+  spoof-proof identity seeding and `HandlerTransports.Connection` route filtering, and
+  `ConnectionPendingRequests.SendAndWaitAsync` packages the register-before-send correlation pattern.
+  Telemetry: `connection.identity_promotions` on the kernel meter and a new bounded-vocabulary
+  `Elarion.Connections.Tcp` meter (TLS handshake seconds, failure stages, graceful/forced closes, outbound
+  pending/saturation, idle events).
 - **gRPC request-driven server streaming (ADR-0063).** `Elarion.Grpc` now adapts the existing cold
   `IStreamHandler<TRequest,TItem>` seam through `GrpcStreamHandlerInvoker`, preserving principal and exact
   `ServerCallContext` scope seeding, decorated stream-handler resolution, call cancellation, and scope

@@ -201,13 +201,10 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
 
     private static async Task StopEndpointAsync(Endpoint endpoint) {
         await endpoint.Cts.CancelAsync();
-        // Loops never throw; the wait only bounds a teardown that ignores cancellation.
-        try {
-            await endpoint.Run.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
-        }
-        catch (TimeoutException) {
-        }
-
+        // Loops never throw and terminate deterministically: they close their connections gracefully,
+        // force-abort stragglers after the endpoint's ShutdownGracePeriod, and await every runner — so
+        // this await is bounded by that grace period, never a silent abandonment.
+        await endpoint.Run;
         endpoint.Cts.Dispose();
     }
 
@@ -229,11 +226,9 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
             _mutation.Release();
         }
 
-        try {
-            await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
-        }
-        catch (TimeoutException) {
-        }
+        // Same guarantee as StopEndpointAsync: each loop's teardown is bounded by its grace period and
+        // forced abort, and no connection task is left running when stop returns.
+        await Task.WhenAll(runs);
     }
 
     private IClientConnectionRegistry Registry => services.GetRequiredService<IClientConnectionRegistry>();

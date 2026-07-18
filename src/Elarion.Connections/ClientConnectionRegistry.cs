@@ -85,9 +85,21 @@ internal sealed class ClientConnectionRegistry(
         ArgumentNullException.ThrowIfNull(identity);
 
         if (!_connections.TryGetValue(connectionId, out var registration)) {
+            ConnectionTelemetry.RecordPromotion("unknown", ClientConnectionPromotionStatus.ConnectionNotFound);
             return ClientConnectionPromotionStatus.ConnectionNotFound;
         }
 
+        var transport = registration.Connection.Connection.Transport;
+        var status = await PromoteRegisteredAsync(registration, connectionId, identity, ct);
+        ConnectionTelemetry.RecordPromotion(transport, status);
+        return status;
+    }
+
+    private async ValueTask<ClientConnectionPromotionStatus> PromoteRegisteredAsync(
+        Registration registration,
+        string connectionId,
+        ClientConnectionIdentity identity,
+        CancellationToken ct) {
         ThrowIfReentrantLifecycleMutation(registration);
         ClientConnection previous;
         ClientConnection current;

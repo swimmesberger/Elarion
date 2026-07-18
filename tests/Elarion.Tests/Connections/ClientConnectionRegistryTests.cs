@@ -208,7 +208,7 @@ public sealed class ClientConnectionRegistryTests {
     }
 
     [Fact]
-    public async Task RegisterAsync_ClonesBootstrapContextAndRejectsCyclicActorGraph() {
+    public async Task RegisterAsync_ClonesBootstrapContext() {
         var ct = TestContext.Current.CancellationToken;
         await using var provider = BuildProvider();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
@@ -222,14 +222,13 @@ public sealed class ClientConnectionRegistryTests {
 
         ((byte[])sink.Connection.Principal.Identities.Single().BootstrapContext!).Should().Equal(1, 2, 3);
 
+        // A cyclic actor graph cannot be constructed with BCL ClaimsIdentity — its Actor setter rejects
+        // circular references — so the registry's own cycle guard is defense-in-depth, and the reachable
+        // bound is the actor depth limit covered by RegisterAsync_RejectsPrincipalGraphBeyondConfiguredLimits.
         var first = new ClaimsIdentity();
-        var second = new ClaimsIdentity();
-        first.Actor = second;
-        second.Actor = first;
-        var cyclic = new SimulatedClientConnection(
-            connectionId: "cycle", principal: new ClaimsPrincipal(first));
-        var register = async () => await registry.RegisterAsync(cyclic, ct);
-        await register.Should().ThrowAsync<ArgumentException>().WithMessage("*cyclic actor*");
+        var second = new ClaimsIdentity { Actor = first };
+        var close = () => first.Actor = second;
+        close.Should().Throw<InvalidOperationException>();
     }
 
     [Fact]

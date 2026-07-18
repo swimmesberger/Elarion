@@ -57,7 +57,11 @@ public sealed class TcpTlsConnectionTests {
         }, ct);
         await authenticate.Should().ThrowAsync<AuthenticationException>();
 
-        handler.AuthenticationCalls.Should().Be(0);
+        // The platform may complete the server-side handshake before the client's rejection alert lands
+        // (TLS 1.3 half-RTT; macOS validates client-side after its handshake break), so the application
+        // authenticator may briefly run — the invariants are that it never receives framed peer data and
+        // that nothing registers.
+        handler.FramedResponses.Should().Be(0);
         host.Registry.Connections.Should().BeEmpty();
     }
 
@@ -81,7 +85,8 @@ public sealed class TcpTlsConnectionTests {
         await authenticate.Should().ThrowAsync<AuthenticationException>();
         (await validationErrors.Task.WaitAsync(ct)).Should().HaveFlag(SslPolicyErrors.RemoteCertificateNameMismatch);
 
-        handler.AuthenticationCalls.Should().Be(0);
+        // See ListenerTls_DefaultPlatformValidationRejectsSelfSignedCertificate for the timing caveat.
+        handler.FramedResponses.Should().Be(0);
         host.Registry.Connections.Should().BeEmpty();
     }
 
@@ -269,12 +274,18 @@ public sealed class TcpTlsConnectionTests {
     private class TlsChallengeHandler : TcpConnectionHandler {
         public int AuthenticationCalls { get; private set; }
 
+        public int FramedResponses { get; private set; }
+
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake,
             CancellationToken ct) {
             AuthenticationCalls++;
             await handshake.SendTextAsync("challenge", ct);
             var response = await handshake.ReceiveTextAsync(ct);
+            if (response is not null) {
+                FramedResponses++;
+            }
+
             if (response is null || !response.StartsWith("device:", StringComparison.Ordinal)) {
                 return null;
             }

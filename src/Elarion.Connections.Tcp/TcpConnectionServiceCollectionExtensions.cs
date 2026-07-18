@@ -82,6 +82,8 @@ public static class TcpConnectionServiceCollectionExtensions {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxOutboundFrameBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialReadBufferBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialSendBufferBytes, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxPendingSends, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(options.ShutdownGracePeriod, TimeSpan.Zero);
         if (options.InitialReadBufferBytes > options.MaxInboundFrameBytes) {
             throw new ArgumentOutOfRangeException(nameof(options.InitialReadBufferBytes),
                 "InitialReadBufferBytes cannot exceed MaxInboundFrameBytes.");

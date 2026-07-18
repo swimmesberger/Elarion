@@ -5,32 +5,24 @@ namespace Elarion.Connections.Tcp;
 
 /// <summary>
 /// One live TCP connection: the adapter's <see cref="IClientConnectionSink"/>. The raw send legs
-/// (<see cref="SendTextAsync"/>/<see cref="SendBinaryAsync"/>, writes
-/// serialized — safe from any thread, actor turn, or observer) frame through the endpoint's configured
-/// framer; the neutral sink members delegate to the connection's codec, identical to every other adapter.
+/// (<see cref="SendTextAsync"/>/<see cref="SendBinaryAsync"/>) go through the connection's bounded FIFO
+/// outbound writer — safe from any thread, actor turn, or observer; a completed send means the complete
+/// frame was physically written to the stream. The neutral sink members delegate to the connection's
+/// codec, identical to every other adapter.
 /// </summary>
 public sealed class TcpClientConnection : IClientConnectionSink {
-    private readonly Action _closeTransport;
-    private readonly Stream _stream;
-    private readonly TcpMessageFramer _framer;
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
-    // Reused under the send lock (writes are serialized anyway), so the steady-state send path is
-    // allocation-free — the proxy/forwarder hot loop (receive one link, send another) stays zero-cost on
-    // both halves. Grows to the largest framed message this connection ever sent and is retained.
-    private readonly BoundedArrayBufferWriter _sendBuffer;
+    private readonly TcpOutboundWriter _writer;
+    private readonly TcpConnectionLifetime _lifetime;
     private readonly TimeSpan? _defaultInvokeTimeout;
     private IClientConnectionProtocol? _protocol;
 
     internal TcpClientConnection(
-        ClientConnection connection, Stream stream, TcpMessageFramer framer,
-        int initialSendBufferBytes, int maxOutboundMessageBytes, TimeSpan? defaultInvokeTimeout,
-        Action closeTransport) {
+        ClientConnection connection, TcpOutboundWriter writer, TcpConnectionLifetime lifetime,
+        TimeSpan? defaultInvokeTimeout) {
         ConnectionState = new ClientConnectionState(connection);
-        _stream = stream;
-        _framer = framer;
-        _sendBuffer = new BoundedArrayBufferWriter(initialSendBufferBytes, maxOutboundMessageBytes);
+        _writer = writer;
+        _lifetime = lifetime;
         _defaultInvokeTimeout = defaultInvokeTimeout;
-        _closeTransport = closeTransport;
     }
 
     /// <inheritdoc />
@@ -52,60 +44,25 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     }
 
     /// <summary>
-    /// Sends one message through the endpoint's framer; at-most-once, faults with
-    /// <see cref="ClientConnectionClosedException"/> when the link is gone or
+    /// Sends one message through the endpoint's framer via the connection's bounded FIFO writer. The send
+    /// completes only after the complete frame was written to the stream. Faults with
+    /// <see cref="ClientConnectionClosedException"/> when the link is gone,
     /// <see cref="TcpOutboundFrameTooLargeException"/> when framing exceeds
-    /// <see cref="ElarionTcpConnectionOptions.MaxOutboundFrameBytes"/>. An oversized frame is rejected before
-    /// any bytes are written and does not close the connection.
+    /// <see cref="ElarionTcpConnectionOptions.MaxOutboundFrameBytes"/> (rejected before any byte is
+    /// written; the connection stays open), or <see cref="TcpSendQueueFullException"/> when
+    /// <see cref="ElarionTcpConnectionOptions.MaxPendingSends"/> sends are already admitted (deterministic
+    /// saturation — nothing was queued). Cancellation before the frame reaches the stream withdraws it;
+    /// cancellation during the physical write aborts the connection, because a partial frame may have
+    /// corrupted stream boundaries.
     /// </summary>
-    public async ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) {
-        var connection = Connection;
-        await _sendLock.WaitAsync(ct);
-        try {
-            _sendBuffer.ResetWrittenCount();
-            _framer.WriteMessage(message.Span, _sendBuffer);
+    public ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) =>
+        _writer.SendAsync(message, ct);
 
-            try {
-                await _stream.WriteAsync(_sendBuffer.WrittenMemory, ct);
-            }
-            catch (OperationCanceledException) {
-                // A cancelled write may have emitted a partial frame — the stream can no longer be
-                // trusted to carry message boundaries. At-most-once covers loss, never corruption: kill
-                // the connection so the receive loop tears it down instead of desyncing the peer forever.
-                CloseTransportQuietly();
-                throw;
-            }
-        }
-        catch (IOException failure) {
-            throw new ClientConnectionClosedException(connection.ConnectionId, failure);
-        }
-        catch (ObjectDisposedException failure) {
-            throw new ClientConnectionClosedException(connection.ConnectionId, failure);
-        }
-        finally {
-            _sendLock.Release();
-        }
-    }
-
-    private void CloseTransportQuietly() {
-        try {
-            _closeTransport();
-        }
-        catch (Exception) {
-            // Best-effort: the teardown completes via the receive loop regardless.
-        }
-    }
-
-    /// <summary>Closes the connection from the server side; the receive loop observes it and unregisters.
-    /// Safe to call on an already-closed link.</summary>
+    /// <summary>Requests a graceful server-side close: no new sends are admitted, admitted sends drain,
+    /// and the connection tears down once (codec close, unregistration, disposal). Safe to call on an
+    /// already-closed link.</summary>
     public ValueTask CloseAsync() {
-        try {
-            _closeTransport();
-        }
-        catch (Exception) {
-            // Closing a dying socket is best-effort; teardown happens via the receive loop regardless.
-        }
-
+        _lifetime.RequestGracefulClose(null);
         return ValueTask.CompletedTask;
     }
 
