@@ -245,6 +245,23 @@ Set `PrincipalId` to the device id — a device's parallel channels all register
 shared state across channels and user-triggered commands. Facts still travel as client events, even
 over a connection; the sink (`SendAsync`/`InvokeAsync`) is for conversation traffic only.
 
+Raw TCP devices use `Elarion.Connections.Tcp` — same authenticator/codec seams over
+`AddElarionTcpConnectionListener/Dialer<THandler>` (or `TcpConnectionEndpoints.Apply*` for
+bindings-as-data), plus a required `Framer` because TCP has no message boundaries. What the adapter owns
+so you don't: optional **TLS before framing** (`o.Tls = new TcpServerTlsOptions/TcpClientTlsOptions { … }`
+— fresh BCL options per connection, fail-closed validation, no plaintext fallback), **late
+authentication** (register the ticket anonymous, then `registry.PromoteAsync(connectionId, identity)` —
+one-way, exactly once, authenticated tickets always need a `PrincipalId`; client-event subscriptions drop
+so the peer resubscribes), **bounded backpressure** (`MaxPendingSends` admission throws
+`TcpSendQueueFullException` at capacity; a completed send means the frame was physically written; FIFO by
+admission order, so "reply, then follow-ups" is just admitting them in order from one codec/actor turn),
+and **deterministic shutdown** (`ShutdownGracePeriod`, then abort — no leaked connection tasks). For
+request/reply into the device, correlate with
+`ConnectionPendingRequests.SendAndWaitAsync(key, sendCt => connection.SendBinaryAsync(frame, sendCt))` —
+registration before send, withdrawal when the send fails. Dispatch decoded commands through
+`ConnectionHandlerInvoker.InvokeAsync/InvokeNamedAsync` (full pipeline per message; named routes need
+`HandlerTransports.Connection`). Test codecs socket-free with `InMemoryTcpLink`.
+
 Don't hand-roll device provisioning — `Elarion.Devices` owns the identity chain (ADR-0054):
 `AddElarionDeviceIdentityEntityFrameworkCore<TDbContext>()` + `[GenerateElarionDeviceIdentity]` on the
 context gives you `IDevicePairingService` (issue a single-use CSPRNG pairing code — device id
