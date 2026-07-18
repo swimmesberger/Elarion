@@ -685,20 +685,41 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     [Fact]
-    public async Task Runner_RegistrationFailure_DoesNotUnregisterAnotherSink() {
+    public async Task Runner_RegistrationFailure_DoesNotUnregisterAnotherSink_AndFailsLoud() {
         var existing = new SimulatedClientConnection(principalId: "existing", connectionId: "existing");
         var registry = new RejectingRegistrationRegistry(existing);
         await using var stream = new ChunkedReadStream();
         var options = new ElarionTcpConnectionOptions { Framer = new DelimitedTcpFramer((byte)'\n') };
+        var logger = new CollectingLogger();
 
         await TcpConnectionRunner.RunAsync(
             stream, new TcpConnectionPeer(null, null), stream, applyNoDelay: null, options,
             new RegistrationFailureTcpHandler(), registry, defaultInvokeTimeout: null, TimeProvider.System,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
-            TestContext.Current.CancellationToken);
+            logger, TestContext.Current.CancellationToken);
 
         registry.UnregisterCalls.Should().Be(0);
         registry.Existing.Should().BeSameAs(existing);
+        // A rejected registration is an adapter bug and must surface loudly — error level, saying
+        // "rejected by the registry", not the generic codec-failure warning.
+        var entry = logger.Entries.Should().ContainSingle().Subject;
+        entry.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Error);
+        entry.Message.Should().Contain("rejected by the registry");
+    }
+
+    private sealed class CollectingLogger : Microsoft.Extensions.Logging.ILogger {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     [Fact]

@@ -73,6 +73,7 @@ internal static class TcpConnectionRunner {
         ClientConnection? identity = null;
         SslStream? tlsStream = null;
         TcpOutboundWriter? writer = null;
+        Exception? registrationRejection = null;
         var transportTag = options.Transport;
         try {
             // Per-connection configuration (the binding-config lookup point): resolved before any byte is
@@ -138,11 +139,23 @@ internal static class TcpConnectionRunner {
                     await registry.RegisterAsync(connection, ct);
                     ownsRegistration = true;
                 }
-                catch {
+                catch (Exception failure) {
                     // Observer cancellation can throw after the registry mutation. A duplicate-id failure,
                     // however, belongs to another sink and must never unregister that live connection.
                     ownsRegistration = registry.TryGet(identity.ConnectionId, out var registered)
                         && ReferenceEquals(registered, connection);
+                    if (!ownsRegistration && failure is not OperationCanceledException) {
+                        // A rejected registration is an adapter/ticket bug (e.g. an authenticated ticket
+                        // without a PrincipalId, or a duplicate connection id) — the peer did nothing
+                        // wrong, and burying it as a generic codec warning cost real debugging time.
+                        // Fail loud: error-level log plus its own bounded telemetry stage.
+                        registrationRejection = failure;
+                        logger.LogError(failure,
+                            "Connection {ConnectionId} was rejected by the registry; the connection is closed. This is an adapter/ticket bug, not a peer failure.",
+                            identity.ConnectionId);
+                        TcpConnectionTelemetry.RecordFailure(transportTag, "registration");
+                    }
+
                     throw;
                 }
 
@@ -207,6 +220,9 @@ internal static class TcpConnectionRunner {
         }
         catch (SocketException) {
             TcpConnectionTelemetry.RecordFailure(transportTag, "io");
+        }
+        catch (Exception failure) when (ReferenceEquals(failure, registrationRejection)) {
+            // Already reported at error level with the "registration" stage at the rejection site.
         }
         catch (Exception failure) {
             logger.LogWarning(failure, "Connection {ConnectionId} codec failed; closing the connection.",
