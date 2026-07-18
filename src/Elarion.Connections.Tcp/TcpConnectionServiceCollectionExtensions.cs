@@ -78,9 +78,42 @@ public static class TcpConnectionServiceCollectionExtensions {
                 nameof(options));
         }
 
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxMessageBytes, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxInboundFrameBytes, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxOutboundFrameBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialReadBufferBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialSendBufferBytes, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxPendingSends, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(options.ShutdownGracePeriod, TimeSpan.Zero);
+        if (options.InitialReadBufferBytes > options.MaxInboundFrameBytes) {
+            throw new ArgumentOutOfRangeException(nameof(options.InitialReadBufferBytes),
+                "InitialReadBufferBytes cannot exceed MaxInboundFrameBytes.");
+        }
+
+        if (options.InitialSendBufferBytes > options.MaxOutboundFrameBytes) {
+            throw new ArgumentOutOfRangeException(nameof(options.InitialSendBufferBytes),
+                "InitialSendBufferBytes cannot exceed MaxOutboundFrameBytes.");
+        }
+
+        if (options.Tls is { HandshakeTimeout: var tlsTimeout }
+            && tlsTimeout <= TimeSpan.Zero && tlsTimeout != Timeout.InfiniteTimeSpan) {
+            throw new ArgumentException(
+                "TLS HandshakeTimeout must be positive or Timeout.InfiniteTimeSpan.", nameof(options));
+        }
+
+        if (options is ElarionTcpListenerOptions { Tls: not null and not TcpServerTlsOptions }) {
+            throw new ArgumentException("Listener endpoints require TcpServerTlsOptions.", nameof(options));
+        }
+
+        if (options is ElarionTcpDialerOptions { Tls: not null and not TcpClientTlsOptions }) {
+            throw new ArgumentException("Dialer endpoints require TcpClientTlsOptions.", nameof(options));
+        }
+
+        if (options.GetType() == typeof(ElarionTcpConnectionOptions) && options.Tls is not null) {
+            throw new ArgumentException(
+                "TLS requires a listener or dialer endpoint so the adapter can select server or client mode.",
+                nameof(options));
+        }
+
         if (options is ElarionTcpListenerOptions { MaxConcurrentConnections: <= 0 }) {
             throw new ArgumentException("MaxConcurrentConnections must be positive when set.", nameof(options));
         }

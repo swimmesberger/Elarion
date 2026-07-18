@@ -114,13 +114,23 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         connection.AttachProtocol(handler.CreateProtocol(connection));
 
         Exception? closeReason = null;
+        var ownsRegistration = false;
         try {
-            // Registration lives inside this try: RegisterAsync mutates the index before dispatching
-            // observers, so an abort mid-registration must still reach the unregister in finally.
-            await registry.RegisterAsync(connection, ct);
+            try {
+                await registry.RegisterAsync(connection, ct);
+                ownsRegistration = true;
+            }
+            catch {
+                // Observer cancellation can throw after the registry mutation. A duplicate-id failure,
+                // however, belongs to another sink and must never unregister that live connection.
+                ownsRegistration = registry.TryGet(identity.ConnectionId, out var registered)
+                    && ReferenceEquals(registered, connection);
+                throw;
+            }
+
             // Critical codec setup is intentionally after registration (ordinary observers can see the
             // link) but before the first frame. Unlike observers it is awaited and fatal on failure.
-            await connection.Protocol.OnOpenedAsync(identity, ct);
+            await connection.Protocol.OnOpenedAsync(connection.Connection, ct);
             await ReceiveLoopAsync(connection, reader, idleTimeout, ct);
             await CloseSafelyAsync(socket, WebSocketCloseStatus.NormalClosure, "closing", ct);
         }
@@ -143,11 +153,13 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             await CloseSafelyAsync(socket, WebSocketCloseStatus.InternalServerError, "protocol failure", ct);
         }
         finally {
-            // The codec learns the connection ended before observers do — its pending invokes and
-            // conversation waiters must fault, not hang. Then unregister must run even when the request
-            // token is already cancelled — observers tear down subscriptions and presence.
-            await NotifyClosedSafelyAsync(connection, closeReason, logger);
-            await registry.UnregisterAsync(identity.ConnectionId, CancellationToken.None);
+            if (ownsRegistration) {
+                // The codec learns the connection ended before observers do — its pending invokes and
+                // conversation waiters must fault, not hang. Then unregister must run even when the request
+                // token is already cancelled — observers tear down subscriptions and presence.
+                await NotifyClosedSafelyAsync(connection, closeReason, logger);
+                await registry.UnregisterAsync(identity.ConnectionId, CancellationToken.None);
+            }
         }
 
         return Results.Empty;

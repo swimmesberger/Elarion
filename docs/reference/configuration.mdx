@@ -265,7 +265,35 @@ builder.Services.AddElarionConnections(o => o.DefaultInvokeTimeout = TimeSpan.Fr
 | Option | Default |
 | --- | --- |
 | `DefaultInvokeTimeout` | `30 seconds` (applied whenever an `InvokeAsync` call carries no per-call `ClientInvokeOptions.Timeout`; `null` = no default — the call is bounded only by its token) |
+| `MaxIdentityMetadataEntries` | `32` (adapter-owned identity metadata entries accepted at registration or promotion) |
+| `MaxIdentityMetadataKeyLength` | `128` (UTF-16 chars per metadata key) |
+| `MaxIdentityMetadataValueLength` | `1024` (UTF-16 chars per metadata value) |
+| `MaxPrincipalIdentities` | `16` (identities per connection principal) |
+| `MaxPrincipalClaims` | `256` (claims across the principal and every actor identity) |
+| `MaxPrincipalActorDepth` | `16` (actor-identity nesting depth) |
 
 The layering is per-call `Timeout` > `DefaultInvokeTimeout` > unbounded; pass
 `Timeout.InfiniteTimeSpan` per call to make a single invoke unbounded without touching the default. See
 [Connections](/docs/capabilities/connections).
+
+### TCP endpoints (options, not config)
+
+Each `AddElarionTcpConnectionListener`/`Dialer` call (and each runtime `Apply…`) configures one
+endpoint in code via `ElarionTcpListenerOptions`/`ElarionTcpDialerOptions`; per-connection overrides
+come from `ConfigureConnectionAsync` returning `TcpConnectionSettings`:
+
+| Option | Default |
+| --- | --- |
+| `Framer` | required (`LengthPrefixedTcpFramer`, `DelimitedTcpFramer`, or custom) |
+| `MaxInboundFrameBytes` | `1 MiB` (total unconsumed wire bytes per inbound frame — prefix/header/body/trailer included) |
+| `MaxOutboundFrameBytes` | `1 MiB` (total framed wire bytes per outbound message) |
+| `InitialReadBufferBytes` / `InitialSendBufferBytes` | `8 KiB` / `4 KiB` (send buffer is pooled and trimmed after oversized frames) |
+| `MaxPendingSends` | `256` (bounded outbound admission — queued plus in-progress; at capacity a send throws `TcpSendQueueFullException`) |
+| `ShutdownGracePeriod` | `5 seconds` (graceful-close drain window before stragglers are force-aborted; shutdown then awaits every connection task) |
+| `HandshakeTimeout` | `10 seconds` (framed application authentication deadline) |
+| `Tls` | `null` (`TcpServerTlsOptions` on listeners / `TcpClientTlsOptions` on dialers; own `HandshakeTimeout` default 10 s; TLS always completes before framing) |
+| `IdleTimeout` | `null` (arms the codec's `OnIdleAsync`) |
+| `NoDelay` | `true` |
+| `Transport` | `"tcp"` (bounded telemetry tag) |
+| `MaxConcurrentConnections` (listener) | `null` (shed excess accepted sockets at the cap) |
+| `ReconnectMinDelay` / `ReconnectMaxDelay` (dialer) | `1 s` / `30 s` (jittered exponential backoff) |

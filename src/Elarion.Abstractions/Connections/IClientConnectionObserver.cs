@@ -28,4 +28,17 @@ public interface IClientConnectionObserver {
     /// <param name="connection">The identity of the connection that ended.</param>
     /// <param name="ct">A cancellation token.</param>
     ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default);
+
+    /// <summary>
+    /// Called after an anonymous connection identity was atomically promoted. The registry has already
+    /// committed <paramref name="current"/> before observers run; failures are isolated and never roll back.
+    /// Existing authorization-derived state should be invalidated and rebuilt under the new identity.
+    /// </summary>
+    /// <param name="previous">The anonymous snapshot that was replaced.</param>
+    /// <param name="current">The authenticated snapshot now exposed by the sink.</param>
+    /// <param name="ct">A cancellation token.</param>
+    ValueTask OnIdentityPromotedAsync(
+        ClientConnection previous,
+        ClientConnection current,
+        CancellationToken ct = default);
 }

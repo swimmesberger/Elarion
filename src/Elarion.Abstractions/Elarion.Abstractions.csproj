@@ -16,6 +16,7 @@
     <!-- Elarion core is the reference implementation of these contracts: the framework pipeline decorators
          (moved out of this package, ADR-0034) and other runtime primitives may use internal helpers here. -->
     <InternalsVisibleTo Include="Elarion" />
+    <InternalsVisibleTo Include="Elarion.Connections" />
   </ItemGroup>
 
 </Project>

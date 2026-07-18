@@ -1,7 +1,10 @@
 using System.Buffers;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using BenchmarkDotNet.Attributes;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
@@ -35,8 +38,18 @@ public class TcpSendBenchmarks {
     private NetworkStream _rawSendStream = null!;
     private Task _rawDrainLoop = null!;
     private TcpClientConnection _sink = null!;
+    private TcpClientConnection _saturatedSink = null!;
+    private Task _saturatedSend = null!;
+    private TcpConnectionLifetime _saturatedLifetime = null!;
     private byte[] _payload = null!;
     private DelimitedTcpFramer _framer = null!;
+    private ServiceProvider _tlsProvider = null!;
+    private IHostedService[] _tlsHosted = null!;
+    private X509Certificate2 _tlsCertificate = null!;
+    private TcpClient _tlsClient = null!;
+    private SslStream _tlsStream = null!;
+    private Task _tlsDrainLoop = null!;
+    private TcpClientConnection _tlsSink = null!;
 
     [GlobalSetup]
     public async Task Setup() {
@@ -78,16 +91,76 @@ public class TcpSendBenchmarks {
         _rawAccepted = await rawAccept;
         _rawSendStream = _rawClient.GetStream();
         _rawDrainLoop = DrainAsync(_rawAccepted.GetStream(), _received);
+
+        // The saturated sink: capacity 1 over a stream whose write never completes — one admitted send
+        // pins the queue full, so every benchmarked send exercises the rejection path.
+        var blocked = new NeverCompletingWriteStream();
+        var identity = new ClientConnection {
+            ConnectionId = "saturated",
+            Transport = "bench",
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "bench")),
+            ConnectedAt = DateTimeOffset.UtcNow,
+        };
+        _saturatedLifetime = new TcpConnectionLifetime(blocked, CancellationToken.None);
+        var writer = new TcpOutboundWriter(
+            blocked, _framer, initialBufferBytes: 4 * 1024, maxFrameBytes: 64 * 1024, maxPendingSends: 1,
+            identity.ConnectionId, identity.Transport, _saturatedLifetime);
+        _saturatedLifetime.AttachWriter(writer);
+        _saturatedSink = new TcpClientConnection(identity, writer, _saturatedLifetime, defaultInvokeTimeout: null);
+        _saturatedSend = _saturatedSink.SendBinaryAsync(_payload).AsTask();
+
+        // TLS variant: same passive endpoint behind a TLS upgrade — measures the steady-state overhead
+        // of the encrypted leg (record framing + encryption), not the one-time handshake.
+        _tlsCertificate = CreateLoopbackCertificate();
+        var tlsSinkReady = new TaskCompletionSource<TcpClientConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tlsPort = new TaskCompletionSource<IPEndPoint>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tlsServices = new ServiceCollection();
+        tlsServices.AddElarionConnections();
+        tlsServices.AddSingleton<IClientConnectionObserver>(new SinkCapture(tlsSinkReady));
+        tlsServices.AddSingleton<PassiveHandler>();
+        tlsServices.AddElarionTcpConnectionListener<PassiveHandler>(o => {
+            o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
+            o.Framer = _framer;
+            o.OnListening = tlsPort.SetResult;
+            o.Tls = new TcpServerTlsOptions {
+                CreateAuthenticationOptionsAsync = (_, _) => ValueTask.FromResult(
+                    new SslServerAuthenticationOptions { ServerCertificate = _tlsCertificate }),
+            };
+        });
+        _tlsProvider = tlsServices.BuildServiceProvider();
+        _tlsHosted = [.. _tlsProvider.GetServices<IHostedService>()];
+        foreach (var service in _tlsHosted) {
+            await service.StartAsync(CancellationToken.None);
+        }
+
+        _tlsClient = new TcpClient { NoDelay = true };
+        await _tlsClient.ConnectAsync(await tlsPort.Task);
+        _tlsStream = new SslStream(_tlsClient.GetStream(), leaveInnerStreamOpen: false,
+            // Benchmark-only trust-any for the self-signed loopback certificate.
+            (_, _, _, _) => true);
+        await _tlsStream.AuthenticateAsClientAsync("localhost");
+        _tlsDrainLoop = DrainAsync(_tlsStream, _received);
+        _tlsSink = await tlsSinkReady.Task;
     }
 
     [GlobalCleanup]
     public async Task Cleanup() {
+        _saturatedLifetime.Abort(null);
+        try {
+            await _saturatedSend;
+        }
+        catch (ClientConnectionClosedException) {
+            // The pinned send settles through the abort — expected.
+        }
+
         _adapterClient.Dispose();
         _rawClient.Dispose();
         _rawAccepted.Dispose();
         _rawListener.Stop();
+        await _tlsStream.DisposeAsync();
+        _tlsClient.Dispose();
         try {
-            await Task.WhenAll(_adapterDrainLoop, _rawDrainLoop).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(_adapterDrainLoop, _rawDrainLoop, _tlsDrainLoop).WaitAsync(TimeSpan.FromSeconds(5));
         }
         catch (Exception) {
             // Drain loops end with their sockets; a straggler must not fail cleanup.
@@ -97,7 +170,13 @@ public class TcpSendBenchmarks {
             await service.StopAsync(CancellationToken.None);
         }
 
+        foreach (var service in _tlsHosted) {
+            await service.StopAsync(CancellationToken.None);
+        }
+
         await _provider.DisposeAsync();
+        await _tlsProvider.DisposeAsync();
+        _tlsCertificate.Dispose();
     }
 
     [Benchmark(Baseline = true, OperationsPerInvoke = MessagesPerInvoke)]
@@ -122,7 +201,55 @@ public class TcpSendBenchmarks {
         await done;
     }
 
-    private static async Task DrainAsync(NetworkStream stream, TcpServerBenchmarks.MessageCounter counter) {
+    // Concurrent producers below capacity: the contended path — the first sender writes inline, the rest
+    // queue FIFO behind it and a drainer settles them after each physical write.
+    [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]
+    public async Task Sink_SendBinary_FourProducers() {
+        var done = _received.WaitFor(MessagesPerInvoke);
+        var producers = new Task[4];
+        for (var p = 0; p < producers.Length; p++) {
+            producers[p] = Task.Run(async () => {
+                for (var i = 0; i < MessagesPerInvoke / 4; i++) {
+                    await _sink.SendBinaryAsync(_payload);
+                }
+            });
+        }
+
+        await Task.WhenAll(producers);
+        await done;
+    }
+
+    // The TLS leg: identical send loop through a connection whose stream is an SslStream — the delta
+    // against Sink_SendBinary is the per-message cost of TLS record framing and encryption.
+    [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]
+    public async Task Sink_SendBinary_Tls() {
+        var done = _received.WaitFor(MessagesPerInvoke);
+        for (var i = 0; i < MessagesPerInvoke; i++) {
+            await _tlsSink.SendBinaryAsync(_payload);
+        }
+
+        await done;
+    }
+
+    // Deterministic saturation: a standalone sink whose single admitted send never completes, so every
+    // benchmarked send is rejected at capacity — measures the cost of the deterministic saturation fault
+    // (no frame allocation, no queueing).
+    [Benchmark(OperationsPerInvoke = 1_000)]
+    public async Task<int> Sink_SaturatedRejection() {
+        var rejections = 0;
+        for (var i = 0; i < 1_000; i++) {
+            try {
+                await _saturatedSink.SendBinaryAsync(_payload);
+            }
+            catch (TcpSendQueueFullException) {
+                rejections++;
+            }
+        }
+
+        return rejections;
+    }
+
+    private static async Task DrainAsync(Stream stream, TcpServerBenchmarks.MessageCounter counter) {
         var buffer = new byte[64 * 1024];
         try {
             while (true) {
@@ -148,13 +275,22 @@ public class TcpSendBenchmarks {
 
         public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
             ValueTask.CompletedTask;
+
+        public ValueTask OnIdentityPromotedAsync(
+            ClientConnection previous,
+            ClientConnection current,
+            CancellationToken ct = default) =>
+            ValueTask.CompletedTask;
     }
 
     public sealed class PassiveHandler : TcpConnectionHandler {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) =>
+            // Authenticated tickets require a principal id — an id-less authenticated ticket is
+            // rejected at registration and the setup's sink capture would wait forever.
             ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
                 Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "bench")),
+                PrincipalId = "bench-device",
             });
 
         public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
@@ -164,5 +300,44 @@ public class TcpSendBenchmarks {
     private sealed class SilentProtocol : IClientConnectionProtocol {
         public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
             ValueTask.CompletedTask;
+    }
+
+    private static X509Certificate2 CreateLoopbackCertificate() {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256);
+        var san = new SubjectAlternativeNameBuilder();
+        san.AddDnsName("localhost");
+        san.AddIpAddress(IPAddress.Loopback);
+        request.CertificateExtensions.Add(san.Build());
+        return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+    }
+
+    /// <summary>Writes never complete until disposal faults them — pins one admitted send so the
+    /// saturation benchmark's queue stays deterministically full.</summary>
+    private sealed class NeverCompletingWriteStream : Stream {
+        private readonly TaskCompletionSource _blocked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) =>
+            await _blocked.Task;
+
+        protected override void Dispose(bool disposing) {
+            _blocked.TrySetException(new ObjectDisposedException(nameof(NeverCompletingWriteStream)));
+            base.Dispose(disposing);
+        }
+
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

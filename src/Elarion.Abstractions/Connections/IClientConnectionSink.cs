@@ -26,8 +26,16 @@ namespace Elarion.Abstractions.Connections;
 /// </para>
 /// </remarks>
 public interface IClientConnectionSink {
-    /// <summary>The identity of the connection this sink writes to.</summary>
-    ClientConnection Connection { get; }
+    /// <summary>
+    /// The atomic snapshot source owned by this adapter connection. The registry publishes normalized and
+    /// promoted snapshots through it; application code reads <see cref="ClientConnectionState.Current"/>.
+    /// </summary>
+    ClientConnectionState ConnectionState { get; }
+
+    /// <summary>
+    /// The current immutable connection snapshot. Capture this property once at an operation boundary.
+    /// </summary>
+    ClientConnection Connection => ConnectionState.Current;
 
     /// <summary>
     /// Pushes <paramref name="payload"/> to the client as <paramref name="name"/>, fire-and-forget:

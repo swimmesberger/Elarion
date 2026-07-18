@@ -11,7 +11,9 @@ namespace Elarion.Connections.Tcp;
 /// <see cref="LengthPrefixedTcpFramer"/> and <see cref="DelimitedTcpFramer"/>.
 /// </summary>
 /// <remarks>
-/// Implementations are stateless with respect to the buffer: <see cref="TryReadMessage"/> is called with
+/// Endpoint-level framers are shared by every connection, so implementations must be stateless and
+/// thread-safe. A negotiated or otherwise stateful framing scheme belongs in a per-connection
+/// <see cref="TcpConnectionSettings.Framer"/> override. <see cref="TryReadMessage"/> is called with
 /// everything received-but-unconsumed and either extracts exactly one complete leading message (reporting
 /// the consumed byte count, which may exceed the payload for delimiters/headers) or returns
 /// <see langword="false"/> for "need more data". A framer that detects an unrecoverable stream corruption

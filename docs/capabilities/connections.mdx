@@ -28,9 +28,9 @@ them assumes a socket exists at all:
 
 | Piece | Role |
 | --- | --- |
-| `ClientConnection` | Identity record: opaque `ConnectionId`, the principal captured at connect, `PrincipalId` (user id for browsers, **device id for device links** — many connections share one principal), `Transport` (bounded telemetry tag), opaque `Metadata`. |
-| `IClientConnectionRegistry` | Node-local index and lifecycle broker: adapters register/unregister; consumers look up by id or principal. Observers run after the index mutation and are failure-isolated. |
-| `IClientConnectionObserver` | Connect/disconnect lifecycle seam — presence projections, device registration, twin wiring hang here. |
+| `ClientConnection` | Stable connection facts (`ConnectionId`, `Transport`, `ConnectedAt`) plus the current **immutable, revisioned identity snapshot**: principal, `PrincipalId` (user id for browsers, **device id for device links** — many connections share one principal), bounded opaque `Metadata`. Capture the snapshot once at an operation boundary. |
+| `IClientConnectionRegistry` | Node-local index and lifecycle broker: adapters register/unregister; consumers look up by id or principal; `PromoteAsync` performs the one-way anonymous → authenticated identity promotion. Observers run after the index mutation and are failure-isolated. |
+| `IClientConnectionObserver` | Connect/disconnect/identity-promotion lifecycle seam — presence projections, device registration, twin wiring hang here. |
 | `IClientConnectionSink` | The per-connection outbound port: fire-and-forget `SendAsync(name, payload)` and request/reply `InvokeAsync` (completes with the reply, a timeout, or `ClientConnectionClosedException` — never silently). |
 | `IClientConnectionProtocol` | The app-owned **codec**: complete inbound messages arrive sequentially in receive order; the sink's outbound legs delegate here so wire encoding stays the codec's decision. Legs a codec doesn't speak keep fail-loud defaults. |
 | `ClientConnectionEventBridge` | Makes any adapter a peer delivery leg of the SSE endpoint: same topic catalog, same fail-closed subscribe-time authorization, same `elarion.connected` greeting, same cross-node fan-out. |
@@ -40,6 +40,37 @@ Register the kernel once:
 ```csharp
 builder.Services.AddElarionConnections();   // registry + client-events bridge
 ```
+
+### Identity promotion (anonymous → authenticated)
+
+A connection may register **anonymously** — the shape of device protocols whose authentication is a
+framed exchange after connect rather than a connect-time credential — and later perform **exactly one
+atomic, one-way promotion** to an authenticated identity:
+
+```csharp
+var status = await registry.PromoteAsync(connection.Connection.ConnectionId,
+    new ClientConnectionIdentity {
+        Principal = principal,
+        PrincipalId = deviceId,
+        Metadata = new Dictionary<string, string> { ["firmware"] = version },
+    }, ct);
+// Promoted | AlreadyAuthenticated | ConnectionNotFound — demotion and user switching are rejected.
+```
+
+The rules are deliberate and security-shaped:
+
+- **Stable facts never change** (`ConnectionId`, `Transport`, `ConnectedAt`); the principal, principal
+  id, metadata, and revision are replaced **together** as one immutable snapshot. Inputs are cloned and
+  metadata is defensively copied and bounded — mutating what you passed in cannot alter stored identity.
+- Only anonymous/no-id → authenticated/non-empty-id is accepted, **exactly once** — concurrent
+  promoters get one winner; demotion and principal switching are rejected as `AlreadyAuthenticated`.
+- **An in-flight dispatch keeps the snapshot it captured** at its boundary; the next dispatch observes
+  the promoted snapshot. A failed validation or a lost race leaves the prior snapshot and revision
+  intact; a promotion observer failure is isolated and never rolls the identity back.
+- **Client-event subscriptions are disposed on promotion** — the peer must resubscribe so subscribe-time
+  authorization is reevaluated under the new identity. Observers implementing
+  `OnIdentityPromotedAsync(previous, current, …)` see both snapshots; disconnect observers and the
+  codec's `OnClosedAsync` always receive the final (latest) snapshot.
 
 ## The WebSocket endpoint
 
@@ -166,11 +197,20 @@ message boundaries, the adapter owns a **framing seam** — and framing is bound
 skips serial-bridge line noise), or implement `TcpMessageFramer` for the vendor's format. Bytes are
 bytes on TCP, so every inbound message reaches the codec's `OnBinaryAsync` as a raw slice; a text
 protocol's codec decodes with one `Encoding.UTF8.GetString` — the string is paid for only where it is
-wanted. The pipeline is benchmarked at **raw-socket parity with zero allocations per message in both
-directions** — receive (framer slice → codec) and send (`SendBinaryAsync` reuses a per-connection frame
-buffer, so a proxy that forwards between links allocates nothing) — and an armed-but-quiet idle window
-costs nothing on the hot path. Sockets default to `NoDelay` (Nagle stalls serial request/reply
-telegrams); override per endpoint or per connection for bulk one-way streams.
+wanted. The pipeline is benchmarked at **raw-socket parity** in both directions — receive (framer slice
+→ codec) and send (`SendBinaryAsync` frames into a pooled, budget-capped per-connection buffer that is
+trimmed after oversized frames, so a proxy that forwards between links stays allocation-light and never
+retains its largest frame) — and an armed-but-quiet idle window costs nothing on the hot path. Sockets
+default to `NoDelay` (Nagle stalls serial request/reply telegrams); override per endpoint or per
+connection for bulk one-way streams.
+
+**Establishment order is fixed**: raw TCP → optional TLS → framer → framed application authentication →
+registration → `OnOpenedAsync` → messages. Frame limits count **total unconsumed wire bytes** —
+prefix, variable header, body, and trailer included — so `MaxInboundFrameBytes` bounds what a peer can
+make the endpoint buffer before a single message completes, and `MaxOutboundFrameBytes` bounds what a
+codec can frame outward; both are validated before allocation and apply to the handshake too. Shared
+endpoint framers must be stateless and thread-safe; a framer carrying negotiated state belongs in a
+per-connection override from `ConfigureConnectionAsync`.
 
 ```csharp
 // Devices dial in:
@@ -224,11 +264,73 @@ and `endpoints.StatusChanged` fires on every transition, ready to be projected o
 an admin UI shows binding state live.
 
 Settings can also vary **per connection on one endpoint**: override
-`ConfigureConnectionAsync(TcpConnectionPeer, …)` and return `TcpConnectionSettings` (framer, size cap,
-idle window, transport tag — nulls inherit the endpoint options). It runs before any byte is
-exchanged, so a binding-configuration lookup keyed on the peer can pick the wire framing that governs
-the handshake itself — the shape gateways need when differently-speaking device families share one
-ingress port.
+`ConfigureConnectionAsync(TcpConnectionPeer, …)` and return `TcpConnectionSettings` (framer, size caps,
+send capacity, TLS policy, idle window, transport tag — nulls inherit the endpoint options). It runs
+before any byte is exchanged, so a binding-configuration lookup keyed on the peer can pick the wire
+framing — or the TLS certificate — that governs the handshake itself — the shape gateways need when
+differently-speaking device families share one ingress port.
+
+### TLS
+
+Set `Tls` on any TCP endpoint (or per connection) and the adapter authenticates the stream **before
+the framer, the application authenticator, the registry, or any observer sees a byte** — a TLS failure
+rejects the socket with nothing registered, and a TLS-configured dialer never falls back to plaintext.
+Policy stays explicit BCL configuration (`SslServerAuthenticationOptions` /
+`SslClientAuthenticationOptions`, minted **fresh per connection**); platform certificate validation is
+fail-closed and Elarion never bypasses it — a development bypass is test configuration, not a
+production convenience. The recommended server setup:
+
+```csharp
+builder.Services.AddElarionTcpConnectionListener<GatewayListenHandler>(o => {
+    o.ListenEndPoint = new IPEndPoint(IPAddress.Any, 7010);
+    o.Framer = new LengthPrefixedTcpFramer();
+    o.Tls = new TcpServerTlsOptions {
+        CreateAuthenticationOptionsAsync = (peer, ct) => ValueTask.FromResult(
+            new SslServerAuthenticationOptions { ServerCertificate = gatewayCertificate }),
+    };
+});
+
+// Dialer side: TargetHost names the certificate identity this binding expects.
+builder.Services.AddElarionTcpConnectionDialer<DeviceLinkHandler>(o => {
+    o.Host = "10.0.40.17"; o.Port = 2101;
+    o.Framer = new LengthPrefixedTcpFramer();
+    o.Tls = new TcpClientTlsOptions {
+        CreateAuthenticationOptionsAsync = (peer, ct) => ValueTask.FromResult(
+            new SslClientAuthenticationOptions { TargetHost = "device-7.gateway.internal" }),
+    };
+});
+```
+
+`TcpTlsOptions.HandshakeTimeout` (10 s default) bounds the TLS exchange separately from the framed
+application `HandshakeTimeout` that follows it.
+
+### Outbound backpressure and send completion
+
+Each connection's outbound leg is a **bounded FIFO pipeline**: up to `MaxPendingSends` (256 default)
+sends may be admitted at once — queued *plus* in-progress — and at capacity a send fails immediately
+with `TcpSendQueueFullException` before any frame memory is allocated. Admitted sends are never
+silently dropped; saturation is always that deterministic fault, so a slow device produces visible
+backpressure instead of an unbounded waiter population. A send that **completes** means its complete
+frame was physically written to the stream — never merely queued. Under contention the drainer
+**coalesces queued frames into one physical write** (up to a 64 KiB flush threshold): FIFO order is
+unchanged, syscalls amortize, and over TLS a batch costs one record instead of one per frame — the
+uncontended send stays inline and allocation-free at raw-socket parity. Cancellation before a frame is
+picked up withdraws it (nothing is emitted, the slot frees); a frame the drainer has already activated
+completes regardless (the batch write is connection-owned — like bytes already on the wire);
+cancellation or an I/O failure *during* an inline physical write aborts the connection, because a
+partial frame may have corrupted stream boundaries — at-most-once covers loss, never corruption.
+
+### Deterministic close and endpoint shutdown
+
+One internal lifetime controller owns every connection's `Open → Closing → Closed` transition: peer
+EOF, `CloseAsync`, codec failures, endpoint reconfiguration, and host shutdown all funnel into one
+first-reason-wins close that quiesces I/O, settles every admitted send exactly once (drain on a clean
+close, fault on failure), runs the codec's `OnClosedAsync` once with the first reason and the latest
+identity, unregisters once, and disposes the transport once. Endpoint stop — hosted shutdown,
+`RemoveAsync`, or a reconfiguring `Apply…` — stops accepting/redialing, requests graceful close
+everywhere, waits the endpoint's `ShutdownGracePeriod` (5 s default), force-aborts the stragglers' raw
+transports, and then **awaits every connection task**: no connection is ever silently abandoned, and
+the registry holds none of the endpoint's connections when stop returns.
 
 ## Keepalives and conversations
 
@@ -240,7 +342,10 @@ Two optional pieces cover what every device codec otherwise hand-rolls:
 - **Conversation helpers** (in the kernel, use only if they fit):
   `ConnectionPendingRequests<TKey, TResponse>` is the sequence-number → completion map behind a codec's
   `InvokeAsync` — register the key, send, await the correlated reply with a timeout, `FailAll` on
-  teardown. `ConnectionInbox<TMessage>` serves multi-message flows: the receive path `Post`s every
+  teardown. `SendAndWaitAsync(key, send, …)` is the safe correlation pattern in one call: it registers
+  **before** invoking your send (a fast reply can never race its own registration), and a failed send
+  withdraws its own pending entry — the key is immediately reusable and nothing awaits a reply that can
+  never come. `ConnectionInbox<TMessage>` serves multi-message flows: the receive path `Post`s every
   parsed message, flow code awaits the next message matching a predicate ("the ready frame or the abort
   frame"), buffered so a fast reply beats its waiter safely, and `Complete` faults everything when the
   connection ends.
@@ -260,11 +365,13 @@ internal sealed class DeviceCodec(TcpClientConnection connection) : IClientConne
         string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct)
         where TRequest : class {
         var sequence = NextSequence();
-        // The sink already resolved the default invoke timeout into options — honor it as-is
-        // (a null Timeout here means the invoke is deliberately unbounded).
-        var reply = _pending.WaitAsync(sequence, options?.Timeout, ct);
-        await connection.SendBinaryAsync(DeviceFrame.Encode(sequence, name, request), ct);
-        return Decode<TResponse>(await reply);
+        // Register-then-send in one call: the sink already resolved the default invoke timeout into
+        // options (a null Timeout here means the invoke is deliberately unbounded), and a send that
+        // faults withdraws its own registration so the sequence number is immediately reusable.
+        var reply = await _pending.SendAndWaitAsync(sequence,
+            sendCt => connection.SendBinaryAsync(DeviceFrame.Encode(sequence, name, request), sendCt),
+            options?.Timeout, ct);
+        return Decode<TResponse>(reply);
     }
 
     public ValueTask OnIdleAsync(CancellationToken ct) =>
@@ -337,16 +444,20 @@ frame to the mailbox (see the codec examples above). The codec's one routing dec
 are commands* — those go through the dispatch rail instead:
 
 ```csharp
-// Inside a codec, for command-shaped messages: the same per-call scope rail JSON-RPC and MCP use.
-// Authorization, validation, [Idempotent], transaction, and audit all run per message, evaluated
-// against the connection's principal (seeded as ICurrentUser by the standard initializer).
-var boundary = new DispatchScopeContext();
-boundary.Set(connection.Connection.Principal);
-await using var scope = services.CreateDispatchScope(boundary);
-if (dispatcher.TryGetRoute(name, HandlerTransports.Connection, out var route)) {
-    var result = await route.InvokeAsync(request, scope.ServiceProvider, ct);
-    // encode the result back over the sink — your framing
-}
+// Inside a codec, for command-shaped messages: ConnectionHandlerInvoker rides the same per-call scope
+// rail JSON-RPC and MCP use. Authorization, validation, [Idempotent], transaction, and audit all run
+// per message, evaluated against the connection's captured identity snapshot (seeded as ICurrentUser
+// by the standard initializer) — a promotion racing this dispatch affects the next message, never the
+// scope underneath this one, and adapter metadata can never overwrite the framework identity entries.
+var result = await ConnectionHandlerInvoker.InvokeAsync<StartCommand, StartAck>(
+    services, connection, decoded, ct: ct);
+// encode the result back over the sink — your framing; a failed Result stays a value
+
+// Decoded-by-name traffic goes through the filtered named rail instead: only routes exposed with
+// HandlerTransports.Connection are reachable, and unknown/other-transport names return the same
+// generic NotFound so exposure is never leaked.
+var named = await ConnectionHandlerInvoker.InvokeNamedAsync(
+    services, connection, dispatcher, name, decodedRequest, ct: ct);
 ```
 
 **User → device.** A UI action arrives as a normal `[Handler]` (over HTTP/JSON-RPC — `[RequirePermission]`,
@@ -389,5 +500,12 @@ handshake, registry, lifecycle, per-message scopes, mailbox, and fan-out are all
   single-homed twin (the role-holder proxy's prefix list); a replicated connection directory is the
   point where you adopt a clustered runtime instead.
 - **Telemetry**: register the `Elarion.Connections` meter — `connection.active`,
-  `connection.opened`/`connection.closed` (tagged `elarion.connection.transport`), and
-  `connection.event_subscriptions.active`.
+  `connection.opened`/`connection.closed` (tagged `elarion.connection.transport`),
+  `connection.identity_promotions` (tagged `elarion.connection.promotion.outcome`), and
+  `connection.event_subscriptions.active` — and, for TCP endpoints, `Elarion.Connections.Tcp`:
+  `elarion.tcp.tls.handshake.duration` (seconds, tagged `elarion.tcp.tls.outcome`),
+  `elarion.tcp.connection.failures` (bounded `elarion.tcp.failure.stage`),
+  `elarion.tcp.connection.closed` (`elarion.tcp.close.mode` = `graceful`/`forced`),
+  `elarion.tcp.outbound.pending`/`elarion.tcp.outbound.saturated`, and `elarion.tcp.idle`. Tags are
+  fixed vocabularies only — never connection/principal ids, payloads, endpoints, operation names, or
+  certificate data.

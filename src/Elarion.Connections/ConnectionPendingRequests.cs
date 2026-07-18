@@ -30,6 +30,44 @@ public sealed class ConnectionPendingRequests<TKey, TResponse> where TKey : notn
     /// <param name="ct">Cancels the wait and withdraws the registration.</param>
     /// <exception cref="InvalidOperationException">The key is already in flight.</exception>
     public async Task<TResponse> WaitAsync(TKey key, TimeSpan? timeout = null, CancellationToken ct = default) {
+        var source = Register(key);
+        return await AwaitReplyAsync(key, source, timeout, ct);
+    }
+
+    /// <summary>
+    /// The safe correlation pattern in one call: registers <paramref name="key"/>, then invokes
+    /// <paramref name="send"/>, then awaits the reply — registration-before-send closes the fast-reply
+    /// race, and a failed send withdraws its own pending entry so the key is immediately reusable and
+    /// nothing awaits a reply that can never come. When the reply nevertheless raced a send fault (the
+    /// request did reach the peer), the reply wins and is returned.
+    /// </summary>
+    /// <param name="key">The correlation key the reply will carry.</param>
+    /// <param name="send">Transmits the request (e.g. a framed connection send). A throw here faults the
+    /// pending entry, not the connection.</param>
+    /// <param name="timeout">Faults with <see cref="TimeoutException"/> when no reply arrives in time.</param>
+    /// <param name="ct">Cancels the send and the wait; withdraws the registration.</param>
+    /// <exception cref="InvalidOperationException">The key is already in flight.</exception>
+    public async Task<TResponse> SendAndWaitAsync(
+        TKey key, Func<CancellationToken, ValueTask> send, TimeSpan? timeout = null, CancellationToken ct = default) {
+        ArgumentNullException.ThrowIfNull(send);
+        var source = Register(key);
+        try {
+            await send(ct);
+        }
+        catch (Exception) when (_pending.TryRemove(new KeyValuePair<TKey, TaskCompletionSource<TResponse>>(key, source))) {
+            // The send failed with no reply seen: the registration is withdrawn and the key reusable.
+            throw;
+        }
+        catch (Exception) {
+            // The reply (or teardown) raced the failed send and already settled this registration —
+            // hand its outcome over instead of losing it.
+            return await source.Task;
+        }
+
+        return await AwaitReplyAsync(key, source, timeout, ct);
+    }
+
+    private TaskCompletionSource<TResponse> Register(TKey key) {
         if (Volatile.Read(ref _completion) is { } alreadyFailed) {
             throw alreadyFailed;
         }
@@ -46,6 +84,11 @@ public sealed class ConnectionPendingRequests<TKey, TResponse> where TKey : notn
             throw failed;
         }
 
+        return source;
+    }
+
+    private async Task<TResponse> AwaitReplyAsync(
+        TKey key, TaskCompletionSource<TResponse> source, TimeSpan? timeout, CancellationToken ct) {
         try {
             return timeout is { } window
                 ? await source.Task.WaitAsync(window, ct)

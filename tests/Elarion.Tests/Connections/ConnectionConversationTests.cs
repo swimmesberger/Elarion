@@ -125,4 +125,50 @@ public sealed class ConnectionConversationTests {
         await ((Func<Task>)(() => requests.WaitAsync(2, ct: ct))).Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("link down");
     }
+
+    [Fact]
+    public async Task SendAndWait_RegistersBeforeTheSend_SoAFastReplyIsNeverLost() {
+        var ct = TestContext.Current.CancellationToken;
+        var requests = new ConnectionPendingRequests<int, string>();
+
+        // The reply lands while the send is still "on the wire" — registration-first means it completes
+        // the already-pending entry instead of reporting an unsolicited reply.
+        var roundTrip = requests.SendAndWaitAsync(3, _ => {
+            requests.TryComplete(3, "immediate").Should().BeTrue();
+            return ValueTask.CompletedTask;
+        }, ct: ct);
+
+        (await roundTrip).Should().Be("immediate");
+    }
+
+    [Fact]
+    public async Task SendAndWait_FailedSend_WithdrawsTheRegistration_AndTheKeyIsImmediatelyReusable() {
+        var ct = TestContext.Current.CancellationToken;
+        var requests = new ConnectionPendingRequests<int, string>();
+
+        var failed = async () => await requests.SendAndWaitAsync(
+            9, _ => throw new IOException("send leg broke"), ct: ct);
+        await failed.Should().ThrowAsync<IOException>();
+
+        // Nothing waits for a reply that can never come, and the key is free for the retry.
+        requests.TryComplete(9, "stale").Should().BeFalse();
+        var retry = requests.SendAndWaitAsync(9, _ => ValueTask.CompletedTask, ct: ct);
+        requests.TryComplete(9, "second attempt").Should().BeTrue();
+        (await retry).Should().Be("second attempt");
+    }
+
+    [Fact]
+    public async Task SendAndWait_ReplyRacingAFailedSend_WinsOverTheSendFault() {
+        var ct = TestContext.Current.CancellationToken;
+        var requests = new ConnectionPendingRequests<int, string>();
+
+        // The request reached the peer and was answered even though the send leg reported a failure —
+        // the reply already settled the registration, so it is handed over instead of lost.
+        var result = await requests.SendAndWaitAsync(4, _ => {
+            requests.TryComplete(4, "answered anyway").Should().BeTrue();
+            throw new IOException("reported after the fact");
+        }, ct: ct);
+
+        result.Should().Be("answered anyway");
+    }
 }

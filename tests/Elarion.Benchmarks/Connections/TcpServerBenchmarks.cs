@@ -226,8 +226,10 @@ public class TcpServerBenchmarks {
     public sealed class CountingConnectionHandler(MessageCounter counter) : TcpConnectionHandler {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) =>
+            // Authenticated tickets require a principal id — id-less ones are rejected at registration.
             ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
                 Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "bench")),
+                PrincipalId = "bench-device",
             });
 
         public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
@@ -241,6 +243,7 @@ public class TcpServerBenchmarks {
             TcpHandshakeContext handshake, CancellationToken ct) =>
             ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
                 Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "bench")),
+                PrincipalId = "bench-device",
             });
 
         public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>

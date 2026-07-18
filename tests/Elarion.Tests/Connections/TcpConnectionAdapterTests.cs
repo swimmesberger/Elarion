@@ -94,6 +94,84 @@ public sealed class TcpConnectionAdapterTests {
         consumed.Should().Be(3);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task Reader_FragmentedVariableLengthHeaderAtEveryBoundary_AndBackToBackFrames(int firstChunkLength) {
+        var frame = new VariableHeaderTcpFramer();
+        var writer = new ArrayBufferWriter<byte>();
+        frame.WriteMessage([1, 2], writer);
+        frame.WriteMessage([3], writer);
+        var wire = writer.WrittenMemory.ToArray();
+        await using var stream = new ChunkedReadStream(wire[..firstChunkLength], wire[firstChunkLength..]);
+        var reader = new TcpMessageReader(stream, frame, maxMessageBytes: 16, initialBufferBytes: 1);
+
+        (await reader.ReadAsync(TestContext.Current.CancellationToken))!.Value.ToArray().Should().Equal(1, 2);
+        (await reader.ReadAsync(TestContext.Current.CancellationToken))!.Value.ToArray().Should().Equal(3);
+    }
+
+    [Fact]
+    public async Task Reader_ExactlyAtTotalWireLimit_Succeeds() {
+        var framer = new LengthPrefixedTcpFramer();
+        var writer = new ArrayBufferWriter<byte>();
+        framer.WriteMessage([1, 2, 3, 4], writer);
+        await using var stream = new ChunkedReadStream(writer.WrittenMemory.ToArray());
+        var reader = new TcpMessageReader(stream, framer, maxMessageBytes: 8, initialBufferBytes: 3);
+
+        (await reader.ReadAsync(TestContext.Current.CancellationToken))!.Value.ToArray().Should().Equal(1, 2, 3, 4);
+    }
+
+    [Fact]
+    public async Task Reader_PrefixOrHeaderPushingTotalWireBytesOverLimit_IsRejected() {
+        var framer = new LengthPrefixedTcpFramer();
+        var writer = new ArrayBufferWriter<byte>();
+        framer.WriteMessage([1, 2, 3, 4], writer);
+        await using var stream = new ChunkedReadStream(writer.WrittenMemory.ToArray());
+        var reader = new TcpMessageReader(stream, framer, maxMessageBytes: 7, initialBufferBytes: 3);
+
+        var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
+        await read.Should().ThrowAsync<TcpMessageTooLargeException>();
+    }
+
+    [Fact]
+    public async Task Reader_OneChunkOversizedFrame_IsCappedBeforeFramerCanCompleteIt() {
+        var framer = new CompleteFrameFramer();
+        await using var stream = new ChunkedReadStream([1, 2, 3, 4, 5]);
+        var reader = new TcpMessageReader(stream, framer, maxMessageBytes: 4, initialBufferBytes: 4);
+
+        var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
+        await read.Should().ThrowAsync<TcpMessageTooLargeException>();
+        stream.ReadRequests.Should().ContainSingle().Which.Should().Be(4);
+    }
+
+    [Theory]
+    [InlineData(FramerViolation.NegativeConsumed)]
+    [InlineData(FramerViolation.ConsumedPastAvailable)]
+    [InlineData(FramerViolation.ZeroConsumedComplete)]
+    [InlineData(FramerViolation.MessageOutsidePresentedMemory)]
+    [InlineData(FramerViolation.MessageBeyondConsumed)]
+    public async Task Reader_RejectsMalformedCustomFramerResults(FramerViolation violation) {
+        await using var stream = new ChunkedReadStream([1, 2]);
+        var reader = new TcpMessageReader(stream, new MalformedTcpFramer(violation), maxMessageBytes: 8, initialBufferBytes: 2);
+
+        var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
+        await read.Should().ThrowAsync<TcpMessageFramingException>();
+    }
+
+    [Fact]
+    public async Task Reader_AtLimitIncompleteData_DoesNotReadOrAllocateBeyondCap() {
+        await using var stream = new RecordingReadStream([1, 2, 3, 4]);
+        var reader = new TcpMessageReader(stream, new NeverCompleteFramer(), maxMessageBytes: 4, initialBufferBytes: 1);
+
+        var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
+        await read.Should().ThrowAsync<TcpMessageTooLargeException>();
+        stream.ReadRequests.Should().Equal(1, 1, 2);
+        reader.BufferCapacity.Should().Be(4);
+    }
+
     [Fact]
     public async Task Listener_HandshakeRegistryEchoAndTeardown() {
         var ct = TestContext.Current.CancellationToken;
@@ -588,6 +666,130 @@ public sealed class TcpConnectionAdapterTests {
         }
     }
 
+    [Fact]
+    public async Task Runner_InvalidPerConnectionOverride_IsRejectedBeforeAuthenticationOrRegistration() {
+        var handler = new InvalidOverrideTcpHandler();
+        await using var stream = new ChunkedReadStream();
+        await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
+        var registry = provider.GetRequiredService<IClientConnectionRegistry>();
+        var options = new ElarionTcpConnectionOptions { Framer = new DelimitedTcpFramer((byte)'\n') };
+
+        await TcpConnectionRunner.RunAsync(
+            stream, new TcpConnectionPeer(null, null), stream, applyNoDelay: null, options, handler, registry,
+            defaultInvokeTimeout: null, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            TestContext.Current.CancellationToken);
+
+        handler.AuthenticateCalls.Should().Be(0);
+        registry.Connections.Should().BeEmpty();
+        stream.ReadRequests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Runner_RegistrationFailure_DoesNotUnregisterAnotherSink_AndFailsLoud() {
+        var existing = new SimulatedClientConnection(principalId: "existing", connectionId: "existing");
+        var registry = new RejectingRegistrationRegistry(existing);
+        await using var stream = new ChunkedReadStream();
+        var options = new ElarionTcpConnectionOptions { Framer = new DelimitedTcpFramer((byte)'\n') };
+        var logger = new CollectingLogger();
+
+        await TcpConnectionRunner.RunAsync(
+            stream, new TcpConnectionPeer(null, null), stream, applyNoDelay: null, options,
+            new RegistrationFailureTcpHandler(), registry, defaultInvokeTimeout: null, TimeProvider.System,
+            logger, TestContext.Current.CancellationToken);
+
+        registry.UnregisterCalls.Should().Be(0);
+        registry.Existing.Should().BeSameAs(existing);
+        // A rejected registration is an adapter bug and must surface loudly — error level, saying
+        // "rejected by the registry", not the generic codec-failure warning.
+        var entry = logger.Entries.Should().ContainSingle().Subject;
+        entry.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Error);
+        entry.Message.Should().Contain("rejected by the registry");
+    }
+
+    private sealed class CollectingLogger : Microsoft.Extensions.Logging.ILogger {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    [Fact]
+    public async Task Runner_OversizedFramedAuthentication_IsRejectedBeforeRegistration() {
+        var handler = new AuthenticationRecordingTcpHandler();
+        var writer = new ArrayBufferWriter<byte>();
+        new LengthPrefixedTcpFramer().WriteMessage([1, 2, 3, 4], writer);
+        await using var stream = new ChunkedReadStream(writer.WrittenMemory.ToArray());
+        await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
+        var registry = provider.GetRequiredService<IClientConnectionRegistry>();
+        var options = new ElarionTcpConnectionOptions {
+            Framer = new LengthPrefixedTcpFramer(), MaxInboundFrameBytes = 7, InitialReadBufferBytes = 3,
+        };
+
+        await TcpConnectionRunner.RunAsync(
+            stream, new TcpConnectionPeer(null, null), stream, applyNoDelay: null, options, handler, registry,
+            defaultInvokeTimeout: null, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            TestContext.Current.CancellationToken);
+
+        handler.AuthenticateCalls.Should().Be(1);
+        registry.Connections.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClientConnection_MaliciousFramerCannotAllocatePastOutboundLimit() {
+        await using var stream = new RecordingWriteStream();
+        var (connection, _) = CreateStandaloneConnection(
+            stream, new GreedyTcpFramer(), initialSendBufferBytes: 4, maxOutboundMessageBytes: 8);
+
+        var send = async () => await connection.SendBinaryAsync(
+            new byte[] { 1 }, TestContext.Current.CancellationToken);
+
+        await send.Should().ThrowAsync<TcpOutboundFrameTooLargeException>();
+        stream.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClientConnection_OutboundExactLimitWrites_AndOneByteOverDoesNotWrite() {
+        await using var stream = new RecordingWriteStream();
+        var (connection, _) = CreateStandaloneConnection(
+            stream, new LengthPrefixedTcpFramer(), initialSendBufferBytes: 4, maxOutboundMessageBytes: 8);
+
+        await connection.SendBinaryAsync(new byte[] { 1, 2, 3, 4 }, TestContext.Current.CancellationToken);
+        stream.Writes.Should().ContainSingle().Which.Should().HaveCount(8);
+
+        var oversized = async () => await connection.SendBinaryAsync(
+            new byte[] { 1, 2, 3, 4, 5 }, TestContext.Current.CancellationToken);
+        await oversized.Should().ThrowAsync<TcpOutboundFrameTooLargeException>();
+        stream.Writes.Should().ContainSingle();
+    }
+
+    /// <summary>A sink over a bare stream — the writer/lifetime wiring the runner normally performs,
+    /// for tests that exercise the outbound path without a full connection lifecycle.</summary>
+    internal static (TcpClientConnection Connection, TcpConnectionLifetime Lifetime) CreateStandaloneConnection(
+        Stream stream, TcpMessageFramer framer, int initialSendBufferBytes, int maxOutboundMessageBytes,
+        int maxPendingSends = 8) {
+        var identity = new ClientConnection {
+            ConnectionId = "standalone",
+            Transport = "test",
+            Principal = new ClaimsPrincipal(new ClaimsIdentity()),
+            ConnectedAt = DateTimeOffset.UtcNow,
+        };
+        var lifetime = new TcpConnectionLifetime(stream, CancellationToken.None);
+        var writer = new TcpOutboundWriter(
+            stream, framer, initialSendBufferBytes, maxOutboundMessageBytes, maxPendingSends,
+            identity.ConnectionId, identity.Transport, lifetime);
+        lifetime.AttachWriter(writer);
+        return (new TcpClientConnection(identity, writer, lifetime, defaultInvokeTimeout: null), lifetime);
+    }
+
     private static Task<TcpTestHost> StartListenerHostAsync(CancellationToken ct, TimeSpan? idleTimeout = null) =>
         StartListenerHostAsync<ChallengeTcpHandler>(ct, idleTimeout);
 
@@ -823,4 +1025,245 @@ public sealed class TcpConnectionAdapterTests {
         }
     }
 
+
+    public enum FramerViolation {
+        NegativeConsumed,
+        ConsumedPastAvailable,
+        ZeroConsumedComplete,
+        MessageOutsidePresentedMemory,
+        MessageBeyondConsumed,
+    }
+
+    private sealed class VariableHeaderTcpFramer : TcpMessageFramer {
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+            consumed = 0;
+            message = default;
+            if (buffer.IsEmpty) {
+                return false;
+            }
+
+            var headerLength = buffer.Span[0];
+            if (headerLength < 2 || buffer.Length < headerLength) {
+                return false;
+            }
+
+            var payloadLength = buffer.Span[headerLength - 1];
+            if (buffer.Length < headerLength + payloadLength) {
+                return false;
+            }
+
+            consumed = headerLength + payloadLength;
+            message = buffer.Slice(headerLength, payloadLength);
+            return true;
+        }
+
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
+            const byte headerLength = 5;
+            if (payload.Length > byte.MaxValue) {
+                throw new ArgumentOutOfRangeException(nameof(payload));
+            }
+
+            var header = output.GetSpan(headerLength);
+            header[0] = headerLength;
+            header[1] = 0;
+            header[2] = 0;
+            header[3] = 0;
+            header[4] = (byte)payload.Length;
+            output.Advance(headerLength);
+            output.Write(payload);
+        }
+    }
+
+    private sealed class GreedyTcpFramer : TcpMessageFramer {
+        public override bool TryReadMessage(
+            ReadOnlyMemory<byte> buffer,
+            out int consumed,
+            out ReadOnlyMemory<byte> message) {
+            consumed = 0;
+            message = default;
+            return false;
+        }
+
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) =>
+            output.GetSpan(1024 * 1024);
+    }
+
+    private sealed class CompleteFrameFramer : TcpMessageFramer {
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+            // Completes only once the whole 5-byte frame arrived; incomplete bytes stay buffered (not
+            // noise), so an oversized frame accumulates against the reader's cap.
+            var complete = buffer.Length == 5;
+            consumed = complete ? buffer.Length : 0;
+            message = complete ? buffer : default;
+            return complete;
+        }
+
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) => output.Write(payload);
+    }
+
+    private sealed class NeverCompleteFramer : TcpMessageFramer {
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+            consumed = 0;
+            message = default;
+            return false;
+        }
+
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) => output.Write(payload);
+    }
+
+    private sealed class MalformedTcpFramer(FramerViolation violation) : TcpMessageFramer {
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+            var foreign = new byte[] { 9 };
+            switch (violation) {
+                case FramerViolation.NegativeConsumed:
+                    consumed = -1;
+                    message = default;
+                    return false;
+                case FramerViolation.ConsumedPastAvailable:
+                    consumed = buffer.Length + 1;
+                    message = default;
+                    return false;
+                case FramerViolation.ZeroConsumedComplete:
+                    consumed = 0;
+                    message = default;
+                    return true;
+                case FramerViolation.MessageOutsidePresentedMemory:
+                    consumed = 1;
+                    message = foreign;
+                    return true;
+                case FramerViolation.MessageBeyondConsumed:
+                    consumed = 1;
+                    message = buffer.Slice(1, 1);
+                    return true;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) => output.Write(payload);
+    }
+
+    private class ChunkedReadStream(params byte[][] chunks) : Stream {
+        private readonly Queue<byte[]> _chunks = new(chunks);
+        private int _offset;
+
+        public List<int> ReadRequests { get; } = [];
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) {
+            ReadRequests.Add(buffer.Length);
+            while (_chunks.TryPeek(out var chunk)) {
+                var count = Math.Min(buffer.Length, chunk.Length - _offset);
+                chunk.AsMemory(_offset, count).CopyTo(buffer);
+                _offset += count;
+                if (_offset == chunk.Length) {
+                    _chunks.Dequeue();
+                    _offset = 0;
+                }
+
+                return ValueTask.FromResult(count);
+            }
+
+            return ValueTask.FromResult(0);
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingReadStream(params byte[] bytes) : ChunkedReadStream(bytes);
+
+    private sealed class RecordingWriteStream : Stream {
+        public List<byte[]> Writes { get; } = [];
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) {
+            Writes.Add(buffer.ToArray());
+            return ValueTask.CompletedTask;
+        }
+
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => Writes.Add(buffer.AsSpan(offset, count).ToArray());
+    }
+
+    private sealed class InvalidOverrideTcpHandler : TcpConnectionHandler {
+        public int AuthenticateCalls { get; private set; }
+        public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(TcpConnectionPeer peer, CancellationToken ct) =>
+            ValueTask.FromResult<TcpConnectionSettings?>(new TcpConnectionSettings { MaxInboundFrameBytes = 0 });
+        public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake, CancellationToken ct) {
+            AuthenticateCalls++;
+            return ValueTask.FromResult<ClientConnectionTicket?>(null);
+        }
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) => throw new NotSupportedException();
+    }
+
+    private sealed class RegistrationFailureTcpHandler : TcpConnectionHandler {
+        public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+            TcpHandshakeContext handshake,
+            CancellationToken ct) =>
+            ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity()),
+            });
+
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
+            new NoOpTcpProtocol();
+    }
+
+    private sealed class RejectingRegistrationRegistry(IClientConnectionSink existing) : IClientConnectionRegistry {
+        public IClientConnectionSink Existing { get; } = existing;
+        public int UnregisterCalls { get; private set; }
+        public IReadOnlyCollection<IClientConnectionSink> Connections => [Existing];
+
+        public ValueTask RegisterAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
+            throw new InvalidOperationException("duplicate connection id");
+
+        public ValueTask UnregisterAsync(string connectionId, CancellationToken ct = default) {
+            UnregisterCalls++;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<ClientConnectionPromotionStatus> PromoteAsync(
+            string connectionId,
+            ClientConnectionIdentity identity,
+            CancellationToken ct = default) =>
+            ValueTask.FromResult(ClientConnectionPromotionStatus.ConnectionNotFound);
+
+        public bool TryGet(
+            string connectionId,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IClientConnectionSink? connection) {
+            connection = Existing;
+            return true;
+        }
+
+        public IReadOnlyList<IClientConnectionSink> GetForPrincipal(string principalId) => [Existing];
+    }
+
+    private sealed class NoOpTcpProtocol : IClientConnectionProtocol {
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
+            ValueTask.CompletedTask;
+    }
+
+    private sealed class AuthenticationRecordingTcpHandler : TcpConnectionHandler {
+        public int AuthenticateCalls { get; private set; }
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake, CancellationToken ct) {
+            AuthenticateCalls++;
+            await handshake.ReceiveAsync(ct);
+            return null;
+        }
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) => throw new NotSupportedException();
+    }
 }

@@ -31,6 +31,7 @@ transport-neutral `HandlerDispatcher` when messages route by operation name.
 | `DispatchScopeContext`, `CreateDispatchScope`, `SeedScope` | `Elarion.Abstractions.Dispatch` | Per-call scope-seeding rail |
 | `HandlerInvoker` | `Elarion` | Typed scope + resolve + invoke + dispose helper |
 | `IStreamHandler<TRequest,TItem>`, `StreamHandlerInvoker` | `Elarion.Abstractions`, `Elarion` | Typed startup + scoped server-streaming invocation |
+| `ConnectionHandlerInvoker` | `Elarion` | Connection-boundary variant of the invokers: captures one `ClientConnection` snapshot, seeds it (plus its `ClaimsPrincipal`) under exact types so adapter enrichment cannot spoof framework identity, and filters named dispatch through `HandlerTransports.Connection` |
 | `ICurrentUser`, `IAuthorizer` | `Elarion.Abstractions` | Transport-neutral identity and authorization |
 | `IAppErrorTranslator<TError>` | `Elarion.Abstractions` | Protocol-specific error translation |
 
@@ -74,6 +75,21 @@ Typed adapters such as gRPC and CLIs usually use:
 ```csharp
 var result = await HandlerInvoker.InvokeAsync<CreateClientCommand, ClientDto>(
     rootProvider, command, context, ct);
+```
+
+Bidirectional connection adapters (the codec of an `Elarion.Connections` transport) use
+`ConnectionHandlerInvoker` instead of hand-rolling the scope: it captures the connection's immutable
+identity snapshot exactly once per call, so an identity promotion racing the dispatch affects the next
+message rather than the scope underneath the current one:
+
+```csharp
+var result = await ConnectionHandlerInvoker.InvokeAsync<StartCommand, StartAck>(
+    rootProvider, connectionSink, decoded, ct: ct);
+
+// Decoded named traffic is filtered to routes exposed with HandlerTransports.Connection; unknown and
+// other-transport names return the same generic NotFound so exposure is never leaked.
+var named = await ConnectionHandlerInvoker.InvokeNamedAsync(
+    rootProvider, connectionSink, dispatcher, name, decodedRequest, ct: ct);
 ```
 
 Dynamic adapters map and dispatch names:

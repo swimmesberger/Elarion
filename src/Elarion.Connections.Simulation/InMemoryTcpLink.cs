@@ -40,9 +40,8 @@ public static class InMemoryTcpLink {
         ArgumentNullException.ThrowIfNull(configure);
         var options = new ElarionTcpConnectionOptions { Transport = "in-memory" };
         configure(options);
-        if (options.Framer is null) {
-            throw new ArgumentException("Framer is required.", nameof(configure));
-        }
+        TcpConnectionServiceCollectionExtensions.ValidateShared(options);
+        var framer = options.Framer!;
 
         var (serverEnd, clientEnd) = InMemoryDuplexStream.CreatePair();
         var shutdown = new CancellationTokenSource();
@@ -67,7 +66,7 @@ public static class InMemoryTcpLink {
             static faulted => _ = faulted.Exception,
             CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
-        var client = TcpSimulatorClient.FromStream(clientEnd, options.Framer);
+        var client = TcpSimulatorClient.FromStream(clientEnd, framer);
         return new InMemoryTcpLinkSession(client, serverRun, observing.Registered.Task, shutdown);
     }
 
@@ -84,6 +83,12 @@ public static class InMemoryTcpLink {
 
         public ValueTask UnregisterAsync(string connectionId, CancellationToken ct = default) =>
             inner.UnregisterAsync(connectionId, ct);
+
+        public ValueTask<ClientConnectionPromotionStatus> PromoteAsync(
+            string connectionId,
+            ClientConnectionIdentity identity,
+            CancellationToken ct = default) =>
+            inner.PromoteAsync(connectionId, identity, ct);
 
         public bool TryGet(string connectionId, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IClientConnectionSink? connection) =>
             inner.TryGet(connectionId, out connection);
