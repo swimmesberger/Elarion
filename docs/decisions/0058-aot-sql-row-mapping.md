@@ -240,13 +240,15 @@ the transaction — so commit only commits. `AddElarionSqlSession()` registers t
 auto-commit); `AddElarionSqlUnitOfWork()` layers the transactional unit of work on it. Both live in
 `Elarion.Sql` — no new package, because `IUnitOfWork` is already in `Elarion.Abstractions`.
 
-Which data source a session opens from is the `IElarionSqlDataSourceProvider` seam, not a hard
-`GetRequiredService<DbDataSource>()` — consistent with the migration runner, which takes an explicit data
-source rather than resolving a global one. The default provider resolves a container-registered
-`DbDataSource` (the idiomatic `AddNpgsqlDataSource` registers one, or a host registers a manually-built
-source as `DbDataSource`); a host-registered scoped provider routes per request — a tenant's database or a
-read replica — winning over the default. The seam is designed for that strongest implementation, and the
-single-database happy path stays a one-liner with no data-source argument.
+Which data source a session opens from is the `IElarionSqlDataSourceProvider` seam — the **single source of
+truth**, and the only thing the tier resolves. There is deliberately no hard `GetRequiredService<DbDataSource>()`
+inside the session and no hidden default that reaches for an ambient `DbDataSource`: the provider is registered
+explicitly, in two steps like the EF tier (`AddDbContext` then `AddElarionUnitOfWork<TDbContext>`). Register it
+with `AddElarionSqlDataSource(sp => …)` (build and own the source here, the container disposes it),
+`AddElarionSqlDataSource()` (wrap a `DbDataSource` already in the container, e.g. from `AddNpgsqlDataSource`),
+or `AddElarionSqlDataSourceProvider<T>()` (a scoped provider that routes per request — a tenant's database or a
+read replica). This is consistent with the migration runner, which also takes an explicit data source rather
+than resolving a global one, and the seam is designed for that strongest (per-scope routing) implementation.
 
 Preferring API design over pre-1.0 compatibility, the `DbDataSource` receiver was **removed**, not kept
 alongside: the query/write surface now lives on `ISqlSession` (the handler entry point) and the

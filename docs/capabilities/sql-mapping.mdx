@@ -184,11 +184,14 @@ Because a handler injects `ISqlSession` — one connection pinned for the reques
 statements can run in one transaction. That is what makes a command that writes more than once atomic.
 This tier supplies the same `IUnitOfWork` seam the EF tier does, so the framework
 [`TransactionDecorator`](/docs/capabilities/entity-framework) wraps a command handler in one
-commit/rollback with no per-handler transaction code:
+commit/rollback with no per-handler transaction code. Wiring is two steps, mirroring the EF tier
+(`AddDbContext` then `AddElarionUnitOfWork<TDbContext>`) — register the data source, then the tier:
 
 ```csharp
-builder.Services.AddNpgsqlDataSource(connectionString);   // registers a DbDataSource
-builder.Services.AddElarionSqlUnitOfWork();               // scoped ISqlSession + SqlUnitOfWork
+// 1. The data source is the IElarionSqlDataSourceProvider — the single source of truth. Build and own it here:
+builder.Services.AddElarionSqlDataSource(sp => NpgsqlDataSource.Create(connectionString));
+// 2. The scoped ISqlSession + SqlUnitOfWork:
+builder.Services.AddElarionSqlUnitOfWork();
 ```
 
 `AddElarionSqlUnitOfWork()` registers the scoped `ISqlSession` and replaces the default no-op
@@ -197,12 +200,14 @@ handler calls the convenience surface on the session; every read and write runs 
 enlists the open transaction automatically. (A read-only host that never writes can register just
 `AddElarionSqlSession()` — the session with per-call auto-commit, no transaction machinery.)
 
-**Which data source the session opens from is a seam, not a global.** The default resolves the container's
-registered `DbDataSource` — `AddNpgsqlDataSource(connectionString)` registers one, or register a
-manually-built source as `AddSingleton<DbDataSource>(sp => …)`. For per-scope routing — a tenant's database,
-a read replica — register your own scoped `IElarionSqlDataSourceProvider` (its `GetDataSource()` can read the
-current tenant from `ICurrentUser` and return that tenant's pooled source); it wins over the default. The
-session resolves the provider once per scope, so the tier never assumes a single ambient data source.
+**The data source is the `IElarionSqlDataSourceProvider` seam — the session resolves the provider and
+nothing else, so there is no ambient `DbDataSource` the tier assumes.** Register the provider with one of:
+
+| Registration | Use it when |
+| --- | --- |
+| `AddElarionSqlDataSource(sp => …)` | build and own the `DbDataSource` here (the container disposes it) |
+| `AddElarionSqlDataSource()` | a `DbDataSource` is already in the container (Npgsql's `AddNpgsqlDataSource`) |
+| `AddElarionSqlDataSourceProvider<T>()` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` and returns its pooled source |
 
 ```csharp
 [Handler]
