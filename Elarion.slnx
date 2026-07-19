@@ -46,7 +46,6 @@
     <Project Path="src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj"/>
     <Project Path="src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj"/>
     <Project Path="src/Elarion.Migrations/Elarion.Migrations.csproj"/>
-    <Project Path="src/Elarion.Migrations.Sqlite/Elarion.Migrations.Sqlite.csproj"/>
     <Project Path="src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj"/>
     <Project Path="src/Elarion.Messaging.Outbox.Generators/Elarion.Messaging.Outbox.Generators.csproj"/>
     <Project Path="src/Elarion.Paging/Elarion.Paging.csproj"/>
@@ -63,6 +62,7 @@
     <Project Path="src/Elarion.Sql/Elarion.Sql.csproj"/>
     <Project Path="src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"/>
     <Project Path="src/Elarion.Sql.PostgreSql/Elarion.Sql.PostgreSql.csproj"/>
+    <Project Path="src/Elarion.Sql.Sqlite/Elarion.Sql.Sqlite.csproj"/>
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj"/>
     <Project Path="src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj"/>
     <Project Path="src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj"/>

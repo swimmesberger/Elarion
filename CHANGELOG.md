@@ -55,10 +55,15 @@ minor releases may include breaking changes.
   from `PostgreSqlMigrationOptions` (deleted) to an `AddElarionPostgreSql` argument. The `PostgreSqlMigrationRunner`
   façade remains for direct/non-DI construction (now taking `MigrationOptions`). Migration:
   `AddElarionPostgreSql(cs)` + `AddElarionMigrations(o => o.AddScripts(...))`.
-- **SQLite migrations follow the same neutral shape (breaking).** `AddElarionSqliteMigrations(cs, configure)`
-  became `AddElarionSqlite(cs)` (provider choice) + the neutral `AddElarionMigrations(configure)`, identical in
-  shape to PostgreSQL — only the provider call differs. `SqliteMigrationOptions` (empty) was deleted and the
-  `SqliteMigrationRunner` façade now takes `MigrationOptions`. SQLite remains migration-only (no SQL access tier).
+- **`Elarion.Migrations.Sqlite` is retired; SQLite is now a full provider in `Elarion.Sql.Sqlite` (breaking).**
+  Mirroring `Elarion.Sql.PostgreSql`, the single `AddElarionSqlite(cs)` picks SQLite for every subsystem — a
+  `DbDataSource` over `Microsoft.Data.Sqlite` (which ships none; a small `SqliteDataSource` supplies it) plus the
+  `IElarionSqlDataSourceProvider` **and** the migration factory. `AddElarionSqliteMigrations(cs, configure)`
+  became `AddElarionSqlite(cs)` + the neutral `AddElarionMigrations(configure)`. So the EF-free **access tier now
+  runs on SQLite too**: `AddElarionSqlite()` + `AddElarionSqlUnitOfWork()` + `AddElarionMigrations()`, the exact
+  SQLite counterpart to PostgreSQL (the `[SqlRecord]` mappers are provider-portable; `SqlUnitOfWork` already
+  gates its PostgreSQL `lock_timeout`). `SqliteMigrationOptions` (empty) was deleted; the `SqliteMigrationRunner`
+  façade now takes `MigrationOptions`.
 - **`Elarion.Sql` data access is now `ISqlSession`-based; the `DbDataSource` query/write extensions are
   removed (breaking).** The query/write convenience surface (`QueryAsync`, `QueryFirstOrDefaultAsync`,
   `QuerySingleOrDefaultAsync`, `QueryUnbufferedAsync`, `ExecuteAsync`, `ExecuteScalarAsync`, `InsertAsync`,

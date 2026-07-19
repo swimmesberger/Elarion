@@ -15,12 +15,13 @@ The engine is **database-neutral**; a provider package supplies the SQL and lock
 | Provider package | Registration | Use it for | Driver |
 | --- | --- | --- | --- |
 | `Elarion.Sql.PostgreSql` | `AddElarionPostgreSql` + `AddElarionMigrations` | Multi-node PostgreSQL AOT hosts (session advisory lock serializes 1–10 nodes) | `Npgsql` |
-| `Elarion.Migrations.Sqlite` | `AddElarionSqlite` + `AddElarionMigrations` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
+| `Elarion.Sql.Sqlite` | `AddElarionSqlite` + `AddElarionMigrations` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
 
-On PostgreSQL the migration engine ships in **`Elarion.Sql.PostgreSql`** alongside the tier's **access
-half** — generated row mappers over hand-written SQL, [SQL mapping](/docs/capabilities/sql-mapping)
-(ADR-0058) — so the single `AddElarionPostgreSql(connectionString)` picks the provider for both and they
-share one `NpgsqlDataSource`. `AddElarionMigrations` itself is provider-neutral. Both run together in the
+Each provider package ships the migration engine **alongside the tier's access half** — generated row
+mappers over hand-written SQL, [SQL mapping](/docs/capabilities/sql-mapping) (ADR-0058) — so the single
+provider call picks the database for both and they share one data source: `AddElarionPostgreSql` on
+`Elarion.Sql.PostgreSql`, `AddElarionSqlite` on `Elarion.Sql.Sqlite`. `AddElarionMigrations` itself is
+provider-neutral. PostgreSQL runs both together in the
 [`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
 NativeAOT host.
 
@@ -30,7 +31,7 @@ Pick the row that matches your app:
 | --- | --- |
 | Uses EF Core | EF migrations (`UseElarion*` model hooks ride your `DbContext`) — see [Entity Framework Core](/docs/capabilities/entity-framework) |
 | EF-free / NativeAOT, multi-node on PostgreSQL, no deploy pipeline | **This runner** (`Elarion.Sql.PostgreSql`), applied at startup |
-| EF-free / NativeAOT, single-node / edge on a local file | **This runner** (`Elarion.Migrations.Sqlite`), applied at startup |
+| EF-free / NativeAOT, single-node / edge on a local file | **This runner** (`Elarion.Sql.Sqlite`), applied at startup |
 | Either, with real deploy infrastructure | Bundles / `migrations script --idempotent` / Flyway in CI — replace the tool, don't grow the default |
 
 It deliberately does **not** ship Elarion framework-table scripts: the EF-based packages remain

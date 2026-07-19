@@ -1,7 +1,7 @@
 using Elarion.Migrations;
 using Microsoft.Extensions.Logging;
 
-namespace Elarion.Migrations.Sqlite;
+namespace Elarion.Sql.Sqlite;
 
 /// <summary>
 /// The SQLite <see cref="IMigrationDatabaseFactory"/> that <c>AddElarionSqlite</c> registers: it captures the

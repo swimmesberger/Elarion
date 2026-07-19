@@ -1,6 +1,6 @@
 using AwesomeAssertions;
 using Elarion.Migrations;
-using Elarion.Migrations.Sqlite;
+using Elarion.Sql.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;

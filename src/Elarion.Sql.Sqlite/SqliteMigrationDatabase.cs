@@ -3,7 +3,7 @@ using System.Globalization;
 using Elarion.Migrations;
 using Microsoft.Data.Sqlite;
 
-namespace Elarion.Migrations.Sqlite;
+namespace Elarion.Sql.Sqlite;
 
 /// <summary>
 /// The SQLite <see cref="IMigrationDatabase"/> (ADR-0060): opens one dedicated, pooling-disabled

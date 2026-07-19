@@ -132,10 +132,15 @@ neutrality so a host picks its database in exactly one place:
   and the migration-database factory at once (ADR-0058 addendum). A migration-only PostgreSQL host references
   `Elarion.Sql.PostgreSql` (it pulls in the small neutral `Elarion.Sql`). The `PostgreSqlMigrationRunner` façade
   remains for direct/non-DI construction.
-- **SQLite follows the same shape.** `Elarion.Migrations.Sqlite` registers an `IMigrationDatabaseFactory` too;
+- **SQLite consolidated into `Elarion.Sql.Sqlite` — a full provider, not migration-only.**
+  `Elarion.Migrations.Sqlite` is retired; its migration engine moved into a new `Elarion.Sql.Sqlite` that
+  mirrors `Elarion.Sql.PostgreSql`. The single `AddElarionSqlite(cs)` picks SQLite for every subsystem:
   `AddElarionSqliteMigrations(cs, configure)` became `AddElarionSqlite(cs)` (provider choice) + the neutral
-  `AddElarionMigrations(configure)`. `SqliteMigrationOptions` (empty) was deleted; the `SqliteMigrationRunner`
-  façade takes `MigrationOptions`. The registration pattern is now identical across providers — only the
-  provider call differs. SQLite stays migration-only (there is no `DbDataSource` for it, so the SQL access tier
-  does not apply), and its migration package stays separate because there is no SQLite access tier to fold it
-  into.
+  `AddElarionMigrations(configure)`, and the package now **also** provides the SQL access tier. The missing
+  piece — `Microsoft.Data.Sqlite` ships no `DbDataSource` — is a trivial `SqliteDataSource : DbDataSource` over
+  `SqliteConnection`; the `[SqlRecord]` mappers are provider-portable (they emit neutral ADO.NET `DbParameter`
+  binding and `@`-named placeholders — the only Npgsql-specific branch is `[SqlJson]`→`jsonb`), and the
+  `SqlUnitOfWork` already gates its PostgreSQL `SET LOCAL lock_timeout` so commit/rollback and savepoints work
+  on SQLite unchanged. So `AddElarionSqlite` + `AddElarionSqlUnitOfWork` + `AddElarionMigrations` is the exact
+  SQLite counterpart to the PostgreSQL wiring, proven by an in-process access-tier round-trip test.
+  `SqliteMigrationOptions` (empty) was deleted; the `SqliteMigrationRunner` façade takes `MigrationOptions`.

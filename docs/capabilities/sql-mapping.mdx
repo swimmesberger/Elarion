@@ -209,6 +209,7 @@ Npgsql-free; the Npgsql binding lives in `Elarion.Sql.PostgreSql`. Register the 
 | Registration | Package | Use it when |
 | --- | --- | --- |
 | `AddElarionPostgreSql(connectionString)` | `Elarion.Sql.PostgreSql` | the common PostgreSQL host — one central `NpgsqlDataSource` shared by the access tier and migrations |
+| `AddElarionSqlite(connectionString)` | `Elarion.Sql.Sqlite` | a single-node / edge SQLite host — a `DbDataSource` over `Microsoft.Data.Sqlite` plus migrations, the same shape as PostgreSQL |
 | `AddElarionSqlDataSource(sp => …)` | `Elarion.Sql` | build and own a `DbDataSource` yourself (any provider) |
 | `AddElarionSqlDataSource()` | `Elarion.Sql` | a `DbDataSource` is already in the container (`AddNpgsqlDataSource`) |
 | `AddElarionSqlDataSourceProvider<T>()` | `Elarion.Sql` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` |

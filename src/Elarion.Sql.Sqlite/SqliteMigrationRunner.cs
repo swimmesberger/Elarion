@@ -1,7 +1,7 @@
 using Elarion.Migrations;
 using Microsoft.Extensions.Logging;
 
-namespace Elarion.Migrations.Sqlite;
+namespace Elarion.Sql.Sqlite;
 
 /// <summary>
 /// The SQLite convenience façade over the neutral <see cref="MigrationRunner"/> (ADR-0060): construct it

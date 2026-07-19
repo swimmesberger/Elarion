@@ -1,7 +1,7 @@
 using Elarion.Migrations;
 using Microsoft.Data.Sqlite;
 
-namespace Elarion.Migrations.Sqlite;
+namespace Elarion.Sql.Sqlite;
 
 /// <summary>
 /// A SQLite migration session over one dedicated connection (ADR-0060). An exclusive session holds the
