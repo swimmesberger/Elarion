@@ -129,7 +129,18 @@ public sealed partial class ClientEventLifecycleTests {
     }
 
     private static async Task WaitUntilAsync(Recorder recorder, Func<bool> condition, CancellationToken ct) {
-        while (!condition()) await recorder.WaitForNextAsync(ct);
+        while (true) {
+            // Capture the signal BEFORE evaluating the condition. The observer's Pulse runs detached on a
+            // pool thread; check-then-capture left a window where a pulse landing between the two completed
+            // a signal nobody held, and the waiter then awaited the fresh signal forever — the intermittent
+            // CI hang that cancelled whole runs (including docs-only commits) since the recorder pattern
+            // landed. With capture-first, a pulse after the capture completes the captured task, and a pulse
+            // before it implies the condition change is already visible to the check.
+            var signal = recorder.WaitForNextAsync(ct);
+            if (condition()) return;
+
+            await signal;
+        }
     }
 
     [Fact]
