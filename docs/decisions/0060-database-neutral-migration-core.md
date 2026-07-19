@@ -129,7 +129,13 @@ neutrality so a host picks its database in exactly one place:
   migration database, session, history, and statement splitter moved into `Elarion.Sql.PostgreSql`, which is
   now the one package holding every PostgreSQL-specific piece of the EF-free tier. Its single
   `AddElarionPostgreSql(connectionString)` registers the shared `NpgsqlDataSource`, the access-tier provider,
-  and the migration-database factory at once (ADR-0058 addendum). The trade-off accepted: PostgreSQL and SQLite
-  migration packaging is now asymmetric (SQLite keeps `Elarion.Migrations.Sqlite` + `AddElarionSqliteMigrations`),
-  and a migration-only PostgreSQL host references `Elarion.Sql.PostgreSql` (it pulls in the small neutral
-  `Elarion.Sql`). The `PostgreSqlMigrationRunner` façade remains for direct/non-DI construction.
+  and the migration-database factory at once (ADR-0058 addendum). A migration-only PostgreSQL host references
+  `Elarion.Sql.PostgreSql` (it pulls in the small neutral `Elarion.Sql`). The `PostgreSqlMigrationRunner` façade
+  remains for direct/non-DI construction.
+- **SQLite follows the same shape.** `Elarion.Migrations.Sqlite` registers an `IMigrationDatabaseFactory` too;
+  `AddElarionSqliteMigrations(cs, configure)` became `AddElarionSqlite(cs)` (provider choice) + the neutral
+  `AddElarionMigrations(configure)`. `SqliteMigrationOptions` (empty) was deleted; the `SqliteMigrationRunner`
+  façade takes `MigrationOptions`. The registration pattern is now identical across providers — only the
+  provider call differs. SQLite stays migration-only (there is no `DbDataSource` for it, so the SQL access tier
+  does not apply), and its migration package stays separate because there is no SQLite access tier to fold it
+  into.

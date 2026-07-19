@@ -53,9 +53,12 @@ minor releases may include breaking changes.
   `AddElarionMigrations(configure)`. The migration core adds an `IMigrationDatabaseFactory` seam and the neutral
   `AddElarionMigrations`; `MigrationOptions` became a concrete type, and the PostgreSQL advisory-lock key moved
   from `PostgreSqlMigrationOptions` (deleted) to an `AddElarionPostgreSql` argument. The `PostgreSqlMigrationRunner`
-  façade remains for direct/non-DI construction (now taking `MigrationOptions`). SQLite is unchanged
-  (`Elarion.Migrations.Sqlite` + `AddElarionSqliteMigrations`). Migration: `AddElarionPostgreSql(cs)` +
-  `AddElarionMigrations(o => o.AddScripts(...))`.
+  façade remains for direct/non-DI construction (now taking `MigrationOptions`). Migration:
+  `AddElarionPostgreSql(cs)` + `AddElarionMigrations(o => o.AddScripts(...))`.
+- **SQLite migrations follow the same neutral shape (breaking).** `AddElarionSqliteMigrations(cs, configure)`
+  became `AddElarionSqlite(cs)` (provider choice) + the neutral `AddElarionMigrations(configure)`, identical in
+  shape to PostgreSQL — only the provider call differs. `SqliteMigrationOptions` (empty) was deleted and the
+  `SqliteMigrationRunner` façade now takes `MigrationOptions`. SQLite remains migration-only (no SQL access tier).
 - **`Elarion.Sql` data access is now `ISqlSession`-based; the `DbDataSource` query/write extensions are
   removed (breaking).** The query/write convenience surface (`QueryAsync`, `QueryFirstOrDefaultAsync`,
   `QuerySingleOrDefaultAsync`, `QueryUnbufferedAsync`, `ExecuteAsync`, `ExecuteScalarAsync`, `InsertAsync`,

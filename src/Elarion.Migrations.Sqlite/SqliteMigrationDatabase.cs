@@ -22,9 +22,9 @@ internal sealed class SqliteMigrationDatabase : IMigrationDatabase {
 
     private readonly string _connectionString;
     private readonly string _lockKey;
-    private readonly SqliteMigrationOptions _options;
+    private readonly MigrationOptions _options;
 
-    public SqliteMigrationDatabase(string connectionString, SqliteMigrationOptions options) {
+    public SqliteMigrationDatabase(string connectionString, MigrationOptions options) {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentNullException.ThrowIfNull(options);
         MigrationTableName.Validate(options.HistoryTableName);

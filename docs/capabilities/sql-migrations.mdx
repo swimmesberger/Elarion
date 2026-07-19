@@ -15,7 +15,7 @@ The engine is **database-neutral**; a provider package supplies the SQL and lock
 | Provider package | Registration | Use it for | Driver |
 | --- | --- | --- | --- |
 | `Elarion.Sql.PostgreSql` | `AddElarionPostgreSql` + `AddElarionMigrations` | Multi-node PostgreSQL AOT hosts (session advisory lock serializes 1–10 nodes) | `Npgsql` |
-| `Elarion.Migrations.Sqlite` | `AddElarionSqliteMigrations` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
+| `Elarion.Migrations.Sqlite` | `AddElarionSqlite` + `AddElarionMigrations` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
 
 On PostgreSQL the migration engine ships in **`Elarion.Sql.PostgreSql`** alongside the tier's **access
 half** — generated row mappers over hand-written SQL, [SQL mapping](/docs/capabilities/sql-mapping)
@@ -47,23 +47,26 @@ apart from the registration method:
 </ItemGroup>
 ```
 
-```csharp
-// PostgreSQL — pick the provider once (shared with the SQL access tier), then register migrations neutrally:
-builder.Services.AddElarionPostgreSql(builder.Configuration.GetConnectionString("Default")!);
-builder.Services.AddElarionMigrations(
-    o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
+Registration is two steps and identical across providers: pick the database with the provider call, then
+register migrations with the neutral `AddElarionMigrations` — the only line that differs is the provider.
 
-// SQLite (single-node / edge)
-builder.Services.AddElarionSqliteMigrations(
-    builder.Configuration.GetConnectionString("Default")!,   // e.g. "Data Source=app.db"
+```csharp
+// PostgreSQL — the same call also wires the SQL access tier, on one shared NpgsqlDataSource:
+builder.Services.AddElarionPostgreSql(builder.Configuration.GetConnectionString("Default")!);
+
+// ...or SQLite (single-node / edge):
+builder.Services.AddElarionSqlite(builder.Configuration.GetConnectionString("Default")!);  // "Data Source=app.db"
+
+// Neutral — names no provider:
+builder.Services.AddElarionMigrations(
     o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
 ```
 
-That registers `IMigrationRunner` plus a hosted service that applies pending migrations **before the
-host reports ready** and fails startup on error — serving traffic against a half-migrated schema is
-worse than not starting. Register it before other hosted services that expect the schema (hosted
-services start in registration order); set `ApplyOnStartup = false` to invoke the runner yourself.
-The PostgreSQL registration also has an `NpgsqlDataSource` overload for hosts that already manage one.
+`AddElarionMigrations` registers `IMigrationRunner` plus a hosted service that applies pending migrations
+**before the host reports ready** and fails startup on error — serving traffic against a half-migrated
+schema is worse than not starting. Register it before other hosted services that expect the schema (hosted
+services start in registration order); set `ApplyOnStartup = false` to invoke the runner yourself. The
+PostgreSQL provider call also has an `NpgsqlDataSource` overload for hosts that already manage one.
 
 Scripts are plain SQL in your database's own dialect — the runner never rewrites them, so write
 PostgreSQL for the PostgreSQL provider and SQLite for the SQLite provider.
