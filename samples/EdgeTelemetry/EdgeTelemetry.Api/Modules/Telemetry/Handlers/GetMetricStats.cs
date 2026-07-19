@@ -1,6 +1,5 @@
 using Elarion.Abstractions;
 using Elarion.Sql;
-using Npgsql;
 
 namespace EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 
@@ -11,7 +10,7 @@ namespace EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 /// Extension functions need no framework support. <c>ReadingRow.Table</c> splices the source table.
 /// </summary>
 [Handler("telemetry.stats")]
-public sealed class GetMetricStats(NpgsqlDataSource db, TimeProvider time)
+public sealed class GetMetricStats(ISqlSession db, TimeProvider time)
     : IHandler<GetMetricStats.Query, Result<List<MetricBucket>>> {
     public sealed record Query(string DeviceId, string Metric, int Hours) : IQuery;
 

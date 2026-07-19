@@ -9,6 +9,31 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **EF-free unit of work for the SQL tier (ADR-0058 addendum).** `Elarion.Sql` now implements the
+  provider-neutral `IUnitOfWork` seam, so the framework `TransactionDecorator` wraps a command handler's
+  raw-SQL writes in one atomic commit/rollback on an EF-free / NativeAOT host — previously such a host fell
+  back to the core no-op unit of work and a failed multi-write command was never rolled back. New
+  `ISqlSession` is the scoped ambient connection (the SQL analogue of EF's shared scoped `DbContext`) that a
+  handler injects; `SqlUnitOfWork` opens the transaction on it with the same semantics as
+  `EfUnitOfWork<TDbContext>` (nested handlers join via a savepoint; best-effort `SET LOCAL lock_timeout` on
+  Npgsql; no change-tracker flush). Register with `AddElarionSqlUnitOfWork()` (transactional) or
+  `AddElarionSqlSession()` (session alone, per-call auto-commit). Which data source a session opens from is
+  the `IElarionSqlDataSourceProvider` seam — the single source of truth, registered explicitly (two-step, like
+  the EF tier's `AddDbContext` + `AddElarionUnitOfWork<TDbContext>`): `AddElarionSqlDataSource(sp => …)` builds
+  and owns a `DbDataSource`, `AddElarionSqlDataSource()` wraps one already in the container, and
+  `AddElarionSqlDataSourceProvider<T>()` routes per request (tenant database, read replica). The tier resolves
+  the provider and nothing else, so there is no ambient `DbDataSource` it assumes. Covered by Docker-gated
+  integration tests against real PostgreSQL.
+- **`Elarion.Sql.PostgreSql` — one provider package for the whole EF-free PostgreSQL tier.** The single
+  `AddElarionPostgreSql(connectionString, configure?, advisoryLockKey?)` picks PostgreSQL for **every**
+  subsystem at once: it registers one central `NpgsqlDataSource` (the shared core, EF Core's `DbContext`
+  analogue — command logging wired from DI), the `IElarionSqlDataSourceProvider` the session opens from, and
+  the `IMigrationDatabaseFactory` the migration runner resolves; an `NpgsqlDataSource` overload wraps a
+  host-built source. The subsequent registrations are provider-neutral — `AddElarionSqlUnitOfWork()` (access)
+  and the migration core's new `AddElarionMigrations(configure)` (schema) — so swapping databases is a
+  one-line change. This package now contains all PostgreSQL-specific code for the tier, including the migration
+  engine (session advisory lock, history table, statement splitter). `Elarion.Sql` and `Elarion.Migrations`
+  stay Npgsql-free.
 - **Self-typed request markers and inferred dispatch (ADR-0065).** `Elarion.Abstractions` adds optional
   generic marker forms — `IRequest<TSelf, TResponse>`, `ICommand<TSelf, TResponse>`,
   `IQuery<TSelf, TResponse>`, and `IStreamRequest<TSelf, TItem>` — that declare a request's response type
@@ -22,6 +47,33 @@ minor releases may include breaking changes.
   (warnings) when a handler's response or stream item drifts from the marker's declared type.
 
 ### Changed
+- **`Elarion.Migrations.PostgreSql` is retired; its code moved into `Elarion.Sql.PostgreSql` (breaking).** The
+  provider-named `AddElarionPostgreSqlMigrations(connectionString | dataSource, configure)` is replaced by the
+  single `AddElarionPostgreSql(connectionString)` (provider choice) plus the neutral
+  `AddElarionMigrations(configure)`. The migration core adds an `IMigrationDatabaseFactory` seam and the neutral
+  `AddElarionMigrations`; `MigrationOptions` became a concrete type, and the PostgreSQL advisory-lock key moved
+  from `PostgreSqlMigrationOptions` (deleted) to an `AddElarionPostgreSql` argument. The `PostgreSqlMigrationRunner`
+  façade remains for direct/non-DI construction (now taking `MigrationOptions`). Migration:
+  `AddElarionPostgreSql(cs)` + `AddElarionMigrations(o => o.AddScripts(...))`.
+- **`Elarion.Migrations.Sqlite` is retired; SQLite is now a full provider in `Elarion.Sql.Sqlite` (breaking).**
+  Mirroring `Elarion.Sql.PostgreSql`, the single `AddElarionSqlite(cs)` picks SQLite for every subsystem — a
+  `DbDataSource` over `Microsoft.Data.Sqlite` (which ships none; a small `SqliteDataSource` supplies it) plus the
+  `IElarionSqlDataSourceProvider` **and** the migration factory. `AddElarionSqliteMigrations(cs, configure)`
+  became `AddElarionSqlite(cs)` + the neutral `AddElarionMigrations(configure)`. So the EF-free **access tier now
+  runs on SQLite too**: `AddElarionSqlite()` + `AddElarionSqlUnitOfWork()` + `AddElarionMigrations()`, the exact
+  SQLite counterpart to PostgreSQL (the `[SqlRecord]` mappers are provider-portable; `SqlUnitOfWork` already
+  gates its PostgreSQL `lock_timeout`). `SqliteMigrationOptions` (empty) was deleted; the `SqliteMigrationRunner`
+  façade now takes `MigrationOptions`.
+- **`Elarion.Sql` data access is now `ISqlSession`-based; the `DbDataSource` query/write extensions are
+  removed (breaking).** The query/write convenience surface (`QueryAsync`, `QueryFirstOrDefaultAsync`,
+  `QuerySingleOrDefaultAsync`, `QueryUnbufferedAsync`, `ExecuteAsync`, `ExecuteScalarAsync`, `InsertAsync`,
+  `InsertManyAsync`) no longer has `DbDataSource` overloads — it lives on `ISqlSession` (the transaction-aware
+  handler entry point) and the `DbConnection` primitive it delegates to (for DI-free / NativeAOT hosts,
+  tooling, and tests that own their connection via `dataSource.OpenConnectionAsync(ct)`). A per-call-pooled
+  receiver could never join a transaction, so a handler that used it silently opted out of atomic commits;
+  removing it makes the correct path the only path. Migration: inject `ISqlSession` and call
+  `AddElarionSqlUnitOfWork()`/`AddElarionSqlSession()`; the call sites are unchanged. The EdgeTelemetry sample
+  handlers moved from `NpgsqlDataSource` to `ISqlSession`.
 - **`ConnectionHandlerInvoker` is now bound per connection (ADR-0065).** The static entry points are
   replaced by a sealed instance class constructed once with `(IServiceProvider, IClientConnectionSink)`:
   `var invoker = new ConnectionHandlerInvoker(services, connection);` then

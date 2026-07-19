@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v7.0.0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5.3.0
+        uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: 10.0.x
           dotnet-quality: ga
@@ -40,7 +40,10 @@ jobs:
         run: dotnet build Elarion.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release --no-build --report-xunit-trx --report-xunit-trx-filename elarion-results.trx
+        # --output Detailed streams per-test progress, so a hang shows exactly which tests completed
+        # before the silence instead of the job dying with an empty log at the timeout. Deliberately NOT
+        # --xunit-info: that flag reproducibly kills the MTP run midway (exit 137, truncated counts).
+        run: dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release --no-build --output Detailed --report-xunit-trx --report-xunit-trx-filename elarion-results.trx
 
       - name: Pack
         run: dotnet pack Elarion.slnx --configuration Release --no-build --output artifacts/nuget
@@ -80,7 +83,7 @@ jobs:
       - uses: actions/checkout@v7.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@v6.4.0
+        uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
           cache: npm

@@ -1,11 +1,45 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Elarion.Migrations;
 
 /// <summary>Shared registration for migration providers (ADR-0060).</summary>
 public static class MigrationServiceCollectionExtensions {
+    /// <summary>
+    /// Registers the database-neutral migration runner over the <see cref="IMigrationDatabaseFactory"/> the
+    /// provider registered (for example through <c>AddElarionPostgreSql</c>): the host configures the provider
+    /// once and calls this with only the script sources and neutral options. Applies pending migrations before
+    /// the host reports ready unless <see cref="MigrationOptions.ApplyOnStartup"/> is disabled.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">
+    /// Configures the neutral <see cref="MigrationOptions"/>; must add at least one script source via
+    /// <see cref="MigrationOptions.AddScripts"/>.
+    /// </param>
+    /// <returns>The same service collection for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// builder.Services.AddElarionPostgreSql(connectionString);   // provider choice for every subsystem
+    /// builder.Services.AddElarionMigrations(o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
+    /// </code>
+    /// </example>
+    public static IServiceCollection AddElarionMigrations(
+        this IServiceCollection services, Action<MigrationOptions> configure) {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new MigrationOptions();
+        configure(options);
+
+        return services.AddElarionMigrationRunner(options, provider => new MigrationRunner(
+            provider.GetRequiredService<IMigrationDatabaseFactory>().Create(
+                options, provider.GetService<ILogger<MigrationRunner>>()),
+            options,
+            provider.GetService<ILogger<MigrationRunner>>()));
+    }
+
     /// <summary>
     /// Registers <paramref name="runnerFactory"/> as the single <see cref="IMigrationRunner"/> plus —
     /// unless <see cref="MigrationOptions.ApplyOnStartup"/> is disabled — a hosted service that applies

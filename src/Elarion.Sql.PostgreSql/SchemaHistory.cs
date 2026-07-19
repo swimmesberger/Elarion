@@ -1,7 +1,7 @@
 using Elarion.Migrations;
 using Npgsql;
 
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Sql.PostgreSql;
 
 /// <summary>
 /// PostgreSQL operations on the <c>elarion_schema_history</c> table over the session's dedicated

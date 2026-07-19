@@ -12,14 +12,17 @@ hole (Evolve is dormant, Flyway is a JVM tool). `Elarion.Migrations` is that tie
 minimal, AOT-compatible, and designed explicitly against Flyway's documented production failure modes.
 The engine is **database-neutral**; a provider package supplies the SQL and locking:
 
-| Provider package | Use it for | Driver |
-| --- | --- | --- |
-| `Elarion.Migrations.PostgreSql` | Multi-node PostgreSQL AOT hosts (session advisory lock serializes 1–10 nodes) | `Npgsql` |
-| `Elarion.Migrations.Sqlite` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
+| Provider package | Registration | Use it for | Driver |
+| --- | --- | --- | --- |
+| `Elarion.Sql.PostgreSql` | `AddElarionPostgreSql` + `AddElarionMigrations` | Multi-node PostgreSQL AOT hosts (session advisory lock serializes 1–10 nodes) | `Npgsql` |
+| `Elarion.Sql.Sqlite` | `AddElarionSqlite` + `AddElarionMigrations` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
 
-The same tier's **access half** — generated row mappers over hand-written SQL — is
-[SQL mapping](/docs/capabilities/sql-mapping) (ADR-0058); neither package requires the other. Both run
-together in the [`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
+Each provider package ships the migration engine **alongside the tier's access half** — generated row
+mappers over hand-written SQL, [SQL mapping](/docs/capabilities/sql-mapping) (ADR-0058) — so the single
+provider call picks the database for both and they share one data source: `AddElarionPostgreSql` on
+`Elarion.Sql.PostgreSql`, `AddElarionSqlite` on `Elarion.Sql.Sqlite`. `AddElarionMigrations` itself is
+provider-neutral. PostgreSQL runs both together in the
+[`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
 NativeAOT host.
 
 Pick the row that matches your app:
@@ -27,8 +30,8 @@ Pick the row that matches your app:
 | Your app | Schema tool |
 | --- | --- |
 | Uses EF Core | EF migrations (`UseElarion*` model hooks ride your `DbContext`) — see [Entity Framework Core](/docs/capabilities/entity-framework) |
-| EF-free / NativeAOT, multi-node on PostgreSQL, no deploy pipeline | **This runner** (`Elarion.Migrations.PostgreSql`), applied at startup |
-| EF-free / NativeAOT, single-node / edge on a local file | **This runner** (`Elarion.Migrations.Sqlite`), applied at startup |
+| EF-free / NativeAOT, multi-node on PostgreSQL, no deploy pipeline | **This runner** (`Elarion.Sql.PostgreSql`), applied at startup |
+| EF-free / NativeAOT, single-node / edge on a local file | **This runner** (`Elarion.Sql.Sqlite`), applied at startup |
 | Either, with real deploy infrastructure | Bundles / `migrations script --idempotent` / Flyway in CI — replace the tool, don't grow the default |
 
 It deliberately does **not** ship Elarion framework-table scripts: the EF-based packages remain
@@ -45,23 +48,26 @@ apart from the registration method:
 </ItemGroup>
 ```
 
-```csharp
-// PostgreSQL
-builder.Services.AddElarionPostgreSqlMigrations(
-    builder.Configuration.GetConnectionString("Default")!,
-    o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
+Registration is two steps and identical across providers: pick the database with the provider call, then
+register migrations with the neutral `AddElarionMigrations` — the only line that differs is the provider.
 
-// SQLite (single-node / edge)
-builder.Services.AddElarionSqliteMigrations(
-    builder.Configuration.GetConnectionString("Default")!,   // e.g. "Data Source=app.db"
+```csharp
+// PostgreSQL — the same call also wires the SQL access tier, on one shared NpgsqlDataSource:
+builder.Services.AddElarionPostgreSql(builder.Configuration.GetConnectionString("Default")!);
+
+// ...or SQLite (single-node / edge):
+builder.Services.AddElarionSqlite(builder.Configuration.GetConnectionString("Default")!);  // "Data Source=app.db"
+
+// Neutral — names no provider:
+builder.Services.AddElarionMigrations(
     o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
 ```
 
-That registers `IMigrationRunner` plus a hosted service that applies pending migrations **before the
-host reports ready** and fails startup on error — serving traffic against a half-migrated schema is
-worse than not starting. Register it before other hosted services that expect the schema (hosted
-services start in registration order); set `ApplyOnStartup = false` to invoke the runner yourself.
-The PostgreSQL registration also has an `NpgsqlDataSource` overload for hosts that already manage one.
+`AddElarionMigrations` registers `IMigrationRunner` plus a hosted service that applies pending migrations
+**before the host reports ready** and fails startup on error — serving traffic against a half-migrated
+schema is worse than not starting. Register it before other hosted services that expect the schema (hosted
+services start in registration order); set `ApplyOnStartup = false` to invoke the runner yourself. The
+PostgreSQL provider call also has an `NpgsqlDataSource` overload for hosts that already manage one.
 
 Scripts are plain SQL in your database's own dialect — the runner never rewrites them, so write
 PostgreSQL for the PostgreSQL provider and SQLite for the SQLite provider.

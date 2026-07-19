@@ -11,14 +11,16 @@
        a single process built for cold-start speed (edge nodes, scale-to-zero, CLI-style lifetimes).
        The programming model stays the same as every Elarion app ([Handler] classes registered by the
        generated module bootstrapper); the two AOT-tier packages carry the whole data story:
-         Elarion.Migrations.PostgreSql — embedded V__ scripts applied before the host reports ready;
-         Elarion.Sql                   — [SqlRecord] generated mappers + injection-safe interpolation.
+         Elarion.Migrations            — embedded V__ scripts applied before the host reports ready;
+         Elarion.Sql                   — [SqlRecord] generated mappers + injection-safe interpolation;
+         Elarion.Sql.PostgreSql        — the single AddElarionPostgreSql picks the provider for both.
        Everything else is the stock slim builder. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj"/>
     <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj"/>
     <ProjectReference Include="..\..\..\src\Elarion.Sql\Elarion.Sql.csproj"/>
-    <ProjectReference Include="..\..\..\src\Elarion.Migrations.PostgreSql\Elarion.Migrations.PostgreSql.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.Sql.PostgreSql\Elarion.Sql.PostgreSql.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.Migrations\Elarion.Migrations.csproj"/>
   </ItemGroup>
 
   <!-- Observability for the Aspire dashboard (OTLP). The whole pipeline only activates when an OTLP

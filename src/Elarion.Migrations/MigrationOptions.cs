@@ -11,10 +11,12 @@ namespace Elarion.Migrations;
 public sealed record MigrationScriptSource(Assembly Assembly, string? ResourceNamePrefix);
 
 /// <summary>
-/// The database-neutral options shared by every migration provider (ADR-0060). A provider extends this
-/// with its engine-specific knobs (e.g. <c>PostgreSqlMigrationOptions.AdvisoryLockKey</c>).
+/// The database-neutral migration options (ADR-0060) — script sources, history-table name, out-of-order
+/// policy, timeouts, and startup application. Used directly by the neutral <c>AddElarionMigrations</c>
+/// registration; a provider may still extend it with engine-specific knobs where a separate options type
+/// is warranted (a PostgreSQL advisory-lock key is a provider-registration argument, not an option here).
 /// </summary>
-public abstract class MigrationOptions {
+public class MigrationOptions {
     private readonly List<MigrationScriptSource> _scriptSources = [];
 
     /// <summary>The assemblies scanned for embedded migration scripts, in registration order.</summary>

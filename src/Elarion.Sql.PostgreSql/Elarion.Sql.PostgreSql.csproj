@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>PostgreSQL provider for the Elarion EF-free tier (ADR-0057/ADR-0058): the single AddElarionPostgreSql(connectionString) picks PostgreSQL for every subsystem — it registers one central NpgsqlDataSource (the shared core, EF Core's DbContext analogue), the IElarionSqlDataSourceProvider the scoped ISqlSession opens from, and the IMigrationDatabaseFactory the neutral AddElarionMigrations resolves. Command logging is wired from DI. Contains the PostgreSQL migration engine (session advisory lock, history table, statement splitter). The neutral Elarion.Sql and Elarion.Migrations packages stay Npgsql-free. NativeAOT-friendly via the Npgsql slim builder.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Sql\Elarion.Sql.csproj"/>
+    <ProjectReference Include="..\Elarion.Migrations\Elarion.Migrations.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+</Project>

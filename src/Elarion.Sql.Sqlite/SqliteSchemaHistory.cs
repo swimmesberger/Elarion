@@ -1,7 +1,7 @@
 using Elarion.Migrations;
 using Microsoft.Data.Sqlite;
 
-namespace Elarion.Migrations.Sqlite;
+namespace Elarion.Sql.Sqlite;
 
 /// <summary>
 /// SQLite operations on the <c>elarion_schema_history</c> table over the session's dedicated connection
