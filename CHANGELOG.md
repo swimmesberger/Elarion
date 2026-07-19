@@ -18,11 +18,10 @@ minor releases may include breaking changes.
   `EfUnitOfWork<TDbContext>` (nested handlers join via a savepoint; best-effort `SET LOCAL lock_timeout` on
   Npgsql; no change-tracker flush). Register with `AddElarionSqlUnitOfWork()` (transactional) or
   `AddElarionSqlSession()` (session alone, per-call auto-commit). Which data source a session opens from is
-  the `IElarionSqlDataSourceProvider` seam — the no-argument overloads default to a container-registered
-  `DbDataSource`, a factory overload (`AddElarionSqlUnitOfWork(sp => sp.GetRequiredService<NpgsqlDataSource>())`)
-  names it explicitly, and a host-registered scoped provider routes per request (tenant database, read
-  replica), so the tier never assumes a single ambient data source. No new package — `IUnitOfWork` already
-  lives in `Elarion.Abstractions`. Covered by Docker-gated integration tests against real PostgreSQL.
+  the `IElarionSqlDataSourceProvider` seam — the default resolves a container-registered `DbDataSource`, and a
+  host-registered scoped provider routes per request (tenant database, read replica), so the tier never
+  assumes a single ambient data source. No new package — `IUnitOfWork` already lives in
+  `Elarion.Abstractions`. Covered by Docker-gated integration tests against real PostgreSQL.
 - **Self-typed request markers and inferred dispatch (ADR-0065).** `Elarion.Abstractions` adds optional
   generic marker forms — `IRequest<TSelf, TResponse>`, `ICommand<TSelf, TResponse>`,
   `IQuery<TSelf, TResponse>`, and `IStreamRequest<TSelf, TItem>` — that declare a request's response type

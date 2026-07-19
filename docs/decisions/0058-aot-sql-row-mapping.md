@@ -242,11 +242,11 @@ auto-commit); `AddElarionSqlUnitOfWork()` layers the transactional unit of work 
 
 Which data source a session opens from is the `IElarionSqlDataSourceProvider` seam, not a hard
 `GetRequiredService<DbDataSource>()` — consistent with the migration runner, which takes an explicit data
-source rather than resolving a global one. The no-argument DI overloads default to a container-registered
-`DbDataSource`; a factory overload names it explicitly (so a host that registered a concrete
-`NpgsqlDataSource` need not also alias it as `DbDataSource`); and a host-registered scoped provider routes
-per request — a tenant's database or a read replica — winning over the default. The seam is designed for
-that strongest implementation, and the single-database happy path stays a one-liner.
+source rather than resolving a global one. The default provider resolves a container-registered
+`DbDataSource` (the idiomatic `AddNpgsqlDataSource` registers one, or a host registers a manually-built
+source as `DbDataSource`); a host-registered scoped provider routes per request — a tenant's database or a
+read replica — winning over the default. The seam is designed for that strongest implementation, and the
+single-database happy path stays a one-liner with no data-source argument.
 
 Preferring API design over pre-1.0 compatibility, the `DbDataSource` receiver was **removed**, not kept
 alongside: the query/write surface now lives on `ISqlSession` (the handler entry point) and the

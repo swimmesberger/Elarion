@@ -197,18 +197,12 @@ handler calls the convenience surface on the session; every read and write runs 
 enlists the open transaction automatically. (A read-only host that never writes can register just
 `AddElarionSqlSession()` — the session with per-call auto-commit, no transaction machinery.)
 
-**Which data source the session opens from is a seam, not a global.** The no-argument overloads above
-default to the container's registered `DbDataSource`; a factory overload names the source explicitly
-(handy when the host registered a concrete `NpgsqlDataSource` rather than `DbDataSource`):
-
-```csharp
-builder.Services.AddElarionSqlUnitOfWork(sp => sp.GetRequiredService<NpgsqlDataSource>());
-```
-
-For per-scope routing — a tenant's database, a read replica — register your own scoped
-`IElarionSqlDataSourceProvider` (its `GetDataSource()` can read the current tenant from `ICurrentUser` and
-return that tenant's pooled source); it wins over the default. The session resolves the provider once per
-scope, so the tier never assumes a single ambient data source.
+**Which data source the session opens from is a seam, not a global.** The default resolves the container's
+registered `DbDataSource` — `AddNpgsqlDataSource(connectionString)` registers one, or register a
+manually-built source as `AddSingleton<DbDataSource>(sp => …)`. For per-scope routing — a tenant's database,
+a read replica — register your own scoped `IElarionSqlDataSourceProvider` (its `GetDataSource()` can read the
+current tenant from `ICurrentUser` and return that tenant's pooled source); it wins over the default. The
+session resolves the provider once per scope, so the tier never assumes a single ambient data source.
 
 ```csharp
 [Handler]
