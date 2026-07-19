@@ -204,6 +204,39 @@ retains its largest frame) — and an armed-but-quiet idle window costs nothing 
 default to `NoDelay` (Nagle stalls serial request/reply telegrams); override per endpoint or per
 connection for bulk one-way streams.
 
+When you implement `TcpMessageFramer` for a vendor format, the contract is **payload only on both sides** —
+the framer owns the header/prefix/delimiter, the codec never sees or supplies it:
+
+- `TryReadMessage` reports `consumed` = the *whole* wire span it advances past (reserved prologue + payload
+  + any trailer), but hands back `message` = the **payload slice alone**. Don't subtract the header length
+  from `message` — it already excludes the header; `consumed` is what accounts for it.
+- `WriteMessage` receives `payload` = the codec's bytes only, and **prepends its own framing** onto the
+  output. Don't expect `payload` to already contain a reserved prologue.
+
+```csharp
+// A 2-byte reserved prologue (e.g. a type tag) before the body:
+public sealed class VendorFramer : TcpMessageFramer {
+    private const int Prologue = 2;
+
+    public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+        out ReadOnlyMemory<byte> message) {
+        consumed = 0; message = default;
+        if (buffer.Length < Prologue + BodyLength) return false;   // need more bytes
+        consumed = Prologue + BodyLength;                          // advance past prologue AND body
+        message = buffer.Slice(Prologue, BodyLength);              // payload only — prologue excluded
+        return true;
+    }
+
+    public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
+        WriteProlog(output);      // the framer adds the reserved prologue...
+        output.Write(payload);    // ...then the codec's payload, unchanged
+    }
+}
+```
+
+`LengthPrefixedTcpFramer` is the shipped reference for exactly this shape (4-byte length prefix as the
+prologue). The codec's `OnBinaryAsync` then receives that payload slice — never the framing bytes.
+
 **Establishment order is fixed**: raw TCP → optional TLS → framer → framed application authentication →
 registration → `OnOpenedAsync` → messages. Frame limits count **total unconsumed wire bytes** —
 prefix, variable header, body, and trailer included — so `MaxInboundFrameBytes` bounds what a peer can

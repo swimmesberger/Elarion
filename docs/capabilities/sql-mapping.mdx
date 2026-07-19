@@ -141,13 +141,31 @@ zero per row); there is no cheaper *safe* way to build a dynamic `WHERE`.
 
 ## Reads and writes
 
-The same query/write surface lives on two receivers: **`ISqlSession`** — the scoped, transaction-aware
-entry point a handler injects (below and [Transactions](#transactions-unit-of-work)) — and the
-**`DbConnection`** primitive it is built on (Dapper open/close semantics), for DI-free / NativeAOT hosts,
-tooling, and tests that manage their own connection (`await using var connection = await
-dataSource.OpenConnectionAsync(ct);`). There is deliberately **no `DbDataSource` receiver**: a
-per-call-pooled-connection surface cannot participate in a transaction, and a handler that reached for it
-would silently opt out of atomic commits — inject `ISqlSession` instead.
+The query/write surface lives on **one receiver: `ISqlSession`** — a connection paired with its
+transaction intent. There is deliberately no raw-`DbConnection` or `DbDataSource` twin of these methods:
+a look-alike surface that skips transaction enlistment is exactly the silent-footgun class this tier
+removes. How you obtain the session states the semantics:
+
+- **In a handler**, inject the scoped `ISqlSession` — writes join the framework unit of work
+  ([Transactions](#transactions-unit-of-work)).
+- **In a singleton-eligible handler** (no scoped dependencies, deliberately no unit of work), inject the
+  singleton `ISqlDatabase` handle and open an owning one-shot session per operation.
+- **Owning your own connection** — DI-free / NativeAOT hosts, tooling, tests — bridge with
+  `AsSqlSession`, deciding the transaction **once at wrap time**:
+
+```csharp
+// Singleton-eligible handler: one call through the seam, autonomous per-call semantics.
+await using var session = await db.OpenSessionAsync(ct);           // db is the injected ISqlDatabase
+var rows = await session.QueryAsync<Order>($"{Order.Select} WHERE status = {status}", ct);
+
+// Tooling that owns a connection and transaction: wrap once — every write below enlists it.
+await using var transaction = await connection.BeginTransactionAsync(ct);
+var tx = connection.AsSqlSession(transaction);
+```
+
+The wrap is a cheap non-owning view (disposing it disposes nothing); because the transaction is bound at
+wrap, there is no per-call `transaction:` parameter anywhere — a write can never accidentally run outside
+the transaction its scope declared.
 
 | Call | Shape |
 | --- | --- |
@@ -174,9 +192,10 @@ Bounding work on the *server* (incremental production) is a `DECLARE CURSOR … 
 this thin API deliberately does not wrap — hand-write the cursor SQL and map each fetch through the
 generated mapper if you ever need it.
 
-The `DbConnection` extensions (`QueryAsync`, `QueryFirstOrDefaultAsync`, `ExecuteAsync`,
-`ExecuteScalarAsync`) pair statements with mappers and open/close closed connections around the call
-(Dapper semantics). They save the command/reader ceremony — nothing more.
+The explicit-mapper overloads (`db.QueryAsync(mapper, $"…")`, `db.QueryFirstOrDefaultAsync(mapper, $"…")`)
+remain the escape hatch for hand-written mappers of non-`[SqlRecord]` shapes. Under the hood a closed
+connection is opened for the call and closed afterwards (Dapper semantics); an already-open connection —
+the scoped session's, or one you wrapped — is left open.
 
 ## Transactions (unit of work)
 
@@ -202,17 +221,32 @@ handler calls the convenience surface on the session; every read and write runs 
 enlists the open transaction automatically. (A read-only host that never writes can register just
 `AddElarionSqlSession()` — the session with per-call auto-commit, no transaction machinery.)
 
-**The data source is the `IElarionSqlDataSourceProvider` seam — the session resolves the provider and
-nothing else, so there is no ambient `DbDataSource` the tier assumes.** `Elarion.Sql` itself stays
-Npgsql-free; the Npgsql binding lives in `Elarion.Sql.PostgreSql`. Register the provider with one of:
+**`ISqlDatabase` is the application's database handle — the tier's `DbContext`/`IDbContextFactory`
+counterpart, and the only thing the session resolves, so there is no ambient `DbDataSource` the tier
+assumes.** `Elarion.Sql` itself stays Npgsql-free; the Npgsql binding lives in `Elarion.Sql.PostgreSql`.
+Register it with one of:
 
 | Registration | Package | Use it when |
 | --- | --- | --- |
 | `AddElarionPostgreSql(connectionString)` | `Elarion.Sql.PostgreSql` | the common PostgreSQL host — one central `NpgsqlDataSource` shared by the access tier and migrations |
 | `AddElarionSqlite(connectionString)` | `Elarion.Sql.Sqlite` | a single-node / edge SQLite host — a `DbDataSource` over `Microsoft.Data.Sqlite` plus migrations, the same shape as PostgreSQL |
-| `AddElarionSqlDataSource(sp => …)` | `Elarion.Sql` | build and own a `DbDataSource` yourself (any provider) |
-| `AddElarionSqlDataSource()` | `Elarion.Sql` | a `DbDataSource` is already in the container (`AddNpgsqlDataSource`) |
-| `AddElarionSqlDataSourceProvider<T>()` | `Elarion.Sql` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` |
+| `AddElarionSqlDatabase(sp => …)` | `Elarion.Sql` | build and own a `DbDataSource` yourself (any provider) |
+| `AddElarionSqlDatabase()` | `Elarion.Sql` | a `DbDataSource` is already in the container (`AddNpgsqlDataSource`) |
+| `AddElarionSqlDatabase<T>()` | `Elarion.Sql` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` |
+
+Beyond feeding the scoped session, the handle is directly usable: `db.OpenSessionAsync(ct)` opens an
+**owning** one-shot session over a fresh pooled connection (autonomous per-call semantics, disposed with
+the session) — which upgrades the singleton-eligible pattern from three steps to one:
+
+```csharp
+public sealed class WorldTick(ISqlDatabase db) {          // singleton-eligible: no scoped dependencies
+    public async ValueTask<Result> HandleAsync(Tick tick, CancellationToken ct) {
+        await using var session = await db.OpenSessionAsync(ct);   // through the seam — routing still applies
+        var rows = await session.QueryAsync<Reading>($"{Reading.Select} WHERE cell = {tick.Cell}", ct);
+        // …
+    }
+}
+```
 
 ```csharp
 [Handler]
@@ -243,8 +277,12 @@ public sealed class PlaceOrder(ISqlSession db) {
   once) so a failed multi-write command is **not** rolled back. Register `AddElarionSqlUnitOfWork()` on
   any EF-free host whose handlers write.
 
-`InsertManyAsync` on the session enlists the ambient transaction; on the raw `DbConnection` primitive it
-opens its own (a batch is atomic on its own), so prefer the session inside a handler.
+**A write cannot silently escape its transaction.** Every write on this surface enlists the session's
+transaction automatically (`InsertManyAsync` without one opens its own — a batch is atomic on its own), and
+there is no raw-connection twin of these methods to reach for by accident: the only way to run against your
+own connection is `AsSqlSession(transaction?)`, which makes the transaction decision explicit at wrap time.
+What used to be a documented footgun — a record-level write on a raw connection running outside the
+handler's unit of work — is now unrepresentable.
 
 ## Why not Dapper.AOT
 

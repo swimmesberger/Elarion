@@ -20,7 +20,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
     // A session over the fixture's data source through the default single-source provider — the seam the DI
     // helpers register for a single-database host.
     private SqlSession NewSession() {
-        return new SqlSession(new SingletonSqlDataSourceProvider(fixture.DataSource));
+        return new SqlSession(new DataSourceSqlDatabase(fixture.DataSource));
     }
 
     private async Task<bool> ExistsAsync(Guid id) {

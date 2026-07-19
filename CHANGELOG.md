@@ -18,16 +18,20 @@ minor releases may include breaking changes.
   `EfUnitOfWork<TDbContext>` (nested handlers join via a savepoint; best-effort `SET LOCAL lock_timeout` on
   Npgsql; no change-tracker flush). Register with `AddElarionSqlUnitOfWork()` (transactional) or
   `AddElarionSqlSession()` (session alone, per-call auto-commit). Which data source a session opens from is
-  the `IElarionSqlDataSourceProvider` seam — the single source of truth, registered explicitly (two-step, like
-  the EF tier's `AddDbContext` + `AddElarionUnitOfWork<TDbContext>`): `AddElarionSqlDataSource(sp => …)` builds
-  and owns a `DbDataSource`, `AddElarionSqlDataSource()` wraps one already in the container, and
-  `AddElarionSqlDataSourceProvider<T>()` routes per request (tenant database, read replica). The tier resolves
-  the provider and nothing else, so there is no ambient `DbDataSource` it assumes. Covered by Docker-gated
+  the `ISqlDatabase` seam (the application database handle) — the single source of truth, registered explicitly (two-step, like
+  the EF tier's `AddDbContext` + `AddElarionUnitOfWork<TDbContext>`): `AddElarionSqlDatabase(sp => …)` builds
+  and owns a `DbDataSource`, `AddElarionSqlDatabase()` wraps one already in the container, and
+  `AddElarionSqlDatabase<T>()` routes per request (tenant database, read replica). The tier resolves
+  the handle and nothing else, so there is no ambient `DbDataSource` it assumes. Beyond feeding the scoped
+  session, the handle is directly usable: `db.OpenSessionAsync(ct)` opens an owning one-shot session
+  (autonomous per-call semantics) — the one-call path for singleton-eligible handlers, which cannot inject
+  the scoped `ISqlSession`. (For preview-package consumers: `ISqlDatabase`/`AddElarionSqlDatabase` were
+  briefly published as `IElarionSqlDataSourceProvider`/`AddElarionSqlDataSource*`.) Covered by Docker-gated
   integration tests against real PostgreSQL.
 - **`Elarion.Sql.PostgreSql` — one provider package for the whole EF-free PostgreSQL tier.** The single
   `AddElarionPostgreSql(connectionString, configure?, advisoryLockKey?)` picks PostgreSQL for **every**
   subsystem at once: it registers one central `NpgsqlDataSource` (the shared core, EF Core's `DbContext`
-  analogue — command logging wired from DI), the `IElarionSqlDataSourceProvider` the session opens from, and
+  analogue — command logging wired from DI), the `ISqlDatabase` handle the session opens from, and
   the `IMigrationDatabaseFactory` the migration runner resolves; an `NpgsqlDataSource` overload wraps a
   host-built source. The subsequent registrations are provider-neutral — `AddElarionSqlUnitOfWork()` (access)
   and the migration core's new `AddElarionMigrations(configure)` (schema) — so swapping databases is a
@@ -47,6 +51,17 @@ minor releases may include breaking changes.
   (warnings) when a handler's response or stream item drifts from the marker's declared type.
 
 ### Changed
+- **SQL tier: one convenience surface, on `ISqlSession`; the raw-`DbConnection` extensions are internal
+  (breaking).** Field feedback showed the two look-alike surfaces diverged silently: `connection.InsertAsync(row)`
+  compiled identically to `session.InsertAsync(row)` but skipped unit-of-work enlistment. The query/write
+  surface (including the explicit-mapper overloads) now lives only on `ISqlSession`, and the former
+  `DbConnection` extensions are internal plumbing. Code that owns its connection bridges with the new
+  `connection.AsSqlSession(transaction?)` — a cheap non-owning view that binds the transaction decision once
+  at wrap time (no per-call `transaction:` parameter anywhere), so an un-enlisted write is no longer
+  representable. Singleton-eligible handlers keep their pattern: hold the `DbDataSource`, open a connection
+  per operation, wrap with `AsSqlSession()` for explicitly-autonomous per-call semantics. Migration:
+  `connection.QueryAsync<T>(…)` → `connection.AsSqlSession().QueryAsync<T>(…)` (wrap once per connection
+  scope); `connection.ExecuteAsync(sql, tx)` → `connection.AsSqlSession(tx).ExecuteAsync(sql)`.
 - **`Elarion.Migrations.PostgreSql` is retired; its code moved into `Elarion.Sql.PostgreSql` (breaking).** The
   provider-named `AddElarionPostgreSqlMigrations(connectionString | dataSource, configure)` is replaced by the
   single `AddElarionPostgreSql(connectionString)` (provider choice) plus the neutral
@@ -58,7 +73,7 @@ minor releases may include breaking changes.
 - **`Elarion.Migrations.Sqlite` is retired; SQLite is now a full provider in `Elarion.Sql.Sqlite` (breaking).**
   Mirroring `Elarion.Sql.PostgreSql`, the single `AddElarionSqlite(cs)` picks SQLite for every subsystem — a
   `DbDataSource` over `Microsoft.Data.Sqlite` (which ships none; a small `SqliteDataSource` supplies it) plus the
-  `IElarionSqlDataSourceProvider` **and** the migration factory. `AddElarionSqliteMigrations(cs, configure)`
+  `ISqlDatabase` **and** the migration factory. `AddElarionSqliteMigrations(cs, configure)`
   became `AddElarionSqlite(cs)` + the neutral `AddElarionMigrations(configure)`. So the EF-free **access tier now
   runs on SQLite too**: `AddElarionSqlite()` + `AddElarionSqlUnitOfWork()` + `AddElarionMigrations()`, the exact
   SQLite counterpart to PostgreSQL (the `[SqlRecord]` mappers are provider-portable; `SqlUnitOfWork` already
@@ -112,6 +127,14 @@ minor releases may include breaking changes.
   faults. grpc-dotnet hosts use
   `ServerCallContext.InvokeElarionStreamAsync<TRequest,TItem>(request)` after
   `services.AddGrpc().AddElarion()`. Client and duplex streaming remain deliberately out of scope.
+
+### Fixed
+- **`TcpMessageFramer` contract docs: payload only, on both sides.** Field feedback showed the framing docs
+  could be read as if `TryReadMessage`'s `message` / `WriteMessage`'s `payload` included the wire framing
+  (header/reserved prologue). The XML docs and the connections capability page now state the contract
+  explicitly — `message` is the payload slice with framing already excluded (`consumed` accounts for the
+  full wire span; don't subtract the header again), and `WriteMessage` receives unframed payload and
+  prepends its own framing — with a custom-framer example.
 
 ## [0.2.5] - 2026-07-15
 

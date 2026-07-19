@@ -10,7 +10,7 @@ namespace Elarion.Sql.PostgreSql;
 /// The single PostgreSQL provider registration for the EF-free tier: <see cref="AddElarionPostgreSql"/> picks
 /// PostgreSQL for <b>every</b> subsystem at once. It registers one central <see cref="NpgsqlDataSource"/> — the
 /// shared core, analogous to how a <c>DbContext</c> is central in EF Core — plus the
-/// <see cref="IElarionSqlDataSourceProvider"/> the <see cref="ISqlSession"/> access tier opens from and the
+/// <see cref="ISqlDatabase"/> the <see cref="ISqlSession"/> access tier opens from and the
 /// <see cref="IMigrationDatabaseFactory"/> the neutral <c>AddElarionMigrations</c> resolves. The neutral
 /// <c>AddElarionSqlUnitOfWork</c> and <c>AddElarionMigrations</c> then wire the subsystems without naming a
 /// provider, so swapping databases is a one-line change here. Keeps <c>Elarion.Sql</c> and
@@ -20,7 +20,7 @@ public static class SqlPostgreSqlServiceCollectionExtensions {
     /// <summary>
     /// Registers a container-owned <see cref="NpgsqlDataSource"/> built from <paramref name="connectionString"/>
     /// (command logging wired from the container's logger factory) and, over it, the
-    /// <see cref="IElarionSqlDataSourceProvider"/> (for the access tier) and the
+    /// <see cref="ISqlDatabase"/> (for the access tier) and the
     /// <see cref="IMigrationDatabaseFactory"/> (for migrations). Pair with the neutral
     /// <c>AddElarionSqlUnitOfWork()</c> and <c>AddElarionMigrations(configure)</c>.
     /// </summary>
@@ -85,7 +85,7 @@ public static class SqlPostgreSqlServiceCollectionExtensions {
     private static IServiceCollection AddProviderOverDataSource(this IServiceCollection services, long advisoryLockKey) {
         // The access tier's provider wraps the same NpgsqlDataSource (an upcast to DbDataSource); the migration
         // factory captures it and the advisory-lock key. Both draw from the one core source.
-        services.AddElarionSqlDataSource(sp => sp.GetRequiredService<NpgsqlDataSource>());
+        services.AddElarionSqlDatabase(sp => sp.GetRequiredService<NpgsqlDataSource>());
         services.TryAddSingleton<IMigrationDatabaseFactory>(
             sp => new PostgreSqlMigrationDatabaseFactory(sp.GetRequiredService<NpgsqlDataSource>(), advisoryLockKey));
         return services;
