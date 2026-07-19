@@ -270,3 +270,17 @@ connection). Two receivers, not three, and the one a handler injects is transact
 construction — the silent non-transactional path is gone rather than merely discouraged. The EdgeTelemetry
 sample migrated its handlers from `NpgsqlDataSource` to `ISqlSession` (call sites unchanged); its e2e test
 covers ingest-then-query through the migrated schema.
+
+The two-receiver split then collapsed to **one**. Downstream field use showed the residual hazard of a public
+raw-connection twin: `connection.InsertAsync(row)` compiled identically to `session.InsertAsync(row)` but
+skipped enlistment, and with the connection extensions merely *discouraged*, an interpolated call on a raw
+connection could even silently bind to Dapper's string-based reflection API when both are in scope. The
+public surface is now `SqlSessionExtensions` alone (self-mapping happy path, explicit-mapper escape hatch,
+writes); the `DbConnection` extension classes are internal plumbing. Callers who own a connection — DI-free
+hosts, tooling, tests, and singleton-eligible handlers that hold a `DbDataSource` and deliberately want
+per-call autonomous semantics with no unit of work (a scoped `ISqlSession` would block singleton
+registration) — bridge with `connection.AsSqlSession(transaction?)`: a cheap non-owning view that binds the
+transaction decision once at wrap time. There is no per-call `transaction:` parameter anywhere on the
+surface (the Dapper shape this tier deliberately rejects), so an un-enlisted write is unrepresentable rather
+than documented against. `ISqlSession` is thereby the tier's one data-access handle: *a connection paired
+with its transaction intent* — scoped in handlers, wrapped where the caller owns the connection.

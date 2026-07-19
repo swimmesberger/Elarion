@@ -4,13 +4,15 @@ using System.Data.Common;
 namespace Elarion.Sql;
 
 /// <summary>
-/// The write half of the convenience surface (ADR-0058): full-row inserts from the generated
-/// <c>InsertCommandText</c> + typed <c>BindParameters</c>, so a handler never hand-rolls the
-/// command/transaction/<c>Parameters.Clear()</c> loop. <c>InsertManyAsync</c> is a batched convenience
-/// (one prepared statement reused per row inside one transaction), not bulk COPY — for high-throughput
-/// bulk load use the binary-COPY path (<c>Elarion.BulkOperations.PostgreSql</c>, ADR-0051).
+/// Internal write plumbing (ADR-0058): full-row inserts from the generated <c>InsertCommandText</c> + typed
+/// <c>BindParameters</c>, behind the single public surface (<see cref="SqlSessionExtensions"/>), which passes
+/// the session's ambient transaction through. <c>InsertManyAsync</c> is a batched convenience (one prepared
+/// statement reused per row inside one transaction), not bulk COPY — for high-throughput bulk load use the
+/// binary-COPY path (<c>Elarion.BulkOperations.PostgreSql</c>, ADR-0051). Not public: the per-call
+/// <see cref="DbTransaction"/> parameter is exactly the forget-to-thread-it footgun the session surface
+/// exists to remove.
 /// </summary>
-public static class SqlWriteExtensions {
+internal static class SqlWriteExtensions {
     /// <summary>Inserts one row via the generated full-row INSERT; returns the affected row count.</summary>
     public static async Task<int> InsertAsync<T>(
         this DbConnection connection, T row, DbTransaction? transaction = null,

@@ -47,6 +47,17 @@ minor releases may include breaking changes.
   (warnings) when a handler's response or stream item drifts from the marker's declared type.
 
 ### Changed
+- **SQL tier: one convenience surface, on `ISqlSession`; the raw-`DbConnection` extensions are internal
+  (breaking).** Field feedback showed the two look-alike surfaces diverged silently: `connection.InsertAsync(row)`
+  compiled identically to `session.InsertAsync(row)` but skipped unit-of-work enlistment. The query/write
+  surface (including the explicit-mapper overloads) now lives only on `ISqlSession`, and the former
+  `DbConnection` extensions are internal plumbing. Code that owns its connection bridges with the new
+  `connection.AsSqlSession(transaction?)` — a cheap non-owning view that binds the transaction decision once
+  at wrap time (no per-call `transaction:` parameter anywhere), so an un-enlisted write is no longer
+  representable. Singleton-eligible handlers keep their pattern: hold the `DbDataSource`, open a connection
+  per operation, wrap with `AsSqlSession()` for explicitly-autonomous per-call semantics. Migration:
+  `connection.QueryAsync<T>(…)` → `connection.AsSqlSession().QueryAsync<T>(…)` (wrap once per connection
+  scope); `connection.ExecuteAsync(sql, tx)` → `connection.AsSqlSession(tx).ExecuteAsync(sql)`.
 - **`Elarion.Migrations.PostgreSql` is retired; its code moved into `Elarion.Sql.PostgreSql` (breaking).** The
   provider-named `AddElarionPostgreSqlMigrations(connectionString | dataSource, configure)` is replaced by the
   single `AddElarionPostgreSql(connectionString)` (provider choice) plus the neutral
@@ -120,10 +131,6 @@ minor releases may include breaking changes.
   explicitly — `message` is the payload slice with framing already excluded (`consumed` accounts for the
   full wire span; don't subtract the header again), and `WriteMessage` receives unframed payload and
   prepends its own framing — with a custom-framer example.
-- **SQL mapping docs: record-level writes in handlers go through `ISqlSession`.** Made explicit that the
-  raw-`DbConnection` overloads of `InsertAsync`/`InsertManyAsync`/`ExecuteAsync` do not enlist the handler's
-  unit-of-work transaction (a write on a raw connection silently escapes commit/rollback); inside a handler,
-  use the injected `ISqlSession`, whose surface enlists the ambient transaction automatically.
 
 ## [0.2.5] - 2026-07-15
 

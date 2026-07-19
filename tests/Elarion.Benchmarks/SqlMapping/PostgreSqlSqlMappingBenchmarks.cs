@@ -19,6 +19,7 @@ namespace Elarion.Benchmarks.SqlMapping;
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 3, iterationCount: 10)]
 public class PostgreSqlSqlMappingReadBenchmarks {
+    private ISqlSession _db = null!;
     [Params(1_000, 100_000)] public int Rows { get; set; }
 
     private PostgreSqlContainer _container = null!;
@@ -43,6 +44,8 @@ public class PostgreSqlSqlMappingReadBenchmarks {
 
         _connection = new NpgsqlConnection(_container.GetConnectionString());
         _connection.Open();
+        // The public Elarion surface: wrap the benchmark's long-lived connection once (no per-op cost).
+        _db = _connection.AsSqlSession();
         BenchReadRows.CreateAndSeed(_connection, Rows);
 
         var builder = new DbContextOptionsBuilder<BenchReadContext>();
@@ -89,8 +92,8 @@ public class PostgreSqlSqlMappingReadBenchmarks {
     [Benchmark]
     public Task<List<BenchReadRow>> ElarionQueryAsync() {
         // The product path end-to-end: self-mapping (BenchReadRow resolves its own mapper) +
-        // interpolated statement build + connection extension.
-        return _connection.QueryAsync<BenchReadRow>($"{BenchReadRow.Select}");
+        // interpolated statement build + the session surface (wrapped once in Setup).
+        return _db.QueryAsync<BenchReadRow>($"{BenchReadRow.Select}");
     }
 
     [Benchmark]
@@ -116,6 +119,7 @@ public class PostgreSqlSqlMappingReadBenchmarks {
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 3, iterationCount: 10)]
 public class PostgreSqlSqlMappingSingleRowBenchmarks {
+    private ISqlSession _db = null!;
     private PostgreSqlContainer _container = null!;
     private NpgsqlConnection _connection = null!;
     private BenchReadContext _context = null!;
@@ -138,6 +142,8 @@ public class PostgreSqlSqlMappingSingleRowBenchmarks {
 
         _connection = new NpgsqlConnection(_container.GetConnectionString());
         _connection.Open();
+        // The public Elarion surface: wrap the benchmark's long-lived connection once (no per-op cost).
+        _db = _connection.AsSqlSession();
         _targetId = BenchReadRows.CreateAndSeed(_connection, 1_000);
 
         var builder = new DbContextOptionsBuilder<BenchReadContext>();
@@ -185,8 +191,9 @@ public class PostgreSqlSqlMappingSingleRowBenchmarks {
 
     [Benchmark]
     public Task<BenchReadRow?> ElarionQueryAsync() {
-        // The product path end-to-end: self-mapping + interpolated statement (one parameter).
-        return _connection.QueryFirstOrDefaultAsync<BenchReadRow>(
+        // The product path end-to-end: self-mapping + interpolated statement (one parameter) on the
+        // session surface (wrapped once in Setup).
+        return _db.QueryFirstOrDefaultAsync<BenchReadRow>(
             $"{BenchReadRow.Select} WHERE id = {_targetId}");
     }
 

@@ -141,13 +141,31 @@ zero per row); there is no cheaper *safe* way to build a dynamic `WHERE`.
 
 ## Reads and writes
 
-The same query/write surface lives on two receivers: **`ISqlSession`** — the scoped, transaction-aware
-entry point a handler injects (below and [Transactions](#transactions-unit-of-work)) — and the
-**`DbConnection`** primitive it is built on (Dapper open/close semantics), for DI-free / NativeAOT hosts,
-tooling, and tests that manage their own connection (`await using var connection = await
-dataSource.OpenConnectionAsync(ct);`). There is deliberately **no `DbDataSource` receiver**: a
-per-call-pooled-connection surface cannot participate in a transaction, and a handler that reached for it
-would silently opt out of atomic commits — inject `ISqlSession` instead.
+The query/write surface lives on **one receiver: `ISqlSession`** — a connection paired with its
+transaction intent. There is deliberately no raw-`DbConnection` or `DbDataSource` twin of these methods:
+a look-alike surface that skips transaction enlistment is exactly the silent-footgun class this tier
+removes. How you obtain the session states the semantics:
+
+- **In a handler**, inject the scoped `ISqlSession` — writes join the framework unit of work
+  ([Transactions](#transactions-unit-of-work)).
+- **Owning your own connection** — DI-free / NativeAOT hosts, tooling, tests, or a singleton-eligible
+  handler that holds a `DbDataSource` and deliberately wants per-call autonomous semantics with no unit
+  of work — bridge with `AsSqlSession`, deciding the transaction **once at wrap time**:
+
+```csharp
+// Singleton-eligible handler (no scoped dependencies): per-call auto-commit, no unit of work.
+await using var connection = await dataSource.OpenConnectionAsync(ct);
+var db = connection.AsSqlSession();
+var rows = await db.QueryAsync<Order>($"{Order.Select} WHERE status = {status}", ct);
+
+// Tooling that owns a transaction: wrap once — every write below enlists it.
+await using var transaction = await connection.BeginTransactionAsync(ct);
+var tx = connection.AsSqlSession(transaction);
+```
+
+The wrap is a cheap non-owning view (disposing it disposes nothing); because the transaction is bound at
+wrap, there is no per-call `transaction:` parameter anywhere — a write can never accidentally run outside
+the transaction its scope declared.
 
 | Call | Shape |
 | --- | --- |
@@ -174,9 +192,10 @@ Bounding work on the *server* (incremental production) is a `DECLARE CURSOR … 
 this thin API deliberately does not wrap — hand-write the cursor SQL and map each fetch through the
 generated mapper if you ever need it.
 
-The `DbConnection` extensions (`QueryAsync`, `QueryFirstOrDefaultAsync`, `ExecuteAsync`,
-`ExecuteScalarAsync`) pair statements with mappers and open/close closed connections around the call
-(Dapper semantics). They save the command/reader ceremony — nothing more.
+The explicit-mapper overloads (`db.QueryAsync(mapper, $"…")`, `db.QueryFirstOrDefaultAsync(mapper, $"…")`)
+remain the escape hatch for hand-written mappers of non-`[SqlRecord]` shapes. Under the hood a closed
+connection is opened for the call and closed afterwards (Dapper semantics); an already-open connection —
+the scoped session's, or one you wrapped — is left open.
 
 ## Transactions (unit of work)
 
@@ -243,14 +262,12 @@ public sealed class PlaceOrder(ISqlSession db) {
   once) so a failed multi-write command is **not** rolled back. Register `AddElarionSqlUnitOfWork()` on
   any EF-free host whose handlers write.
 
-**Inside a handler, do record-level writes through `ISqlSession`, not a raw `DbConnection`.**
-`session.InsertAsync(row)` / `InsertManyAsync(rows)` / `ExecuteAsync(sql)` enlist the open unit-of-work
-transaction automatically. The `DbConnection` primitive's overloads do **not**: `connection.InsertAsync(row)`
-runs outside the transaction unless you thread the ambient `DbTransaction` in yourself, and
-`InsertManyAsync` on a raw connection opens its *own* transaction (a batch is atomic on its own). So a write
-issued on a raw connection silently escapes the handler's unit of work — commit/rollback won't cover it. The
-`DbConnection` overloads exist for DI-free / tooling code that owns its connection and transaction; in a
-handler, always reach for the injected `ISqlSession`.
+**A write cannot silently escape its transaction.** Every write on this surface enlists the session's
+transaction automatically (`InsertManyAsync` without one opens its own — a batch is atomic on its own), and
+there is no raw-connection twin of these methods to reach for by accident: the only way to run against your
+own connection is `AsSqlSession(transaction?)`, which makes the transaction decision explicit at wrap time.
+What used to be a documented footgun — a record-level write on a raw connection running outside the
+handler's unit of work — is now unrepresentable.
 
 ## Why not Dapper.AOT
 

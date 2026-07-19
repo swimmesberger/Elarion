@@ -48,8 +48,9 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
 
     private async Task<List<SqlItem>> InsertItemsAsync(int count) {
         await using var connection = fixture.CreateConnection();
+        var db = connection.AsSqlSession();
         await connection.OpenAsync(Ct);
-        await connection.ExecuteAsync($"TRUNCATE TABLE sql_items", Ct);
+        await db.ExecuteAsync($"TRUNCATE TABLE sql_items", Ct);
 
         var items = Enumerable.Range(0, count).Select(NewItem).OrderBy(i => i.Id).ToList();
         foreach (var item in items) {
@@ -69,7 +70,8 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var items = await InsertItemsAsync(25);
 
         await using var connection = fixture.CreateConnection();
-        var read = await connection.QueryAsync(
+        var db = connection.AsSqlSession();
+        var read = await db.QueryAsync(
             Mapper,
             $"{SqlItem.Select}",
             Ct);
@@ -86,7 +88,8 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var minQuantity = -1;
 
         await using var connection = fixture.CreateConnection();
-        var read = await connection.QueryAsync(
+        var db = connection.AsSqlSession();
+        var read = await db.QueryAsync(
             Mapper,
             $"""
              {SqlItem.Select}
@@ -100,8 +103,9 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
     [Fact]
     public async Task Interpolation_EmptyInList_FailsBeforeTouchingTheDatabase() {
         await using var connection = fixture.CreateConnection();
+        var db = connection.AsSqlSession();
 
-        var act = () => connection.QueryAsync(
+        var act = () => db.QueryAsync(
             Mapper,
             $"{SqlItem.Select} WHERE id IN {Array.Empty<Guid>()}",
             Ct);
@@ -117,9 +121,10 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var active = new SqlStatement($"WHERE active = {true}");
 
         await using var connection = fixture.CreateConnection();
-        var count = await connection.ExecuteScalarAsync<long>(
+        var db = connection.AsSqlSession();
+        var count = await db.ExecuteScalarAsync<long>(
             new SqlStatement($"SELECT count(*) FROM sql_items {active}"), Ct);
-        var read = await connection.QueryAsync(
+        var read = await db.QueryAsync(
             Mapper, new SqlStatement($"{SqlItem.Select} {active} ORDER BY id"), Ct);
 
         count.Should().Be(items.Count(i => i.Active));
@@ -134,7 +139,8 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         await InsertItemsAsync(2);
 
         await using var connection = fixture.CreateConnection();
-        var missing = await connection.QueryFirstOrDefaultAsync(
+        var db = connection.AsSqlSession();
+        var missing = await db.QueryFirstOrDefaultAsync(
             Mapper, $"{SqlItem.Select} WHERE id = {Guid.NewGuid()}", Ct);
 
         missing.Should().BeNull();
@@ -148,9 +154,10 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var target = items[2];
 
         await using var connection = fixture.CreateConnection();
-        var affected = await connection.ExecuteAsync(
+        var db = connection.AsSqlSession();
+        var affected = await db.ExecuteAsync(
             $"UPDATE sql_items SET name = {"renamed"} WHERE id = {target.Id}", Ct);
-        var renamed = await connection.QueryFirstOrDefaultAsync(
+        var renamed = await db.QueryFirstOrDefaultAsync(
             Mapper, $"{SqlItem.Select} WHERE id = {target.Id}", Ct);
 
         affected.Should().Be(1);
@@ -164,8 +171,9 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var row = new SqlPositionalRow(Guid.CreateVersion7(), "row-1", 7);
 
         await using var connection = fixture.CreateConnection();
+        var db = connection.AsSqlSession();
         await connection.OpenAsync(Ct);
-        await connection.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
+        await db.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
         await using (var command = connection.CreateCommand()) {
             command.CommandText =
                 $"INSERT INTO {SqlPositionalRowSqlMapper.TableName} ({SqlPositionalRowSqlMapper.Columns.All}) "
@@ -175,7 +183,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         }
 
         // Self-mapping happy path: the row type resolves its own mapper — no mapper argument.
-        var read = await connection.QueryAsync<SqlPositionalRow>($"{SqlPositionalRow.Select}", Ct);
+        var read = await db.QueryAsync<SqlPositionalRow>($"{SqlPositionalRow.Select}", Ct);
 
         read.Should().Equal(row);
     }
@@ -186,8 +194,9 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
 
         var row = new SqlPositionalRow(Guid.CreateVersion7(), "self-mapped", 3);
         await using var connection = fixture.CreateConnection();
+        var db = connection.AsSqlSession();
         await connection.OpenAsync(Ct);
-        await connection.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
+        await db.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
         await using (var command = connection.CreateCommand()) {
             command.CommandText = SqlPositionalRowSqlMapper.Insert;
             SqlPositionalRowSqlMapper.Instance.BindParameters(command, row);
@@ -195,9 +204,9 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         }
 
         // db.QueryAsync<T>(...) with no mapper, and the generated Select/Table fragments (no :raw).
-        var list = await connection.QueryAsync<SqlPositionalRow>(
+        var list = await db.QueryAsync<SqlPositionalRow>(
             $"{SqlPositionalRow.Select} WHERE label = {row.Label}", Ct);
-        var one = await connection.QueryFirstOrDefaultAsync<SqlPositionalRow>(
+        var one = await db.QueryFirstOrDefaultAsync<SqlPositionalRow>(
             $"SELECT count, label, id FROM {SqlPositionalRow.Table} WHERE id = {row.Id}", Ct);
 
         list.Should().Equal(row);
@@ -209,12 +218,13 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
 
         await using var connection = fixture.CreateConnection();
+        var db = connection.AsSqlSession();
         await connection.OpenAsync(Ct);
-        await connection.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
+        await db.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
 
         // Single-row insert via the generated full-row INSERT — no command/parameter ceremony.
         var first = new SqlPositionalRow(Guid.CreateVersion7(), "a", 1);
-        var inserted = await connection.InsertAsync(first, cancellationToken: Ct);
+        var inserted = await db.InsertAsync(first, cancellationToken: Ct);
         inserted.Should().Be(1);
 
         // Batch insert owns the transaction + reused command; the suffix composes ON CONFLICT.
@@ -223,21 +233,21 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
             new SqlPositionalRow(Guid.CreateVersion7(), "b", 2),
             new SqlPositionalRow(Guid.CreateVersion7(), "c", 3)
         };
-        var written = await connection.InsertManyAsync(batch, " ON CONFLICT DO NOTHING", cancellationToken: Ct);
+        var written = await db.InsertManyAsync(batch, " ON CONFLICT DO NOTHING", cancellationToken: Ct);
         written.Should().Be(2, "the duplicate primary key inserts nothing");
 
         // Single-row query helper — one match.
-        var single = await connection.QuerySingleOrDefaultAsync<SqlPositionalRow>(
+        var single = await db.QuerySingleOrDefaultAsync<SqlPositionalRow>(
             $"{SqlPositionalRow.Select} WHERE id = {first.Id}", Ct);
         single.Should().Be(first);
 
         // Single-row helper throws when the query returns more than one row.
-        var act = () => connection.QuerySingleOrDefaultAsync<SqlPositionalRow>($"{SqlPositionalRow.Select}", Ct);
+        var act = () => db.QuerySingleOrDefaultAsync<SqlPositionalRow>($"{SqlPositionalRow.Select}", Ct);
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*more than one row*");
 
         // Streaming — unbuffered enumeration of all rows.
         var streamed = new List<SqlPositionalRow>();
-        await foreach (var r in connection.QueryUnbufferedAsync<SqlPositionalRow>(
+        await foreach (var r in db.QueryUnbufferedAsync<SqlPositionalRow>(
                            $"{SqlPositionalRow.Select} ORDER BY count", Ct))
             streamed.Add(r);
 

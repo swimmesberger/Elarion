@@ -4,22 +4,14 @@ using System.Data.Common;
 namespace Elarion.Sql;
 
 /// <summary>
-/// Query/execute convenience over a <see cref="DbConnection"/>: the low-level primitive the SQL tier is built
-/// on. The self-mapping happy path resolves the generated mapper from the row type
-/// (<c>connection.QueryAsync&lt;Order&gt;($"…")</c>, no mapper argument — see
-/// <see cref="ISqlRecord{TSelf}"/>); an explicit-mapper escape hatch stays for hand-written mappers of
-/// non-<c>[SqlRecord]</c> shapes. Deliberately thin: no ORM, no statement generation — these save the
-/// command/reader ceremony, nothing more. A closed connection is opened for the call and closed afterwards
-/// (Dapper semantics); an already-open connection is left open.
+/// Internal read plumbing over a <see cref="DbConnection"/> — the command/reader ceremony behind the single
+/// public convenience surface, <see cref="SqlSessionExtensions"/> on <see cref="ISqlSession"/>. Deliberately
+/// thin: no ORM, no statement generation. A closed connection is opened for the call and closed afterwards
+/// (Dapper semantics); an already-open connection is left open. Not public: a raw-connection twin of the
+/// session surface would look identical at the call site but skip transaction enlistment — callers who own a
+/// connection bridge through <see cref="SqlConnectionSessionExtensions.AsSqlSession"/> instead.
 /// </summary>
-/// <remarks>
-/// Inside a handler, inject <see cref="ISqlSession"/> and call the equivalent
-/// <see cref="SqlSessionExtensions">session methods</see> instead: they run on the scope's shared connection and
-/// enlist the active unit-of-work transaction automatically. Reach for these <see cref="DbConnection"/> methods
-/// in DI-free / NativeAOT hosts, tooling, and tests that manage their own connection — for example
-/// <c>await using var connection = await dataSource.OpenConnectionAsync(ct);</c>.
-/// </remarks>
-public static class SqlDbConnectionExtensions {
+internal static class SqlDbConnectionExtensions {
     // ---- Self-mapping happy path ------------------------------------------------------------------
 
     /// <summary>Runs the query and materializes every row through the row type's generated mapper.</summary>
