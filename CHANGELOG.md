@@ -9,6 +9,27 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Self-typed request markers and inferred dispatch (ADR-0065).** `Elarion.Abstractions` adds optional
+  generic marker forms — `IRequest<TSelf, TResponse>`, `ICommand<TSelf, TResponse>`,
+  `IQuery<TSelf, TResponse>`, and `IStreamRequest<TSelf, TItem>` — that declare a request's response type
+  on the request itself (`record Query(Guid Id) : IQuery<Query, Response>`). `IHandlerSender.SendAsync`,
+  `HandlerInvoker.InvokeAsync`, `StreamHandlerInvoker.InvokeAsync`, and `ConnectionHandlerInvoker` gain
+  overloads that infer **both** generic arguments from such a request —
+  `await sender.SendAsync(new GetClient.Query(id), ct)` — while staying fully static and AOT-clean (the
+  same `IHandler<,>` DI resolution; no reflection, registry, or boxing). Marker-free requests keep the
+  explicit two-generic overloads. A new `RequestMarkerAnalyzer` enforces the marker contract at build
+  time: `ELREQ001` (error) when a marker's `TSelf` names a different type, `ELREQ002`/`ELREQ003`
+  (warnings) when a handler's response or stream item drifts from the marker's declared type.
+
+### Changed
+- **`ConnectionHandlerInvoker` is now bound per connection (ADR-0065).** The static entry points are
+  replaced by a sealed instance class constructed once with `(IServiceProvider, IClientConnectionSink)`:
+  `var invoker = new ConnectionHandlerInvoker(services, connection);` then
+  `await invoker.InvokeAsync(decoded, ct)` (inferred) or `invoker.InvokeAsync<TRequest, TResponse>` /
+  `invoker.InvokeStreamAsync` / `invoker.InvokeNamedAsync(dispatcher, name, request, ct)`. Context
+  enrichment moved to explicit `(request, enrichContext, ct)` overloads, so plain calls no longer need a
+  named `ct:` argument. Per-dispatch semantics are unchanged: the sink's snapshot is still captured
+  exactly once per call before enrichment, and framework identity entries still cannot be spoofed.
 - **Hardened TCP connection runtime (ADR-0053).** The TCP adapter now owns the full secure-establishment
   and delivery lifecycle: optional **TLS before framing** (`TcpServerTlsOptions`/`TcpClientTlsOptions` over
   explicit BCL authentication options, fail-closed platform validation, separate handshake timeout, no

@@ -243,6 +243,20 @@ attributes. See [Validation](/docs/concepts/validation).
 | ELVAL001 | Error | A handler's request type carries validation attributes but its response type does not implement `IResultFailureFactory<T>`, so the validation check cannot short-circuit and would be silently skipped (mirrors `ELAUTH001`). | Return `Result<T>` or `Result` from the handler so the validation decorator can short-circuit to `AppError.Validation`. |
 | ELVAL002 | Warning | A handler's request type carries validation attributes but the compilation does not reference `Elarion.Validation`; the constraints are exported to every schema surface but **not enforced** at runtime. | Reference `Elarion.Validation` and call `AddElarionValidation()` in the host, or remove the validation attributes — the gap must be a visible choice. |
 
+## ELREQ — Self-typed request markers
+
+Consistency checks for the self-typed request markers (`IRequest<TSelf, TResponse>`,
+`ICommand<TSelf, TResponse>`, `IQuery<TSelf, TResponse>`, `IStreamRequest<TSelf, TItem>`) that drive
+inferred dispatch (ADR-0065). Both mistakes compile but would otherwise surface only at runtime — as an
+invalid cast in the inferred dispatch overloads or as failed handler resolution. See
+[Command vs. query](/docs/concepts/handlers#self-typed-markers-declaring-the-response-type).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELREQ001 | Error | A type implements a self-typed marker whose `TSelf` names a different, unrelated type (usually a copy-paste slip); inferred dispatch of this request would throw `InvalidCastException`. | Make the marker name the implementing type itself: `record Query(…) : IQuery<Query, Response>`. |
+| ELREQ002 | Warning | A handler pairs a request with a response that differs from the `TResponse` the request's marker declares, so inferred dispatch resolves a different `IHandler<,>` closure and will not find this handler. | Align the marker's `TResponse` with the handler's `Result<T>` (or vice versa). A deliberate second handler with a different response for the same request stays reachable through the explicit-generic overloads; suppress the warning there. |
+| ELREQ003 | Warning | A stream handler's item type differs from the `TItem` the request's `IStreamRequest<TSelf, TItem>` marker declares, so inferred stream dispatch will not find this handler. | Align the marker's `TItem` with the stream handler's item type (or vice versa). |
+
 ## ELVAR — Variant services
 
 Variant-service registration for `[FeatureVariant]` and `[ConfigurationVariant]`. See

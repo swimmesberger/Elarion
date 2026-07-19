@@ -61,6 +61,27 @@ public sealed class GrpcHandlerInvoker(
     }
 
     /// <summary>
+    /// Fully inferred unary invoke for requests implementing the self-typed marker
+    /// <see cref="IRequest{TSelf, TResponse}"/>: both generic arguments are inferred from
+    /// <paramref name="request"/> — <c>await invoker.InvokeUnaryAsync(new GetClient.Query(id), context)</c>.
+    /// </summary>
+    /// <typeparam name="TRequest">The application handler request type (inferred).</typeparam>
+    /// <typeparam name="TResponse">The application handler success type (inferred from the marker).</typeparam>
+    /// <param name="request">The application request to dispatch.</param>
+    /// <param name="callContext">The exact gRPC context for this call.</param>
+    /// <returns>The successful application response.</returns>
+    /// <exception cref="RpcException">The registered gRPC translator's representation of a failed result.</exception>
+    public Task<TResponse> InvokeUnaryAsync<TRequest, TResponse>(
+        IRequest<TRequest, TResponse> request,
+        ServerCallContext callContext)
+        where TRequest : notnull, IRequest<TRequest, TResponse>
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return InvokeUnaryAsync<TRequest, TResponse>((TRequest)request, callContext);
+    }
+
+    /// <summary>
     /// Maps and invokes a unary gRPC request, returning its mapped success response or throwing the translated
     /// <see cref="RpcException"/> for a failed <see cref="Result{T}"/>.
     /// </summary>

@@ -115,6 +115,35 @@ public sealed class StreamHandlerInvokerTests {
         probe.Disposed.Should().BeTrue();
     }
 
+    private sealed record InferredRequest : IStreamRequest<InferredRequest, int>;
+
+    private sealed class InferredHandler : IStreamHandler<InferredRequest, int> {
+        public ValueTask<Result<IAsyncEnumerable<int>>> HandleAsync(InferredRequest request, CancellationToken ct) =>
+            ValueTask.FromResult(Result<IAsyncEnumerable<int>>.Success(Items()));
+
+        private static async IAsyncEnumerable<int> Items() {
+            yield return 1;
+            await Task.Yield();
+            yield return 2;
+        }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_SelfTypedStreamMarkerInfersBothTypeArguments() {
+        using var provider = new ServiceCollection()
+            .AddScoped<IStreamHandler<InferredRequest, int>, InferredHandler>()
+            .BuildServiceProvider();
+
+        Result<StreamHandlerInvocation<int>> start = await StreamHandlerInvoker.InvokeAsync(
+            provider, new InferredRequest(), ct: TestContext.Current.CancellationToken);
+
+        start.IsSuccess.Should().BeTrue();
+        var values = new List<int>();
+        await foreach (var value in start.Value!)
+            values.Add(value);
+        values.Should().Equal(1, 2);
+    }
+
     [Fact]
     public async Task DisposeAsync_WithoutEnumeration_ReleasesScopeExactlyOnce() {
         Probe? probe = null;

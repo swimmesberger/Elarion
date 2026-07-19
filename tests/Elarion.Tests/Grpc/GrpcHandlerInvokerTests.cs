@@ -93,6 +93,23 @@ public sealed class GrpcHandlerInvokerTests
     }
 
     [Fact]
+    public async Task InvokeUnaryAsync_SelfTypedMarkerInfersBothTypeArguments()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "grpc"));
+        using var provider = new ServiceCollection()
+            .AddScoped<IHandler<InferredRequest, Result<ApplicationResponse>>, InferredHandler>()
+            .AddElarionGrpcTransport(_ => principal)
+            .BuildServiceProvider();
+        var invoker = provider.GetRequiredService<GrpcHandlerInvoker>();
+
+        ApplicationResponse response = await invoker.InvokeUnaryAsync(
+            new InferredRequest("input"),
+            new TestServerCallContext(CancellationToken.None));
+
+        response.Value.Should().Be("input-inferred");
+    }
+
+    [Fact]
     public async Task InvokeUnaryAsync_FailureUsesRegisteredTranslator()
     {
         var translator = new RecordingTranslator();
@@ -171,6 +188,14 @@ public sealed class GrpcHandlerInvokerTests
     private sealed record ApplicationRequest(string Value);
 
     private sealed record ApplicationResponse(string Value);
+
+    private sealed record InferredRequest(string Value) : IQuery<InferredRequest, ApplicationResponse>;
+
+    private sealed class InferredHandler : IHandler<InferredRequest, Result<ApplicationResponse>>
+    {
+        public ValueTask<Result<ApplicationResponse>> HandleAsync(InferredRequest request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<ApplicationResponse>>(new ApplicationResponse(request.Value + "-inferred"));
+    }
 
     private sealed class ScopeProbe
     {

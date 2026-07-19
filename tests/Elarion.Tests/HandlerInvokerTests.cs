@@ -44,6 +44,28 @@ public sealed class HandlerInvokerTests {
         result.Value.Authenticated.Should().BeTrue();
     }
 
+    private sealed record InferredWhoAmIQuery : IQuery<InferredWhoAmIQuery, WhoAmIResponse>;
+
+    private sealed class InferredWhoAmIHandler(ICurrentUser user) : IHandler<InferredWhoAmIQuery, Result<WhoAmIResponse>> {
+        public ValueTask<Result<WhoAmIResponse>> HandleAsync(InferredWhoAmIQuery request, CancellationToken ct) =>
+            ValueTask.FromResult<Result<WhoAmIResponse>>(
+                new WhoAmIResponse(user.IsAuthenticated ? user.UserId : "", user.IsAuthenticated));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_SelfTypedMarkerInfersBothTypeArguments() {
+        using var provider = new ServiceCollection()
+            .AddElarionClaimsCurrentUser()
+            .AddScoped<IHandler<InferredWhoAmIQuery, Result<WhoAmIResponse>>, InferredWhoAmIHandler>()
+            .BuildServiceProvider();
+
+        Result<WhoAmIResponse> result = await HandlerInvoker.InvokeAsync(
+            provider, new InferredWhoAmIQuery(), context: null, TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Authenticated.Should().BeFalse();
+    }
+
     [Fact]
     public async Task InvokeAsync_NoContext_CurrentUserIsAnonymous() {
         using var provider = new ServiceCollection()

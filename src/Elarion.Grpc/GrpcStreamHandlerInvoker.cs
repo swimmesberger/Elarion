@@ -59,6 +59,27 @@ public sealed class GrpcStreamHandlerInvoker(
     }
 
     /// <summary>
+    /// Fully inferred server-stream start for requests implementing the self-typed marker
+    /// <see cref="IStreamRequest{TSelf, TItem}"/>: both generic arguments are inferred from
+    /// <paramref name="request"/>.
+    /// </summary>
+    /// <typeparam name="TRequest">The application stream-handler request type (inferred).</typeparam>
+    /// <typeparam name="TItem">The application stream item type (inferred from the marker).</typeparam>
+    /// <param name="request">The application request to dispatch.</param>
+    /// <param name="callContext">The exact gRPC context for this call.</param>
+    /// <returns>The accepted stream invocation. Dispose it after enumeration.</returns>
+    /// <exception cref="RpcException">The registered gRPC translator's representation of a failed stream startup.</exception>
+    public Task<StreamHandlerInvocation<TItem>> InvokeServerStreamingAsync<TRequest, TItem>(
+        IStreamRequest<TRequest, TItem> request,
+        ServerCallContext callContext)
+        where TRequest : notnull, IStreamRequest<TRequest, TItem>
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return InvokeServerStreamingAsync<TRequest, TItem>((TRequest)request, callContext);
+    }
+
+    /// <summary>
     /// Maps a gRPC request, writes every successful application stream item to <paramref name="responseStream"/>,
     /// and disposes the dispatch scope when enumeration ends.
     /// </summary>

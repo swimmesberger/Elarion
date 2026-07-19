@@ -86,3 +86,6 @@ ELINBX001 | Elarion.Abstractions.Messaging | Warning | [AllowDuplicates] handler
 ELCEV001 | Elarion.Abstractions.ClientEvents | Warning | Client event is not in any module
 ELCEV002 | Elarion.Abstractions.ClientEvents | Error | Duplicate client-event topic name
 ELCEV003 | Elarion.Abstractions.ClientEvents | Warning | Client events are not registered without Elarion.ClientEvents
+ELREQ001 | Elarion.Abstractions.Requests | Error | Self-typed request marker must name the implementing type
+ELREQ002 | Elarion.Abstractions.Requests | Warning | Handler response does not match the request's self-typed marker
+ELREQ003 | Elarion.Abstractions.Requests | Warning | Stream handler item does not match the request's self-typed marker

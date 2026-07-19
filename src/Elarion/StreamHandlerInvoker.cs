@@ -34,6 +34,23 @@ public static class StreamHandlerInvoker {
             throw;
         }
     }
+
+    /// <summary>
+    /// Fully inferred stream start for requests implementing the self-typed marker
+    /// <see cref="IStreamRequest{TSelf, TItem}"/>: both generic arguments are inferred from
+    /// <paramref name="request"/>. Dispatches through the same typed resolution as
+    /// <see cref="InvokeAsync{TRequest, TItem}(IServiceProvider, TRequest, DispatchScopeContext?, CancellationToken)"/>.
+    /// </summary>
+    public static ValueTask<Result<StreamHandlerInvocation<TItem>>> InvokeAsync<TRequest, TItem>(
+        IServiceProvider rootProvider,
+        IStreamRequest<TRequest, TItem> request,
+        DispatchScopeContext? context = null,
+        CancellationToken ct = default)
+        where TRequest : notnull, IStreamRequest<TRequest, TItem> {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return InvokeAsync<TRequest, TItem>(rootProvider, (TRequest)request, context, ct);
+    }
 }
 
 /// <summary>
