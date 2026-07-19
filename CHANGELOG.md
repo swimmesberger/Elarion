@@ -113,6 +113,18 @@ minor releases may include breaking changes.
   `ServerCallContext.InvokeElarionStreamAsync<TRequest,TItem>(request)` after
   `services.AddGrpc().AddElarion()`. Client and duplex streaming remain deliberately out of scope.
 
+### Fixed
+- **`TcpMessageFramer` contract docs: payload only, on both sides.** Field feedback showed the framing docs
+  could be read as if `TryReadMessage`'s `message` / `WriteMessage`'s `payload` included the wire framing
+  (header/reserved prologue). The XML docs and the connections capability page now state the contract
+  explicitly — `message` is the payload slice with framing already excluded (`consumed` accounts for the
+  full wire span; don't subtract the header again), and `WriteMessage` receives unframed payload and
+  prepends its own framing — with a custom-framer example.
+- **SQL mapping docs: record-level writes in handlers go through `ISqlSession`.** Made explicit that the
+  raw-`DbConnection` overloads of `InsertAsync`/`InsertManyAsync`/`ExecuteAsync` do not enlist the handler's
+  unit-of-work transaction (a write on a raw connection silently escapes commit/rollback); inside a handler,
+  use the injected `ISqlSession`, whose surface enlists the ambient transaction automatically.
+
 ## [0.2.5] - 2026-07-15
 
 ### Added

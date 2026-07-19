@@ -243,8 +243,14 @@ public sealed class PlaceOrder(ISqlSession db) {
   once) so a failed multi-write command is **not** rolled back. Register `AddElarionSqlUnitOfWork()` on
   any EF-free host whose handlers write.
 
-`InsertManyAsync` on the session enlists the ambient transaction; on the raw `DbConnection` primitive it
-opens its own (a batch is atomic on its own), so prefer the session inside a handler.
+**Inside a handler, do record-level writes through `ISqlSession`, not a raw `DbConnection`.**
+`session.InsertAsync(row)` / `InsertManyAsync(rows)` / `ExecuteAsync(sql)` enlist the open unit-of-work
+transaction automatically. The `DbConnection` primitive's overloads do **not**: `connection.InsertAsync(row)`
+runs outside the transaction unless you thread the ambient `DbTransaction` in yourself, and
+`InsertManyAsync` on a raw connection opens its *own* transaction (a batch is atomic on its own). So a write
+issued on a raw connection silently escapes the handler's unit of work — commit/rollback won't cover it. The
+`DbConnection` overloads exist for DI-free / tooling code that owns its connection and transaction; in a
+handler, always reach for the injected `ISqlSession`.
 
 ## Why not Dapper.AOT
 
