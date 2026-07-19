@@ -24,9 +24,7 @@ public sealed class SettingsManager(
         SettingsScope? scope = null,
         CancellationToken cancellationToken = default) {
         var raw = await store.GetAsync(ResolveScope(scope), key, cancellationToken).ConfigureAwait(false);
-        if (raw is null) {
-            return fallback;
-        }
+        if (raw is null) return fallback;
 
         var value = JsonSerializer.Deserialize(raw, jsonSerialization.GetTypeInfo<T>());
         return value is null ? fallback : value;
@@ -47,8 +45,9 @@ public sealed class SettingsManager(
     public ValueTask<string?> GetStringAsync(
         string key,
         SettingsScope? scope = null,
-        CancellationToken cancellationToken = default) =>
-        store.GetAsync(ResolveScope(scope), key, cancellationToken);
+        CancellationToken cancellationToken = default) {
+        return store.GetAsync(ResolveScope(scope), key, cancellationToken);
+    }
 
     /// <inheritdoc />
     public ValueTask<SettingWriteResult> SetStringAsync(
@@ -56,33 +55,33 @@ public sealed class SettingsManager(
         string? value,
         SettingsScope? scope = null,
         int? expectedVersion = null,
-        CancellationToken cancellationToken = default) =>
-        store.SetAsync(ResolveScope(scope), key, value, expectedVersion, cancellationToken);
+        CancellationToken cancellationToken = default) {
+        return store.SetAsync(ResolveScope(scope), key, value, expectedVersion, cancellationToken);
+    }
 
     /// <inheritdoc />
     public ValueTask<bool> RemoveAsync(
         string key,
         SettingsScope? scope = null,
         int? expectedVersion = null,
-        CancellationToken cancellationToken = default) =>
-        store.RemoveAsync(ResolveScope(scope), key, expectedVersion, cancellationToken);
+        CancellationToken cancellationToken = default) {
+        return store.RemoveAsync(ResolveScope(scope), key, expectedVersion, cancellationToken);
+    }
 
     /// <inheritdoc />
-    public IChangeToken Watch(string? keyPrefix = null, SettingsScope? scope = null) =>
-        changeSource.Watch(ResolveScope(scope), keyPrefix);
+    public IChangeToken Watch(string? keyPrefix = null, SettingsScope? scope = null) {
+        return changeSource.Watch(ResolveScope(scope), keyPrefix);
+    }
 
     private SettingsScope ResolveScope(SettingsScope? scope) {
         var resolved = scope ?? SettingsScope.Global;
-        if (!resolved.IsCurrentUserPlaceholder) {
-            return resolved;
-        }
+        if (!resolved.IsCurrentUserPlaceholder) return resolved;
 
         // Resolve the ambient user lazily and fail closed when unauthenticated (for example outside HTTP).
         var currentUser = services.GetRequiredService<ICurrentUser>();
-        if (!currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(currentUser.UserId)) {
+        if (!currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(currentUser.UserId))
             throw new InvalidOperationException(
                 "User-scoped settings require an authenticated current user with a user id.");
-        }
 
         return SettingsScope.User(currentUser.UserId);
     }

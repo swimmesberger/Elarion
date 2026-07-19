@@ -48,11 +48,10 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
         await using var scope = await unitOfWork.BeginAsync(UnitOfWorkOptions.Default, ct).ConfigureAwait(false);
         var response = await inner.HandleAsync(request, ct).ConfigureAwait(false);
 
-        if (response is IResultLike { IsSuccess: true }) {
+        if (response is IResultLike { IsSuccess: true })
             await scope.CommitAsync(CancellationToken.None).ConfigureAwait(false);
-        } else {
+        else
             await scope.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-        }
 
         return response;
     }

@@ -43,7 +43,8 @@ public sealed class MigrationScriptDiscoveryTests {
 
     [Fact]
     public void DirectiveBelowTheLeadingCommentBlockIsIgnored() {
-        MigrationScriptDiscovery.TryParseDirectives("SELECT 1;\n-- elarion: no-transaction\n", out var noTransaction, out _)
+        MigrationScriptDiscovery
+            .TryParseDirectives("SELECT 1;\n-- elarion: no-transaction\n", out var noTransaction, out _)
             .Should().BeTrue();
         noTransaction.Should().BeFalse();
     }
@@ -95,8 +96,9 @@ public sealed class MigrationScriptDiscoveryTests {
         error.Should().Contain(scriptName);
     }
 
-    internal static MigrationScriptSet Discover(string scenario) =>
-        MigrationScriptDiscovery.Discover([
-            new MigrationScriptSource(typeof(MigrationScriptDiscoveryTests).Assembly, ScriptPrefix + scenario),
+    internal static MigrationScriptSet Discover(string scenario) {
+        return MigrationScriptDiscovery.Discover([
+            new MigrationScriptSource(typeof(MigrationScriptDiscoveryTests).Assembly, ScriptPrefix + scenario)
         ]);
+    }
 }

@@ -32,10 +32,12 @@ public sealed class StreamHandlerMetadata {
     public IHandlerPipeline Pipeline { get; }
 
     /// <summary>Returns one inherited attribute of the requested type, if present.</summary>
-    public TAttribute? GetAttribute<TAttribute>() where TAttribute : Attribute =>
-        HandlerType.GetCustomAttribute<TAttribute>(inherit: true);
+    public TAttribute? GetAttribute<TAttribute>() where TAttribute : Attribute {
+        return HandlerType.GetCustomAttribute<TAttribute>(true);
+    }
 
     /// <summary>Returns all inherited attributes of the requested type.</summary>
-    public IEnumerable<TAttribute> GetAttributes<TAttribute>() where TAttribute : Attribute =>
-        HandlerType.GetCustomAttributes<TAttribute>(inherit: true);
+    public IEnumerable<TAttribute> GetAttributes<TAttribute>() where TAttribute : Attribute {
+        return HandlerType.GetCustomAttributes<TAttribute>(true);
+    }
 }

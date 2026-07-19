@@ -10,5 +10,6 @@ namespace Elarion.Auditing.EntityFrameworkCore;
 /// </summary>
 [JsonSerializable(typeof(AuditChange[]))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal sealed partial class AuditingJsonContext : JsonSerializerContext;

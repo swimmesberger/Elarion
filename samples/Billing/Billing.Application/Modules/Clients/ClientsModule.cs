@@ -12,5 +12,7 @@ namespace Billing.Application.Modules.Clients;
 // UI flag with no server-side [FeatureGate] behind it — still first-class, evaluated with the user's context.
 [ClientFeatures("client-portal-v2", "bulk-import")]
 public static partial class ClientsModule {
-    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => ClientsJsonContext.Default;
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() {
+        return ClientsJsonContext.Default;
+    }
 }

@@ -25,8 +25,7 @@ namespace Elarion.Paging;
 /// their own authorization filters (e.g. <c>Where(c =&gt; c.OwnerId == user.UserId)</c>).
 /// </para>
 /// </remarks>
-public sealed class CursorWriter
-{
+public sealed class CursorWriter {
     internal const byte FormatVersion = 2;
 
     private readonly List<byte> _buffer;
@@ -38,8 +37,7 @@ public sealed class CursorWriter
     /// produced it and a mismatched cursor is rejected on read rather than silently decoded.
     /// </summary>
     /// <param name="tag">The keyset-identity tag embedded after the format-version byte.</param>
-    public CursorWriter(uint tag)
-    {
+    public CursorWriter(uint tag) {
         _buffer = new List<byte>(32) { FormatVersion };
         Span<byte> tagBytes = stackalloc byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(tagBytes, tag);
@@ -47,40 +45,35 @@ public sealed class CursorWriter
     }
 
     /// <summary>Appends a 32-bit signed integer (also used for narrower integral types).</summary>
-    public void WriteInt32(int value)
-    {
+    public void WriteInt32(int value) {
         Span<byte> bytes = stackalloc byte[sizeof(int)];
         BinaryPrimitives.WriteInt32LittleEndian(bytes, value);
         _buffer.AddRange(bytes);
     }
 
     /// <summary>Appends a 64-bit signed integer (also used for other 64-bit integral types).</summary>
-    public void WriteInt64(long value)
-    {
+    public void WriteInt64(long value) {
         Span<byte> bytes = stackalloc byte[sizeof(long)];
         BinaryPrimitives.WriteInt64LittleEndian(bytes, value);
         _buffer.AddRange(bytes);
     }
 
     /// <summary>Appends a double-precision floating point value.</summary>
-    public void WriteDouble(double value)
-    {
+    public void WriteDouble(double value) {
         Span<byte> bytes = stackalloc byte[sizeof(double)];
         BinaryPrimitives.WriteDoubleLittleEndian(bytes, value);
         _buffer.AddRange(bytes);
     }
 
     /// <summary>Appends a single-precision floating point value.</summary>
-    public void WriteSingle(float value)
-    {
+    public void WriteSingle(float value) {
         Span<byte> bytes = stackalloc byte[sizeof(float)];
         BinaryPrimitives.WriteSingleLittleEndian(bytes, value);
         _buffer.AddRange(bytes);
     }
 
     /// <summary>Appends a decimal value.</summary>
-    public void WriteDecimal(decimal value)
-    {
+    public void WriteDecimal(decimal value) {
         Span<int> bits = stackalloc int[4];
         decimal.GetBits(value, bits);
         WriteInt32(bits[0]);
@@ -90,42 +83,48 @@ public sealed class CursorWriter
     }
 
     /// <summary>Appends a GUID.</summary>
-    public void WriteGuid(Guid value)
-    {
+    public void WriteGuid(Guid value) {
         Span<byte> bytes = stackalloc byte[16];
         value.TryWriteBytes(bytes);
         _buffer.AddRange(bytes);
     }
 
     /// <summary>Appends a UTF-8 string, length-prefixed.</summary>
-    public void WriteString(string value)
-    {
+    public void WriteString(string value) {
         var byteCount = Encoding.UTF8.GetByteCount(value);
         WriteVarUInt32((uint)byteCount);
-        Span<byte> bytes = byteCount <= 256 ? stackalloc byte[byteCount] : new byte[byteCount];
+        var bytes = byteCount <= 256 ? stackalloc byte[byteCount] : new byte[byteCount];
         Encoding.UTF8.GetBytes(value, bytes);
         _buffer.AddRange(bytes);
     }
 
     /// <summary>Appends a <see cref="DateTime"/> preserving ticks and kind.</summary>
-    public void WriteDateTime(DateTime value) => WriteInt64(value.ToBinary());
+    public void WriteDateTime(DateTime value) {
+        WriteInt64(value.ToBinary());
+    }
 
     /// <summary>Appends a <see cref="DateTimeOffset"/> by its UTC instant.</summary>
-    public void WriteDateTimeOffset(DateTimeOffset value) => WriteInt64(value.UtcTicks);
+    public void WriteDateTimeOffset(DateTimeOffset value) {
+        WriteInt64(value.UtcTicks);
+    }
 
     /// <summary>Appends a <see cref="DateOnly"/> value.</summary>
-    public void WriteDateOnly(DateOnly value) => WriteInt32(value.DayNumber);
+    public void WriteDateOnly(DateOnly value) {
+        WriteInt32(value.DayNumber);
+    }
 
     /// <summary>Appends a <see cref="TimeOnly"/> value.</summary>
-    public void WriteTimeOnly(TimeOnly value) => WriteInt64(value.Ticks);
+    public void WriteTimeOnly(TimeOnly value) {
+        WriteInt64(value.Ticks);
+    }
 
     /// <summary>Renders the accumulated bytes as an opaque, URL-safe cursor token.</summary>
-    public string ToCursor() => Base64Url.EncodeToString(CollectionsMarshal.AsSpan(_buffer));
+    public string ToCursor() {
+        return Base64Url.EncodeToString(CollectionsMarshal.AsSpan(_buffer));
+    }
 
-    private void WriteVarUInt32(uint value)
-    {
-        while (value >= 0x80)
-        {
+    private void WriteVarUInt32(uint value) {
+        while (value >= 0x80) {
             _buffer.Add((byte)(value | 0x80));
             value >>= 7;
         }
@@ -139,16 +138,14 @@ public sealed class CursorWriter
 /// <c>TryRead*</c> returns <c>false</c> on a truncated or malformed buffer; generated decoders treat
 /// any failure (including trailing bytes via <see cref="AtEnd"/>) as an invalid cursor.
 /// </summary>
-public struct CursorReader
-{
+public struct CursorReader {
     // Header: [0] format version, [1..5) little-endian keyset-identity tag.
     private const int HeaderLength = 1 + sizeof(uint);
 
     private readonly byte[] _data;
     private int _position;
 
-    private CursorReader(byte[] data)
-    {
+    private CursorReader(byte[] data) {
         _data = data;
         _position = HeaderLength; // skip the format-version byte and identity tag
     }
@@ -167,44 +164,30 @@ public struct CursorReader
     /// <param name="cursor">The opaque cursor token.</param>
     /// <param name="expectedTag">The identity tag of the keyset performing the decode.</param>
     /// <param name="reader">The positioned reader when decoding succeeds.</param>
-    public static bool TryCreate(string? cursor, uint expectedTag, out CursorReader reader)
-    {
+    public static bool TryCreate(string? cursor, uint expectedTag, out CursorReader reader) {
         reader = default;
-        if (string.IsNullOrEmpty(cursor))
-        {
-            return false;
-        }
+        if (string.IsNullOrEmpty(cursor)) return false;
 
         byte[] data;
-        try
-        {
+        try {
             data = Base64Url.DecodeFromChars(cursor.AsSpan());
         }
-        catch (FormatException)
-        {
+        catch (FormatException) {
             return false;
         }
 
-        if (data.Length < HeaderLength || data[0] != CursorWriter.FormatVersion)
-        {
-            return false;
-        }
+        if (data.Length < HeaderLength || data[0] != CursorWriter.FormatVersion) return false;
 
         var tag = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(1, sizeof(uint)));
-        if (tag != expectedTag)
-        {
-            return false;
-        }
+        if (tag != expectedTag) return false;
 
         reader = new CursorReader(data);
         return true;
     }
 
     /// <summary>Reads a 32-bit signed integer.</summary>
-    public bool TryReadInt32(out int value)
-    {
-        if (!TryTake(sizeof(int), out var span))
-        {
+    public bool TryReadInt32(out int value) {
+        if (!TryTake(sizeof(int), out var span)) {
             value = default;
             return false;
         }
@@ -214,10 +197,8 @@ public struct CursorReader
     }
 
     /// <summary>Reads a 64-bit signed integer.</summary>
-    public bool TryReadInt64(out long value)
-    {
-        if (!TryTake(sizeof(long), out var span))
-        {
+    public bool TryReadInt64(out long value) {
+        if (!TryTake(sizeof(long), out var span)) {
             value = default;
             return false;
         }
@@ -227,10 +208,8 @@ public struct CursorReader
     }
 
     /// <summary>Reads a double-precision floating point value.</summary>
-    public bool TryReadDouble(out double value)
-    {
-        if (!TryTake(sizeof(double), out var span))
-        {
+    public bool TryReadDouble(out double value) {
+        if (!TryTake(sizeof(double), out var span)) {
             value = default;
             return false;
         }
@@ -240,10 +219,8 @@ public struct CursorReader
     }
 
     /// <summary>Reads a single-precision floating point value.</summary>
-    public bool TryReadSingle(out float value)
-    {
-        if (!TryTake(sizeof(float), out var span))
-        {
+    public bool TryReadSingle(out float value) {
+        if (!TryTake(sizeof(float), out var span)) {
             value = default;
             return false;
         }
@@ -253,24 +230,17 @@ public struct CursorReader
     }
 
     /// <summary>Reads a decimal value.</summary>
-    public bool TryReadDecimal(out decimal value)
-    {
+    public bool TryReadDecimal(out decimal value) {
         value = default;
         Span<int> bits = stackalloc int[4];
         for (var i = 0; i < 4; i++)
-        {
             if (!TryReadInt32(out bits[i]))
-            {
                 return false;
-            }
-        }
 
-        try
-        {
+        try {
             value = new decimal(bits);
         }
-        catch (ArgumentException)
-        {
+        catch (ArgumentException) {
             // A crafted cursor can carry an invalid flags word; report malformed instead of throwing.
             return false;
         }
@@ -279,10 +249,8 @@ public struct CursorReader
     }
 
     /// <summary>Reads a GUID.</summary>
-    public bool TryReadGuid(out Guid value)
-    {
-        if (!TryTake(16, out var span))
-        {
+    public bool TryReadGuid(out Guid value) {
+        if (!TryTake(16, out var span)) {
             value = default;
             return false;
         }
@@ -292,13 +260,9 @@ public struct CursorReader
     }
 
     /// <summary>Reads a length-prefixed UTF-8 string.</summary>
-    public bool TryReadString(out string value)
-    {
+    public bool TryReadString(out string value) {
         value = string.Empty;
-        if (!TryReadVarUInt32(out var length) || !TryTake((int)length, out var span))
-        {
-            return false;
-        }
+        if (!TryReadVarUInt32(out var length) || !TryTake((int)length, out var span)) return false;
 
         value = Encoding.UTF8.GetString(span);
         return true;
@@ -309,20 +273,14 @@ public struct CursorReader
     // reports a malformed buffer as false rather than throwing.
 
     /// <summary>Reads a <see cref="DateTime"/> preserving ticks and kind.</summary>
-    public bool TryReadDateTime(out DateTime value)
-    {
+    public bool TryReadDateTime(out DateTime value) {
         value = default;
-        if (!TryReadInt64(out var binary))
-        {
-            return false;
-        }
+        if (!TryReadInt64(out var binary)) return false;
 
-        try
-        {
+        try {
             value = DateTime.FromBinary(binary);
         }
-        catch (ArgumentException)
-        {
+        catch (ArgumentException) {
             return false;
         }
 
@@ -330,52 +288,41 @@ public struct CursorReader
     }
 
     /// <summary>Reads a <see cref="DateTimeOffset"/> as a UTC instant.</summary>
-    public bool TryReadDateTimeOffset(out DateTimeOffset value)
-    {
+    public bool TryReadDateTimeOffset(out DateTimeOffset value) {
         value = default;
-        if (!TryReadInt64(out var ticks) || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
-        {
-            return false;
-        }
+        if (!TryReadInt64(out var ticks) || ticks < DateTime.MinValue.Ticks ||
+            ticks > DateTime.MaxValue.Ticks) return false;
 
         value = new DateTimeOffset(ticks, TimeSpan.Zero);
         return true;
     }
 
     /// <summary>Reads a <see cref="DateOnly"/> value.</summary>
-    public bool TryReadDateOnly(out DateOnly value)
-    {
+    public bool TryReadDateOnly(out DateOnly value) {
         value = default;
         if (!TryReadInt32(out var dayNumber)
             || dayNumber < DateOnly.MinValue.DayNumber
             || dayNumber > DateOnly.MaxValue.DayNumber)
-        {
             return false;
-        }
 
         value = DateOnly.FromDayNumber(dayNumber);
         return true;
     }
 
     /// <summary>Reads a <see cref="TimeOnly"/> value.</summary>
-    public bool TryReadTimeOnly(out TimeOnly value)
-    {
+    public bool TryReadTimeOnly(out TimeOnly value) {
         value = default;
-        if (!TryReadInt64(out var ticks) || ticks < TimeOnly.MinValue.Ticks || ticks > TimeOnly.MaxValue.Ticks)
-        {
-            return false;
-        }
+        if (!TryReadInt64(out var ticks) || ticks < TimeOnly.MinValue.Ticks ||
+            ticks > TimeOnly.MaxValue.Ticks) return false;
 
         value = new TimeOnly(ticks);
         return true;
     }
 
-    private bool TryTake(int count, out ReadOnlySpan<byte> span)
-    {
+    private bool TryTake(int count, out ReadOnlySpan<byte> span) {
         // Compared as "count > remaining" (never "_position + count > length"): a huge decoded length
         // would overflow the addition into a negative value and pass the bounds check.
-        if (count < 0 || count > _data.Length - _position)
-        {
+        if (count < 0 || count > _data.Length - _position) {
             span = default;
             return false;
         }
@@ -385,23 +332,15 @@ public struct CursorReader
         return true;
     }
 
-    private bool TryReadVarUInt32(out uint value)
-    {
+    private bool TryReadVarUInt32(out uint value) {
         value = 0;
         var shift = 0;
-        while (shift < 35)
-        {
-            if (_position >= _data.Length)
-            {
-                return false;
-            }
+        while (shift < 35) {
+            if (_position >= _data.Length) return false;
 
             var b = _data[_position++];
             value |= (uint)(b & 0x7F) << shift;
-            if ((b & 0x80) == 0)
-            {
-                return true;
-            }
+            if ((b & 0x80) == 0) return true;
 
             shift += 7;
         }
@@ -422,23 +361,19 @@ public struct CursorReader
 /// learns the cursor is invalid rather than receiving a silently-reset first page. The message is safe
 /// to surface: it names no key values.
 /// </remarks>
-public sealed class MalformedCursorException : Exception
-{
+public sealed class MalformedCursorException : Exception {
     /// <summary>Creates the exception with the default "malformed or wrong-keyset cursor" message.</summary>
     public MalformedCursorException()
-        : base("The pagination cursor is malformed or was produced by a different keyset; it cannot be decoded.")
-    {
+        : base("The pagination cursor is malformed or was produced by a different keyset; it cannot be decoded.") {
     }
 
     /// <summary>Creates the exception with a custom <paramref name="message"/>.</summary>
     public MalformedCursorException(string message)
-        : base(message)
-    {
+        : base(message) {
     }
 
     /// <summary>Creates the exception with a custom <paramref name="message"/> and <paramref name="innerException"/>.</summary>
     public MalformedCursorException(string message, Exception innerException)
-        : base(message, innerException)
-    {
+        : base(message, innerException) {
     }
 }

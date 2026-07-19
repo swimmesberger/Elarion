@@ -30,6 +30,7 @@ public sealed class ClientConnectionEventBridge(
     ILogger<ClientConnectionEventBridge>? logger = null) : IClientConnectionObserver {
     private readonly ILogger<ClientConnectionEventBridge> _logger =
         logger ?? NullLogger<ClientConnectionEventBridge>.Instance;
+
     private readonly ConcurrentDictionary<string, ConnectionSubscriptions> _byConnection =
         new(StringComparer.Ordinal);
 
@@ -61,9 +62,8 @@ public sealed class ClientConnectionEventBridge(
             resolution = await resolver.ResolveAsync(requests, ct);
         }
 
-        if (resolution.Status != ClientEventSubscriptionStatus.Resolved) {
+        if (resolution.Status != ClientEventSubscriptionStatus.Resolved)
             return new ClientConnectionEventSubscribeResult { Status = resolution.Status };
-        }
 
         var source = services.GetRequiredService<IClientEventSubscriptionSource>();
         var connectionId = snapshot.ConnectionId;
@@ -73,7 +73,7 @@ public sealed class ClientConnectionEventBridge(
             source.Subscribe(resolution.Subscriptions),
             (envelope, deliveryCt) => DeliverIfCurrentAsync(
                 connection.ConnectionState, snapshot.IdentityRevision, deliver, envelope, deliveryCt),
-            onFinished: self => Untrack(connectionId, subscriptions, self), _logger);
+            self => Untrack(connectionId, subscriptions, self), _logger);
         bool start;
         lock (subscriptions.Gate) {
             subscriptions.Items.TryAdd(subscription, 0);
@@ -81,16 +81,14 @@ public sealed class ClientConnectionEventBridge(
             start = connection.ConnectionState.IsCurrent(snapshot.IdentityRevision);
         }
 
-        if (start) {
+        if (start)
             subscription.Start();
-        }
-        else {
+        else
             subscription.Dispose();
-        }
 
         return new ClientConnectionEventSubscribeResult {
             Status = ClientEventSubscriptionStatus.Resolved,
-            Subscription = subscription,
+            Subscription = subscription
         };
     }
 
@@ -127,25 +125,19 @@ public sealed class ClientConnectionEventBridge(
         ClientEventDelivery deliver,
         ClientEventEnvelope envelope,
         CancellationToken ct) {
-        if (!state.IsCurrent(identityRevision)) {
-            throw new ClientConnectionClosedException(state.Current.ConnectionId);
-        }
+        if (!state.IsCurrent(identityRevision)) throw new ClientConnectionClosedException(state.Current.ConnectionId);
 
         return deliver(envelope, ct);
     }
 
     private void InvalidateSubscriptions(string connectionId) {
-        if (!_byConnection.TryGetValue(connectionId, out var subscriptions)) {
-            return;
-        }
+        if (!_byConnection.TryGetValue(connectionId, out var subscriptions)) return;
 
         DisposeTracked(subscriptions);
     }
 
     private void CloseSubscriptions(string connectionId) {
-        if (_byConnection.TryRemove(connectionId, out var subscriptions)) {
-            DisposeTracked(subscriptions);
-        }
+        if (_byConnection.TryRemove(connectionId, out var subscriptions)) DisposeTracked(subscriptions);
     }
 
     private static void DisposeTracked(ConnectionSubscriptions subscriptions) {
@@ -155,9 +147,7 @@ public sealed class ClientConnectionEventBridge(
             subscriptions.Items.Clear();
         }
 
-        foreach (var subscription in dispose) {
-            subscription.Dispose();
-        }
+        foreach (var subscription in dispose) subscription.Dispose();
     }
 
     private void Untrack(
@@ -169,9 +159,8 @@ public sealed class ClientConnectionEventBridge(
         ConnectionTelemetry.ActiveEventSubscriptions.Add(-1);
         lock (subscriptions.Gate) {
             subscriptions.Items.TryRemove(subscription, out _);
-            if (subscriptions.Items.IsEmpty && !subscriptions.ConnectionIsRegistered) {
+            if (subscriptions.Items.IsEmpty && !subscriptions.ConnectionIsRegistered)
                 _byConnection.TryRemove(new KeyValuePair<string, ConnectionSubscriptions>(connectionId, subscriptions));
-            }
         }
     }
 

@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import {describe, expect, it} from 'vitest'
+import {mkdtempSync, writeFileSync} from 'node:fs'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {pathToFileURL} from 'node:url'
 import ts from 'typescript'
 import {
   generateRpcClientFiles,
@@ -15,6 +15,7 @@ type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 
 interface RpcClientForTests {
   call(method: string, params: unknown, options?: { signal?: AbortSignal; headers?: HeadersInit }): Promise<unknown>
+
   batch(
     items: readonly { method: string; params: unknown }[],
     options?: { signal?: AbortSignal; headers?: HeadersInit }
@@ -33,7 +34,9 @@ interface BatchItemResultForTests {
 
 interface TestSpan {
   headers?: HeadersInit
+
   setError(error: unknown): void
+
   end(): void
 }
 
@@ -45,23 +48,31 @@ interface GeneratedClientModule {
   createRpcApi(options: {
     url: string
     fetch?: FetchLike
-    headers?: HeadersInit | ((context: { methods: readonly string[]; batch: boolean }) => HeadersInit | Promise<HeadersInit>)
+    headers?: HeadersInit | ((context: {
+      methods: readonly string[];
+      batch: boolean
+    }) => HeadersInit | Promise<HeadersInit>)
     idGenerator?: () => string | number
     validateParams?: boolean
     validateResults?: boolean
     transformResult?: (method: string, result: unknown) => unknown
     instrumentation?: TestInstrumentation
   }): RpcApiForTests
+
   createRpcClient(options: {
     url: string
     fetch?: FetchLike
-    headers?: HeadersInit | ((context: { methods: readonly string[]; batch: boolean }) => HeadersInit | Promise<HeadersInit>)
+    headers?: HeadersInit | ((context: {
+      methods: readonly string[];
+      batch: boolean
+    }) => HeadersInit | Promise<HeadersInit>)
     idGenerator?: () => string | number
     validateParams?: boolean
     validateResults?: boolean
     transformResult?: (method: string, result: unknown) => unknown
     instrumentation?: TestInstrumentation
   }): RpcClientForTests
+
   RpcError: new (code: number, message: string, data?: unknown) => Error & {
     code: number
     data?: unknown
@@ -100,10 +111,12 @@ interface RpcApiForTests {
       get(params: unknown): { method: string; params: unknown }
     }
   }
+
   $batch(
     items: readonly { method: string; params: unknown }[],
     options?: { signal?: AbortSignal; headers?: HeadersInit }
   ): Promise<readonly BatchItemResultForTests[]>
+
   $client: RpcClientForTests
 }
 
@@ -115,14 +128,14 @@ describe('JSON-RPC client generator', () => {
           params: {
             type: 'object',
             properties: {
-              id: { type: 'string', format: 'uuid' },
+              id: {type: 'string', format: 'uuid'},
             },
             required: ['id'],
           },
           result: {
             type: 'object',
             properties: {
-              ok: { type: 'boolean' },
+              ok: {type: 'boolean'},
             },
             required: ['ok'],
           },
@@ -131,11 +144,11 @@ describe('JSON-RPC client generator', () => {
           params: {
             type: 'object',
             properties: {
-              name: { type: 'string' },
-              nickname: { type: ['string', 'null'] },
+              name: {type: 'string'},
+              nickname: {type: ['string', 'null']},
               tags: {
                 type: 'array',
-                items: { type: 'string' },
+                items: {type: 'string'},
               },
               status: {
                 enum: ['Open', 'Closed', null],
@@ -146,9 +159,9 @@ describe('JSON-RPC client generator', () => {
           result: {
             type: 'object',
             properties: {
-              count: { type: 'integer' },
-              maybe: { type: ['number', 'null'] },
-              state: { enum: ['Open', 'Closed', null] },
+              count: {type: 'integer'},
+              maybe: {type: ['number', 'null']},
+              state: {enum: ['Open', 'Closed', null]},
             },
             required: ['count', 'maybe', 'state'],
           },
@@ -195,14 +208,14 @@ describe('JSON-RPC client generator', () => {
             properties: {
               tags: {
                 type: 'array',
-                items: { type: ['string', 'null'] },
+                items: {type: ['string', 'null']},
               },
             },
             required: ['tags'],
           },
           result: {
             type: 'array',
-            items: { type: ['number', 'null'] },
+            items: {type: ['number', 'null']},
           },
         },
       },
@@ -226,12 +239,12 @@ describe('JSON-RPC client generator', () => {
             properties: {
               colors: {
                 type: 'array',
-                items: { enum: ['red', 'green'] },
+                items: {enum: ['red', 'green']},
               },
             },
             required: ['colors'],
           },
-          result: { type: 'boolean' },
+          result: {type: 'boolean'},
         },
       },
     } satisfies RpcSchema
@@ -246,15 +259,15 @@ describe('JSON-RPC client generator', () => {
     const schema = {
       methods: {
         'cyclic.tree': {
-          params: { type: 'object', properties: {} },
+          params: {type: 'object', properties: {}},
           result: {
             type: 'object',
             properties: {
-              a: { $ref: '#/properties/b' },
+              a: {$ref: '#/properties/b'},
               b: {
                 type: 'object',
                 properties: {
-                  back: { $ref: '#/properties/a' },
+                  back: {$ref: '#/properties/a'},
                 },
               },
             },
@@ -273,12 +286,12 @@ describe('JSON-RPC client generator', () => {
     const schema = {
       methods: {
         'a.lower': {
-          params: { type: 'object', properties: {} },
-          result: { type: 'boolean' },
+          params: {type: 'object', properties: {}},
+          result: {type: 'boolean'},
         },
         'B.upper': {
-          params: { type: 'object', properties: {} },
-          result: { type: 'boolean' },
+          params: {type: 'object', properties: {}},
+          result: {type: 'boolean'},
         },
       },
     } satisfies RpcSchema
@@ -299,7 +312,7 @@ describe('JSON-RPC client generator', () => {
           params: {
             type: ['object', 'null'],
             properties: {
-              id: { type: 'string' },
+              id: {type: 'string'},
             },
             required: ['id'],
           },
@@ -326,24 +339,24 @@ describe('JSON-RPC client generator', () => {
           params: {
             type: 'object',
             properties: {
-              name: { type: 'string', minLength: 3, maxLength: 100 },
-              slug: { type: 'string', pattern: '^[a-z0-9-]+$' },
-              path: { type: 'string', pattern: '^/api/v\\d+/users/' },
-              email: { type: 'string', format: 'email' },
-              website: { type: 'string', format: 'uri' },
-              age: { type: 'integer', minimum: 0, maximum: 150 },
-              score: { type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 1 },
+              name: {type: 'string', minLength: 3, maxLength: 100},
+              slug: {type: 'string', pattern: '^[a-z0-9-]+$'},
+              path: {type: 'string', pattern: '^/api/v\\d+/users/'},
+              email: {type: 'string', format: 'email'},
+              website: {type: 'string', format: 'uri'},
+              age: {type: 'integer', minimum: 0, maximum: 150},
+              score: {type: 'number', exclusiveMinimum: 0, exclusiveMaximum: 1},
               tags: {
                 type: 'array',
-                items: { type: 'string', minLength: 1 },
+                items: {type: 'string', minLength: 1},
                 minItems: 1,
                 maxItems: 10,
               },
-              note: { type: ['string', 'null'], minLength: 1, maxLength: 20 },
+              note: {type: ['string', 'null'], minLength: 1, maxLength: 20},
             },
             required: ['name', 'slug', 'path', 'email', 'website', 'age', 'score', 'tags', 'note'],
           },
-          result: { type: 'integer', minimum: 1 },
+          result: {type: 'integer', minimum: 1},
         },
       },
     } satisfies RpcSchema
@@ -384,8 +397,8 @@ describe('JSON-RPC client generator', () => {
                 items: {
                   type: 'object',
                   properties: {
-                    taxCategoryId: { type: 'string' },
-                    netAmount: { type: 'number' },
+                    taxCategoryId: {type: 'string'},
+                    netAmount: {type: 'number'},
                   },
                   required: ['taxCategoryId', 'netAmount'],
                 },
@@ -415,9 +428,9 @@ describe('JSON-RPC client generator', () => {
     const schema = {
       methods: {
         'unsupported.oneOf': {
-          params: { type: 'object', properties: {} },
+          params: {type: 'object', properties: {}},
           result: {
-            oneOf: [{ type: 'string' }, { type: 'number' }],
+            oneOf: [{type: 'string'}, {type: 'number'}],
           },
         },
       },
@@ -446,10 +459,10 @@ describe('JSON-RPC client generator', () => {
       expect(request).toMatchObject({
         id: 'request-1',
         method: 'math.add',
-        params: { left: 1, right: 2 },
+        params: {left: 1, right: 2},
       })
 
-      return jsonResponse({ jsonrpc: '2.0', id: request.id, result: '3' })
+      return jsonResponse({jsonrpc: '2.0', id: request.id, result: '3'})
     }
 
     const rpc = clientModule.createRpcApi({
@@ -457,19 +470,19 @@ describe('JSON-RPC client generator', () => {
       fetch: fetchImpl,
       headers: (context) => {
         seenContexts.push(context)
-        return { Authorization: 'Bearer test' }
+        return {Authorization: 'Bearer test'}
       },
       idGenerator: () => 'request-1',
       transformResult: (method, result) => method === 'math.add' ? Number(result) : result,
     })
 
     await expect(
-      rpc.math.add({ left: 1, right: 2 }, {
+      rpc.math.add({left: 1, right: 2}, {
         signal: abort.signal,
-        headers: { 'X-Request': 'single' },
+        headers: {'X-Request': 'single'},
       })
     ).resolves.toBe(3)
-    expect(seenContexts).toEqual([{ methods: ['math.add'], batch: false }])
+    expect(seenContexts).toEqual([{methods: ['math.add'], batch: false}])
   })
 
   it('maps x-elarion-file nodes to native File in types and Zod schemas', () => {
@@ -493,8 +506,8 @@ describe('JSON-RPC client generator', () => {
     const generated = generateRpcClientFiles(fileClientTestSchema())
     const clientModule = await loadGeneratedFileClient(generated.clientSource)
 
-    const upload = new File([new TextEncoder().encode('id;name')], 'clients.csv', { type: 'text/csv' })
-    const extra = new File([new TextEncoder().encode('x')], 'extra.bin', { type: 'application/octet-stream' })
+    const upload = new File([new TextEncoder().encode('id;name')], 'clients.csv', {type: 'text/csv'})
+    const extra = new File([new TextEncoder().encode('x')], 'extra.bin', {type: 'application/octet-stream'})
 
     let wireParams: Record<string, unknown> | undefined
     const fetchImpl: FetchLike = async (_input, init) => {
@@ -503,7 +516,7 @@ describe('JSON-RPC client generator', () => {
       return jsonResponse({
         jsonrpc: '2.0',
         id: request.id,
-        result: { contentType: 'application/pdf', fileName: 'report.pdf', data: btoa('pdf-bytes') },
+        result: {contentType: 'application/pdf', fileName: 'report.pdf', data: btoa('pdf-bytes')},
       })
     }
 
@@ -521,7 +534,7 @@ describe('JSON-RPC client generator', () => {
 
     expect(wireParams).toMatchObject({
       container: 'invoices',
-      required: { contentType: 'text/csv', fileName: 'clients.csv', data: btoa('id;name') },
+      required: {contentType: 'text/csv', fileName: 'clients.csv', data: btoa('id;name')},
     })
     expect((wireParams?.attachments as unknown[])[0]).toMatchObject({
       contentType: 'application/octet-stream',
@@ -546,7 +559,7 @@ describe('JSON-RPC client generator', () => {
       return jsonResponse({
         jsonrpc: '2.0',
         id: request.id,
-        result: { contentType: 'text/plain', data: btoa('ok') },
+        result: {contentType: 'text/plain', data: btoa('ok')},
       })
     }
 
@@ -560,12 +573,12 @@ describe('JSON-RPC client generator', () => {
 
     const result = await client.call('files.roundTrip', {
       container: 'invoices',
-      required: new File([new TextEncoder().encode('raw')], 'raw.txt', { type: 'text/plain' }),
+      required: new File([new TextEncoder().encode('raw')], 'raw.txt', {type: 'text/plain'}),
     }) as File
 
     // Conversion is independent of validation: the wire always carries the envelope, and the caller
     // always receives a File.
-    expect(wireParams?.required).toMatchObject({ contentType: 'text/plain', data: btoa('raw') })
+    expect(wireParams?.required).toMatchObject({contentType: 'text/plain', data: btoa('raw')})
     expect(result).toBeInstanceOf(File)
   })
 
@@ -582,7 +595,7 @@ describe('JSON-RPC client generator', () => {
       idGenerator: () => 'request-1',
     })
 
-    await expect(transportClient.call('math.add', { left: 1, right: 2 }))
+    await expect(transportClient.call('math.add', {left: 1, right: 2}))
       .rejects.toMatchObject({
         name: 'RpcTransportError',
         status: 503,
@@ -594,25 +607,25 @@ describe('JSON-RPC client generator', () => {
       fetch: async () => jsonResponse({
         jsonrpc: '2.0',
         id: 'request-2',
-        error: { code: -32602, message: 'Invalid params', data: { field: 'left' } },
+        error: {code: -32602, message: 'Invalid params', data: {field: 'left'}},
       }),
       idGenerator: () => 'request-2',
     })
 
-    await expect(rpcClient.call('math.add', { left: 1, right: 2 }))
+    await expect(rpcClient.call('math.add', {left: 1, right: 2}))
       .rejects.toMatchObject({
         name: 'RpcError',
         code: -32602,
-        data: { field: 'left' },
+        data: {field: 'left'},
       })
 
     const mismatchedIdClient = clientModule.createRpcClient({
       url: 'https://example.test/rpc',
-      fetch: async () => jsonResponse({ jsonrpc: '2.0', id: 'different-request', result: 3 }),
+      fetch: async () => jsonResponse({jsonrpc: '2.0', id: 'different-request', result: 3}),
       idGenerator: () => 'request-3',
     })
 
-    await expect(mismatchedIdClient.call('math.add', { left: 1, right: 2 }))
+    await expect(mismatchedIdClient.call('math.add', {left: 1, right: 2}))
       .rejects.toMatchObject({
         name: 'RpcProtocolError',
         message: 'JSON-RPC response id does not match request id.',
@@ -629,12 +642,12 @@ describe('JSON-RPC client generator', () => {
       fetch: async () => jsonResponse({
         jsonrpc: '2.0',
         id: null,
-        error: { code: -32700, message: 'Parse error' },
+        error: {code: -32700, message: 'Parse error'},
       }),
       idGenerator: () => 'request-1',
     })
 
-    await expect(client.call('math.add', { left: 1, right: 2 })).rejects.toMatchObject({
+    await expect(client.call('math.add', {left: 1, right: 2})).rejects.toMatchObject({
       name: 'RpcError',
       code: -32700,
       message: 'Parse error',
@@ -652,13 +665,13 @@ describe('JSON-RPC client generator', () => {
       fetch: async () => jsonResponse({
         jsonrpc: '2.0',
         id: null,
-        error: { code: -32600, message: 'Batch too large' },
+        error: {code: -32600, message: 'Batch too large'},
       }),
       idGenerator: () => 'request-1',
     })
 
     await expect(rpc.$batch([
-      rpc.$request.math.add({ left: 1, right: 2 }),
+      rpc.$request.math.add({left: 1, right: 2}),
     ] as const)).rejects.toMatchObject({
       name: 'RpcError',
       code: -32600,
@@ -674,14 +687,14 @@ describe('JSON-RPC client generator', () => {
       url: 'https://example.test/rpc',
       fetch: async (_input, init) => {
         const request = JSON.parse(String(init?.body)) as { id: string }
-        return jsonResponse({ jsonrpc: '2.0', id: request.id, result: 3 })
+        return jsonResponse({jsonrpc: '2.0', id: request.id, result: 3})
       },
       idGenerator: () => 'request-1',
       validateResults: false,
       transformResult: () => null,
     })
 
-    await expect(client.call('math.add', { left: 1, right: 2 })).resolves.toBeNull()
+    await expect(client.call('math.add', {left: 1, right: 2})).resolves.toBeNull()
   })
 
   it('exposes Elarion app-error code getters on RpcError, matching the server AppErrorMapper', async () => {
@@ -703,12 +716,12 @@ describe('JSON-RPC client generator', () => {
       fetch: async () => jsonResponse({
         jsonrpc: '2.0',
         id: 'request-1',
-        error: { code: clientModule.ElarionErrorCodes.notFound, message: 'Client not found' },
+        error: {code: clientModule.ElarionErrorCodes.notFound, message: 'Client not found'},
       }),
       idGenerator: () => 'request-1',
     })
 
-    await expect(notFoundClient.call('math.add', { left: 1, right: 2 })).rejects.toMatchObject({
+    await expect(notFoundClient.call('math.add', {left: 1, right: 2})).rejects.toMatchObject({
       name: 'RpcError',
       code: -32001,
       isNotFound: true,
@@ -716,14 +729,14 @@ describe('JSON-RPC client generator', () => {
     })
 
     const cases = [
-      { code: -32002, getter: 'isConflict' },
-      { code: -32003, getter: 'isForbidden' },
-      { code: -32004, getter: 'isBusinessRule' },
-      { code: -32005, getter: 'isUnauthorized' },
-      { code: -32602, getter: 'isInvalidParams' },
-      { code: -32603, getter: 'isInternalError' },
+      {code: -32002, getter: 'isConflict'},
+      {code: -32003, getter: 'isForbidden'},
+      {code: -32004, getter: 'isBusinessRule'},
+      {code: -32005, getter: 'isUnauthorized'},
+      {code: -32602, getter: 'isInvalidParams'},
+      {code: -32603, getter: 'isInternalError'},
     ] as const
-    for (const { code, getter } of cases) {
+    for (const {code, getter} of cases) {
       const error = new clientModule.RpcError(code, 'boom')
       expect(error[getter]).toBe(true)
       expect(error.isNotFound).toBe(false)
@@ -748,43 +761,43 @@ describe('JSON-RPC client generator', () => {
         expect(requests.map((request) => request.method)).toEqual(['math.add', 'user.get', 'math.add'])
 
         return jsonResponse([
-          { jsonrpc: '2.0', id: 'request-2', error: { code: -32601, message: 'Method not found' } },
-          { jsonrpc: '2.0', id: 'request-3', result: 'not a number' },
-          { jsonrpc: '2.0', id: 'request-1', result: 3 },
+          {jsonrpc: '2.0', id: 'request-2', error: {code: -32601, message: 'Method not found'}},
+          {jsonrpc: '2.0', id: 'request-3', result: 'not a number'},
+          {jsonrpc: '2.0', id: 'request-1', result: 3},
         ])
       },
       headers: async (context) => {
         seenContexts.push(context)
-        return { 'X-Batch': String(context.batch) }
+        return {'X-Batch': String(context.batch)}
       },
       idGenerator: () => ids.shift() ?? 'unexpected',
     })
 
     const results = await rpc.$batch([
-      rpc.$request.math.add({ left: 1, right: 2 }),
-      rpc.$request.user.get({ id: 'user-1' }),
-      rpc.$request.math.add({ left: 3, right: 4 }),
+      rpc.$request.math.add({left: 1, right: 2}),
+      rpc.$request.user.get({id: 'user-1'}),
+      rpc.$request.math.add({left: 3, right: 4}),
     ] as const)
 
-    expect(results[0]).toMatchObject({ ok: true, result: 3 })
-    expect(results[1]).toMatchObject({ ok: false, error: { code: -32601 } })
-    expect(results[2]).toMatchObject({ ok: false, error: { code: -32603 } })
+    expect(results[0]).toMatchObject({ok: true, result: 3})
+    expect(results[1]).toMatchObject({ok: false, error: {code: -32601}})
+    expect(results[2]).toMatchObject({ok: false, error: {code: -32603}})
     expect(seenContexts).toEqual([
-      { methods: ['math.add', 'user.get', 'math.add'], batch: true },
+      {methods: ['math.add', 'user.get', 'math.add'], batch: true},
     ])
 
     const duplicateIdClient = clientModule.createRpcApi({
       url: 'https://example.test/rpc',
       fetch: async () => jsonResponse([
-        { jsonrpc: '2.0', id: 'request-1', result: 3 },
-        { jsonrpc: '2.0', id: 'request-1', result: 7 },
+        {jsonrpc: '2.0', id: 'request-1', result: 3},
+        {jsonrpc: '2.0', id: 'request-1', result: 7},
       ]),
       idGenerator: () => 'request-1',
     })
 
     await expect(duplicateIdClient.$batch([
-      duplicateIdClient.$request.math.add({ left: 1, right: 2 }),
-      duplicateIdClient.$request.math.add({ left: 3, right: 4 }),
+      duplicateIdClient.$request.math.add({left: 1, right: 2}),
+      duplicateIdClient.$request.math.add({left: 3, right: 4}),
     ] as const)).rejects.toMatchObject({
       name: 'RpcProtocolError',
       message: 'JSON-RPC batch response contains a duplicate id.',
@@ -804,7 +817,7 @@ describe('JSON-RPC client generator', () => {
         seenContexts.push(context)
         events.push('start')
         return {
-          headers: { traceparent: '00-trace-span-01' },
+          headers: {traceparent: '00-trace-span-01'},
           setError() {
             events.push('error')
           },
@@ -819,15 +832,15 @@ describe('JSON-RPC client generator', () => {
       url: 'https://example.test/rpc',
       fetch: async (_input, init) => {
         seenTraceparent = new Headers(init?.headers).get('traceparent')
-        return jsonResponse({ jsonrpc: '2.0', id: 'request-1', result: 3 })
+        return jsonResponse({jsonrpc: '2.0', id: 'request-1', result: 3})
       },
       idGenerator: () => 'request-1',
       instrumentation,
     })
 
-    await expect(okClient.call('math.add', { left: 1, right: 2 })).resolves.toBe(3)
+    await expect(okClient.call('math.add', {left: 1, right: 2})).resolves.toBe(3)
     expect(seenTraceparent).toBe('00-trace-span-01')
-    expect(seenContexts).toEqual([{ methods: ['math.add'], batch: false }])
+    expect(seenContexts).toEqual([{methods: ['math.add'], batch: false}])
     expect(events).toEqual(['start', 'end'])
 
     events.length = 0
@@ -836,14 +849,14 @@ describe('JSON-RPC client generator', () => {
       fetch: async () => jsonResponse({
         jsonrpc: '2.0',
         id: 'request-2',
-        error: { code: -32602, message: 'Invalid params' },
+        error: {code: -32602, message: 'Invalid params'},
       }),
       idGenerator: () => 'request-2',
       instrumentation,
     })
 
-    await expect(errorClient.call('math.add', { left: 1, right: 2 }))
-      .rejects.toMatchObject({ name: 'RpcError', code: -32602 })
+    await expect(errorClient.call('math.add', {left: 1, right: 2}))
+      .rejects.toMatchObject({name: 'RpcError', code: -32602})
     expect(events).toEqual(['start', 'error', 'end'])
   })
 
@@ -864,10 +877,10 @@ describe('JSON-RPC client generator', () => {
 
     const sessionModule = await loadGeneratedSessionClient(source)
     const snapshot = {
-      user: { id: 'u-1', isAuthenticated: true, roles: ['admin'], permissions: ['billing.write'] },
-      modules: { Billing: true, Experiments: false },
-      flags: { 'new-checkout': true },
-      variants: { ForecastAlgorithm: 'neural' },
+      user: {id: 'u-1', isAuthenticated: true, roles: ['admin'], permissions: ['billing.write']},
+      modules: {Billing: true, Experiments: false},
+      flags: {'new-checkout': true},
+      variants: {ForecastAlgorithm: 'neural'},
     }
 
     const provider = sessionModule.createElarionOpenFeatureProvider(snapshot)
@@ -878,9 +891,12 @@ describe('JSON-RPC client generator', () => {
     expect(provider.resolveBooleanEvaluation('permission.billing.read', false).value).toBe(false)
     expect(provider.resolveBooleanEvaluation('role.admin', false).value).toBe(true)
     expect(provider.resolveBooleanEvaluation('new-checkout', false).value).toBe(true)
-    expect(provider.resolveBooleanEvaluation('unknown-flag', false)).toMatchObject({ value: false, reason: 'DEFAULT' })
-    expect(provider.resolveStringEvaluation('ForecastAlgorithm', 'control')).toMatchObject({ value: 'neural', variant: 'neural' })
-    expect(provider.resolveStringEvaluation('missing', 'control')).toMatchObject({ value: 'control', reason: 'DEFAULT' })
+    expect(provider.resolveBooleanEvaluation('unknown-flag', false)).toMatchObject({value: false, reason: 'DEFAULT'})
+    expect(provider.resolveStringEvaluation('ForecastAlgorithm', 'control')).toMatchObject({
+      value: 'neural',
+      variant: 'neural'
+    })
+    expect(provider.resolveStringEvaluation('missing', 'control')).toMatchObject({value: 'control', reason: 'DEFAULT'})
 
     const caps = sessionModule.createSessionCapabilities(snapshot)
     expect(caps.isModuleEnabled('Billing')).toBe(true)
@@ -919,7 +935,7 @@ describe('JSON-RPC client generator', () => {
     // runtime-loaded here because @tanstack/react-start is a consumer-side peer dependency.
     const transpiled = ts.transpileModule(source, {
       reportDiagnostics: true,
-      compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
+      compilerOptions: {module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022},
     })
     expect(transpiled.diagnostics ?? []).toHaveLength(0)
     expect(transpiled.outputText).toContain('forwardRequestCookie')
@@ -946,18 +962,18 @@ describe('JSON-RPC client generator', () => {
     const schema = sessionSchema()
     schema.capabilities = {
       modules: {
-        Clients: { features: ['client-portal-v2', 'bulk-import'] },
-        Invoicing: { features: ['late-fees'] },
+        Clients: {features: ['client-portal-v2', 'bulk-import']},
+        Invoicing: {features: ['late-fees']},
       },
       permissions: [
-        { permission: 'clients.read', resource: 'clients', verb: 'read' },
-        { permission: 'clients.write', resource: 'clients', verb: 'write' },
-        { permission: 'invoices.read', resource: 'invoices', verb: 'read' },
+        {permission: 'clients.read', resource: 'clients', verb: 'read'},
+        {permission: 'clients.write', resource: 'clients', verb: 'write'},
+        {permission: 'invoices.read', resource: 'invoices', verb: 'read'},
       ],
       roles: ['billing-admin'],
     }
 
-    const generated = generateRpcClientFiles(schema, { generatedBy: 'test', sourceLabel: 'session.json' })
+    const generated = generateRpcClientFiles(schema, {generatedBy: 'test', sourceLabel: 'session.json'})
     const source = generated.sessionClientSource as string
 
     // Const objects with literal-union type aliases — a typo in a capability check is a compile error.
@@ -988,7 +1004,7 @@ describe('JSON-RPC client generator', () => {
   })
 
   it('falls back to string aliases when the schema has no capabilities block', () => {
-    const generated = generateRpcClientFiles(sessionSchema(), { generatedBy: 'test', sourceLabel: 'session.json' })
+    const generated = generateRpcClientFiles(sessionSchema(), {generatedBy: 'test', sourceLabel: 'session.json'})
     const source = generated.sessionClientSource as string
 
     expect(source).toContain('export type ModuleName = string')
@@ -1009,8 +1025,8 @@ describe('JSON-RPC client generator', () => {
     const rpc = clientModule.createRpcApi({
       url: 'https://example.test/rpc',
       fetch: async () => jsonResponse([
-        { jsonrpc: '2.0', id: 'request-1', result: 3 },
-        { jsonrpc: '2.0', id: 'request-2', error: { code: -32601, message: 'Method not found' } },
+        {jsonrpc: '2.0', id: 'request-1', result: 3},
+        {jsonrpc: '2.0', id: 'request-2', error: {code: -32601, message: 'Method not found'}},
       ]),
       idGenerator: () => ids.shift() ?? 'unexpected',
       instrumentation: {
@@ -1029,12 +1045,12 @@ describe('JSON-RPC client generator', () => {
     })
 
     const results = await rpc.$batch([
-      rpc.$request.math.add({ left: 1, right: 2 }),
-      rpc.$request.math.add({ left: 3, right: 4 }),
+      rpc.$request.math.add({left: 1, right: 2}),
+      rpc.$request.math.add({left: 3, right: 4}),
     ] as const)
 
-    expect(results[0]).toMatchObject({ ok: true, result: 3 })
-    expect(results[1]).toMatchObject({ ok: false, error: { code: -32601 } })
+    expect(results[0]).toMatchObject({ok: true, result: 3})
+    expect(results[1]).toMatchObject({ok: false, error: {code: -32601}})
     expect(events).toEqual(['start:true:2', 'end'])
   })
 
@@ -1054,41 +1070,45 @@ describe('JSON-RPC client generator', () => {
       const items = Array.isArray(request) ? request : [request]
       for (const item of items) bodies.push(item)
       const respond = (item: { id: string; method: string }) =>
-        ({ jsonrpc: '2.0', id: item.id, result: item.method === 'math.add' ? 3 : { id: 'u', name: 'n' } })
+        ({jsonrpc: '2.0', id: item.id, result: item.method === 'math.add' ? 3 : {id: 'u', name: 'n'}})
       return jsonResponse(Array.isArray(request) ? request.map(respond) : respond(request))
     }
 
     const meta = (index: number) => bodies[index].params._meta as Record<string, string> | undefined
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rpc = clientModule.createRpcApi({ url: 'https://example.test/rpc', fetch: fetchImpl }) as any
+    const rpc = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: fetchImpl}) as any
 
-    await rpc.math.add({ left: 1, right: 2 })
+    await rpc.math.add({left: 1, right: 2})
     expect(meta(0)?.[metaKey]).toEqual(expect.any(String))
     expect((meta(0)?.[metaKey] ?? '').length).toBeGreaterThan(0)
 
     // A non-idempotent operation never gets a key.
-    await rpc.user.get({ id: 'x' })
+    await rpc.user.get({id: 'x'})
     expect(meta(1)).toBeUndefined()
 
     // A caller-supplied key (stable across a retry layer's retries) is used verbatim.
-    await rpc.math.add({ left: 1, right: 2 }, { idempotencyKey: 'fixed-key' })
+    await rpc.math.add({left: 1, right: 2}, {idempotencyKey: 'fixed-key'})
     expect(meta(2)?.[metaKey]).toBe('fixed-key')
 
     // `false` disables the key for a single call.
-    await rpc.math.add({ left: 1, right: 2 }, { idempotencyKey: false })
+    await rpc.math.add({left: 1, right: 2}, {idempotencyKey: false})
     expect(meta(3)).toBeUndefined()
 
     // Each batch item gets its own key (batch-correct, per-call granularity).
-    await rpc.$batch([rpc.$request.math.add({ left: 1, right: 2 }), rpc.$request.math.add({ left: 3, right: 4 })] as const)
+    await rpc.$batch([rpc.$request.math.add({left: 1, right: 2}), rpc.$request.math.add({left: 3, right: 4})] as const)
     expect(meta(4)?.[metaKey]).toEqual(expect.any(String))
     expect(meta(5)?.[metaKey]).toEqual(expect.any(String))
     expect(meta(4)?.[metaKey]).not.toBe(meta(5)?.[metaKey])
 
     // Globally disabling opts every operation out.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const off = clientModule.createRpcApi({ url: 'https://example.test/rpc', fetch: fetchImpl, idempotency: { enabled: false } }) as any
-    await off.math.add({ left: 1, right: 2 })
+    const off = clientModule.createRpcApi({
+      url: 'https://example.test/rpc',
+      fetch: fetchImpl,
+      idempotency: {enabled: false}
+    }) as any
+    await off.math.add({left: 1, right: 2})
     expect(meta(6)).toBeUndefined()
   })
 
@@ -1100,16 +1120,16 @@ describe('JSON-RPC client generator', () => {
     const fetchImpl: FetchLike = async (_input, init) => {
       fetchCalls += 1
       const request = JSON.parse(String(init?.body)) as { id: string }
-      return jsonResponse({ jsonrpc: '2.0', id: request.id, result: 3 })
+      return jsonResponse({jsonrpc: '2.0', id: request.id, result: 3})
     }
 
-    const rpc = clientModule.createRpcApi({ url: 'https://example.test/rpc', fetch: fetchImpl })
+    const rpc = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: fetchImpl})
 
-    await expect(rpc.math.add({ left: 1, right: 2 })).resolves.toBe(3)
+    await expect(rpc.math.add({left: 1, right: 2})).resolves.toBe(3)
     expect(fetchCalls).toBe(1)
 
     // Invalid params fail locally with a descriptive error and never reach the wire.
-    await expect(rpc.math.add({ left: 'one', right: 2 })).rejects.toMatchObject({
+    await expect(rpc.math.add({left: 'one', right: 2})).rejects.toMatchObject({
       name: 'RpcParamsValidationError',
       method: 'math.add',
       message: expect.stringContaining('math.add'),
@@ -1118,8 +1138,8 @@ describe('JSON-RPC client generator', () => {
 
     // An invalid batch item fails the whole batch locally before anything is sent.
     await expect(rpc.$batch([
-      rpc.$request.math.add({ left: 1, right: 2 }),
-      rpc.$request.math.add({ left: 'oops', right: 4 }),
+      rpc.$request.math.add({left: 1, right: 2}),
+      rpc.$request.math.add({left: 'oops', right: 4}),
     ] as const)).rejects.toMatchObject({
       name: 'RpcParamsValidationError',
       method: 'math.add',
@@ -1132,7 +1152,7 @@ describe('JSON-RPC client generator', () => {
       fetch: fetchImpl,
       validateParams: false,
     })
-    await expect(unchecked.math.add({ left: 'one', right: 2 })).resolves.toBe(3)
+    await expect(unchecked.math.add({left: 'one', right: 2})).resolves.toBe(3)
     expect(fetchCalls).toBe(2)
   })
 })
@@ -1143,11 +1163,13 @@ interface SessionClientModule {
     resolveBooleanEvaluation(flagKey: string, defaultValue: boolean): { value: boolean; reason: string }
     resolveStringEvaluation(flagKey: string, defaultValue: string): { value: string; variant?: string; reason: string }
   }
+
   createSessionCapabilities(snapshot: unknown): {
     isModuleEnabled(name: string): boolean
     hasPermission(permission: string): boolean
     getVariant(name: string): string | undefined
   }
+
   Keys: { module(name: string): string; permission(permission: string): string; role(role: string): string }
 }
 
@@ -1155,8 +1177,8 @@ function sessionSchema(): RpcSchema {
   return {
     methods: {
       'elarion.session': {
-        params: { type: 'object', properties: {} },
-        result: { type: 'object', properties: {} },
+        params: {type: 'object', properties: {}},
+        result: {type: 'object', properties: {}},
       },
     },
   }
@@ -1182,26 +1204,26 @@ function rpcClientTestSchema(): RpcSchema {
         params: {
           type: 'object',
           properties: {
-            left: { type: 'number' },
-            right: { type: 'number' },
+            left: {type: 'number'},
+            right: {type: 'number'},
           },
           required: ['left', 'right'],
         },
-        result: { type: 'number' },
+        result: {type: 'number'},
       },
       'user.get': {
         params: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
+            id: {type: 'string'},
           },
           required: ['id'],
         },
         result: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
-            name: { type: 'string' },
+            id: {type: 'string'},
+            name: {type: 'string'},
           },
           required: ['id', 'name'],
         },
@@ -1216,9 +1238,9 @@ function fileClientTestSchema(): RpcSchema {
     'x-elarion-file': true,
     description: 'A binary file payload; data is the base64-encoded content.',
     properties: {
-      contentType: { type: 'string' },
-      fileName: { type: 'string' },
-      data: { type: 'string', format: 'byte' },
+      contentType: {type: 'string'},
+      fileName: {type: 'string'},
+      data: {type: 'string', format: 'byte'},
     },
     required: ['contentType', 'data'],
   } satisfies JsonSchema
@@ -1229,10 +1251,10 @@ function fileClientTestSchema(): RpcSchema {
         params: {
           type: 'object',
           properties: {
-            container: { type: 'string' },
+            container: {type: 'string'},
             required: fileSchema,
             file: fileSchema,
-            attachments: { type: 'array', items: fileSchema },
+            attachments: {type: 'array', items: fileSchema},
           },
           required: ['container', 'required'],
         },
@@ -1345,7 +1367,7 @@ async function loadGeneratedClient(clientSource: string): Promise<GeneratedClien
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {'Content-Type': 'application/json'},
   })
 }
 
@@ -1363,7 +1385,7 @@ describe('client events (ADR-0043)', () => {
 
   it('omits the events client and stays byte-identical when the schema declares no events', () => {
     const without = generateRpcClientFiles(rpcClientTestSchema())
-    const withEmptyEvents = generateRpcClientFiles({ ...rpcClientTestSchema(), events: {} })
+    const withEmptyEvents = generateRpcClientFiles({...rpcClientTestSchema(), events: {}})
 
     expect(without.eventsClientSource).toBeUndefined()
     expect(withEmptyEvents.eventsClientSource).toBeUndefined()
@@ -1401,8 +1423,8 @@ describe('client events (ADR-0043)', () => {
     sources[0].emit('elarion.connected', '{}')
     expect(connectedCount).toBe(1)
 
-    sources[0].emit('invoicing.invoiceChanged', JSON.stringify({ invoiceId: 'inv-1' }))
-    expect(received).toEqual([{ invoiceId: 'inv-1' }])
+    sources[0].emit('invoicing.invoiceChanged', JSON.stringify({invoiceId: 'inv-1'}))
+    expect(received).toEqual([{invoiceId: 'inv-1'}])
 
     // Dropping the last subscription closes the connection without opening a new one.
     unsubscribe()
@@ -1423,14 +1445,14 @@ describe('client events (ADR-0043)', () => {
         sources.push(source)
         return source
       },
-      onEventError: (topic, error) => errors.push({ topic, error }),
+      onEventError: (topic, error) => errors.push({topic, error}),
     })
 
     const received: unknown[] = []
     events['invoicing']['invoiceChanged'].subscribe((payload) => received.push(payload))
     await microtasks()
 
-    sources[0].emit('invoicing.invoiceChanged', JSON.stringify({ wrong: true }))
+    sources[0].emit('invoicing.invoiceChanged', JSON.stringify({wrong: true}))
 
     expect(received).toEqual([])
     expect(errors).toHaveLength(1)
@@ -1450,11 +1472,13 @@ describe('client events (ADR-0043)', () => {
       },
     })
 
-    events['invoicing']['invoiceChanged'].subscribe(() => {})
+    events['invoicing']['invoiceChanged'].subscribe(() => {
+    })
     await microtasks()
     expect(sources).toHaveLength(1)
 
-    events.$client.subscribe('invoicing.invoiceChanged', { resource: 'customer:42' }, () => {})
+    events.$client.subscribe('invoicing.invoiceChanged', {resource: 'customer:42'}, () => {
+    })
     await microtasks()
 
     expect(sources).toHaveLength(2)
@@ -1467,7 +1491,8 @@ class FakeEventSource {
   readonly listeners = new Map<string, Array<(event: { data?: unknown }) => void>>()
   closed = false
 
-  constructor(readonly url: string) {}
+  constructor(readonly url: string) {
+  }
 
   addEventListener(type: string, listener: (event: { data?: unknown }) => void): void {
     const list = this.listeners.get(type) ?? []
@@ -1481,20 +1506,24 @@ class FakeEventSource {
 
   emit(type: string, data: string): void {
     for (const listener of this.listeners.get(type) ?? []) {
-      listener({ data })
+      listener({data})
     }
   }
 }
 
 interface EventsTopicApiForTests {
   subscribe(handler: (payload: unknown) => void): () => void
+
   subscribe(options: { resource?: string }, handler: (payload: unknown) => void): () => void
 }
 
 interface EventsClientForTests {
   subscribe(topic: string, handler: (payload: unknown) => void): () => void
+
   subscribe(topic: string, options: { resource?: string }, handler: (payload: unknown) => void): () => void
+
   onConnected(handler: () => void): () => void
+
   close(): void
 }
 
@@ -1514,12 +1543,12 @@ function eventsTestSchema(): RpcSchema {
         params: {
           type: 'object',
           properties: {
-            left: { type: 'number' },
-            right: { type: 'number' },
+            left: {type: 'number'},
+            right: {type: 'number'},
           },
           required: ['left', 'right'],
         },
-        result: { type: 'number' },
+        result: {type: 'number'},
       },
     },
     events: {
@@ -1527,7 +1556,7 @@ function eventsTestSchema(): RpcSchema {
         payload: {
           type: 'object',
           properties: {
-            invoiceId: { type: 'string' },
+            invoiceId: {type: 'string'},
           },
           required: ['invoiceId'],
         },

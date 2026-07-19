@@ -27,21 +27,18 @@ public static class MigrationServiceCollectionExtensions {
 
         // Fail loud on a second registration: silently keeping the first would leave the second
         // database unmigrated. One runner per host; a second database is a second host concern.
-        if (services.Any(descriptor => descriptor.ServiceType == typeof(IMigrationRunner))) {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(IMigrationRunner)))
             throw new InvalidOperationException(
                 "An Elarion migration runner was already registered on this service collection; the runner migrates exactly one database.");
-        }
 
-        if (options.ScriptSources.Count == 0) {
+        if (options.ScriptSources.Count == 0)
             throw new InvalidOperationException(
                 "A migration runner requires at least one script source; call options.AddScripts(assembly, resourceNamePrefix).");
-        }
 
         services.AddSingleton<IMigrationRunner>(runnerFactory);
 
-        if (options.ApplyOnStartup) {
+        if (options.ApplyOnStartup)
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, MigrationHostedService>());
-        }
 
         return services;
     }

@@ -30,8 +30,11 @@ internal sealed class ClientEventSubscriptionLifecycle(
     TimeProvider? timeProvider = null) : IClientEventInterest, IDisposable {
     private readonly ILogger<ClientEventSubscriptionLifecycle> _logger =
         logger ?? NullLogger<ClientEventSubscriptionLifecycle>.Instance;
+
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private readonly Dictionary<ClientEventSubscription, InterestState> _interest = [];
+
     // The per-(topic, scope) observer dispatch chains: the tail every new callback appends behind. Entries are
     // removed once their chain drains, so an idle key holds no memory.
     private readonly Dictionary<ClientEventSubscription, Task> _dispatchTails = [];
@@ -41,7 +44,7 @@ internal sealed class ClientEventSubscriptionLifecycle(
         ArgumentException.ThrowIfNullOrEmpty(topic);
         lock (_lock) {
             return _interest.TryGetValue(new ClientEventSubscription { Topic = topic, Scope = scope }, out var state)
-                && state.Count > 0;
+                   && state.Count > 0;
         }
     }
 
@@ -52,6 +55,7 @@ internal sealed class ClientEventSubscriptionLifecycle(
                 state = new InterestState();
                 _interest[subscription] = state;
             }
+
             state.Count += 1;
             // "Active" is the observer-visible epoch, not the raw count: a resubscribe within the linger
             // cancels the pending inactive signal and must NOT re-fire active — interest never went away.
@@ -60,9 +64,7 @@ internal sealed class ClientEventSubscriptionLifecycle(
             state.LingerTimer?.Dispose();
             state.LingerTimer = null;
 
-            if (topic?.ObserverType is not { } observerType) {
-                return;
-            }
+            if (topic?.ObserverType is not { } observerType) return;
 
             var sink = new ClientEventSubscriberSink(subscription, writer, catalog, serialization);
             // Detached from the subscribe path by design; observed inside (catch-all + logging).
@@ -73,13 +75,9 @@ internal sealed class ClientEventSubscriptionLifecycle(
 
     public void OnUnsubscribed(ClientEventSubscription subscription) {
         lock (_lock) {
-            if (!_interest.TryGetValue(subscription, out var state) || state.Count == 0) {
-                return;
-            }
+            if (!_interest.TryGetValue(subscription, out var state) || state.Count == 0) return;
             state.Count -= 1;
-            if (state.Count > 0) {
-                return;
-            }
+            if (state.Count > 0) return;
 
             var topic = catalog.FindByName(subscription.Topic);
             if (topic?.ObserverType is not { } observerType) {
@@ -91,19 +89,18 @@ internal sealed class ClientEventSubscriptionLifecycle(
             state.LingerTimer?.Dispose();
             state.LingerTimer = _timeProvider.CreateTimer(
                 _ => OnLingerElapsed(subscription, observerType),
-                state: null, topic.InterestLinger, Timeout.InfiniteTimeSpan);
+                null, topic.InterestLinger, Timeout.InfiniteTimeSpan);
         }
     }
 
-    private void OnLingerElapsed(ClientEventSubscription subscription, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type observerType) {
+    private void OnLingerElapsed(ClientEventSubscription subscription,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type observerType) {
         lock (_lock) {
-            if (!_interest.TryGetValue(subscription, out var state) || state.Count > 0) {
-                return;
-            }
+            if (!_interest.TryGetValue(subscription, out var state) || state.Count > 0) return;
             state.LingerTimer?.Dispose();
             _interest.Remove(subscription);
             EnqueueDispatch(subscription,
-                () => DispatchInterestChangedAsync(observerType, subscription, active: false));
+                () => DispatchInterestChangedAsync(observerType, subscription, false));
         }
     }
 
@@ -134,29 +131,30 @@ internal sealed class ClientEventSubscriptionLifecycle(
         await chained.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         lock (_lock) {
             // Only the task that is still the tail removes the entry — a newer append supersedes it.
-            if (_dispatchTails.TryGetValue(subscription, out var current) && ReferenceEquals(current, chained)) {
+            if (_dispatchTails.TryGetValue(subscription, out var current) && ReferenceEquals(current, chained))
                 _dispatchTails.Remove(subscription);
-            }
         }
     }
 
     private async Task DispatchSubscribedAsync(
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type observerType, ClientEventSubscription subscription, IClientEventSubscriberSink sink, bool becameActive) {
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+        Type observerType, ClientEventSubscription subscription, IClientEventSubscriberSink sink, bool becameActive) {
         // Sequenced: a producer warms up on the interest transition before it is asked to greet.
-        if (becameActive) {
-            await DispatchInterestChangedAsync(observerType, subscription, active: true);
-        }
+        if (becameActive) await DispatchInterestChangedAsync(observerType, subscription, true);
         await DispatchAsync(observerType, subscription,
             (observer, ct) => observer.OnSubscribedAsync(subscription, sink, ct));
     }
 
     private Task DispatchInterestChangedAsync(
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type observerType, ClientEventSubscription subscription, bool active) =>
-        DispatchAsync(observerType, subscription,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+        Type observerType, ClientEventSubscription subscription, bool active) {
+        return DispatchAsync(observerType, subscription,
             (observer, ct) => observer.OnInterestChangedAsync(subscription, active, ct));
+    }
 
     private async Task DispatchAsync(
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type observerType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+        Type observerType,
         ClientEventSubscription subscription,
         Func<IClientEventSubscriptionObserver, CancellationToken, ValueTask> callback) {
         try {
@@ -176,9 +174,7 @@ internal sealed class ClientEventSubscriptionLifecycle(
 
     public void Dispose() {
         lock (_lock) {
-            foreach (var state in _interest.Values) {
-                state.LingerTimer?.Dispose();
-            }
+            foreach (var state in _interest.Values) state.LingerTimer?.Dispose();
             _interest.Clear();
         }
     }

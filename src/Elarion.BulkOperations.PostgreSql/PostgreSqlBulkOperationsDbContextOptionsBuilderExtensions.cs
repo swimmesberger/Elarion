@@ -10,11 +10,12 @@ public static class PostgreSqlBulkOperationsDbContextOptionsBuilderExtensions {
     /// Compose with the Npgsql provider:
     /// <c>options.UseNpgsql(...).UseElarionPostgreSqlBulkOperations()</c>.
     /// </summary>
-    public static DbContextOptionsBuilder UseElarionPostgreSqlBulkOperations(this DbContextOptionsBuilder optionsBuilder) {
+    public static DbContextOptionsBuilder UseElarionPostgreSqlBulkOperations(
+        this DbContextOptionsBuilder optionsBuilder) {
         ArgumentNullException.ThrowIfNull(optionsBuilder);
 
         var extension = optionsBuilder.Options.FindExtension<PostgreSqlBulkOperationsOptionsExtension>()
-            ?? new PostgreSqlBulkOperationsOptionsExtension();
+                        ?? new PostgreSqlBulkOperationsOptionsExtension();
         ((IDbContextOptionsBuilderInfrastructure)optionsBuilder).AddOrUpdateExtension(extension);
         return optionsBuilder;
     }
@@ -22,6 +23,8 @@ public static class PostgreSqlBulkOperationsDbContextOptionsBuilderExtensions {
     /// <inheritdoc cref="UseElarionPostgreSqlBulkOperations(DbContextOptionsBuilder)"/>
     public static DbContextOptionsBuilder<TContext> UseElarionPostgreSqlBulkOperations<TContext>(
         this DbContextOptionsBuilder<TContext> optionsBuilder)
-        where TContext : DbContext =>
-        (DbContextOptionsBuilder<TContext>)UseElarionPostgreSqlBulkOperations((DbContextOptionsBuilder)optionsBuilder);
+        where TContext : DbContext {
+        return (DbContextOptionsBuilder<TContext>)UseElarionPostgreSqlBulkOperations(
+            (DbContextOptionsBuilder)optionsBuilder);
+    }
 }

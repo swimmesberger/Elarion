@@ -16,8 +16,7 @@ namespace Elarion.Paging;
 /// append fixed-direction tiebreakers to the entry currently being built.
 /// </remarks>
 /// <typeparam name="T">The entity type being sorted.</typeparam>
-public sealed class SortMapBuilder<T>
-{
+public sealed class SortMapBuilder<T> {
     private readonly Dictionary<string, Func<IQueryable<T>, bool?, IOrderedQueryable<T>>> _entries =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -28,8 +27,7 @@ public sealed class SortMapBuilder<T>
     private Func<IQueryable<T>, bool, IOrderedQueryable<T>>? _currentPrimary;
     private bool _currentPrimaryDescending;
 
-    internal SortMapBuilder(string defaultKey)
-    {
+    internal SortMapBuilder(string defaultKey) {
         ArgumentException.ThrowIfNullOrWhiteSpace(defaultKey);
         _defaultKey = defaultKey;
     }
@@ -45,8 +43,7 @@ public sealed class SortMapBuilder<T>
     /// <param name="selector">The primary key selector for this sort.</param>
     /// <param name="direction">The default direction for the primary column.</param>
     public SortMapBuilder<T> Add<TKey>(
-        string key, Expression<Func<T, TKey>> selector, SortDirection direction = SortDirection.Ascending)
-    {
+        string key, Expression<Func<T, TKey>> selector, SortDirection direction = SortDirection.Ascending) {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(selector);
 
@@ -67,13 +64,9 @@ public sealed class SortMapBuilder<T>
     /// <param name="selector">The tiebreaker key selector.</param>
     /// <param name="direction">The direction for this tiebreaker column.</param>
     public SortMapBuilder<T> ThenBy<TKey>(
-        Expression<Func<T, TKey>> selector, SortDirection direction = SortDirection.Ascending)
-    {
+        Expression<Func<T, TKey>> selector, SortDirection direction = SortDirection.Ascending) {
         ArgumentNullException.ThrowIfNull(selector);
-        if (_currentKey is null)
-        {
-            throw new InvalidOperationException("ThenBy must follow CreateBuilder or Add.");
-        }
+        if (_currentKey is null) throw new InvalidOperationException("ThenBy must follow CreateBuilder or Add.");
 
         var descending = direction == SortDirection.Descending;
         _tiebreakers.Add(ordered =>
@@ -86,30 +79,21 @@ public sealed class SortMapBuilder<T>
     /// <see cref="FrozenDictionary{TKey, TValue}"/>. Further calls on this builder do not affect maps
     /// already built.
     /// </summary>
-    public SortMap<T> Build()
-    {
+    public SortMap<T> Build() {
         Flush();
-        return new(_defaultKey, _entries.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase));
+        return new SortMap<T>(_defaultKey, _entries.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase));
     }
 
-    private void Flush()
-    {
-        if (_currentKey is null)
-        {
-            return;
-        }
+    private void Flush() {
+        if (_currentKey is null) return;
 
         var primary = _currentPrimary!;
         var primaryDeclaredDescending = _currentPrimaryDescending;
         var tiebreakers = _tiebreakers.ToArray();
-        _entries[_currentKey] = (source, primaryDescendingOverride) =>
-        {
+        _entries[_currentKey] = (source, primaryDescendingOverride) => {
             var descending = primaryDescendingOverride ?? primaryDeclaredDescending;
             var ordered = primary(source, descending);
-            foreach (var tiebreaker in tiebreakers)
-            {
-                ordered = tiebreaker(ordered);
-            }
+            foreach (var tiebreaker in tiebreakers) ordered = tiebreaker(ordered);
 
             return ordered;
         };

@@ -8,5 +8,7 @@ public readonly record struct ResiliencePolicyReference {
     public required string Name { get; init; }
 
     /// <summary>Allows framework integrations to pass policy references to string-based APIs.</summary>
-    public static implicit operator string(ResiliencePolicyReference reference) => reference.Name;
+    public static implicit operator string(ResiliencePolicyReference reference) {
+        return reference.Name;
+    }
 }

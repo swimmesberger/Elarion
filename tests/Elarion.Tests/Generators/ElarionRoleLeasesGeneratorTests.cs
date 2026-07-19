@@ -7,8 +7,7 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ElarionRoleLeasesGeneratorTests
-{
+public sealed class ElarionRoleLeasesGeneratorTests {
     private const string ContextSource =
         """
         using Microsoft.EntityFrameworkCore;
@@ -25,8 +24,7 @@ public sealed class ElarionRoleLeasesGeneratorTests
         """;
 
     [Fact]
-    public void EmitsDbSetAndModelConfigurationSeam()
-    {
+    public void EmitsDbSetAndModelConfigurationSeam() {
         var result = RunGenerator(ContextSource);
 
         NoErrors(result);
@@ -34,7 +32,8 @@ public sealed class ElarionRoleLeasesGeneratorTests
 
         source.Should().Contain(
             "public DbSet<global::Elarion.Coordination.PostgreSql.RoleLeaseEntity> RoleLeases => Set<global::Elarion.Coordination.PostgreSql.RoleLeaseEntity>();");
-        source.Should().Contain("partial void OnEntitiesConfigured_GenerateElarionRoleLeases(ModelBuilder modelBuilder) =>");
+        source.Should()
+            .Contain("partial void OnEntitiesConfigured_GenerateElarionRoleLeases(ModelBuilder modelBuilder) =>");
         source.Should().Contain("UseElarionRoleLeases(");
         source.Should().Contain("tableName: null");
         source.Should().Contain("schema: null");
@@ -42,8 +41,7 @@ public sealed class ElarionRoleLeasesGeneratorTests
     }
 
     [Fact]
-    public void TableSchemaAndSnakeCaseOverrides_AreHonored()
-    {
+    public void TableSchemaAndSnakeCaseOverrides_AreHonored() {
         var result = RunGenerator(
             """
             using Microsoft.EntityFrameworkCore;
@@ -66,8 +64,7 @@ public sealed class ElarionRoleLeasesGeneratorTests
     }
 
     [Fact]
-    public void MissingGenerateDbSets_ReportsElrole001AndGeneratesNothing()
-    {
+    public void MissingGenerateDbSets_ReportsElrole001AndGeneratesNothing() {
         var result = RunGenerator(
             """
             using Microsoft.EntityFrameworkCore;
@@ -86,8 +83,7 @@ public sealed class ElarionRoleLeasesGeneratorTests
     }
 
     [Fact]
-    public void ComposesWithEfGeneratorSeamAndCompiles()
-    {
+    public void ComposesWithEfGeneratorSeamAndCompiles() {
         var ct = TestContext.Current.CancellationToken;
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var compilation = CSharpCompilation.Create(
@@ -97,7 +93,9 @@ public sealed class ElarionRoleLeasesGeneratorTests
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            new[] { new DbContextGenerator().AsSourceGenerator(), new ElarionRoleLeasesGenerator().AsSourceGenerator() },
+            new[] {
+                new DbContextGenerator().AsSourceGenerator(), new ElarionRoleLeasesGenerator().AsSourceGenerator()
+            },
             parseOptions: parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, ct);
 
@@ -107,21 +105,18 @@ public sealed class ElarionRoleLeasesGeneratorTests
     }
 
     [Fact]
-    public void IrrelevantEditReusesTargets()
-    {
+    public void IrrelevantEditReusesTargets() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new ElarionRoleLeasesGenerator(), ContextSource, "RoleLeasesTargets");
     }
 
     [Fact]
-    public void UnrelatedFileEditDoesNotRerunDiscovery()
-    {
+    public void UnrelatedFileEditDoesNotRerunDiscovery() {
         GeneratorCacheAssert.ReusesDiscoveryAfterUnrelatedFileEdit(
             new ElarionRoleLeasesGenerator(), ContextSource, "RoleLeasesTargets");
     }
 
-    private static GeneratorDriverRunResult RunGenerator(string source)
-    {
+    private static GeneratorDriverRunResult RunGenerator(string source) {
         var compilation = CSharpCompilation.Create(
             "ElarionRoleLeasesGeneratorTests",
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview))],
@@ -132,19 +127,20 @@ public sealed class ElarionRoleLeasesGeneratorTests
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    private static void NoErrors(GeneratorDriverRunResult result) =>
+    private static void NoErrors(GeneratorDriverRunResult result) {
         result.Diagnostics
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
+    }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
         return trustedPlatformAssemblies!

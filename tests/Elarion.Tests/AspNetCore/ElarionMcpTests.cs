@@ -24,21 +24,22 @@ public sealed class ElarionMcpTests {
     private sealed record PurgeCommand;
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     // The metadata table only ever contains MCP-surfaced methods (the generator filters out JSON-RPC-only ones),
     // so a JSON-RPC-only handler like "admin.purge" simply never appears here.
-    private static RpcMcpMetadataSource BuildMetadata() =>
-        new([
+    private static RpcMcpMetadataSource BuildMetadata() {
+        return new RpcMcpMetadataSource([
             new RpcMcpMethodMetadata {
                 MethodName = "clients.create",
                 RequestType = typeof(CreateClientCommand),
                 ToolName = "create_client",
                 Description = "Creates a client.",
-                Parameters = [new RpcMcpParameterDescriptor("DisplayName", "The display name.")],
-            },
+                Parameters = [new RpcMcpParameterDescriptor("DisplayName", "The display name.")]
+            }
         ]);
+    }
 
     [Fact]
     public void BuildTools_ProjectsMetadata() {
@@ -47,7 +48,7 @@ public sealed class ElarionMcpTests {
 
         tools.Should().ContainSingle();
         var tool = tools[0].ProtocolTool;
-        tool.Name.Should().Be("create_client");          // ToolName override honored
+        tool.Name.Should().Be("create_client"); // ToolName override honored
         tool.Description.Should().Be("Creates a client.");
 
         var properties = tool.InputSchema.GetProperty("properties");
@@ -60,7 +61,7 @@ public sealed class ElarionMcpTests {
     public void BuildTools_DerivesToolName_WhenNoOverride() {
         var metadata = new RpcMcpMetadataSource([
             new RpcMcpMethodMetadata { MethodName = "clients.create", RequestType = typeof(CreateClientCommand) },
-            new RpcMcpMethodMetadata { MethodName = "admin.purge", RequestType = typeof(PurgeCommand) },
+            new RpcMcpMethodMetadata { MethodName = "admin.purge", RequestType = typeof(PurgeCommand) }
         ]);
 
         var tools = ElarionMcpServiceExtensions.BuildTools(
@@ -75,7 +76,7 @@ public sealed class ElarionMcpTests {
         // "a.b" and "a_b" both resolve to the tool name "a_b" under the default transform.
         var metadata = new RpcMcpMetadataSource([
             new RpcMcpMethodMetadata { MethodName = "a.b", RequestType = typeof(PurgeCommand) },
-            new RpcMcpMethodMetadata { MethodName = "a_b", RequestType = typeof(PurgeCommand) },
+            new RpcMcpMethodMetadata { MethodName = "a_b", RequestType = typeof(PurgeCommand) }
         ]);
 
         var act = () => ElarionMcpServiceExtensions.BuildTools(
@@ -86,7 +87,7 @@ public sealed class ElarionMcpTests {
 
     [Fact]
     public void ToCallToolResult_Success_WrapsResultText() {
-        var tool = new ElarionMcpServerTool("clients.create", new Tool { Name = "create_client" }, includeErrorDetails: true);
+        var tool = new ElarionMcpServerTool("clients.create", new Tool { Name = "create_client" }, true);
 
         var result = tool.ToCallToolResult(
             new RpcToolResult { IsError = false, Text = "{\"id\":\"x\"}" }, Options);
@@ -99,7 +100,7 @@ public sealed class ElarionMcpTests {
 
     [Fact]
     public void ToCallToolResult_Error_SetsIsErrorAndStructuredContent() {
-        var tool = new ElarionMcpServerTool("clients.create", new Tool { Name = "create_client" }, includeErrorDetails: true);
+        var tool = new ElarionMcpServerTool("clients.create", new Tool { Name = "create_client" }, true);
 
         var result = tool.ToCallToolResult(
             new RpcToolResult { IsError = true, Text = "client not found", ErrorCode = -32001 }, Options);
@@ -114,7 +115,7 @@ public sealed class ElarionMcpTests {
 
     [Fact]
     public void ToCallToolResult_Error_OmitsStructuredContent_WhenDisabled() {
-        var tool = new ElarionMcpServerTool("clients.create", new Tool { Name = "create_client" }, includeErrorDetails: false);
+        var tool = new ElarionMcpServerTool("clients.create", new Tool { Name = "create_client" }, false);
 
         var result = tool.ToCallToolResult(
             new RpcToolResult { IsError = true, Text = "nope", ErrorCode = -32001 }, Options);
@@ -126,8 +127,7 @@ public sealed class ElarionMcpTests {
     [Fact]
     public void AddElarionJsonRpcDispatcher_RegistersFrozenUsableDispatcher() {
         var services = new ServiceCollection();
-        services.AddElarionJsonRpcDispatcher(
-            d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"));
+        services.AddElarionJsonRpcDispatcher(d => d.Map<CreateClientCommand, CreateClientResponse>("clients.create"));
 
         using var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<JsonRpcDispatcher>();

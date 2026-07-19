@@ -5,8 +5,7 @@ namespace Elarion.Messaging.Outbox;
 /// <summary>
 /// Configures the EF Core transactional outbox and its background delivery worker.
 /// </summary>
-public sealed class OutboxOptions
-{
+public sealed class OutboxOptions {
     /// <summary>
     /// Whether this instance runs the background delivery worker (<c>OutboxDeliveryService</c>).
     /// Defaults to <see langword="true"/>.

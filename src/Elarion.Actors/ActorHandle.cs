@@ -50,9 +50,7 @@ public sealed class ActorHandle<TActor> where TActor : class {
         // with no trace listener attached there is nothing left to do here — hand the caller the
         // completion task directly, with no async state machine in this frame. A Task-shaped facade
         // calling .AsTask() on this ValueTask gets the underlying task back allocation-free.
-        if (callActivity is null && enqueue.IsCompletedSuccessfully) {
-            return new ValueTask<TResult>(completion);
-        }
+        if (callActivity is null && enqueue.IsCompletedSuccessfully) return new ValueTask<TResult>(completion);
 
         return AwaitAsync(item, completion, enqueue, callActivity);
     }
@@ -60,10 +58,11 @@ public sealed class ActorHandle<TActor> where TActor : class {
     /// <summary>Enqueues a void-shaped call (a <c>Unit</c> work item) and awaits its completion.</summary>
     public ValueTask InvokeAsync(
         ActorWorkItem<TActor, Unit> item,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default) {
         // On the fast path the generic call wraps the completion Task<Unit>, so AsTask() returns
         // that same instance and this conversion allocates nothing.
-        new(InvokeAsync<Unit>(item, cancellationToken).AsTask());
+        return new ValueTask(InvokeAsync<Unit>(item, cancellationToken).AsTask());
+    }
 
     private static async ValueTask<TResult> AwaitAsync<TResult>(
         ActorWorkItem<TActor, TResult> item,
@@ -79,14 +78,13 @@ public sealed class ActorHandle<TActor> where TActor : class {
                 // it here to complete the caller is safe.
                 callActivity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 item.Abandon();
-                if (ex is OperationCanceledException) {
+                if (ex is OperationCanceledException)
                     // A Wait-mode bounded enqueue was cancelled by the invocation token (call
                     // timeout or caller cancellation). Abandon attributed the outcome, so the
                     // caller observes the same TimeoutException/cancellation the backstop produces
                     // during execution — never a raw enqueue OCE. A cancelled channel write never
                     // lands in the mailbox, so the abandoned call can never execute later.
                     return await completion.ConfigureAwait(false);
-                }
 
                 throw;
             }

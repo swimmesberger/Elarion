@@ -210,16 +210,19 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
             .State.Should().Be(BlobLifecycleState.Committed);
     }
 
-    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) {
+        return new PostgreSqlBlobStore<IntegrationBlobDbContext>(context,
+            NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    }
 
     private static Task<bool> BlobExistsByName(
         IntegrationBlobDbContext context,
         BlobUploadRequest request,
-        CancellationToken cancellationToken) =>
-        context.Set<StoredBlob>()
+        CancellationToken cancellationToken) {
+        return context.Set<StoredBlob>()
             .AsNoTracking()
             .AnyAsync(blob => blob.Container == request.Container && blob.Name == request.Name, cancellationToken);
+    }
 
     [Fact]
     public async Task OpenReadAsync_LargeBlob_StreamsWithoutBuffering() {
@@ -322,18 +325,17 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
         await transaction.RollbackAsync(ct);
     }
 
-    private static BlobUploadRequest NewRequest() =>
-        new() {
+    private static BlobUploadRequest NewRequest() {
+        return new BlobUploadRequest {
             Container = $"c-{Guid.NewGuid():N}",
             Name = "blob.bin",
             ContentType = "application/octet-stream"
         };
+    }
 
     private static byte[] Bytes(int count) {
         var bytes = new byte[count];
-        for (var i = 0; i < count; i++) {
-            bytes[i] = (byte)(i % 251);
-        }
+        for (var i = 0; i < count; i++) bytes[i] = (byte)(i % 251);
 
         return bytes;
     }
@@ -359,17 +361,27 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
             set => throw new NotSupportedException();
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override int Read(byte[] buffer, int offset, int count) {
+            return inner.Read(buffer, offset, count);
+        }
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
-            inner.ReadAsync(buffer, cancellationToken);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) {
+            return inner.ReadAsync(buffer, cancellationToken);
+        }
 
-        public override void Flush() { }
+        public override void Flush() {
+        }
 
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) {
+            throw new NotSupportedException();
+        }
 
-        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void SetLength(long value) {
+            throw new NotSupportedException();
+        }
 
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
     }
 }

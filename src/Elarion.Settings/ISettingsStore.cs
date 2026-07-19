@@ -11,7 +11,8 @@ public interface ISettingsStore {
     ValueTask<string?> GetAsync(SettingsScope scope, string key, CancellationToken cancellationToken = default);
 
     /// <summary>Reads every entry in the scope (used for snapshots and the future <c>IConfiguration</c> load).</summary>
-    ValueTask<IReadOnlyList<SettingEntry>> GetAllAsync(SettingsScope scope, CancellationToken cancellationToken = default);
+    ValueTask<IReadOnlyList<SettingEntry>> GetAllAsync(SettingsScope scope,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Creates or updates a value. When <paramref name="expectedVersion"/> is supplied the write is applied

@@ -22,12 +22,13 @@ public sealed class RpcDispatcherHandlerTests {
     private sealed record EchoResponse(string Greeting);
 
     private sealed class EchoHandler : IHandler<EchoCommand, Result<EchoResponse>> {
-        public ValueTask<Result<EchoResponse>> HandleAsync(EchoCommand request, CancellationToken ct) =>
-            request.Name switch {
+        public ValueTask<Result<EchoResponse>> HandleAsync(EchoCommand request, CancellationToken ct) {
+            return request.Name switch {
                 "missing" => ValueTask.FromResult<Result<EchoResponse>>(AppError.NotFound("client not found")),
                 "dup" => ValueTask.FromResult<Result<EchoResponse>>(AppError.Conflict("already exists")),
-                _ => ValueTask.FromResult<Result<EchoResponse>>(new EchoResponse($"Hello {request.Name}")),
+                _ => ValueTask.FromResult<Result<EchoResponse>>(new EchoResponse($"Hello {request.Name}"))
             };
+        }
     }
 
     private sealed record CancelCommand {
@@ -38,9 +39,7 @@ public sealed class RpcDispatcherHandlerTests {
         public ValueTask<Result<EchoResponse>> HandleAsync(CancelCommand request, CancellationToken ct) {
             // Cooperative: honor the request token (client disconnect). Non-cooperative: throw an OCE that is not
             // tied to the request token (a handler-internal cancellation), which must still surface as an error.
-            if (request.Cooperative) {
-                ct.ThrowIfCancellationRequested();
-            }
+            if (request.Cooperative) ct.ThrowIfCancellationRequested();
 
             throw new OperationCanceledException();
         }
@@ -54,15 +53,16 @@ public sealed class RpcDispatcherHandlerTests {
     private sealed record ListResponse(string? Search, int Page, int PageSize);
 
     private sealed class ListHandler : IHandler<ListQuery, Result<ListResponse>> {
-        public ValueTask<Result<ListResponse>> HandleAsync(ListQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<ListResponse>>(
+        public ValueTask<Result<ListResponse>> HandleAsync(ListQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<ListResponse>>(
                 new ListResponse(request.Search, request.Page, request.PageSize));
+        }
     }
 
     // The framework disables reflection-based serialization by default (AOT discipline); opt these
     // test options in explicitly so the dispatcher can (de)serialize the sample request type.
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     private static (JsonRpcDispatcher Dispatcher, IServiceProvider Services) Build() {
@@ -81,13 +81,14 @@ public sealed class RpcDispatcherHandlerTests {
         return (dispatcher, services);
     }
 
-    private static JsonRpcRequest Request(object @params) =>
-        new() {
+    private static JsonRpcRequest Request(object @params) {
+        return new JsonRpcRequest {
             Jsonrpc = "2.0",
             Method = "echo",
             Params = JsonSerializer.SerializeToElement(@params, Options),
-            Id = "1",
+            Id = "1"
         };
+    }
 
     [Fact]
     public async Task Dispatch_CallerCanceled_RethrowsInsteadOfFabricatingInternalError() {
@@ -100,7 +101,7 @@ public sealed class RpcDispatcherHandlerTests {
             Jsonrpc = "2.0",
             Method = "cancel",
             Params = JsonSerializer.SerializeToElement(new { cooperative = true }, Options),
-            Id = "1",
+            Id = "1"
         };
 
         var act = async () => await dispatcher.DispatchAsync(request, scope.ServiceProvider, cts.Token);
@@ -117,7 +118,7 @@ public sealed class RpcDispatcherHandlerTests {
             Jsonrpc = "2.0",
             Method = "cancel",
             Params = JsonSerializer.SerializeToElement(new { cooperative = false }, Options),
-            Id = "1",
+            Id = "1"
         };
 
         // The request token is never canceled, so a handler-internal OCE is a genuine fault, not a client abort.
@@ -171,7 +172,7 @@ public sealed class RpcDispatcherHandlerTests {
             Jsonrpc = "2.0",
             Method = "list",
             Params = JsonSerializer.SerializeToElement(new { }, Options),
-            Id = "2",
+            Id = "2"
         };
 
         var fromOmitted = await dispatcher.DispatchAsync(
@@ -194,7 +195,7 @@ public sealed class RpcDispatcherHandlerTests {
             Jsonrpc = "2.0",
             Method = "list",
             Params = JsonSerializer.SerializeToElement(new { page = 3 }, Options),
-            Id = "1",
+            Id = "1"
         };
 
         var response = await dispatcher.DispatchAsync(
@@ -226,7 +227,7 @@ public sealed class RpcDispatcherHandlerTests {
 
     [Theory]
     [InlineData("missing", -32001)] // ErrorKind.NotFound
-    [InlineData("dup", -32002)]     // ErrorKind.Conflict
+    [InlineData("dup", -32002)] // ErrorKind.Conflict
     public async Task Dispatch_HandlerReturnsAppError_MapsToJsonRpcErrorCode(string name, int expectedCode) {
         var (dispatcher, services) = Build();
         await using var scope = services.CreateAsyncScope();
@@ -240,7 +241,9 @@ public sealed class RpcDispatcherHandlerTests {
     }
 
     private sealed class FixedCodeErrorTranslator : IAppErrorTranslator<RpcError> {
-        public RpcError Translate(AppError error) => new() { Code = -40404, Message = $"custom: {error.Message}" };
+        public RpcError Translate(AppError error) {
+            return new RpcError { Code = -40404, Message = $"custom: {error.Message}" };
+        }
     }
 
     [Fact]
@@ -281,7 +284,8 @@ public sealed class RpcDispatcherHandlerTests {
         var options = services.BuildServiceProvider().GetRequiredService<IElarionJsonSerialization>().Options;
 
         var response = JsonRpcResponse.FromError(
-            "1", AppErrorMapper.ToRpcError(AppError.Validation("invalid", (IReadOnlyList<string>)["name is required"])));
+            "1",
+            AppErrorMapper.ToRpcError(AppError.Validation("invalid", (IReadOnlyList<string>)["name is required"])));
 
         var json = JsonSerializer.Serialize(response, options.GetTypeInfo(typeof(JsonRpcResponse)));
 

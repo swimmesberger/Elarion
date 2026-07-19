@@ -23,9 +23,7 @@ public sealed class ValidationDecorator<TRequest, TResponse>(
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         var errors = await validator.ValidateAsync(typeof(TRequest), request!, ct).ConfigureAwait(false);
-        if (errors is null) {
-            return await inner.HandleAsync(request, ct).ConfigureAwait(false);
-        }
+        if (errors is null) return await inner.HandleAsync(request, ct).ConfigureAwait(false);
 
         var messages = ValidationErrorData.Flatten(errors.FieldErrors);
         return TResponse.Failure(AppError.Validation(string.Join("; ", messages), errors.FieldErrors));

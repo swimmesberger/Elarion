@@ -3,7 +3,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Elarion.Messaging.Outbox;
 
 /// <summary>EF Core transactional storage for role-grouped outbox envelopes.</summary>
-public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOptions options, TimeProvider timeProvider)
+public sealed class EfCoreOutboxStore<TDbContext>(
+    TDbContext dbContext,
+    OutboxOptions options,
+    TimeProvider timeProvider)
     : IOutboxStore
     where TDbContext : DbContext {
     private const int PurgeBatchSize = 1_000;
@@ -29,9 +32,9 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
         var candidateIds = await dbContext.Set<OutboxMessage>()
             .AsNoTracking()
             .Where(message => message.ProcessedOnUtc == null
-                && message.Attempts < maxAttempts
-                && (message.LockedUntilUtc == null || message.LockedUntilUtc < now)
-                && (message.TargetRole == null || roles.Contains(message.TargetRole)))
+                              && message.Attempts < maxAttempts
+                              && (message.LockedUntilUtc == null || message.LockedUntilUtc < now)
+                              && (message.TargetRole == null || roles.Contains(message.TargetRole)))
             .OrderBy(message => message.OccurredOnUtc)
             .ThenBy(message => message.Id)
             .Take(batchSize)
@@ -39,16 +42,14 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        if (candidateIds.Count == 0) {
-            return [];
-        }
+        if (candidateIds.Count == 0) return [];
 
         await dbContext.Set<OutboxMessage>()
             .Where(message => candidateIds.Contains(message.Id)
-                && message.ProcessedOnUtc == null
-                && message.Attempts < maxAttempts
-                && (message.LockedUntilUtc == null || message.LockedUntilUtc < now)
-                && (message.TargetRole == null || roles.Contains(message.TargetRole)))
+                              && message.ProcessedOnUtc == null
+                              && message.Attempts < maxAttempts
+                              && (message.LockedUntilUtc == null || message.LockedUntilUtc < now)
+                              && (message.TargetRole == null || roles.Contains(message.TargetRole)))
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(message => message.LockId, lockId)
@@ -144,7 +145,7 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
             var candidates = await dbContext.Set<OutboxMessage>()
                 .AsNoTracking()
                 .Where(message => message.ProcessedOnUtc != null
-                    && message.ProcessedOnUtc < olderThanUtc)
+                                  && message.ProcessedOnUtc < olderThanUtc)
                 .OrderBy(message => message.ProcessedOnUtc)
                 .ThenBy(message => message.Id)
                 .Select(message => message.Id)
@@ -152,18 +153,14 @@ public sealed class EfCoreOutboxStore<TDbContext>(TDbContext dbContext, OutboxOp
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
-            if (candidates.Count == 0) {
-                return purged;
-            }
+            if (candidates.Count == 0) return purged;
 
             purged += await dbContext.Set<OutboxMessage>()
                 .Where(message => candidates.Contains(message.Id))
                 .ExecuteDeleteAsync(ct)
                 .ConfigureAwait(false);
 
-            if (candidates.Count < PurgeBatchSize) {
-                return purged;
-            }
+            if (candidates.Count < PurgeBatchSize) return purged;
         }
     }
 }

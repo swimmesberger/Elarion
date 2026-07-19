@@ -30,9 +30,7 @@ public sealed class PostgreSqlMigrationsFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
     /// <summary>Creates a fresh database and returns a connection string targeting it.</summary>

@@ -28,9 +28,8 @@ public sealed class UserContextEnricher(
     public void Enrich(HandlerEnrichmentContext context) {
         if (!options.Enabled
             || user is not { IsAuthenticated: true }
-            || user.UserId is not { Length: > 0 } userId) {
+            || user.UserId is not { Length: > 0 } userId)
             return;
-        }
 
         context.SetTag("user.id", userId);
         context.AddScopeItem("UserId", userId);
@@ -67,25 +66,20 @@ public sealed class UserContextEnricher(
         var count = 0;
 
         foreach (var value in values) {
-            if (string.IsNullOrEmpty(value)) {
-                continue;
-            }
+            if (string.IsNullOrEmpty(value)) continue;
 
             if (count == 0) {
                 first = value;
-            } else {
+            }
+            else {
                 builder ??= new StringBuilder(first);
                 builder.Append(',').Append(value);
             }
 
-            if (++count >= maxItems) {
-                break;
-            }
+            if (++count >= maxItems) break;
         }
 
-        if (count == 0) {
-            return string.Empty;
-        }
+        if (count == 0) return string.Empty;
 
         return builder?.ToString() ?? first!;
     }

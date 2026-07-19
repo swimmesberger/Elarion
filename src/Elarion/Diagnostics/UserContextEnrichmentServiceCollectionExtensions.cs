@@ -43,7 +43,8 @@ public static class UserContextEnrichmentServiceCollectionExtensions {
     /// <typeparam name="TEnricher">The enricher implementation.</typeparam>
     /// <param name="services">The service collection.</param>
     /// <returns>The service collection for chaining.</returns>
-    public static IServiceCollection AddElarionHandlerContextEnricher<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TEnricher>(
+    public static IServiceCollection AddElarionHandlerContextEnricher<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TEnricher>(
         this IServiceCollection services)
         where TEnricher : class, IHandlerContextEnricher {
         ArgumentNullException.ThrowIfNull(services);

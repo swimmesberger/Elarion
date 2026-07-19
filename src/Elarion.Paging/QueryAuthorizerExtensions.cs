@@ -14,8 +14,7 @@ namespace Elarion.Paging;
 /// database-backed <c>IResourceAuthorizer</c> for the full, grant-aware check. The predicate is compiled per
 /// call, so this suits occasional pre-write checks, not hot loops.
 /// </remarks>
-public static class QueryAuthorizerExtensions
-{
+public static class QueryAuthorizerExtensions {
     /// <summary>
     /// Returns whether <paramref name="user"/> may access <paramref name="entity"/> for
     /// <paramref name="operation"/> (defaulting to <see cref="ResourceOperation.Read"/>). A
@@ -26,8 +25,7 @@ public static class QueryAuthorizerExtensions
         TEntity entity,
         ICurrentUser user,
         ResourceOperation? operation = null)
-        where TEntity : class
-    {
+        where TEntity : class {
         ArgumentNullException.ThrowIfNull(authorizer);
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(user);

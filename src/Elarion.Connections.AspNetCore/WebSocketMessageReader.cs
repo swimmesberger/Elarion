@@ -15,18 +15,12 @@ internal sealed class WebSocketMessageReader(WebSocket socket, int maxMessageByt
         using var assembled = new MemoryStream();
         while (true) {
             var result = await socket.ReceiveAsync(_buffer.AsMemory(), ct);
-            if (result.MessageType == WebSocketMessageType.Close) {
-                return null;
-            }
+            if (result.MessageType == WebSocketMessageType.Close) return null;
 
             assembled.Write(_buffer, 0, result.Count);
-            if (assembled.Length > maxMessageBytes) {
-                throw new WebSocketMessageTooLargeException();
-            }
+            if (assembled.Length > maxMessageBytes) throw new WebSocketMessageTooLargeException();
 
-            if (result.EndOfMessage) {
-                return new WebSocketInboundMessage(result.MessageType, assembled.ToArray());
-            }
+            if (result.EndOfMessage) return new WebSocketInboundMessage(result.MessageType, assembled.ToArray());
         }
     }
 }

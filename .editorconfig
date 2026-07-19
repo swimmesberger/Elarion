@@ -12,5 +12,11 @@ insert_final_newline = true
 indent_size = 4
 resharper_log_message_is_sentence_problem_highlighting = suggestion
 
+# Opening braces on the same line (K&R), per AGENTS.md. This is the standard Roslyn/dotnet-format
+# convention; Rider's own "Braces Layout" page (Settings > Editor > Code Style > C#) has separate
+# resharper_csharp_*_braces keys per construct that this alone does not set — export those from Rider
+# once configured there so IDE reformats match, rather than hand-typing keys from memory.
+csharp_new_line_before_open_brace = none
+
 [*.{sln,slnx,csproj,props}]
 indent_size = 2

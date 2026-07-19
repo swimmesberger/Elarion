@@ -9,7 +9,7 @@ public enum StreamReplay {
     Latest,
 
     /// <summary>Everything the replay ring retains, then live.</summary>
-    Available,
+    Available
 }
 
 /// <summary>
@@ -34,7 +34,7 @@ public enum StreamOverflowMode {
     /// Fail the subscriber: its enumeration throws <see cref="StreamLaggedException"/> and it is removed
     /// (the Akka <c>BroadcastHub</c> kill-slow-consumer strategy). The publisher is never delayed.
     /// </summary>
-    Cancel,
+    Cancel
 }
 
 /// <summary>Per-subscriber options for <see cref="StreamHub{T}"/> subscriptions.</summary>

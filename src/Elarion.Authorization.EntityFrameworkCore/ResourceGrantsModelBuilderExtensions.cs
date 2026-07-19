@@ -30,20 +30,24 @@ public static class ResourceGrantsModelBuilderExtensions {
 
         modelBuilder.Entity<ResourceGrantEntity>(builder => {
             builder.ToTable(table, schema);
-            builder.HasKey(grant => new
-            {
+            builder.HasKey(grant => new {
                 grant.ResourceType,
                 grant.ResourceId,
                 grant.PrincipalKind,
                 grant.PrincipalId,
-                grant.Operation,
+                grant.Operation
             });
 
-            builder.Property(grant => grant.ResourceType).HasColumnName(snakeCase ? "resource_type" : "ResourceType").HasMaxLength(128);
-            builder.Property(grant => grant.ResourceId).HasColumnName(snakeCase ? "resource_id" : "ResourceId").HasMaxLength(256);
-            builder.Property(grant => grant.PrincipalKind).HasColumnName(snakeCase ? "principal_kind" : "PrincipalKind").HasMaxLength(32);
-            builder.Property(grant => grant.PrincipalId).HasColumnName(snakeCase ? "principal_id" : "PrincipalId").HasMaxLength(256);
-            builder.Property(grant => grant.Operation).HasColumnName(snakeCase ? "operation" : "Operation").HasMaxLength(64);
+            builder.Property(grant => grant.ResourceType).HasColumnName(snakeCase ? "resource_type" : "ResourceType")
+                .HasMaxLength(128);
+            builder.Property(grant => grant.ResourceId).HasColumnName(snakeCase ? "resource_id" : "ResourceId")
+                .HasMaxLength(256);
+            builder.Property(grant => grant.PrincipalKind).HasColumnName(snakeCase ? "principal_kind" : "PrincipalKind")
+                .HasMaxLength(32);
+            builder.Property(grant => grant.PrincipalId).HasColumnName(snakeCase ? "principal_id" : "PrincipalId")
+                .HasMaxLength(256);
+            builder.Property(grant => grant.Operation).HasColumnName(snakeCase ? "operation" : "Operation")
+                .HasMaxLength(64);
 
             // Supports "what is this principal granted" lookups and revocation.
             builder.HasIndex(grant => new { grant.PrincipalKind, grant.PrincipalId })

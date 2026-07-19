@@ -10,8 +10,7 @@ namespace Elarion.Messaging.Outbox;
 /// <summary>
 /// Registers the EF Core transactional outbox as the integration-event (Plane B) delivery tier.
 /// </summary>
-public static class OutboxServiceCollectionExtensions
-{
+public static class OutboxServiceCollectionExtensions {
     /// <summary>
     /// Registers the durable outbox <see cref="IIntegrationEventBus"/> backed by <typeparamref name="TDbContext"/>,
     /// plus its storage, dispatcher, and background delivery worker.
@@ -30,8 +29,7 @@ public static class OutboxServiceCollectionExtensions
     public static IServiceCollection AddElarionOutbox<TDbContext>(
         this IServiceCollection services,
         Action<OutboxOptions>? configure = null)
-        where TDbContext : DbContext
-    {
+        where TDbContext : DbContext {
         ArgumentNullException.ThrowIfNull(services);
 
         var options = new OutboxOptions();
@@ -55,10 +53,7 @@ public static class OutboxServiceCollectionExtensions
         services.AddScoped<IIntegrationEventBus, OutboxIntegrationEventBus>();
 
         // Publisher-only nodes may opt out of claiming while retaining publish-time target metadata.
-        if (options.RunDeliveryWorker)
-        {
-            services.AddHostedService<OutboxDeliveryService>();
-        }
+        if (options.RunDeliveryWorker) services.AddHostedService<OutboxDeliveryService>();
 
         return services;
     }

@@ -6,13 +6,13 @@ import {
   type ClientSnapshot,
   type SessionCapabilities,
 } from "@/generated/session-client"
-import { rpc } from "@/lib/rpc"
+import {rpc} from "@/lib/rpc"
 
-export type { SessionCapabilities }
+export type {SessionCapabilities}
 
 // Fail closed: when the API is unreachable the shell still renders, with every gated contribution hidden.
 const OFFLINE: ClientSnapshot = {
-  user: { id: "", isAuthenticated: false, roles: [], permissions: [] },
+  user: {id: "", isAuthenticated: false, roles: [], permissions: []},
   modules: {},
   flags: {},
   variants: {},

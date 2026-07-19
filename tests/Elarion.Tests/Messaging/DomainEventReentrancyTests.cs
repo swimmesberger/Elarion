@@ -34,7 +34,7 @@ public sealed class DomainEventReentrancyTests {
     public async Task PublishAsync_BoundedNesting_UnderLimit_Succeeds() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var recorder = new Counter();
-        await using var provider = BuildProvider(BoundedSubscriber(typeof(SelfEvent), recorder, maxDepth: 5));
+        await using var provider = BuildProvider(BoundedSubscriber(typeof(SelfEvent), recorder, 5));
 
         using var scope = provider.CreateScope();
         var bus = scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
@@ -54,8 +54,8 @@ public sealed class DomainEventReentrancyTests {
         return services.BuildServiceProvider();
     }
 
-    private static EventSubscriptionDescriptor RepublishingSubscriber(Type eventType) =>
-        new() {
+    private static EventSubscriptionDescriptor RepublishingSubscriber(Type eventType) {
+        return new EventSubscriptionDescriptor {
             EventType = eventType,
             Plane = EventPlane.Domain,
             ServiceType = typeof(SelfEvent),
@@ -65,28 +65,31 @@ public sealed class DomainEventReentrancyTests {
                 await bus.PublishAsync((SelfEvent)evt, ct).ConfigureAwait(false);
             }
         };
+    }
 
-    private static EventSubscriptionDescriptor BoundedSubscriber(Type eventType, Counter counter, int maxDepth) =>
-        new() {
+    private static EventSubscriptionDescriptor BoundedSubscriber(Type eventType, Counter counter, int maxDepth) {
+        return new EventSubscriptionDescriptor {
             EventType = eventType,
             Plane = EventPlane.Domain,
             ServiceType = typeof(SelfEvent),
             Order = 0,
             InvokeAsync = async (sp, evt, _, ct) => {
-                if (counter.Increment() >= maxDepth) {
-                    return;
-                }
+                if (counter.Increment() >= maxDepth) return;
 
                 var bus = sp.GetRequiredService<IDomainEventBus>();
                 await bus.PublishAsync((SelfEvent)evt, ct).ConfigureAwait(false);
             }
         };
+    }
 
     private sealed record SelfEvent : IDomainEvent;
 
     private sealed class Counter {
         private int _value;
         public int Value => _value;
-        public int Increment() => Interlocked.Increment(ref _value);
+
+        public int Increment() {
+            return Interlocked.Increment(ref _value);
+        }
     }
 }

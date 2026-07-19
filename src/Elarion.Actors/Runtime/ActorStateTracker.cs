@@ -11,15 +11,13 @@ internal sealed class ActorStateTracker {
 
     internal bool HasStates => _slots is { Count: > 0 };
 
-    internal void Register(IActorStateSlot slot) => (_slots ??= []).Add(slot);
+    internal void Register(IActorStateSlot slot) {
+        (_slots ??= []).Add(slot);
+    }
 
     internal async ValueTask LoadAllAsync(CancellationToken cancellationToken) {
-        if (_slots is null) {
-            return;
-        }
+        if (_slots is null) return;
 
-        foreach (var slot in _slots) {
-            await slot.LoadAsync(cancellationToken).ConfigureAwait(false);
-        }
+        foreach (var slot in _slots) await slot.LoadAsync(cancellationToken).ConfigureAwait(false);
     }
 }

@@ -24,19 +24,15 @@ public sealed class OutboxConsumerCatalog {
 
         var byEventType = new Dictionary<Type, List<EventSubscriptionDescriptor>>();
         foreach (var descriptor in descriptors) {
-            if (descriptor.Plane is not EventPlane.Integration || descriptor.InvokeAsync is null) {
-                continue;
-            }
+            if (descriptor.Plane is not EventPlane.Integration || descriptor.InvokeAsync is null) continue;
 
-            if (string.IsNullOrWhiteSpace(descriptor.ConsumerId)) {
+            if (string.IsNullOrWhiteSpace(descriptor.ConsumerId))
                 throw new InvalidOperationException(
                     $"Integration-event consumer '{descriptor.ServiceType}' has no stable ConsumerId.");
-            }
 
-            if (!_consumersById.TryAdd(descriptor.ConsumerId, descriptor)) {
+            if (!_consumersById.TryAdd(descriptor.ConsumerId, descriptor))
                 throw new InvalidOperationException(
                     $"Integration-event consumer id '{descriptor.ConsumerId}' is registered more than once.");
-            }
 
             if (!byEventType.TryGetValue(descriptor.EventType, out var consumers)) {
                 consumers = [];
@@ -47,21 +43,20 @@ public sealed class OutboxConsumerCatalog {
         }
 
         _consumersByEventType = new Dictionary<Type, EventSubscriptionDescriptor[]>(byEventType.Count);
-        _consumersByEventTypeName = new Dictionary<string, EventSubscriptionDescriptor[]>(byEventType.Count, StringComparer.Ordinal);
+        _consumersByEventTypeName =
+            new Dictionary<string, EventSubscriptionDescriptor[]>(byEventType.Count, StringComparer.Ordinal);
         foreach (var (eventType, consumers) in byEventType) {
             var ordered = consumers.OrderBy(static descriptor => descriptor.Order).ToArray();
             _consumersByEventType.Add(eventType, ordered);
-            if (ordered.Any(static descriptor => descriptor.ResolveDeliveryRole is not null)) {
+            if (ordered.Any(static descriptor => descriptor.ResolveDeliveryRole is not null))
                 _roleRoutedEventTypes.Add(eventType);
-            }
 
             var eventTypeName = eventType.FullName
-                ?? throw new InvalidOperationException(
-                    $"Integration event '{eventType}' has no full name and cannot be persisted.");
-            if (!_consumersByEventTypeName.TryAdd(eventTypeName, ordered)) {
+                                ?? throw new InvalidOperationException(
+                                    $"Integration event '{eventType}' has no full name and cannot be persisted.");
+            if (!_consumersByEventTypeName.TryAdd(eventTypeName, ordered))
                 throw new InvalidOperationException(
                     $"Integration event type name '{eventTypeName}' is registered more than once.");
-            }
         }
     }
 
@@ -71,13 +66,17 @@ public sealed class OutboxConsumerCatalog {
         return GetConsumerArray(eventType);
     }
 
-    internal EventSubscriptionDescriptor[] GetConsumerArray(Type eventType) =>
-        _consumersByEventType.TryGetValue(eventType, out var consumers) ? consumers : None;
+    internal EventSubscriptionDescriptor[] GetConsumerArray(Type eventType) {
+        return _consumersByEventType.TryGetValue(eventType, out var consumers) ? consumers : None;
+    }
 
-    internal bool TryGetConsumerArray(string eventTypeName, out EventSubscriptionDescriptor[] consumers) =>
-        _consumersByEventTypeName.TryGetValue(eventTypeName, out consumers!);
+    internal bool TryGetConsumerArray(string eventTypeName, out EventSubscriptionDescriptor[] consumers) {
+        return _consumersByEventTypeName.TryGetValue(eventTypeName, out consumers!);
+    }
 
-    internal bool HasDeliveryRoleResolvers(Type eventType) => _roleRoutedEventTypes.Contains(eventType);
+    internal bool HasDeliveryRoleResolvers(Type eventType) {
+        return _roleRoutedEventTypes.Contains(eventType);
+    }
 
     /// <summary>Looks up one durable consumer by its stable identity.</summary>
     public bool TryGetConsumer(string consumerId, out EventSubscriptionDescriptor descriptor) {

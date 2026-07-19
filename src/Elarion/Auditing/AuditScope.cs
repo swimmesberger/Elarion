@@ -38,16 +38,19 @@ public sealed class AuditScope(TimeProvider? timeProvider = null) : IAuditScope 
     public bool RecordPending => _frames.TryPeek(out var frame) && frame.RecordPending;
 
     /// <summary>Opens a frame for one audited handler invocation. Called by the outer audit decorator.</summary>
-    public void Begin(string action, string? module, string? userId, string? defaultResourceType) =>
+    public void Begin(string action, string? module, string? userId, string? defaultResourceType) {
         _frames.Push(new Frame {
             Action = action,
             Module = module,
             UserId = userId,
-            DefaultResourceType = defaultResourceType,
+            DefaultResourceType = defaultResourceType
         });
+    }
 
     /// <summary>Closes the current frame. Called by the outer audit decorator, always (finally).</summary>
-    public void End() => _frames.TryPop(out _);
+    public void End() {
+        _frames.TryPop(out _);
+    }
 
     /// <summary>
     /// Resets the current frame's accumulated changes, details, and resource for a fresh handler attempt.
@@ -106,7 +109,7 @@ public sealed class AuditScope(TimeProvider? timeProvider = null) : IAuditScope 
             ErrorKind = errorKind,
             CorrelationId = Activity.Current?.TraceId.ToString(),
             Changes = frame.Changes.Count > 0 ? frame.Changes.ToArray() : [],
-            Details = frame.Details.Count > 0 ? new Dictionary<string, string>(frame.Details) : EmptyDetails,
+            Details = frame.Details.Count > 0 ? new Dictionary<string, string>(frame.Details) : EmptyDetails
         };
     }
 
@@ -134,7 +137,7 @@ public sealed class AuditScope(TimeProvider? timeProvider = null) : IAuditScope 
     }
 
     private static readonly IReadOnlyDictionary<string, string> EmptyDetails =
-        new Dictionary<string, string>(capacity: 0);
+        new Dictionary<string, string>(0);
 
     private sealed class Frame {
         public required string Action { get; init; }

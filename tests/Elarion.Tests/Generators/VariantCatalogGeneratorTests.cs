@@ -49,7 +49,9 @@ public sealed class VariantCatalogGeneratorTests {
         generated.Should().Contain("HasDefault = true,");
         generated.Should().Contain("Module = \"Mail\",");
         generated.Should().Contain("Axis = global::Elarion.Abstractions.Features.VariantAxis.Configuration,");
-        generated.Should().Contain("public static global::System.Collections.Generic.IReadOnlyList<global::Elarion.Abstractions.Features.VariantDescriptor> All { get; }");
+        generated.Should()
+            .Contain(
+                "public static global::System.Collections.Generic.IReadOnlyList<global::Elarion.Abstractions.Features.VariantDescriptor> All { get; }");
         generated.Should().Contain("[\"Email:Backend\"] =");
         generated.Should().Contain("[\"Mail\"] =");
     }
@@ -58,39 +60,41 @@ public sealed class VariantCatalogGeneratorTests {
     public void PlatformVariant_CarriesNullModule_AndAppearsInPlatformList() {
         // Adapters in an infrastructure assembly live under no module — the documented platform placement.
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.Infrastructure {
-                public interface IBlobCompressor { }
-                [Service]
-                [ConfigurationVariant("Blobs:Compression", Value = "gzip", IsDefault = true)]
-                public sealed class GzipCompressor : IBlobCompressor { }
-            }
-            """;
+                     namespace Sample.Infrastructure {
+                         public interface IBlobCompressor { }
+                         [Service]
+                         [ConfigurationVariant("Blobs:Compression", Value = "gzip", IsDefault = true)]
+                         public sealed class GzipCompressor : IBlobCompressor { }
+                     }
+                     """;
 
         var (result, _) = Run(new VariantCatalogGenerator(), source);
 
         var generated = GetGenerated(result, "ElarionVariants.g.cs");
         generated.Should().Contain("Module = null,");
-        generated.Should().Contain("public static global::System.Collections.Generic.IReadOnlyList<global::Elarion.Abstractions.Features.VariantDescriptor> Platform { get; } = new global::Elarion.Abstractions.Features.VariantDescriptor[] { D0 };");
+        generated.Should()
+            .Contain(
+                "public static global::System.Collections.Generic.IReadOnlyList<global::Elarion.Abstractions.Features.VariantDescriptor> Platform { get; } = new global::Elarion.Abstractions.Features.VariantDescriptor[] { D0 };");
     }
 
     [Fact]
     public void FeatureVariant_EmitsFeatureAxisDescriptor() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IForecast { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm")]
-                public sealed class LinearForecast : IForecast { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
-                public sealed class NeuralForecast : IForecast { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IForecast { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm")]
+                         public sealed class LinearForecast : IForecast { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
+                         public sealed class NeuralForecast : IForecast { }
+                     }
+                     """;
 
         var (result, _) = Run(new VariantCatalogGenerator(), source);
 
@@ -106,35 +110,45 @@ public sealed class VariantCatalogGeneratorTests {
 
     [Fact]
     public void CrossAssembly_AggregatesReferencedManifestVariants_RespectingContractAccessibility() {
-        static string Field(string? value) => value is null ? "-1:" : $"{value.Length}:{value}";
-        static string Entry(string ns, string key, string contract, string? value, bool isDefault, bool isPublic) =>
-            Field(ns) + Field("1") + Field(key) + Field(contract) + Field(value)
-            + Field(isDefault ? "1" : "0") + Field(isPublic ? "1" : "0");
+        static string Field(string? value) {
+            return value is null ? "-1:" : $"{value.Length}:{value}";
+        }
+
+        static string Entry(string ns, string key, string contract, string? value, bool isDefault, bool isPublic) {
+            return Field(ns) + Field("1") + Field(key) + Field(contract) + Field(value)
+                   + Field(isDefault ? "1" : "0") + Field(isPublic ? "1" : "0");
+        }
 
         // A referenced assembly advertising one public and one internal contract's switch via its manifest.
         var producerSource =
             $$"""
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Email:Backend", "global::Sample.Platform.IEmailSender", "smtp", isDefault: true, isPublic: true)}}")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Email:Backend", "global::Sample.Platform.IEmailSender", "office365", isDefault: false, isPublic: true)}}")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Search:Engine", "global::Sample.Platform.ISearchEngine", "lucene", isDefault: true, isPublic: false)}}")]
+              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Email:Backend", "global::Sample.Platform.IEmailSender", "smtp", true, true)}}")]
+              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Email:Backend", "global::Sample.Platform.IEmailSender", "office365", false, true)}}")]
+              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Search:Engine", "global::Sample.Platform.ISearchEngine", "lucene", true, false)}}")]
 
-            namespace Sample.Platform {
-                public interface IEmailSender { }
-                internal interface ISearchEngine { }
-            }
-            """;
+              namespace Sample.Platform {
+                  public interface IEmailSender { }
+                  internal interface ISearchEngine { }
+              }
+              """;
         var ct = TestContext.Current.CancellationToken;
         var producer = CSharpCompilation.Create(
             "Sample.Platform",
-            [CSharpSyntaxTree.ParseText(producerSource, new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: ct)],
+            [
+                CSharpSyntaxTree.ParseText(producerSource, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: ct)
+            ],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         var consumerSource = Preamble + "\n\nnamespace Host { public static class Anchor { } }";
         var consumer = CSharpCompilation.Create(
             "Host",
-            [CSharpSyntaxTree.ParseText(consumerSource, new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: ct)],
+            [
+                CSharpSyntaxTree.ParseText(consumerSource, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: ct)
+            ],
             [.. CreateMetadataReferences(), producer.ToMetadataReference()],
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
@@ -153,20 +167,20 @@ public sealed class VariantCatalogGeneratorTests {
     [Fact]
     public void ReportsElvar010_WhenSelectorsCollideOnOneAccessorName() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IA { }
-                public interface IB { }
-                [Service]
-                [ConfigurationVariant("Email:Backend", Value = "a", IsDefault = true)]
-                public sealed class A1 : IA { }
-                [Service]
-                [ConfigurationVariant("email-backend", Value = "b", IsDefault = true)]
-                public sealed class B1 : IB { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IA { }
+                         public interface IB { }
+                         [Service]
+                         [ConfigurationVariant("Email:Backend", Value = "a", IsDefault = true)]
+                         public sealed class A1 : IA { }
+                         [Service]
+                         [ConfigurationVariant("email-backend", Value = "b", IsDefault = true)]
+                         public sealed class B1 : IB { }
+                     }
+                     """;
 
         var (result, diagnostics) = Run(new VariantCatalogGenerator(), source);
 
@@ -206,11 +220,12 @@ public sealed class VariantCatalogGeneratorTests {
         return (result, result.Diagnostics);
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");

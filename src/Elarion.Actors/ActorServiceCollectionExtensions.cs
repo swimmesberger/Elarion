@@ -52,7 +52,8 @@ public static class ActorServiceCollectionExtensions {
         ArgumentException.ThrowIfNullOrWhiteSpace(role);
         services.RemoveAll<IActorHomeLease>();
         services.AddSingleton<IActorHomeLease>(serviceProvider =>
-            new RoleLeaseActorHome(serviceProvider.GetRequiredKeyedService<Abstractions.Coordination.IRoleLease>(role)));
+            new RoleLeaseActorHome(serviceProvider
+                .GetRequiredKeyedService<Abstractions.Coordination.IRoleLease>(role)));
         return services;
     }
 }

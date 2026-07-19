@@ -23,7 +23,8 @@ public sealed class EfCoreDeviceKeyStore<TDbContext>(
     private static readonly ConcurrentDictionary<IModel, string> UpsertSqlCache = new();
 
     /// <inheritdoc />
-    public async ValueTask<ReadOnlyMemory<byte>?> GetKeyAsync(string deviceId, CancellationToken cancellationToken = default) {
+    public async ValueTask<ReadOnlyMemory<byte>?> GetKeyAsync(string deviceId,
+        CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
@@ -39,7 +40,8 @@ public sealed class EfCoreDeviceKeyStore<TDbContext>(
     }
 
     /// <inheritdoc />
-    public async ValueTask PutAsync(string deviceId, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default) {
+    public async ValueTask PutAsync(string deviceId, ReadOnlyMemory<byte> key,
+        CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();

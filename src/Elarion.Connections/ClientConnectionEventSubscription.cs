@@ -33,9 +33,7 @@ public sealed class ClientConnectionEventSubscription : IDisposable {
     }
 
     internal void Start() {
-        if (Volatile.Read(ref _disposed) == 0) {
-            _pump = PumpAsync();
-        }
+        if (Volatile.Read(ref _disposed) == 0) _pump = PumpAsync();
     }
 
     /// <summary>Completes when the pump has ended (subscription disposed, connection closed, or delivery
@@ -47,11 +45,9 @@ public sealed class ClientConnectionEventSubscription : IDisposable {
         try {
             // The greeting: every subscribe converges the client via re-query, exactly like an SSE open.
             await _deliver(ConnectedEnvelope(), ct);
-            while (await _handle.Events.WaitToReadAsync(ct)) {
-                while (_handle.Events.TryRead(out var envelope)) {
-                    await _deliver(envelope, ct);
-                }
-            }
+            while (await _handle.Events.WaitToReadAsync(ct))
+            while (_handle.Events.TryRead(out var envelope))
+                await _deliver(envelope, ct);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) {
             // Disposed (explicit unsubscribe or connection teardown) — the normal end.
@@ -69,19 +65,19 @@ public sealed class ClientConnectionEventSubscription : IDisposable {
 
     /// <inheritdoc />
     public void Dispose() {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) {
-            return;
-        }
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
         _cts.Cancel();
         _handle.Dispose();
         _onFinished(this);
     }
 
-    private static ClientEventEnvelope ConnectedEnvelope() => new() {
-        Id = Guid.CreateVersion7(),
-        Topic = ClientEventControlEvents.Connected,
-        Scope = ClientEventScope.Global,
-        Payload = string.Empty,
-    };
+    private static ClientEventEnvelope ConnectedEnvelope() {
+        return new ClientEventEnvelope {
+            Id = Guid.CreateVersion7(),
+            Topic = ClientEventControlEvents.Connected,
+            Scope = ClientEventScope.Global,
+            Payload = string.Empty
+        };
+    }
 }

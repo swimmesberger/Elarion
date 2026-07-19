@@ -10,11 +10,11 @@
        module, and the wwwroot dashboard all live here. Compare samples/Billing for the layered
        host + application shape an app grows into. -->
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
-    <ProjectReference Include="..\..\..\src\Elarion.Actors\Elarion.Actors.csproj" />
-    <ProjectReference Include="..\..\..\src\Elarion.ClientEvents\Elarion.ClientEvents.csproj" />
-    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
-    <ProjectReference Include="..\..\..\src\Elarion.ClientEvents.AspNetCore\Elarion.ClientEvents.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.Actors\Elarion.Actors.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.ClientEvents\Elarion.ClientEvents.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.ClientEvents.AspNetCore\Elarion.ClientEvents.AspNetCore.csproj"/>
   </ItemGroup>
 
   <!-- The Elarion generator emits the module bootstrapper, the actor facade, the handler
@@ -23,8 +23,8 @@
        from NuGet it ships inside the package. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
-                     OutputItemType="Analyzer"
-                     ReferenceOutputAssembly="false" />
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"/>
   </ItemGroup>
 
 </Project>

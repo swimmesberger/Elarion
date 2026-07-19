@@ -19,5 +19,5 @@ public enum HandlerCacheScope {
     /// <remarks>
     /// Use only for data that is not user-specific and does not depend on authorization context.
     /// </remarks>
-    Global = 1,
+    Global = 1
 }

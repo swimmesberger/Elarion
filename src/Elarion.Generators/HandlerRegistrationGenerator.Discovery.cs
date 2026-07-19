@@ -139,7 +139,8 @@ public sealed partial class HandlerRegistrationGenerator {
 
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
-        var decoratorListAttr = ResolveDecoratorListFromPipelineAttributes(classSymbol, compilation, moduleDecoratorLists);
+        var decoratorListAttr =
+            ResolveDecoratorListFromPipelineAttributes(classSymbol, compilation, moduleDecoratorLists);
         var decorators = decoratorListAttr is not null
             ? ParseDecorators(decoratorListAttr, requestType, responseType, compilation, diagnostics, fmt)
             : ImmutableArray<DecoratorInfo>.Empty;
@@ -180,14 +181,13 @@ public sealed partial class HandlerRegistrationGenerator {
         // [AllowDuplicates] opts out) keeps them off the command path.
         if (resiliencePolicyName is not null && idempotent is null &&
             RequestImplementsMarker(requestType, compilation, CommandMarkerMetadataName) &&
-            noRetryPolicies?.Contains(resiliencePolicyName) != true) {
+            noRetryPolicies?.Contains(resiliencePolicyName) != true)
             diagnostics.Add(DiagnosticInfo.Create(
                 ResilientCommandWithoutIdempotentDescriptor,
                 classDecl.Identifier.GetLocation(),
                 handlerFqn,
                 resiliencePolicyName,
                 requestFqn));
-        }
 
         var audit = ParseAudit(
             classSymbol, requestType, compilation, moduleAuditDefaults, assemblyAuditDefault,
@@ -289,10 +289,9 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     private static bool IsKeyedServiceParameter(IParameterSymbol parameter) {
-        foreach (var attribute in parameter.GetAttributes()) {
+        foreach (var attribute in parameter.GetAttributes())
             if (attribute.AttributeClass?.ToDisplayString() == FromKeyedServicesAttributeFqn)
                 return true;
-        }
 
         return false;
     }
@@ -313,29 +312,28 @@ public sealed partial class HandlerRegistrationGenerator {
 
     // True when the request implements the named event marker (IDomainEvent/IIntegrationEvent) — i.e. the handler
     // is an event-consumer handler. Used to keep pipeline pieces that assume a command/query off consumers.
-    private static bool RequestImplementsMarker(ITypeSymbol requestType, Compilation compilation, string markerMetadataName) {
+    private static bool RequestImplementsMarker(ITypeSymbol requestType, Compilation compilation,
+        string markerMetadataName) {
         var markerSymbol = compilation.GetTypeByMetadataName(markerMetadataName);
         if (markerSymbol is null)
             return false;
 
-        foreach (var iface in requestType.AllInterfaces) {
+        foreach (var iface in requestType.AllInterfaces)
             if (SymbolEqualityComparer.Default.Equals(iface, markerSymbol))
                 return true;
-        }
 
         return SymbolEqualityComparer.Default.Equals(requestType, markerSymbol);
     }
 
-    private static bool IsEventConsumerRequest(ITypeSymbol requestType, Compilation compilation) =>
-        RequestImplementsMarker(requestType, compilation, DomainEventMetadataName) ||
-        RequestImplementsMarker(requestType, compilation, IntegrationEventMetadataName);
+    private static bool IsEventConsumerRequest(ITypeSymbol requestType, Compilation compilation) {
+        return RequestImplementsMarker(requestType, compilation, DomainEventMetadataName) ||
+               RequestImplementsMarker(requestType, compilation, IntegrationEventMetadataName);
+    }
 
     private static INamedTypeSymbol? FindHandlerInterface(INamedTypeSymbol classSymbol) {
-        foreach (var iface in classSymbol.AllInterfaces) {
-            if (iface.OriginalDefinition.ToDisplayString() == "Elarion.Abstractions.IHandler<TRequest, TResponse>") {
+        foreach (var iface in classSymbol.AllInterfaces)
+            if (iface.OriginalDefinition.ToDisplayString() == "Elarion.Abstractions.IHandler<TRequest, TResponse>")
                 return iface;
-            }
-        }
 
         return null;
     }
@@ -355,9 +353,8 @@ public sealed partial class HandlerRegistrationGenerator {
         if (attribute is null ||
             attribute.ConstructorArguments.Length == 0 ||
             attribute.ConstructorArguments[0].Value is not string policyName ||
-            string.IsNullOrWhiteSpace(policyName)) {
+            string.IsNullOrWhiteSpace(policyName))
             return null;
-        }
 
         if (RequestImplementsMarker(requestType, compilation, DomainEventMetadataName)) {
             diagnostics.Add(DiagnosticInfo.Create(
@@ -383,13 +380,12 @@ public sealed partial class HandlerRegistrationGenerator {
         var attribute = ctx.Attributes[0];
         if (attribute.ConstructorArguments.Length == 0 ||
             attribute.ConstructorArguments[0].Value is not string name ||
-            string.IsNullOrWhiteSpace(name)) {
+            string.IsNullOrWhiteSpace(name))
             return null;
-        }
 
         var hasRetryOption = false;
         var maxRetryAttempts = 3;
-        foreach (var namedArgument in attribute.NamedArguments) {
+        foreach (var namedArgument in attribute.NamedArguments)
             switch (namedArgument.Key) {
                 case "MaxRetryAttempts":
                     hasRetryOption = true;
@@ -403,7 +399,6 @@ public sealed partial class HandlerRegistrationGenerator {
                     hasRetryOption = true;
                     break;
             }
-        }
 
         return new PolicyRetryCandidate(name, hasRetryOption && maxRetryAttempts != 0);
     }
@@ -447,10 +442,9 @@ public sealed partial class HandlerRegistrationGenerator {
     // Inherited = false (e.g. [Cacheable]/[Idempotent]/[Resilient]) must NOT use this walker — they are read via
     // classSymbol.GetAttributes() so they stay directly-declared-only, consistent with their declaration.
     private static IEnumerable<AttributeData> EnumerateInheritedAttributes(INamedTypeSymbol classSymbol) {
-        for (INamedTypeSymbol? current = classSymbol; current is not null; current = current.BaseType) {
+        for (var current = classSymbol; current is not null; current = current.BaseType)
             foreach (var attribute in current.GetAttributes())
                 yield return attribute;
-        }
     }
 
     // Decides whether the authorization decorator attaches to this handler, and whether it enforces an
@@ -458,16 +452,17 @@ public sealed partial class HandlerRegistrationGenerator {
     // attachment is a compile-time presence decision the generator makes by inspecting the handler symbol — an
     // AppliesTo predicate is a runtime gate that always emits the decorator. A default policy
     // ([ElarionAuthorizationDefaults] at module/assembly scope) attaches to every non-anonymous handler.
-    private static (bool HasAuthorization, bool RequireAuthenticatedByDefault, EquatableArray<ResourceBindingInfo> ResourceBindings) ParseAuthorization(
-        ClassDeclarationSyntax classDecl,
-        INamedTypeSymbol classSymbol,
-        ITypeSymbol requestType,
-        ITypeSymbol responseType,
-        Compilation compilation,
-        IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
-        bool assemblyRequireAuthenticated,
-        bool isEventConsumer,
-        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+    private static (bool HasAuthorization, bool RequireAuthenticatedByDefault, EquatableArray<ResourceBindingInfo>
+        ResourceBindings) ParseAuthorization(
+            ClassDeclarationSyntax classDecl,
+            INamedTypeSymbol classSymbol,
+            ITypeSymbol requestType,
+            ITypeSymbol responseType,
+            Compilation compilation,
+            IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
+            bool assemblyRequireAuthenticated,
+            bool isEventConsumer,
+            ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         EquatableArray<ResourceBindingInfo> noBindings = ImmutableArray<ResourceBindingInfo>.Empty;
 
         var isAllowAnonymous = false;
@@ -478,7 +473,7 @@ public sealed partial class HandlerRegistrationGenerator {
         // GetCustomAttributes(inherit: true). Walk the base-type chain; the most-derived [AllowAnonymous]
         // still wins because presence anywhere in the chain opens the handler (CLR inherit:true semantics for a
         // single, AllowMultiple=false attribute), and the AllowMultiple=true [Require*] accumulate across it.
-        foreach (var attribute in EnumerateInheritedAttributes(classSymbol)) {
+        foreach (var attribute in EnumerateInheritedAttributes(classSymbol))
             switch (attribute.AttributeClass?.ToDisplayString()) {
                 case AllowAnonymousAttributeMetadataName:
                     isAllowAnonymous = true;
@@ -494,7 +489,6 @@ public sealed partial class HandlerRegistrationGenerator {
                     resourceAttributes.Add(attribute);
                     break;
             }
-        }
 
         // AllowAnonymous wins: the handler is public, so no decorator is attached.
         if (isAllowAnonymous)
@@ -505,7 +499,8 @@ public sealed partial class HandlerRegistrationGenerator {
         // attach — it would fail every consumer. An EXPLICIT [Require*] on a consumer still attaches (a deliberate
         // app choice), so only the default-driven attachment is suppressed here.
         var defaultRequireAuthenticated = !isEventConsumer &&
-            ResolveAuthorizationDefault(classSymbol, moduleAuthDefaults, assemblyRequireAuthenticated);
+                                          ResolveAuthorizationDefault(classSymbol, moduleAuthDefaults,
+                                              assemblyRequireAuthenticated);
         if (!hasExplicit && !defaultRequireAuthenticated)
             return (false, false, noBindings);
 
@@ -546,14 +541,13 @@ public sealed partial class HandlerRegistrationGenerator {
             var operation = "read";
             var idPath = "Id";
             string? resourceTypeName = null;
-            foreach (var named in attribute.NamedArguments) {
+            foreach (var named in attribute.NamedArguments)
                 if (named.Key == "Operation" && named.Value.Value is string op && op.Length > 0)
                     operation = op;
                 else if (named.Key == "Id" && named.Value.Value is string id && id.Length > 0)
                     idPath = id;
                 else if (named.Key == "ResourceTypeName" && named.Value.Value is string typeName && typeName.Length > 0)
                     resourceTypeName = typeName;
-            }
 
             if (!ResourcePathResolves(requestType, idPath)) {
                 diagnostics.Add(DiagnosticInfo.Create(
@@ -565,7 +559,8 @@ public sealed partial class HandlerRegistrationGenerator {
                 continue;
             }
 
-            builder.Add(new ResourceBindingInfo(resourceType.ToDisplayString(fmt), operation, idPath, resourceTypeName));
+            builder.Add(new ResourceBindingInfo(resourceType.ToDisplayString(fmt), operation, idPath,
+                resourceTypeName));
         }
 
         return builder.ToImmutable();
@@ -592,14 +587,13 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     private static IPropertySymbol? FindPublicInstanceProperty(ITypeSymbol type, string name) {
-        for (ITypeSymbol? current = type; current is not null; current = current.BaseType) {
-            foreach (var member in current.GetMembers(name)) {
-                if (member is IPropertySymbol { IsStatic: false, GetMethod: { DeclaredAccessibility: Accessibility.Public } } property &&
-                    property.DeclaredAccessibility == Accessibility.Public) {
+        for (var current = type; current is not null; current = current.BaseType)
+            foreach (var member in current.GetMembers(name))
+                if (member is IPropertySymbol {
+                        IsStatic: false, GetMethod: { DeclaredAccessibility: Accessibility.Public }
+                    } property &&
+                    property.DeclaredAccessibility == Accessibility.Public)
                     return property;
-                }
-            }
-        }
 
         return null;
     }
@@ -616,9 +610,8 @@ public sealed partial class HandlerRegistrationGenerator {
         // Most-specific-wins: the handler's nearest module overrides the assembly default.
         foreach (var (moduleNamespace, requireAuthenticated) in moduleAuthDefaults) {
             if (!IsNamespaceInScope(handlerNamespace, moduleNamespace) ||
-                moduleNamespace.Length <= bestNamespaceLength) {
+                moduleNamespace.Length <= bestNamespaceLength)
                 continue;
-            }
 
             hasModule = true;
             bestValue = requireAuthenticated;
@@ -646,24 +639,22 @@ public sealed partial class HandlerRegistrationGenerator {
         AttributeData? auditable = null;
         // [Auditable] declares Inherited = false, but mirror the other gates' base-chain walk deliberately: a
         // shared audited base handler is a reasonable shape, and the runtime HandlerMetadata read is inherit-aware.
-        foreach (var attribute in EnumerateInheritedAttributes(classSymbol)) {
+        foreach (var attribute in EnumerateInheritedAttributes(classSymbol))
             if (attribute.AttributeClass?.ToDisplayString() == AuditableAttributeMetadataName) {
                 auditable = attribute;
                 break;
             }
-        }
 
         if (auditable is not null) {
-            foreach (var named in auditable.NamedArguments) {
+            foreach (var named in auditable.NamedArguments)
                 if (named.Key == "Enabled" && named.Value.Value is false)
                     return null;
-            }
-        } else {
+        }
+        else {
             if (isEventConsumer ||
                 !RequestImplementsMarker(requestType, compilation, CommandMarkerMetadataName) ||
-                !ResolveAuditDefault(classSymbol, moduleAuditDefaults, assemblyAuditDefault)) {
+                !ResolveAuditDefault(classSymbol, moduleAuditDefaults, assemblyAuditDefault))
                 return null;
-            }
         }
 
         var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
@@ -679,10 +670,9 @@ public sealed partial class HandlerRegistrationGenerator {
             return true;
 
         var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
-        foreach (var moduleNamespace in moduleAuditDefaults) {
+        foreach (var moduleNamespace in moduleAuditDefaults)
             if (IsNamespaceInScope(handlerNamespace, moduleNamespace))
                 return true;
-        }
 
         return false;
     }
@@ -706,9 +696,8 @@ public sealed partial class HandlerRegistrationGenerator {
 
             if (attribute.ConstructorArguments.Length > 0 &&
                 attribute.ConstructorArguments[0].Value is string explicitName &&
-                explicitName.Length > 0) {
+                explicitName.Length > 0)
                 return explicitName;
-            }
 
             break;
         }
@@ -728,10 +717,9 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     private static bool ReadRequireAuthenticated(AttributeData attribute) {
-        foreach (var namedArgument in attribute.NamedArguments) {
+        foreach (var namedArgument in attribute.NamedArguments)
             if (namedArgument.Key == "RequireAuthenticated" && namedArgument.Value.Value is bool value)
                 return value;
-        }
 
         // The attribute's RequireAuthenticated property defaults to true when not explicitly set.
         return true;
@@ -776,14 +764,12 @@ public sealed partial class HandlerRegistrationGenerator {
             return false;
         }
 
-        foreach (var attribute in gateAttributes) {
-            if (HasBlankFeatureName(attribute)) {
+        foreach (var attribute in gateAttributes)
+            if (HasBlankFeatureName(attribute))
                 diagnostics.Add(DiagnosticInfo.Create(
                     EmptyFeatureGateDescriptor,
                     classDecl.Identifier.GetLocation(),
                     classSymbol.ToDisplayString(fmt)));
-            }
-        }
 
         return gateAttributes.Any(HasEffectiveFeatureName);
     }
@@ -798,10 +784,9 @@ public sealed partial class HandlerRegistrationGenerator {
         if (featuresArg.Kind != TypedConstantKind.Array || featuresArg.Values.Length == 0)
             return true;
 
-        foreach (var value in featuresArg.Values) {
+        foreach (var value in featuresArg.Values)
             if (value.Value is not string feature || string.IsNullOrWhiteSpace(feature))
                 return true;
-        }
 
         return false;
     }
@@ -812,6 +797,7 @@ public sealed partial class HandlerRegistrationGenerator {
 
         var featuresArg = attribute.ConstructorArguments[attribute.ConstructorArguments.Length - 1];
         return featuresArg.Kind == TypedConstantKind.Array &&
-            featuresArg.Values.Any(static value => value.Value is string feature && !string.IsNullOrWhiteSpace(feature));
+               featuresArg.Values.Any(static value =>
+                   value.Value is string feature && !string.IsNullOrWhiteSpace(feature));
     }
 }

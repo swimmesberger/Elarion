@@ -31,7 +31,9 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     /// <inheritdoc />
     public ClientConnection Connection => ConnectionState.Current;
 
-    internal void AttachProtocol(IClientConnectionProtocol protocol) => _protocol = protocol;
+    internal void AttachProtocol(IClientConnectionProtocol protocol) {
+        _protocol = protocol;
+    }
 
     internal IClientConnectionProtocol Protocol =>
         _protocol ?? throw new InvalidOperationException("The connection's protocol is not attached yet.");
@@ -55,8 +57,9 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     /// cancellation during the physical write aborts the connection, because a partial frame may have
     /// corrupted stream boundaries.
     /// </summary>
-    public ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) =>
-        _writer.SendAsync(message, ct);
+    public ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) {
+        return _writer.SendAsync(message, ct);
+    }
 
     /// <summary>Requests a graceful server-side close: no new sends are admitted, admitted sends drain,
     /// and the connection tears down once (codec close, unregistration, disposal). Safe to call on an

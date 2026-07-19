@@ -150,7 +150,7 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
             property.Street = "New Street";
             scope.SetResource("property", id.ToString());
             return Result<string>.Success("ok");
-        }, wrapTransaction: static inner => new ThrowAfterCommitDecorator(inner));
+        }, static inner => new ThrowAfterCommitDecorator(inner));
 
         await act.Should().ThrowAsync<TimeoutException>();
         await using var verify = fixture.CreateContext();
@@ -169,8 +169,9 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
         db.ChangeTracker.Clear();
     }
 
-    private ComposedHost Compose(IInterceptor? extraInterceptor = null) =>
-        new(fixture.ConnectionString, extraInterceptor);
+    private ComposedHost Compose(IInterceptor? extraInterceptor = null) {
+        return new ComposedHost(fixture.ConnectionString, extraInterceptor);
+    }
 
     private sealed record DemoCommand : ICommand;
 
@@ -223,9 +224,7 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
             var services = new ServiceCollection();
             services.AddDbContext<AuditIntegrationDbContext>(options => {
                 options.UseNpgsql(connectionString);
-                if (extraInterceptor is not null) {
-                    options.AddInterceptors(extraInterceptor);
-                }
+                if (extraInterceptor is not null) options.AddInterceptors(extraInterceptor);
             });
             services.AddElarionUnitOfWork<AuditIntegrationDbContext>();
             services.AddElarionAuditingEntityFrameworkCore<AuditIntegrationDbContext>();
@@ -234,7 +233,8 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
 
         public async Task<Result<string>> Run(
             Func<AuditIntegrationDbContext, IAuditScope, CancellationToken, Task<Result<string>>> body,
-            Func<IHandler<DemoCommand, Result<string>>, IHandler<DemoCommand, Result<string>>>? wrapTransaction = null) {
+            Func<IHandler<DemoCommand, Result<string>>, IHandler<DemoCommand, Result<string>>>? wrapTransaction =
+                null) {
             await using var scope = _provider.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AuditIntegrationDbContext>();
             var auditScope = scope.ServiceProvider.GetRequiredService<AuditScope>();
@@ -245,20 +245,21 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
             var commit = new AuditCommitDecorator<DemoCommand, Result<string>>(handler, auditScope, trail);
             IHandler<DemoCommand, Result<string>> transaction =
                 new TransactionDecorator<DemoCommand, Result<string>>(commit, unitOfWork);
-            if (wrapTransaction is not null) {
+            if (wrapTransaction is not null)
                 // The position between the outer audit decorator and the transaction — where cache
                 // invalidation and other post-commit decorators live in the generated chain.
                 transaction = wrapTransaction(transaction);
-            }
 
             var metadata = new HandlerMetadata(typeof(DelegateHandler), typeof(DemoCommand), typeof(Result<string>));
             var outer = new AuditDecorator<DemoCommand, Result<string>>(
-                transaction, metadata, "properties.update", "Properties", auditScope, trail, currentUser: null);
+                transaction, metadata, "properties.update", "Properties", auditScope, trail, null);
 
             return await outer.HandleAsync(new DemoCommand(), Ct);
         }
 
-        public ValueTask DisposeAsync() => _provider.DisposeAsync();
+        public ValueTask DisposeAsync() {
+            return _provider.DisposeAsync();
+        }
     }
 
     private sealed class DelegateHandler(
@@ -266,7 +267,8 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
         IAuditScope scope,
         Func<AuditIntegrationDbContext, IAuditScope, CancellationToken, Task<Result<string>>> body
     ) : IHandler<DemoCommand, Result<string>> {
-        public async ValueTask<Result<string>> HandleAsync(DemoCommand request, CancellationToken ct) =>
-            await body(db, scope, ct);
+        public async ValueTask<Result<string>> HandleAsync(DemoCommand request, CancellationToken ct) {
+            return await body(db, scope, ct);
+        }
     }
 }

@@ -53,7 +53,7 @@ public sealed class TcpTlsConnectionTests {
 
         var authenticate = async () => await stream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions {
             TargetHost = "localhost",
-            EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+            EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
         }, ct);
         await authenticate.Should().ThrowAsync<AuthenticationException>();
 
@@ -74,13 +74,14 @@ public sealed class TcpTlsConnectionTests {
         using var client = await ConnectAsync(host.EndPoint, ct);
         await using var stream = new SslStream(client.GetStream(), true);
 
-        var validationErrors = new TaskCompletionSource<SslPolicyErrors>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var validationErrors =
+            new TaskCompletionSource<SslPolicyErrors>(TaskCreationOptions.RunContinuationsAsynchronously);
         var authenticate = async () => await stream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions {
             TargetHost = "not-localhost",
             RemoteCertificateValidationCallback = (_, _, _, errors) => {
                 validationErrors.TrySetResult(errors);
                 return false;
-            },
+            }
         }, ct);
         await authenticate.Should().ThrowAsync<AuthenticationException>();
         (await validationErrors.Task.WaitAsync(ct)).Should().HaveFlag(SslPolicyErrors.RemoteCertificateNameMismatch);
@@ -158,16 +159,18 @@ public sealed class TcpTlsConnectionTests {
     private static TcpServerTlsOptions ServerTls(
         X509Certificate2 certificate,
         TimeSpan? timeout = null,
-        TaskCompletionSource? factoryObserved = null) => new() {
-        HandshakeTimeout = timeout ?? TimeSpan.FromSeconds(2),
-        CreateAuthenticationOptionsAsync = (_, _) => {
-            factoryObserved?.TrySetResult();
-            return ValueTask.FromResult(new SslServerAuthenticationOptions {
-                ServerCertificate = certificate,
-                EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-            });
-        },
-    };
+        TaskCompletionSource? factoryObserved = null) {
+        return new TcpServerTlsOptions {
+            HandshakeTimeout = timeout ?? TimeSpan.FromSeconds(2),
+            CreateAuthenticationOptionsAsync = (_, _) => {
+                factoryObserved?.TrySetResult();
+                return ValueTask.FromResult(new SslServerAuthenticationOptions {
+                    ServerCertificate = certificate,
+                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+                });
+            }
+        };
+    }
 
     private static async Task<TcpTlsTestHost> StartListenerAsync(
         TcpConnectionHandler handler,
@@ -187,12 +190,11 @@ public sealed class TcpTlsConnectionTests {
 
         // Register the exact supplied handler under the service type the generic hosted service resolves.
         services.AddSingleton<TlsChallengeHandler>(_ => handler as TlsChallengeHandler
-            ?? throw new InvalidOperationException("The supplied test handler must derive from TlsChallengeHandler."));
+                                                        ?? throw new InvalidOperationException(
+                                                            "The supplied test handler must derive from TlsChallengeHandler."));
         var provider = services.BuildServiceProvider();
         var hosted = provider.GetServices<IHostedService>().ToArray();
-        foreach (var service in hosted) {
-            await service.StartAsync(ct);
-        }
+        foreach (var service in hosted) await service.StartAsync(ct);
 
         return new TcpTlsTestHost(provider, hosted, await bound.Task.WaitAsync(ct));
     }
@@ -212,13 +214,15 @@ public sealed class TcpTlsConnectionTests {
         await stream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions {
             TargetHost = targetHost,
             RemoteCertificateValidationCallback = callback,
-            EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+            EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
         }, ct);
         return stream;
     }
 
     private static bool TrustAnyCertificate(
-        object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors errors) => true;
+        object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors errors) {
+        return true;
+    }
 
     private static X509Certificate2 CreateLoopbackCertificate() {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -226,7 +230,7 @@ public sealed class TcpTlsConnectionTests {
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-            new OidCollection { new("1.3.6.1.5.5.7.3.1") }, true));
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, true));
         var san = new SubjectAlternativeNameBuilder();
         san.AddDnsName("localhost");
         san.AddIpAddress(IPAddress.Loopback);
@@ -234,21 +238,18 @@ public sealed class TcpTlsConnectionTests {
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
     }
 
-    private static async Task WriteLineAsync(Stream stream, string line, CancellationToken ct) =>
+    private static async Task WriteLineAsync(Stream stream, string line, CancellationToken ct) {
         await stream.WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), ct);
+    }
 
     private static async Task<string?> ReadLineAsync(Stream stream, CancellationToken ct) {
         var buffer = new List<byte>();
         var one = new byte[1];
         while (true) {
             var read = await stream.ReadAsync(one, ct);
-            if (read == 0) {
-                return null;
-            }
+            if (read == 0) return null;
 
-            if (one[0] == (byte)'\n') {
-                return Encoding.UTF8.GetString([.. buffer]);
-            }
+            if (one[0] == (byte)'\n') return Encoding.UTF8.GetString([.. buffer]);
 
             buffer.Add(one[0]);
         }
@@ -263,9 +264,7 @@ public sealed class TcpTlsConnectionTests {
         public AwaitableConnectionObserver Observer => provider.GetRequiredService<AwaitableConnectionObserver>();
 
         public async ValueTask DisposeAsync() {
-            foreach (var service in hosted) {
-                await service.StopAsync(CancellationToken.None);
-            }
+            foreach (var service in hosted) await service.StopAsync(CancellationToken.None);
 
             await provider.DisposeAsync();
         }
@@ -282,29 +281,28 @@ public sealed class TcpTlsConnectionTests {
             AuthenticationCalls++;
             await handshake.SendTextAsync("challenge", ct);
             var response = await handshake.ReceiveTextAsync(ct);
-            if (response is not null) {
-                FramedResponses++;
-            }
+            if (response is not null) FramedResponses++;
 
-            if (response is null || !response.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (response is null || !response.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
                 Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
-                PrincipalId = response["device:".Length..],
+                PrincipalId = response["device:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new EchoProtocol(connection);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new EchoProtocol(connection);
+        }
     }
 
     private sealed class PerConnectionTlsHandler(TcpServerTlsOptions tls) : TlsChallengeHandler {
         public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(
             TcpConnectionPeer peer,
-            CancellationToken ct) => ValueTask.FromResult<TcpConnectionSettings?>(new TcpConnectionSettings { Tls = tls });
+            CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSettings?>(new TcpConnectionSettings { Tls = tls });
+        }
     }
 
     private sealed class InvalidDirectionHandler : TlsChallengeHandler {
@@ -320,14 +318,15 @@ public sealed class TcpTlsConnectionTests {
                     CreateAuthenticationOptionsAsync = (_, _) => {
                         FactoryCalls++;
                         return ValueTask.FromResult(new SslClientAuthenticationOptions { TargetHost = "localhost" });
-                    },
-                },
+                    }
+                }
             });
         }
     }
 
     private sealed class EchoProtocol(TcpClientConnection connection) : IClientConnectionProtocol {
-        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
-            connection.SendTextAsync("echo:" + Encoding.UTF8.GetString(message.Span), ct);
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            return connection.SendTextAsync("echo:" + Encoding.UTF8.GetString(message.Span), ct);
+        }
     }
 }

@@ -33,10 +33,11 @@ public sealed class HttpEndpointMappingEndToEndTests {
     private sealed record WidgetResponse(Guid Id, string Name);
 
     private sealed class GetWidgetHandler : IHandler<GetWidgetQuery, Result<WidgetResponse>> {
-        public ValueTask<Result<WidgetResponse>> HandleAsync(GetWidgetQuery request, CancellationToken ct) =>
-            request.Id == MissingId
+        public ValueTask<Result<WidgetResponse>> HandleAsync(GetWidgetQuery request, CancellationToken ct) {
+            return request.Id == MissingId
                 ? ValueTask.FromResult<Result<WidgetResponse>>(AppError.NotFound("widget not found"))
                 : ValueTask.FromResult<Result<WidgetResponse>>(new WidgetResponse(request.Id, "Widget"));
+        }
     }
 
     private sealed record CreateWidgetCommand {
@@ -46,10 +47,12 @@ public sealed class HttpEndpointMappingEndToEndTests {
     private sealed record CreateWidgetResponse(Guid Id);
 
     private sealed class CreateWidgetHandler : IHandler<CreateWidgetCommand, Result<CreateWidgetResponse>> {
-        public ValueTask<Result<CreateWidgetResponse>> HandleAsync(CreateWidgetCommand request, CancellationToken ct) =>
-            string.IsNullOrWhiteSpace(request.Name)
-                ? ValueTask.FromResult<Result<CreateWidgetResponse>>(AppError.Validation("invalid", ["Name is required"]))
+        public ValueTask<Result<CreateWidgetResponse>> HandleAsync(CreateWidgetCommand request, CancellationToken ct) {
+            return string.IsNullOrWhiteSpace(request.Name)
+                ? ValueTask.FromResult<Result<CreateWidgetResponse>>(AppError.Validation("invalid",
+                    ["Name is required"]))
                 : ValueTask.FromResult<Result<CreateWidgetResponse>>(new CreateWidgetResponse(Guid.NewGuid()));
+        }
     }
 
     private sealed record ExportQuery {
@@ -57,14 +60,15 @@ public sealed class HttpEndpointMappingEndToEndTests {
     }
 
     private sealed class ExportHandler : IHandler<ExportQuery, Result<ElarionFile>> {
-        public ValueTask<Result<ElarionFile>> HandleAsync(ExportQuery request, CancellationToken ct) =>
-            request.Kind switch {
+        public ValueTask<Result<ElarionFile>> HandleAsync(ExportQuery request, CancellationToken ct) {
+            return request.Kind switch {
                 "named" => ValueTask.FromResult<Result<ElarionFile>>(
                     new ElarionFile("id;name"u8.ToArray(), "text/csv") { FileName = "clients.csv" }),
                 "inline" => ValueTask.FromResult<Result<ElarionFile>>(
                     new ElarionFile("inline-content"u8.ToArray(), "application/octet-stream")),
-                _ => ValueTask.FromResult<Result<ElarionFile>>(AppError.NotFound("no such export")),
+                _ => ValueTask.FromResult<Result<ElarionFile>>(AppError.NotFound("no such export"))
             };
+        }
     }
 
     [Fact]
@@ -110,7 +114,8 @@ public sealed class HttpEndpointMappingEndToEndTests {
             missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
             missing.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
             (await missing.Content.ReadAsStringAsync(ct)).Should().Contain("no such export");
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }
@@ -172,7 +177,8 @@ public sealed class HttpEndpointMappingEndToEndTests {
                 "/widgets", new StringContent("""{"name":""}""", Encoding.UTF8, "application/json"), ct);
             postInvalid.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await postInvalid.Content.ReadAsStringAsync(ct)).Should().Contain("Name is required");
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }

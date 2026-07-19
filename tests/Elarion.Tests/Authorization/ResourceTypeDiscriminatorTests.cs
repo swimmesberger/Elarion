@@ -43,7 +43,7 @@ public sealed class ResourceTypeDiscriminatorTests {
     [Fact]
     public void RequirementBinding_HonoursExplicitDiscriminator() {
         var binding = new ResourceRequirementBinding<object>(
-            typeof(Crm.Contact), ResourceOperation.Read, static _ => null, resourceTypeName: "Contact");
+            typeof(Crm.Contact), ResourceOperation.Read, static _ => null, "Contact");
 
         binding.ResourceTypeName.Should().Be("Contact");
     }

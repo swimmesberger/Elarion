@@ -31,16 +31,15 @@ public sealed class ReentrantActorConfigureAwaitAnalyzer : DiagnosticAnalyzer {
     private const int ContinueOnCapturedContextFlag = 1;
 
     private static readonly DiagnosticDescriptor ConfigureAwaitFalseInReentrantActor = new(
-        id: "ELACT006",
-        title: "ConfigureAwait(false) inside a [Reentrant] actor",
-        messageFormat:
+        "ELACT006",
+        "ConfigureAwait(false) inside a [Reentrant] actor",
         "ConfigureAwait(false) inside [Reentrant] actor '{0}' escapes the exclusive scheduler: the rest of "
         + "the method resumes off the actor's single-threaded context, forfeiting the interleaving guarantee "
         + "(and only when the await actually suspends, so the escape is timing-dependent). Remove it from "
         + "actor-owned code — libraries the actor calls may use ConfigureAwait(false) internally without harm.",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Warning,
+        true);
 
     private static readonly ImmutableArray<DiagnosticDescriptor> SupportedDiagnosticsArray =
         ImmutableArray.Create(ConfigureAwaitFalseInReentrantActor);
@@ -55,9 +54,7 @@ public sealed class ReentrantActorConfigureAwaitAnalyzer : DiagnosticAnalyzer {
         context.RegisterCompilationStartAction(static startContext => {
             var actorAttribute = startContext.Compilation.GetTypeByMetadataName(ActorAttributeMetadataName);
             var reentrantAttribute = startContext.Compilation.GetTypeByMetadataName(ReentrantAttributeMetadataName);
-            if (actorAttribute is null || reentrantAttribute is null) {
-                return;
-            }
+            if (actorAttribute is null || reentrantAttribute is null) return;
 
             startContext.RegisterOperationAction(
                 operationContext => AnalyzeInvocation(operationContext, actorAttribute, reentrantAttribute),
@@ -73,18 +70,13 @@ public sealed class ReentrantActorConfigureAwaitAnalyzer : DiagnosticAnalyzer {
         var method = invocation.TargetMethod;
         if (method.Name != "ConfigureAwait" ||
             invocation.Arguments.Length != 1 ||
-            method.ContainingType?.ContainingNamespace?.ToDisplayString() != TasksNamespace) {
+            method.ContainingType?.ContainingNamespace?.ToDisplayString() != TasksNamespace)
             return;
-        }
 
-        if (!DisablesContextCapture(invocation.Arguments[0].Value)) {
-            return;
-        }
+        if (!DisablesContextCapture(invocation.Arguments[0].Value)) return;
 
         var actorType = FindContainingReentrantActor(context.ContainingSymbol, actorAttribute, reentrantAttribute);
-        if (actorType is null) {
-            return;
-        }
+        if (actorType is null) return;
 
         context.ReportDiagnostic(Diagnostic.Create(
             ConfigureAwaitFalseInReentrantActor,
@@ -93,10 +85,9 @@ public sealed class ReentrantActorConfigureAwaitAnalyzer : DiagnosticAnalyzer {
     }
 
     private static bool DisablesContextCapture(IOperation argument) {
-        if (!argument.ConstantValue.HasValue) {
+        if (!argument.ConstantValue.HasValue)
             // Non-constant argument: unknowable, stay quiet.
             return false;
-        }
 
         return argument.ConstantValue.Value switch {
             bool continueOnCapturedContext => !continueOnCapturedContext,
@@ -113,21 +104,17 @@ public sealed class ReentrantActorConfigureAwaitAnalyzer : DiagnosticAnalyzer {
         // helpers inside the actor class) are covered.
         for (var type = containingSymbol as INamedTypeSymbol ?? containingSymbol.ContainingType;
              type is not null;
-             type = type.ContainingType) {
-            if (HasAttribute(type, actorAttribute) && HasAttribute(type, reentrantAttribute)) {
+             type = type.ContainingType)
+            if (HasAttribute(type, actorAttribute) && HasAttribute(type, reentrantAttribute))
                 return type;
-            }
-        }
 
         return null;
     }
 
     private static bool HasAttribute(INamedTypeSymbol type, INamedTypeSymbol attribute) {
-        foreach (var candidate in type.GetAttributes()) {
-            if (SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attribute)) {
+        foreach (var candidate in type.GetAttributes())
+            if (SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attribute))
                 return true;
-            }
-        }
 
         return false;
     }

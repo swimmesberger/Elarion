@@ -3,8 +3,8 @@
 // framework owns is the `when` clause, and a route guard must evaluate it with exactly the slot-filter
 // semantics (AND, fail-closed) — this sub-export exists so that never drifts. The guard takes the same
 // `when` object a sidebar item declares, so "this page and its nav entry gate identically" is one literal.
-import { redirect } from "@tanstack/react-router"
-import { evaluateWhen, type CapabilityReader, type Vocabulary, type WhenClause } from "./index.js"
+import {redirect} from "@tanstack/react-router"
+import {evaluateWhen, type CapabilityReader, type Vocabulary, type WhenClause} from "./index.js"
 
 /** The router-context shape the guard reads — the app's router context carries the capability snapshot. */
 export interface GuardContext {
@@ -26,9 +26,9 @@ export function redirectUnless<V extends Vocabulary = Vocabulary>(
   when: WhenClause<V>,
   to: string
 ): (opts: GuardContext) => void {
-  return ({ context }) => {
+  return ({context}) => {
     if (!evaluateWhen(when, context.caps)) {
-      throw redirect({ to })
+      throw redirect({to})
     }
   }
 }
@@ -43,5 +43,5 @@ export interface RouteGuards<V extends Vocabulary> {
  * compile-checked against the same generated literal unions as a manifest's. Purely a typing layer.
  */
 export function createRouteGuards<V extends Vocabulary>(): RouteGuards<V> {
-  return { redirectUnless }
+  return {redirectUnless}
 }

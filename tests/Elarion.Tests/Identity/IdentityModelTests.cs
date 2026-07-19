@@ -21,7 +21,7 @@ public sealed class IdentityModelTests {
 
     [Fact]
     public void MapsAllIdentityEntitiesWithKeysSoStoresWorkWithoutIdentityDbContext() {
-        var model = BuildModel(snakeCase: true);
+        var model = BuildModel(true);
 
         model.FindEntityType(typeof(ApplicationUser)).Should().NotBeNull();
         model.FindEntityType(typeof(ApplicationRole)).Should().NotBeNull();
@@ -41,7 +41,7 @@ public sealed class IdentityModelTests {
 
     [Fact]
     public void SnakeCaseSetsTableColumnAndIndexNames() {
-        var model = BuildModel(snakeCase: true);
+        var model = BuildModel(true);
 
         model.FindEntityType(typeof(ApplicationUser))!.GetTableName().Should().Be("users");
         model.FindEntityType(typeof(ApplicationRole))!.GetTableName().Should().Be("roles");
@@ -52,24 +52,29 @@ public sealed class IdentityModelTests {
         model.FindEntityType(typeof(IdentityUserToken<Guid>))!.GetTableName().Should().Be("user_tokens");
 
         var user = model.FindEntityType(typeof(ApplicationUser))!;
-        user.FindProperty(nameof(IdentityUser<Guid>.NormalizedUserName))!.GetColumnName().Should().Be("normalized_user_name");
-        user.FindProperty(nameof(IdentityUser<Guid>.AccessFailedCount))!.GetColumnName().Should().Be("access_failed_count");
+        user.FindProperty(nameof(IdentityUser<Guid>.NormalizedUserName))!.GetColumnName().Should()
+            .Be("normalized_user_name");
+        user.FindProperty(nameof(IdentityUser<Guid>.AccessFailedCount))!.GetColumnName().Should()
+            .Be("access_failed_count");
 
         user.GetIndexes()
-            .Single(index => index.Properties.Any(property => property.Name == nameof(IdentityUser<Guid>.NormalizedUserName)))
+            .Single(index =>
+                index.Properties.Any(property => property.Name == nameof(IdentityUser<Guid>.NormalizedUserName)))
             .GetDatabaseName().Should().Be("ix_users_normalized_user_name");
         user.GetIndexes()
-            .Single(index => index.Properties.Any(property => property.Name == nameof(IdentityUser<Guid>.NormalizedEmail)))
+            .Single(index =>
+                index.Properties.Any(property => property.Name == nameof(IdentityUser<Guid>.NormalizedEmail)))
             .GetDatabaseName().Should().Be("ix_users_normalized_email");
         model.FindEntityType(typeof(ApplicationRole))!.GetIndexes()
-            .Single(index => index.Properties.Any(property => property.Name == nameof(IdentityRole<Guid>.NormalizedName)))
+            .Single(index =>
+                index.Properties.Any(property => property.Name == nameof(IdentityRole<Guid>.NormalizedName)))
             .GetDatabaseName().Should().Be("ix_roles_normalized_name");
     }
 
     [Fact]
     public void SchemaAndTablePrefixAreApplied() {
         var modelBuilder = new ModelBuilder(new ConventionSet());
-        modelBuilder.ApplyElarionIdentity<ApplicationUser, ApplicationRole, Guid>(schema: "auth", tablePrefix: "app_");
+        modelBuilder.ApplyElarionIdentity<ApplicationUser, ApplicationRole, Guid>("auth", "app_");
         var model = modelBuilder.FinalizeModel();
 
         var user = model.FindEntityType(typeof(ApplicationUser))!;
@@ -79,13 +84,14 @@ public sealed class IdentityModelTests {
 
         // Index names incorporate the prefixed table name so two prefixed Identity models never collide.
         user.GetIndexes()
-            .Single(index => index.Properties.Any(property => property.Name == nameof(IdentityUser<Guid>.NormalizedUserName)))
+            .Single(index =>
+                index.Properties.Any(property => property.Name == nameof(IdentityUser<Guid>.NormalizedUserName)))
             .GetDatabaseName().Should().Be("ix_app_users_normalized_user_name");
     }
 
     [Fact]
     public void NonSnakeCaseKeepsAspNetDefaults() {
-        var model = BuildModel(snakeCase: false);
+        var model = BuildModel(false);
 
         model.FindEntityType(typeof(ApplicationUser))!.GetTableName().Should().Be("AspNetUsers");
         model.FindEntityType(typeof(ApplicationRole))!.GetTableName().Should().Be("AspNetRoles");

@@ -9,8 +9,7 @@ using Xunit;
 
 namespace Elarion.Tests.Paging;
 
-public sealed class QueryableAuthorizationExtensionsTests
-{
+public sealed class QueryableAuthorizationExtensionsTests {
     private static readonly Guid OwnerA = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid OwnerB = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
@@ -20,8 +19,7 @@ public sealed class QueryableAuthorizationExtensionsTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
-    public void WhereAuthorized_NullFilter_LeavesSourceUnchanged()
-    {
+    public void WhereAuthorized_NullFilter_LeavesSourceUnchanged() {
         var source = Docs();
 
         var result = source.WhereAuthorized(new FakeQueryAuthorizer<Doc>(null), UserA);
@@ -30,24 +28,21 @@ public sealed class QueryableAuthorizationExtensionsTests
     }
 
     [Fact]
-    public void WhereAuthorized_DenyAll_YieldsEmpty()
-    {
+    public void WhereAuthorized_DenyAll_YieldsEmpty() {
         var result = Docs().WhereAuthorized(new FakeQueryAuthorizer<Doc>(_ => false), UserA);
 
         result.ToList().Should().BeEmpty();
     }
 
     [Fact]
-    public void WhereAuthorized_OwnerPredicate_FiltersToOwnedRows()
-    {
+    public void WhereAuthorized_OwnerPredicate_FiltersToOwnedRows() {
         var result = Docs().WhereAuthorized(new FakeQueryAuthorizer<Doc>(d => d.OwnerId == OwnerA), UserA);
 
         result.ToList().Should().HaveCount(2).And.OnlyContain(d => d.OwnerId == OwnerA);
     }
 
     [Fact]
-    public void WhereAuthorized_DefaultsToReadOperation()
-    {
+    public void WhereAuthorized_DefaultsToReadOperation() {
         var authorizer = new FakeQueryAuthorizer<Doc>(null);
 
         Docs().WhereAuthorized(authorizer, UserA);
@@ -56,8 +51,7 @@ public sealed class QueryableAuthorizationExtensionsTests
     }
 
     [Fact]
-    public void WhereAuthorized_PassesThroughExplicitOperation()
-    {
+    public void WhereAuthorized_PassesThroughExplicitOperation() {
         var authorizer = new FakeQueryAuthorizer<Doc>(null);
 
         Docs().WhereAuthorized(authorizer, UserA, ResourceOperation.Update);
@@ -66,8 +60,7 @@ public sealed class QueryableAuthorizationExtensionsTests
     }
 
     [Fact]
-    public async Task WhereAuthorized_ComposesBeforeOffsetPaging_CountsAndPagesOnlyAuthorizedRows()
-    {
+    public async Task WhereAuthorized_ComposesBeforeOffsetPaging_CountsAndPagesOnlyAuthorizedRows() {
         var page = await Docs()
             .WhereAuthorized(new FakeQueryAuthorizer<Doc>(d => d.OwnerId == OwnerA), UserA)
             .ToOffsetPageAsync(
@@ -82,39 +75,36 @@ public sealed class QueryableAuthorizationExtensionsTests
     }
 
     [Fact]
-    public void Matches_NullFilter_ReturnsTrue()
-    {
+    public void Matches_NullFilter_ReturnsTrue() {
         new FakeQueryAuthorizer<Doc>(null)
             .Matches(new Doc(Guid.NewGuid(), OwnerB), UserA)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void Matches_OwnerPredicate_TrueForOwnerFalseOtherwise()
-    {
+    public void Matches_OwnerPredicate_TrueForOwnerFalseOtherwise() {
         var authorizer = new FakeQueryAuthorizer<Doc>(d => d.OwnerId == OwnerA);
 
         authorizer.Matches(new Doc(Guid.NewGuid(), OwnerA), UserA).Should().BeTrue();
         authorizer.Matches(new Doc(Guid.NewGuid(), OwnerB), UserA).Should().BeFalse();
     }
 
-    private static IQueryable<Doc> Docs() => new[]
-    {
-        new Doc(Guid.NewGuid(), OwnerA),
-        new Doc(Guid.NewGuid(), OwnerB),
-        new Doc(Guid.NewGuid(), OwnerA),
-    }.AsAsyncQueryable();
+    private static IQueryable<Doc> Docs() {
+        return new[] {
+            new Doc(Guid.NewGuid(), OwnerA),
+            new Doc(Guid.NewGuid(), OwnerB),
+            new Doc(Guid.NewGuid(), OwnerA)
+        }.AsAsyncQueryable();
+    }
 
     private sealed record Doc(Guid Id, Guid OwnerId);
 
     private sealed class FakeQueryAuthorizer<TEntity>(Expression<Func<TEntity, bool>>? filter)
         : IQueryAuthorizer<TEntity>
-        where TEntity : class
-    {
+        where TEntity : class {
         public ResourceOperation? LastOperation { get; private set; }
 
-        public Expression<Func<TEntity, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation)
-        {
+        public Expression<Func<TEntity, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) {
             LastOperation = operation;
             return filter;
         }

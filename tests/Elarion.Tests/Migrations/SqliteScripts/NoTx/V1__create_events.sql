@@ -1,1 +1,5 @@
-CREATE TABLE mig_events (id INTEGER PRIMARY KEY, val INTEGER);
+CREATE TABLE mig_events
+(
+  id  INTEGER PRIMARY KEY,
+  val INTEGER
+);

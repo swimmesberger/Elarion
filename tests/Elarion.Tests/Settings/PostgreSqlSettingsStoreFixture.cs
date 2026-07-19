@@ -43,20 +43,21 @@ public sealed class PostgreSqlSettingsStoreFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
     /// <summary>Creates a fresh context bound to the container, so each test owns its own connection.</summary>
-    public SettingsIntegrationDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<SettingsIntegrationDbContext>()
+    public SettingsIntegrationDbContext CreateContext() {
+        return new SettingsIntegrationDbContext(new DbContextOptionsBuilder<SettingsIntegrationDbContext>()
             .UseNpgsql(ConnectionString)
             .Options);
+    }
 }
 
 /// <summary>EF Core context mapping the Elarion settings table for integration tests.</summary>
-public sealed class SettingsIntegrationDbContext(DbContextOptions<SettingsIntegrationDbContext> options) : DbContext(options) {
-    protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+public sealed class SettingsIntegrationDbContext(DbContextOptions<SettingsIntegrationDbContext> options)
+    : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.UseElarionSettings();
+    }
 }

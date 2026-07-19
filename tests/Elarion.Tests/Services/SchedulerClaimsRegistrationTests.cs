@@ -29,7 +29,7 @@ public sealed class SchedulerClaimsRegistrationTests {
         var coordinator = new LocalScheduledOccurrenceCoordinator();
         var occurrence = new ScheduledOccurrence {
             JobName = "job",
-            DueTimeUtc = DateTimeOffset.UtcNow,
+            DueTimeUtc = DateTimeOffset.UtcNow
         };
 
         (await coordinator.TryClaimAsync(occurrence, CancellationToken.None)).Should().BeTrue();
@@ -79,7 +79,7 @@ public sealed class SchedulerClaimsRegistrationTests {
     [Fact]
     public void UseElarionSchedulerClaims_OverridesAndPascalCase_AreApplied() {
         var modelBuilder = new ModelBuilder(new ConventionSet());
-        modelBuilder.UseElarionSchedulerClaims("MyClaims", "jobs", snakeCase: false);
+        modelBuilder.UseElarionSchedulerClaims("MyClaims", "jobs", false);
         var model = modelBuilder.FinalizeModel();
 
         var claim = model.FindEntityType(typeof(SchedulerClaimEntity))!;
@@ -92,6 +92,7 @@ public sealed class SchedulerClaimsRegistrationTests {
 
 /// <summary>EF Core context mapping the scheduler-claims table for registration/integration tests.</summary>
 public sealed class SchedulerClaimsDbContext(DbContextOptions<SchedulerClaimsDbContext> options) : DbContext(options) {
-    protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.UseElarionSchedulerClaims();
+    }
 }

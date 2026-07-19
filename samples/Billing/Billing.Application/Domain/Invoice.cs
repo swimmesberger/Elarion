@@ -21,4 +21,10 @@ public sealed class Invoice {
     public DateTimeOffset? OverdueNoticeSentAt { get; set; }
 }
 
-public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Cancelled }
+public enum InvoiceStatus {
+    Draft,
+    Sent,
+    Paid,
+    Overdue,
+    Cancelled
+}

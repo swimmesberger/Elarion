@@ -20,6 +20,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 public sealed class GetClient(BillingDbContext db, ICurrentUser user)
     : IHandler<GetClient.Query, Result<GetClient.Response>> {
     public sealed record Query(Guid Id) : IQuery;
+
     public sealed record Response(Guid Id, string Number, string Name, string Email);
 
     public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {

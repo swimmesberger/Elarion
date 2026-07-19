@@ -46,7 +46,7 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
     // still bounded so a stuck winner can never pin the duplicate's database connection forever. On timeout the
     // duplicate degrades to the same "in progress" 409 the fast path returns, rather than hanging. The ceiling
     // is shared with the in-memory store so both tiers bound the wait identically.
-    private static readonly TimeSpan WaitLockTimeout = Elarion.Idempotency.IdempotencyTimeouts.WaitThenReplayCeiling;
+    private static readonly TimeSpan WaitLockTimeout = Idempotency.IdempotencyTimeouts.WaitThenReplayCeiling;
 
     private const string SavepointName = "elarion_idempotency";
 
@@ -57,16 +57,14 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         var key = ResolveKey(request);
-        if (string.IsNullOrEmpty(key)) {
+        if (string.IsNullOrEmpty(key))
             return policy.KeyRequired
                 ? TResponse.Failure(AppError.Validation("An idempotency key is required for this operation."))
                 : await inner.HandleAsync(request, ct).ConfigureAwait(false);
-        }
 
-        if (policy.Scope == IdempotencyScope.CurrentUser && currentUser is not { IsAuthenticated: true }) {
+        if (policy.Scope == IdempotencyScope.CurrentUser && currentUser is not { IsAuthenticated: true })
             return TResponse.Failure(
                 AppError.Unauthorized("A user-scoped idempotency key requires an authenticated caller."));
-        }
 
         var owner = policy.Scope switch {
             IdempotencyScope.CurrentUser => Hash(currentUser!.UserId),
@@ -75,7 +73,7 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
             // without it would collapse all consumers of an event onto one claim — fail loud instead.
             IdempotencyScope.Consumer => policy.Owner ?? throw new InvalidOperationException(
                 $"IdempotencyScope.Consumer requires the policy for '{typeof(TRequest).Name}' to supply Owner."),
-            _ => string.Empty,
+            _ => string.Empty
         };
         var storeKey = new IdempotencyStoreKey(Operation, policy.Scope, owner, key);
         var fingerprint = policy.Fingerprint ? ComputeFingerprint(request) : string.Empty;
@@ -86,7 +84,7 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
             // connection indefinitely. On timeout the store surfaces the "in progress" 409 either way.
             LockTimeout = policy.ConflictBehavior == IdempotencyConflictBehavior.Conflict
                 ? ConflictLockTimeout
-                : WaitLockTimeout,
+                : WaitLockTimeout
         };
 
         await using var scope = await unitOfWork.BeginAsync(options, ct).ConfigureAwait(false);
@@ -111,14 +109,13 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
 
         // Began — run the handler inside the claimed transaction.
         var storeFailures = policy.StoreFailures == IdempotencyFailureStorage.Definitive;
-        if (storeFailures) {
-            await scope.CreateSavepointAsync(SavepointName, ct).ConfigureAwait(false);
-        }
+        if (storeFailures) await scope.CreateSavepointAsync(SavepointName, ct).ConfigureAwait(false);
 
         TResponse response;
         try {
             response = await inner.HandleAsync(request, ct).ConfigureAwait(false);
-        } catch {
+        }
+        catch {
             RecordOutcome("abandoned");
             await store.AbandonAsync(storeKey, ct).ConfigureAwait(false);
             await scope.RollbackAsync(ct).ConfigureAwait(false);
@@ -129,7 +126,8 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
             RecordOutcome("completed");
             // The handler succeeded: finalize the key and commit uncancellably. A cancellation arriving now must
             // not roll back completed work and leave the key claimable again — that would re-run a done command.
-            await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), isFailure: false, policy.Retention, CancellationToken.None)
+            await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), false, policy.Retention,
+                    CancellationToken.None)
                 .ConfigureAwait(false);
             await scope.CommitAsync(CancellationToken.None).ConfigureAwait(false);
             return response;
@@ -141,7 +139,8 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
             // decided, so finalize uncancellably (see the success path above).
             RecordOutcome("completed");
             await scope.RollbackToSavepointAsync(SavepointName, CancellationToken.None).ConfigureAwait(false);
-            await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), isFailure: true, policy.Retention, CancellationToken.None)
+            await store.CompleteAsync(storeKey, policy.Serialize(response, jsonOptions), true, policy.Retention,
+                    CancellationToken.None)
                 .ConfigureAwait(false);
             await scope.CommitAsync(CancellationToken.None).ConfigureAwait(false);
             return response;
@@ -164,9 +163,7 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
     }
 
     private string? ResolveKey(TRequest request) {
-        if (keyAccessor.TryGetKey(out var captured)) {
-            return captured;
-        }
+        if (keyAccessor.TryGetKey(out var captured)) return captured;
 
         return request is IIdempotentRequest { IdempotencyKey: { Length: > 0 } inBand } ? inBand : null;
     }
@@ -176,11 +173,13 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
 
-    private static bool IsDefinitiveFailure(TResponse response) =>
-        response is IResultError {
-            Error.Kind: ErrorKind.Validation or ErrorKind.BusinessRule or ErrorKind.NotFound or ErrorKind.Forbidden,
+    private static bool IsDefinitiveFailure(TResponse response) {
+        return response is IResultError {
+            Error.Kind: ErrorKind.Validation or ErrorKind.BusinessRule or ErrorKind.NotFound or ErrorKind.Forbidden
         };
+    }
 
-    private static string Hash(string value) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    private static string Hash(string value) {
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    }
 }

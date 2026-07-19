@@ -25,7 +25,9 @@ public sealed class PostgreSqlSettingsChangeSourceIntegrationTests(PostgreSqlSet
     // Long enough for a wrongly-sent notification to arrive, short enough to keep the suite fast.
     private static readonly TimeSpan QuietWindow = TimeSpan.FromMilliseconds(750);
 
-    private static string UniqueKey() => $"app:{Guid.NewGuid():N}";
+    private static string UniqueKey() {
+        return $"app:{Guid.NewGuid():N}";
+    }
 
     [Fact]
     public async Task WriteOnOneNode_FiresWatcherOnOtherNode() {
@@ -113,7 +115,7 @@ public sealed class PostgreSqlSettingsChangeSourceIntegrationTests(PostgreSqlSet
         var options = new PostgreSqlSettingsChangeOptions();
         await using var source = new PostgreSqlSettingsChangeSource(
             NpgsqlDataSource.Create(fixture.ConnectionString),
-            ownsDataSource: true,
+            true,
             options,
             NullLogger<PostgreSqlSettingsChangeSource>.Instance);
         var fired = WaitForFire(source.Watch(SettingsScope.Global));
@@ -161,8 +163,10 @@ public sealed class PostgreSqlSettingsChangeSourceIntegrationTests(PostgreSqlSet
 
     private static EfCoreSettingsStore<SettingsIntegrationDbContext> CreateStore(
         SettingsIntegrationDbContext context,
-        PostgreSqlSettingsChangeOptions options) =>
-        new(context, new PostgreSqlTransactionalSettingsChangeNotifier(options), TimeProvider.System);
+        PostgreSqlSettingsChangeOptions options) {
+        return new EfCoreSettingsStore<SettingsIntegrationDbContext>(context,
+            new PostgreSqlTransactionalSettingsChangeNotifier(options), TimeProvider.System);
+    }
 
     private static Task WaitForFire(IChangeToken token) {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -191,7 +195,7 @@ public sealed class PostgreSqlSettingsChangeSourceIntegrationTests(PostgreSqlSet
             var options = new PostgreSqlSettingsChangeOptions();
             var source = new PostgreSqlSettingsChangeSource(
                 NpgsqlDataSource.Create(connectionString),
-                ownsDataSource: true,
+                true,
                 options,
                 NullLogger<PostgreSqlSettingsChangeSource>.Instance);
             var listener = new PostgreSqlSettingsChangeListener(

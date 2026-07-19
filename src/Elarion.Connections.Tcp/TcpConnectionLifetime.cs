@@ -57,15 +57,15 @@ internal sealed class TcpConnectionLifetime : IDisposable {
     }
 
     /// <summary>Attaches the outbound writer once it exists (after the framed handshake).</summary>
-    public void AttachWriter(TcpOutboundWriter writer) => _writer = writer;
+    public void AttachWriter(TcpOutboundWriter writer) {
+        _writer = writer;
+    }
 
     /// <summary>Records the first close reason and cancels the receive loop. Later calls are no-ops, so
     /// competing initiators cannot overwrite the reason.</summary>
     public bool TryBeginClose(Exception? reason) {
         lock (_gate) {
-            if (_closeRequested) {
-                return false;
-            }
+            if (_closeRequested) return false;
 
             _closeRequested = true;
             _closeReason = reason;
@@ -93,9 +93,7 @@ internal sealed class TcpConnectionLifetime : IDisposable {
     public void Abort(Exception? reason) {
         TryBeginClose(reason);
         lock (_gate) {
-            if (_forced) {
-                return;
-            }
+            if (_forced) return;
 
             _forced = true;
         }
@@ -108,9 +106,7 @@ internal sealed class TcpConnectionLifetime : IDisposable {
     /// <summary>Disposes the raw transport exactly once (also the normal end-of-runner disposal path).</summary>
     public void DisposeTransport() {
         lock (_gate) {
-            if (_transportDisposed) {
-                return;
-            }
+            if (_transportDisposed) return;
 
             _transportDisposed = true;
         }
@@ -124,7 +120,9 @@ internal sealed class TcpConnectionLifetime : IDisposable {
     }
 
     /// <summary>Marks the terminal state: teardown finished, the runner is about to return.</summary>
-    public void MarkClosed() => _completion.TrySetResult();
+    public void MarkClosed() {
+        _completion.TrySetResult();
+    }
 
     private void CancelReceive() {
         try {
@@ -135,5 +133,7 @@ internal sealed class TcpConnectionLifetime : IDisposable {
         }
     }
 
-    public void Dispose() => _receiveCts.Dispose();
+    public void Dispose() {
+        _receiveCts.Dispose();
+    }
 }

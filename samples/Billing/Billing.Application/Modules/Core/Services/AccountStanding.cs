@@ -16,15 +16,15 @@ namespace Billing.Application.Modules.Core.Services;
 internal sealed class AccountStanding(BillingDbContext db) : IAccountStanding {
     private const long CreditLimitCents = 1_000_000; // €10,000 per customer, for the sample
 
-    public async ValueTask<Result> EnsureCanInvoiceAsync(Guid clientId, long amountCents, CancellationToken ct = default) {
+    public async ValueTask<Result> EnsureCanInvoiceAsync(Guid clientId, long amountCents,
+        CancellationToken ct = default) {
         var outstanding = await db.Invoices
             .Where(i => i.ClientId == clientId && (i.Status == InvoiceStatus.Sent || i.Status == InvoiceStatus.Overdue))
             .SumAsync(i => i.AmountCents, ct);
 
-        if (outstanding + amountCents > CreditLimitCents) {
+        if (outstanding + amountCents > CreditLimitCents)
             return AppError.BusinessRule(
                 $"Credit limit exceeded: outstanding {outstanding} + {amountCents} would pass {CreditLimitCents} (minor units).");
-        }
 
         return Result.Success();
     }

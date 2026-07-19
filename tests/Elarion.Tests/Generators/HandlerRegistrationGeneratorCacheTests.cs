@@ -32,7 +32,7 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
         """;
 
     [Fact]
-    public void ReusesOutputsAfterIrrelevantEdit() =>
+    public void ReusesOutputsAfterIrrelevantEdit() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new HandlerRegistrationGenerator(),
             Source,
@@ -42,9 +42,10 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
             "NoRetryPolicies",
             "Handlers",
             "HandlerModuleAggregation");
+    }
 
     [Fact]
-    public void DiscoveryStaysCached_WhenAnUnrelatedFileChanges() =>
+    public void DiscoveryStaysCached_WhenAnUnrelatedFileChanges() {
         // The strict form: candidate discovery is per-node, so editing another file must not re-bind the
         // handler's file at all (reason Cached, not merely Unchanged). The "Handlers" resolution stage is
         // deliberately excluded — it combines the compilation to keep cross-file [DecoratorList]/[Require*]
@@ -56,4 +57,5 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
             "HandlerCandidates",
             "VariantContracts",
             "NoRetryPolicies");
+    }
 }

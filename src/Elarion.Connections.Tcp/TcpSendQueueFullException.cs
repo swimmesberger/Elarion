@@ -8,7 +8,8 @@ namespace Elarion.Connections.Tcp;
 /// never silently dropped: saturation is always this deterministic fault.
 /// </summary>
 public sealed class TcpSendQueueFullException(string connectionId, int capacity)
-    : Exception($"Connection '{connectionId}' has {capacity} outbound sends pending — the send was rejected, not queued.") {
+    : Exception(
+        $"Connection '{connectionId}' has {capacity} outbound sends pending — the send was rejected, not queued.") {
     /// <summary>The id of the saturated connection.</summary>
     public string ConnectionId { get; } = connectionId;
 

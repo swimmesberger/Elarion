@@ -73,11 +73,10 @@ builder.Services.AddElarionResilience();
 // operating a separate Redis. HybridCache's in-process L1 still carries the hot path. During build-time schema
 // generation the Aspire-injected connection string is absent, so fall back to the in-memory tier — the schema
 // tool only builds the host, it never serves traffic.
-if (JsonRpcSchemaGeneration.IsRunning) {
+if (JsonRpcSchemaGeneration.IsRunning)
     builder.Services.AddElarionHandlerCaching();
-} else {
+else
     builder.Services.AddElarionPostgreSqlHandlerCaching(builder.Configuration.GetConnectionString("billing")!);
-}
 
 // Transport-neutral current user, filled from the authenticated principal.
 builder.Services.AddElarionCurrentUser(options => options.UserIdClaimType = "sub");
@@ -190,9 +189,9 @@ app.UseAuthentication();
 // Development-only: stamp a stable dev principal so ICurrentUser resolves without an external issuer. It
 // carries the permission claims the handlers require ([RequirePermission("clients", Verbs.Read)], …) so the
 // authorization checks pass locally; a real issuer would mint these from the user's roles/scopes.
-if (app.Environment.IsDevelopment()) {
+if (app.Environment.IsDevelopment())
     app.Use(async (context, next) => {
-        if (context.User.Identity?.IsAuthenticated != true) {
+        if (context.User.Identity?.IsAuthenticated != true)
             context.User = new ClaimsPrincipal(
                 new ClaimsIdentity(
                     [
@@ -200,21 +199,19 @@ if (app.Environment.IsDevelopment()) {
                         new Claim("permission", "clients.read"),
                         new Claim("permission", "clients.write"),
                         new Claim("permission", "invoices.read"),
-                        new Claim("permission", "invoices.write"),
+                        new Claim("permission", "invoices.write")
                     ],
                     "Development"));
-        }
         await next();
     });
-}
 
-app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
+app.UseElarionCurrentUser(); // snapshot claims into the scoped ICurrentUser
 app.UseAuthorization();
 
-app.MapElarionEndpoints(app.Configuration);            // generated [HttpEndpoint] REST routes (e.g. GET /clients/{id})
-app.MapElarionSession();                                // GET /session — client-capability snapshot (anonymous-friendly)
-app.MapOpenApi();                                      // GET /openapi/v1.json — the REST contract (dev-only in production)
-app.MapElarionJsonRpc().RequireAuthorization();        // POST /rpc
-app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
+app.MapElarionEndpoints(app.Configuration); // generated [HttpEndpoint] REST routes (e.g. GET /clients/{id})
+app.MapElarionSession(); // GET /session — client-capability snapshot (anonymous-friendly)
+app.MapOpenApi(); // GET /openapi/v1.json — the REST contract (dev-only in production)
+app.MapElarionJsonRpc().RequireAuthorization(); // POST /rpc
+app.MapElarionMcp().RequireAuthorization(); // /mcp — independent of /rpc
 
 app.Run();

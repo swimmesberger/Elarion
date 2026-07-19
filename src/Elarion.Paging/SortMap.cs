@@ -27,15 +27,13 @@ namespace Elarion.Paging;
 /// // request.Sort == "name" sorts by Name then Id; "-createdAt"/"+createdAt" flip the primary column.
 /// </code>
 /// </example>
-public sealed class SortMap<T>
-{
+public sealed class SortMap<T> {
     private readonly FrozenDictionary<string, Func<IQueryable<T>, bool?, IOrderedQueryable<T>>> _entries;
     private readonly string _defaultKey;
 
     internal SortMap(
         string defaultKey,
-        FrozenDictionary<string, Func<IQueryable<T>, bool?, IOrderedQueryable<T>>> entries)
-    {
+        FrozenDictionary<string, Func<IQueryable<T>, bool?, IOrderedQueryable<T>>> entries) {
         _defaultKey = defaultKey;
         _entries = entries;
     }
@@ -51,8 +49,9 @@ public sealed class SortMap<T>
     /// <param name="selector">The primary key selector for the default sort.</param>
     /// <param name="direction">The default direction for the primary column.</param>
     public static SortMapBuilder<T> CreateBuilder<TKey>(
-        string key, Expression<Func<T, TKey>> selector, SortDirection direction = SortDirection.Ascending)
-        => new SortMapBuilder<T>(key).Add(key, selector, direction);
+        string key, Expression<Func<T, TKey>> selector, SortDirection direction = SortDirection.Ascending) {
+        return new SortMapBuilder<T>(key).Add(key, selector, direction);
+    }
 
     /// <summary>
     /// Applies the sort named by <paramref name="sort"/>, falling back to the default key when the key is
@@ -60,30 +59,23 @@ public sealed class SortMap<T>
     /// entry's primary column; tiebreakers keep their declared direction. With no prefix the entry's
     /// declared directions are used as-is.
     /// </summary>
-    public IOrderedQueryable<T> Apply(IQueryable<T> source, string? sort)
-    {
+    public IOrderedQueryable<T> Apply(IQueryable<T> source, string? sort) {
         ArgumentNullException.ThrowIfNull(source);
 
         var key = _defaultKey;
         bool? primaryDescendingOverride = null;
 
-        if (!string.IsNullOrWhiteSpace(sort))
-        {
+        if (!string.IsNullOrWhiteSpace(sort)) {
             var parsed = sort.Trim();
-            if (parsed[0] is '-' or '+')
-            {
+            if (parsed[0] is '-' or '+') {
                 primaryDescendingOverride = parsed[0] == '-';
                 parsed = parsed[1..];
             }
 
             if (_entries.ContainsKey(parsed))
-            {
                 key = parsed;
-            }
             else
-            {
                 primaryDescendingOverride = null;
-            }
         }
 
         return _entries[key](source, primaryDescendingOverride);

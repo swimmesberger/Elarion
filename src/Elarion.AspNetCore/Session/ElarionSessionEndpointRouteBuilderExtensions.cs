@@ -31,8 +31,8 @@ public static class ElarionSessionEndpointRouteBuilderExtensions {
         return endpoints.MapGet(
                 route,
                 static async (
-                    [FromServices] IHandler<SessionRequest, Result<SessionResponse>> handler,
-                    CancellationToken ct) =>
+                        [FromServices] IHandler<SessionRequest, Result<SessionResponse>> handler,
+                        CancellationToken ct) =>
                     ElarionHttpResults.ToResult(await handler.HandleAsync(new SessionRequest(), ct)))
             .WithName("ElarionSession")
             .WithDescription("Returns the client-capability snapshot for the current user and deployment.")

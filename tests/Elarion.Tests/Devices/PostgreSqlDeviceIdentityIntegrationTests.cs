@@ -49,7 +49,7 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IPairingCodeStore>();
-        var entry = NewEntry(expiresIn: TimeSpan.FromMinutes(5));
+        var entry = NewEntry(TimeSpan.FromMinutes(5));
 
         (await store.TryReplaceAsync(entry, TestToken)).Should().BeTrue();
         (await store.TryReplaceAsync(entry with { DeviceId = NewDeviceId() }, TestToken)).Should().BeFalse();
@@ -60,7 +60,7 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IPairingCodeStore>();
-        var entry = NewEntry(expiresIn: TimeSpan.FromMinutes(5));
+        var entry = NewEntry(TimeSpan.FromMinutes(5));
         await store.TryReplaceAsync(entry, TestToken);
 
         var claimed = await store.ClaimAsync(entry.CodeHash, DateTimeOffset.UtcNow, TestToken);
@@ -76,7 +76,7 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IPairingCodeStore>();
-        var entry = NewEntry(expiresIn: TimeSpan.FromMinutes(5));
+        var entry = NewEntry(TimeSpan.FromMinutes(5));
         await store.TryReplaceAsync(entry, TestToken);
 
         var claims = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ =>
@@ -90,7 +90,7 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IPairingCodeStore>();
-        var entry = NewEntry(expiresIn: TimeSpan.FromMinutes(-1));
+        var entry = NewEntry(TimeSpan.FromMinutes(-1));
         await store.TryReplaceAsync(entry, TestToken);
 
         (await store.ClaimAsync(entry.CodeHash, DateTimeOffset.UtcNow, TestToken)).Should().BeNull();
@@ -101,8 +101,8 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IPairingCodeStore>();
-        var expired = NewEntry(expiresIn: TimeSpan.FromMinutes(-1));
-        var live = NewEntry(expiresIn: TimeSpan.FromMinutes(5));
+        var expired = NewEntry(TimeSpan.FromMinutes(-1));
+        var live = NewEntry(TimeSpan.FromMinutes(5));
         await store.TryReplaceAsync(expired, TestToken);
         await store.TryReplaceAsync(live, TestToken);
 
@@ -133,18 +133,22 @@ public sealed class PostgreSqlDeviceIdentityIntegrationTests(PostgreSqlDeviceIde
         (await pairing.RedeemAsync(issued.Code, TestToken)).Should().BeNull();
     }
 
-    private static string NewDeviceId() => Guid.CreateVersion7().ToString();
+    private static string NewDeviceId() {
+        return Guid.CreateVersion7().ToString();
+    }
 
-    private static PairingCodeEntry NewEntry(TimeSpan expiresIn) =>
-        new() {
+    private static PairingCodeEntry NewEntry(TimeSpan expiresIn) {
+        return new PairingCodeEntry {
             CodeHash = Convert.ToHexStringLower(Guid.CreateVersion7().ToByteArray()),
             DeviceId = NewDeviceId(),
-            ExpiresAt = DateTimeOffset.UtcNow + expiresIn,
+            ExpiresAt = DateTimeOffset.UtcNow + expiresIn
         };
+    }
 
     private ServiceProvider CreateProvider() {
         var services = new ServiceCollection();
-        services.AddDbContext<DeviceIdentityIntegrationDbContext>(options => options.UseNpgsql(fixture.ConnectionString));
+        services.AddDbContext<DeviceIdentityIntegrationDbContext>(options =>
+            options.UseNpgsql(fixture.ConnectionString));
         services.AddElarionDeviceIdentityEntityFrameworkCore<DeviceIdentityIntegrationDbContext>();
         return services.BuildServiceProvider();
     }

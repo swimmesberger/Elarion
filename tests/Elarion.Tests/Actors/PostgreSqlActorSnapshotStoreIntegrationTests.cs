@@ -21,7 +21,7 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
 
-        var etag = await store.WriteAsync(key, """{"balance":5}""", expectedETag: null, TestToken);
+        var etag = await store.WriteAsync(key, """{"balance":5}""", null, TestToken);
         // The create mints a lineage-unique positive version, rendered as invariant text.
         long.Parse(etag, CultureInfo.InvariantCulture).Should().BePositive();
 
@@ -46,9 +46,9 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
-        await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+        await store.WriteAsync(key, """{"balance":1}""", null, TestToken);
 
-        var act = async () => await store.WriteAsync(key, """{"balance":2}""", expectedETag: null, TestToken);
+        var act = async () => await store.WriteAsync(key, """{"balance":2}""", null, TestToken);
         await act.Should().ThrowAsync<ActorSnapshotConcurrencyException>();
 
         // The ON CONFLICT create shape never poisons the connection; the row is untouched.
@@ -61,7 +61,7 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
-        var etag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+        var etag = await store.WriteAsync(key, """{"balance":1}""", null, TestToken);
         var lineageVersion = long.Parse(etag, CultureInfo.InvariantCulture);
 
         etag = await store.WriteAsync(key, """{"balance":2}""", etag, TestToken);
@@ -78,7 +78,7 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
-        var etag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+        var etag = await store.WriteAsync(key, """{"balance":1}""", null, TestToken);
         await store.WriteAsync(key, """{"balance":2}""", etag, TestToken);
 
         var act = async () => await store.WriteAsync(key, """{"balance":3}""", etag, TestToken);
@@ -92,7 +92,7 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
-        var etag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+        var etag = await store.WriteAsync(key, """{"balance":1}""", null, TestToken);
 
         await store.ClearAsync(key, etag, TestToken);
 
@@ -105,7 +105,7 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
-        var etag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+        var etag = await store.WriteAsync(key, """{"balance":1}""", null, TestToken);
         await store.WriteAsync(key, """{"balance":2}""", etag, TestToken);
 
         var act = async () => await store.ClearAsync(key, etag, TestToken);
@@ -122,10 +122,10 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
-        var staleETag = await store.WriteAsync(key, """{"balance":1}""", expectedETag: null, TestToken);
+        var staleETag = await store.WriteAsync(key, """{"balance":1}""", null, TestToken);
 
         await store.ClearAsync(key, staleETag, TestToken);
-        var newETag = await store.WriteAsync(key, """{"balance":100}""", expectedETag: null, TestToken);
+        var newETag = await store.WriteAsync(key, """{"balance":100}""", null, TestToken);
         newETag.Should().NotBe(staleETag);
 
         var act = async () => await store.WriteAsync(key, """{"balance":2}""", staleETag, TestToken);
@@ -141,7 +141,7 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
         await using var provider = CreateProvider();
         var store = provider.GetRequiredService<IActorSnapshotStore>();
         var key = NewKey();
-        await store.WriteAsync(key, """{"stage":"shipped","attempts":3}""", expectedETag: null, TestToken);
+        await store.WriteAsync(key, """{"stage":"shipped","attempts":3}""", null, TestToken);
 
         // The ops story: actor state is inspectable with plain SQL over the jsonb column.
         await using var context = fixture.CreateContext();
@@ -162,18 +162,20 @@ public sealed class PostgreSqlActorSnapshotStoreIntegrationTests(PostgreSqlActor
 
         (await reader.ReadAsync<ActorStateTests.VaultState>(key, TestToken)).Should().BeNull();
 
-        await store.WriteAsync(key, """{"balance":7}""", expectedETag: null, TestToken);
+        await store.WriteAsync(key, """{"balance":7}""", null, TestToken);
         var state = await reader.ReadAsync<ActorStateTests.VaultState>(key, TestToken);
         state.Should().NotBeNull();
         state!.Balance.Should().Be(7);
     }
 
-    private static ActorSnapshotKey NewKey() =>
-        new("Vault", Guid.CreateVersion7().ToString());
+    private static ActorSnapshotKey NewKey() {
+        return new ActorSnapshotKey("Vault", Guid.CreateVersion7().ToString());
+    }
 
     private ServiceProvider CreateProvider() {
         var services = new ServiceCollection();
-        services.AddDbContext<ActorSnapshotIntegrationDbContext>(options => options.UseNpgsql(fixture.ConnectionString));
+        services.AddDbContext<ActorSnapshotIntegrationDbContext>(options =>
+            options.UseNpgsql(fixture.ConnectionString));
         services.AddElarionPostgreSqlActorSnapshots<ActorSnapshotIntegrationDbContext>();
         services.ConfigureElarionJson(options => options.TypeInfoResolvers.Add(ActorStateTestContext.Default));
         return services.BuildServiceProvider();

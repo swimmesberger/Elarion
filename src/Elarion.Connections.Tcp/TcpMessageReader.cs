@@ -21,10 +21,9 @@ internal sealed class TcpMessageReader {
         ArgumentNullException.ThrowIfNull(framer);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxMessageBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(initialBufferBytes, 0);
-        if (initialBufferBytes > maxMessageBytes) {
+        if (initialBufferBytes > maxMessageBytes)
             throw new ArgumentOutOfRangeException(nameof(initialBufferBytes),
                 "The initial read buffer cannot exceed the maximum framed wire-message size.");
-        }
 
         _stream = stream;
         _framer = framer;
@@ -49,15 +48,11 @@ internal sealed class TcpMessageReader {
                 // Consumed applies either way: framers drop skippable noise even without a complete
                 // message, so noise neither accumulates against the cap nor gets rescanned per read.
                 _start += consumed;
-                if (complete) {
-                    return message;
-                }
+                if (complete) return message;
             }
 
             var unconsumed = _end - _start;
-            if (unconsumed >= _maxMessageBytes) {
-                throw new TcpMessageTooLargeException();
-            }
+            if (unconsumed >= _maxMessageBytes) throw new TcpMessageTooLargeException();
 
             if (_start > 0) {
                 Buffer.BlockCopy(_buffer, _start, _buffer, 0, unconsumed);
@@ -69,23 +64,17 @@ internal sealed class TcpMessageReader {
             var readBudget = Math.Min(_buffer.Length - _end, _maxMessageBytes - unconsumed);
             // The precondition above guarantees a positive budget. Keeping it explicit prevents a future
             // capacity change from issuing a zero-length read (whose EOF-like result would be misleading).
-            if (readBudget <= 0) {
-                throw new TcpMessageTooLargeException();
-            }
+            if (readBudget <= 0) throw new TcpMessageTooLargeException();
 
             var read = await _stream.ReadAsync(_buffer.AsMemory(_end, readBudget), ct);
-            if (read == 0) {
-                return null;
-            }
+            if (read == 0) return null;
 
             _end += read;
         }
     }
 
     private void EnsureReadCapacity(int unconsumed) {
-        if (_end < _buffer.Length) {
-            return;
-        }
+        if (_end < _buffer.Length) return;
 
         // The endpoint validates the initial size; all later growth is capped here too. Calculate through
         // long so a pathological configured cap cannot overflow a doubling operation.
@@ -97,29 +86,25 @@ internal sealed class TcpMessageReader {
 
     private static void ValidateFramerResult(
         ReadOnlyMemory<byte> presented, int available, bool complete, int consumed, ReadOnlyMemory<byte> message) {
-        if (consumed < 0 || consumed > available) {
-            throw new TcpMessageFramingException("The TCP framer returned a consumed byte count outside the presented buffer.");
-        }
+        if (consumed < 0 || consumed > available)
+            throw new TcpMessageFramingException(
+                "The TCP framer returned a consumed byte count outside the presented buffer.");
 
-        if (!complete) {
-            return;
-        }
+        if (!complete) return;
 
-        if (consumed == 0) {
+        if (consumed == 0)
             throw new TcpMessageFramingException("The TCP framer completed a message without consuming any bytes.");
-        }
 
         // Memory.Equals cannot establish that one memory is a slice of another. The reader always presents
         // an array-backed slice, so require the returned memory to reference that exact array and prove its
         // offset/range lie inside both the presented data and the reported consumed region.
-        if (!MemoryMarshal.TryGetArray(presented, out ArraySegment<byte> presentedSegment)
-            || !MemoryMarshal.TryGetArray(message, out ArraySegment<byte> messageSegment)
+        if (!MemoryMarshal.TryGetArray(presented, out var presentedSegment)
+            || !MemoryMarshal.TryGetArray(message, out var messageSegment)
             || !ReferenceEquals(presentedSegment.Array, messageSegment.Array)
             || messageSegment.Offset < presentedSegment.Offset
-            || (long)messageSegment.Offset + messageSegment.Count > (long)presentedSegment.Offset + consumed) {
+            || (long)messageSegment.Offset + messageSegment.Count > (long)presentedSegment.Offset + consumed)
             throw new TcpMessageFramingException(
                 "The TCP framer returned a complete message outside the presented consumed buffer region.");
-        }
     }
 }
 

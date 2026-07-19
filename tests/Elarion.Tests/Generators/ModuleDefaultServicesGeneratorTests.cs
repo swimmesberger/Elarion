@@ -6,11 +6,9 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ModuleDefaultServicesGeneratorTests
-{
+public sealed class ModuleDefaultServicesGeneratorTests {
     [Fact]
-    public void Skeleton_EmitsSiblingClassWithConfigureDefaultServicesAndHooks()
-    {
+    public void Skeleton_EmitsSiblingClassWithConfigureDefaultServicesAndHooks() {
         const string source =
             """
             namespace Sample.Modules {
@@ -24,8 +22,10 @@ public sealed class ModuleDefaultServicesGeneratorTests
         generated.Should().Contain("public static partial class BillingModuleElarionModuleServices");
         generated.Should().Contain(
             "public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection ConfigureDefaultServices(");
-        foreach (var hook in new[] { "AddHandlers", "AddServices", "AddValidators", "AddScheduledJobs", "AddEventConsumers", "AddModuleApi" })
-        {
+        foreach (var hook in new[] {
+                     "AddHandlers", "AddServices", "AddValidators", "AddScheduledJobs", "AddEventConsumers",
+                     "AddModuleApi"
+                 }) {
             generated.Should().Contain($"        {hook}(services);");
             generated.Should().Contain(
                 $"static partial void {hook}(global::Microsoft.Extensions.DependencyInjection.IServiceCollection services);");
@@ -33,8 +33,7 @@ public sealed class ModuleDefaultServicesGeneratorTests
     }
 
     [Fact]
-    public void Skeleton_GlobalNamespaceModule_EmitsCompilableSibling()
-    {
+    public void Skeleton_GlobalNamespaceModule_EmitsCompilableSibling() {
         const string source =
             """
             [Elarion.Abstractions.Modules.AppModule("Root")]
@@ -48,8 +47,7 @@ public sealed class ModuleDefaultServicesGeneratorTests
     }
 
     [Fact]
-    public void Skeleton_NoModules_EmitsNothing()
-    {
+    public void Skeleton_NoModules_EmitsNothing() {
         const string source =
             """
             namespace Sample.Modules {
@@ -64,16 +62,14 @@ public sealed class ModuleDefaultServicesGeneratorTests
             .Should().BeFalse();
     }
 
-    private static string GenerateSibling(string source)
-    {
+    private static string GenerateSibling(string source) {
         var result = Run(source);
         return result.GeneratedTrees
             .Select(tree => tree.GetText().ToString())
             .Single(text => text.Contains("ConfigureDefaultServices"));
     }
 
-    private static GeneratorDriverRunResult Run(string source)
-    {
+    private static GeneratorDriverRunResult Run(string source) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
         var compilation = CSharpCompilation.Create(
@@ -86,7 +82,7 @@ public sealed class ModuleDefaultServicesGeneratorTests
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(new ModuleDefaultServicesGenerator())
+        var driver = CSharpGeneratorDriver.Create(new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             compilation,
@@ -104,8 +100,7 @@ public sealed class ModuleDefaultServicesGeneratorTests
         return driver.GetRunResult();
     }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 

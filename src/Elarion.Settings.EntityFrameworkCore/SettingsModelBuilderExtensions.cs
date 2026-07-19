@@ -35,11 +35,13 @@ public static class SettingsModelBuilderExtensions {
             builder.Property(setting => setting.Owner).HasColumnName(snakeCase ? "owner" : "Owner").HasMaxLength(256);
             builder.Property(setting => setting.Key).HasColumnName(snakeCase ? "key" : "Key").HasMaxLength(512);
             builder.Property(setting => setting.Value).HasColumnName(snakeCase ? "value" : "Value");
-            builder.Property(setting => setting.UpdatedOnUtc).HasColumnName(snakeCase ? "updated_on_utc" : "UpdatedOnUtc");
+            builder.Property(setting => setting.UpdatedOnUtc)
+                .HasColumnName(snakeCase ? "updated_on_utc" : "UpdatedOnUtc");
 
             // Marked as a concurrency token for tracked saves; the store also guards writes explicitly so the
             // optimistic-concurrency contract holds under the change-tracker-free ExecuteUpdate/ExecuteDelete path.
-            builder.Property(setting => setting.Version).HasColumnName(snakeCase ? "version" : "Version").IsConcurrencyToken();
+            builder.Property(setting => setting.Version).HasColumnName(snakeCase ? "version" : "Version")
+                .IsConcurrencyToken();
         });
 
         return modelBuilder;

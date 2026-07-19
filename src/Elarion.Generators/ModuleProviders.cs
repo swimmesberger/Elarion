@@ -7,8 +7,7 @@ namespace Elarion.Generators;
 /// Shared incremental providers for module discovery and assembly-trigger gating, so each generator
 /// stops re-scanning the whole compilation on every edit.
 /// </summary>
-internal static class ModuleProviders
-{
+internal static class ModuleProviders {
     private const string AppModuleAttributeMetadataName = "Elarion.Abstractions.Modules.AppModuleAttribute";
 
     /// <summary>
@@ -19,8 +18,8 @@ internal static class ModuleProviders
     /// duplicate itself is reported once, as ELMOD006, by the manifest generator that always runs alongside.
     /// </summary>
     public static IncrementalValueProvider<EquatableArray<ModuleScanner.Module>> CollectModules(
-        IncrementalGeneratorInitializationContext context) =>
-        context.SyntaxProvider
+        IncrementalGeneratorInitializationContext context) {
+        return context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 AppModuleAttributeMetadataName,
                 static (node, _) => node is TypeDeclarationSyntax,
@@ -34,6 +33,7 @@ internal static class ModuleProviders
                     static m => m.Name,
                     static m => m.MetadataName)
                 .ToEquatableArray());
+    }
 
     /// <summary>
     /// Whether the assembly opts into the given generator, projected to a <see cref="bool"/> so
@@ -41,28 +41,22 @@ internal static class ModuleProviders
     /// </summary>
     public static IncrementalValueProvider<bool> HasTrigger(
         IncrementalGeneratorInitializationContext context,
-        string triggerAttributeMetadataName) =>
-        context.CompilationProvider.Select(
-            (compilation, _) => FrameworkFeatureTriggers.HasAssemblyTrigger(compilation, triggerAttributeMetadataName));
+        string triggerAttributeMetadataName) {
+        return context.CompilationProvider.Select((compilation, _) =>
+            FrameworkFeatureTriggers.HasAssemblyTrigger(compilation, triggerAttributeMetadataName));
+    }
 
-    private static ModuleScanner.Module? CreateModule(GeneratorAttributeSyntaxContext ctx)
-    {
-        if (ctx.TargetSymbol is not INamedTypeSymbol type)
-        {
-            return null;
-        }
+    private static ModuleScanner.Module? CreateModule(GeneratorAttributeSyntaxContext ctx) {
+        if (ctx.TargetSymbol is not INamedTypeSymbol type) return null;
 
         foreach (var attribute in ctx.Attributes)
-        {
             if (attribute.ConstructorArguments.Length > 0 &&
-                attribute.ConstructorArguments[0].Value is string name)
-            {
+                attribute.ConstructorArguments[0].Value is string name) {
                 var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing
                     ? containing.ToDisplayString()
                     : string.Empty;
                 return new ModuleScanner.Module(name, ns, type.Name, ModuleScanner.BuildMetadataName(type));
             }
-        }
 
         return null;
     }

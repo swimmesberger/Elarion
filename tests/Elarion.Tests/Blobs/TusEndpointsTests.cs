@@ -159,7 +159,7 @@ public sealed class TusEndpointsTests {
     [Fact]
     public async Task Create_OverMaxSize_Returns413() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, configure: options => options.MaxSize = 4);
+        await using var host = await StartAsync(ct, options => options.MaxSize = 4);
 
         var request = new HttpRequestMessage(HttpMethod.Post, "/_elarion/blobs/tus");
         request.Headers.Add("Upload-Length", "100");
@@ -279,12 +279,12 @@ public sealed class TusEndpointsTests {
         return request;
     }
 
-    private static string Base64(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+    private static string Base64(string value) {
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+    }
 
     private static string? Header(HttpResponseMessage response, string name) {
-        if (response.Headers.TryGetValues(name, out var values)) {
-            return string.Join(",", values);
-        }
+        if (response.Headers.TryGetValues(name, out var values)) return string.Join(",", values);
 
         return name == "Location" && response.Headers.Location is { } location ? location.ToString() : null;
     }
@@ -299,7 +299,8 @@ public sealed class TusEndpointsTests {
 
         var store = new RecordingBlobStore();
         builder.Services.AddSingleton<IBlobStore>(store);
-        builder.Services.AddSingleton<ICurrentUser>(user ?? new MutableCurrentUser { UserId = "user-1", IsAuthenticated = true });
+        builder.Services.AddSingleton<ICurrentUser>(user ?? new MutableCurrentUser
+            { UserId = "user-1", IsAuthenticated = true });
         builder.Services.AddElarionResumableBlobUploads(configure);
 
         var app = builder.Build();
@@ -328,9 +329,12 @@ public sealed class TusEndpointsTests {
 
         public BlobUploadRequest? LastRequest { get; private set; }
 
-        public byte[] Content(string id) => _content[id];
+        public byte[] Content(string id) {
+            return _content[id];
+        }
 
-        public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content, CancellationToken cancellationToken) {
+        public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content,
+            CancellationToken cancellationToken) {
             LastRequest = request;
             using var buffer = new MemoryStream();
             await content.CopyToAsync(buffer, cancellationToken);
@@ -339,23 +343,29 @@ public sealed class TusEndpointsTests {
             return new BlobRef { Value = id };
         }
 
-        public Task<BlobMetadata?> GetMetadataAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult<BlobMetadata?>(null);
+        public Task<BlobMetadata?> GetMetadataAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult<BlobMetadata?>(null);
+        }
 
-        public Task<bool> DeleteAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult(_content.Remove(blobRef.Value));
+        public Task<bool> DeleteAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult(_content.Remove(blobRef.Value));
+        }
 
-        public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult(_content.ContainsKey(blobRef.Value));
+        public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult(_content.ContainsKey(blobRef.Value));
+        }
 
-        public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult<BlobDownload?>(null);
+        public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult<BlobDownload?>(null);
+        }
 
-        public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) =>
+        public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
+        public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
     }
 
     private sealed class MutableCurrentUser : ICurrentUser {
@@ -367,6 +377,8 @@ public sealed class TusEndpointsTests {
 
         public IReadOnlyList<string> Roles => [];
 
-        public bool IsInRole(string role) => false;
+        public bool IsInRole(string role) {
+            return false;
+        }
     }
 }

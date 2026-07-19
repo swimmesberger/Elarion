@@ -29,7 +29,7 @@ internal static class SqlStatementSplitter {
                 // PostgreSQL block comments nest.
                 var depth = 1;
                 i += 2;
-                while (i < n && depth > 0) {
+                while (i < n && depth > 0)
                     if (sql[i] == '/' && i + 1 < n && sql[i + 1] == '*') {
                         depth++;
                         i += 2;
@@ -41,7 +41,6 @@ internal static class SqlStatementSplitter {
                     else {
                         i++;
                     }
-                }
 
                 continue;
             }
@@ -101,9 +100,7 @@ internal static class SqlStatementSplitter {
             }
 
             if (c == ';') {
-                if (significant) {
-                    statements.Add(sql[start..i].Trim());
-                }
+                if (significant) statements.Add(sql[start..i].Trim());
 
                 i++;
                 start = i;
@@ -111,18 +108,14 @@ internal static class SqlStatementSplitter {
                 continue;
             }
 
-            if (!char.IsWhiteSpace(c)) {
-                significant = true;
-            }
+            if (!char.IsWhiteSpace(c)) significant = true;
 
             i++;
         }
 
         if (significant) {
             var tail = sql[start..].Trim();
-            if (tail.Length > 0) {
-                statements.Add(tail);
-            }
+            if (tail.Length > 0) statements.Add(tail);
         }
 
         return statements;
@@ -130,24 +123,20 @@ internal static class SqlStatementSplitter {
 
     /// <summary>An <c>E'…'</c>/<c>e'…'</c> string uses backslash escapes; the E must not itself end an identifier.</summary>
     private static bool IsEscapeStringPrefix(string sql, int quoteIndex) {
-        if (quoteIndex == 0) {
-            return false;
-        }
+        if (quoteIndex == 0) return false;
 
         var previous = sql[quoteIndex - 1];
-        if (previous is not ('E' or 'e')) {
-            return false;
-        }
+        if (previous is not ('E' or 'e')) return false;
 
-        if (quoteIndex == 1) {
-            return true;
-        }
+        if (quoteIndex == 1) return true;
 
         var beforePrevious = sql[quoteIndex - 2];
         return !char.IsLetterOrDigit(beforePrevious) && beforePrevious != '_';
     }
 
-    private static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c is '_' or '$';
+    private static bool IsIdentifierChar(char c) {
+        return char.IsLetterOrDigit(c) || c is '_' or '$';
+    }
 
     /// <summary>Reads a <c>$tag$</c> opener at <paramref name="index"/>: <c>$$</c> or <c>$identifier$</c>.</summary>
     private static bool TryReadDollarTag(string sql, int index, out string tag) {
@@ -155,16 +144,12 @@ internal static class SqlStatementSplitter {
         var i = index + 1;
         while (i < sql.Length && (char.IsLetterOrDigit(sql[i]) || sql[i] == '_')) {
             // A tag must not start with a digit ($1 is a parameter, not a quote).
-            if (i == index + 1 && char.IsDigit(sql[i])) {
-                return false;
-            }
+            if (i == index + 1 && char.IsDigit(sql[i])) return false;
 
             i++;
         }
 
-        if (i >= sql.Length || sql[i] != '$') {
-            return false;
-        }
+        if (i >= sql.Length || sql[i] != '$') return false;
 
         tag = sql[index..(i + 1)];
         return true;

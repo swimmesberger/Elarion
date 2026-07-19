@@ -20,7 +20,7 @@ namespace Elarion.Benchmarks.Connections;
 public class TcpFramingBenchmarks {
     private const int Messages = 1_000;
 
-    private readonly DelimitedTcpFramer _framer = new(end: (byte)'>', start: (byte)'<');
+    private readonly DelimitedTcpFramer _framer = new((byte)'>', (byte)'<');
     private readonly ArrayBufferWriter<byte> _writer = new(64 * 1024);
     private byte[] _wire = null!;
     private byte[] _payload = null!;
@@ -29,9 +29,7 @@ public class TcpFramingBenchmarks {
     public void Setup() {
         _payload = Encoding.UTF8.GetBytes(new string('x', 30));
         var writer = new ArrayBufferWriter<byte>();
-        for (var i = 0; i < Messages; i++) {
-            _framer.WriteMessage(_payload, writer);
-        }
+        for (var i = 0; i < Messages; i++) _framer.WriteMessage(_payload, writer);
 
         _wire = writer.WrittenMemory.ToArray();
     }
@@ -51,9 +49,7 @@ public class TcpFramingBenchmarks {
     [Benchmark(OperationsPerInvoke = Messages)]
     public int WriteDelimited() {
         _writer.ResetWrittenCount();
-        for (var i = 0; i < Messages; i++) {
-            _framer.WriteMessage(_payload, _writer);
-        }
+        for (var i = 0; i < Messages; i++) _framer.WriteMessage(_payload, _writer);
 
         return _writer.WrittenCount;
     }
@@ -91,9 +87,7 @@ public class TcpServerBenchmarks {
         Array.Fill(message, (byte)'x', 0, 31);
         message[31] = Delimiter;
         _batch = new byte[message.Length * MessagesPerBatch];
-        for (var i = 0; i < MessagesPerBatch; i++) {
-            message.CopyTo(_batch, i * message.Length);
-        }
+        for (var i = 0; i < MessagesPerBatch; i++) message.CopyTo(_batch, i * message.Length);
 
         // The floor: accept one socket, read chunks, count delimiter bytes. No framing, no dispatch.
         _rawServerCts = new CancellationTokenSource();
@@ -128,9 +122,7 @@ public class TcpServerBenchmarks {
         });
         _provider = services.BuildServiceProvider();
         _hosted = [.. _provider.GetServices<IHostedService>()];
-        foreach (var service in _hosted) {
-            await service.StartAsync(CancellationToken.None);
-        }
+        foreach (var service in _hosted) await service.StartAsync(CancellationToken.None);
 
         _rawClient = await ConnectAsync((IPEndPoint)_rawListener.LocalEndpoint);
         _binaryClient = await ConnectAsync(await binaryPort.Task);
@@ -147,31 +139,35 @@ public class TcpServerBenchmarks {
         await _rawServerCts.CancelAsync();
         _rawListener.Stop();
         await _rawServerLoop;
-        foreach (var service in _hosted) {
-            await service.StopAsync(CancellationToken.None);
-        }
+        foreach (var service in _hosted) await service.StopAsync(CancellationToken.None);
 
         await _provider.DisposeAsync();
         _rawServerCts.Dispose();
     }
 
     [Benchmark(Baseline = true, OperationsPerInvoke = MessagesPerInvoke)]
-    public Task RawSocketFloor() => PumpAsync(_rawClient);
+    public Task RawSocketFloor() {
+        return PumpAsync(_rawClient);
+    }
 
     [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]
-    public Task Adapter_Binary() => PumpAsync(_binaryClient);
+    public Task Adapter_Binary() {
+        return PumpAsync(_binaryClient);
+    }
 
     [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]
-    public Task Adapter_Binary_IdleArmed() => PumpAsync(_binaryIdleClient);
+    public Task Adapter_Binary_IdleArmed() {
+        return PumpAsync(_binaryIdleClient);
+    }
 
     [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]
-    public Task Adapter_TextDecode() => PumpAsync(_textClient);
+    public Task Adapter_TextDecode() {
+        return PumpAsync(_textClient);
+    }
 
     private async Task PumpAsync(NetworkStream client) {
         var done = _counter.WaitFor(MessagesPerInvoke);
-        for (var sent = 0; sent < MessagesPerInvoke; sent += MessagesPerBatch) {
-            await client.WriteAsync(_batch);
-        }
+        for (var sent = 0; sent < MessagesPerInvoke; sent += MessagesPerBatch) await client.WriteAsync(_batch);
 
         await done;
     }
@@ -189,9 +185,7 @@ public class TcpServerBenchmarks {
             var buffer = new byte[64 * 1024];
             while (!ct.IsCancellationRequested) {
                 var read = await stream.ReadAsync(buffer, ct);
-                if (read == 0) {
-                    return;
-                }
+                if (read == 0) return;
 
                 counter.Add(buffer.AsSpan(0, read).Count(Delimiter));
             }
@@ -225,29 +219,33 @@ public class TcpServerBenchmarks {
     /// <summary>No-handshake ticket (identity by binding) and a codec that only counts.</summary>
     public sealed class CountingConnectionHandler(MessageCounter counter) : TcpConnectionHandler {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
-            TcpHandshakeContext handshake, CancellationToken ct) =>
+            TcpHandshakeContext handshake, CancellationToken ct) {
             // Authenticated tickets require a principal id — id-less ones are rejected at registration.
-            ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "bench")),
-                PrincipalId = "bench-device",
+            return ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("bench")),
+                PrincipalId = "bench-device"
             });
+        }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new CountingProtocol(counter);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new CountingProtocol(counter);
+        }
     }
 
     /// <summary>Same, but the codec decodes each message to a string first — the priced text convenience,
     /// now living where it belongs (in the codec).</summary>
     public sealed class DecodingConnectionHandler(MessageCounter counter) : TcpConnectionHandler {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
-            TcpHandshakeContext handshake, CancellationToken ct) =>
-            ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "bench")),
-                PrincipalId = "bench-device",
+            TcpHandshakeContext handshake, CancellationToken ct) {
+            return ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("bench")),
+                PrincipalId = "bench-device"
             });
+        }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new DecodingProtocol(counter);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new DecodingProtocol(counter);
+        }
     }
 
     private sealed class CountingProtocol(MessageCounter counter) : IClientConnectionProtocol {

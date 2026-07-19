@@ -16,5 +16,7 @@ internal sealed class MigrationHostedService(
         await runner.MigrateAsync(cancellationToken);
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) {
+        return Task.CompletedTask;
+    }
 }

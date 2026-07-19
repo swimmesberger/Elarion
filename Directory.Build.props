@@ -31,8 +31,8 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" Link="README.md" />
-    <None Include="$(MSBuildThisFileDirectory)docs/public/brand/elarion-nuget-icon.png" Pack="true" PackagePath="icon.png" Visible="false" />
-    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" Link="README.md"/>
+    <None Include="$(MSBuildThisFileDirectory)docs/public/brand/elarion-nuget-icon.png" Pack="true" PackagePath="icon.png" Visible="false"/>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all"/>
   </ItemGroup>
 </Project>

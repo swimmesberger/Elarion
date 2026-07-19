@@ -32,7 +32,8 @@ public interface IActorStateReader {
 public sealed class ActorStateReader(IActorSnapshotStore store, IElarionJsonSerialization serialization)
     : IActorStateReader {
     /// <inheritdoc />
-    public async ValueTask<TState?> ReadAsync<TState>(ActorSnapshotKey key, CancellationToken cancellationToken = default)
+    public async ValueTask<TState?> ReadAsync<TState>(ActorSnapshotKey key,
+        CancellationToken cancellationToken = default)
         where TState : class {
         var snapshot = await store.ReadAsync(key, cancellationToken).ConfigureAwait(false);
         return snapshot is null

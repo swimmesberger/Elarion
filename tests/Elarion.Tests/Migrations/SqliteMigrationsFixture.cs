@@ -13,7 +13,9 @@ public sealed class SqliteMigrationsFixture : IDisposable {
 
     private int _counter;
 
-    public SqliteMigrationsFixture() => Directory.CreateDirectory(_directory);
+    public SqliteMigrationsFixture() {
+        Directory.CreateDirectory(_directory);
+    }
 
     /// <summary>Returns a connection string for a fresh, empty database file.</summary>
     public string CreateConnectionString() {
@@ -23,7 +25,7 @@ public sealed class SqliteMigrationsFixture : IDisposable {
 
     public void Dispose() {
         try {
-            Directory.Delete(_directory, recursive: true);
+            Directory.Delete(_directory, true);
         }
         catch (IOException) {
             // Best-effort temp cleanup; the OS reclaims it regardless.

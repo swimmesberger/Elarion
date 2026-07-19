@@ -31,9 +31,7 @@ internal sealed class HintedLengthStream(Stream inner, long length) : Stream {
     public override long Position {
         get => _position;
         set {
-            if (value != _position) {
-                throw new NotSupportedException($"{nameof(HintedLengthStream)} is forward-only.");
-            }
+            if (value != _position) throw new NotSupportedException($"{nameof(HintedLengthStream)} is forward-only.");
         }
     }
 
@@ -44,9 +42,7 @@ internal sealed class HintedLengthStream(Stream inner, long length) : Stream {
 
     public override int Read(Span<byte> buffer) {
         var allowed = (int)Math.Min(buffer.Length, length - _position);
-        if (allowed <= 0) {
-            return 0;
-        }
+        if (allowed <= 0) return 0;
 
         var read = inner.Read(buffer[..allowed]);
         _position += read;
@@ -55,9 +51,7 @@ internal sealed class HintedLengthStream(Stream inner, long length) : Stream {
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) {
         var allowed = (int)Math.Min(buffer.Length, length - _position);
-        if (allowed <= 0) {
-            return 0;
-        }
+        if (allowed <= 0) return 0;
 
         var read = await inner.ReadAsync(buffer[..allowed], cancellationToken);
         _position += read;
@@ -73,12 +67,18 @@ internal sealed class HintedLengthStream(Stream inner, long length) : Stream {
         return await inner.ReadAsync(probe, cancellationToken) > 0;
     }
 
-    public override void Flush() { }
+    public override void Flush() {
+    }
 
-    public override long Seek(long offset, SeekOrigin origin) =>
+    public override long Seek(long offset, SeekOrigin origin) {
         throw new NotSupportedException($"{nameof(HintedLengthStream)} is forward-only.");
+    }
 
-    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void SetLength(long value) {
+        throw new NotSupportedException();
+    }
 
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) {
+        throw new NotSupportedException();
+    }
 }

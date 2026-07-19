@@ -32,7 +32,7 @@ public sealed class VariantCatalogRuntimeTests {
     public void NamedDefault_IsExplicitlySelectable_AndTheFallback() {
         // A named default ("linear") is registered under its own value key and doubles as the fallback, so an
         // admin can switch back to it by writing the value rather than by removing the key.
-        using var absent = BuildServices(algorithm: null).BuildServiceProvider();
+        using var absent = BuildServices(null).BuildServiceProvider();
         using (var scope = absent.CreateScope()) {
             scope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeOfType<LinearAlgorithm>();
         }
@@ -70,7 +70,7 @@ public sealed class VariantCatalogRuntimeTests {
     public async Task Validator_Strict_FailsStartup_WhenPlatformContractIsNotRegistered() {
         var ct = TestContext.Current.CancellationToken;
         var catalog = new DefaultVariantCatalog(
-            [Descriptor("Email:Backend", ["smtp"], contract: typeof(IAlgorithm), module: null)]);
+            [Descriptor("Email:Backend", ["smtp"], typeof(IAlgorithm), null)]);
         using var provider = new ServiceCollection().BuildServiceProvider();
         using var validator = new VariantConfigurationValidator(
             catalog,
@@ -90,7 +90,7 @@ public sealed class VariantCatalogRuntimeTests {
         var services = BuildServices("neural");
         using var provider = services.BuildServiceProvider();
         var catalog = new DefaultVariantCatalog(
-            [Descriptor("Forecast:Algorithm", ["linear", "neural"], contract: typeof(IAlgorithm), module: null)]);
+            [Descriptor("Forecast:Algorithm", ["linear", "neural"], typeof(IAlgorithm), null)]);
         using var validator = new VariantConfigurationValidator(
             catalog,
             provider.GetRequiredService<IConfiguration>(),
@@ -119,22 +119,24 @@ public sealed class VariantCatalogRuntimeTests {
     }
 
     private static VariantDescriptor Descriptor(
-        string key, string[] values, Type? contract = null, string? module = "App") => new() {
-        Axis = VariantAxis.Configuration,
-        Key = key,
-        ContractName = contract?.FullName ?? key,
-        Contract = contract,
-        Values = values,
-        DefaultValue = values.Length > 0 ? values[0] : null,
-        HasDefault = true,
-        Module = module,
-    };
+        string key, string[] values, Type? contract = null, string? module = "App") {
+        return new VariantDescriptor {
+            Axis = VariantAxis.Configuration,
+            Key = key,
+            ContractName = contract?.FullName ?? key,
+            Contract = contract,
+            Values = values,
+            DefaultValue = values.Length > 0 ? values[0] : null,
+            HasDefault = true,
+            Module = module
+        };
+    }
 
     private static ServiceCollection BuildServices(string? algorithm) {
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(BuildConfiguration(
             algorithm is null ? [] : [("Forecast:Algorithm", algorithm)]));
-        services.AddElarionConfigurationVariantService<IAlgorithm>("Forecast:Algorithm", defaultKey: "linear");
+        services.AddElarionConfigurationVariantService<IAlgorithm>("Forecast:Algorithm", "linear");
         services.AddKeyedScoped<IAlgorithm, LinearAlgorithm>("linear");
         services.AddKeyedScoped<IAlgorithm, NeuralAlgorithm>("neural");
         return services;
@@ -142,9 +144,7 @@ public sealed class VariantCatalogRuntimeTests {
 
     private static IConfiguration BuildConfiguration(params (string Key, string Value)[] values) {
         var data = new Dictionary<string, string?>();
-        foreach (var (key, value) in values) {
-            data[key] = value;
-        }
+        foreach (var (key, value) in values) data[key] = value;
 
         return new ConfigurationBuilder().AddInMemoryCollection(data).Build();
     }

@@ -27,7 +27,8 @@ public abstract class TcpMessageFramer {
     /// consumed so it neither accumulates against the size cap nor gets rescanned per read.</param>
     /// <param name="message">The extracted payload; it may slice <paramref name="buffer"/> and is only
     /// valid until the adapter's next read.</param>
-    public abstract bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message);
+    public abstract bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+        out ReadOnlyMemory<byte> message);
 
     /// <summary>Writes <paramref name="payload"/> in wire framing onto <paramref name="output"/>.</summary>
     public abstract void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output);

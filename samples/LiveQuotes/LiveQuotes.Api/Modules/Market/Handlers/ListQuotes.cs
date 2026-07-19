@@ -12,15 +12,14 @@ namespace LiveQuotes.Api.Modules.Market.Handlers;
 public sealed class ListQuotes(IActorSystem actors, MarketFeedOptions options)
     : IHandler<ListQuotes.Query, Result<ListQuotes.Response>> {
     public sealed record Query : IQuery;
+
     public sealed record Response(IReadOnlyList<Quote> Quotes);
 
     public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
         var quotes = new List<Quote>(options.Symbols.Length);
-        foreach (var symbol in options.Symbols) {
-            if (await actors.Get<IStockQuote>(symbol).GetQuote(ct) is { } quote) {
+        foreach (var symbol in options.Symbols)
+            if (await actors.Get<IStockQuote>(symbol).GetQuote(ct) is { } quote)
                 quotes.Add(quote);
-            }
-        }
 
         return new Response(quotes);
     }

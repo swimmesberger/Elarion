@@ -16,5 +16,6 @@ public sealed class ElarionFileEndpointMetadata {
     /// <summary>The shared marker instance emitted onto every generated file-response endpoint.</summary>
     public static readonly ElarionFileEndpointMetadata Instance = new();
 
-    private ElarionFileEndpointMetadata() { }
+    private ElarionFileEndpointMetadata() {
+    }
 }

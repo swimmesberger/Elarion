@@ -11,7 +11,9 @@ internal sealed class ScopedIdempotencyKeyAccessor : IIdempotencyKeyAccessor, II
     private string? _key;
 
     /// <summary>Sets the key for this scope — from the scope initializer, or a transport's in-band seed.</summary>
-    public void Seed(string key) => _key = key;
+    public void Seed(string key) {
+        _key = key;
+    }
 
     /// <inheritdoc />
     public bool TryGetKey([NotNullWhen(true)] out string? key) {

@@ -6,5 +6,5 @@ public enum VariantAxis {
     Feature,
 
     /// <summary>Selected process-globally by a configuration value (<c>[ConfigurationVariant]</c>).</summary>
-    Configuration,
+    Configuration
 }

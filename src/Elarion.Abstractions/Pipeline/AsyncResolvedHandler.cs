@@ -37,9 +37,7 @@ public sealed class AsyncResolvedHandler<TRequest, TResponse>(
     // exactly once, not race a double build.
     private async ValueTask<IHandler<TRequest, TResponse>> GetInnerAsync(CancellationToken ct) {
         var inner = Volatile.Read(ref _inner);
-        if (inner is not null) {
-            return inner;
-        }
+        if (inner is not null) return inner;
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try {
@@ -48,7 +46,8 @@ public sealed class AsyncResolvedHandler<TRequest, TResponse>(
                 inner = await build(scope, ct).ConfigureAwait(false);
                 Volatile.Write(ref _inner, inner);
             }
-        } finally {
+        }
+        finally {
             _gate.Release();
         }
 

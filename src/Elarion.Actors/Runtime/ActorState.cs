@@ -30,8 +30,9 @@ internal sealed class ActorState<TState>(
 
     private JsonTypeInfo<TState> TypeInfo => _typeInfo ??= serialization.GetTypeInfo<TState>();
 
-    ValueTask IActorStateSlot.LoadAsync(CancellationToken cancellationToken) =>
-        ReadStateAsync(cancellationToken);
+    ValueTask IActorStateSlot.LoadAsync(CancellationToken cancellationToken) {
+        return ReadStateAsync(cancellationToken);
+    }
 
     public async ValueTask ReadStateAsync(CancellationToken cancellationToken = default) {
         var snapshot = await store.ReadAsync(key, cancellationToken).ConfigureAwait(false);
@@ -79,5 +80,7 @@ internal sealed class ActorState<TState>(
     // Stamps the conflict with this activation's tracker so the turn's transparent retry
     // (ADR-0047) only fires for the activation whose own slot raised it — a conflict re-thrown out
     // of a nested actor call must fault the outer turn, never re-run it.
-    private void MarkOrigin(ActorSnapshotConcurrencyException exception) => exception.Origin = tracker;
+    private void MarkOrigin(ActorSnapshotConcurrencyException exception) {
+        exception.Origin = tracker;
+    }
 }

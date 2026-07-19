@@ -11,7 +11,8 @@ public sealed class InMemoryDeviceKeyStore : IDeviceKeyStore {
     private readonly ConcurrentDictionary<string, byte[]> _keys = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
-    public ValueTask<ReadOnlyMemory<byte>?> GetKeyAsync(string deviceId, CancellationToken cancellationToken = default) {
+    public ValueTask<ReadOnlyMemory<byte>?>
+        GetKeyAsync(string deviceId, CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
         // Convert on the non-null branch only: a null byte[] would otherwise become an EMPTY
         // ReadOnlyMemory and report the device as known.
@@ -20,7 +21,8 @@ public sealed class InMemoryDeviceKeyStore : IDeviceKeyStore {
     }
 
     /// <inheritdoc />
-    public ValueTask PutAsync(string deviceId, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default) {
+    public ValueTask PutAsync(string deviceId, ReadOnlyMemory<byte> key,
+        CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
         _keys[deviceId] = key.ToArray();
         return ValueTask.CompletedTask;

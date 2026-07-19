@@ -68,9 +68,7 @@ internal sealed class TcpOutboundWriter : IDisposable {
         ct.ThrowIfCancellationRequested();
         PendingSend? queued = null;
         lock (_gate) {
-            if (_closed) {
-                throw ClosedFault();
-            }
+            if (_closed) throw ClosedFault();
 
             if (_pending >= _maxPendingSends) {
                 TcpConnectionTelemetry.RecordOutboundSaturated(_transport);
@@ -94,9 +92,7 @@ internal sealed class TcpOutboundWriter : IDisposable {
             var (error, fatal) = await WriteFrameAsync(message, ct);
             FinishWriter(error, fatal);
             if (error is not null) {
-                if (fatal) {
-                    _lifetime.Abort(error);
-                }
+                if (fatal) _lifetime.Abort(error);
 
                 throw error;
             }
@@ -137,12 +133,12 @@ internal sealed class TcpOutboundWriter : IDisposable {
             CheckDrainedLocked();
         }
 
-        foreach (var send in toFault) {
-            send.Completion.TrySetException(fault);
-        }
+        foreach (var send in toFault) send.Completion.TrySetException(fault);
     }
 
-    public void Dispose() => _frameBuffer.Dispose();
+    public void Dispose() {
+        _frameBuffer.Dispose();
+    }
 
     // The drainer coalesces every activated frame up to the flush threshold into ONE physical write:
     // fewer syscalls under contention, and over TLS one record per batch instead of one per frame. FIFO
@@ -156,12 +152,11 @@ internal sealed class TcpOutboundWriter : IDisposable {
             while (_frameBuffer.WrittenCount < _flushThresholdBytes) {
                 PendingSend? item = null;
                 lock (_gate) {
-                    while (_queue.TryDequeue(out var next)) {
+                    while (_queue.TryDequeue(out var next))
                         if (next.TryActivate()) {
                             item = next;
                             break;
                         }
-                    }
 
                     if (item is null && _drainBatch.Count == 0) {
                         // Emptiness and releasing the stream are decided under one gate, so a sender
@@ -172,9 +167,7 @@ internal sealed class TcpOutboundWriter : IDisposable {
                     }
                 }
 
-                if (item is null) {
-                    break;
-                }
+                if (item is null) break;
 
                 _frameBuffer.BeginFrame();
                 try {
@@ -189,9 +182,7 @@ internal sealed class TcpOutboundWriter : IDisposable {
                 }
             }
 
-            if (_drainBatch.Count == 0) {
-                continue;
-            }
+            if (_drainBatch.Count == 0) continue;
 
             Exception? error = null;
             try {
@@ -204,14 +195,11 @@ internal sealed class TcpOutboundWriter : IDisposable {
                 _frameBuffer.Trim();
             }
 
-            foreach (var item in _drainBatch) {
-                if (error is null) {
+            foreach (var item in _drainBatch)
+                if (error is null)
                     item.Completion.TrySetResult();
-                }
-                else {
+                else
                     item.Completion.TrySetException(error);
-                }
-            }
 
             List<PendingSend>? toFault = null;
             Exception? fault = null;
@@ -228,14 +216,10 @@ internal sealed class TcpOutboundWriter : IDisposable {
                 CheckDrainedLocked();
             }
 
-            for (var i = 0; i < _drainBatch.Count; i++) {
-                TcpConnectionTelemetry.RecordOutboundSettled(_transport);
-            }
+            for (var i = 0; i < _drainBatch.Count; i++) TcpConnectionTelemetry.RecordOutboundSettled(_transport);
 
             if (error is not null) {
-                foreach (var send in toFault!) {
-                    send.Completion.TrySetException(fault!);
-                }
+                foreach (var send in toFault!) send.Completion.TrySetException(fault!);
 
                 _lifetime.Abort(error);
                 return;
@@ -312,23 +296,18 @@ internal sealed class TcpOutboundWriter : IDisposable {
         }
 
         TcpConnectionTelemetry.RecordOutboundSettled(_transport);
-        if (toFault is not null) {
-            foreach (var send in toFault) {
+        if (toFault is not null)
+            foreach (var send in toFault)
                 send.Completion.TrySetException(fault!);
-            }
-        }
 
-        if (startDrainer) {
+        if (startDrainer)
             // The finishing sender must not be conscripted into writing other callers' frames — the queue
             // moves to a task of its own. The drainer settles every item it takes, so nothing is unobserved.
             _ = Task.Run(DrainQueueAsync);
-        }
     }
 
     private void Withdraw(PendingSend send) {
-        if (!send.TryWithdraw()) {
-            return;
-        }
+        if (!send.TryWithdraw()) return;
 
         lock (_gate) {
             _pending--;
@@ -342,32 +321,33 @@ internal sealed class TcpOutboundWriter : IDisposable {
     // Dequeues everything still pending for faulting; withdrawn items are already settled and skipped.
     private List<PendingSend> TakeQueuedLocked() {
         List<PendingSend> taken = [];
-        while (_queue.TryDequeue(out var item)) {
+        while (_queue.TryDequeue(out var item))
             if (item.TryActivate()) {
                 _pending--;
                 TcpConnectionTelemetry.RecordOutboundSettled(_transport);
                 taken.Add(item);
             }
-        }
 
         return taken;
     }
 
     private void CheckDrainedLocked() {
-        if (_closed && _pending == 0 && !_writing) {
-            _drained.TrySetResult();
-        }
+        if (_closed && _pending == 0 && !_writing) _drained.TrySetResult();
     }
 
-    private Exception ClosedFault() =>
-        _failure is null || _failure is ClientConnectionClosedException
+    private Exception ClosedFault() {
+        return _failure is null || _failure is ClientConnectionClosedException
             ? _failure ?? new ClientConnectionClosedException(_connectionId)
             : new ClientConnectionClosedException(_connectionId, _failure);
+    }
 
     private sealed class PendingSend(TcpOutboundWriter owner, ReadOnlyMemory<byte> message, CancellationToken ct) {
         /// <summary>Static + state-carrying so registering the withdrawal never allocates a closure.</summary>
         public static readonly Action<object?> WithdrawCallback =
-            static state => { var send = (PendingSend)state!; send.Owner.Withdraw(send); };
+            static state => {
+                var send = (PendingSend)state!;
+                send.Owner.Withdraw(send);
+            };
 
         private int _state;
 
@@ -377,9 +357,13 @@ internal sealed class TcpOutboundWriter : IDisposable {
         public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>Claims the frame for writing (or faulting); loses to an earlier withdrawal.</summary>
-        public bool TryActivate() => Interlocked.CompareExchange(ref _state, 1, 0) == 0;
+        public bool TryActivate() {
+            return Interlocked.CompareExchange(ref _state, 1, 0) == 0;
+        }
 
         /// <summary>Claims the frame for cancellation-before-write; loses once a writer activated it.</summary>
-        public bool TryWithdraw() => Interlocked.CompareExchange(ref _state, 2, 0) == 0;
+        public bool TryWithdraw() {
+            return Interlocked.CompareExchange(ref _state, 2, 0) == 0;
+        }
     }
 }

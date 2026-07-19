@@ -15,12 +15,14 @@ namespace LiveQuotes.Api.Modules.Market.Handlers;
 [HttpEndpoint("quotes/{symbol}")]
 public sealed class GetQuote(IActorSystem actors) : IHandler<GetQuote.Query, Result<GetQuote.Response>> {
     public sealed record Query(string Symbol) : IQuery;
+
     public sealed record Response(Quote Quote);
 
     public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
         var quote = await actors.Get<IStockQuote>(query.Symbol.ToUpperInvariant()).GetQuote(ct);
         return quote is null
-            ? AppError.NotFound($"No live quote for '{query.Symbol}' (unknown symbol, or the feed has not primed it yet).")
+            ? AppError.NotFound(
+                $"No live quote for '{query.Symbol}' (unknown symbol, or the feed has not primed it yet).")
             : new Response(quote);
     }
 }

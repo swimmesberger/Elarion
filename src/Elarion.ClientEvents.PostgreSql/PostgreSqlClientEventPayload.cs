@@ -21,16 +21,17 @@ internal sealed record PostgreSqlClientEventPayload {
 
     public required string Payload { get; init; }
 
-    public static string Serialize(ClientEventEnvelope envelope) =>
-        JsonSerializer.Serialize(
+    public static string Serialize(ClientEventEnvelope envelope) {
+        return JsonSerializer.Serialize(
             new PostgreSqlClientEventPayload {
                 Id = envelope.Id,
                 Topic = envelope.Topic,
                 ScopeKind = (int)envelope.Scope.Kind,
                 ScopeValue = envelope.Scope.Value,
-                Payload = envelope.Payload,
+                Payload = envelope.Payload
             },
             PostgreSqlClientEventJsonContext.Default.PostgreSqlClientEventPayload);
+    }
 
     public static bool TryDeserialize(string payload, out ClientEventEnvelope? envelope) {
         try {
@@ -41,7 +42,7 @@ internal sealed record PostgreSqlClientEventPayload {
                     Id = parsed.Id,
                     Topic = parsed.Topic,
                     Scope = scope,
-                    Payload = parsed.Payload,
+                    Payload = parsed.Payload
                 };
                 return true;
             }

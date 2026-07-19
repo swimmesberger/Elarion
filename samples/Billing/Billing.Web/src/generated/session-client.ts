@@ -121,9 +121,13 @@ export interface ResolutionDetails<T> {
 export interface ElarionWebProvider {
   readonly metadata: { readonly name: string }
   readonly runsOn: 'client'
+
   resolveBooleanEvaluation(flagKey: string, defaultValue: boolean): ResolutionDetails<boolean>
+
   resolveStringEvaluation(flagKey: string, defaultValue: string): ResolutionDetails<string>
+
   resolveNumberEvaluation(flagKey: string, defaultValue: number): ResolutionDetails<number>
+
   resolveObjectEvaluation<T>(flagKey: string, defaultValue: T): ResolutionDetails<T>
 }
 
@@ -139,7 +143,7 @@ const DEFAULT = 'DEFAULT'
 export function createElarionOpenFeatureProvider(snapshot: ClientSnapshot): ElarionWebProvider {
   const capabilities = new SessionCapabilities(snapshot)
   return {
-    metadata: { name: 'elarion-session' },
+    metadata: {name: 'elarion-session'},
     runsOn: 'client',
     resolveBooleanEvaluation(flagKey, defaultValue) {
       if (
@@ -147,22 +151,22 @@ export function createElarionOpenFeatureProvider(snapshot: ClientSnapshot): Elar
         flagKey.startsWith('permission.') ||
         flagKey.startsWith('role.')
       ) {
-        return { value: capabilities.resolveBoolean(flagKey), reason: STATIC }
+        return {value: capabilities.resolveBoolean(flagKey), reason: STATIC}
       }
       const flag = snapshot.flags[flagKey]
-      return flag === undefined ? { value: defaultValue, reason: DEFAULT } : { value: flag, reason: STATIC }
+      return flag === undefined ? {value: defaultValue, reason: DEFAULT} : {value: flag, reason: STATIC}
     },
     resolveStringEvaluation(flagKey, defaultValue) {
       const variant = capabilities.getVariant(flagKey)
       return variant === undefined
-        ? { value: defaultValue, reason: DEFAULT }
-        : { value: variant, variant, reason: STATIC }
+        ? {value: defaultValue, reason: DEFAULT}
+        : {value: variant, variant, reason: STATIC}
     },
     resolveNumberEvaluation(_flagKey, defaultValue) {
-      return { value: defaultValue, reason: DEFAULT }
+      return {value: defaultValue, reason: DEFAULT}
     },
     resolveObjectEvaluation(_flagKey, defaultValue) {
-      return { value: defaultValue, reason: DEFAULT }
+      return {value: defaultValue, reason: DEFAULT}
     },
   }
 }

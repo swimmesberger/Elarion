@@ -45,22 +45,30 @@ public sealed class StagedUploadGarbageCollectorTests {
 
         public DateTimeOffset LastOlderThan { get; private set; }
 
-        public Task<StagedUpload> CreateAsync(StagedUploadCreation creation, CancellationToken cancellationToken) =>
+        public Task<StagedUpload> CreateAsync(StagedUploadCreation creation, CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
 
-        public Task<StagedUpload?> GetAsync(string uploadId, CancellationToken cancellationToken) =>
+        public Task<StagedUpload?> GetAsync(string uploadId, CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
 
-        public Task<StagedUpload> AppendAsync(string uploadId, long offset, Stream chunk, CancellationToken cancellationToken) =>
+        public Task<StagedUpload> AppendAsync(string uploadId, long offset, Stream chunk,
+            CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
 
-        public Task<StagedUpload> CompleteAsync(string uploadId, StagedUploadCompletion completion, CancellationToken cancellationToken) =>
+        public Task<StagedUpload> CompleteAsync(string uploadId, StagedUploadCompletion completion,
+            CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
 
-        public Task DeleteAsync(string uploadId, CancellationToken cancellationToken) =>
+        public Task DeleteAsync(string uploadId, CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
 
-        public Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
+        public Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize,
+            CancellationToken cancellationToken) {
             LastOlderThan = olderThanUtc;
             FirstSweep.TrySetResult();
             return Task.FromResult(0);

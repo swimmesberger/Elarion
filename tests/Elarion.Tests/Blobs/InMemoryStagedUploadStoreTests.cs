@@ -62,7 +62,7 @@ public sealed class InMemoryStagedUploadStoreTests {
         // The RUFH shape: no declared length, growth per append, sealed by the explicit completion.
         var ct = TestContext.Current.CancellationToken;
         var (store, blobStore) = CreateStore();
-        var created = await store.CreateAsync(NewCreation(length: null), ct);
+        var created = await store.CreateAsync(NewCreation(null), ct);
         created.Length.Should().BeNull();
 
         await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3]), ct);
@@ -160,7 +160,7 @@ public sealed class InMemoryStagedUploadStoreTests {
         // junk that a resend then appends after.
         var ct = TestContext.Current.CancellationToken;
         var (store, blobStore) = CreateStore();
-        var created = await store.CreateAsync(NewCreation(length: null), ct);
+        var created = await store.CreateAsync(NewCreation(null), ct);
 
         var failing = async () => await store.AppendAsync(
             created.Id, 0, new ThrowingAfterBytesStream([9, 9, 9]), ct);
@@ -219,21 +219,23 @@ public sealed class InMemoryStagedUploadStoreTests {
         return (store, blobStore);
     }
 
-    private static StagedUploadCreation NewCreation(long? length) =>
-        new() {
+    private static StagedUploadCreation NewCreation(long? length) {
+        return new StagedUploadCreation {
             Container = "uploads",
             Name = $"user-1/{Guid.NewGuid():N}/file.bin",
             Length = length,
             ContentType = "application/octet-stream",
             OwnerId = "user-1",
-            ExpiresAt = Origin.AddHours(24),
+            ExpiresAt = Origin.AddHours(24)
         };
+    }
 
-    private static StagedUploadCompletion NewCompletion() =>
-        new() {
+    private static StagedUploadCompletion NewCompletion() {
+        return new StagedUploadCompletion {
             SessionExpiresAt = Origin.AddHours(1),
-            BlobExpiresAt = Origin.AddMinutes(30),
+            BlobExpiresAt = Origin.AddMinutes(30)
         };
+    }
 
     /// <summary>Serves its payload on the first read, then fails the copy like a client disconnect.</summary>
     private sealed class ThrowingAfterBytesStream(byte[] payload) : Stream {
@@ -253,24 +255,31 @@ public sealed class InMemoryStagedUploadStoreTests {
         }
 
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken) {
-            if (_served) {
-                throw new IOException("The client disconnected mid-chunk.");
-            }
+            if (_served) throw new IOException("The client disconnected mid-chunk.");
 
             _served = true;
             payload.CopyTo(buffer);
             return ValueTask.FromResult(payload.Length);
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
 
-        public override void Flush() { }
+        public override void Flush() {
+        }
 
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) {
+            throw new NotSupportedException();
+        }
 
-        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void SetLength(long value) {
+            throw new NotSupportedException();
+        }
 
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
     }
 
     /// <summary>Blocks the first read until released, so a test can hold an append in flight.</summary>
@@ -281,7 +290,9 @@ public sealed class InMemoryStagedUploadStoreTests {
 
         public Task ReadStarted => _readStarted.Task;
 
-        public void Release() => _released.TrySetResult();
+        public void Release() {
+            _released.TrySetResult();
+        }
 
         public override bool CanRead => true;
 
@@ -299,24 +310,31 @@ public sealed class InMemoryStagedUploadStoreTests {
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken) {
             _readStarted.TrySetResult();
             await _released.Task.WaitAsync(cancellationToken);
-            if (_served) {
-                return 0;
-            }
+            if (_served) return 0;
 
             _served = true;
             payload.CopyTo(buffer);
             return payload.Length;
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
 
-        public override void Flush() { }
+        public override void Flush() {
+        }
 
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) {
+            throw new NotSupportedException();
+        }
 
-        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void SetLength(long value) {
+            throw new NotSupportedException();
+        }
 
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
     }
 
     private sealed class RecordingBlobStore : IBlobStore {
@@ -324,9 +342,12 @@ public sealed class InMemoryStagedUploadStoreTests {
 
         public BlobUploadRequest? LastRequest { get; private set; }
 
-        public byte[] Content(string id) => _content[id];
+        public byte[] Content(string id) {
+            return _content[id];
+        }
 
-        public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content, CancellationToken cancellationToken) {
+        public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content,
+            CancellationToken cancellationToken) {
             LastRequest = request;
             using var buffer = new MemoryStream();
             await content.CopyToAsync(buffer, cancellationToken);
@@ -335,22 +356,28 @@ public sealed class InMemoryStagedUploadStoreTests {
             return new BlobRef { Value = id };
         }
 
-        public Task<BlobMetadata?> GetMetadataAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult<BlobMetadata?>(null);
+        public Task<BlobMetadata?> GetMetadataAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult<BlobMetadata?>(null);
+        }
 
-        public Task<bool> DeleteAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult(_content.Remove(blobRef.Value));
+        public Task<bool> DeleteAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult(_content.Remove(blobRef.Value));
+        }
 
-        public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult(_content.ContainsKey(blobRef.Value));
+        public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult(_content.ContainsKey(blobRef.Value));
+        }
 
-        public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult<BlobDownload?>(null);
+        public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult<BlobDownload?>(null);
+        }
 
-        public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) =>
+        public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
+        public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
     }
 }

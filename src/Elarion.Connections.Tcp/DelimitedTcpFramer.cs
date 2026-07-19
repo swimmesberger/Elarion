@@ -20,7 +20,8 @@ namespace Elarion.Connections.Tcp;
 /// never occur inside a payload either.</param>
 public sealed class DelimitedTcpFramer(byte end, byte? start = null) : TcpMessageFramer {
     /// <inheritdoc />
-    public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+    public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+        out ReadOnlyMemory<byte> message) {
         consumed = 0;
         message = default;
         var span = buffer.Span;
@@ -43,9 +44,7 @@ public sealed class DelimitedTcpFramer(byte end, byte? start = null) : TcpMessag
         }
 
         var endIndex = span[payloadStart..].IndexOf(end);
-        if (endIndex < 0) {
-            return false;   // consumed may carry pre-start noise dropped above
-        }
+        if (endIndex < 0) return false; // consumed may carry pre-start noise dropped above
 
         consumed = payloadStart + endIndex + 1;
         message = buffer.Slice(payloadStart, endIndex);
@@ -56,21 +55,19 @@ public sealed class DelimitedTcpFramer(byte end, byte? start = null) : TcpMessag
     /// <exception cref="ArgumentException">The payload contains the end delimiter (or the configured start
     /// delimiter) — unframeable without desyncing the peer; escape it in the codec instead.</exception>
     public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-        if (payload.IndexOf(end) >= 0) {
+        if (payload.IndexOf(end) >= 0)
             throw new ArgumentException(
                 $"The payload contains the end delimiter 0x{end:X2} — delimiter framing cannot represent it "
                 + "(the peer would parse one message as two). Escape/encode the payload in the codec, or use "
                 + "length-prefixed framing.",
                 nameof(payload));
-        }
 
-        if (start is { } forbiddenStart && payload.IndexOf(forbiddenStart) >= 0) {
+        if (start is { } forbiddenStart && payload.IndexOf(forbiddenStart) >= 0)
             throw new ArgumentException(
                 $"The payload contains the start delimiter 0x{forbiddenStart:X2} — delimiter framing cannot "
                 + "represent it (a resynchronizing peer would misparse the message boundary). Escape/encode "
                 + "the payload in the codec, or use length-prefixed framing.",
                 nameof(payload));
-        }
 
         if (start is { } startByte) {
             var head = output.GetSpan(1);

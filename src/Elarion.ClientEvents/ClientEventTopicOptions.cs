@@ -47,7 +47,8 @@ public sealed class ClientEventTopicOptions {
     /// </summary>
     /// <typeparam name="TObserver">The observer implementation.</typeparam>
     public ClientEventTopicOptions ObserveSubscriptions<
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TObserver>()
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+        TObserver>()
         where TObserver : class, IClientEventSubscriptionObserver {
         ObserverType = typeof(TObserver);
         return this;
@@ -71,12 +72,13 @@ public sealed class ClientEventTopicOptions {
 
     internal TimeSpan? InterestLinger { get; private set; }
 
-    internal AuthorizationRequirements BuildRequirements() =>
-        new(AllowAnonymous: false,
-            RequireAuthenticated: true,
-            Permissions: [.. _permissions],
-            Roles: [.. _roles],
-            Claims: [],
-            Policies: [],
-            Resources: []);
+    internal AuthorizationRequirements BuildRequirements() {
+        return new AuthorizationRequirements(false,
+            true,
+            [.. _permissions],
+            [.. _roles],
+            [],
+            [],
+            []);
+    }
 }

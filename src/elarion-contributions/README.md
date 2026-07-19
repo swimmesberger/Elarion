@@ -43,15 +43,15 @@ npm install @swimmesberger/elarion-contributions
 This package ships the *machinery* with fixed semantics; your application owns the *points* and the shell
 (Elarion deliberately ships no UI kit and no router integration):
 
-| You import (fixed semantics) | You own (copy from the sample) |
-| --- | --- |
-| `defineExtensionPoint`, `defineModule`, `contribute`, `ItemOf`/`ContextOf` | Your extension points (`sidebarItems`, …) and their payload types |
-| `evaluateWhen` + the strict `when` AND semantics | The kit instantiation binding your (generated or hand-authored) vocabulary |
-| `createContributionRegistry` (filter + deterministic order + id validation) | The app shell that renders each slot |
-| `createStaticCapabilities` (the no-snapshot `CapabilityReader`) | The real snapshot wiring once `elarion.session` exists |
-| `ContributionProvider` / `useContributions` / `<ExtensionSlot context=…>` (React) | Route composition and module discovery (e.g. `import.meta.glob`) |
-| `provideContributions` / `injectContributions` (Angular) | Slot rendering — an `@for` block, or a small `*extensionSlot` directive you own (see below) |
-| `redirectUnless` route guard (`/tanstack-router`) | Everything else routing — the router's own API |
+| You import (fixed semantics)                                                      | You own (copy from the sample)                                                              |
+|-----------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| `defineExtensionPoint`, `defineModule`, `contribute`, `ItemOf`/`ContextOf`        | Your extension points (`sidebarItems`, …) and their payload types                           |
+| `evaluateWhen` + the strict `when` AND semantics                                  | The kit instantiation binding your (generated or hand-authored) vocabulary                  |
+| `createContributionRegistry` (filter + deterministic order + id validation)       | The app shell that renders each slot                                                        |
+| `createStaticCapabilities` (the no-snapshot `CapabilityReader`)                   | The real snapshot wiring once `elarion.session` exists                                      |
+| `ContributionProvider` / `useContributions` / `<ExtensionSlot context=…>` (React) | Route composition and module discovery (e.g. `import.meta.glob`)                            |
+| `provideContributions` / `injectContributions` (Angular)                          | Slot rendering — an `@for` block, or a small `*extensionSlot` directive you own (see below) |
+| `redirectUnless` route guard (`/tanstack-router`)                                 | Everything else routing — the router's own API                                              |
 
 ## Quick start
 

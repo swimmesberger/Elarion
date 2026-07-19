@@ -27,7 +27,8 @@ public sealed partial class HandlerRegistrationGenerator {
             return null;
 
         var attribute = classSymbol.GetAttributes()
-            .FirstOrDefault(candidate => SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attributeSymbol));
+            .FirstOrDefault(candidate =>
+                SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attributeSymbol));
         if (attribute is null)
             return null;
 
@@ -60,7 +61,7 @@ public sealed partial class HandlerRegistrationGenerator {
         var conflictBehaviorValue = 0;
         var storeFailuresValue = 0;
 
-        foreach (var namedArgument in attribute.NamedArguments) {
+        foreach (var namedArgument in attribute.NamedArguments)
             switch (namedArgument.Key) {
                 case "RetentionHours" when namedArgument.Value.Value is int retention:
                     retentionHours = retention;
@@ -81,23 +82,20 @@ public sealed partial class HandlerRegistrationGenerator {
                     storeFailuresValue = storeFailures;
                     break;
             }
-        }
 
         // ELIDEM003: retention must be positive.
-        if (retentionHours <= 0) {
+        if (retentionHours <= 0)
             diagnostics.Add(DiagnosticInfo.Create(
                 InvalidIdempotentRetentionDescriptor,
                 location,
                 classSymbol.ToDisplayString(fmt)));
-        }
 
         // ELIDEM004: caching is for queries, idempotency for commands.
-        if (cacheable is not null) {
+        if (cacheable is not null)
             diagnostics.Add(DiagnosticInfo.Create(
                 IdempotentAndCacheableDescriptor,
                 location,
                 classSymbol.ToDisplayString(fmt)));
-        }
 
         var resultValueFqn = TryGetResultValueFqn(responseType, fmt);
         return new IdempotentInfo(
@@ -108,7 +106,7 @@ public sealed partial class HandlerRegistrationGenerator {
             conflictBehaviorValue,
             storeFailuresValue,
             resultValueFqn,
-            Owner: null);
+            null);
     }
 
     // The inbox retention is deliberately NOT per-consumer: the invariant it serves — retention must exceed the
@@ -137,20 +135,20 @@ public sealed partial class HandlerRegistrationGenerator {
         ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         var allowDuplicatesSymbol = compilation.GetTypeByMetadataName(AllowDuplicatesAttributeMetadataName);
         var allowDuplicates = allowDuplicatesSymbol is not null
-            && classSymbol.GetAttributes().Any(candidate =>
-                SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, allowDuplicatesSymbol));
+                              && classSymbol.GetAttributes().Any(candidate =>
+                                  SymbolEqualityComparer.Default.Equals(candidate.AttributeClass,
+                                      allowDuplicatesSymbol));
 
         var isIntegrationEvent = RequestImplementsMarker(requestType, compilation, IntegrationEventMetadataName);
         if (!isIntegrationEvent) {
             // ELINBX001: [AllowDuplicates] on a non-integration-event handler has no effect (domain-event
             // consumers are exactly-once by atomicity; commands/queries use [Idempotent]).
-            if (allowDuplicates) {
+            if (allowDuplicates)
                 diagnostics.Add(DiagnosticInfo.Create(
                     AllowDuplicatesOnNonIntegrationEventDescriptor,
                     classDecl.Identifier.GetLocation(),
                     classSymbol.ToDisplayString(fmt),
                     requestType.ToDisplayString(fmt)));
-            }
 
             return null;
         }
@@ -169,22 +167,24 @@ public sealed partial class HandlerRegistrationGenerator {
     // The canonical inbox policy (ADR-0022), built in one place so every emitter — the handler generator's
     // structural discovery and the actor generator's synthesized relay (ADR-0046) — produces the same
     // Consumer-scoped dedupe. Only the owner discriminator and the stored result-value type vary per consumer.
-    internal static IdempotentInfo CreateInboxInfo(string owner, string? resultValueFqn) =>
-        new(
+    internal static IdempotentInfo CreateInboxInfo(string owner, string? resultValueFqn) {
+        return new IdempotentInfo(
             InboxRetentionHours,
-            KeyRequired: false,
-            ScopeValue: 2, // IdempotencyScope.Consumer
-            Fingerprint: false,
-            ConflictBehaviorValue: 1, // IdempotencyConflictBehavior.WaitThenReplay
-            StoreFailuresValue: 0, // IdempotencyFailureStorage.None — a failed consumer retries
+            false,
+            2, // IdempotencyScope.Consumer
+            false,
+            1, // IdempotencyConflictBehavior.WaitThenReplay
+            0, // IdempotencyFailureStorage.None — a failed consumer retries
             resultValueFqn,
-            Owner: owner);
+            owner);
+    }
 
     // The Consumer-scope owner discriminator: the handler's fully qualified name, verbatim while it fits the
     // store's 128-char owner column, else truncated with a stable SHA-256 suffix so two long names never collide.
     // Computed at generation time — deterministic across builds, no runtime hashing.
-    private static string ComputeConsumerOwner(INamedTypeSymbol classSymbol) =>
-        TruncateOwner(classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+    private static string ComputeConsumerOwner(INamedTypeSymbol classSymbol) {
+        return TruncateOwner(classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+    }
 
     // Truncation of the owner discriminator, shared with the actor generator (ADR-0046), which computes it
     // from the relay's fully qualified name string (the relay class has no symbol at discovery time).
@@ -213,10 +213,9 @@ public sealed partial class HandlerRegistrationGenerator {
         if (SymbolEqualityComparer.Default.Equals(requestType, commandSymbol))
             return true;
 
-        foreach (var iface in requestType.AllInterfaces) {
+        foreach (var iface in requestType.AllInterfaces)
             if (SymbolEqualityComparer.Default.Equals(iface, commandSymbol))
                 return true;
-        }
 
         return false;
     }

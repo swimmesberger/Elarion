@@ -16,7 +16,7 @@ public sealed class OpenFeatureFeatureFlagService(IFeatureClient client, ICurren
     public async ValueTask<bool> IsEnabledAsync(string feature, CancellationToken ct = default) {
         var context = ElarionEvaluationContext.Create(currentUser);
 
-        return await client.GetBooleanValueAsync(feature, defaultValue: false, context, cancellationToken: ct)
+        return await client.GetBooleanValueAsync(feature, false, context, cancellationToken: ct)
             .ConfigureAwait(false);
     }
 }

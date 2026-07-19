@@ -13,5 +13,7 @@ public sealed class SettingsConfigurationSource : IConfigurationSource {
     public SettingsConfigurationProvider Provider { get; } = new();
 
     /// <inheritdoc />
-    public IConfigurationProvider Build(IConfigurationBuilder builder) => Provider;
+    public IConfigurationProvider Build(IConfigurationBuilder builder) {
+        return Provider;
+    }
 }

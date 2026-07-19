@@ -134,7 +134,7 @@ public sealed class EventTelemetryTests {
             EventType = typeof(OutboxTestEvent).FullName!,
             Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
             CorrelationId = correlationId,
-            TraceParent = publisherActivity.Id,
+            TraceParent = publisherActivity.Id
         };
         publisherActivity.Stop();
 
@@ -169,14 +169,16 @@ public sealed class EventTelemetryTests {
         var correlationId = Guid.NewGuid();
         var store = new FakeOutboxStore();
         var messageId = Guid.NewGuid();
-        store.Pending.Enqueue([new OutboxMessage {
-            Id = messageId,
-            MessageId = messageId,
-            OccurredOnUtc = DateTimeOffset.UnixEpoch,
-            EventType = typeof(OutboxTestEvent).FullName!,
-            Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
-            CorrelationId = correlationId,
-        }]);
+        store.Pending.Enqueue([
+            new OutboxMessage {
+                Id = messageId,
+                MessageId = messageId,
+                OccurredOnUtc = DateTimeOffset.UnixEpoch,
+                EventType = typeof(OutboxTestEvent).FullName!,
+                Payload = JsonSerializer.Serialize(new OutboxTestEvent(1, "a"), OutboxTestJson.Instance.Options),
+                CorrelationId = correlationId
+            }
+        ]);
         await RunDeliveryUntilSignaledAsync(store, (_, _, _, _) => throw new InvalidOperationException("boom"));
 
         // Scoped to this test's correlation id — see OutboxDelivery_ConsumeSpan for why.
@@ -191,7 +193,8 @@ public sealed class EventTelemetryTests {
             m.HasTag("messaging.delivery.outcome", "failed"));
     }
 
-    private static async Task RunDeliveryUntilSignaledAsync(FakeOutboxStore store, EventSubscriberInvokeDelegate consumer) {
+    private static async Task RunDeliveryUntilSignaledAsync(FakeOutboxStore store,
+        EventSubscriberInvokeDelegate consumer) {
         var services = new ServiceCollection();
         services.AddSingleton<IOutboxStore>(store);
         await using var provider = services.BuildServiceProvider();
@@ -226,17 +229,15 @@ public sealed class EventTelemetryTests {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<Recorder>();
-        foreach (var descriptor in descriptors) {
-            services.AddSingleton(descriptor);
-        }
+        foreach (var descriptor in descriptors) services.AddSingleton(descriptor);
 
         services.AddElarionDomainEventBus();
         services.AddElarionInMemoryIntegrationEventBus();
         return services.BuildServiceProvider();
     }
 
-    private static EventSubscriptionDescriptor Subscriber<TEvent>(EventPlane plane) =>
-        new() {
+    private static EventSubscriptionDescriptor Subscriber<TEvent>(EventPlane plane) {
+        return new EventSubscriptionDescriptor {
             ConsumerId = $"subscriber:{typeof(TEvent).FullName}:{plane}",
             EventType = typeof(TEvent),
             Plane = plane,
@@ -246,25 +247,27 @@ public sealed class EventTelemetryTests {
                 return ValueTask.CompletedTask;
             }
         };
+    }
 
-    private static EventSubscriptionDescriptor Throwing<TEvent>(EventPlane plane) =>
-        new() {
+    private static EventSubscriptionDescriptor Throwing<TEvent>(EventPlane plane) {
+        return new EventSubscriptionDescriptor {
             ConsumerId = $"throwing:{typeof(TEvent).FullName}:{plane}",
             EventType = typeof(TEvent),
             Plane = plane,
             ServiceType = typeof(Recorder),
             InvokeAsync = (_, _, _, _) => throw new InvalidOperationException("boom")
         };
+    }
 
     private sealed class Recorder {
         private readonly SemaphoreSlim _signal = new(0);
 
-        public void Add() => _signal.Release();
+        public void Add() {
+            _signal.Release();
+        }
 
         public async Task WaitForAsync(int count, CancellationToken ct) {
-            for (var i = 0; i < count; i++) {
-                await _signal.WaitAsync(ct);
-            }
+            for (var i = 0; i < count; i++) await _signal.WaitAsync(ct);
         }
     }
 }

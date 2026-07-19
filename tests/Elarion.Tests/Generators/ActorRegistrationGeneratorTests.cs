@@ -65,8 +65,11 @@ public sealed class ActorRegistrationGeneratorTests {
         generated.Should().Contain(
             "new global::Elarion.Actors.ActorRegistration<global::Sample.Orders.OrderFulfillmentActor, global::System.Guid, global::Sample.Orders.IOrderFulfillment>");
         generated.Should().Contain("Name = \"OrderFulfillment\"");
-        generated.Should().Contain("Activator = static (serviceProvider, context) => new global::Sample.Orders.OrderFulfillmentActor(context)");
-        generated.Should().Contain("Facade = static handle => new global::Sample.Orders.OrderFulfillmentActorFacade(handle)");
+        generated.Should()
+            .Contain(
+                "Activator = static (serviceProvider, context) => new global::Sample.Orders.OrderFulfillmentActor(context)");
+        generated.Should()
+            .Contain("Facade = static handle => new global::Sample.Orders.OrderFulfillmentActorFacade(handle)");
         generated.Should().NotContain("System.Reflection");
     }
 
@@ -167,7 +170,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: """
+            """
             [assembly: Elarion.Abstractions.GenerateActors]
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
@@ -451,7 +454,7 @@ public sealed class ActorRegistrationGeneratorTests {
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELACT004"]);
+        var result = Generate(source, false, ["ELACT004"]);
 
         result.Diagnostics.Any(d => d.Id == "ELACT004" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
@@ -474,7 +477,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: """
+            """
             [assembly: Elarion.Abstractions.GenerateActors]
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
@@ -496,7 +499,9 @@ public sealed class ActorRegistrationGeneratorTests {
         // integration subscription.
         generated.Should().Contain("global::Elarion.Pipeline.IdempotencyDecorator<global::Sample.Orders.OrderShipped");
         generated.Should().Contain("global::Elarion.Abstractions.Messaging.EventPlane.Integration");
-        generated.Should().Contain("OrderFulfillment_OnShipped_EventRelayRegistration.AddOrderFulfillment_OnShipped_EventRelay(services)");
+        generated.Should()
+            .Contain(
+                "OrderFulfillment_OnShipped_EventRelayRegistration.AddOrderFulfillment_OnShipped_EventRelay(services)");
     }
 
     [Fact]
@@ -514,7 +519,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: """
+            """
             [assembly: Elarion.Abstractions.GenerateActors]
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
@@ -544,7 +549,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: """
+            """
             [assembly: Elarion.Abstractions.GenerateActors]
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
@@ -574,7 +579,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: """
+            """
             [assembly: Elarion.Abstractions.GenerateActors]
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
@@ -602,7 +607,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: """
+            """
             [assembly: Elarion.Abstractions.GenerateActors]
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
@@ -630,7 +635,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: """
+            """
             [assembly: Elarion.Abstractions.GenerateActors]
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
@@ -669,7 +674,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: """
+            """
             [assembly: Elarion.Abstractions.GenerateActors]
             [assembly: Elarion.Abstractions.GenerateEventConsumers]
             """);
@@ -697,7 +702,7 @@ public sealed class ActorRegistrationGeneratorTests {
                 }
             }
             """,
-            assemblyTrigger: "");
+            "");
 
         var result = Generate(source);
 
@@ -740,24 +745,25 @@ public sealed class ActorRegistrationGeneratorTests {
         // default. Tests asserting no-module behavior pass false.
         var moduleDeclaration = wrapInModule && !testSource.Contains("AppModule(")
             ? """
-            namespace Sample.Orders {
-                [Elarion.Abstractions.Modules.AppModule("Sample")]
-                public static class GeneratedTestModule { }
-            }
-            """
+              namespace Sample.Orders {
+                  [Elarion.Abstractions.Modules.AppModule("Sample")]
+                  public static class GeneratedTestModule { }
+              }
+              """
             : "";
 
         return $"""
-        {assemblyTrigger}
+                {assemblyTrigger}
 
-        {moduleDeclaration}
+                {moduleDeclaration}
 
-        {testSource}
-        """;
+                {testSource}
+                """;
     }
 
-    private static string AllGenerated(GeneratorDriverRunResult result) =>
-        string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+    private static string AllGenerated(GeneratorDriverRunResult result) {
+        return string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+    }
 
     private static GeneratorDriverRunResult Generate(
         string source,
@@ -776,7 +782,7 @@ public sealed class ActorRegistrationGeneratorTests {
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        GeneratorDriver driver = CSharpGeneratorDriver
+        var driver = CSharpGeneratorDriver
             .Create(
                 new ActorRegistrationGenerator(),
                 new EventConsumerRegistrationGenerator(),
@@ -792,11 +798,10 @@ public sealed class ActorRegistrationGeneratorTests {
             .Where(d => d.Severity == DiagnosticSeverity.Error && !allowedIds.Contains(d.Id))
             .Should().BeEmpty();
 
-        if (assertGeneratedOutputCompiles) {
+        if (assertGeneratedOutputCompiles)
             outputCompilation.GetDiagnostics()
                 .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
                 .Should().BeEmpty();
-        }
 
         return result;
     }

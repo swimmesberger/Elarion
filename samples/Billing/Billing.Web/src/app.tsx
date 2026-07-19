@@ -6,12 +6,12 @@
 // app-wide. (A team that prefers zero-edit route discovery can compose appModules.flatMap((m) => m.routes)
 // and register the router as AnyRouter instead — the tradeoff is documented in the frontend-modules
 // concept doc.)
-import { createRoute, createRouter } from "@tanstack/react-router"
+import {createRoute, createRouter} from "@tanstack/react-router"
 import clients from "@/modules/clients"
 import invoicing from "@/modules/invoicing"
-import { HomePage } from "@/platform/HomePage"
-import type { AppModule } from "@/platform/modules"
-import { rootRoute } from "@/platform/router"
+import {HomePage} from "@/platform/HomePage"
+import type {AppModule} from "@/platform/modules"
+import {rootRoute} from "@/platform/router"
 
 // Vite expands the glob at build time into static imports, so manifest discovery stays compile-time,
 // bundled, and deterministic (keys come back sorted).
@@ -32,7 +32,7 @@ const routeTree = rootRoute.addChildren([indexRoute, ...clients.routes, ...invoi
 export const router = createRouter({
   routeTree,
   // The capability snapshot is loaded asynchronously at boot and supplied by <RouterProvider context=…>.
-  context: { caps: undefined! },
+  context: {caps: undefined!},
 })
 
 declare module "@tanstack/react-router" {

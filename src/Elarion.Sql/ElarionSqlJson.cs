@@ -21,11 +21,10 @@ public static class ElarionSqlJson {
     public static void Use(IElarionJsonSerialization serialization) {
         ArgumentNullException.ThrowIfNull(serialization);
         var existing = Interlocked.CompareExchange(ref _serialization, serialization, null);
-        if (existing is not null && !ReferenceEquals(existing, serialization)) {
+        if (existing is not null && !ReferenceEquals(existing, serialization))
             throw new InvalidOperationException(
                 "ElarionSqlJson.Use was already called with a different IElarionJsonSerialization instance. "
                 + "Install the canonical accessor exactly once per process.");
-        }
     }
 
     /// <summary>The installed accessor; used by generated JSON-mapper <c>Instance</c> members.</summary>

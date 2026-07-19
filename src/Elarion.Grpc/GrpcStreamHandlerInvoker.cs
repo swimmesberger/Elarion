@@ -18,8 +18,7 @@ namespace Elarion.Grpc;
 public sealed class GrpcStreamHandlerInvoker(
     IServiceProvider services,
     IGrpcPrincipalFactory principalFactory,
-    IAppErrorTranslator<RpcException> errorTranslator)
-{
+    IAppErrorTranslator<RpcException> errorTranslator) {
     /// <summary>
     /// Starts an application server stream directly, returning an invocation that owns its dispatch scope or
     /// throwing the translated <see cref="RpcException"/> when stream startup returns a failed result.
@@ -33,8 +32,7 @@ public sealed class GrpcStreamHandlerInvoker(
     public async Task<StreamHandlerInvocation<TItem>> InvokeServerStreamingAsync<TRequest, TItem>(
         TRequest request,
         ServerCallContext callContext)
-        where TRequest : notnull
-    {
+        where TRequest : notnull {
         ArgumentNullException.ThrowIfNull(callContext);
 
         var principal = principalFactory.CreatePrincipal(callContext);
@@ -50,12 +48,29 @@ public sealed class GrpcStreamHandlerInvoker(
             context,
             callContext.CancellationToken).ConfigureAwait(false);
 
-        if (result.IsSuccess)
-        {
-            return result.Value;
-        }
+        if (result.IsSuccess) return result.Value;
 
         throw errorTranslator.Translate(result.Error);
+    }
+
+    /// <summary>
+    /// Fully inferred server-stream start for requests implementing the self-typed marker
+    /// <see cref="IStreamRequest{TSelf, TItem}"/>: both generic arguments are inferred from
+    /// <paramref name="request"/>.
+    /// </summary>
+    /// <typeparam name="TRequest">The application stream-handler request type (inferred).</typeparam>
+    /// <typeparam name="TItem">The application stream item type (inferred from the marker).</typeparam>
+    /// <param name="request">The application request to dispatch.</param>
+    /// <param name="callContext">The exact gRPC context for this call.</param>
+    /// <returns>The accepted stream invocation. Dispose it after enumeration.</returns>
+    /// <exception cref="RpcException">The registered gRPC translator's representation of a failed stream startup.</exception>
+    public Task<StreamHandlerInvocation<TItem>> InvokeServerStreamingAsync<TRequest, TItem>(
+        IStreamRequest<TRequest, TItem> request,
+        ServerCallContext callContext)
+        where TRequest : notnull, IStreamRequest<TRequest, TItem> {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return InvokeServerStreamingAsync<TRequest, TItem>((TRequest)request, callContext);
     }
 
     /// <summary>
@@ -83,8 +98,7 @@ public sealed class GrpcStreamHandlerInvoker(
         ServerCallContext callContext,
         Func<TWireRequest, TRequest> mapRequest,
         Func<TItem, TWireItem> mapItem)
-        where TRequest : notnull
-    {
+        where TRequest : notnull {
         ArgumentNullException.ThrowIfNull(responseStream);
         ArgumentNullException.ThrowIfNull(callContext);
         ArgumentNullException.ThrowIfNull(mapRequest);
@@ -95,10 +109,8 @@ public sealed class GrpcStreamHandlerInvoker(
             callContext).ConfigureAwait(false);
 
         await foreach (var item in invocation
-            .WithCancellation(callContext.CancellationToken)
-            .ConfigureAwait(false))
-        {
+                           .WithCancellation(callContext.CancellationToken)
+                           .ConfigureAwait(false))
             await responseStream.WriteAsync(mapItem(item)).ConfigureAwait(false);
-        }
     }
 }

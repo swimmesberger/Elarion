@@ -9,11 +9,9 @@ using Xunit;
 
 namespace Elarion.Tests.Analyzers;
 
-public sealed class ModuleBoundaryAnalyzerTests
-{
+public sealed class ModuleBoundaryAnalyzerTests {
     [Fact]
-    public async Task InjectingForeignInternalService_IsReported()
-    {
+    public async Task InjectingForeignInternalService_IsReported() {
         const string source =
             """
             namespace App.Billing {
@@ -41,8 +39,7 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task ReferencingCoreModuleInternal_IsStillReported()
-    {
+    public async Task ReferencingCoreModuleInternal_IsStillReported() {
         // A foundation (Core) module gets no exemption: the analyzer reads only the module name, never
         // Kind. Knowing what a module exports is valuable, so even Core publishes a [ModuleContract] (or a
         // platform port outside every module) for its cross-module surface, like any other module.
@@ -73,8 +70,7 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task InjectingForeignModuleContract_IsAllowed()
-    {
+    public async Task InjectingForeignModuleContract_IsAllowed() {
         const string source =
             """
             namespace App.Billing {
@@ -102,8 +98,7 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task SameModuleReference_IsAllowed()
-    {
+    public async Task SameModuleReference_IsAllowed() {
         const string source =
             """
             namespace App.Billing {
@@ -131,8 +126,7 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task ReferencingForeignModuleLocalEntity_IsReported()
-    {
+    public async Task ReferencingForeignModuleLocalEntity_IsReported() {
         // An entity placed *inside* a module's namespace is owned by that module (the way a mini bounded
         // context earns data ownership), so referencing it from another module trips ELMOD002. Contrast
         // ReferencingSharedKernelEntity_IsNotGated, where the entity lives outside every module.
@@ -162,8 +156,7 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task ReferencingSharedKernelEntity_IsNotGated()
-    {
+    public async Task ReferencingSharedKernelEntity_IsNotGated() {
         // The rule is location-based: an entity outside every [AppModule] (the shared kernel, e.g.
         // App.Persistence) is shared data and freely referenceable from any module.
         const string source =
@@ -194,8 +187,7 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task InjectingForeignEntityConfiguration_IsReported()
-    {
+    public async Task InjectingForeignEntityConfiguration_IsReported() {
         // The configuration class itself is module-internal infrastructure.
         const string source =
             """
@@ -237,8 +229,7 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task ReferencingForeignModuleLocalPlainType_IsReported()
-    {
+    public async Task ReferencingForeignModuleLocalPlainType_IsReported() {
         // A plain type owned by another module is module-internal too — sharing it means moving it out of
         // the module (to the shared kernel) or publishing a [ModuleContract], not depending on it directly.
         const string source =
@@ -267,8 +258,7 @@ public sealed class ModuleBoundaryAnalyzerTests
     }
 
     [Fact]
-    public async Task ReferencingSharedKernelPlainType_IsNotGated()
-    {
+    public async Task ReferencingSharedKernelPlainType_IsNotGated() {
         // A platform-capability port (or any value type) outside every module is shareable by location —
         // this is the adapter/port pattern's home, distinct from a [ModuleContract].
         const string source =
@@ -298,8 +288,7 @@ public sealed class ModuleBoundaryAnalyzerTests
         diagnostics.Should().NotContain(d => d.Id == "ELMOD002");
     }
 
-    private static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(string source)
-    {
+    private static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(string source) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
         var compilation = CSharpCompilation.Create(
@@ -317,8 +306,7 @@ public sealed class ModuleBoundaryAnalyzerTests
         return await withAnalyzers.GetAnalyzerDiagnosticsAsync();
     }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 

@@ -76,38 +76,41 @@ public static class RpcToolInvoker {
             // Omitted arguments are treated identically to `{}` and deserialized through the configured (source-gen)
             // resolver — reflection-free / Native-AOT-safe, and applies the request record's constructor defaults.
             requestObject = RpcRequestParams.Deserialize(arguments, route.RequestType, serializerOptions);
-        } catch (JsonException ex) {
+        }
+        catch (JsonException ex) {
             RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
             return new RpcToolResult { IsError = true, Text = $"Invalid params: {ex.Message}", ErrorCode = -32602 };
         }
 
         if (requestObject is null) {
             RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
-            return new RpcToolResult { IsError = true, Text = "Could not construct request params", ErrorCode = -32602 };
+            return new RpcToolResult
+                { IsError = true, Text = "Could not construct request params", ErrorCode = -32602 };
         }
 
         // Per-call idempotency key from the tool arguments' _meta (the batch-correct, transport-neutral location).
-        if (route.Idempotent && JsonRpcDispatcher.TryReadMetaIdempotencyKey(arguments, out var idempotencyKey)) {
-            scope.ServiceProvider.GetService<Elarion.Abstractions.Idempotency.IIdempotencyKeySeed>()?.Seed(idempotencyKey);
-        }
+        if (route.Idempotent && JsonRpcDispatcher.TryReadMetaIdempotencyKey(arguments, out var idempotencyKey))
+            scope.ServiceProvider.GetService<Abstractions.Idempotency.IIdempotencyKeySeed>()?.Seed(idempotencyKey);
 
         var logger = rootServices.GetService<ILoggerFactory>()?.CreateLogger(typeof(RpcToolInvoker));
 
         Result<object> result;
         try {
             result = await route.InvokeAsync(requestObject, scope.ServiceProvider, ct).ConfigureAwait(false);
-        } catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) {
             // Expected cancellation (e.g. the client disconnected). Rethrow so the transport bails quietly; do
             // not log it as an error or map it to a fabricated internal error.
             logger?.LogDebug("Tool {Method} canceled by the caller", methodName);
             throw;
-        } catch (Exception ex) {
+        }
+        catch (Exception ex) {
             // An unexpected handler exception must not propagate raw to the MCP SDK. Log it, record it on the
             // span, and map it to a JSON-RPC internal error (-32603), consistent with JsonRpcDispatcher.
             logger?.LogError(ex, "Unhandled exception invoking tool {Method}", methodName);
             activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
                 { "exception.type", ex.GetType().FullName },
-                { "exception.message", ex.Message },
+                { "exception.message", ex.Message }
             }));
             RecordError(activity, route.Name, "-32603", ex.Message, startTimestamp);
             return new RpcToolResult { IsError = true, Text = "Internal error", ErrorCode = -32603 };
@@ -115,14 +118,14 @@ public static class RpcToolInvoker {
 
         if (!result.IsSuccess) {
             var translator = scope.ServiceProvider.GetService<IAppErrorTranslator<RpcError>>()
-                ?? JsonRpcAppErrorTranslator.Default;
+                             ?? JsonRpcAppErrorTranslator.Default;
             var rpcError = translator.Translate(result.Error);
             RecordError(activity, route.Name, rpcError.Code.ToString(), rpcError.Message, startTimestamp);
             return new RpcToolResult {
                 IsError = true,
                 Text = rpcError.Message,
                 ErrorCode = rpcError.Code,
-                ErrorData = rpcError.Data,
+                ErrorData = rpcError.Data
             };
         }
 
@@ -132,20 +135,16 @@ public static class RpcToolInvoker {
             ? JsonSerializer.Serialize(value, serializerOptions.GetTypeInfo(value.GetType()))
             : "{}";
 
-        if (activity?.IsAllDataRequested == true) {
-            activity.SetTag("rpc.response.status_code", "OK");
-        }
+        if (activity?.IsAllDataRequested == true) activity.SetTag("rpc.response.status_code", "OK");
 
         JsonRpcTelemetry.RecordRequest(
-            route.Name, "OK", Stopwatch.GetElapsedTime(startTimestamp), system: "mcp");
+            route.Name, "OK", Stopwatch.GetElapsedTime(startTimestamp), "mcp");
         return new RpcToolResult { IsError = false, Text = text };
     }
 
     private static Activity? StartToolActivity(string method) {
         // Guard before interpolating: with no listener the name string would still be built every call.
-        if (!JsonRpcTelemetry.Source.HasListeners()) {
-            return null;
-        }
+        if (!JsonRpcTelemetry.Source.HasListeners()) return null;
 
         var activity = JsonRpcTelemetry.Source.StartActivity($"mcp {method}", ActivityKind.Server);
         if (activity?.IsAllDataRequested == true) {
@@ -156,7 +155,8 @@ public static class RpcToolInvoker {
         return activity;
     }
 
-    private static void RecordError(Activity? activity, string method, string statusCode, string description, long startTimestamp) {
+    private static void RecordError(Activity? activity, string method, string statusCode, string description,
+        long startTimestamp) {
         if (activity?.IsAllDataRequested == true) {
             activity.SetTag("rpc.response.status_code", statusCode);
             activity.SetTag("error.type", statusCode);
@@ -164,6 +164,6 @@ public static class RpcToolInvoker {
         }
 
         JsonRpcTelemetry.RecordRequest(
-            method, statusCode, Stopwatch.GetElapsedTime(startTimestamp), system: "mcp");
+            method, statusCode, Stopwatch.GetElapsedTime(startTimestamp), "mcp");
     }
 }

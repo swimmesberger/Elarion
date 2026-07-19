@@ -94,30 +94,32 @@ public sealed class PostgreSqlBlobStoreTransactionTests(PostgreSqlBlobStoreFixtu
         (await ContentRowCount(verifyContext, blobRef.Value, Ct)).Should().Be(1);
     }
 
-    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) {
+        return new PostgreSqlBlobStore<IntegrationBlobDbContext>(context,
+            NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    }
 
     // Probes the raw content table directly, so the assertion is independent of the store's read path.
     private static async Task<long> ContentRowCount(
         IntegrationBlobDbContext context,
         string blobId,
-        CancellationToken cancellationToken) =>
-        await context.Database
+        CancellationToken cancellationToken) {
+        return await context.Database
             .SqlQueryRaw<long>("SELECT count(*) AS \"Value\" FROM blob_contents WHERE blob_id = {0}", blobId)
             .SingleAsync(cancellationToken);
+    }
 
-    private static BlobUploadRequest NewRequest() =>
-        new() {
+    private static BlobUploadRequest NewRequest() {
+        return new BlobUploadRequest {
             Container = $"c-{Guid.NewGuid():N}",
             Name = "blob.bin",
             ContentType = "application/octet-stream"
         };
+    }
 
     private static byte[] Bytes(int count) {
         var bytes = new byte[count];
-        for (var i = 0; i < count; i++) {
-            bytes[i] = (byte)(i % 251);
-        }
+        for (var i = 0; i < count; i++) bytes[i] = (byte)(i % 251);
 
         return bytes;
     }

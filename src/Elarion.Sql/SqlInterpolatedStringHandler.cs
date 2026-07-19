@@ -22,21 +22,27 @@ public struct SqlInterpolatedStringHandler {
         _formattedCount = formattedCount;
     }
 
-    public void AppendLiteral(string value) => _segments.Add(SqlSegment.OfLiteral(value));
+    public void AppendLiteral(string value) {
+        _segments.Add(SqlSegment.OfLiteral(value));
+    }
 
     /// <summary>
     /// Splices a composed fragment; its parameters are renumbered into this statement. A pure-literal
     /// fragment (from <see cref="SqlStatement.Verbatim"/> or a generated <c>Table</c>/<c>Select</c>) inlines as
     /// a literal segment, so it costs no more than raw text — this is the identifier-splice fast path.
     /// </summary>
-    public void AppendFormatted(SqlStatement? fragment) => fragment?.AddAsSegmentTo(_segments);
+    public void AppendFormatted(SqlStatement? fragment) {
+        fragment?.AddAsSegmentTo(_segments);
+    }
 
     /// <summary>
     /// Splices an optional-filter accumulator: renders <c>WHERE (…) AND (…)</c>, or nothing when no
     /// predicates were added. Its predicates carry their own parameters, so the composed WHERE stays
     /// injection-safe.
     /// </summary>
-    public void AppendFormatted(SqlWhere? where) => where?.ToSql().AddAsSegmentTo(_segments);
+    public void AppendFormatted(SqlWhere? where) {
+        where?.ToSql().AddAsSegmentTo(_segments);
+    }
 
     /// <summary>Binds a value as a parameter; collections expand to a parameter list for <c>IN</c>.</summary>
     public void AppendFormatted<T>(T value) {
@@ -61,7 +67,7 @@ public struct SqlInterpolatedStringHandler {
     internal readonly List<SqlSegment> Segments => _segments;
 
     // Capacity hints: literal text plus ~4 chars per "@pN" placeholder; one value per hole.
-    internal readonly int TextCapacityHint => _literalLength + (_formattedCount * 4);
+    internal readonly int TextCapacityHint => _literalLength + _formattedCount * 4;
 
     internal readonly int ValueCountHint => _formattedCount;
 }

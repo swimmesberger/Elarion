@@ -17,7 +17,7 @@ public sealed class OpenFeatureFeatureVariantService(IFeatureClient client, ICur
 
         // The default value is a fail-safe sentinel; we read .Variant (the allocated variant name), not .Value.
         var details = await client
-            .GetStringDetailsAsync(feature, defaultValue: string.Empty, context, cancellationToken: ct)
+            .GetStringDetailsAsync(feature, string.Empty, context, cancellationToken: ct)
             .ConfigureAwait(false);
 
         return string.IsNullOrEmpty(details.Variant) ? null : details.Variant;

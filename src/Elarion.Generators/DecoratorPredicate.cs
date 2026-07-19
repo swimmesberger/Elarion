@@ -17,10 +17,8 @@ namespace Elarion.Generators;
 /// differently-shaped <c>AppliesTo</c> (e.g. the older <c>AppliesTo(System.Type)</c>) is reported rather than
 /// silently ignored, which would attach the decorator unconditionally.
 /// </remarks>
-internal static class DecoratorPredicate
-{
-    public enum Result
-    {
+internal static class DecoratorPredicate {
+    public enum Result {
         /// <summary>No <c>AppliesTo</c> predicate; attach unconditionally.</summary>
         None,
 
@@ -31,18 +29,19 @@ internal static class DecoratorPredicate
         NotPublic,
 
         /// <summary>A <c>static bool AppliesTo(…)</c> method exists with a parameter other than <c>HandlerMetadata</c>.</summary>
-        UnsupportedSignature,
+        UnsupportedSignature
     }
 
     private const string AppliesToMethodName = "AppliesTo";
     private const string HandlerMetadataMetadataName = "Elarion.Abstractions.Pipeline.HandlerMetadata";
 
-    public static Result Detect(INamedTypeSymbol decoratorDefinition, Compilation compilation, out Location? location)
-        => Detect(decoratorDefinition, compilation, HandlerMetadataMetadataName, out location);
+    public static Result Detect(INamedTypeSymbol decoratorDefinition, Compilation compilation, out Location? location) {
+        return Detect(decoratorDefinition, compilation, HandlerMetadataMetadataName, out location);
+    }
 
     /// <summary>Detects a predicate for the supplied metadata contract.</summary>
-    public static Result Detect(INamedTypeSymbol decoratorDefinition, Compilation compilation, string metadataName, out Location? location)
-    {
+    public static Result Detect(INamedTypeSymbol decoratorDefinition, Compilation compilation, string metadataName,
+        out Location? location) {
         location = null;
 
         var handlerMetadata = compilation.GetTypeByMetadataName(metadataName);
@@ -55,8 +54,7 @@ internal static class DecoratorPredicate
 
         // A member named AppliesTo is an intended predicate. Silently ignoring a malformed overload would
         // attach the decorator unconditionally, which is a fail-open pipeline configuration error.
-        foreach (var member in members)
-        {
+        foreach (var member in members) {
             location = member.Locations.FirstOrDefault();
             if (member is not IMethodSymbol method)
                 return Result.UnsupportedSignature;

@@ -6,8 +6,8 @@ using Elarion.Abstractions.Caching;
 using Elarion.Caching;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-
 using Elarion.Pipeline;
+
 namespace Elarion.Tests.Services;
 
 public sealed class HandlerCacheDecoratorTests {
@@ -122,7 +122,9 @@ public sealed class HandlerCacheDecoratorTests {
     }
 
     private sealed class StaticHandler<TRequest, TResponse>(TResponse response) : IHandler<TRequest, TResponse> {
-        public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) => ValueTask.FromResult(response);
+        public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+            return ValueTask.FromResult(response);
+        }
     }
 
     private sealed class CachePolicy : IHandlerCachePolicy<Request> {
@@ -130,7 +132,10 @@ public sealed class HandlerCacheDecoratorTests {
         public TimeSpan Expiration => TimeSpan.FromMinutes(1);
         public HandlerCacheScope Scope => HandlerCacheScope.Global;
         public IReadOnlyList<string> Tags { get; } = ["items"];
-        public string CreateKey(Request request) => request.Id.ToString();
+
+        public string CreateKey(Request request) {
+            return request.Id.ToString();
+        }
     }
 
     private sealed class InvalidationPolicy : IHandlerCacheInvalidationPolicy {

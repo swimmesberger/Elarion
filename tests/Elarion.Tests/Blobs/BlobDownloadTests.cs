@@ -48,8 +48,8 @@ public sealed class BlobDownloadTests {
         act.Should().Throw<ArgumentNullException>();
     }
 
-    private static BlobMetadata Metadata() =>
-        new() {
+    private static BlobMetadata Metadata() {
+        return new BlobMetadata {
             Id = "id",
             Container = "container",
             Name = "name",
@@ -58,6 +58,7 @@ public sealed class BlobDownloadTests {
             CreatedAt = DateTimeOffset.UnixEpoch,
             State = BlobLifecycleState.Committed
         };
+    }
 
     private sealed class TrackingStream(Action onDispose) : MemoryStream {
         public bool Disposed { get; private set; }
@@ -77,6 +78,8 @@ public sealed class BlobDownloadTests {
     }
 
     private sealed class ThrowingDisposeStream : MemoryStream {
-        public override ValueTask DisposeAsync() => throw new IOException("Dispose failed.");
+        public override ValueTask DisposeAsync() {
+            throw new IOException("Dispose failed.");
+        }
     }
 }

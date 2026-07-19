@@ -1,13 +1,16 @@
 # @swimmesberger/elarion-jsonrpc-client-generator
 
-Generate TypeScript RPC method contracts, Zod params/result schemas, and a portable fetch-based JSON-RPC client from an Elarion `rpc-schema.json` export.
+Generate TypeScript RPC method contracts, Zod params/result schemas, and a portable fetch-based JSON-RPC client from an
+Elarion `rpc-schema.json` export.
 
 ```bash
 npm install --save-dev @swimmesberger/elarion-jsonrpc-client-generator
 npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated
 ```
 
-Add `--watch` for a tight dev loop — the generator regenerates whenever `rpc-schema.json` changes (and survives the partial/invalid states a build tool leaves the file in mid-write). Pair it with a server that re-exports the schema on save (e.g. `dotnet watch`) so an edit to a handler flows straight to the typed client:
+Add `--watch` for a tight dev loop — the generator regenerates whenever `rpc-schema.json` changes (and survives the
+partial/invalid states a build tool leaves the file in mid-write). Pair it with a server that re-exports the schema on
+save (e.g. `dotnet watch`) so an edit to a handler flows straight to the typed client:
 
 ```bash
 npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated --watch
@@ -15,13 +18,14 @@ npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generate
 
 The generated files are:
 
-| File | Purpose |
-| --- | --- |
-| `rpc-types.ts` | `RpcMethods` interface mapping method names to params/result types. |
-| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation. |
-| `rpc-client.ts` | Browser/Node.js fetch client with typed single calls, batching, headers, `AbortSignal`, JSON-RPC errors, and Zod-backed params/result validation. |
+| File             | Purpose                                                                                                                                           |
+|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `rpc-types.ts`   | `RpcMethods` interface mapping method names to params/result types.                                                                               |
+| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation.                                                          |
+| `rpc-client.ts`  | Browser/Node.js fetch client with typed single calls, batching, headers, `AbortSignal`, JSON-RPC errors, and Zod-backed params/result validation. |
 
-The generated schema and client files import `zod`, so consuming applications should install `zod` as a runtime dependency.
+The generated schema and client files import `zod`, so consuming applications should install `zod` as a runtime
+dependency.
 
 ## Generated API client
 
@@ -37,9 +41,12 @@ const abort = new AbortController()
 const client = await rpc.clients.get({ id: clientId }, { signal: abort.signal })
 ```
 
-The generated API mirrors dotted JSON-RPC method names as nested properties, so `clients.get` becomes `rpc.clients.get(...)`. The file also exports the lower-level `createRpcClient(...)` generic transport for advanced cases.
+The generated API mirrors dotted JSON-RPC method names as nested properties, so `clients.get` becomes
+`rpc.clients.get(...)`. The file also exports the lower-level `createRpcClient(...)` generic transport for advanced
+cases.
 
-The API client uses `globalThis.fetch` in browsers and modern Node.js. Pass `fetch` explicitly for tests, older Node.js runtimes, server-function forwarding, or framework-specific transport wrappers:
+The API client uses `globalThis.fetch` in browsers and modern Node.js. Pass `fetch` explicitly for tests, older Node.js
+runtimes, server-function forwarding, or framework-specific transport wrappers:
 
 ```ts
 const rpc = createRpcApi({
@@ -52,7 +59,9 @@ const rpc = createRpcApi({
 })
 ```
 
-Batching uses generated request builders, so params and results stay tied to each RPC method. Batch results preserve input order even when the server returns JSON-RPC responses out of order. Each item returns either `{ ok: true, result }` or `{ ok: false, error }`, so one method failure does not reject the whole batch:
+Batching uses generated request builders, so params and results stay tied to each RPC method. Batch results preserve
+input order even when the server returns JSON-RPC responses out of order. Each item returns either
+`{ ok: true, result }` or `{ ok: false, error }`, so one method failure does not reject the whole batch:
 
 ```ts
 const [clientResult, projectsResult] = await rpc.$batch([
@@ -61,13 +70,21 @@ const [clientResult, projectsResult] = await rpc.$batch([
 ] as const)
 ```
 
-Result validation is enabled by default through `rpcResultSchemas`. Use `transformResult` for app-specific normalization before validation, or set `validateResults: false` when another layer validates responses.
+Result validation is enabled by default through `rpcResultSchemas`. Use `transformResult` for app-specific normalization
+before validation, or set `validateResults: false` when another layer validates responses.
 
-Params validation is also enabled by default through `rpcParamsSchemas`: single calls and batch items are checked against the exported schema's constraints (lengths, ranges, patterns, formats) before the request is sent, and a failure throws `RpcParamsValidationError` locally — naming the method, with the underlying Zod error as `cause` — so tier-1 contract violations never reach the wire. Set `validateParams: false` to opt out.
+Params validation is also enabled by default through `rpcParamsSchemas`: single calls and batch items are checked
+against the exported schema's constraints (lengths, ranges, patterns, formats) before the request is sent, and a failure
+throws `RpcParamsValidationError` locally — naming the method, with the underlying Zod error as `cause` — so tier-1
+contract violations never reach the wire. Set `validateParams: false` to opt out.
 
 ## Client-event subscriptions
 
-When the schema carries an `events` block (the host registers Elarion client-event topics, ADR-0043), the generator additionally emits `events-client.ts`: `createElarionEvents(...)` multiplexes topic-typed subscriptions over one `EventSource`, validates incoming payloads with the generated Zod schemas (`rpcEventPayloadSchemas`), and exposes `$client.onConnected(...)` — fired on connect and every reconnect — as the "you may have missed events, re-query" signal. Event-free schemas produce byte-identical output with no events file.
+When the schema carries an `events` block (the host registers Elarion client-event topics, ADR-0043), the generator
+additionally emits `events-client.ts`: `createElarionEvents(...)` multiplexes topic-typed subscriptions over one
+`EventSource`, validates incoming payloads with the generated Zod schemas (`rpcEventPayloadSchemas`), and exposes
+`$client.onConnected(...)` — fired on connect and every reconnect — as the "you may have missed events, re-query"
+signal. Event-free schemas produce byte-identical output with no events file.
 
 ```ts
 import { createElarionEvents } from './generated/events-client'
@@ -79,7 +96,9 @@ events.$client.onConnected(() => refetchAll())
 
 ## Error handling
 
-A JSON-RPC error from the server is thrown as a typed `RpcError` (`code`, `message`, optional `data`). Elarion maps its `AppError` kinds onto the JSON-RPC server-reserved range, so the generated `RpcError` exposes a getter per kind — branch on the kind directly instead of re-wrapping:
+A JSON-RPC error from the server is thrown as a typed `RpcError` (`code`, `message`, optional `data`). Elarion maps its
+`AppError` kinds onto the JSON-RPC server-reserved range, so the generated `RpcError` exposes a getter per kind — branch
+on the kind directly instead of re-wrapping:
 
 ```ts
 import { RpcError, ElarionErrorCodes } from './generated/rpc-client'
@@ -92,17 +111,23 @@ try {
 }
 ```
 
-`isNotFound` (`-32001`), `isConflict` (`-32002`), `isForbidden` (`-32003`), `isBusinessRule` (`-32004`), and `isUnauthorized` (`-32005`) cover the Elarion application kinds; `isInvalidParams` (`-32602`) and `isInternalError` (`-32603`) cover `Validation`/`Internal`; and the standard `isParseError`/`isInvalidRequest`/`isMethodNotFound` getters stay available. The application codes are also exported as `ElarionErrorCodes` for `switch` statements.
+`isNotFound` (`-32001`), `isConflict` (`-32002`), `isForbidden` (`-32003`), `isBusinessRule` (`-32004`), and
+`isUnauthorized` (`-32005`) cover the Elarion application kinds; `isInvalidParams` (`-32602`) and `isInternalError` (
+`-32603`) cover `Validation`/`Internal`; and the standard `isParseError`/`isInvalidRequest`/`isMethodNotFound` getters
+stay available. The application codes are also exported as `ElarionErrorCodes` for `switch` statements.
 
 ## Framework adapters
 
-The core client stays framework-neutral, but you can opt into a framework adapter emitted as a separate file. Pass `--framework tanstack-start` to also emit `start-adapter.ts` (needs the `@tanstack/react-start` peer dependency):
+The core client stays framework-neutral, but you can opt into a framework adapter emitted as a separate file. Pass
+`--framework tanstack-start` to also emit `start-adapter.ts` (needs the `@tanstack/react-start` peer dependency):
 
 ```bash
 npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated --framework tanstack-start
 ```
 
-It exports `createStartRpcApi` — a `createRpcApi` with request-scoped cookie forwarding pre-wired for SSR — and `forwardRequestCookie`, the isomorphic headers function on its own. The core client never imports the adapter, so consumers that don't opt in stay framework-neutral and their output is byte-identical.
+It exports `createStartRpcApi` — a `createRpcApi` with request-scoped cookie forwarding pre-wired for SSR — and
+`forwardRequestCookie`, the isomorphic headers function on its own. The core client never imports the adapter, so
+consumers that don't opt in stay framework-neutral and their output is byte-identical.
 
 ```ts
 import { createStartRpcApi } from './generated/start-adapter'
@@ -112,7 +137,10 @@ export const rpc = createStartRpcApi({ url: '/rpc' })
 
 ## Client-side tracing
 
-The generated client never imports an OpenTelemetry SDK. Instead it exposes an optional `instrumentation` hook so client-side tracing stays a host decision and adds zero dependencies. The client calls `startSpan` once per request (and once per batch), reads the returned span's `headers` to inject trace context into the outgoing request, then calls `setError`/`end` as the request settles:
+The generated client never imports an OpenTelemetry SDK. Instead it exposes an optional `instrumentation` hook so
+client-side tracing stays a host decision and adds zero dependencies. The client calls `startSpan` once per request (and
+once per batch), reads the returned span's `headers` to inject trace context into the outgoing request, then calls
+`setError`/`end` as the request settles:
 
 ```ts
 interface RpcInstrumentation {
@@ -126,7 +154,8 @@ interface RpcClientSpan {
 }
 ```
 
-Minimal, dependency-free W3C context propagation (continues the server trace; ASP.NET Core reads `traceparent` automatically):
+Minimal, dependency-free W3C context propagation (continues the server trace; ASP.NET Core reads `traceparent`
+automatically):
 
 ```ts
 const rpc = createRpcApi({
@@ -143,4 +172,7 @@ const rpc = createRpcApi({
 })
 ```
 
-Hosts that already run `@opentelemetry/api` pass a small adapter that starts a real `CLIENT` span and injects context via the API's propagator — still no SDK in the generated client. Per-item application errors in a batch are returned as data (`{ ok: false, error }`), so the batch span ends without `setError`; only transport/protocol failures mark the span as errored.
+Hosts that already run `@opentelemetry/api` pass a small adapter that starts a real `CLIENT` span and injects context
+via the API's propagator — still no SDK in the generated client. Per-item application errors in a batch are returned as
+data (`{ ok: false, error }`), so the batch span ends without `setError`; only transport/protocol failures mark the span
+as errored.

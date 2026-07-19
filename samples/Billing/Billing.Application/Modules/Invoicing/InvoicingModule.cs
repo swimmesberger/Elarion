@@ -7,5 +7,7 @@ namespace Billing.Application.Modules.Invoicing;
 /// When disabled, its handlers, endpoints, JSON metadata, and scheduled jobs all disappear together.</summary>
 [AppModule("Invoicing")]
 public static partial class InvoicingModule {
-    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => InvoicingJsonContext.Default;
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() {
+        return InvoicingJsonContext.Default;
+    }
 }

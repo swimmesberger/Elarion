@@ -61,7 +61,7 @@ public sealed class InMemoryIdempotencyStoreTests {
         var first = await store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.Conflict, Ct);
         first.Status.Should().Be(IdempotencyBeginStatus.Began);
 
-        await store.CompleteAsync(Key, "payload", isFailure: false, TimeSpan.FromHours(1), Ct);
+        await store.CompleteAsync(Key, "payload", false, TimeSpan.FromHours(1), Ct);
 
         var replay = await store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.Conflict, Ct);
         replay.Status.Should().Be(IdempotencyBeginStatus.Replay);
@@ -99,7 +99,7 @@ public sealed class InMemoryIdempotencyStoreTests {
         var (store, _) = CreateStore();
 
         await store.TryBeginAsync(Key, "fp-a", IdempotencyConflictBehavior.Conflict, Ct);
-        await store.CompleteAsync(Key, "payload", isFailure: false, TimeSpan.FromHours(1), Ct);
+        await store.CompleteAsync(Key, "payload", false, TimeSpan.FromHours(1), Ct);
 
         (await store.TryBeginAsync(Key, "fp-b", IdempotencyConflictBehavior.Conflict, Ct)).Status
             .Should().Be(IdempotencyBeginStatus.FingerprintMismatch);
@@ -115,7 +115,7 @@ public sealed class InMemoryIdempotencyStoreTests {
         var waiter = store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.WaitThenReplay, Ct).AsTask();
         waiter.IsCompleted.Should().BeFalse();
 
-        await store.CompleteAsync(Key, "winner", isFailure: false, TimeSpan.FromHours(1), Ct);
+        await store.CompleteAsync(Key, "winner", false, TimeSpan.FromHours(1), Ct);
 
         var replay = await waiter;
         replay.Status.Should().Be(IdempotencyBeginStatus.Replay);
@@ -145,7 +145,7 @@ public sealed class InMemoryIdempotencyStoreTests {
         var (store, time) = CreateStore();
 
         await store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.Conflict, Ct);
-        await store.CompleteAsync(Key, "payload", isFailure: false, TimeSpan.FromHours(1), Ct);
+        await store.CompleteAsync(Key, "payload", false, TimeSpan.FromHours(1), Ct);
 
         time.Advance(TimeSpan.FromHours(2));
 
@@ -161,15 +161,17 @@ public sealed class InMemoryIdempotencyStoreTests {
 
         (await store.TryBeginAsync(opA, "fp", IdempotencyConflictBehavior.Conflict, Ct)).Status
             .Should().Be(IdempotencyBeginStatus.Began);
-        await store.CompleteAsync(opA, "payload-a", isFailure: false, TimeSpan.FromHours(1), Ct);
+        await store.CompleteAsync(opA, "payload-a", false, TimeSpan.FromHours(1), Ct);
 
         // A different operation with the same client key must claim its own record, not replay op.a's response.
         var beginB = await store.TryBeginAsync(opB, "fp", IdempotencyConflictBehavior.Conflict, Ct);
         beginB.Status.Should().Be(IdempotencyBeginStatus.Began);
 
-        await store.CompleteAsync(opB, "payload-b", isFailure: false, TimeSpan.FromHours(1), Ct);
-        (await store.TryBeginAsync(opB, "fp", IdempotencyConflictBehavior.Conflict, Ct)).Payload.Should().Be("payload-b");
-        (await store.TryBeginAsync(opA, "fp", IdempotencyConflictBehavior.Conflict, Ct)).Payload.Should().Be("payload-a");
+        await store.CompleteAsync(opB, "payload-b", false, TimeSpan.FromHours(1), Ct);
+        (await store.TryBeginAsync(opB, "fp", IdempotencyConflictBehavior.Conflict, Ct)).Payload.Should()
+            .Be("payload-b");
+        (await store.TryBeginAsync(opA, "fp", IdempotencyConflictBehavior.Conflict, Ct)).Payload.Should()
+            .Be("payload-a");
     }
 
     [Fact]
@@ -177,7 +179,7 @@ public sealed class InMemoryIdempotencyStoreTests {
         var (store, time) = CreateStore();
 
         await store.TryBeginAsync(Key, "fp", IdempotencyConflictBehavior.Conflict, Ct);
-        await store.CompleteAsync(Key, "payload", isFailure: false, TimeSpan.FromHours(1), Ct);
+        await store.CompleteAsync(Key, "payload", false, TimeSpan.FromHours(1), Ct);
 
         time.Advance(TimeSpan.FromHours(2));
         var purged = await store.PurgeCompletedAsync(time.GetUtcNow(), Ct);
@@ -188,21 +190,26 @@ public sealed class InMemoryIdempotencyStoreTests {
     private sealed class CapturingLoggerProvider : ILoggerProvider {
         public ConcurrentQueue<string> Warnings { get; } = new();
 
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Warnings);
+        public ILogger CreateLogger(string categoryName) {
+            return new CapturingLogger(Warnings);
+        }
 
-        public void Dispose() { }
+        public void Dispose() {
+        }
 
         private sealed class CapturingLogger(ConcurrentQueue<string> warnings) : ILogger {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull {
+                return null;
+            }
 
-            public bool IsEnabled(LogLevel logLevel) => true;
+            public bool IsEnabled(LogLevel logLevel) {
+                return true;
+            }
 
             public void Log<TState>(
                 LogLevel logLevel, EventId eventId, TState state, Exception? exception,
                 Func<TState, Exception?, string> formatter) {
-                if (logLevel == LogLevel.Warning) {
-                    warnings.Enqueue(formatter(state, exception));
-                }
+                if (logLevel == LogLevel.Warning) warnings.Enqueue(formatter(state, exception));
             }
         }
     }

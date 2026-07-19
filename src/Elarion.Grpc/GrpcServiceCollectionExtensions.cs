@@ -7,8 +7,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Elarion.Grpc;
 
 /// <summary>Registration helpers for the host-neutral gRPC transport adapter.</summary>
-public static class GrpcServiceCollectionExtensions
-{
+public static class GrpcServiceCollectionExtensions {
     /// <summary>
     /// Registers the unary and server-streaming invokers, default error translator, and a delegate that returns
     /// the principal already authenticated by the host. This does not add or configure a gRPC server.
@@ -17,8 +16,7 @@ public static class GrpcServiceCollectionExtensions
     /// <param name="createPrincipal">Returns the host-authenticated principal for each call.</param>
     public static IServiceCollection AddElarionGrpcTransport(
         this IServiceCollection services,
-        Func<ServerCallContext, ClaimsPrincipal> createPrincipal)
-    {
+        Func<ServerCallContext, ClaimsPrincipal> createPrincipal) {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(createPrincipal);
 
@@ -34,8 +32,7 @@ public static class GrpcServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddElarionGrpcTransport(
         this IServiceCollection services,
-        IGrpcPrincipalFactory principalFactory)
-    {
+        IGrpcPrincipalFactory principalFactory) {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(principalFactory);
 
@@ -44,16 +41,16 @@ public static class GrpcServiceCollectionExtensions
         return services;
     }
 
-    private static void AddTransportServices(IServiceCollection services)
-    {
+    private static void AddTransportServices(IServiceCollection services) {
         services.TryAddSingleton<IAppErrorTranslator<RpcException>, GrpcAppErrorTranslator>();
         services.TryAddTransient<GrpcHandlerInvoker>();
         services.TryAddTransient<GrpcStreamHandlerInvoker>();
     }
 
     private sealed class DelegateGrpcPrincipalFactory(
-        Func<ServerCallContext, ClaimsPrincipal> createPrincipal) : IGrpcPrincipalFactory
-    {
-        public ClaimsPrincipal CreatePrincipal(ServerCallContext context) => createPrincipal(context);
+        Func<ServerCallContext, ClaimsPrincipal> createPrincipal) : IGrpcPrincipalFactory {
+        public ClaimsPrincipal CreatePrincipal(ServerCallContext context) {
+            return createPrincipal(context);
+        }
     }
 }

@@ -28,23 +28,18 @@ public sealed class ConnectionInbox<TMessage>(int bufferCapacity = 64) {
     public void Post(TMessage message) {
         Waiter? matched = null;
         lock (_lock) {
-            if (_completion is not null) {
-                return;
-            }
+            if (_completion is not null) return;
 
-            for (var i = 0; i < _waiters.Count; i++) {
+            for (var i = 0; i < _waiters.Count; i++)
                 if (_waiters[i].Match(message)) {
                     matched = _waiters[i];
                     _waiters.RemoveAt(i);
                     break;
                 }
-            }
 
             if (matched is null) {
                 _buffer.Add(message);
-                if (_buffer.Count > bufferCapacity) {
-                    _buffer.RemoveAt(0);
-                }
+                if (_buffer.Count > bufferCapacity) _buffer.RemoveAt(0);
             }
         }
 
@@ -67,18 +62,15 @@ public sealed class ConnectionInbox<TMessage>(int bufferCapacity = 64) {
         Func<TMessage, bool>? match = null, TimeSpan? timeout = null, CancellationToken ct = default) {
         Waiter waiter;
         lock (_lock) {
-            if (_completion is not null) {
-                throw _completion;
-            }
+            if (_completion is not null) throw _completion;
 
             var predicate = match ?? (static _ => true);
-            for (var i = 0; i < _buffer.Count; i++) {
+            for (var i = 0; i < _buffer.Count; i++)
                 if (predicate(_buffer[i])) {
                     var buffered = _buffer[i];
                     _buffer.RemoveAt(i);
                     return buffered;
                 }
-            }
 
             waiter = new Waiter(predicate);
             _waiters.Add(waiter);
@@ -105,9 +97,7 @@ public sealed class ConnectionInbox<TMessage>(int bufferCapacity = 64) {
         Waiter[] pending;
         Exception completion;
         lock (_lock) {
-            if (_completion is not null) {
-                return;
-            }
+            if (_completion is not null) return;
 
             completion = _completion = error ?? new ConnectionInboxCompletedException();
             pending = [.. _waiters];
@@ -115,9 +105,7 @@ public sealed class ConnectionInbox<TMessage>(int bufferCapacity = 64) {
             _buffer.Clear();
         }
 
-        foreach (var waiter in pending) {
-            waiter.Source.TrySetException(completion);
-        }
+        foreach (var waiter in pending) waiter.Source.TrySetException(completion);
     }
 
     /// <summary>Returns <see langword="true"/> when a post already consumed the waiter (its message is

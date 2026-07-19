@@ -17,9 +17,7 @@ public sealed class InvoiceNotifications(
 ) : IHandler<InvoiceCreated> {
     public async ValueTask<Result> HandleAsync(InvoiceCreated e, CancellationToken ct) {
         var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == e.InvoiceId, ct);
-        if (invoice is null) {
-            return Result.Success();
-        }
+        if (invoice is null) return Result.Success();
 
         var client = await db.Clients.FirstAsync(c => c.Id == invoice.ClientId, ct);
         // A real consumer would push to a webhook, search index, or notification service.

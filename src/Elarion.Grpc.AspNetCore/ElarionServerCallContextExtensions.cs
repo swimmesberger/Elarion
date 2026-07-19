@@ -5,8 +5,7 @@ using Elarion;
 namespace Elarion.Grpc.AspNetCore;
 
 /// <summary>ASP.NET Core grpc-dotnet convenience methods for invoking Elarion handlers.</summary>
-public static class ElarionServerCallContextExtensions
-{
+public static class ElarionServerCallContextExtensions {
     /// <summary>
     /// Invokes an application request directly using this call's request services and authenticated principal.
     /// </summary>
@@ -19,8 +18,9 @@ public static class ElarionServerCallContextExtensions
     public static Task<TResponse> InvokeElarionAsync<TRequest, TResponse>(
         this ServerCallContext context,
         TRequest request)
-        where TRequest : notnull =>
-        GetInvoker(context).InvokeUnaryAsync<TRequest, TResponse>(request, context);
+        where TRequest : notnull {
+        return GetInvoker(context).InvokeUnaryAsync<TRequest, TResponse>(request, context);
+    }
 
     /// <summary>
     /// Maps and invokes a unary Elarion handler using this call's request services and authenticated principal.
@@ -40,8 +40,7 @@ public static class ElarionServerCallContextExtensions
         TWireRequest wireRequest,
         Func<TWireRequest, TRequest> mapRequest,
         Func<TResponse, TWireResponse> mapResponse)
-        where TRequest : notnull
-    {
+        where TRequest : notnull {
         return GetInvoker(context).InvokeUnaryAsync(wireRequest, context, mapRequest, mapResponse);
     }
 
@@ -58,8 +57,9 @@ public static class ElarionServerCallContextExtensions
     public static Task<StreamHandlerInvocation<TItem>> InvokeElarionStreamAsync<TRequest, TItem>(
         this ServerCallContext context,
         TRequest request)
-        where TRequest : notnull =>
-        GetStreamInvoker(context).InvokeServerStreamingAsync<TRequest, TItem>(request, context);
+        where TRequest : notnull {
+        return GetStreamInvoker(context).InvokeServerStreamingAsync<TRequest, TItem>(request, context);
+    }
 
     /// <summary>
     /// Maps and writes a server stream using this call's request services and authenticated principal.
@@ -81,8 +81,7 @@ public static class ElarionServerCallContextExtensions
         IServerStreamWriter<TWireItem> responseStream,
         Func<TWireRequest, TRequest> mapRequest,
         Func<TItem, TWireItem> mapItem)
-        where TRequest : notnull
-    {
+        where TRequest : notnull {
         return GetStreamInvoker(context).InvokeServerStreamingAsync(
             wireRequest,
             responseStream,
@@ -91,14 +90,12 @@ public static class ElarionServerCallContextExtensions
             mapItem);
     }
 
-    private static GrpcHandlerInvoker GetInvoker(ServerCallContext context)
-    {
+    private static GrpcHandlerInvoker GetInvoker(ServerCallContext context) {
         ArgumentNullException.ThrowIfNull(context);
         return context.GetHttpContext().RequestServices.GetRequiredService<GrpcHandlerInvoker>();
     }
 
-    private static GrpcStreamHandlerInvoker GetStreamInvoker(ServerCallContext context)
-    {
+    private static GrpcStreamHandlerInvoker GetStreamInvoker(ServerCallContext context) {
         ArgumentNullException.ThrowIfNull(context);
         return context.GetHttpContext().RequestServices.GetRequiredService<GrpcStreamHandlerInvoker>();
     }

@@ -258,9 +258,13 @@ admission order, so "reply, then follow-ups" is just admitting them in order fro
 and **deterministic shutdown** (`ShutdownGracePeriod`, then abort — no leaked connection tasks). For
 request/reply into the device, correlate with
 `ConnectionPendingRequests.SendAndWaitAsync(key, sendCt => connection.SendBinaryAsync(frame, sendCt))` —
-registration before send, withdrawal when the send fails. Dispatch decoded commands through
-`ConnectionHandlerInvoker.InvokeAsync/InvokeNamedAsync` (full pipeline per message; named routes need
-`HandlerTransports.Connection`). Test codecs socket-free with `InMemoryTcpLink`.
+registration before send, withdrawal when the send fails. Dispatch decoded commands through a
+per-connection `new ConnectionHandlerInvoker(services, connection)` —
+`invoker.InvokeAsync(decoded, ct)` infers both generic arguments when the request carries a self-typed
+marker (`ICommand<TSelf, TResponse>`/`IQuery<TSelf, TResponse>`); marker-free requests use
+`invoker.InvokeAsync<TRequest, TResponse>`, named traffic `invoker.InvokeNamedAsync(dispatcher, name,
+request, ct)` (full pipeline per message; named routes need `HandlerTransports.Connection`). Test codecs
+socket-free with `InMemoryTcpLink`.
 
 Don't hand-roll device provisioning — `Elarion.Devices` owns the identity chain (ADR-0054):
 `AddElarionDeviceIdentityEntityFrameworkCore<TDbContext>()` + `[GenerateElarionDeviceIdentity]` on the
@@ -289,7 +293,9 @@ app-owned and must be rate-limited; sweep expired codes with a `[ScheduledJob]` 
   `IEntityTypeConfiguration<T>` marked `[EntityConfiguration]` with `[GenerateDbSets]` on the
   DbContext. Commands already run in a framework transaction — don't open your own.
 - **In-process calls are typed.** Inject `IHandler<TReq, Result<TRes>>` (or `IHandlerSender`) so a
-  rename is a compile error; never dispatch by string name. Cross-module calls go through a
+  rename is a compile error; never dispatch by string name. A request declared with a self-typed marker
+  (`Query : IQuery<Query, Response>`) gets fully inferred dispatch — `sender.SendAsync(new Query(id), ct)`
+  with no generic arguments. Cross-module calls go through a
   `[ModuleContract]` — the analyzer (ELMOD002) flags reaching into another module's internals.
 - **Two event planes.** Same-transaction reaction → domain event (inline, a failure rolls the
   command back). After-commit side effect → integration event (outbox, retried, deduped). Pub/sub

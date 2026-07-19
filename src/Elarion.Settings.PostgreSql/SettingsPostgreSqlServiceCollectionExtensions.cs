@@ -41,7 +41,7 @@ public static class SettingsPostgreSqlServiceCollectionExtensions {
             configure,
             provider => new PostgreSqlSettingsChangeSource(
                 NpgsqlDataSource.Create(connectionString),
-                ownsDataSource: true,
+                true,
                 provider.GetRequiredService<PostgreSqlSettingsChangeOptions>(),
                 provider.GetRequiredService<ILogger<PostgreSqlSettingsChangeSource>>()));
     }
@@ -67,7 +67,7 @@ public static class SettingsPostgreSqlServiceCollectionExtensions {
             configure,
             provider => new PostgreSqlSettingsChangeSource(
                 dataSource,
-                ownsDataSource: false,
+                false,
                 provider.GetRequiredService<PostgreSqlSettingsChangeOptions>(),
                 provider.GetRequiredService<ILogger<PostgreSqlSettingsChangeSource>>()));
     }
@@ -87,8 +87,10 @@ public static class SettingsPostgreSqlServiceCollectionExtensions {
         // AddElarionSettings/AddElarionSettingsEntityFrameworkCore ran first.
         services.RemoveAll<ISettingsChangeSource>();
         services.RemoveAll<ISettingsChangePublisher>();
-        services.AddSingleton<ISettingsChangeSource>(provider => provider.GetRequiredService<PostgreSqlSettingsChangeSource>());
-        services.AddSingleton<ISettingsChangePublisher>(provider => provider.GetRequiredService<PostgreSqlSettingsChangeSource>());
+        services.AddSingleton<ISettingsChangeSource>(provider =>
+            provider.GetRequiredService<PostgreSqlSettingsChangeSource>());
+        services.AddSingleton<ISettingsChangePublisher>(provider =>
+            provider.GetRequiredService<PostgreSqlSettingsChangeSource>());
 
         // The EF store notifies on its own connection so transactional writes are commit-gated by NOTIFY.
         services.RemoveAll<IEfCoreSettingsChangeNotifier>();

@@ -28,10 +28,14 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
     // carry no savepoint name, so rollback/release target the top of the stack — correct for LIFO nesting.
     private readonly Stack<int> _savepointMarks = new();
 
-    public void Add(EventEnvelope envelope) => _buffer.Add(envelope);
+    public void Add(EventEnvelope envelope) {
+        _buffer.Add(envelope);
+    }
 
     /// <summary>Records the current buffer size as the high-water mark for a newly created savepoint.</summary>
-    public void PushSavepoint() => _savepointMarks.Push(_buffer.Count);
+    public void PushSavepoint() {
+        _savepointMarks.Push(_buffer.Count);
+    }
 
     /// <summary>
     /// Truncates the buffer back to the most recent savepoint mark, dropping every event buffered after that
@@ -39,32 +43,22 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
     /// it may be rolled back to again or released later.
     /// </summary>
     public void RollbackToSavepoint() {
-        if (_savepointMarks.Count == 0) {
-            return;
-        }
+        if (_savepointMarks.Count == 0) return;
 
         var mark = _savepointMarks.Peek();
-        if (mark < _buffer.Count) {
-            _buffer.RemoveRange(mark, _buffer.Count - mark);
-        }
+        if (mark < _buffer.Count) _buffer.RemoveRange(mark, _buffer.Count - mark);
     }
 
     /// <summary>Pops the most recent savepoint mark without touching the buffer (SQL <c>RELEASE SAVEPOINT</c>).</summary>
     public void ReleaseSavepoint() {
-        if (_savepointMarks.Count > 0) {
-            _savepointMarks.Pop();
-        }
+        if (_savepointMarks.Count > 0) _savepointMarks.Pop();
     }
 
     public async ValueTask FlushAsync(CancellationToken ct = default) {
         _savepointMarks.Clear();
-        if (_buffer.Count == 0) {
-            return;
-        }
+        if (_buffer.Count == 0) return;
 
-        foreach (var envelope in _buffer) {
-            await pump.EnqueueAsync(envelope, ct).ConfigureAwait(false);
-        }
+        foreach (var envelope in _buffer) await pump.EnqueueAsync(envelope, ct).ConfigureAwait(false);
 
         _buffer.Clear();
     }
@@ -76,13 +70,9 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
     /// </summary>
     public void FlushSynchronously() {
         _savepointMarks.Clear();
-        if (_buffer.Count == 0) {
-            return;
-        }
+        if (_buffer.Count == 0) return;
 
-        foreach (var envelope in _buffer) {
-            pump.EnqueueSynchronously(envelope);
-        }
+        foreach (var envelope in _buffer) pump.EnqueueSynchronously(envelope);
 
         _buffer.Clear();
     }
@@ -100,9 +90,7 @@ internal sealed class EventDispatchScope(EventDispatchPump pump, ILogger<EventDi
     /// events — even when an earlier commit in the same scope did flush (events published after it still drop).
     /// </summary>
     public void Dispose() {
-        if (_buffer.Count == 0) {
-            return;
-        }
+        if (_buffer.Count == 0) return;
 
         var eventTypes = string.Join(", ", _buffer.Select(e => e.EventType.Name).Distinct(StringComparer.Ordinal));
         logger.LogWarning(

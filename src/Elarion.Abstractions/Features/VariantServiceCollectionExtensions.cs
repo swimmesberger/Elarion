@@ -51,9 +51,11 @@ public static class VariantServiceCollectionExtensions {
         string configurationKey,
         string? defaultKey = VariantServiceKeys.Default,
         ServiceLifetime lifetime = ServiceLifetime.Scoped) where TService : class {
-        services.TryAddSingleton(new ConfigurationVariantBinding<TService> { Key = configurationKey, DefaultKey = defaultKey });
+        services.TryAddSingleton(new ConfigurationVariantBinding<TService>
+            { Key = configurationKey, DefaultKey = defaultKey });
         services.TryAdd(new ServiceDescriptor(
-            typeof(IVariantServiceProvider<TService>), typeof(ConfigurationVariantServiceProvider<TService>), lifetime));
+            typeof(IVariantServiceProvider<TService>), typeof(ConfigurationVariantServiceProvider<TService>),
+            lifetime));
         // Transparent unkeyed registration: the configuration read is synchronous, so ordinary construction
         // resolves the active implementation directly (no warmed per-scope cache).
         services.TryAdd(new ServiceDescriptor(

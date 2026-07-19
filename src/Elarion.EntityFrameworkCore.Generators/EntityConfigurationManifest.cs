@@ -12,8 +12,7 @@ namespace Elarion.EntityFrameworkCore.Generators;
 /// reference, so an edit that does not change a reference re-reads nothing. The entity set is derived
 /// from the configurations — there is no separate entity entry.
 /// </summary>
-internal static class EntityConfigurationManifest
-{
+internal static class EntityConfigurationManifest {
     public const string ConfigKey = "Elarion.Manifest.EntityConfiguration.v1";
 
     /// <summary>
@@ -24,21 +23,16 @@ internal static class EntityConfigurationManifest
         string fullName,
         string ns,
         IReadOnlyList<string> scopes,
-        IReadOnlyList<(string Name, string FullName, string Namespace)> entities)
-    {
-        var fields = new string?[3 + scopes.Count + 1 + (entities.Count * 3)];
+        IReadOnlyList<(string Name, string FullName, string Namespace)> entities) {
+        var fields = new string?[3 + scopes.Count + 1 + entities.Count * 3];
         var index = 0;
         fields[index++] = fullName;
         fields[index++] = ns;
         fields[index++] = scopes.Count.ToString();
-        foreach (var scope in scopes)
-        {
-            fields[index++] = scope;
-        }
+        foreach (var scope in scopes) fields[index++] = scope;
 
         fields[index++] = entities.Count.ToString();
-        foreach (var entity in entities)
-        {
+        foreach (var entity in entities) {
             fields[index++] = entity.Name;
             fields[index++] = entity.FullName;
             fields[index++] = entity.Namespace;
@@ -57,35 +51,25 @@ internal static class EntityConfigurationManifest
         out string fullName,
         out string ns,
         out IReadOnlyList<string> scopes,
-        out IReadOnlyList<(string Name, string FullName, string Namespace)> entities)
-    {
+        out IReadOnlyList<(string Name, string FullName, string Namespace)> entities) {
         fullName = string.Empty;
         ns = string.Empty;
         scopes = [];
         entities = [];
 
-        if (!TryDecodeFields(value, out var fields) || fields.Count < 4)
-        {
-            return false;
-        }
+        if (!TryDecodeFields(value, out var fields) || fields.Count < 4) return false;
 
         if (fields[0] is not { } decodedFullName ||
             fields[1] is not { } decodedNamespace ||
             fields[2] is not { } scopeCountText ||
             !int.TryParse(scopeCountText, out var scopeCount) ||
             scopeCount < 0)
-        {
             return false;
-        }
 
         var index = 3;
         var decodedScopes = new List<string>(scopeCount);
-        for (var i = 0; i < scopeCount; i++)
-        {
-            if (index >= fields.Count || fields[index] is not { } scope)
-            {
-                return false;
-            }
+        for (var i = 0; i < scopeCount; i++) {
+            if (index >= fields.Count || fields[index] is not { } scope) return false;
 
             decodedScopes.Add(scope);
             index++;
@@ -95,21 +79,16 @@ internal static class EntityConfigurationManifest
             fields[index] is not { } entityCountText ||
             !int.TryParse(entityCountText, out var entityCount) ||
             entityCount < 0)
-        {
             return false;
-        }
 
         index++;
         var decodedEntities = new List<(string, string, string)>(entityCount);
-        for (var i = 0; i < entityCount; i++)
-        {
+        for (var i = 0; i < entityCount; i++) {
             if (index + 2 >= fields.Count ||
                 fields[index] is not { } name ||
                 fields[index + 1] is not { } entityFullName ||
                 fields[index + 2] is not { } entityNamespace)
-            {
                 return false;
-            }
 
             decodedEntities.Add((name, entityFullName, entityNamespace));
             index += 3;
@@ -123,16 +102,14 @@ internal static class EntityConfigurationManifest
     }
 
     /// <summary>Reads every <c>[assembly: AssemblyMetadata]</c> key/value pair from a reference, no symbols required.</summary>
-    public static List<(string Key, string Value)> ReadEntries(MetadataReference reference, CancellationToken ct) =>
-        AssemblyMetadataReader.ReadRawEntries(reference, ct);
+    public static List<(string Key, string Value)> ReadEntries(MetadataReference reference, CancellationToken ct) {
+        return AssemblyMetadataReader.ReadRawEntries(reference, ct);
+    }
 
-    public static string EncodeFields(params string?[] fields)
-    {
+    public static string EncodeFields(params string?[] fields) {
         var result = new System.Text.StringBuilder();
-        foreach (var field in fields)
-        {
-            if (field is null)
-            {
+        foreach (var field in fields) {
+            if (field is null) {
                 result.Append("-1:");
                 continue;
             }
@@ -145,44 +122,32 @@ internal static class EntityConfigurationManifest
         return result.ToString();
     }
 
-    public static bool TryDecodeFields(string value, out IReadOnlyList<string?> fields)
-    {
+    public static bool TryDecodeFields(string value, out IReadOnlyList<string?> fields) {
         var result = new List<string?>();
         var index = 0;
-        while (index < value.Length)
-        {
+        while (index < value.Length) {
             var lengthStart = index;
-            if (value[index] == '-')
-            {
-                index++;
-            }
+            if (value[index] == '-') index++;
 
-            while (index < value.Length && char.IsDigit(value[index]))
-            {
-                index++;
-            }
+            while (index < value.Length && char.IsDigit(value[index])) index++;
 
-            if (index == lengthStart || index >= value.Length || value[index] != ':')
-            {
+            if (index == lengthStart || index >= value.Length || value[index] != ':') {
                 fields = [];
                 return false;
             }
 
-            if (!int.TryParse(value.Substring(lengthStart, index - lengthStart), out var length))
-            {
+            if (!int.TryParse(value.Substring(lengthStart, index - lengthStart), out var length)) {
                 fields = [];
                 return false;
             }
 
             index++;
-            if (length == -1)
-            {
+            if (length == -1) {
                 result.Add(null);
                 continue;
             }
 
-            if (length < 0 || index + length > value.Length)
-            {
+            if (length < 0 || index + length > value.Length) {
                 fields = [];
                 return false;
             }

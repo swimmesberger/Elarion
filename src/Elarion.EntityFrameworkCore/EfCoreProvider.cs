@@ -9,8 +9,7 @@ namespace Elarion.EntityFrameworkCore;
 /// The numeric values are part of the contract read by the source generators and must not be
 /// renumbered. <see cref="Portable"/> is the default and emits provider-neutral code.
 /// </remarks>
-public enum EfCoreProvider
-{
+public enum EfCoreProvider {
     /// <summary>
     /// Provider-neutral output that translates on any EF Core provider. This is the default.
     /// </summary>
@@ -21,5 +20,5 @@ public enum EfCoreProvider
     /// optimizations such as row-value (<c>(a, b) &gt; (x, y)</c>) keyset seek predicates, which let
     /// a composite index satisfy the seek in a single range scan.
     /// </summary>
-    Npgsql = 1,
+    Npgsql = 1
 }

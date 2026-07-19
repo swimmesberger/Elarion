@@ -3,8 +3,7 @@ namespace Elarion.Abstractions;
 /// <summary>
 /// Declares the DI lifetime used for a <see cref="ServiceAttribute"/> registration.
 /// </summary>
-public enum ServiceScope
-{
+public enum ServiceScope {
     /// <summary>
     /// Creates one instance per request or manually created service scope.
     /// </summary>

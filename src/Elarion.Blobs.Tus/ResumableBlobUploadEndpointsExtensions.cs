@@ -41,9 +41,8 @@ public static class ResumableBlobUploadEndpointsExtensions {
         response.Headers[TusProtocol.Resumable] = TusProtocol.Version;
         response.Headers[TusProtocol.VersionHeader] = TusProtocol.Version;
         response.Headers[TusProtocol.Extension] = TusProtocol.Extensions;
-        if (options.MaxSize is long max) {
+        if (options.MaxSize is long max)
             response.Headers[TusProtocol.MaxSize] = max.ToString(CultureInfo.InvariantCulture);
-        }
 
         response.StatusCode = StatusCodes.Status204NoContent;
         return Task.CompletedTask;
@@ -89,15 +88,13 @@ public static class ResumableBlobUploadEndpointsExtensions {
                 ContentType = contentType,
                 Metadata = string.IsNullOrEmpty(rawMetadata) ? null : rawMetadata,
                 OwnerId = currentUser.UserId,
-                ExpiresAt = timeProvider.GetUtcNow() + options.UploadExpiry,
+                ExpiresAt = timeProvider.GetUtcNow() + options.UploadExpiry
             },
             cancellationToken);
 
         // A zero-length upload is complete on creation (tus needs no PATCH), so seal it now — completion
         // yields the blob reference the same way a final PATCH would.
-        if (length == 0) {
-            upload = await CompleteAsync(store, upload.Id, options, timeProvider, cancellationToken);
-        }
+        if (length == 0) upload = await CompleteAsync(store, upload.Id, options, timeProvider, cancellationToken);
 
         response.Headers.Location = BuildLocation(context.Request, options.RoutePrefix, upload.Id);
         response.Headers[TusProtocol.UploadOffset] = upload.Offset.ToString(CultureInfo.InvariantCulture);
@@ -126,7 +123,7 @@ public static class ResumableBlobUploadEndpointsExtensions {
         // Self-heal the crash window between the last append and completion: a session that has all its
         // bytes but no blob reference is completed (idempotently) right here, so the client's status probe
         // yields the reference instead of a forever-stuck "done but ref-less" upload.
-        if (upload is { Length: long total, IsComplete: false } && upload.Offset >= total) {
+        if (upload is { Length: long total, IsComplete: false } && upload.Offset >= total)
             try {
                 upload = await CompleteAsync(store, id, options, timeProvider, cancellationToken);
             }
@@ -138,17 +135,13 @@ public static class ResumableBlobUploadEndpointsExtensions {
                     return;
                 }
             }
-        }
 
         response.Headers.CacheControl = "no-store";
         response.Headers[TusProtocol.UploadOffset] = upload.Offset.ToString(CultureInfo.InvariantCulture);
-        if (upload.Length is long length) {
+        if (upload.Length is long length)
             response.Headers[TusProtocol.UploadLength] = length.ToString(CultureInfo.InvariantCulture);
-        }
 
-        if (upload.Metadata is not null) {
-            response.Headers[TusProtocol.UploadMetadata] = upload.Metadata;
-        }
+        if (upload.Metadata is not null) response.Headers[TusProtocol.UploadMetadata] = upload.Metadata;
 
         SetExpires(response, upload);
         SetBlobRef(response, upload);
@@ -203,9 +196,8 @@ public static class ResumableBlobUploadEndpointsExtensions {
 
             // tus 1.0 declares the length up front, so the append that reaches it completes the upload —
             // the explicit-completion analog of the IETF draft's Upload-Complete flag.
-            if (updated is { Length: long total, IsComplete: false } && updated.Offset >= total) {
+            if (updated is { Length: long total, IsComplete: false } && updated.Offset >= total)
                 updated = await CompleteAsync(store, id, options, timeProvider, cancellationToken);
-            }
         }
         catch (StagedUploadConflictException) {
             response.StatusCode = StatusCodes.Status409Conflict;
@@ -250,71 +242,67 @@ public static class ResumableBlobUploadEndpointsExtensions {
             id,
             new StagedUploadCompletion {
                 SessionExpiresAt = now + options.CompletedSessionRetention,
-                BlobExpiresAt = now + options.Ttl,
+                BlobExpiresAt = now + options.Ttl
             },
             cancellationToken);
     }
 
-    private static void SetResumable(HttpResponse response) =>
+    private static void SetResumable(HttpResponse response) {
         response.Headers[TusProtocol.Resumable] = TusProtocol.Version;
+    }
 
-    private static void SetExpires(HttpResponse response, StagedUpload upload) =>
+    private static void SetExpires(HttpResponse response, StagedUpload upload) {
         response.Headers[TusProtocol.UploadExpires] = upload.ExpiresAt.ToString("R", CultureInfo.InvariantCulture);
+    }
 
     private static void SetBlobRef(HttpResponse response, StagedUpload upload) {
-        if (upload.BlobRef is { } blobRef) {
-            response.Headers[TusProtocol.BlobRef] = blobRef.Value;
-        }
+        if (upload.BlobRef is { } blobRef) response.Headers[TusProtocol.BlobRef] = blobRef.Value;
     }
 
     // Owner-scoped operations require an authenticated caller whose id matches the upload's recorded owner.
     // A session with no recorded owner is denied to everyone (fail closed), matching the direct-upload
     // endpoint's stance, so a null/empty owner id can never be matched by an unauthenticated caller.
-    private static bool IsOwner(StagedUpload upload, ICurrentUser currentUser) =>
-        currentUser.IsAuthenticated
-        && upload.OwnerId is not null
-        && string.Equals(upload.OwnerId, currentUser.UserId, StringComparison.Ordinal);
+    private static bool IsOwner(StagedUpload upload, ICurrentUser currentUser) {
+        return currentUser.IsAuthenticated
+               && upload.OwnerId is not null
+               && string.Equals(upload.OwnerId, currentUser.UserId, StringComparison.Ordinal);
+    }
 
-    private static bool IsOffsetContentType(string? contentType) =>
-        contentType is not null
-        && contentType.StartsWith(TusProtocol.OffsetContentType, StringComparison.OrdinalIgnoreCase);
+    private static bool IsOffsetContentType(string? contentType) {
+        return contentType is not null
+               && contentType.StartsWith(TusProtocol.OffsetContentType, StringComparison.OrdinalIgnoreCase);
+    }
 
-    private static bool TryGetLong(string? value, out long result) =>
-        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
+    private static bool TryGetLong(string? value, out long result) {
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
+    }
 
     private static string? Pick(IReadOnlyDictionary<string, string> metadata, string primary, string fallback) {
-        if (metadata.TryGetValue(primary, out var value) && value.Length > 0) {
-            return value;
-        }
+        if (metadata.TryGetValue(primary, out var value) && value.Length > 0) return value;
 
         return metadata.TryGetValue(fallback, out var alternate) && alternate.Length > 0 ? alternate : null;
     }
 
     private static string SanitizeFileName(string? name) {
-        if (string.IsNullOrWhiteSpace(name)) {
-            return "upload";
-        }
+        if (string.IsNullOrWhiteSpace(name)) return "upload";
 
         var leaf = name.Replace('\\', '/');
         var slash = leaf.LastIndexOf('/');
-        if (slash >= 0) {
-            leaf = leaf[(slash + 1)..];
-        }
+        if (slash >= 0) leaf = leaf[(slash + 1)..];
 
         // Strip control characters and double quotes: a CR/LF or quote in the stored name would later be
         // rejected by the server when rendered into the download Content-Disposition header, leaving the
         // blob permanently undownloadable. (Mirrored in the direct upload transport's sanitizer.)
         var builder = new StringBuilder(leaf.Length);
-        foreach (var ch in leaf) {
-            if (!char.IsControl(ch) && ch != '"') {
+        foreach (var ch in leaf)
+            if (!char.IsControl(ch) && ch != '"')
                 builder.Append(ch);
-            }
-        }
 
         leaf = builder.ToString();
         return string.IsNullOrWhiteSpace(leaf) ? "upload" : leaf;
     }
 
-    private static string BuildLocation(HttpRequest request, string routePrefix, string id) =>
-        $"{request.Scheme}://{request.Host}{request.PathBase}{routePrefix}/{id}";
+    private static string BuildLocation(HttpRequest request, string routePrefix, string id) {
+        return $"{request.Scheme}://{request.Host}{request.PathBase}{routePrefix}/{id}";
+    }
 }

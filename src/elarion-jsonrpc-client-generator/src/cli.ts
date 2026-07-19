@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { mkdirSync, readFileSync, watchFile, writeFileSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
-import { generateRpcClientFiles, type RpcSchema } from './generate.js'
+import {mkdirSync, readFileSync, watchFile, writeFileSync} from 'node:fs'
+import {basename, resolve} from 'node:path'
+import {generateRpcClientFiles, type RpcSchema} from './generate.js'
 
 interface CliOptions {
   schemaPath: string
@@ -168,7 +168,7 @@ function generateOnce(options: CliOptions): boolean {
     frameworkAdapterFileName: options.frameworkAdapterFileName,
   })
 
-  mkdirSync(outDir, { recursive: true })
+  mkdirSync(outDir, {recursive: true})
   writeFileSync(resolve(outDir, generated.typesFileName), generated.typesSource, 'utf-8')
   writeFileSync(resolve(outDir, generated.schemasFileName), generated.schemasSource, 'utf-8')
   writeFileSync(resolve(outDir, generated.clientFileName), generated.clientSource, 'utf-8')
@@ -211,7 +211,7 @@ function main() {
 
   const schemaPath = resolve(process.cwd(), options.schemaPath)
   console.log(`[jsonrpc-client-generator] Watching ${schemaPath} for changes (Ctrl+C to stop)…`)
-  watchFile(schemaPath, { interval: WATCH_INTERVAL_MS }, (curr, prev) => {
+  watchFile(schemaPath, {interval: WATCH_INTERVAL_MS}, (curr, prev) => {
     // mtimeMs === 0 means the file does not currently exist (not yet written, or just deleted); wait for the
     // next write rather than regenerating from a stale/absent file.
     if (curr.mtimeMs === 0) {

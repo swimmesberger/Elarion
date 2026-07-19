@@ -24,6 +24,7 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
     private const string DescriptorFqn = "global::Elarion.Abstractions.Features.VariantDescriptor";
     private const string AxisFqn = "global::Elarion.Abstractions.Features.VariantAxis";
     private const string ListFqn = "global::System.Collections.Generic.IReadOnlyList<" + DescriptorFqn + ">";
+
     private const string DictionaryFqn =
         "global::System.Collections.Generic.IReadOnlyDictionary<string, " + ListFqn + ">";
 
@@ -31,7 +32,7 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
         "ELVAR010", "Variant registry accessor collision",
         "Variant selectors or values '{0}' and '{1}' map to the same ElarionVariants accessor '{2}'; the second "
         + "is omitted from the typed accessors (every entry remains in ElarionVariants.All)",
-        "Elarion.Abstractions.Features", DiagnosticSeverity.Warning, isEnabledByDefault: true);
+        "Elarion.Abstractions.Features", DiagnosticSeverity.Warning, true);
 
     private static readonly string[] ReservedRootNames = ["All", "ByKey", "ByModule", "Platform", "ElarionVariants"];
     private static readonly string[] ReservedAccessorMemberNames = ["Key", "Descriptors"];
@@ -47,7 +48,7 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
             .ForAttributeWithMetadataName(
                 VariantDiscovery.FeatureVariantAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, _) => VariantDiscovery.CreateVariants(ctx, isConfiguration: false))
+                static (ctx, _) => VariantDiscovery.CreateVariants(ctx, false))
             .Collect()
             .WithTrackingName(TrackingNames.Feature);
 
@@ -55,7 +56,7 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
             .ForAttributeWithMetadataName(
                 VariantDiscovery.ConfigurationVariantAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, _) => VariantDiscovery.CreateVariants(ctx, isConfiguration: true))
+                static (ctx, _) => VariantDiscovery.CreateVariants(ctx, true))
             .Collect()
             .WithTrackingName(TrackingNames.Configuration);
 
@@ -77,9 +78,7 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
 
         context.RegisterSourceOutput(combined, static (spc, source) => {
             var (((((featureGroups, configurationGroups), moduleList), hasTrigger), rootNamespace), manifests) = source;
-            if (!hasTrigger) {
-                return;
-            }
+            if (!hasTrigger) return;
 
             Emit(spc, featureGroups.AddRange(configurationGroups), moduleList, rootNamespace, manifests);
         });
@@ -105,34 +104,24 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
 
         // Modules to resolve against: this assembly's plus every referenced assembly's (from the manifest).
         var moduleScopes = new List<(string Name, string Namespace)>();
-        foreach (var module in modules) {
-            moduleScopes.Add((module.Name, module.Namespace));
-        }
+        foreach (var module in modules) moduleScopes.Add((module.Name, module.Namespace));
 
-        foreach (var module in manifest.Modules) {
-            moduleScopes.Add((module.ModuleName, module.Namespace));
-        }
+        foreach (var module in manifest.Modules) moduleScopes.Add((module.ModuleName, module.Namespace));
 
         // Current-compilation entries may reference even an internal contract with typeof (same assembly);
         // manifest entries only when the contract is public where it was declared.
         var entries = new List<(ElarionManifest.Variant Variant, bool CanReferenceContract)>();
         var seenEntries = new HashSet<ElarionManifest.Variant>();
         foreach (var group in currentGroups)
-        foreach (var variant in group) {
-            if (seenEntries.Add(variant)) {
+        foreach (var variant in group)
+            if (seenEntries.Add(variant))
                 entries.Add((variant, true));
-            }
-        }
 
-        foreach (var variant in manifest.Variants) {
-            if (seenEntries.Add(variant)) {
+        foreach (var variant in manifest.Variants)
+            if (seenEntries.Add(variant))
                 entries.Add((variant, variant.ContractIsPublic));
-            }
-        }
 
-        if (entries.Count == 0) {
-            return;
-        }
+        if (entries.Count == 0) return;
 
         var descriptors = entries
             .GroupBy(static e => (e.Variant.IsConfiguration, e.Variant.SelectorKey, e.Variant.ContractFqn))
@@ -154,14 +143,14 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
                     .First();
 
                 return new DescriptorModel(
-                    IsConfiguration: group.Key.IsConfiguration,
-                    Key: group.Key.SelectorKey,
-                    ContractFqn: group.Key.ContractFqn,
-                    CanReferenceContract: group.Any(static e => e.CanReferenceContract),
-                    Values: values,
-                    DefaultValue: defaultValue,
-                    HasDefault: group.Any(static e => e.Variant.IsDefault),
-                    Module: FindBestModule(declarationNamespace, moduleScopes));
+                    group.Key.IsConfiguration,
+                    group.Key.SelectorKey,
+                    group.Key.ContractFqn,
+                    group.Any(static e => e.CanReferenceContract),
+                    values,
+                    defaultValue,
+                    group.Any(static e => e.Variant.IsDefault),
+                    FindBestModule(declarationNamespace, moduleScopes));
             })
             .OrderBy(static d => d.Key, StringComparer.Ordinal)
             .ThenBy(static d => d.ContractFqn, StringComparer.Ordinal)
@@ -198,7 +187,8 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
             sb.AppendLine($"        ContractName = {Literal(contractName)},");
             sb.AppendLine($"        Contract = {contractExpr},");
             sb.AppendLine($"        Values = {StringArrayLiteral(descriptor.Values)},");
-            sb.AppendLine($"        DefaultValue = {(descriptor.DefaultValue is null ? "null" : Literal(descriptor.DefaultValue))},");
+            sb.AppendLine(
+                $"        DefaultValue = {(descriptor.DefaultValue is null ? "null" : Literal(descriptor.DefaultValue))},");
             sb.AppendLine($"        HasDefault = {(descriptor.HasDefault ? "true" : "false")},");
             sb.AppendLine($"        Module = {(descriptor.Module is null ? "null" : Literal(descriptor.Module))},");
             sb.AppendLine("    };");
@@ -210,9 +200,7 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
         sb.AppendLine("    /// <summary>Every switch descriptor this assembly declares or references.</summary>");
         sb.AppendLine($"    public static {ListFqn} All {{ get; }} = new {DescriptorFqn}[]");
         sb.AppendLine("    {");
-        for (var i = 0; i < descriptors.Count; i++) {
-            sb.AppendLine($"        D{i},");
-        }
+        for (var i = 0; i < descriptors.Count; i++) sb.AppendLine($"        D{i},");
 
         sb.AppendLine("    };");
         sb.AppendLine();
@@ -228,9 +216,7 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
     private static void EmitAccessors(
         SourceProductionContext spc, StringBuilder sb, IReadOnlyList<DescriptorModel> descriptors) {
         var claimed = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var reserved in ReservedRootNames) {
-            claimed[reserved] = "(reserved)";
-        }
+        foreach (var reserved in ReservedRootNames) claimed[reserved] = "(reserved)";
 
         var accessorGroups = descriptors
             .Select(static (descriptor, index) => (Descriptor: descriptor, Index: index))
@@ -240,9 +226,7 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
 
         foreach (var group in accessorGroups) {
             var accessorName = Pascal(group.Key.Key);
-            if (accessorName.Length == 0) {
-                continue;
-            }
+            if (accessorName.Length == 0) continue;
 
             if (claimed.TryGetValue(accessorName, out var existing)) {
                 spc.ReportDiagnostic(Diagnostic.Create(
@@ -259,22 +243,19 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
                 .OrderBy(static v => v, StringComparer.Ordinal)
                 .ToList();
 
-            sb.AppendLine($"    /// <summary>The '{group.Key.Key}' switch ({(group.Key.IsConfiguration ? "configuration-selected" : "feature-selected")}).</summary>");
+            sb.AppendLine(
+                $"    /// <summary>The '{group.Key.Key}' switch ({(group.Key.IsConfiguration ? "configuration-selected" : "feature-selected")}).</summary>");
             sb.AppendLine($"    public static class {accessorName}");
             sb.AppendLine("    {");
             sb.AppendLine($"        /// <summary>The selector key.</summary>");
             sb.AppendLine($"        public const string Key = {Literal(group.Key.Key)};");
 
             var memberClaimed = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var reserved in ReservedAccessorMemberNames) {
-                memberClaimed[reserved] = "(reserved)";
-            }
+            foreach (var reserved in ReservedAccessorMemberNames) memberClaimed[reserved] = "(reserved)";
 
             foreach (var value in values) {
                 var memberName = Pascal(value);
-                if (memberName.Length == 0) {
-                    continue;
-                }
+                if (memberName.Length == 0) continue;
 
                 if (memberClaimed.TryGetValue(memberName, out var existingValue)) {
                     spc.ReportDiagnostic(Diagnostic.Create(
@@ -287,7 +268,8 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
             }
 
             sb.AppendLine();
-            sb.AppendLine("        /// <summary>The switch's descriptors (several contracts may share one key).</summary>");
+            sb.AppendLine(
+                "        /// <summary>The switch's descriptors (several contracts may share one key).</summary>");
             sb.Append($"        public static {ListFqn} Descriptors {{ get; }} = new {DescriptorFqn}[] {{ ");
             sb.Append(string.Join(", ", members.Select(static pair => $"D{pair.Index}")));
             sb.AppendLine(" };");
@@ -297,17 +279,21 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
     }
 
     private static void EmitByKey(StringBuilder sb, IReadOnlyList<DescriptorModel> descriptors) {
-        sb.AppendLine("    /// <summary>Descriptors by selector key (case-insensitive, matching configuration keys).</summary>");
+        sb.AppendLine(
+            "    /// <summary>Descriptors by selector key (case-insensitive, matching configuration keys).</summary>");
         sb.AppendLine($"    public static {DictionaryFqn} ByKey {{ get; }} =");
-        sb.AppendLine($"        new global::System.Collections.Generic.Dictionary<string, {ListFqn}>(global::System.StringComparer.OrdinalIgnoreCase)");
+        sb.AppendLine(
+            $"        new global::System.Collections.Generic.Dictionary<string, {ListFqn}>(global::System.StringComparer.OrdinalIgnoreCase)");
         sb.AppendLine("        {");
         var groups = descriptors
             .Select(static (descriptor, index) => (Descriptor: descriptor, Index: index))
             .GroupBy(static pair => pair.Descriptor.Key, StringComparer.OrdinalIgnoreCase)
             .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase);
         foreach (var group in groups) {
-            var key = group.Select(static pair => pair.Descriptor.Key).OrderBy(static k => k, StringComparer.Ordinal).First();
-            var refs = string.Join(", ", group.OrderBy(static pair => pair.Index).Select(static pair => $"D{pair.Index}"));
+            var key = group.Select(static pair => pair.Descriptor.Key).OrderBy(static k => k, StringComparer.Ordinal)
+                .First();
+            var refs = string.Join(", ",
+                group.OrderBy(static pair => pair.Index).Select(static pair => $"D{pair.Index}"));
             sb.AppendLine($"            [{Literal(key)}] = new {DescriptorFqn}[] {{ {refs} }},");
         }
 
@@ -316,9 +302,11 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
     }
 
     private static void EmitByModule(StringBuilder sb, IReadOnlyList<DescriptorModel> descriptors) {
-        sb.AppendLine("    /// <summary>Descriptors grouped by owning module (platform variants are under <see cref=\"Platform\"/>).</summary>");
+        sb.AppendLine(
+            "    /// <summary>Descriptors grouped by owning module (platform variants are under <see cref=\"Platform\"/>).</summary>");
         sb.AppendLine($"    public static {DictionaryFqn} ByModule {{ get; }} =");
-        sb.AppendLine($"        new global::System.Collections.Generic.Dictionary<string, {ListFqn}>(global::System.StringComparer.Ordinal)");
+        sb.AppendLine(
+            $"        new global::System.Collections.Generic.Dictionary<string, {ListFqn}>(global::System.StringComparer.Ordinal)");
         sb.AppendLine("        {");
         var groups = descriptors
             .Select(static (descriptor, index) => (Descriptor: descriptor, Index: index))
@@ -326,7 +314,8 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
             .GroupBy(static pair => pair.Descriptor.Module!, StringComparer.Ordinal)
             .OrderBy(static group => group.Key, StringComparer.Ordinal);
         foreach (var group in groups) {
-            var refs = string.Join(", ", group.OrderBy(static pair => pair.Index).Select(static pair => $"D{pair.Index}"));
+            var refs = string.Join(", ",
+                group.OrderBy(static pair => pair.Index).Select(static pair => $"D{pair.Index}"));
             sb.AppendLine($"            [{Literal(group.Key)}] = new {DescriptorFqn}[] {{ {refs} }},");
         }
 
@@ -335,7 +324,8 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
     }
 
     private static void EmitPlatform(StringBuilder sb, IReadOnlyList<DescriptorModel> descriptors) {
-        sb.AppendLine("    /// <summary>Descriptors of platform variants — implementations living outside every module.</summary>");
+        sb.AppendLine(
+            "    /// <summary>Descriptors of platform variants — implementations living outside every module.</summary>");
         sb.Append($"    public static {ListFqn} Platform {{ get; }} = new {DescriptorFqn}[] {{ ");
         var refs = descriptors
             .Select(static (descriptor, index) => (Descriptor: descriptor, Index: index))
@@ -350,9 +340,8 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
         (string Name, string Namespace)? best = null;
         foreach (var module in moduleScopes) {
             if (!ModuleScanner.IsInScope(ns, module.Namespace) ||
-                (best is not null && module.Namespace.Length <= best.Value.Namespace.Length)) {
+                (best is not null && module.Namespace.Length <= best.Value.Namespace.Length))
                 continue;
-            }
 
             best = module;
         }
@@ -363,29 +352,27 @@ public sealed class VariantCatalogGenerator : IIncrementalGenerator {
     private static string Pascal(string segment) {
         var sb = new StringBuilder(segment.Length);
         var upperNext = true;
-        foreach (var ch in segment) {
+        foreach (var ch in segment)
             if (char.IsLetterOrDigit(ch)) {
                 sb.Append(upperNext ? char.ToUpperInvariant(ch) : ch);
                 upperNext = false;
-            } else {
+            }
+            else {
                 upperNext = true;
             }
-        }
 
-        if (sb.Length > 0 && char.IsDigit(sb[0])) {
-            sb.Insert(0, '_');
-        }
+        if (sb.Length > 0 && char.IsDigit(sb[0])) sb.Insert(0, '_');
 
         return sb.ToString();
     }
 
     private static string StringArrayLiteral(IReadOnlyList<string> values) {
-        if (values.Count == 0) {
-            return "global::System.Array.Empty<string>()";
-        }
+        if (values.Count == 0) return "global::System.Array.Empty<string>()";
 
         return "new string[] { " + string.Join(", ", values.Select(Literal)) + " }";
     }
 
-    private static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);
+    private static string Literal(string value) {
+        return SymbolDisplay.FormatLiteral(value, true);
+    }
 }

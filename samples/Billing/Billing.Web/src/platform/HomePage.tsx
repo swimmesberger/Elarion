@@ -1,14 +1,14 @@
 // The landing page makes the capability snapshot (ADR-0030) visible: which modules this deployment
 // enables and what the current user may do — the same facts that gate every sidebar item, row action, and
 // route in this app.
-import { Modules } from "@/generated/session-client"
-import { rootRoute, type RouterContext } from "@/platform/router"
+import {Modules} from "@/generated/session-client"
+import {rootRoute, type RouterContext} from "@/platform/router"
 
 export function HomePage() {
   // The glob-composed route tree erases per-route types from the global Register (the documented
   // auto-discovery tradeoff), so the context is annotated with the root context type explicitly.
-  const { caps }: RouterContext = rootRoute.useRouteContext()
-  const modules = Object.values(Modules).map((name) => ({ name, enabled: caps.isModuleEnabled(name) }))
+  const {caps}: RouterContext = rootRoute.useRouteContext()
+  const modules = Object.values(Modules).map((name) => ({name, enabled: caps.isModuleEnabled(name)}))
 
   return (
     <section className="max-w-3xl">

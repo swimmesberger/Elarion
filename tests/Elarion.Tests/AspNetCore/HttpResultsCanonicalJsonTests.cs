@@ -27,8 +27,9 @@ public sealed class HttpResultsCanonicalJsonTests {
     private sealed record Widget(string WidgetName);
 
     private sealed class WidgetHandler : IHandler<WidgetQuery, Result<Widget>> {
-        public ValueTask<Result<Widget>> HandleAsync(WidgetQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<Widget>>(new Widget("gadget"));
+        public ValueTask<Result<Widget>> HandleAsync(WidgetQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<Widget>>(new Widget("gadget"));
+        }
     }
 
     private sealed record WidgetQuery {
@@ -36,7 +37,9 @@ public sealed class HttpResultsCanonicalJsonTests {
     }
 
     private sealed class UpperCaseNamingPolicy : JsonNamingPolicy {
-        public override string ConvertName(string name) => name.ToUpperInvariant();
+        public override string ConvertName(string name) {
+            return name.ToUpperInvariant();
+        }
     }
 
     [Fact]
@@ -75,7 +78,8 @@ public sealed class HttpResultsCanonicalJsonTests {
             var body = await response.Content.ReadAsStringAsync(ct);
             body.Should().Contain("WIDGETNAME");
             body.Should().NotContain("widgetName");
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }

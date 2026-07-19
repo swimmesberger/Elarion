@@ -445,19 +445,22 @@ are commands* — those go through the dispatch rail instead:
 
 ```csharp
 // Inside a codec, for command-shaped messages: ConnectionHandlerInvoker rides the same per-call scope
-// rail JSON-RPC and MCP use. Authorization, validation, [Idempotent], transaction, and audit all run
-// per message, evaluated against the connection's captured identity snapshot (seeded as ICurrentUser
-// by the standard initializer) — a promotion racing this dispatch affects the next message, never the
-// scope underneath this one, and adapter metadata can never overwrite the framework identity entries.
-var result = await ConnectionHandlerInvoker.InvokeAsync<StartCommand, StartAck>(
-    services, connection, decoded, ct: ct);
+// rail JSON-RPC and MCP use. Bind it once per connection; every call then runs authorization,
+// validation, [Idempotent], transaction, and audit per message, evaluated against the connection's
+// captured identity snapshot (seeded as ICurrentUser by the standard initializer) — a promotion racing
+// a dispatch affects the next message, never the scope underneath the current one, and adapter
+// metadata can never overwrite the framework identity entries.
+var invoker = new ConnectionHandlerInvoker(services, connection);
+
+// A request with a self-typed marker (StartCommand : ICommand<StartCommand, StartAck>) infers both
+// generic arguments; marker-free requests use the explicit InvokeAsync<StartCommand, StartAck> form.
+var result = await invoker.InvokeAsync(decoded, ct);
 // encode the result back over the sink — your framing; a failed Result stays a value
 
 // Decoded-by-name traffic goes through the filtered named rail instead: only routes exposed with
 // HandlerTransports.Connection are reachable, and unknown/other-transport names return the same
 // generic NotFound so exposure is never leaked.
-var named = await ConnectionHandlerInvoker.InvokeNamedAsync(
-    services, connection, dispatcher, name, decodedRequest, ct: ct);
+var named = await invoker.InvokeNamedAsync(dispatcher, name, decodedRequest, ct);
 ```
 
 **User → device.** A UI action arrives as a normal `[Handler]` (over HTTP/JSON-RPC — `[RequirePermission]`,

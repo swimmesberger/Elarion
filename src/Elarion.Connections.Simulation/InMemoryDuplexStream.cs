@@ -48,13 +48,9 @@ public sealed class InMemoryDuplexStream : Stream {
     /// <inheritdoc />
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) {
         if (_current is null) {
-            if (!await _incoming.Reader.WaitToReadAsync(ct)) {
-                return 0;
-            }
+            if (!await _incoming.Reader.WaitToReadAsync(ct)) return 0;
 
-            if (!_incoming.Reader.TryRead(out _current)) {
-                return await ReadAsync(buffer, ct);
-            }
+            if (!_incoming.Reader.TryRead(out _current)) return await ReadAsync(buffer, ct);
 
             _currentOffset = 0;
         }
@@ -63,9 +59,7 @@ public sealed class InMemoryDuplexStream : Stream {
         var copied = Math.Min(available, buffer.Length);
         _current.AsMemory(_currentOffset, copied).CopyTo(buffer);
         _currentOffset += copied;
-        if (_currentOffset == _current.Length) {
-            _current = null;
-        }
+        if (_currentOffset == _current.Length) _current = null;
 
         return copied;
     }
@@ -73,35 +67,38 @@ public sealed class InMemoryDuplexStream : Stream {
     /// <inheritdoc />
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) {
         // An empty chunk would read as end-of-stream on the peer; an empty write is a no-op instead.
-        if (buffer.IsEmpty) {
-            return ValueTask.CompletedTask;
-        }
+        if (buffer.IsEmpty) return ValueTask.CompletedTask;
 
         // Copy: senders reuse their buffers (the adapter's reused send buffer included).
-        if (!_outgoing.Writer.TryWrite(buffer.ToArray())) {
+        if (!_outgoing.Writer.TryWrite(buffer.ToArray()))
             throw new IOException("The in-memory duplex stream is closed.");
-        }
 
         return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc />
-    public override int Read(byte[] buffer, int offset, int count) =>
-        ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+    public override int Read(byte[] buffer, int offset, int count) {
+        return ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+    }
 
     /// <inheritdoc />
-    public override void Write(byte[] buffer, int offset, int count) =>
+    public override void Write(byte[] buffer, int offset, int count) {
         WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+    }
 
     /// <inheritdoc />
     public override void Flush() {
     }
 
     /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) {
+        throw new NotSupportedException();
+    }
 
     /// <inheritdoc />
-    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void SetLength(long value) {
+        throw new NotSupportedException();
+    }
 
     /// <inheritdoc />
     protected override void Dispose(bool disposing) {

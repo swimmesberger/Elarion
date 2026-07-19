@@ -22,19 +22,19 @@ public sealed class AuthorizationPolicyGeneratorTests {
     [Fact]
     public void AutoRegistersPolicyPerModuleAndComposes() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static partial class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static partial class AppModule { }
 
-                [AuthorizationPolicy("AtLeast21")]
-                public sealed class AtLeast21Policy : IAuthorizationPolicy {
-                    public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) =>
-                        ValueTask.FromResult(true);
-                }
-            }
-            """;
+                                  [AuthorizationPolicy("AtLeast21")]
+                                  public sealed class AtLeast21Policy : IAuthorizationPolicy {
+                                      public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) =>
+                                          ValueTask.FromResult(true);
+                                  }
+                              }
+                              """;
 
         var result = Generate(source);
         var extensions = GetGenerated(result, "AppAuthorizationPolicyExtensions.g.cs");
@@ -54,16 +54,16 @@ public sealed class AuthorizationPolicyGeneratorTests {
     [Fact]
     public void ReportsElpol001WhenNotAnAuthorizationPolicy() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static partial class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static partial class AppModule { }
 
-                [AuthorizationPolicy("Broken")]
-                public sealed class NotAPolicy { }
-            }
-            """;
+                                  [AuthorizationPolicy("Broken")]
+                                  public sealed class NotAPolicy { }
+                              }
+                              """;
 
         var diagnostics = RunForDiagnostics(source);
 
@@ -73,21 +73,21 @@ public sealed class AuthorizationPolicyGeneratorTests {
     [Fact]
     public void ReportsElpol002WhenPolicyNotInAnyModule() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static partial class AppModule { }
-            }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static partial class AppModule { }
+                              }
 
-            namespace Sample.Outside {
-                [AuthorizationPolicy("Orphan")]
-                public sealed class OrphanPolicy : IAuthorizationPolicy {
-                    public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) =>
-                        ValueTask.FromResult(true);
-                }
-            }
-            """;
+                              namespace Sample.Outside {
+                                  [AuthorizationPolicy("Orphan")]
+                                  public sealed class OrphanPolicy : IAuthorizationPolicy {
+                                      public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) =>
+                                          ValueTask.FromResult(true);
+                                  }
+                              }
+                              """;
 
         var diagnostics = RunForDiagnostics(source);
 
@@ -97,22 +97,23 @@ public sealed class AuthorizationPolicyGeneratorTests {
     [Fact]
     public void IrrelevantEditReusesPolicies() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static partial class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static partial class AppModule { }
 
-                [AuthorizationPolicy("AtLeast21")]
-                public sealed class AtLeast21Policy : IAuthorizationPolicy {
-                    public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) =>
-                        ValueTask.FromResult(true);
-                }
-            }
-            """;
+                                  [AuthorizationPolicy("AtLeast21")]
+                                  public sealed class AtLeast21Policy : IAuthorizationPolicy {
+                                      public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) =>
+                                          ValueTask.FromResult(true);
+                                  }
+                              }
+                              """;
 
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
-            new AuthorizationPolicyRegistrationGenerator(), source, "AuthorizationPolicies", "AuthorizationPoliciesCombined");
+            new AuthorizationPolicyRegistrationGenerator(), source, "AuthorizationPolicies",
+            "AuthorizationPoliciesCombined");
     }
 
     private static GeneratorDriverRunResult Generate(string source) {
@@ -127,10 +128,9 @@ public sealed class AuthorizationPolicyGeneratorTests {
         // The ConfigureDefaultServices skeleton (ModuleDefaultServicesGenerator) declares the partial hooks this
         // generator's filler implements, so both run together.
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            new[]
-            {
+            new[] {
                 new AuthorizationPolicyRegistrationGenerator().AsSourceGenerator(),
-                new ModuleDefaultServicesGenerator().AsSourceGenerator(),
+                new ModuleDefaultServicesGenerator().AsSourceGenerator()
             },
             parseOptions: parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, ct);
@@ -146,7 +146,10 @@ public sealed class AuthorizationPolicyGeneratorTests {
         var ct = TestContext.Current.CancellationToken;
         var compilation = CSharpCompilation.Create(
             "AuthorizationPolicyGeneratorDiagnostics",
-            [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: ct)],
+            [
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: ct)
+            ],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
@@ -154,11 +157,12 @@ public sealed class AuthorizationPolicyGeneratorTests {
         return driver.RunGenerators(compilation, ct).GetRunResult().Diagnostics;
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");

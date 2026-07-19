@@ -10,27 +10,37 @@ namespace Elarion.Tests.Connections;
 
 public sealed class ConnectionHandlerInvokerTests {
     private sealed record Request(string Value);
+
     private sealed record Response(
         string Value,
         ClaimsPrincipal Principal,
         ClientConnection Connection,
         CustomMetadata? Metadata);
+
     private sealed record StreamRequest;
+
     private sealed record CustomMetadata(string Value);
+
     private sealed record WrongRequest;
+
+    private sealed record InferredRequest(string Value) : IQuery<InferredRequest, InferredResponse>;
+
+    private sealed record InferredResponse(string Value, CustomMetadata? Metadata);
+
+    private sealed record InferredStreamRequest : IStreamRequest<InferredStreamRequest, int>;
 
     [Fact]
     public async Task InvokeAsync_UsesDecoratedHandlerAndSeedsExactConnectionContext() {
         var principal = Principal("old-user");
-        var snapshot = Connection("old", principal, revision: 0);
+        var snapshot = Connection("old", principal, 0);
         var sink = new CountingSink(snapshot);
         var calls = new CallLog();
         using var provider = CreateUnaryProvider(calls);
         var metadata = new CustomMetadata("adapter-value");
 
-        var result = await ConnectionHandlerInvoker.InvokeAsync<Request, Response>(
-            provider,
-            sink,
+        var invoker = new ConnectionHandlerInvoker(provider, sink);
+
+        var result = await invoker.InvokeAsync<Request, Response>(
             new Request("hello"),
             context => context.Set(metadata),
             TestContext.Current.CancellationToken);
@@ -47,20 +57,19 @@ public sealed class ConnectionHandlerInvokerTests {
     [Fact]
     public async Task InvokeAsync_EnrichmentCannotOverrideFrameworkIdentity() {
         var principal = Principal("framework-user");
-        var snapshot = Connection("framework", principal, revision: 3);
+        var snapshot = Connection("framework", principal, 3);
         var spoofedPrincipal = Principal("spoofed-user");
-        var spoofedConnection = Connection("spoofed", spoofedPrincipal, revision: 99);
+        var spoofedConnection = Connection("spoofed", spoofedPrincipal, 99);
         using var provider = CreateUnaryProvider(new CallLog());
 
-        var result = await ConnectionHandlerInvoker.InvokeAsync<Request, Response>(
-            provider,
-            new CountingSink(snapshot),
-            new Request("protected"),
-            context => {
-                context.Set<ClaimsPrincipal>(spoofedPrincipal);
-                context.Set<ClientConnection>(spoofedConnection);
-            },
-            TestContext.Current.CancellationToken);
+        var result = await new ConnectionHandlerInvoker(provider, new CountingSink(snapshot))
+            .InvokeAsync<Request, Response>(
+                new Request("protected"),
+                context => {
+                    context.Set<ClaimsPrincipal>(spoofedPrincipal);
+                    context.Set<ClientConnection>(spoofedConnection);
+                },
+                TestContext.Current.CancellationToken);
 
         result.Value!.Principal.Should().BeSameAs(principal);
         result.Value.Connection.Should().BeSameAs(snapshot);
@@ -68,14 +77,12 @@ public sealed class ConnectionHandlerInvokerTests {
 
     [Fact]
     public async Task InvokeAsync_CapturesConnectionOnceAndKeepsOldSnapshotDuringPromotionRace() {
-        var oldSnapshot = Connection("old", Principal("old-user"), revision: 0);
-        var newSnapshot = Connection("new", Principal("new-user"), revision: 1);
+        var oldSnapshot = Connection("old", Principal("old-user"), 0);
+        var newSnapshot = Connection("new", Principal("new-user"), 1);
         var sink = new PromotingGetterSink(oldSnapshot, newSnapshot);
         using var provider = CreateUnaryProvider(new CallLog());
 
-        var result = await ConnectionHandlerInvoker.InvokeAsync<Request, Response>(
-            provider,
-            sink,
+        var result = await new ConnectionHandlerInvoker(provider, sink).InvokeAsync<Request, Response>(
             new Request("race"),
             context => sink.PromotionObservedDuringEnrichment = sink.ReadCount == 1,
             TestContext.Current.CancellationToken);
@@ -88,16 +95,18 @@ public sealed class ConnectionHandlerInvokerTests {
 
     [Fact]
     public async Task InvokeAsync_NextInvocationObservesPromotedSnapshot() {
-        var oldSnapshot = Connection("old", Principal("old-user"), revision: 0);
-        var newSnapshot = Connection("new", Principal("new-user"), revision: 1);
+        var oldSnapshot = Connection("old", Principal("old-user"), 0);
+        var newSnapshot = Connection("new", Principal("new-user"), 1);
         var sink = new MutableSink(oldSnapshot);
         using var provider = CreateUnaryProvider(new CallLog());
 
-        var first = await ConnectionHandlerInvoker.InvokeAsync<Request, Response>(
-            provider, sink, new Request("first"), ct: TestContext.Current.CancellationToken);
+        var invoker = new ConnectionHandlerInvoker(provider, sink);
+
+        var first = await invoker.InvokeAsync<Request, Response>(
+            new Request("first"), TestContext.Current.CancellationToken);
         sink.Current = newSnapshot;
-        var second = await ConnectionHandlerInvoker.InvokeAsync<Request, Response>(
-            provider, sink, new Request("second"), ct: TestContext.Current.CancellationToken);
+        var second = await invoker.InvokeAsync<Request, Response>(
+            new Request("second"), TestContext.Current.CancellationToken);
 
         first.Value!.Connection.Should().BeSameAs(oldSnapshot);
         second.Value!.Connection.Should().BeSameAs(newSnapshot);
@@ -112,14 +121,53 @@ public sealed class ConnectionHandlerInvokerTests {
             .AddScoped<IHandler<Request, Result<Response>>>(_ => new FailingHandler(expected))
             .BuildServiceProvider();
 
-        var result = await ConnectionHandlerInvoker.InvokeAsync<Request, Response>(
-            provider,
-            new CountingSink(Connection("failure", Principal("user"))),
-            new Request("fail"),
-            ct: TestContext.Current.CancellationToken);
+        var result =
+            await new ConnectionHandlerInvoker(provider, new CountingSink(Connection("failure", Principal("user"))))
+                .InvokeAsync<Request, Response>(new Request("fail"), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeFalse();
         result.Error.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_InfersBothTypeArgumentsFromSelfTypedMarker() {
+        using var provider = new ServiceCollection()
+            .AddScoped<ScopeValues>()
+            .AddSingleton<IDispatchScopeInitializer, ScopeValuesInitializer>()
+            .AddScoped<IHandler<InferredRequest, Result<InferredResponse>>, InferredHandler>()
+            .BuildServiceProvider();
+        var invoker =
+            new ConnectionHandlerInvoker(provider, new CountingSink(Connection("inferred", Principal("user"))));
+
+        var result = await invoker.InvokeAsync(
+            new InferredRequest("inferred"), TestContext.Current.CancellationToken);
+        var enriched = await invoker.InvokeAsync(
+            new InferredRequest("enriched"),
+            context => context.Set(new CustomMetadata("adapter")),
+            TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value!.Value.Should().Be("inferred");
+        result.Value.Metadata.Should().BeNull();
+        enriched.Value!.Metadata!.Value.Should().Be("adapter");
+    }
+
+    [Fact]
+    public async Task InvokeStreamAsync_InfersItemTypeFromSelfTypedStreamMarker() {
+        using var provider = new ServiceCollection()
+            .AddScoped<IStreamHandler<InferredStreamRequest, int>, InferredStreamHandler>()
+            .BuildServiceProvider();
+        var invoker =
+            new ConnectionHandlerInvoker(provider, new CountingSink(Connection("inferred", Principal("user"))));
+
+        var start = await invoker.InvokeStreamAsync(
+            new InferredStreamRequest(), TestContext.Current.CancellationToken);
+
+        start.IsSuccess.Should().BeTrue();
+        var values = new List<int>();
+        await foreach (var value in start.Value!)
+            values.Add(value);
+        values.Should().Equal(1, 2);
     }
 
     [Fact]
@@ -141,7 +189,8 @@ public sealed class ConnectionHandlerInvokerTests {
                 (request, _, _) => {
                     jsonRpcCalls++;
                     return ValueTask.FromResult<Result<Response>>(
-                        new Response(request.Value, new ClaimsPrincipal(), Connection("unused", new ClaimsPrincipal()), null));
+                        new Response(request.Value, new ClaimsPrincipal(), Connection("unused", new ClaimsPrincipal()),
+                            null));
                 },
                 HandlerTransports.JsonRpc)
             .Freeze();
@@ -152,20 +201,20 @@ public sealed class ConnectionHandlerInvokerTests {
             .AddSingleton<IDispatchScopeInitializer, ScopeValuesInitializer>()
             .BuildServiceProvider();
 
-        var success = await ConnectionHandlerInvoker.InvokeNamedAsync(
-            provider,
-            sink,
+        var invoker = new ConnectionHandlerInvoker(provider, sink);
+
+        var success = await invoker.InvokeNamedAsync(
             dispatcher,
             "connection.call",
             new Request("ok"),
             context => context.Set(new CustomMetadata("named")),
             TestContext.Current.CancellationToken);
-        var hidden = await ConnectionHandlerInvoker.InvokeNamedAsync(
-            provider, sink, dispatcher, "jsonrpc.only", new Request("hidden"), ct: TestContext.Current.CancellationToken);
-        var unknown = await ConnectionHandlerInvoker.InvokeNamedAsync(
-            provider, sink, dispatcher, "unknown", new Request("unknown"), ct: TestContext.Current.CancellationToken);
-        var wrongType = async () => await ConnectionHandlerInvoker.InvokeNamedAsync(
-            provider, sink, dispatcher, "connection.call", new WrongRequest(), ct: TestContext.Current.CancellationToken);
+        var hidden = await invoker.InvokeNamedAsync(
+            dispatcher, "jsonrpc.only", new Request("hidden"), TestContext.Current.CancellationToken);
+        var unknown = await invoker.InvokeNamedAsync(
+            dispatcher, "unknown", new Request("unknown"), TestContext.Current.CancellationToken);
+        var wrongType = async () => await invoker.InvokeNamedAsync(
+            dispatcher, "connection.call", new WrongRequest(), TestContext.Current.CancellationToken);
 
         success.IsSuccess.Should().BeTrue();
         success.Value.Should().BeOfType<Response>().Which.Connection.Should().BeSameAs(snapshot);
@@ -194,11 +243,8 @@ public sealed class ConnectionHandlerInvokerTests {
             .AddScoped<IStreamHandler<StreamRequest, int>, ObservingStreamHandler>()
             .BuildServiceProvider();
 
-        var start = await ConnectionHandlerInvoker.InvokeStreamAsync<StreamRequest, int>(
-            provider,
-            new CountingSink(snapshot),
-            new StreamRequest(),
-            ct: TestContext.Current.CancellationToken);
+        var start = await new ConnectionHandlerInvoker(provider, new CountingSink(snapshot))
+            .InvokeStreamAsync<StreamRequest, int>(new StreamRequest(), TestContext.Current.CancellationToken);
 
         start.IsSuccess.Should().BeTrue();
         probe.Should().NotBeNull();
@@ -219,11 +265,9 @@ public sealed class ConnectionHandlerInvokerTests {
             .AddScoped<IStreamHandler<StreamRequest, int>, RejectingStreamHandler>()
             .BuildServiceProvider();
 
-        var start = await ConnectionHandlerInvoker.InvokeStreamAsync<StreamRequest, int>(
-            provider,
-            new CountingSink(Connection("rejected", Principal("user"))),
-            new StreamRequest(),
-            ct: TestContext.Current.CancellationToken);
+        var start = await new ConnectionHandlerInvoker(provider,
+                new CountingSink(Connection("rejected", Principal("user"))))
+            .InvokeStreamAsync<StreamRequest, int>(new StreamRequest(), TestContext.Current.CancellationToken);
 
         start.IsSuccess.Should().BeFalse();
         start.Error.Kind.Should().Be(ErrorKind.NotFound);
@@ -241,11 +285,9 @@ public sealed class ConnectionHandlerInvokerTests {
             .AddScoped<IHandler<Request, Result<Response>>, CancellationObservingHandler>()
             .BuildServiceProvider();
 
-        var result = await ConnectionHandlerInvoker.InvokeAsync<Request, Response>(
-            provider,
-            new CountingSink(Connection("cancel", Principal("user"))),
-            new Request("cancel"),
-            ct: cancellation.Token);
+        var result =
+            await new ConnectionHandlerInvoker(provider, new CountingSink(Connection("cancel", Principal("user"))))
+                .InvokeAsync<Request, Response>(new Request("cancel"), cancellation.Token);
 
         result.IsSuccess.Should().BeTrue();
         observed.Token.Should().Be(cancellation.Token);
@@ -258,9 +300,7 @@ public sealed class ConnectionHandlerInvokerTests {
         var sink = new CountingSink(Connection("enrichment", Principal("user")));
         using var provider = CreateUnaryProvider(calls);
 
-        var invoke = () => ConnectionHandlerInvoker.InvokeAsync<Request, Response>(
-            provider,
-            sink,
+        var invoke = () => new ConnectionHandlerInvoker(provider, sink).InvokeAsync<Request, Response>(
             new Request("ignored"),
             _ => throw new InvalidOperationException("enrichment failed"),
             TestContext.Current.CancellationToken);
@@ -270,31 +310,36 @@ public sealed class ConnectionHandlerInvokerTests {
         calls.Calls.Should().BeEmpty();
     }
 
-    private static ServiceProvider CreateUnaryProvider(CallLog calls) => new ServiceCollection()
-        .AddSingleton(calls)
-        .AddScoped<ScopeValues>()
-        .AddSingleton<IDispatchScopeInitializer, ScopeValuesInitializer>()
-        .AddScoped<UnaryHandler>()
-        .AddScoped<IHandler<Request, Result<Response>>>(services =>
-            new RecordingDecorator(
-                services.GetRequiredService<UnaryHandler>(),
-                services.GetRequiredService<CallLog>()))
-        .BuildServiceProvider();
+    private static ServiceProvider CreateUnaryProvider(CallLog calls) {
+        return new ServiceCollection()
+            .AddSingleton(calls)
+            .AddScoped<ScopeValues>()
+            .AddSingleton<IDispatchScopeInitializer, ScopeValuesInitializer>()
+            .AddScoped<UnaryHandler>()
+            .AddScoped<IHandler<Request, Result<Response>>>(services =>
+                new RecordingDecorator(
+                    services.GetRequiredService<UnaryHandler>(),
+                    services.GetRequiredService<CallLog>()))
+            .BuildServiceProvider();
+    }
 
-    private static ClaimsPrincipal Principal(string subject) =>
-        new(new ClaimsIdentity([new Claim("sub", subject)], authenticationType: "test"));
+    private static ClaimsPrincipal Principal(string subject) {
+        return new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", subject)], "test"));
+    }
 
     private static ClientConnection Connection(
         string id,
         ClaimsPrincipal principal,
-        long revision = 0) => new() {
+        long revision = 0) {
+        return new ClientConnection {
             ConnectionId = id,
             Transport = "test",
             Principal = principal,
             PrincipalId = principal.FindFirst("sub")?.Value,
             ConnectedAt = DateTimeOffset.UnixEpoch,
-            IdentityRevision = revision,
+            IdentityRevision = revision
         };
+    }
 
     private sealed class ScopeValues {
         public ClaimsPrincipal? Principal { get; set; }
@@ -335,14 +380,37 @@ public sealed class ConnectionHandlerInvokerTests {
         }
     }
 
+    private sealed class InferredHandler(ScopeValues values) : IHandler<InferredRequest, Result<InferredResponse>> {
+        public ValueTask<Result<InferredResponse>> HandleAsync(InferredRequest request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<InferredResponse>>(new InferredResponse(request.Value, values.Metadata));
+        }
+    }
+
+    private sealed class InferredStreamHandler : IStreamHandler<InferredStreamRequest, int> {
+        public ValueTask<Result<IAsyncEnumerable<int>>>
+            HandleAsync(InferredStreamRequest request, CancellationToken ct) {
+            return ValueTask.FromResult(Result<IAsyncEnumerable<int>>.Success(Items()));
+        }
+
+        private static async IAsyncEnumerable<int> Items() {
+            yield return 1;
+            await Task.Yield();
+            yield return 2;
+        }
+    }
+
     private sealed class FailingHandler(AppError error) : IHandler<Request, Result<Response>> {
-        public ValueTask<Result<Response>> HandleAsync(Request request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<Response>>(error);
+        public ValueTask<Result<Response>> HandleAsync(Request request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<Response>>(error);
+        }
     }
 
     private sealed class ScopeProbe : IDisposable {
         public bool Disposed { get; private set; }
-        public void Dispose() => Disposed = true;
+
+        public void Dispose() {
+            Disposed = true;
+        }
     }
 
     private sealed class ObservingStreamHandler(ScopeProbe probe, ScopeValues values)
@@ -399,14 +467,18 @@ public sealed class ConnectionHandlerInvokerTests {
         public int ReadCount => _readCount;
 
         public ValueTask SendAsync<TPayload>(string name, TPayload payload, CancellationToken ct = default)
-            where TPayload : class => throw new NotSupportedException();
+            where TPayload : class {
+            throw new NotSupportedException();
+        }
 
         public ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
             string name,
             TRequest request,
             ClientInvokeOptions? options = null,
             CancellationToken ct = default)
-            where TRequest : class => throw new NotSupportedException();
+            where TRequest : class {
+            throw new NotSupportedException();
+        }
     }
 
     private sealed class MutableSink(ClientConnection connection) : CountingSink(connection) {

@@ -23,7 +23,7 @@ internal sealed class ClientEventPublisher(
             Id = Guid.CreateVersion7(),
             Topic = topic.Name,
             Scope = scope,
-            Payload = payload,
+            Payload = payload
         };
         return broadcaster.BroadcastAsync(envelope, ct);
     }

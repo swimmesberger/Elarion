@@ -4,14 +4,18 @@ namespace Elarion.Abstractions;
 public enum HttpVerb {
     /// <summary>HTTP GET.</summary>
     Get,
+
     /// <summary>HTTP POST.</summary>
     Post,
+
     /// <summary>HTTP PUT.</summary>
     Put,
+
     /// <summary>HTTP PATCH.</summary>
     Patch,
+
     /// <summary>HTTP DELETE.</summary>
-    Delete,
+    Delete
 }
 
 /// <summary>
@@ -45,7 +49,9 @@ public enum HttpVerb {
 public sealed class HttpEndpointAttribute : Attribute {
     /// <summary>Maps the handler at <paramref name="route"/>, inferring the verb from the request's <see cref="ICommand"/>/<see cref="IQuery"/> marker.</summary>
     /// <param name="route">The route pattern (e.g. <c>"clients/{id}"</c>).</param>
-    public HttpEndpointAttribute(string route) => Route = route;
+    public HttpEndpointAttribute(string route) {
+        Route = route;
+    }
 
     /// <summary>Maps the handler at <paramref name="route"/> using the explicit <paramref name="verb"/>.</summary>
     /// <param name="verb">The HTTP method.</param>

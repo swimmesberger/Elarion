@@ -18,11 +18,9 @@ namespace Elarion.Tests.EntityFrameworkCore;
 /// generation. This is the compile-and-behave gate for the emitted convention-API code — the text-level
 /// generator tests cannot catch a renamed EF metadata member.
 /// </summary>
-public sealed class ClientAssignedGuidKeyModelTests
-{
+public sealed class ClientAssignedGuidKeyModelTests {
     [Fact]
-    public void GeneratedPass_DeclaresDomainGuidKeysClientAssigned_AndRespectsExplicitConfiguration()
-    {
+    public void GeneratedPass_DeclaresDomainGuidKeysClientAssigned_AndRespectsExplicitConfiguration() {
         var assembly = CompileWithGeneratedDbSets();
         using var context = CreateContext(assembly);
 
@@ -45,8 +43,7 @@ public sealed class ClientAssignedGuidKeyModelTests
             .FindPrimaryKey()!.Properties.Single().ValueGenerated.Should().Be(ValueGenerated.OnAdd);
     }
 
-    private static ValueGenerated PrimaryKeyGeneration(DbContext context, Assembly assembly, string entityTypeName)
-    {
+    private static ValueGenerated PrimaryKeyGeneration(DbContext context, Assembly assembly, string entityTypeName) {
         var clrType = assembly.GetType(entityTypeName);
         clrType.Should().NotBeNull();
         var entityType = context.Model.FindEntityType(clrType!);
@@ -54,8 +51,7 @@ public sealed class ClientAssignedGuidKeyModelTests
         return entityType!.FindPrimaryKey()!.Properties.Single().ValueGenerated;
     }
 
-    private static DbContext CreateContext(Assembly assembly)
-    {
+    private static DbContext CreateContext(Assembly assembly) {
         var contextType = assembly.GetType("Sample.Persistence.ModelDbContext");
         contextType.Should().NotBeNull();
 
@@ -66,8 +62,7 @@ public sealed class ClientAssignedGuidKeyModelTests
         return (DbContext)Activator.CreateInstance(contextType!, options)!;
     }
 
-    private static Assembly CompileWithGeneratedDbSets()
-    {
+    private static Assembly CompileWithGeneratedDbSets() {
         const string source =
             """
             using Microsoft.EntityFrameworkCore;
@@ -165,7 +160,7 @@ public sealed class ClientAssignedGuidKeyModelTests
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        GeneratorDriver driver = CSharpGeneratorDriver
+        var driver = CSharpGeneratorDriver
             .Create(new DbContextGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, ct);
@@ -177,8 +172,7 @@ public sealed class ClientAssignedGuidKeyModelTests
         return Assembly.Load(image.ToArray());
     }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         // The test host's TPA list contains the real EF Core, Npgsql, and Elarion assemblies (and this test
         // assembly), so the generated code is compiled against exactly what an application compiles against.
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
@@ -192,7 +186,6 @@ public sealed class ClientAssignedGuidKeyModelTests
 }
 
 /// <summary>Guid-keyed entity owned by the test assembly — foreign to the dynamic compilation above.</summary>
-public sealed class ForeignAssemblyEntity
-{
+public sealed class ForeignAssemblyEntity {
     public Guid Id { get; set; }
 }

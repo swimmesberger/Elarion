@@ -11,4 +11,3 @@ public interface IResultFailureFactory<TSelf>
     /// </summary>
     static abstract TSelf Failure(AppError error);
 }
-

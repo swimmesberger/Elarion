@@ -21,17 +21,16 @@ internal sealed class ClientEventSubscriberSink(
         where TEvent : class, IClientEvent {
         ArgumentNullException.ThrowIfNull(@event);
         var topic = catalog.GetByType(typeof(TEvent));
-        if (!string.Equals(topic.Name, Subscription.Topic, StringComparison.Ordinal)) {
+        if (!string.Equals(topic.Name, Subscription.Topic, StringComparison.Ordinal))
             throw new InvalidOperationException(
                 $"'{typeof(TEvent)}' is the contract of topic '{topic.Name}', but this sink delivers to a " +
                 $"subscriber of '{Subscription.Topic}'. A subscriber sink only accepts its own topic's contract.");
-        }
 
         writer.TryWrite(new ClientEventEnvelope {
             Id = Guid.CreateVersion7(),
             Topic = topic.Name,
             Scope = Subscription.Scope,
-            Payload = JsonSerializer.Serialize(@event, serialization.GetTypeInfo<TEvent>()),
+            Payload = JsonSerializer.Serialize(@event, serialization.GetTypeInfo<TEvent>())
         });
         return default;
     }

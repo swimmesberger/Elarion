@@ -29,10 +29,13 @@ public interface ICurrentUser {
     /// Real implementers (e.g. the claims-based <c>ClaimsPrincipalCurrentUser</c>) override it to answer from
     /// the principal's claims.
     /// </remarks>
-    bool HasClaim(string type, string value) => false;
+    bool HasClaim(string type, string value) {
+        return false;
+    }
 
     /// <summary>Returns all values of claims of the given <paramref name="type"/> held by the current principal.</summary>
     /// <remarks>A default interface method that fails closed (returns an empty sequence); see <see cref="HasClaim"/>.</remarks>
-    IEnumerable<string> GetClaimValues(string type) => [];
+    IEnumerable<string> GetClaimValues(string type) {
+        return [];
+    }
 }
-

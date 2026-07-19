@@ -10,5 +10,7 @@ public readonly record struct BlobRef {
     public required string Value { get; init; }
 
     /// <inheritdoc />
-    public override string ToString() => Value;
+    public override string ToString() {
+        return Value;
+    }
 }

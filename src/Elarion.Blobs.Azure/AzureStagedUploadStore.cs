@@ -51,24 +51,20 @@ public sealed class AzureStagedUploadStore(
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal) {
             [AzureBlobMetadata.ContainerKey] = AzureBlobMetadata.Encode(creation.Container),
             [AzureBlobMetadata.NameKey] = AzureBlobMetadata.Encode(creation.Name),
-            [AzureBlobMetadata.ExpiresAtKey] = AzureBlobMetadata.FormatInstant(creation.ExpiresAt),
+            [AzureBlobMetadata.ExpiresAtKey] = AzureBlobMetadata.FormatInstant(creation.ExpiresAt)
         };
-        if (creation.Length is { } declared) {
+        if (creation.Length is { } declared)
             metadata[AzureBlobMetadata.LengthKey] = AzureBlobMetadata.FormatLong(declared);
-        }
 
-        if (creation.Metadata is { } transportMetadata) {
+        if (creation.Metadata is { } transportMetadata)
             metadata[AzureBlobMetadata.TransportMetadataKey] = AzureBlobMetadata.Encode(transportMetadata);
-        }
 
-        if (creation.OwnerId is { } ownerId) {
-            metadata[AzureBlobMetadata.OwnerKey] = AzureBlobMetadata.Encode(ownerId);
-        }
+        if (creation.OwnerId is { } ownerId) metadata[AzureBlobMetadata.OwnerKey] = AzureBlobMetadata.Encode(ownerId);
 
         await StagingBlob(id).CreateAsync(
             new AppendBlobCreateOptions {
                 HttpHeaders = new BlobHttpHeaders { ContentType = creation.ContentType },
-                Metadata = metadata,
+                Metadata = metadata
             },
             cancellationToken);
 
@@ -80,7 +76,7 @@ public sealed class AzureStagedUploadStore(
             Metadata = creation.Metadata,
             OwnerId = creation.OwnerId,
             ExpiresAt = creation.ExpiresAt,
-            BlobRef = null,
+            BlobRef = null
         };
     }
 
@@ -111,14 +107,12 @@ public sealed class AzureStagedUploadStore(
             throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
         }
 
-        if (properties.Metadata.ContainsKey(AzureBlobMetadata.BlobRefKey)) {
+        if (properties.Metadata.ContainsKey(AzureBlobMetadata.BlobRefKey))
             throw new StagedUploadConflictException($"Upload session '{uploadId}' is already complete.");
-        }
 
-        if (properties.ContentLength != offset) {
+        if (properties.ContentLength != offset)
             throw new StagedUploadConflictException(
                 $"The append offset {offset} does not match the current offset {properties.ContentLength}.");
-        }
 
         // A declared length caps the read to the remaining bytes; a deferred length reads the caller's
         // whole (caller-bounded) chunk. The chunk is split into append blocks, each guarded on the exact
@@ -130,15 +124,13 @@ public sealed class AzureStagedUploadStore(
         while (total < remaining) {
             var toRead = (int)Math.Min(buffer.Length, remaining - total);
             var filled = await FillAsync(chunk, buffer.AsMemory(0, toRead), cancellationToken);
-            if (filled == 0) {
-                break;
-            }
+            if (filled == 0) break;
 
             try {
                 await blob.AppendBlockAsync(
-                    new MemoryStream(buffer, 0, filled, writable: false),
+                    new MemoryStream(buffer, 0, filled, false),
                     new AppendBlobAppendBlockOptions {
-                        Conditions = new AppendBlobRequestConditions { IfAppendPositionEqual = offset + total },
+                        Conditions = new AppendBlobRequestConditions { IfAppendPositionEqual = offset + total }
                     },
                     cancellationToken);
             }
@@ -169,21 +161,19 @@ public sealed class AzureStagedUploadStore(
             throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
         }
 
-        if (properties.Metadata.ContainsKey(AzureBlobMetadata.BlobRefKey)) {
-            return Map(uploadId, properties);
-        }
+        if (properties.Metadata.ContainsKey(AzureBlobMetadata.BlobRefKey)) return Map(uploadId, properties);
 
         var received = properties.ContentLength;
         if (AzureBlobMetadata.ParseLong(properties.Metadata, AzureBlobMetadata.LengthKey) is { } declared
-            && received != declared) {
+            && received != declared)
             throw new StagedUploadConflictException(
                 $"Upload session '{uploadId}' declares {declared} bytes but received {received}.");
-        }
 
         var container = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.ContainerKey)
-            ?? throw new InvalidOperationException($"Upload session '{uploadId}' carries no target container.");
+                        ?? throw new InvalidOperationException(
+                            $"Upload session '{uploadId}' carries no target container.");
         var name = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.NameKey)
-            ?? throw new InvalidOperationException($"Upload session '{uploadId}' carries no target name.");
+                   ?? throw new InvalidOperationException($"Upload session '{uploadId}' carries no target name.");
         var ownerId = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.OwnerKey);
         var location = new AzureBlobLocation(container, name);
 
@@ -191,15 +181,12 @@ public sealed class AzureStagedUploadStore(
         // operation (copy carries the source's content type). The copy overwrites, so a completion retry
         // after a crash converges on the same target.
         var targetMetadata = new Dictionary<string, string>(StringComparer.Ordinal) {
-            [AzureBlobMetadata.StateKey] = AzureBlobMetadata.PendingState,
+            [AzureBlobMetadata.StateKey] = AzureBlobMetadata.PendingState
         };
-        if (completion.BlobExpiresAt is { } blobExpiresAt) {
+        if (completion.BlobExpiresAt is { } blobExpiresAt)
             targetMetadata[AzureBlobMetadata.ExpiresAtKey] = AzureBlobMetadata.FormatInstant(blobExpiresAt);
-        }
 
-        if (ownerId is not null) {
-            targetMetadata[AzureBlobMetadata.OwnerKey] = AzureBlobMetadata.Encode(ownerId);
-        }
+        if (ownerId is not null) targetMetadata[AzureBlobMetadata.OwnerKey] = AzureBlobMetadata.Encode(ownerId);
 
         // Both completion legs are guarded on the staging blob's ETag from the snapshot read above: the
         // copy rejects a source that changed (a deferred-length append landing after the read would
@@ -214,7 +201,7 @@ public sealed class AzureStagedUploadStore(
                 blob.Uri,
                 new BlobCopyFromUriOptions {
                     Metadata = targetMetadata,
-                    SourceConditions = new BlobRequestConditions { IfMatch = properties.ETag },
+                    SourceConditions = new BlobRequestConditions { IfMatch = properties.ETag }
                 },
                 cancellationToken);
             await copy.WaitForCompletionAsync(cancellationToken);
@@ -231,14 +218,14 @@ public sealed class AzureStagedUploadStore(
             [AzureBlobMetadata.LengthKey] = AzureBlobMetadata.FormatLong(received),
             [AzureBlobMetadata.FinalOffsetKey] = AzureBlobMetadata.FormatLong(received),
             [AzureBlobMetadata.BlobRefKey] = AzureBlobMetadata.Encode(location.ToBlobRef().Value),
-            [AzureBlobMetadata.ExpiresAtKey] = AzureBlobMetadata.FormatInstant(completion.SessionExpiresAt),
+            [AzureBlobMetadata.ExpiresAtKey] = AzureBlobMetadata.FormatInstant(completion.SessionExpiresAt)
         };
         try {
             await blob.CreateAsync(
                 new AppendBlobCreateOptions {
                     HttpHeaders = new BlobHttpHeaders { ContentType = properties.ContentType },
                     Metadata = completedMetadata,
-                    Conditions = new AppendBlobRequestConditions { IfMatch = properties.ETag },
+                    Conditions = new AppendBlobRequestConditions { IfMatch = properties.ETag }
                 },
                 cancellationToken);
         }
@@ -264,16 +251,18 @@ public sealed class AzureStagedUploadStore(
             Metadata = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.TransportMetadataKey),
             OwnerId = ownerId,
             ExpiresAt = completion.SessionExpiresAt,
-            BlobRef = location.ToBlobRef(),
+            BlobRef = location.ToBlobRef()
         };
     }
 
     /// <inheritdoc />
-    public async Task DeleteAsync(string uploadId, CancellationToken cancellationToken) =>
+    public async Task DeleteAsync(string uploadId, CancellationToken cancellationToken) {
         await StagingBlob(uploadId).DeleteIfExistsAsync(cancellationToken: cancellationToken);
+    }
 
     /// <inheritdoc />
-    public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
+    public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize,
+        CancellationToken cancellationToken) {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
 
         var container = client.GetBlobContainerClient(options.StagingContainer);
@@ -285,25 +274,20 @@ public sealed class AzureStagedUploadStore(
                 if (blobItem.Metadata is null
                     || AzureBlobMetadata.ParseInstant(blobItem.Metadata, AzureBlobMetadata.ExpiresAtKey)
                         is not { } expiresAt
-                    || expiresAt >= olderThanUtc) {
+                    || expiresAt >= olderThanUtc)
                     continue;
-                }
 
                 try {
                     var response = await container.GetBlobClient(blobItem.Name).DeleteIfExistsAsync(
                         conditions: new BlobRequestConditions { IfMatch = blobItem.Properties.ETag },
                         cancellationToken: cancellationToken);
-                    if (response.Value) {
-                        deleted++;
-                    }
+                    if (response.Value) deleted++;
                 }
                 catch (RequestFailedException ex) when (ex.Status == 412) {
                     // Touched concurrently (an append or completion moved the expiry); leave it alone.
                 }
 
-                if (deleted >= batchSize) {
-                    return deleted;
-                }
+                if (deleted >= batchSize) return deleted;
             }
         }
         catch (RequestFailedException ex) when (ex.Status == 404) {
@@ -313,13 +297,12 @@ public sealed class AzureStagedUploadStore(
         return deleted;
     }
 
-    private AppendBlobClient StagingBlob(string uploadId) =>
-        client.GetBlobContainerClient(options.StagingContainer).GetAppendBlobClient(uploadId);
+    private AppendBlobClient StagingBlob(string uploadId) {
+        return client.GetBlobContainerClient(options.StagingContainer).GetAppendBlobClient(uploadId);
+    }
 
     private async Task EnsureStagingContainerAsync(CancellationToken cancellationToken) {
-        if (_stagingContainerEnsured) {
-            return;
-        }
+        if (_stagingContainerEnsured) return;
 
         await client.GetBlobContainerClient(options.StagingContainer)
             .CreateIfNotExistsAsync(cancellationToken: cancellationToken);
@@ -340,18 +323,17 @@ public sealed class AzureStagedUploadStore(
             Metadata = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.TransportMetadataKey),
             OwnerId = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.OwnerKey),
             ExpiresAt = AzureBlobMetadata.ParseInstant(properties.Metadata, AzureBlobMetadata.ExpiresAtKey)
-                ?? DateTimeOffset.MinValue,
-            BlobRef = blobRefValue is null ? null : new BlobRef { Value = blobRefValue },
+                        ?? DateTimeOffset.MinValue,
+            BlobRef = blobRefValue is null ? null : new BlobRef { Value = blobRefValue }
         };
     }
 
-    private static async Task<int> FillAsync(Stream source, Memory<byte> destination, CancellationToken cancellationToken) {
+    private static async Task<int> FillAsync(Stream source, Memory<byte> destination,
+        CancellationToken cancellationToken) {
         var total = 0;
         while (total < destination.Length) {
             var read = await source.ReadAsync(destination[total..], cancellationToken);
-            if (read == 0) {
-                break;
-            }
+            if (read == 0) break;
 
             total += read;
         }

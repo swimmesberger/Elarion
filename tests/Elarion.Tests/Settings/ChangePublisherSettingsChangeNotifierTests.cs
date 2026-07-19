@@ -19,17 +19,20 @@ public sealed class ChangePublisherSettingsChangeNotifierTests {
     private sealed class RecordingPublisher : ISettingsChangePublisher {
         public List<(SettingsScope Scope, string Key)> Published { get; } = [];
 
-        public void Publish(SettingsScope scope, string key) => Published.Add((scope, key));
+        public void Publish(SettingsScope scope, string key) {
+            Published.Add((scope, key));
+        }
     }
 
     private sealed class NotifierTestDbContext(DbContextOptions<NotifierTestDbContext> options)
         : DbContext(options);
 
     /// <summary>A context configured for Npgsql but never opened — CurrentTransaction stays null.</summary>
-    private static NotifierTestDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<NotifierTestDbContext>()
+    private static NotifierTestDbContext CreateContext() {
+        return new NotifierTestDbContext(new DbContextOptionsBuilder<NotifierTestDbContext>()
             .UseNpgsql("Host=localhost;Database=elarion;Username=elarion;Password=elarion")
             .Options);
+    }
 
     private static (ChangePublisherSettingsChangeNotifier Notifier, RecordingPublisher Publisher) CreateNotifier() {
         var publisher = new RecordingPublisher();

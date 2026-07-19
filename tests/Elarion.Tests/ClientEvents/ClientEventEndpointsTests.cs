@@ -32,13 +32,14 @@ public sealed partial class ClientEventEndpointsTests {
     [JsonSerializable(typeof(InvoiceChanged))]
     private sealed partial class EndpointTestContext : JsonSerializerContext;
 
-    private static string SubscriptionsUrl(string subscriptionsJson) =>
-        "/events?subscriptions=" + Uri.EscapeDataString(subscriptionsJson);
+    private static string SubscriptionsUrl(string subscriptionsJson) {
+        return "/events?subscriptions=" + Uri.EscapeDataString(subscriptionsJson);
+    }
 
     [Fact]
     public async Task Subscribe_Unauthenticated_Returns401() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, user: new FakeCurrentUser("user-1", isAuthenticated: false));
+        await using var host = await StartAsync(ct, new FakeCurrentUser("user-1", false));
 
         var response = await host.Client.GetAsync(
             SubscriptionsUrl("""[{"topic":"test.invoiceChanged"}]"""), ct);
@@ -86,7 +87,7 @@ public sealed partial class ClientEventEndpointsTests {
             ct,
             configureTopics: events => events.AddTopic<InvoiceChanged>(
                 "test.invoiceChanged", t => t.RequireRole("admin")),
-            authorizer: new FakeAuthorizer(allow: false));
+            authorizer: new FakeAuthorizer(false));
 
         var response = await host.Client.GetAsync(
             SubscriptionsUrl("""[{"topic":"test.invoiceChanged"}]"""), ct);
@@ -124,7 +125,7 @@ public sealed partial class ClientEventEndpointsTests {
     public async Task Subscribe_ResourceScope_DeniedByAuthorizer_Returns404() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(
-            ct, subscriptionAuthorizer: new FakeSubscriptionAuthorizer(allowedResource: "customer:7"));
+            ct, subscriptionAuthorizer: new FakeSubscriptionAuthorizer("customer:7"));
 
         var response = await host.Client.GetAsync(
             SubscriptionsUrl("""[{"topic":"test.invoiceChanged","resource":"customer:42"}]"""), ct);
@@ -226,16 +227,14 @@ public sealed partial class ClientEventEndpointsTests {
         var lines = new List<string>();
         while (await reader.ReadLineAsync(ct) is { } line) {
             if (line.Length == 0) {
-                if (lines.Count > 0) {
-                    break;
-                }
+                if (lines.Count > 0) break;
                 continue;
             }
-            if (line.StartsWith(':')) {
-                continue; // comments (connected/keep-alive) are not part of a frame
-            }
+
+            if (line.StartsWith(':')) continue; // comments (connected/keep-alive) are not part of a frame
             lines.Add(line);
         }
+
         return lines;
     }
 
@@ -252,13 +251,9 @@ public sealed partial class ClientEventEndpointsTests {
         builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(EndpointTestContext.Default));
         builder.Services.AddElarionClientEvents(configureTopics ?? (events =>
             events.AddTopic<InvoiceChanged>("test.invoiceChanged")));
-        builder.Services.AddScoped<ICurrentUser>(_ => user ?? new FakeCurrentUser("user-1", isAuthenticated: true));
-        if (authorizer is not null) {
-            builder.Services.AddSingleton(authorizer);
-        }
-        if (subscriptionAuthorizer is not null) {
-            builder.Services.AddSingleton(subscriptionAuthorizer);
-        }
+        builder.Services.AddScoped<ICurrentUser>(_ => user ?? new FakeCurrentUser("user-1", true));
+        if (authorizer is not null) builder.Services.AddSingleton(authorizer);
+        if (subscriptionAuthorizer is not null) builder.Services.AddSingleton(subscriptionAuthorizer);
 
         var app = builder.Build();
         app.MapElarionClientEvents();
@@ -290,17 +285,21 @@ public sealed partial class ClientEventEndpointsTests {
 
         public bool IsAuthenticated { get; } = isAuthenticated;
 
-        public bool IsInRole(string role) => false;
+        public bool IsInRole(string role) {
+            return false;
+        }
     }
 
     private sealed class FakeAuthorizer(bool allow) : IAuthorizer {
         public ValueTask<AppError?> AuthorizeAsync(
-            AuthorizationRequirements requirements, object? resource, CancellationToken ct) =>
-            ValueTask.FromResult(allow ? null : AppError.Forbidden("Denied."));
+            AuthorizationRequirements requirements, object? resource, CancellationToken ct) {
+            return ValueTask.FromResult(allow ? null : AppError.Forbidden("Denied."));
+        }
     }
 
     private sealed class FakeSubscriptionAuthorizer(string allowedResource) : IClientEventSubscriptionAuthorizer {
-        public ValueTask<bool> AuthorizeAsync(ClientEventSubscription subscription, CancellationToken ct) =>
-            ValueTask.FromResult(subscription.Scope.Value == allowedResource);
+        public ValueTask<bool> AuthorizeAsync(ClientEventSubscription subscription, CancellationToken ct) {
+            return ValueTask.FromResult(subscription.Scope.Value == allowedResource);
+        }
     }
 }

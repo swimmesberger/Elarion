@@ -53,7 +53,7 @@ public sealed class ActorActivationReplacementTests {
         var time = new FakeTimeProvider();
         var observed = new ReplacementObservations();
         await using var provider = CreateLingeringProvider(
-            observed, time, deactivationTimeout: TimeSpan.FromSeconds(5));
+            observed, time, TimeSpan.FromSeconds(5));
         var probe = provider.GetRequiredService<IActorSystem>().Get<ILingering>("a");
 
         await probe.Ping(TestToken);
@@ -134,9 +134,8 @@ public sealed class ActorActivationReplacementTests {
     private static async Task AdvanceUntilAsync(FakeTimeProvider time, TimeSpan step, Func<bool> condition) {
         var stopwatch = Stopwatch.StartNew();
         while (!condition()) {
-            if (stopwatch.Elapsed > WaitTimeout) {
+            if (stopwatch.Elapsed > WaitTimeout)
                 throw new TimeoutException("The expected actor state was not reached in time.");
-            }
 
             time.Advance(step);
             await Task.Delay(10, TestToken);
@@ -156,8 +155,13 @@ public sealed class ActorActivationReplacementTests {
         public TaskCompletionSource DeactivateGate { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public void RecordActivation() => Interlocked.Increment(ref _activations);
-        public void RecordDeactivationCompleted() => Interlocked.Increment(ref _deactivationsCompleted);
+        public void RecordActivation() {
+            Interlocked.Increment(ref _activations);
+        }
+
+        public void RecordDeactivationCompleted() {
+            Interlocked.Increment(ref _deactivationsCompleted);
+        }
     }
 
     // --- Lingering (a gated OnDeactivateAsync so tests control the drain deterministically) ---
@@ -178,17 +182,21 @@ public sealed class ActorActivationReplacementTests {
             observations.RecordDeactivationCompleted();
         }
 
-        public Task Ping() => Task.CompletedTask;
+        public Task Ping() {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class LingeringFacade(ActorHandle<LingeringActor> handle) : ILingering {
-        public ValueTask Ping(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new PingItem(), cancellationToken);
+        public ValueTask Ping(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new PingItem(), cancellationToken);
+        }
 
         private sealed class PingItem : ActorWorkItem<LingeringActor, Unit> {
             public override string MethodName => "Ping";
 
-            protected override async ValueTask<Unit> InvokeAsync(LingeringActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(LingeringActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Ping().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -206,9 +214,7 @@ public sealed class ActorActivationReplacementTests {
         public int Releases => Volatile.Read(ref _releases);
 
         public void Acquire() {
-            if (Interlocked.Increment(ref _holders) != 1) {
-                Interlocked.Increment(ref _doubleHolds);
-            }
+            if (Interlocked.Increment(ref _holders) != 1) Interlocked.Increment(ref _doubleHolds);
         }
 
         public void Release() {
@@ -234,17 +240,21 @@ public sealed class ActorActivationReplacementTests {
             resource.Release();
         }
 
-        public Task Touch() => Task.CompletedTask;
+        public Task Touch() {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ExclusiveFacade(ActorHandle<ExclusiveActor> handle) : IExclusive {
-        public ValueTask Touch(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new TouchItem(), cancellationToken);
+        public ValueTask Touch(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new TouchItem(), cancellationToken);
+        }
 
         private sealed class TouchItem : ActorWorkItem<ExclusiveActor, Unit> {
             public override string MethodName => "Touch";
 
-            protected override async ValueTask<Unit> InvokeAsync(ExclusiveActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(ExclusiveActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Touch().ConfigureAwait(false);
                 return Unit.Value;
             }

@@ -20,8 +20,7 @@ using BenchmarkDotNet.Running;
 //     ELARION_BENCH_DOTTRACE=1 dotnet run --project tests/Elarion.Benchmarks -c Release -- --filter "*Ask*"
 //     # writes a .dtt snapshot under BenchmarkDotNet.Artifacts/ — open it in JetBrains dotTrace / Rider.
 var config = DefaultConfig.Instance;
-if (Environment.GetEnvironmentVariable("ELARION_BENCH_DOTTRACE") is "1" or "true") {
+if (Environment.GetEnvironmentVariable("ELARION_BENCH_DOTTRACE") is "1" or "true")
     config = config.AddDiagnoser(new DotTraceDiagnoser());
-}
 
 BenchmarkSwitcher.FromAssembly(typeof(Elarion.Benchmarks.Actors.ActorCallBenchmarks).Assembly).Run(args, config);

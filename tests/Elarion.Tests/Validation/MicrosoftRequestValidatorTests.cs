@@ -38,7 +38,7 @@ public sealed class MicrosoftRequestValidatorTests {
         var request = new CreateClientRequest {
             Name = "ab",
             Priority = 0,
-            Address = new AddressDto { Street = "far too long street" },
+            Address = new AddressDto { Street = "far too long street" }
         };
 
         var result = await validator.ValidateAsync(typeof(CreateClientRequest), request, Ct);
@@ -56,7 +56,7 @@ public sealed class MicrosoftRequestValidatorTests {
         var request = new CreateClientRequest {
             Name = "valid",
             Priority = 1,
-            Deliveries = [new AddressDto { Street = "ok" }, new AddressDto { Street = "far too long street" }],
+            Deliveries = [new AddressDto { Street = "ok" }, new AddressDto { Street = "far too long street" }]
         };
 
         var result = await validator.ValidateAsync(typeof(CreateClientRequest), request, Ct);
@@ -73,7 +73,7 @@ public sealed class MicrosoftRequestValidatorTests {
         var request = new CreateClientRequest {
             Name = "valid",
             Priority = 1,
-            Address = new AddressDto { Street = "ok" },
+            Address = new AddressDto { Street = "ok" }
         };
 
         var result = await validator.ValidateAsync(typeof(CreateClientRequest), request, Ct);
@@ -89,7 +89,7 @@ public sealed class MicrosoftRequestValidatorTests {
             new RecordingStreamHandler(), scope.ServiceProvider.GetRequiredService<IRequestValidator>());
 
         var result = await handler.HandleAsync(new CreateClientRequest {
-            Name = "ab", Priority = 1, Address = new AddressDto { Street = "ok" },
+            Name = "ab", Priority = 1, Address = new AddressDto { Street = "ok" }
         }, Ct);
 
         result.IsSuccess.Should().BeFalse();
@@ -118,7 +118,7 @@ public sealed class MicrosoftRequestValidatorTests {
         var request = new CreateClientRequest {
             Name = "ab",
             Priority = 1,
-            Address = new AddressDto { Street = "far too long street" },
+            Address = new AddressDto { Street = "far too long street" }
         };
 
         var result = await validator.ValidateAsync(typeof(CreateClientRequest), request, Ct);
@@ -134,7 +134,7 @@ public sealed class MicrosoftRequestValidatorTests {
         await using var provider = BuildProvider(services => services.AddElarionValidationResolver(
             new PathInjectingResolver(new Dictionary<string, string[]>(StringComparer.Ordinal) {
                 ["Name"] = ["first message"],
-                ["NAME"] = ["second message"],
+                ["NAME"] = ["second message"]
             })));
         using var scope = provider.CreateScope();
         var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
@@ -153,7 +153,7 @@ public sealed class MicrosoftRequestValidatorTests {
         await using var provider = BuildProvider(services => services.AddElarionValidationResolver(
             new PathInjectingResolver(new Dictionary<string, string[]>(StringComparer.Ordinal) {
                 ["Items[My.Key].Name"] = ["bad"],
-                ["Lookup[Ordinal.KEY]"] = ["also bad"],
+                ["Lookup[Ordinal.KEY]"] = ["also bad"]
             })));
         using var scope = provider.CreateScope();
         var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
@@ -174,11 +174,9 @@ public sealed class MicrosoftRequestValidatorTests {
     }
 
     private sealed record CreateClientRequest {
-        [StringLength(10, MinimumLength = 3)]
-        public required string Name { get; init; }
+        [StringLength(10, MinimumLength = 3)] public required string Name { get; init; }
 
-        [Range(1, 100)]
-        public int Priority { get; init; }
+        [Range(1, 100)] public int Priority { get; init; }
 
         public AddressDto? Address { get; init; }
 
@@ -186,8 +184,7 @@ public sealed class MicrosoftRequestValidatorTests {
     }
 
     private sealed record AddressDto {
-        [StringLength(5)]
-        public required string Street { get; init; }
+        [StringLength(5)] public required string Street { get; init; }
     }
 
     private sealed record UnannotatedRequest;
@@ -195,10 +192,15 @@ public sealed class MicrosoftRequestValidatorTests {
     private sealed record PathInjectingRequest;
 
     private sealed class RecordingStreamHandler : IStreamHandler<CreateClientRequest, string> {
-        public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(CreateClientRequest request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+        public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(CreateClientRequest request,
+            CancellationToken ct) {
+            return ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+        }
 
-        private static async IAsyncEnumerable<string> Values() { yield return "unexpected"; await Task.Yield(); }
+        private static async IAsyncEnumerable<string> Values() {
+            yield return "unexpected";
+            await Task.Yield();
+        }
     }
 
     /// <summary>
@@ -216,7 +218,8 @@ public sealed class MicrosoftRequestValidatorTests {
             return false;
         }
 
-        public bool TryGetValidatableParameterInfo(ParameterInfo parameterInfo, [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
+        public bool TryGetValidatableParameterInfo(ParameterInfo parameterInfo,
+            [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
             validatableInfo = null;
             return false;
         }
@@ -225,9 +228,7 @@ public sealed class MicrosoftRequestValidatorTests {
     private sealed class PathInjectingInfo(Dictionary<string, string[]> errors) : IValidatableInfo {
         public Task ValidateAsync(object? value, ValidateContext context, CancellationToken cancellationToken) {
             context.ValidationErrors ??= [];
-            foreach (var (path, messages) in errors) {
-                context.ValidationErrors[path] = messages;
-            }
+            foreach (var (path, messages) in errors) context.ValidationErrors[path] = messages;
 
             return Task.CompletedTask;
         }
@@ -245,8 +246,10 @@ public sealed class MicrosoftRequestValidatorTests {
                         [new StringLengthAttribute(10) { MinimumLength = 3 }]),
                     new TestPropertyInfo(typeof(CreateClientRequest), typeof(int), nameof(CreateClientRequest.Priority),
                         [new RangeAttribute(1, 100)]),
-                    new TestPropertyInfo(typeof(CreateClientRequest), typeof(AddressDto), nameof(CreateClientRequest.Address), []),
-                    new TestPropertyInfo(typeof(CreateClientRequest), typeof(List<AddressDto>), nameof(CreateClientRequest.Deliveries), []),
+                    new TestPropertyInfo(typeof(CreateClientRequest), typeof(AddressDto),
+                        nameof(CreateClientRequest.Address), []),
+                    new TestPropertyInfo(typeof(CreateClientRequest), typeof(List<AddressDto>),
+                        nameof(CreateClientRequest.Deliveries), [])
                 ]);
                 return true;
             }
@@ -254,7 +257,7 @@ public sealed class MicrosoftRequestValidatorTests {
             if (type == typeof(AddressDto)) {
                 validatableInfo = new TestTypeInfo(typeof(AddressDto), [
                     new TestPropertyInfo(typeof(AddressDto), typeof(string), nameof(AddressDto.Street),
-                        [new StringLengthAttribute(5)]),
+                        [new StringLengthAttribute(5)])
                 ]);
                 return true;
             }
@@ -263,14 +266,18 @@ public sealed class MicrosoftRequestValidatorTests {
             return false;
         }
 
-        public bool TryGetValidatableParameterInfo(ParameterInfo parameterInfo, [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
+        public bool TryGetValidatableParameterInfo(ParameterInfo parameterInfo,
+            [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
             validatableInfo = null;
             return false;
         }
     }
 
-    private sealed class TestTypeInfo(Type type, ValidatablePropertyInfo[] members) : ValidatableTypeInfo(type, members) {
-        protected override ValidationAttribute[] GetValidationAttributes() => [];
+    private sealed class TestTypeInfo(Type type, ValidatablePropertyInfo[] members)
+        : ValidatableTypeInfo(type, members) {
+        protected override ValidationAttribute[] GetValidationAttributes() {
+            return [];
+        }
     }
 
     private sealed class TestPropertyInfo(
@@ -279,6 +286,8 @@ public sealed class MicrosoftRequestValidatorTests {
         string name,
         ValidationAttribute[] attributes
     ) : ValidatablePropertyInfo(declaringType, propertyType, name, name) {
-        protected override ValidationAttribute[] GetValidationAttributes() => attributes;
+        protected override ValidationAttribute[] GetValidationAttributes() {
+            return attributes;
+        }
     }
 }

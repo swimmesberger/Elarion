@@ -59,7 +59,7 @@ public sealed class ClientAssignedGuidKeyTests(PostgreSqlClientAssignedKeyFixtur
         await using (var setup = fixture.CreateContext()) {
             var parent = new LegacyParent { Id = parentId };
             parent.Children.Add(new LegacyChild { Id = Guid.CreateVersion7() });
-            setup.Add(parent);   // Add(graph) forces the whole graph Added — creates always work.
+            setup.Add(parent); // Add(graph) forces the whole graph Added — creates always work.
             await setup.SaveChangesAsync(Ct);
         }
 
@@ -113,16 +113,15 @@ public sealed class PostgreSqlClientAssignedKeyFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
     /// <summary>Creates a fresh context bound to the container, so each test owns its own change tracker.</summary>
-    public ClientAssignedKeyDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<ClientAssignedKeyDbContext>()
+    public ClientAssignedKeyDbContext CreateContext() {
+        return new ClientAssignedKeyDbContext(new DbContextOptionsBuilder<ClientAssignedKeyDbContext>()
             .UseNpgsql(_connectionString)
             .Options);
+    }
 }
 
 /// <summary>
@@ -147,7 +146,7 @@ public sealed class ClientAssignedKeyDbContext(DbContextOptions<ClientAssignedKe
 
         modelBuilder.Entity<LegacyParent>(b => {
             b.ToTable("legacy_parents");
-            b.HasKey(p => p.Id);   // Guid PK: EF's convention claims ValueGeneratedOnAdd.
+            b.HasKey(p => p.Id); // Guid PK: EF's convention claims ValueGeneratedOnAdd.
             b.HasMany(p => p.Children).WithOne().HasForeignKey(c => c.ParentId);
         });
         modelBuilder.Entity<LegacyChild>(b => {

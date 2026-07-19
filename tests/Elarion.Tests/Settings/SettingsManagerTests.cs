@@ -14,17 +14,16 @@ public sealed class SettingsManagerTests {
 
     private static ServiceProvider BuildProvider(ICurrentUser? currentUser = null) {
         var services = new ServiceCollection();
-        if (currentUser is not null) {
-            services.AddSingleton(currentUser);
-        }
+        if (currentUser is not null) services.AddSingleton(currentUser);
 
         services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SettingsTestJsonContext.Default));
         services.AddElarionSettings();
         return services.BuildServiceProvider();
     }
 
-    private static ISettingsManager Resolve(ServiceProvider provider) =>
-        provider.CreateScope().ServiceProvider.GetRequiredService<ISettingsManager>();
+    private static ISettingsManager Resolve(ServiceProvider provider) {
+        return provider.CreateScope().ServiceProvider.GetRequiredService<ISettingsManager>();
+    }
 
     [Fact]
     public async Task TypedSet_ThenGet_RoundTripsViaSourceGenJson() {
@@ -51,7 +50,7 @@ public sealed class SettingsManagerTests {
 
     [Fact]
     public async Task GlobalScope_WorksWithoutCurrentUserRegistered() {
-        using var provider = BuildProvider(currentUser: null);
+        using var provider = BuildProvider(null);
         var manager = Resolve(provider);
 
         await manager.SetStringAsync("app:title", "Elarion", cancellationToken: Ct);
@@ -67,8 +66,8 @@ public sealed class SettingsManagerTests {
         await manager.SetStringAsync("theme", "dark", SettingsScope.CurrentUser, cancellationToken: Ct);
 
         // Written under the resolved per-user scope, not global.
-        (await manager.GetStringAsync("theme", SettingsScope.User("u1"), cancellationToken: Ct)).Should().Be("dark");
-        (await manager.GetStringAsync("theme", SettingsScope.Global, cancellationToken: Ct)).Should().BeNull();
+        (await manager.GetStringAsync("theme", SettingsScope.User("u1"), Ct)).Should().Be("dark");
+        (await manager.GetStringAsync("theme", SettingsScope.Global, Ct)).Should().BeNull();
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public sealed class SettingsManagerTests {
         var manager = Resolve(provider);
 
         Func<Task> act = async () =>
-            await manager.GetStringAsync("theme", SettingsScope.CurrentUser, cancellationToken: Ct);
+            await manager.GetStringAsync("theme", SettingsScope.CurrentUser, Ct);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }

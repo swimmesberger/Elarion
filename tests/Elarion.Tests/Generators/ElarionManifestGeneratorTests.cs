@@ -371,8 +371,8 @@ public sealed class ElarionManifestGeneratorTests {
         var result = driver.GetRunResult();
         diagnostics = result.Diagnostics;
 
-        var generatedTree = result.GeneratedTrees.SingleOrDefault(
-            tree => string.Equals(Path.GetFileName(tree.FilePath), "ElarionManifest.g.cs", StringComparison.Ordinal));
+        var generatedTree = result.GeneratedTrees.SingleOrDefault(tree =>
+            string.Equals(Path.GetFileName(tree.FilePath), "ElarionManifest.g.cs", StringComparison.Ordinal));
 
         return generatedTree?.GetText().ToString() ?? string.Empty;
     }

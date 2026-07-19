@@ -25,31 +25,41 @@ internal static class AzureBlobMetadata {
     public const string BlobRefKey = "elarion_blob_ref";
     public const string FinalOffsetKey = "elarion_final_offset";
 
-    public static string Encode(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+    public static string Encode(string value) {
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+    }
 
-    public static string? Decode(IDictionary<string, string> metadata, string key) =>
-        metadata.TryGetValue(key, out var encoded)
+    public static string? Decode(IDictionary<string, string> metadata, string key) {
+        return metadata.TryGetValue(key, out var encoded)
             ? Encoding.UTF8.GetString(Convert.FromBase64String(encoded))
             : null;
+    }
 
-    public static string FormatInstant(DateTimeOffset instant) =>
-        instant.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+    public static string FormatInstant(DateTimeOffset instant) {
+        return instant.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+    }
 
-    public static DateTimeOffset? ParseInstant(IDictionary<string, string> metadata, string key) =>
-        metadata.TryGetValue(key, out var value)
-            && DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant)
+    public static DateTimeOffset? ParseInstant(IDictionary<string, string> metadata, string key) {
+        return metadata.TryGetValue(key, out var value)
+               && DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture,
+                   DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant)
             ? instant
             : null;
+    }
 
-    public static long? ParseLong(IDictionary<string, string> metadata, string key) =>
-        metadata.TryGetValue(key, out var value)
-            && long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+    public static long? ParseLong(IDictionary<string, string> metadata, string key) {
+        return metadata.TryGetValue(key, out var value)
+               && long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : null;
+    }
 
-    public static string FormatLong(long value) => value.ToString(CultureInfo.InvariantCulture);
+    public static string FormatLong(long value) {
+        return value.ToString(CultureInfo.InvariantCulture);
+    }
 
-    public static bool IsPending(IDictionary<string, string> metadata) =>
-        metadata.TryGetValue(StateKey, out var state)
-        && string.Equals(state, PendingState, StringComparison.Ordinal);
+    public static bool IsPending(IDictionary<string, string> metadata) {
+        return metadata.TryGetValue(StateKey, out var state)
+               && string.Equals(state, PendingState, StringComparison.Ordinal);
+    }
 }

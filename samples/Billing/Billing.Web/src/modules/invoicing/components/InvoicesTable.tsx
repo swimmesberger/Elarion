@@ -6,14 +6,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useInvoices } from "../hooks/useInvoices"
+import {useInvoices} from "../hooks/useInvoices"
 
 function formatMoney(cents: number, currency: string) {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(cents / 100)
+  return new Intl.NumberFormat(undefined, {style: "currency", currency}).format(cents / 100)
 }
 
 export function InvoicesTable() {
-  const { data, isPending, isError } = useInvoices()
+  const {data, isPending, isError} = useInvoices()
 
   if (isPending) return <p className="text-[var(--color-muted-foreground)]">Loading invoices…</p>
   if (isError) return <p className="text-[var(--color-destructive)]">Failed to load invoices.</p>

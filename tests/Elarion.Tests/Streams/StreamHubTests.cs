@@ -17,9 +17,7 @@ public sealed class StreamHubTests {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 0 });
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions { Replay = StreamReplay.None });
 
-        for (var i = 1; i <= 5; i++) {
-            await hub.PublishAsync(i * 10, TestToken);
-        }
+        for (var i = 1; i <= 5; i++) await hub.PublishAsync(i * 10, TestToken);
 
         hub.Complete();
 
@@ -81,9 +79,7 @@ public sealed class StreamHubTests {
     [Fact]
     public async Task Resume_ReplaysOnlyNewerRetainedElements() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 16 });
-        for (var i = 1; i <= 5; i++) {
-            await hub.PublishAsync(i, TestToken);
-        }
+        for (var i = 1; i <= 5; i++) await hub.PublishAsync(i, TestToken);
 
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions { ResumeAfterSequence = 3 });
         hub.Complete();
@@ -95,9 +91,7 @@ public sealed class StreamHubTests {
     [Fact]
     public async Task Resume_GapBeyondTheRing_DeliversWhatRemains_AsASequenceJump() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 2 });
-        for (var i = 1; i <= 6; i++) {
-            await hub.PublishAsync(i, TestToken);
-        }
+        for (var i = 1; i <= 6; i++) await hub.PublishAsync(i, TestToken);
 
         // The subscriber saw 1 and asks for everything after; only 5 and 6 survive in the ring.
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions { ResumeAfterSequence = 1 });
@@ -111,15 +105,13 @@ public sealed class StreamHubTests {
     public async Task ReplayThenLive_IsAtomic_NoDuplicateAndNoGapAroundSubscribe() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 512 });
         var publisher = Task.Run(async () => {
-            for (var i = 1; i <= 200; i++) {
-                await hub.PublishAsync(i, TestToken);
-            }
+            for (var i = 1; i <= 200; i++) await hub.PublishAsync(i, TestToken);
         }, TestToken);
 
         // Subscribe mid-publish: everything retained plus everything after must be contiguous.
         await Task.Delay(5, TestToken);
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions {
-            Replay = StreamReplay.Available, BufferCapacity = 512,
+            Replay = StreamReplay.Available, BufferCapacity = 512
         });
         await publisher;
         hub.Complete();
@@ -134,12 +126,10 @@ public sealed class StreamHubTests {
     public async Task DropOldest_LossIsVisibleAsASequenceJump() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 0 });
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions {
-            Replay = StreamReplay.None, BufferCapacity = 2, Overflow = StreamOverflowMode.DropOldest,
+            Replay = StreamReplay.None, BufferCapacity = 2, Overflow = StreamOverflowMode.DropOldest
         });
 
-        for (var i = 1; i <= 10; i++) {
-            await hub.PublishAsync(i, TestToken);
-        }
+        for (var i = 1; i <= 10; i++) await hub.PublishAsync(i, TestToken);
 
         hub.Complete();
 
@@ -152,7 +142,7 @@ public sealed class StreamHubTests {
     public async Task WaitOverflow_BackpressuresThePublisher_UntilTheSubscriberReads() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 0 });
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions {
-            Replay = StreamReplay.None, BufferCapacity = 1, Overflow = StreamOverflowMode.Wait,
+            Replay = StreamReplay.None, BufferCapacity = 1, Overflow = StreamOverflowMode.Wait
         });
 
         await hub.PublishAsync(1, TestToken);
@@ -176,7 +166,7 @@ public sealed class StreamHubTests {
     public async Task CancelOverflow_FailsTheLaggingSubscriber_AndNeverDelaysThePublisher() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 0 });
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions {
-            Replay = StreamReplay.None, BufferCapacity = 1, Overflow = StreamOverflowMode.Cancel,
+            Replay = StreamReplay.None, BufferCapacity = 1, Overflow = StreamOverflowMode.Cancel
         });
 
         await hub.PublishAsync(1, TestToken);
@@ -192,7 +182,7 @@ public sealed class StreamHubTests {
     public async Task WaitOverflow_UnsubscribingWhileThePublisherIsBlocked_WakesThePublisher() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 0 });
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions {
-            Replay = StreamReplay.None, BufferCapacity = 1, Overflow = StreamOverflowMode.Wait,
+            Replay = StreamReplay.None, BufferCapacity = 1, Overflow = StreamOverflowMode.Wait
         });
 
         var enumerator = subscription.GetAsyncEnumerator(TestToken);
@@ -214,13 +204,11 @@ public sealed class StreamHubTests {
     [Fact]
     public async Task CancelOverflow_LagMessage_ReportsTheEffectiveCapacity_WhenAReplayBurstWidenedIt() {
         var hub = new StreamHub<int>(new StreamHubOptions { ReplayCapacity = 4 });
-        for (var i = 1; i <= 4; i++) {
-            await hub.PublishAsync(i, TestToken);
-        }
+        for (var i = 1; i <= 4; i++) await hub.PublishAsync(i, TestToken);
 
         // The replay burst (4) widens the effective buffer beyond the configured capacity (1).
         var subscription = hub.SubscribeSequenced(new StreamSubscribeOptions {
-            Replay = StreamReplay.Available, BufferCapacity = 1, Overflow = StreamOverflowMode.Cancel,
+            Replay = StreamReplay.Available, BufferCapacity = 1, Overflow = StreamOverflowMode.Cancel
         });
         await hub.PublishAsync(5, TestToken); // overflows the widened, unread buffer
 
@@ -249,7 +237,8 @@ public sealed class StreamHubTests {
         await hub.PublishAsync(7, TestToken);
         hub.Complete();
 
-        var items = await Collect(hub.SubscribeSequenced(new StreamSubscribeOptions { Replay = StreamReplay.Available }));
+        var items = await Collect(
+            hub.SubscribeSequenced(new StreamSubscribeOptions { Replay = StreamReplay.Available }));
         items.Should().ContainSingle().Which.Value.Should().Be(7);
     }
 
@@ -269,9 +258,7 @@ public sealed class StreamHubTests {
         var subscription = hub.SubscribeSequenced();
         hub.SubscriberCount.Should().Be(1);
 
-        await foreach (var _ in subscription.WithCancellation(TestToken)) {
-            break; // dispose mid-stream
-        }
+        await foreach (var _ in subscription.WithCancellation(TestToken)) break; // dispose mid-stream
 
         hub.SubscriberCount.Should().Be(0);
     }
@@ -285,18 +272,14 @@ public sealed class StreamHubTests {
         hub.Complete();
 
         var items = new List<string>();
-        await foreach (var item in subscription.WithCancellation(TestToken)) {
-            items.Add(item);
-        }
+        await foreach (var item in subscription.WithCancellation(TestToken)) items.Add(item);
 
         items.Should().Equal("greeting", "live");
     }
 
     private static async Task<List<StreamItem<T>>> Collect<T>(IAsyncEnumerable<StreamItem<T>> source) {
         var items = new List<StreamItem<T>>();
-        await foreach (var item in source.WithCancellation(TestToken)) {
-            items.Add(item);
-        }
+        await foreach (var item in source.WithCancellation(TestToken)) items.Add(item);
 
         return items;
     }

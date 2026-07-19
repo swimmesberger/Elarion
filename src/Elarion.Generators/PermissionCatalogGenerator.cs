@@ -20,11 +20,15 @@ namespace Elarion.Generators;
 /// <para>Trigger: <c>[assembly: UseElarion]</c> or <c>[assembly: GeneratePermissionCatalog]</c>.</para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
-public sealed class PermissionCatalogGenerator : IIncrementalGenerator
-{
+public sealed class PermissionCatalogGenerator : IIncrementalGenerator {
     private const string TriggerAttributeMetadataName = "Elarion.Abstractions.GeneratePermissionCatalogAttribute";
-    private const string PermissionCatalogModuleFqn = "global::Elarion.Abstractions.Authorization.PermissionCatalogModule";
-    private const string PermissionCatalogEntryFqn = "global::Elarion.Abstractions.Authorization.PermissionCatalogEntry";
+
+    private const string PermissionCatalogModuleFqn =
+        "global::Elarion.Abstractions.Authorization.PermissionCatalogModule";
+
+    private const string PermissionCatalogEntryFqn =
+        "global::Elarion.Abstractions.Authorization.PermissionCatalogEntry";
+
     private const string ReadOnlyListFqn = "global::System.Collections.Generic.IReadOnlyList<string>";
 
     private static readonly DiagnosticDescriptor RequirementNotInModule = new(
@@ -34,7 +38,7 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         + "are not added to the runtime permission catalog; move it under a module",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor DuplicateTypedAccessor = new(
         "ELPERM002",
@@ -43,10 +47,9 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         + "the typed accessors (both remain in ElarionPermissions.All)",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
-    private static class TrackingNames
-    {
+    private static class TrackingNames {
         public const string Permissions = "PermissionCatalogPermissions";
         public const string Roles = "PermissionCatalogRoles";
         public const string PerModule = "PermissionCatalogPerModule";
@@ -54,8 +57,7 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
     }
 
     /// <inheritdoc/>
-    public void Initialize(IncrementalGeneratorInitializationContext context)
-    {
+    public void Initialize(IncrementalGeneratorInitializationContext context) {
         var permissions = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 PermissionDiscovery.RequirePermissionAttributeMetadataName,
@@ -83,8 +85,7 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         // referenced assemblies register their own).
         var perModule = permissions.Combine(roles).Combine(modules).Combine(trigger)
             .WithTrackingName(TrackingNames.PerModule);
-        context.RegisterSourceOutput(perModule, static (spc, source) =>
-        {
+        context.RegisterSourceOutput(perModule, static (spc, source) => {
             var (((permissionGuards, roleGuards), moduleList), hasTrigger) = source;
             if (hasTrigger)
                 EmitPerModule(spc, permissionGuards, roleGuards, moduleList);
@@ -104,8 +105,7 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         var staticInput = permissions.Combine(roles).Combine(modules).Combine(manifests).Combine(rootNamespace)
             .Combine(trigger)
             .WithTrackingName(TrackingNames.Static);
-        context.RegisterSourceOutput(staticInput, static (spc, source) =>
-        {
+        context.RegisterSourceOutput(staticInput, static (spc, source) => {
             var (((((permissionGuards, roleGuards), moduleList), manifestList), ns), hasTrigger) = source;
             if (hasTrigger)
                 EmitStatic(spc, permissionGuards, roleGuards, moduleList, manifestList, ns);
@@ -118,18 +118,16 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         SourceProductionContext spc,
         ImmutableArray<PermissionDiscovery.PermissionGuard> permissions,
         ImmutableArray<PermissionDiscovery.RoleGuard> roles,
-        EquatableArray<ModuleScanner.Module> modules)
-    {
+        EquatableArray<ModuleScanner.Module> modules) {
         var modulePermissions = modules.ToDictionary(
-            module => module, _ => new SortedDictionary<string, PermissionDiscovery.PermissionValue>(StringComparer.Ordinal));
+            module => module,
+            _ => new SortedDictionary<string, PermissionDiscovery.PermissionValue>(StringComparer.Ordinal));
         var moduleRoles = modules.ToDictionary(module => module, _ => new SortedSet<string>(StringComparer.Ordinal));
         var reportedUnmatched = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var guard in permissions)
-        {
+        foreach (var guard in permissions) {
             var module = FindBestModule(guard.Namespace, modules);
-            if (module is null)
-            {
+            if (module is null) {
                 ReportUnmatched(spc, reportedUnmatched, guard.HandlerFqn, guard.Location);
                 continue;
             }
@@ -138,11 +136,9 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
                 modulePermissions[module][value.Permission] = value;
         }
 
-        foreach (var guard in roles)
-        {
+        foreach (var guard in roles) {
             var module = FindBestModule(guard.Namespace, modules);
-            if (module is null)
-            {
+            if (module is null) {
                 ReportUnmatched(spc, reportedUnmatched, guard.HandlerFqn, guard.Location);
                 continue;
             }
@@ -151,8 +147,7 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
                 moduleRoles[module].Add(value);
         }
 
-        foreach (var module in modules.OrderBy(module => module.Name, StringComparer.Ordinal))
-        {
+        foreach (var module in modules.OrderBy(module => module.Name, StringComparer.Ordinal)) {
             var perms = modulePermissions[module];
             var roleNames = moduleRoles[module];
             if (perms.Count == 0 && roleNames.Count == 0)
@@ -163,8 +158,7 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
     }
 
     private static void ReportUnmatched(
-        SourceProductionContext spc, HashSet<string> reported, string handlerFqn, LocationInfo location)
-    {
+        SourceProductionContext spc, HashSet<string> reported, string handlerFqn, LocationInfo location) {
         if (reported.Add(handlerFqn))
             spc.ReportDiagnostic(DiagnosticInfo.Create(RequirementNotInModule, location, handlerFqn).ToDiagnostic());
     }
@@ -173,16 +167,14 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         SourceProductionContext spc,
         ModuleScanner.Module module,
         IEnumerable<PermissionDiscovery.PermissionValue> permissions,
-        SortedSet<string> roles)
-    {
+        SortedSet<string> roles) {
         var moduleName = module.Name;
 
         var sb = new StringBuilder();
         sb.AppendLine("using Elarion.Abstractions.Authorization;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine();
-        if (module.Namespace.Length > 0)
-        {
+        if (module.Namespace.Length > 0) {
             sb.AppendLine($"namespace {module.Namespace};");
             sb.AppendLine();
         }
@@ -237,13 +229,10 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         ImmutableArray<PermissionDiscovery.RoleGuard> roles,
         EquatableArray<ModuleScanner.Module> currentModules,
         ImmutableArray<ManifestReadResult> manifests,
-        string targetNamespace)
-    {
+        string targetNamespace) {
         foreach (var result in manifests)
-        {
             if (result.Diagnostic is { } manifestDiagnostic)
                 spc.ReportDiagnostic(manifestDiagnostic.ToDiagnostic());
-        }
 
         var manifest = ElarionManifest.Data.Combine(manifests.Select(static r => r.Data));
 
@@ -289,15 +278,15 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         sb.AppendLine("// Do not edit this file manually.");
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
-        if (targetNamespace.Length > 0)
-        {
+        if (targetNamespace.Length > 0) {
             sb.AppendLine($"namespace {targetNamespace};");
             sb.AppendLine();
         }
 
         sb.AppendLine("/// <summary>");
         sb.AppendLine("/// The compile-time catalog of every [RequirePermission]/[RequireRole] declared across the");
-        sb.AppendLine("/// application (and referenced module assemblies). Reference it from static role policy so the");
+        sb.AppendLine(
+            "/// application (and referenced module assemblies). Reference it from static role policy so the");
         sb.AppendLine("/// permission lists are never hand-maintained.");
         sb.AppendLine("/// </summary>");
         sb.AppendLine("public static partial class ElarionPermissions");
@@ -310,9 +299,11 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         sb.AppendLine();
         AppendStringMap(sb, "ByModule", "Permissions grouped by owning module.", byModule);
         sb.AppendLine();
-        AppendStringMap(sb, "ByResource", "Permissions grouped by resource (Kubernetes \"all verbs on a resource\").", byResource);
+        AppendStringMap(sb, "ByResource", "Permissions grouped by resource (Kubernetes \"all verbs on a resource\").",
+            byResource);
         sb.AppendLine();
-        AppendStringMap(sb, "ByVerb", "Permissions grouped by verb (Kubernetes \"this verb across all resources\").", byVerb);
+        AppendStringMap(sb, "ByVerb", "Permissions grouped by verb (Kubernetes \"this verb across all resources\").",
+            byVerb);
         AppendAccessors(sb, accessors);
         sb.AppendLine("}");
 
@@ -320,11 +311,9 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
     }
 
     private static SortedDictionary<string, SortedSet<string>> GroupBy(
-        IEnumerable<ResolvedPermission> permissions, Func<ResolvedPermission, string?> key)
-    {
+        IEnumerable<ResolvedPermission> permissions, Func<ResolvedPermission, string?> key) {
         var map = new SortedDictionary<string, SortedSet<string>>(StringComparer.Ordinal);
-        foreach (var permission in permissions)
-        {
+        foreach (var permission in permissions) {
             var k = key(permission);
             if (k is null)
                 continue;
@@ -337,14 +326,14 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
     }
 
     private static void AppendStringMap(
-        StringBuilder sb, string propertyName, string summary, SortedDictionary<string, SortedSet<string>> map)
-    {
+        StringBuilder sb, string propertyName, string summary, SortedDictionary<string, SortedSet<string>> map) {
         var dictType =
             $"global::System.Collections.Generic.IReadOnlyDictionary<string, {ReadOnlyListFqn}>";
         var concreteType =
             $"global::System.Collections.Generic.Dictionary<string, {ReadOnlyListFqn}>";
         sb.AppendLine($"    /// <summary>{summary}</summary>");
-        sb.AppendLine($"    public static {dictType} {propertyName} {{ get; }} = new {concreteType}(global::System.StringComparer.Ordinal)");
+        sb.AppendLine(
+            $"    public static {dictType} {propertyName} {{ get; }} = new {concreteType}(global::System.StringComparer.Ordinal)");
         sb.AppendLine("    {");
         foreach (var pair in map)
             sb.AppendLine($"        [{Literal(pair.Key)}] = {StringArrayLiteral(pair.Value)},");
@@ -354,24 +343,22 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
     // --- Typed accessors: resource -> nested class, verb -> const member ---
 
     private static SortedDictionary<string, SortedDictionary<string, string>> BuildAccessors(
-        IEnumerable<ResolvedPermission> permissions, SourceProductionContext spc)
-    {
+        IEnumerable<ResolvedPermission> permissions, SourceProductionContext spc) {
         var groups = new SortedDictionary<string, SortedDictionary<string, string>>(StringComparer.Ordinal);
         var claimed = new Dictionary<string, string>(StringComparer.Ordinal); // "Group.Member" -> permission
 
-        foreach (var permission in permissions.OrderBy(p => p.Permission, StringComparer.Ordinal))
-        {
+        foreach (var permission in permissions.OrderBy(p => p.Permission, StringComparer.Ordinal)) {
             var group = Pascal(permission.Resource);
             var member = Pascal(permission.Verb);
             if (group.Length == 0 || member.Length == 0)
                 continue;
 
             var path = group + "." + member;
-            if (claimed.TryGetValue(path, out var existing))
-            {
+            if (claimed.TryGetValue(path, out var existing)) {
                 if (!string.Equals(existing, permission.Permission, StringComparison.Ordinal))
                     spc.ReportDiagnostic(
-                        Diagnostic.Create(DuplicateTypedAccessor, Location.None, existing, permission.Permission, path));
+                        Diagnostic.Create(DuplicateTypedAccessor, Location.None, existing, permission.Permission,
+                            path));
                 continue;
             }
 
@@ -384,10 +371,9 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         return groups;
     }
 
-    private static void AppendAccessors(StringBuilder sb, SortedDictionary<string, SortedDictionary<string, string>> groups)
-    {
-        foreach (var groupEntry in groups)
-        {
+    private static void AppendAccessors(StringBuilder sb,
+        SortedDictionary<string, SortedDictionary<string, string>> groups) {
+        foreach (var groupEntry in groups) {
             sb.AppendLine();
             sb.AppendLine($"    /// <summary>Permissions on the '{groupEntry.Key}' resource.</summary>");
             sb.AppendLine($"    public static class {groupEntry.Key}");
@@ -398,22 +384,17 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
         }
     }
 
-    private static string Pascal(string segment)
-    {
+    private static string Pascal(string segment) {
         var sb = new StringBuilder(segment.Length);
         var upperNext = true;
         foreach (var ch in segment)
-        {
-            if (char.IsLetterOrDigit(ch))
-            {
+            if (char.IsLetterOrDigit(ch)) {
                 sb.Append(upperNext ? char.ToUpperInvariant(ch) : ch);
                 upperNext = false;
             }
-            else
-            {
+            else {
                 upperNext = true;
             }
-        }
 
         if (sb.Length > 0 && char.IsDigit(sb[0]))
             sb.Insert(0, '_');
@@ -422,42 +403,37 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator
 
     // --- Shared helpers ---
 
-    private static ModuleScanner.Module? FindBestModule(string handlerNamespace, EquatableArray<ModuleScanner.Module> modules)
-    {
+    private static ModuleScanner.Module? FindBestModule(string handlerNamespace,
+        EquatableArray<ModuleScanner.Module> modules) {
         ModuleScanner.Module? best = null;
         foreach (var module in modules)
-        {
             if (ModuleScanner.IsInScope(handlerNamespace, module.Namespace) &&
                 (best is null || module.Namespace.Length > best.Namespace.Length))
                 best = module;
-        }
 
         return best;
     }
 
-    private static string? FindBestModule(string handlerNamespace, List<(string Name, string Namespace)> modules)
-    {
+    private static string? FindBestModule(string handlerNamespace, List<(string Name, string Namespace)> modules) {
         string? bestName = null;
         var bestLength = -1;
         foreach (var (name, ns) in modules)
-        {
-            if (ModuleScanner.IsInScope(handlerNamespace, ns) && ns.Length > bestLength)
-            {
+            if (ModuleScanner.IsInScope(handlerNamespace, ns) && ns.Length > bestLength) {
                 bestName = name;
                 bestLength = ns.Length;
             }
-        }
 
         return bestName;
     }
 
-    private static string StringArrayLiteral(IEnumerable<string> values)
-    {
+    private static string StringArrayLiteral(IEnumerable<string> values) {
         var literals = values.Select(Literal).ToArray();
         return literals.Length == 0
             ? "global::System.Array.Empty<string>()"
             : "new string[] { " + string.Join(", ", literals) + " }";
     }
 
-    private static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);
+    private static string Literal(string value) {
+        return SymbolDisplay.FormatLiteral(value, true);
+    }
 }

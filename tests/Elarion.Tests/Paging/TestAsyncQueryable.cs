@@ -10,49 +10,53 @@ namespace Elarion.Tests.Paging;
 /// <c>CountAsync</c>) execute against LINQ-to-Objects without a database. This keeps the pagination
 /// execution tests deterministic and provider-agnostic.
 /// </summary>
-internal sealed class TestAsyncEnumerable<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
-{
+internal sealed class TestAsyncEnumerable<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T> {
     public TestAsyncEnumerable(IEnumerable<T> enumerable)
-        : base(enumerable)
-    {
+        : base(enumerable) {
     }
 
     public TestAsyncEnumerable(Expression expression)
-        : base(expression)
-    {
+        : base(expression) {
     }
 
-    public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
-        => new TestAsyncEnumerator<T>(((IEnumerable<T>)this).GetEnumerator());
+    public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) {
+        return new TestAsyncEnumerator<T>(((IEnumerable<T>)this).GetEnumerator());
+    }
 
     IQueryProvider IQueryable.Provider => new TestAsyncQueryProvider<T>(this);
 }
 
-internal sealed class TestAsyncEnumerator<T>(IEnumerator<T> inner) : IAsyncEnumerator<T>
-{
+internal sealed class TestAsyncEnumerator<T>(IEnumerator<T> inner) : IAsyncEnumerator<T> {
     public T Current => inner.Current;
 
-    public ValueTask<bool> MoveNextAsync() => new(inner.MoveNext());
+    public ValueTask<bool> MoveNextAsync() {
+        return new ValueTask<bool>(inner.MoveNext());
+    }
 
-    public ValueTask DisposeAsync()
-    {
+    public ValueTask DisposeAsync() {
         inner.Dispose();
         return default;
     }
 }
 
-internal sealed class TestAsyncQueryProvider<TEntity>(IQueryProvider inner) : IAsyncQueryProvider
-{
-    public IQueryable CreateQuery(Expression expression) => new TestAsyncEnumerable<TEntity>(expression);
+internal sealed class TestAsyncQueryProvider<TEntity>(IQueryProvider inner) : IAsyncQueryProvider {
+    public IQueryable CreateQuery(Expression expression) {
+        return new TestAsyncEnumerable<TEntity>(expression);
+    }
 
-    public IQueryable<TElement> CreateQuery<TElement>(Expression expression) => new TestAsyncEnumerable<TElement>(expression);
+    public IQueryable<TElement> CreateQuery<TElement>(Expression expression) {
+        return new TestAsyncEnumerable<TElement>(expression);
+    }
 
-    public object? Execute(Expression expression) => inner.Execute(expression);
+    public object? Execute(Expression expression) {
+        return inner.Execute(expression);
+    }
 
-    public TResult Execute<TResult>(Expression expression) => inner.Execute<TResult>(expression);
+    public TResult Execute<TResult>(Expression expression) {
+        return inner.Execute<TResult>(expression);
+    }
 
-    public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
-    {
+    public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default) {
         var resultType = typeof(TResult).GetGenericArguments()[0];
         var executeMethod = typeof(IQueryProvider)
             .GetMethods()
@@ -66,7 +70,8 @@ internal sealed class TestAsyncQueryProvider<TEntity>(IQueryProvider inner) : IA
     }
 }
 
-internal static class TestAsyncQueryable
-{
-    public static IQueryable<T> AsAsyncQueryable<T>(this IEnumerable<T> source) => new TestAsyncEnumerable<T>(source);
+internal static class TestAsyncQueryable {
+    public static IQueryable<T> AsAsyncQueryable<T>(this IEnumerable<T> source) {
+        return new TestAsyncEnumerable<T>(source);
+    }
 }

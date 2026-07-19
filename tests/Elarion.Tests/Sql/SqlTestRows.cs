@@ -10,7 +10,7 @@ namespace Elarion.Tests.SqlMapping;
 public enum SqlItemStatus {
     Draft = 0,
     Active = 1,
-    Archived = 2,
+    Archived = 2
 }
 
 public sealed record SqlItemProfile {
@@ -29,8 +29,7 @@ public sealed partial record SqlItem {
 
     public required string Name { get; init; }
 
-    [SqlColumn("note_text")]
-    public string? Note { get; init; }
+    [SqlColumn("note_text")] public string? Note { get; init; }
 
     public required int Quantity { get; init; }
 
@@ -50,11 +49,9 @@ public sealed partial record SqlItem {
 
     public DateOnly? DueOn { get; init; }
 
-    [SqlJson]
-    public SqlItemProfile? Profile { get; init; }
+    [SqlJson] public SqlItemProfile? Profile { get; init; }
 
-    [SqlIgnore]
-    public string? Transient { get; init; }
+    [SqlIgnore] public string? Transient { get; init; }
 
     // Derived member (no setter): skipped by the mapper, per the state-record convention.
     public bool IsNamed => Name.Length > 0;

@@ -11,7 +11,9 @@ public sealed class HmacChallengeVerifierTests {
 
     private readonly InMemoryDeviceKeyStore _keys = new();
 
-    private HmacChallengeVerifier CreateVerifier() => new(_keys);
+    private HmacChallengeVerifier CreateVerifier() {
+        return new HmacChallengeVerifier(_keys);
+    }
 
     private async Task<byte[]> ProvisionAsync(string deviceId) {
         var key = RandomNumberGenerator.GetBytes(32);
@@ -72,7 +74,8 @@ public sealed class HmacChallengeVerifierTests {
         var verifier = CreateVerifier();
         var nonce = HmacChallengeVerifier.CreateNonce();
 
-        (await verifier.VerifyAsync("meter-1", nonce, HmacChallengeVerifier.ComputeResponse(otherKey, nonce), TestToken))
+        (await verifier.VerifyAsync("meter-1", nonce, HmacChallengeVerifier.ComputeResponse(otherKey, nonce),
+                TestToken))
             .Should().BeNull();
     }
 
@@ -80,7 +83,8 @@ public sealed class HmacChallengeVerifierTests {
     public async Task Verify_EmptyDeviceIdOrNonce_ReturnsNull() {
         var verifier = CreateVerifier();
 
-        (await verifier.VerifyAsync("", HmacChallengeVerifier.CreateNonce(), new byte[32], TestToken)).Should().BeNull();
+        (await verifier.VerifyAsync("", HmacChallengeVerifier.CreateNonce(), new byte[32], TestToken)).Should()
+            .BeNull();
         (await verifier.VerifyAsync("meter-1", ReadOnlyMemory<byte>.Empty, new byte[32], TestToken)).Should().BeNull();
     }
 

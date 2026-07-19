@@ -45,11 +45,9 @@ internal sealed class HandlerPipeline(Func<IReadOnlyList<PipelineStep>>? accesso
     public bool Contains(Type decoratorDefinition) {
         ArgumentNullException.ThrowIfNull(decoratorDefinition);
         var steps = Steps;
-        for (var i = 0; i < steps.Count; i++) {
-            if (steps[i].Decorator == decoratorDefinition) {
+        for (var i = 0; i < steps.Count; i++)
+            if (steps[i].Decorator == decoratorDefinition)
                 return true;
-            }
-        }
 
         return false;
     }

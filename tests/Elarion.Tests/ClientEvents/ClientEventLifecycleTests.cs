@@ -38,15 +38,18 @@ public sealed partial class ClientEventLifecycleTests {
 
         private TaskCompletionSource _signal = NewSignal();
 
-        public Task WaitForNextAsync(CancellationToken ct) => _signal.Task.WaitAsync(ct);
+        public Task WaitForNextAsync(CancellationToken ct) {
+            return _signal.Task.WaitAsync(ct);
+        }
 
         public void Pulse() {
             var previous = Interlocked.Exchange(ref _signal, NewSignal());
             previous.TrySetResult();
         }
 
-        private static TaskCompletionSource NewSignal() =>
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private static TaskCompletionSource NewSignal() {
+            return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
     }
 
     private sealed class GreetingObserver(Recorder recorder) : IClientEventSubscriptionObserver {
@@ -86,6 +89,7 @@ public sealed partial class ClientEventLifecycleTests {
                 gate.Entered.TrySetResult();
                 await gate.Release.Task;
             }
+
             recorder.InterestChanges.Enqueue((subscription, active));
             recorder.Pulse();
         }
@@ -108,9 +112,7 @@ public sealed partial class ClientEventLifecycleTests {
     private static ServiceProvider BuildProvider(FakeTimeProvider? timeProvider = null) {
         var services = new ServiceCollection();
         services.AddSingleton(new Recorder());
-        if (timeProvider is not null) {
-            services.AddSingleton<TimeProvider>(timeProvider);
-        }
+        if (timeProvider is not null) services.AddSingleton<TimeProvider>(timeProvider);
         services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(LifecycleTestContext.Default));
         services.AddElarionClientEvents(events => events
             .AddTopic<QuoteChanged>("market.quoteChanged", t => t
@@ -121,13 +123,13 @@ public sealed partial class ClientEventLifecycleTests {
         return services.BuildServiceProvider();
     }
 
-    private static ClientEventSubscription Sub(string resource) =>
-        new() { Topic = "market.quoteChanged", Scope = ClientEventScope.Resource(resource) };
+    private static ClientEventSubscription Sub(string resource) {
+        return new ClientEventSubscription
+            { Topic = "market.quoteChanged", Scope = ClientEventScope.Resource(resource) };
+    }
 
     private static async Task WaitUntilAsync(Recorder recorder, Func<bool> condition, CancellationToken ct) {
-        while (!condition()) {
-            await recorder.WaitForNextAsync(ct);
-        }
+        while (!condition()) await recorder.WaitForNextAsync(ct);
     }
 
     [Fact]

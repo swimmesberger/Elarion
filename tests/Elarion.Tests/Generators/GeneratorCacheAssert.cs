@@ -9,8 +9,7 @@ namespace Elarion.Tests.Generators;
 /// re-runs the discovery transform but produces an equal model — i.e. the pipeline value models are
 /// genuinely value-equatable and the generator does not re-emit on unrelated edits.
 /// </summary>
-internal static class GeneratorCacheAssert
-{
+internal static class GeneratorCacheAssert {
     /// <summary>
     /// Runs <paramref name="generator"/> over <paramref name="source"/>, then appends an unrelated
     /// declaration to the same syntax tree (forcing the transform to re-run) and asserts every output
@@ -20,8 +19,7 @@ internal static class GeneratorCacheAssert
     public static void ReusesOutputsAfterIrrelevantEdit(
         IIncrementalGenerator generator,
         string source,
-        params string[] trackingNames)
-    {
+        params string[] trackingNames) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
         var compilation = CSharpCompilation.Create(
@@ -35,7 +33,7 @@ internal static class GeneratorCacheAssert
             parseOptions: parseOptions,
             additionalTexts: null,
             optionsProvider: null,
-            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
+            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, true));
 
         driver = driver.RunGenerators(compilation);
 
@@ -49,8 +47,7 @@ internal static class GeneratorCacheAssert
         driver = driver.RunGenerators(editedCompilation);
 
         var result = driver.GetRunResult().Results.Single();
-        foreach (var trackingName in trackingNames)
-        {
+        foreach (var trackingName in trackingNames) {
             result.TrackedSteps.Should().ContainKey(
                 trackingName,
                 "the generator must tag its '{0}' node with WithTrackingName", trackingName);
@@ -77,8 +74,7 @@ internal static class GeneratorCacheAssert
     public static void ReusesDiscoveryAfterUnrelatedFileEdit(
         IIncrementalGenerator generator,
         string source,
-        params string[] trackingNames)
-    {
+        params string[] trackingNames) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var tree = CSharpSyntaxTree.ParseText(source, parseOptions);
         var unrelated = CSharpSyntaxTree.ParseText(
@@ -94,7 +90,7 @@ internal static class GeneratorCacheAssert
             parseOptions: parseOptions,
             additionalTexts: null,
             optionsProvider: null,
-            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
+            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, true));
 
         driver = driver.RunGenerators(compilation);
 
@@ -105,8 +101,7 @@ internal static class GeneratorCacheAssert
         driver = driver.RunGenerators(editedCompilation);
 
         var result = driver.GetRunResult().Results.Single();
-        foreach (var trackingName in trackingNames)
-        {
+        foreach (var trackingName in trackingNames) {
             result.TrackedSteps.Should().ContainKey(
                 trackingName,
                 "the generator must tag its '{0}' node with WithTrackingName", trackingName);
@@ -123,8 +118,7 @@ internal static class GeneratorCacheAssert
         }
     }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 

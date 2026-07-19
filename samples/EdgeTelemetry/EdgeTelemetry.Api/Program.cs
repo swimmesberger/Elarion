@@ -29,7 +29,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateSlimBuilder(args);
 
 var connectionString = builder.Configuration.GetConnectionString("Telemetry")
-    ?? throw new InvalidOperationException("Missing connection string 'Telemetry'.");
+                       ?? throw new InvalidOperationException("Missing connection string 'Telemetry'.");
 
 // One pooled data source for the host. The slim builder maps exactly the PostgreSQL types this app
 // uses (uuid, text, timestamptz, double precision, jsonb-as-string); `Max Auto Prepare` turns the
@@ -41,9 +41,7 @@ var connectionString = builder.Configuration.GetConnectionString("Telemetry")
 builder.Services.AddSingleton(sp => {
     var db = new NpgsqlSlimDataSourceBuilder(connectionString);
     db.UseLoggerFactory(sp.GetRequiredService<ILoggerFactory>());
-    if (builder.Environment.IsDevelopment()) {
-        db.EnableParameterLogging();
-    }
+    if (builder.Environment.IsDevelopment()) db.EnableParameterLogging();
 
     return db.Build();
 });
@@ -103,42 +101,42 @@ app.MapGet("/healthz", () => Results.Text("ok"));
 // typed-directly, render the Result<T> (success → 200, AppError.Validation → 400,
 // AppError.NotFound → 404 problem details) via ElarionHttpResults.
 app.MapPost("/readings", static async (
-    ReadingInput[] readings,
-    IHandler<IngestReadings.Command, Result<IngestResult>> ingest,
-    CancellationToken ct) =>
+        ReadingInput[] readings,
+        IHandler<IngestReadings.Command, Result<IngestResult>> ingest,
+        CancellationToken ct) =>
     ElarionHttpResults.ToResult(await ingest.HandleAsync(new IngestReadings.Command(readings), ct)));
 
 app.MapGet("/devices/{deviceId}/latest", static async (
-    string deviceId,
-    string metric,
-    IHandler<GetLatestReading.Query, Result<ReadingRow>> latest,
-    CancellationToken ct) =>
+        string deviceId,
+        string metric,
+        IHandler<GetLatestReading.Query, Result<ReadingRow>> latest,
+        CancellationToken ct) =>
     ElarionHttpResults.ToResult(await latest.HandleAsync(new GetLatestReading.Query(deviceId, metric), ct)));
 
 app.MapGet("/devices/{deviceId}/history", static async (
-    string deviceId,
-    string metric,
-    IHandler<GetReadingHistory.Query, Result<List<ReadingRow>>> history,
-    CancellationToken ct,
-    int limit = 100) =>
+        string deviceId,
+        string metric,
+        IHandler<GetReadingHistory.Query, Result<List<ReadingRow>>> history,
+        CancellationToken ct,
+        int limit = 100) =>
     ElarionHttpResults.ToResult(await history.HandleAsync(new GetReadingHistory.Query(deviceId, metric, limit), ct)));
 
 // Unlike /history's buffered JSON array, this finite export leaves the Npgsql reader open while native SSE
 // serializes each row. Direct MapGet keeps route/query binding visible to RDG; the lazy result starts the
 // decorated stream only when ASP.NET executes it and can still return a normal problem before SSE headers.
 app.MapGet("/devices/{deviceId}/history/stream", static (
-    string deviceId,
-    string metric,
-    int limit) =>
+        string deviceId,
+        string metric,
+        int limit) =>
     ElarionHttpResults.ToStreamResult<ExportReadingHistory.Query, ReadingRow>(
         new ExportReadingHistory.Query(deviceId, metric, limit)));
 
 app.MapGet("/devices/{deviceId}/stats", static async (
-    string deviceId,
-    string metric,
-    IHandler<GetMetricStats.Query, Result<List<MetricBucket>>> stats,
-    CancellationToken ct,
-    int hours = 24) =>
+        string deviceId,
+        string metric,
+        IHandler<GetMetricStats.Query, Result<List<MetricBucket>>> stats,
+        CancellationToken ct,
+        int hours = 24) =>
     ElarionHttpResults.ToResult(await stats.HandleAsync(new GetMetricStats.Query(deviceId, metric, hours), ct)));
 
 app.Run();

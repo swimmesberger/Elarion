@@ -6,18 +6,19 @@ using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Pipeline;
 using Elarion.Tests.Services;
 using Xunit;
-
 using Elarion.Pipeline;
 using Elarion.Diagnostics;
+
 namespace Elarion.Tests.Features;
 
 public sealed class FeatureGateDecoratorTests {
     private static FeatureGateDecorator<GatedCommand, Result<string>> Decorate(
-        Type handlerType, IFeatureFlagService features, RecordingHandler? inner = null) =>
-        new(
+        Type handlerType, IFeatureFlagService features, RecordingHandler? inner = null) {
+        return new FeatureGateDecorator<GatedCommand, Result<string>>(
             inner ?? new RecordingHandler(Result<string>.Success("ok")),
             new HandlerMetadata(handlerType, typeof(GatedCommand), typeof(Result<string>)),
             features);
+    }
 
     [Fact]
     public async Task EnabledFlag_RunsHandler() {
@@ -135,8 +136,9 @@ public sealed class FeatureGateDecoratorTests {
     private sealed class FakeFeatureFlags : IFeatureFlagService {
         private readonly Dictionary<string, bool> _flags;
 
-        public FakeFeatureFlags(params (string Name, bool Enabled)[] flags) =>
+        public FakeFeatureFlags(params (string Name, bool Enabled)[] flags) {
             _flags = flags.ToDictionary(flag => flag.Name, flag => flag.Enabled, StringComparer.Ordinal);
+        }
 
         public List<string> Queried { get; } = [];
 

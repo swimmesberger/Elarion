@@ -1,13 +1,13 @@
 <Project>
   <PropertyGroup>
     <ElarionJsonRpcGenerateSchema Condition="'$(ElarionJsonRpcGenerateSchema)' == ''">false</ElarionJsonRpcGenerateSchema>
-    <ElarionJsonRpcGenerateSchemaOnBuild Condition="'$(ElarionJsonRpcGenerateSchemaOnBuild)' == ''" />
-    <ElarionJsonRpcSchemaGenerationOptions Condition="'$(ElarionJsonRpcSchemaGenerationOptions)' == ''" />
-    <ElarionJsonRpcSchemaApplicationArguments Condition="'$(ElarionJsonRpcSchemaApplicationArguments)' == ''" />
+    <ElarionJsonRpcGenerateSchemaOnBuild Condition="'$(ElarionJsonRpcGenerateSchemaOnBuild)' == ''"/>
+    <ElarionJsonRpcSchemaGenerationOptions Condition="'$(ElarionJsonRpcSchemaGenerationOptions)' == ''"/>
+    <ElarionJsonRpcSchemaApplicationArguments Condition="'$(ElarionJsonRpcSchemaApplicationArguments)' == ''"/>
     <ElarionJsonRpcSchemaEnvironment Condition="'$(ElarionJsonRpcSchemaEnvironment)' == ''">Development</ElarionJsonRpcSchemaEnvironment>
     <ElarionJsonRpcSchemaOutputDirectory Condition="'$(ElarionJsonRpcSchemaOutputDirectory)' == ''">$(BaseIntermediateOutputPath)</ElarionJsonRpcSchemaOutputDirectory>
     <ElarionJsonRpcSchemaFileName Condition="'$(ElarionJsonRpcSchemaFileName)' == ''">rpc-schema.json</ElarionJsonRpcSchemaFileName>
-    <ElarionJsonRpcSchemaOutputPath Condition="'$(ElarionJsonRpcSchemaOutputPath)' == ''" />
+    <ElarionJsonRpcSchemaOutputPath Condition="'$(ElarionJsonRpcSchemaOutputPath)' == ''"/>
     <ElarionJsonRpcSchemaToolPath Condition="'$(ElarionJsonRpcSchemaToolPath)' == ''">$(MSBuildThisFileDirectory)..\tools\dotnet-elarion-getrpcschema.dll</ElarionJsonRpcSchemaToolPath>
   </PropertyGroup>
 </Project>

@@ -37,13 +37,19 @@ internal sealed class SettingsChangeDispatchScope(
     private readonly Stack<int> _savepointMarks = new();
 
     /// <summary>Announces a change immediately — the write is already durable (no ambient transaction).</summary>
-    public void PublishNow(SettingsScope scope, string key) => Announce(scope, key);
+    public void PublishNow(SettingsScope scope, string key) {
+        Announce(scope, key);
+    }
 
     /// <summary>Buffers a change made inside a caller-owned transaction; <see cref="Flush"/> announces it after commit.</summary>
-    public void Defer(SettingsScope scope, string key) => _buffer.Add((scope, key));
+    public void Defer(SettingsScope scope, string key) {
+        _buffer.Add((scope, key));
+    }
 
     /// <summary>Records the current buffer size as the high-water mark for a newly created savepoint.</summary>
-    public void PushSavepoint() => _savepointMarks.Push(_buffer.Count);
+    public void PushSavepoint() {
+        _savepointMarks.Push(_buffer.Count);
+    }
 
     /// <summary>
     /// Truncates the buffer back to the most recent savepoint mark, dropping every change buffered after that
@@ -51,33 +57,23 @@ internal sealed class SettingsChangeDispatchScope(
     /// rolled back to again or released later.
     /// </summary>
     public void RollbackToSavepoint() {
-        if (_savepointMarks.Count == 0) {
-            return;
-        }
+        if (_savepointMarks.Count == 0) return;
 
         var mark = _savepointMarks.Peek();
-        if (mark < _buffer.Count) {
-            _buffer.RemoveRange(mark, _buffer.Count - mark);
-        }
+        if (mark < _buffer.Count) _buffer.RemoveRange(mark, _buffer.Count - mark);
     }
 
     /// <summary>Pops the most recent savepoint mark without touching the buffer (SQL <c>RELEASE SAVEPOINT</c>).</summary>
     public void ReleaseSavepoint() {
-        if (_savepointMarks.Count > 0) {
-            _savepointMarks.Pop();
-        }
+        if (_savepointMarks.Count > 0) _savepointMarks.Pop();
     }
 
     /// <summary>Announces every buffered change after the caller's transaction commits.</summary>
     public void Flush() {
         _savepointMarks.Clear();
-        if (_buffer.Count == 0) {
-            return;
-        }
+        if (_buffer.Count == 0) return;
 
-        foreach (var (scope, key) in _buffer) {
-            Announce(scope, key);
-        }
+        foreach (var (scope, key) in _buffer) Announce(scope, key);
 
         _buffer.Clear();
     }
@@ -96,7 +92,8 @@ internal sealed class SettingsChangeDispatchScope(
             // Publishing fires in-process watch-token callbacks synchronously; a throwing watcher must not
             // propagate out of the store write or the committing transaction.
             logger.LogDebug(
-                ex, "A settings change watcher threw while being notified of '{Key}' in scope '{Scope}'.", key, scope.Kind);
+                ex, "A settings change watcher threw while being notified of '{Key}' in scope '{Scope}'.", key,
+                scope.Kind);
         }
     }
 }

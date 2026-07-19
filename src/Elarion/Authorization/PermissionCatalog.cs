@@ -34,19 +34,21 @@ internal sealed class PermissionCatalog : IPermissionCatalog {
     public IReadOnlyList<PermissionCatalogModule> Modules { get; }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> Group(
-        IEnumerable<PermissionCatalogEntry> entries, Func<PermissionCatalogEntry, string> key) =>
-        entries
+        IEnumerable<PermissionCatalogEntry> entries, Func<PermissionCatalogEntry, string> key) {
+        return entries
             .GroupBy(key, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
                 group => (IReadOnlyList<string>)Distinct(group.Select(entry => entry.Permission)),
                 StringComparer.Ordinal);
+    }
 
-    private static string[] Distinct(IEnumerable<string> values) =>
-        values
+    private static string[] Distinct(IEnumerable<string> values) {
+        return values
             .Where(value => !string.IsNullOrEmpty(value))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
+    }
 }

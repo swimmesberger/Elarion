@@ -12,9 +12,8 @@ namespace Elarion.Abstractions.Serialization;
 /// </summary>
 public sealed class ElarionFileJsonConverter : JsonConverter<ElarionFile> {
     public override ElarionFile Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) {
-        if (reader.TokenType != JsonTokenType.StartObject) {
+        if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("Expected an object for an ElarionFile payload.");
-        }
 
         string? contentType = null;
         string? fileName = null;
@@ -22,48 +21,45 @@ public sealed class ElarionFileJsonConverter : JsonConverter<ElarionFile> {
 
         // Malformed payloads must throw JsonException (never FormatException/InvalidOperationException) so
         // transports classify them as invalid input (-32602) rather than an internal error.
-        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject) {
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
             if (reader.ValueTextEquals("contentType"u8)) {
                 reader.Read();
                 contentType = ReadStringOrNull(ref reader, "contentType");
-            } else if (reader.ValueTextEquals("fileName"u8)) {
+            }
+            else if (reader.ValueTextEquals("fileName"u8)) {
                 reader.Read();
                 fileName = ReadStringOrNull(ref reader, "fileName");
-            } else if (reader.ValueTextEquals("data"u8)) {
+            }
+            else if (reader.ValueTextEquals("data"u8)) {
                 reader.Read();
-                if (reader.TokenType != JsonTokenType.String || !reader.TryGetBytesFromBase64(out data)) {
+                if (reader.TokenType != JsonTokenType.String || !reader.TryGetBytesFromBase64(out data))
                     throw new JsonException("An ElarionFile 'data' property must be a base64-encoded string.");
-                }
-            } else {
+            }
+            else {
                 reader.Read();
                 reader.Skip();
             }
-        }
 
-        if (contentType is null || contentType.Length == 0) {
+        if (contentType is null || contentType.Length == 0)
             throw new JsonException("An ElarionFile payload requires a non-empty 'contentType'.");
-        }
 
-        if (data is null) {
-            throw new JsonException("An ElarionFile payload requires a base64 'data' property.");
-        }
+        if (data is null) throw new JsonException("An ElarionFile payload requires a base64 'data' property.");
 
         return new ElarionFile(data, contentType) { FileName = fileName };
     }
 
-    private static string? ReadStringOrNull(ref Utf8JsonReader reader, string propertyName) =>
-        reader.TokenType switch {
+    private static string? ReadStringOrNull(ref Utf8JsonReader reader, string propertyName) {
+        return reader.TokenType switch {
             JsonTokenType.String => reader.GetString(),
             JsonTokenType.Null => null,
-            _ => throw new JsonException($"An ElarionFile '{propertyName}' property must be a string."),
+            _ => throw new JsonException($"An ElarionFile '{propertyName}' property must be a string.")
         };
+    }
 
     public override void Write(Utf8JsonWriter writer, ElarionFile value, JsonSerializerOptions options) {
         writer.WriteStartObject();
         writer.WriteString("contentType"u8, value.ContentType);
-        if (value.FileName is not null) {
-            writer.WriteString("fileName"u8, value.FileName);
-        }
+        if (value.FileName is not null) writer.WriteString("fileName"u8, value.FileName);
 
         writer.WriteBase64String("data"u8, value.Bytes.Span);
         writer.WriteEndObject();

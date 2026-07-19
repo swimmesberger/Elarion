@@ -15,37 +15,37 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="BenchmarkDotNet"/>
     <!-- Cross-platform profiling (opt-in via the "profiler DT" CLI switch, macOS-friendly): auto-downloads
          the JetBrains dotTrace CLI on first run and emits a .dtt snapshot. The speedscope/flamegraph path
          (the "profiler EP" switch) needs no package; EventPipeProfiler ships in the core package. See Program.cs. -->
-    <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection"/>
     <!-- Bulk insert competitors (benchmark-only dependencies; the MIT fork of EFCore.BulkExtensions is
          deliberate — the upstream package is revenue-gated dual-license). -->
-    <PackageReference Include="EFCore.BulkExtensions.MIT.PostgreSql" />
-    <PackageReference Include="linq2db.EntityFrameworkCore" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-    <PackageReference Include="PhenX.EntityFrameworkCore.BulkInsert.PostgreSql" />
-    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="EFCore.BulkExtensions.MIT.PostgreSql"/>
+    <PackageReference Include="linq2db.EntityFrameworkCore"/>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"/>
+    <PackageReference Include="PhenX.EntityFrameworkCore.BulkInsert.PostgreSql"/>
+    <PackageReference Include="Testcontainers.PostgreSql"/>
     <!-- SQL row-mapping competitors (ADR-0058 gate). -->
-    <PackageReference Include="Dapper" />
-    <PackageReference Include="Dapper.AOT" />
+    <PackageReference Include="Dapper"/>
+    <PackageReference Include="Dapper.AOT"/>
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/Elarion/Elarion.csproj" />
-    <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj" />
-    <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj" />
-    <ProjectReference Include="../../src/Elarion.Connections.Simulation/Elarion.Connections.Simulation.csproj" />
-    <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />
-    <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj" />
+    <ProjectReference Include="../../src/Elarion/Elarion.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Connections.Simulation/Elarion.Connections.Simulation.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj"/>
+    <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj"/>
     <!-- The mapper generator applied as an analyzer, so the benchmarks exercise the REAL generated
          mapper (in-repo ProjectReferences do not flow bundled analyzers). -->
     <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"
                       OutputItemType="Analyzer"
-                      ReferenceOutputAssembly="false" />
+                      ReferenceOutputAssembly="false"/>
   </ItemGroup>
 
 </Project>

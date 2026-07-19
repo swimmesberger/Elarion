@@ -23,8 +23,9 @@ public static class ElarionOpenApiServiceCollectionExtensions {
     /// <param name="configureOptions">Optional extra configuration applied after the Elarion transformers.</param>
     public static IServiceCollection AddElarionOpenApi(
         this IServiceCollection services,
-        Action<OpenApiOptions>? configureOptions = null) =>
-        services.AddElarionOpenApi(documentName: "v1", configureOptions);
+        Action<OpenApiOptions>? configureOptions = null) {
+        return services.AddElarionOpenApi("v1", configureOptions);
+    }
 
     /// <summary>Adds an Elarion OpenAPI document with the given <paramref name="documentName"/>.</summary>
     /// <param name="services">The service collection.</param>

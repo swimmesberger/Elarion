@@ -9,7 +9,8 @@ namespace Elarion.Tests.Settings;
 public sealed class InProcessSettingsStoreTests {
     private static InProcessSettingsStore CreateStore(out RecordingChangePublisher publisher) {
         publisher = new RecordingChangePublisher();
-        return new InProcessSettingsStore(publisher, new FakeTimeProvider(DateTimeOffset.Parse("2026-01-02T03:04:05Z")));
+        return new InProcessSettingsStore(publisher,
+            new FakeTimeProvider(DateTimeOffset.Parse("2026-01-02T03:04:05Z")));
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -51,7 +52,7 @@ public sealed class InProcessSettingsStoreTests {
         await store.SetAsync(SettingsScope.Global, "k", "1", cancellationToken: Ct);
         await store.SetAsync(SettingsScope.Global, "k", "2", cancellationToken: Ct);
 
-        var result = await store.SetAsync(SettingsScope.Global, "k", "3", expectedVersion: 1, cancellationToken: Ct);
+        var result = await store.SetAsync(SettingsScope.Global, "k", "3", 1, Ct);
 
         result.Status.Should().Be(SettingWriteStatus.ConcurrencyConflict);
         (await store.GetAsync(SettingsScope.Global, "k", Ct)).Should().Be("2");
@@ -62,7 +63,7 @@ public sealed class InProcessSettingsStoreTests {
         var store = CreateStore(out _);
         await store.SetAsync(SettingsScope.Global, "k", "1", cancellationToken: Ct);
 
-        var result = await store.SetAsync(SettingsScope.Global, "k", "2", expectedVersion: 1, cancellationToken: Ct);
+        var result = await store.SetAsync(SettingsScope.Global, "k", "2", 1, Ct);
 
         result.IsSuccess.Should().BeTrue();
         result.Version.Should().Be(2);
@@ -72,7 +73,7 @@ public sealed class InProcessSettingsStoreTests {
     public async Task Set_NewKey_WithExpectedExistingVersion_ReturnsConflict() {
         var store = CreateStore(out _);
 
-        var result = await store.SetAsync(SettingsScope.Global, "k", "1", expectedVersion: 5, cancellationToken: Ct);
+        var result = await store.SetAsync(SettingsScope.Global, "k", "1", 5, Ct);
 
         result.Status.Should().Be(SettingWriteStatus.ConcurrencyConflict);
         (await store.GetAsync(SettingsScope.Global, "k", Ct)).Should().BeNull();
@@ -107,7 +108,7 @@ public sealed class InProcessSettingsStoreTests {
         await store.SetAsync(SettingsScope.Global, "k", "1", cancellationToken: Ct);
         await store.SetAsync(SettingsScope.Global, "k", "2", cancellationToken: Ct);
 
-        var removed = await store.RemoveAsync(SettingsScope.Global, "k", expectedVersion: 1, cancellationToken: Ct);
+        var removed = await store.RemoveAsync(SettingsScope.Global, "k", 1, Ct);
 
         removed.Should().BeFalse();
         (await store.GetAsync(SettingsScope.Global, "k", Ct)).Should().Be("2");
@@ -150,7 +151,7 @@ public sealed class InProcessSettingsStoreTests {
     public async Task Set_Conflict_DoesNotPublish() {
         var store = CreateStore(out var publisher);
 
-        await store.SetAsync(SettingsScope.Global, "k", "1", expectedVersion: 9, cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "1", 9, Ct);
 
         publisher.Published.Should().BeEmpty();
     }
@@ -158,6 +159,8 @@ public sealed class InProcessSettingsStoreTests {
     private sealed class RecordingChangePublisher : ISettingsChangePublisher {
         public List<(SettingsScope Scope, string Key)> Published { get; } = [];
 
-        public void Publish(SettingsScope scope, string key) => Published.Add((scope, key));
+        public void Publish(SettingsScope scope, string key) {
+            Published.Add((scope, key));
+        }
     }
 }

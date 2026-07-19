@@ -5,14 +5,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion\Elarion.csproj" />
+    <ProjectReference Include="..\Elarion\Elarion.csproj"/>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
   </ItemGroup>
 
   <!-- Bundle the auditing source generator's analyzer into this package. NuGet analyzer assets are not
@@ -21,20 +21,20 @@
        becoming a downstream package dependency. -->
   <ItemGroup>
     <ProjectReference Include="..\Elarion.Auditing.EntityFrameworkCore.Generators\Elarion.Auditing.EntityFrameworkCore.Generators.csproj"
-                     ReferenceOutputAssembly="false"
-                     PrivateAssets="all" />
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"/>
   </ItemGroup>
 
   <Target Name="_BundleElarionAuditingGenerator" BeforeTargets="_GetPackageFiles">
     <MSBuild Projects="..\Elarion.Auditing.EntityFrameworkCore.Generators\Elarion.Auditing.EntityFrameworkCore.Generators.csproj"
              Targets="GetTargetPath">
-      <Output TaskParameter="TargetOutputs" ItemName="_ElarionAuditingGeneratorAnalyzer" />
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionAuditingGeneratorAnalyzer"/>
     </MSBuild>
     <ItemGroup>
       <None Include="@(_ElarionAuditingGeneratorAnalyzer)"
             Pack="true"
             PackagePath="analyzers/dotnet/cs/"
-            Visible="false" />
+            Visible="false"/>
     </ItemGroup>
   </Target>
 

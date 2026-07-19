@@ -36,9 +36,7 @@ public sealed class ClientDunningActorTests {
     private static ServiceProvider BuildActorHost(FakeTimeProvider? timeProvider = null) {
         var services = new ServiceCollection();
         services.AddLogging();
-        if (timeProvider is not null) {
-            services.AddSingleton<TimeProvider>(timeProvider);
-        }
+        if (timeProvider is not null) services.AddSingleton<TimeProvider>(timeProvider);
 
         // The snapshot store behind IActorState<ClientDunningState> (ADR-0047). Production registers the
         // PostgreSQL store (AddElarionPostgreSqlActorSnapshots<BillingDbContext>); tests swap the seam for
@@ -84,9 +82,7 @@ public sealed class ClientDunningActorTests {
         var escalating = Guid.CreateVersion7();
         var quiet = Guid.CreateVersion7();
 
-        for (var i = 0; i < 3; i++) {
-            await relay.HandleAsync(new InvoiceOverdue(Guid.CreateVersion7(), escalating), Ct);
-        }
+        for (var i = 0; i < 3; i++) await relay.HandleAsync(new InvoiceOverdue(Guid.CreateVersion7(), escalating), Ct);
 
         await relay.HandleAsync(new InvoiceOverdue(Guid.CreateVersion7(), quiet), Ct);
 
@@ -160,9 +156,8 @@ public sealed class ClientDunningActorTests {
         // ADR-0047 the count reset to zero here; now the next activation reloads the snapshot.
         var stopwatch = Stopwatch.StartNew();
         while (telemetry.Deactivations == 0) {
-            if (stopwatch.Elapsed > WaitTimeout) {
+            if (stopwatch.Elapsed > WaitTimeout)
                 throw new TimeoutException("The dunning activation did not passivate in time.");
-            }
 
             time.Advance(TimeSpan.FromMinutes(6));
             await Task.Delay(10, Ct);
@@ -185,21 +180,20 @@ public sealed class ClientDunningActorTests {
 
         public ActorDeactivationListener() {
             _listener.InstrumentPublished = (instrument, listener) => {
-                if (instrument.Meter.Name == "Elarion.Actors" && instrument.Name == "actor.activations.active") {
+                if (instrument.Meter.Name == "Elarion.Actors" && instrument.Name == "actor.activations.active")
                     listener.EnableMeasurementEvents(instrument);
-                }
             };
             _listener.SetMeasurementEventCallback<long>((_, value, _, _) => {
-                if (value < 0) {
-                    Interlocked.Increment(ref _deactivations);
-                }
+                if (value < 0) Interlocked.Increment(ref _deactivations);
             });
             _listener.Start();
         }
 
         public long Deactivations => Interlocked.Read(ref _deactivations);
 
-        public void Dispose() => _listener.Dispose();
+        public void Dispose() {
+            _listener.Dispose();
+        }
     }
 
     /// <summary>
@@ -209,40 +203,39 @@ public sealed class ClientDunningActorTests {
     private sealed class InMemorySnapshotStore : IActorSnapshotStore {
         private readonly ConcurrentDictionary<ActorSnapshotKey, (string Payload, long Version)> _rows = new();
 
-        public ValueTask<ActorSnapshot?> ReadAsync(ActorSnapshotKey key, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult<ActorSnapshot?>(_rows.TryGetValue(key, out var row)
+        public ValueTask<ActorSnapshot?>
+            ReadAsync(ActorSnapshotKey key, CancellationToken cancellationToken = default) {
+            return ValueTask.FromResult<ActorSnapshot?>(_rows.TryGetValue(key, out var row)
                 ? new ActorSnapshot {
                     Payload = row.Payload,
                     ETag = row.Version.ToString(CultureInfo.InvariantCulture)
                 }
                 : null);
+        }
 
         public ValueTask<string> WriteAsync(
             ActorSnapshotKey key, string payload, string? expectedETag, CancellationToken cancellationToken = default) {
             if (expectedETag is null) {
                 var version = Random.Shared.NextInt64(1, long.MaxValue >> 1);
-                if (!_rows.TryAdd(key, (payload, version))) {
-                    throw new ActorSnapshotConcurrencyException(key, expectedETag: null);
-                }
+                if (!_rows.TryAdd(key, (payload, version))) throw new ActorSnapshotConcurrencyException(key, null);
 
                 return ValueTask.FromResult(version.ToString(CultureInfo.InvariantCulture));
             }
 
             var expectedVersion = long.Parse(expectedETag, CultureInfo.InvariantCulture);
             if (!_rows.TryGetValue(key, out var row) || row.Version != expectedVersion ||
-                !_rows.TryUpdate(key, (payload, expectedVersion + 1), row)) {
+                !_rows.TryUpdate(key, (payload, expectedVersion + 1), row))
                 throw new ActorSnapshotConcurrencyException(key, expectedETag);
-            }
 
             return ValueTask.FromResult((expectedVersion + 1).ToString(CultureInfo.InvariantCulture));
         }
 
-        public ValueTask ClearAsync(ActorSnapshotKey key, string expectedETag, CancellationToken cancellationToken = default) {
+        public ValueTask ClearAsync(ActorSnapshotKey key, string expectedETag,
+            CancellationToken cancellationToken = default) {
             var expectedVersion = long.Parse(expectedETag, CultureInfo.InvariantCulture);
             if (!_rows.TryGetValue(key, out var row) || row.Version != expectedVersion ||
-                !_rows.TryRemove(new KeyValuePair<ActorSnapshotKey, (string, long)>(key, row))) {
+                !_rows.TryRemove(new KeyValuePair<ActorSnapshotKey, (string, long)>(key, row)))
                 throw new ActorSnapshotConcurrencyException(key, expectedETag);
-            }
 
             return ValueTask.CompletedTask;
         }

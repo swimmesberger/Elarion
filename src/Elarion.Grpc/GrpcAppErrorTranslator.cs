@@ -12,8 +12,7 @@ namespace Elarion.Grpc;
 /// Validation detail payloads are deliberately not serialized in phase one. The trailer preserves the error
 /// category now; a future version can add a stable protobuf detail contract without changing this mapping.
 /// </remarks>
-public sealed class GrpcAppErrorTranslator : IAppErrorTranslator<RpcException>
-{
+public sealed class GrpcAppErrorTranslator : IAppErrorTranslator<RpcException> {
     /// <summary>The stable lower-case metadata key carrying the normalized Elarion error kind.</summary>
     public const string ErrorKindTrailerKey = "elarion-error-kind";
 
@@ -21,12 +20,10 @@ public sealed class GrpcAppErrorTranslator : IAppErrorTranslator<RpcException>
     public static GrpcAppErrorTranslator Default { get; } = new();
 
     /// <inheritdoc />
-    public RpcException Translate(AppError error)
-    {
+    public RpcException Translate(AppError error) {
         ArgumentNullException.ThrowIfNull(error);
 
-        var (statusCode, kind) = error.Kind switch
-        {
+        var (statusCode, kind) = error.Kind switch {
             ErrorKind.Validation => (StatusCode.InvalidArgument, "validation"),
             ErrorKind.NotFound => (StatusCode.NotFound, "not-found"),
             ErrorKind.Conflict => (StatusCode.AlreadyExists, "conflict"),
@@ -34,11 +31,11 @@ public sealed class GrpcAppErrorTranslator : IAppErrorTranslator<RpcException>
             ErrorKind.Unauthorized => (StatusCode.Unauthenticated, "unauthorized"),
             ErrorKind.BusinessRule => (StatusCode.FailedPrecondition, "business-rule"),
             ErrorKind.Internal => (StatusCode.Internal, "internal"),
-            _ => (StatusCode.Internal, "internal"),
+            _ => (StatusCode.Internal, "internal")
         };
 
         var trailers = new Metadata {
-            { ErrorKindTrailerKey, kind },
+            { ErrorKindTrailerKey, kind }
         };
         return new RpcException(new Status(statusCode, error.Message), trailers);
     }

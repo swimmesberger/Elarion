@@ -5,8 +5,7 @@ namespace Elarion.Generators;
 /// <summary>
 /// Shared sanitization for AddSource hint names derived from a type's fully-qualified name.
 /// </summary>
-internal static class HintNames
-{
+internal static class HintNames {
     /// <summary>
     /// Maps a fully-qualified type name to a valid, collision-free hint name. Every non-identifier character
     /// becomes <c>_</c> (spaces are dropped), and when the input contains any character whose mapping is
@@ -16,31 +15,24 @@ internal static class HintNames
     /// generator). Plain dotted names — the overwhelmingly common case — keep their historical shape, the
     /// same pattern <c>AppModuleDiscoveryGenerator.ModuleMethodNamePart</c> uses for method names.
     /// </summary>
-    public static string Sanitize(string fqn)
-    {
+    public static string Sanitize(string fqn) {
         var value = fqn.StartsWith("global::", StringComparison.Ordinal) ? fqn.Substring(8) : fqn;
         var sb = new StringBuilder(value.Length);
         var ambiguous = false;
         foreach (var ch in value)
-        {
-            if (ch == '.')
-            {
+            if (ch == '.') {
                 sb.Append('_');
             }
-            else if (ch == ' ')
-            {
+            else if (ch == ' ') {
                 ambiguous = true;
             }
-            else if (ch != '_' && char.IsLetterOrDigit(ch))
-            {
+            else if (ch != '_' && char.IsLetterOrDigit(ch)) {
                 sb.Append(ch);
             }
-            else
-            {
+            else {
                 sb.Append('_');
                 ambiguous = true;
             }
-        }
 
         if (!ambiguous)
             return sb.ToString();
@@ -48,11 +40,9 @@ internal static class HintNames
         return $"{sb}_{StableHash(value)}";
     }
 
-    private static string StableHash(string value)
-    {
+    private static string StableHash(string value) {
         var hash = 2166136261u;
-        foreach (var ch in value)
-        {
+        foreach (var ch in value) {
             hash ^= ch;
             hash *= 16777619u;
         }

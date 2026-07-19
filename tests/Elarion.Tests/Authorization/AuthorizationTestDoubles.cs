@@ -12,13 +12,17 @@ internal sealed class FakeCurrentUser : ICurrentUser {
     public bool IsAuthenticated { get; init; }
     public IReadOnlyList<(string Type, string Value)> Claims { get; init; } = [];
 
-    public bool IsInRole(string role) => Roles.Contains(role, StringComparer.Ordinal);
+    public bool IsInRole(string role) {
+        return Roles.Contains(role, StringComparer.Ordinal);
+    }
 
-    public bool HasClaim(string type, string value) =>
-        Claims.Any(claim => claim.Type == type && claim.Value == value);
+    public bool HasClaim(string type, string value) {
+        return Claims.Any(claim => claim.Type == type && claim.Value == value);
+    }
 
-    public IEnumerable<string> GetClaimValues(string type) =>
-        Claims.Where(claim => claim.Type == type).Select(claim => claim.Value);
+    public IEnumerable<string> GetClaimValues(string type) {
+        return Claims.Where(claim => claim.Type == type).Select(claim => claim.Value);
+    }
 }
 
 /// <summary>A configurable <see cref="IResourceAuthorizer"/> that records its calls.</summary>

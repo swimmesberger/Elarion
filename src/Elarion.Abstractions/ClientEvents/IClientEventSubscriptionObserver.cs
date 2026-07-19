@@ -25,7 +25,9 @@ public interface IClientEventSubscriptionObserver {
     /// <param name="sink">The single-subscriber sink (e.g. for an initial value).</param>
     /// <param name="ct">A cancellation token.</param>
     ValueTask OnSubscribedAsync(
-        ClientEventSubscription subscription, IClientEventSubscriberSink sink, CancellationToken ct) => default;
+        ClientEventSubscription subscription, IClientEventSubscriberSink sink, CancellationToken ct) {
+        return default;
+    }
 
     /// <summary>Interest in a (topic, scope) transitioned: <see langword="true"/> on the first subscriber,
     /// <see langword="false"/> after the last one left and the topic's linger elapsed.</summary>
@@ -33,5 +35,7 @@ public interface IClientEventSubscriptionObserver {
     /// <param name="active">Whether at least one subscriber now observes the pair.</param>
     /// <param name="ct">A cancellation token.</param>
     ValueTask OnInterestChangedAsync(
-        ClientEventSubscription subscription, bool active, CancellationToken ct) => default;
+        ClientEventSubscription subscription, bool active, CancellationToken ct) {
+        return default;
+    }
 }

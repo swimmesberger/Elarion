@@ -1,4 +1,4 @@
-import type { JsonSchema } from './schema.js'
+import type {JsonSchema} from './schema.js'
 
 export class UnsupportedJsonSchemaError extends Error {
   constructor(
@@ -34,7 +34,7 @@ export function baseType(schema: JsonSchema): string | undefined {
 }
 
 export function stripNullable(schema: JsonSchema): JsonSchema {
-  const copy: JsonSchema = { ...schema }
+  const copy: JsonSchema = {...schema}
   if (Array.isArray(copy.type)) {
     const nonNull = copy.type.filter((type) => type !== 'null')
     copy.type = nonNull.length === 1 ? nonNull[0] : nonNull
@@ -60,7 +60,7 @@ export function resolveSchema(schema: JsonSchema, ctx: SchemaContext): ResolvedS
   assertSupportedComposition(schema, ctx.path)
 
   if (!schema.$ref) {
-    return { schema, ctx }
+    return {schema, ctx}
   }
 
   if (!schema.$ref.startsWith('#/')) {
@@ -107,7 +107,7 @@ export function collectFilePaths(schema: JsonSchema, ctx: SchemaContext): string
 }
 
 function visitFileNodes(schema: JsonSchema, ctx: SchemaContext, prefix: string[], paths: string[][]): void {
-  const { schema: resolved, ctx: resolvedCtx } = resolveSchema(schema, ctx)
+  const {schema: resolved, ctx: resolvedCtx} = resolveSchema(schema, ctx)
   if (resolved['x-elarion-file'] === true) {
     paths.push(prefix)
     return

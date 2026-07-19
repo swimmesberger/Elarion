@@ -24,9 +24,8 @@ public static class RoleLeaseServiceCollectionExtensions {
         configure(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.Name);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.PartitionCount);
-        if (options.Name.EndsWith(':')) {
+        if (options.Name.EndsWith(':'))
             throw new ArgumentException("Role partition names must not end with ':'.", nameof(configure));
-        }
 
         ValidateRoleName(GetPartitionRole(options.Name, options.PartitionCount - 1), nameof(configure));
 
@@ -45,16 +44,14 @@ public static class RoleLeaseServiceCollectionExtensions {
 
         if (services.Any(descriptor => descriptor.ServiceType == typeof(IRolePartition)
                                        && descriptor.IsKeyedService
-                                       && Equals(descriptor.ServiceKey, options.Name))) {
+                                       && Equals(descriptor.ServiceKey, options.Name)))
             throw new InvalidOperationException($"A role partition named '{options.Name}' is already registered.");
-        }
 
         services.AddKeyedSingleton<IRolePartition>(options.Name, (serviceProvider, _) => {
             var leases = new IRoleLease[options.PartitionCount];
-            for (var partition = 0; partition < leases.Length; partition++) {
+            for (var partition = 0; partition < leases.Length; partition++)
                 leases[partition] = serviceProvider.GetRequiredKeyedService<IRoleLease>(
                     GetPartitionRole(options.Name, partition));
-            }
 
             return new PostgreSqlRolePartition(options.Name, leases);
         });
@@ -62,7 +59,9 @@ public static class RoleLeaseServiceCollectionExtensions {
     }
 
     /// <summary>Returns the stable role name for one partition.</summary>
-    public static string GetPartitionRole(string name, int partition) => $"{name}:partition-{partition}";
+    public static string GetPartitionRole(string name, int partition) {
+        return $"{name}:partition-{partition}";
+    }
 
     /// <summary>
     /// Registers one heartbeat-renewed role lease: an <see cref="IRoleLease"/> keyed by
@@ -90,20 +89,18 @@ public static class RoleLeaseServiceCollectionExtensions {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.RoleName);
         ValidateRoleName(options.RoleName, nameof(options));
-        if (options.LeaseDuration <= options.RenewInterval + options.HeldSafetyMargin) {
+        if (options.LeaseDuration <= options.RenewInterval + options.HeldSafetyMargin)
             throw new ArgumentException(
                 $"RoleLeaseOptions.LeaseDuration for role '{options.RoleName}' must exceed RenewInterval + "
                 + "HeldSafetyMargin, or the holder would flap between renewals.");
-        }
 
         // Two leases for one role in one process would compete against themselves (distinct random
         // InstanceIds) — a wiring bug, surfaced at registration.
         if (services.Any(descriptor => descriptor.ServiceType == typeof(IRoleLease)
                                        && descriptor.IsKeyedService
-                                       && Equals(descriptor.ServiceKey, options.RoleName))) {
+                                       && Equals(descriptor.ServiceKey, options.RoleName)))
             throw new InvalidOperationException(
                 $"A role lease for '{options.RoleName}' is already registered; register each role once.");
-        }
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<RoleLeaseRegistry>();
@@ -128,11 +125,10 @@ public static class RoleLeaseServiceCollectionExtensions {
     }
 
     private static void ValidateRoleName(string roleName, string parameterName) {
-        if (roleName.Length > RoleLeaseOptions.MaximumRoleNameLength) {
+        if (roleName.Length > RoleLeaseOptions.MaximumRoleNameLength)
             throw new ArgumentException(
                 $"Role name '{roleName}' is {roleName.Length} characters; PostgreSQL role names must be "
                 + $"at most {RoleLeaseOptions.MaximumRoleNameLength} characters.",
                 parameterName);
-        }
     }
 }

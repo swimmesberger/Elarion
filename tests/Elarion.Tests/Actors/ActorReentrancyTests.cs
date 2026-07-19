@@ -119,8 +119,8 @@ public sealed class ActorReentrancyTests {
         services.AddElarionActor(new ActorRegistration<PingPongActor, string, IPingPong> {
             Name = "PingPong",
             Options = new ActorOptions { Reentrant = true },
-            Activator = static (sp, context) => new PingPongActor(
-                key => sp.GetRequiredService<IActorSystem>().Get<IPingPong>(key)),
+            Activator = static (sp, context) =>
+                new PingPongActor(key => sp.GetRequiredService<IActorSystem>().Get<IPingPong>(key)),
             Facade = static handle => new PingPongFacade(handle)
         });
         services.AddElarionActor(new ActorRegistration<ParallelProbeActor, string, IParallelProbe> {
@@ -147,7 +147,9 @@ public sealed class ActorReentrancyTests {
 
         public Task Opened => _gate.Task;
 
-        public void Release() => _gate.TrySetResult();
+        public void Release() {
+            _gate.TrySetResult();
+        }
     }
 
     // --- Self-caller: the same actor class registered reentrant and non-reentrant ---
@@ -170,29 +172,36 @@ public sealed class ActorReentrancyTests {
             await self(context.Key).Noop(cancellationToken);
         }
 
-        public Task Noop() => Task.CompletedTask;
+        public Task Noop() {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ReentrantSelfCallerFacade(ActorHandle<SelfCallerActor> handle) : IReentrantSelfCaller {
-        public ValueTask CallSelf(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new CallSelfItem(), cancellationToken);
+        public ValueTask CallSelf(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new CallSelfItem(), cancellationToken);
+        }
 
-        public ValueTask Noop(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new NoopItem(), cancellationToken);
+        public ValueTask Noop(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new NoopItem(), cancellationToken);
+        }
     }
 
     private sealed class BlockingSelfCallerFacade(ActorHandle<SelfCallerActor> handle) : IBlockingSelfCaller {
-        public ValueTask CallSelf(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new CallSelfItem(), cancellationToken);
+        public ValueTask CallSelf(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new CallSelfItem(), cancellationToken);
+        }
 
-        public ValueTask Noop(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new NoopItem(), cancellationToken);
+        public ValueTask Noop(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new NoopItem(), cancellationToken);
+        }
     }
 
     private sealed class CallSelfItem : ActorWorkItem<SelfCallerActor, Unit> {
         public override string MethodName => "CallSelf";
 
-        protected override async ValueTask<Unit> InvokeAsync(SelfCallerActor actor, CancellationToken cancellationToken) {
+        protected override async ValueTask<Unit>
+            InvokeAsync(SelfCallerActor actor, CancellationToken cancellationToken) {
             await actor.CallSelf(cancellationToken).ConfigureAwait(false);
             return Unit.Value;
         }
@@ -201,7 +210,8 @@ public sealed class ActorReentrancyTests {
     private sealed class NoopItem : ActorWorkItem<SelfCallerActor, Unit> {
         public override string MethodName => "Noop";
 
-        protected override async ValueTask<Unit> InvokeAsync(SelfCallerActor actor, CancellationToken cancellationToken) {
+        protected override async ValueTask<Unit>
+            InvokeAsync(SelfCallerActor actor, CancellationToken cancellationToken) {
             await actor.Noop().ConfigureAwait(false);
             return Unit.Value;
         }
@@ -215,23 +225,29 @@ public sealed class ActorReentrancyTests {
     }
 
     public sealed class PingPongActor(Func<string, IPingPong> other) {
-        public async Task CallOther(string otherKey, CancellationToken cancellationToken) =>
+        public async Task CallOther(string otherKey, CancellationToken cancellationToken) {
             await other(otherKey).Ping(cancellationToken);
+        }
 
-        public Task Ping() => Task.CompletedTask;
+        public Task Ping() {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class PingPongFacade(ActorHandle<PingPongActor> handle) : IPingPong {
-        public ValueTask CallOther(string otherKey, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new CallOtherItem(otherKey), cancellationToken);
+        public ValueTask CallOther(string otherKey, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new CallOtherItem(otherKey), cancellationToken);
+        }
 
-        public ValueTask Ping(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new PingItem(), cancellationToken);
+        public ValueTask Ping(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new PingItem(), cancellationToken);
+        }
 
         private sealed class CallOtherItem(string otherKey) : ActorWorkItem<PingPongActor, Unit> {
             public override string MethodName => "CallOther";
 
-            protected override async ValueTask<Unit> InvokeAsync(PingPongActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(PingPongActor actor,
+                CancellationToken cancellationToken) {
                 await actor.CallOther(otherKey, cancellationToken).ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -240,7 +256,8 @@ public sealed class ActorReentrancyTests {
         private sealed class PingItem : ActorWorkItem<PingPongActor, Unit> {
             public override string MethodName => "Ping";
 
-            protected override async ValueTask<Unit> InvokeAsync(PingPongActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(PingPongActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Ping().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -261,30 +278,33 @@ public sealed class ActorReentrancyTests {
         public async Task Churn() {
             for (var i = 0; i < 20; i++) {
                 var entered = Interlocked.Increment(ref _active);
-                Thread.SpinWait(200);   // widen the window so genuine overlap cannot slip through
-                if (entered > 1 || Volatile.Read(ref _active) > 1) {
-                    Interlocked.Increment(ref _violations);
-                }
+                Thread.SpinWait(200); // widen the window so genuine overlap cannot slip through
+                if (entered > 1 || Volatile.Read(ref _active) > 1) Interlocked.Increment(ref _violations);
 
                 Interlocked.Decrement(ref _active);
                 await Task.Yield();
             }
         }
 
-        public Task<int> Violations() => Task.FromResult(_violations);
+        public Task<int> Violations() {
+            return Task.FromResult(_violations);
+        }
     }
 
     private sealed class ParallelProbeFacade(ActorHandle<ParallelProbeActor> handle) : IParallelProbe {
-        public ValueTask Churn(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new ChurnItem(), cancellationToken);
+        public ValueTask Churn(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new ChurnItem(), cancellationToken);
+        }
 
-        public ValueTask<int> Violations(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new ViolationsItem(), cancellationToken);
+        public ValueTask<int> Violations(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new ViolationsItem(), cancellationToken);
+        }
 
         private sealed class ChurnItem : ActorWorkItem<ParallelProbeActor, Unit> {
             public override string MethodName => "Churn";
 
-            protected override async ValueTask<Unit> InvokeAsync(ParallelProbeActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(ParallelProbeActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Churn().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -293,8 +313,10 @@ public sealed class ActorReentrancyTests {
         private sealed class ViolationsItem : ActorWorkItem<ParallelProbeActor, int> {
             public override string MethodName => "Violations";
 
-            protected override async ValueTask<int> InvokeAsync(ParallelProbeActor actor, CancellationToken cancellationToken) =>
-                await actor.Violations().ConfigureAwait(false);
+            protected override async ValueTask<int> InvokeAsync(ParallelProbeActor actor,
+                CancellationToken cancellationToken) {
+                return await actor.Violations().ConfigureAwait(false);
+            }
         }
     }
 
@@ -321,23 +343,28 @@ public sealed class ActorReentrancyTests {
     }
 
     private sealed class ReentrantStateFacade(ActorHandle<ReentrantStateActor> handle) : IReentrantState {
-        public ValueTask<string> ReadModeAfterAwait(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new ReadItem(), cancellationToken);
+        public ValueTask<string> ReadModeAfterAwait(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new ReadItem(), cancellationToken);
+        }
 
-        public ValueTask SetMode(string mode, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new SetModeItem(mode), cancellationToken);
+        public ValueTask SetMode(string mode, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new SetModeItem(mode), cancellationToken);
+        }
 
         private sealed class ReadItem : ActorWorkItem<ReentrantStateActor, string> {
             public override string MethodName => "ReadModeAfterAwait";
 
-            protected override async ValueTask<string> InvokeAsync(ReentrantStateActor actor, CancellationToken cancellationToken) =>
-                await actor.ReadModeAfterAwait().ConfigureAwait(false);
+            protected override async ValueTask<string> InvokeAsync(ReentrantStateActor actor,
+                CancellationToken cancellationToken) {
+                return await actor.ReadModeAfterAwait().ConfigureAwait(false);
+            }
         }
 
         private sealed class SetModeItem(string mode) : ActorWorkItem<ReentrantStateActor, Unit> {
             public override string MethodName => "SetMode";
 
-            protected override async ValueTask<Unit> InvokeAsync(ReentrantStateActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(ReentrantStateActor actor,
+                CancellationToken cancellationToken) {
                 await actor.SetMode(mode).ConfigureAwait(false);
                 return Unit.Value;
             }

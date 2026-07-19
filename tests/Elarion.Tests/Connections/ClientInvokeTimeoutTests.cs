@@ -20,7 +20,7 @@ public sealed class ClientInvokeTimeoutTests {
         var ct = TestContext.Current.CancellationToken;
         var connection = new SimulatedClientConnection {
             DefaultInvokeTimeout = TimeSpan.FromMilliseconds(150),
-            InvokeResponder = (_, _) => new ValueTask<object>(new TaskCompletionSource<object>().Task),
+            InvokeResponder = (_, _) => new ValueTask<object>(new TaskCompletionSource<object>().Task)
         };
 
         var invoke = async () => await connection.InvokeAsync<string, string>("status.get", "q", ct: ct);
@@ -33,7 +33,7 @@ public sealed class ClientInvokeTimeoutTests {
         var ct = TestContext.Current.CancellationToken;
         var connection = new SimulatedClientConnection {
             DefaultInvokeTimeout = TimeSpan.FromMinutes(5),
-            InvokeResponder = (_, _) => new ValueTask<object>(new TaskCompletionSource<object>().Task),
+            InvokeResponder = (_, _) => new ValueTask<object>(new TaskCompletionSource<object>().Task)
         };
 
         var invoke = async () => await connection.InvokeAsync<string, string>(
@@ -49,7 +49,7 @@ public sealed class ClientInvokeTimeoutTests {
         var gate = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
         var connection = new SimulatedClientConnection {
             DefaultInvokeTimeout = TimeSpan.FromMilliseconds(50),
-            InvokeResponder = (_, _) => new ValueTask<object>(gate.Task),
+            InvokeResponder = (_, _) => new ValueTask<object>(gate.Task)
         };
 
         var invoke = connection.InvokeAsync<string, string>(
@@ -69,7 +69,7 @@ public sealed class ClientInvokeTimeoutTests {
         var gate = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
         var connection = new SimulatedClientConnection {
             DefaultInvokeTimeout = null,
-            InvokeResponder = (_, _) => new ValueTask<object>(gate.Task),
+            InvokeResponder = (_, _) => new ValueTask<object>(gate.Task)
         };
 
         var invoke = connection.InvokeAsync<string, string>("status.get", "q", ct: ct).AsTask();
@@ -85,7 +85,7 @@ public sealed class ClientInvokeTimeoutTests {
     public async Task ResponsiveInvoke_IsUnaffectedByTheDefault() {
         var ct = TestContext.Current.CancellationToken;
         var connection = new SimulatedClientConnection {
-            InvokeResponder = (name, request) => ValueTask.FromResult<object>($"{name}:{request}:ack"),
+            InvokeResponder = (name, request) => ValueTask.FromResult<object>($"{name}:{request}:ack")
         };
 
         // The double ships the same default real adapters get from the kernel options.
@@ -135,7 +135,7 @@ public sealed class ClientInvokeTimeoutTests {
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
 
         await using var link = InMemoryTcpLink.Start(new TimeoutEchoHandler(), registry,
-            o => o.Framer = new DelimitedTcpFramer(end: (byte)'\n'));
+            o => o.Framer = new DelimitedTcpFramer((byte)'\n'));
         (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
         await link.Client.SendTextAsync("device:sim-1", ct);
         (await link.Client.ReceiveTextAsync(ct)).Should().Be("welcome");
@@ -157,28 +157,29 @@ public sealed class ClientInvokeTimeoutTests {
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
-                PrincipalId = reply["device:".Length..],
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
+                PrincipalId = reply["device:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new TimeoutEchoProtocol();
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new TimeoutEchoProtocol();
+        }
     }
 
     private sealed class TimeoutEchoProtocol : IClientConnectionProtocol {
-        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
-            ValueTask.CompletedTask;
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            return ValueTask.CompletedTask;
+        }
 
         public ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
             string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct)
-            where TRequest : class =>
-            ValueTask.FromResult((TResponse)(object)(options?.Timeout?.ToString() ?? "none"));
+            where TRequest : class {
+            return ValueTask.FromResult((TResponse)(object)(options?.Timeout?.ToString() ?? "none"));
+        }
     }
 }

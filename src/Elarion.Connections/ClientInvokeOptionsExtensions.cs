@@ -20,9 +20,7 @@ public static class ClientInvokeOptionsExtensions {
     /// <param name="options">The caller's per-call options, or <see langword="null"/>.</param>
     /// <param name="defaultTimeout">The adapter's configured default invoke timeout.</param>
     public static ClientInvokeOptions? WithDefaultTimeout(this ClientInvokeOptions? options, TimeSpan? defaultTimeout) {
-        if (options?.Timeout is not null || defaultTimeout is null) {
-            return options;
-        }
+        if (options?.Timeout is not null || defaultTimeout is null) return options;
 
         return options is null
             ? new ClientInvokeOptions { Timeout = defaultTimeout }

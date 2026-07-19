@@ -46,7 +46,8 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     private static readonly ConcurrentDictionary<IModel, string> UpdateSqlCache = new();
 
     /// <inheritdoc />
-    public async ValueTask<string?> GetAsync(SettingsScope scope, string key, CancellationToken cancellationToken = default) {
+    public async ValueTask<string?> GetAsync(SettingsScope scope, string key,
+        CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(key);
         var kind = scope.Kind;
         var owner = scope.Owner ?? string.Empty;
@@ -60,7 +61,8 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     }
 
     /// <inheritdoc />
-    public async ValueTask<IReadOnlyList<SettingEntry>> GetAllAsync(SettingsScope scope, CancellationToken cancellationToken = default) {
+    public async ValueTask<IReadOnlyList<SettingEntry>> GetAllAsync(SettingsScope scope,
+        CancellationToken cancellationToken = default) {
         var kind = scope.Kind;
         var owner = scope.Owner ?? string.Empty;
 
@@ -93,9 +95,7 @@ public sealed class EfCoreSettingsStore<TDbContext>(
 
         if (current is null) {
             // Create path. expectedVersion 0 (or unset) means "expected absent".
-            if (expectedVersion is not null and not 0) {
-                return SettingWriteResult.ConcurrencyConflict;
-            }
+            if (expectedVersion is not null and not 0) return SettingWriteResult.ConcurrencyConflict;
 
             var raced = false;
             try {
@@ -103,16 +103,12 @@ public sealed class EfCoreSettingsStore<TDbContext>(
             }
             catch (DbException) {
                 // A concurrent writer may have created the same key first; rethrow if it was some other failure.
-                if (!await ExistsAsync(kind, owner, key, cancellationToken).ConfigureAwait(false)) {
-                    throw;
-                }
+                if (!await ExistsAsync(kind, owner, key, cancellationToken).ConfigureAwait(false)) throw;
 
                 // For an explicit "expected absent" (expectedVersion == 0) the concurrent create is a genuine
                 // conflict; for the unconditional path (expectedVersion == null) fall through to a last-write-wins
                 // update against the row the other writer just created.
-                if (expectedVersion is 0) {
-                    return SettingWriteResult.ConcurrencyConflict;
-                }
+                if (expectedVersion is 0) return SettingWriteResult.ConcurrencyConflict;
 
                 raced = true;
             }
@@ -126,24 +122,21 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         if (current is not null && expectedVersion is { } expected) {
             // Optimistic path: guard the update on the version the caller observed, so a lost race conflicts.
             var observedVersion = current.Value;
-            if (expected != observedVersion) {
-                return SettingWriteResult.ConcurrencyConflict;
-            }
+            if (expected != observedVersion) return SettingWriteResult.ConcurrencyConflict;
 
             var guardedNewVersion = observedVersion + 1;
             var guardedUpdated = await dbContext.Set<Setting>()
                 .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key
-                    && setting.Version == observedVersion)
+                                  && setting.Version == observedVersion)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(setting => setting.Value, value)
                     .SetProperty(setting => setting.UpdatedOnUtc, now)
                     .SetProperty(setting => setting.Version, guardedNewVersion), cancellationToken)
                 .ConfigureAwait(false);
 
-            if (guardedUpdated == 0) {
+            if (guardedUpdated == 0)
                 // Lost an optimistic race between the read and the conditional update.
                 return SettingWriteResult.ConcurrencyConflict;
-            }
 
             await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
             return SettingWriteResult.Success(guardedNewVersion);
@@ -162,13 +155,11 @@ public sealed class EfCoreSettingsStore<TDbContext>(
             catch (DbException) {
                 // A concurrent create raced us; if the row now exists, retry the unconditional update once,
                 // otherwise the failure is genuine.
-                if (!await ExistsAsync(kind, owner, key, cancellationToken).ConfigureAwait(false)) {
-                    throw;
-                }
+                if (!await ExistsAsync(kind, owner, key, cancellationToken).ConfigureAwait(false)) throw;
 
                 newVersion = await UnconditionalUpdateAsync(kind, owner, key, value, now, cancellationToken)
-                    .ConfigureAwait(false)
-                    ?? 1;
+                                 .ConfigureAwait(false)
+                             ?? 1;
                 await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
                 return SettingWriteResult.Success(newVersion.Value);
             }
@@ -224,24 +215,25 @@ public sealed class EfCoreSettingsStore<TDbContext>(
 
         var deleted = await dbContext.Set<Setting>()
             .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key
-                && (expectedVersion == null || setting.Version == expectedVersion))
+                              && (expectedVersion == null || setting.Version == expectedVersion))
             .ExecuteDeleteAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (deleted == 0) {
-            return false;
-        }
+        if (deleted == 0) return false;
 
         await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
-    private Task<bool> ExistsAsync(string kind, string owner, string key, CancellationToken cancellationToken) =>
-        dbContext.Set<Setting>()
+    private Task<bool> ExistsAsync(string kind, string owner, string key, CancellationToken cancellationToken) {
+        return dbContext.Set<Setting>()
             .AsNoTracking()
-            .AnyAsync(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key, cancellationToken);
+            .AnyAsync(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key,
+                cancellationToken);
+    }
 
-    private async Task InsertAsync(string kind, string owner, string key, string? value, DateTimeOffset now, CancellationToken cancellationToken) {
+    private async Task InsertAsync(string kind, string owner, string key, string? value, DateTimeOffset now,
+        CancellationToken cancellationToken) {
         var sql = InsertSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildInsertSql(context), dbContext);
 
         // A raw null cannot have its store type inferred from a CLR DBNull, so the (nullable) value is passed
@@ -259,9 +251,9 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     private static string BuildInsertSql(DbContext context) {
         var (sqlHelper, table, column) = ResolveSettingTable(context);
         return $"INSERT INTO {table} (" +
-            $"{column(nameof(Setting.Kind))}, {column(nameof(Setting.Owner))}, {column(nameof(Setting.Key))}, " +
-            $"{column(nameof(Setting.Value))}, {column(nameof(Setting.UpdatedOnUtc))}, {column(nameof(Setting.Version))}) " +
-            "VALUES ({0}, {1}, {2}, {3}, {4}, {5})";
+               $"{column(nameof(Setting.Kind))}, {column(nameof(Setting.Owner))}, {column(nameof(Setting.Key))}, " +
+               $"{column(nameof(Setting.Value))}, {column(nameof(Setting.UpdatedOnUtc))}, {column(nameof(Setting.Version))}) " +
+               "VALUES ({0}, {1}, {2}, {3}, {4}, {5})";
     }
 
     private static string BuildUpdateSql(DbContext context) {
@@ -271,30 +263,32 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         // RETURNING (PostgreSQL, SQLite) atomically reads back the version this statement wrote; the alias
         // "Value" is the column name EF's scalar SqlQueryRaw<T> materializes from.
         return $"UPDATE {table} SET " +
-            $"{column(nameof(Setting.Value))} = {{0}}, {column(nameof(Setting.UpdatedOnUtc))} = {{1}}, " +
-            $"{version} = {version} + 1 " +
-            $"WHERE {column(nameof(Setting.Kind))} = {{2}} AND {column(nameof(Setting.Owner))} = {{3}} " +
-            $"AND {column(nameof(Setting.Key))} = {{4}} " +
-            $"RETURNING {version} AS {sqlHelper.DelimitIdentifier("Value")}";
+               $"{column(nameof(Setting.Value))} = {{0}}, {column(nameof(Setting.UpdatedOnUtc))} = {{1}}, " +
+               $"{version} = {version} + 1 " +
+               $"WHERE {column(nameof(Setting.Kind))} = {{2}} AND {column(nameof(Setting.Owner))} = {{3}} " +
+               $"AND {column(nameof(Setting.Key))} = {{4}} " +
+               $"RETURNING {version} AS {sqlHelper.DelimitIdentifier("Value")}";
     }
 
     private static (ISqlGenerationHelper SqlHelper, string Table, Func<string, string> Column) ResolveSettingTable(
         DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(Setting))
-            ?? throw new InvalidOperationException(
-                "The Setting entity is not mapped. Call modelBuilder.UseElarionSettings() in OnModelCreating.");
+                         ?? throw new InvalidOperationException(
+                             "The Setting entity is not mapped. Call modelBuilder.UseElarionSettings() in OnModelCreating.");
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The Setting entity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The Setting entity is not mapped to a table.");
         var schema = entityType.GetSchema();
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The Setting.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The Setting.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The Setting.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The Setting.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 

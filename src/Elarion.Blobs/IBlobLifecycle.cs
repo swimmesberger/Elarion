@@ -43,5 +43,6 @@ public interface IBlobLifecycle {
     /// transaction and deletes only rows still pending, so it never reclaims a blob committed
     /// concurrently. Blob content is removed by the backend's cascade.
     /// </remarks>
-    Task<int> DeleteExpiredPendingAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken);
+    Task<int> DeleteExpiredPendingAsync(DateTimeOffset olderThanUtc, int batchSize,
+        CancellationToken cancellationToken);
 }

@@ -194,7 +194,9 @@ public sealed class EventConsumerRegistrationGeneratorTests {
         var generated = AllGenerated(result);
 
         generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Integration");
-        generated.Should().Contain("return new global::System.Threading.Tasks.ValueTask(service.OnCreated((global::Sample.Events.InvoiceCreated)@event, context));");
+        generated.Should()
+            .Contain(
+                "return new global::System.Threading.Tasks.ValueTask(service.OnCreated((global::Sample.Events.InvoiceCreated)@event, context));");
     }
 
     [Fact]
@@ -260,7 +262,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT001"]);
+        var result = Generate(source, false, ["ELEVT001"]);
 
         result.Diagnostics.Any(d => d.Id == "ELEVT001" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
@@ -283,7 +285,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT002"]);
+        var result = Generate(source, false, ["ELEVT002"]);
 
         result.Diagnostics.Any(d => d.Id == "ELEVT002" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
@@ -342,8 +344,8 @@ public sealed class EventConsumerRegistrationGeneratorTests {
 
         var result = Generate(
             source,
-            assertGeneratedOutputCompiles: false,
-            allowedDiagnosticIds: ["ELEVT006"]);
+            false,
+            ["ELEVT006"]);
 
         result.Diagnostics.Count(diagnostic => diagnostic.Id == "ELEVT006").Should().Be(2);
     }
@@ -366,7 +368,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT002"]);
+        var result = Generate(source, false, ["ELEVT002"]);
 
         result.Diagnostics.Any(d => d.Id == "ELEVT002" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
@@ -525,7 +527,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT005"]);
+        var result = Generate(source, false, ["ELEVT005"]);
 
         result.Diagnostics.Any(d => d.Id == "ELEVT005" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
@@ -549,7 +551,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT005"]);
+        var result = Generate(source, false, ["ELEVT005"]);
 
         result.Diagnostics.Any(d => d.Id == "ELEVT005" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
@@ -565,7 +567,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELEVT005"]);
+        var result = Generate(source, false, ["ELEVT005"]);
 
         result.Diagnostics.Any(d => d.Id == "ELEVT005" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
@@ -599,30 +601,30 @@ public sealed class EventConsumerRegistrationGeneratorTests {
     private static string CreateSource(
         string testSource,
         string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateEventConsumers]",
-        bool wrapInModule = true)
-    {
+        bool wrapInModule = true) {
         // Consumers register only per module, so wrap the `Sample.Events` test namespace in a module by default.
         // Skip when the test already declares a module; tests asserting no-module behavior pass false.
         var moduleDeclaration = wrapInModule && !testSource.Contains("AppModule(")
             ? """
-            namespace Sample.Events {
-                [Elarion.Abstractions.Modules.AppModule("Sample")]
-                public static class GeneratedTestModule { }
-            }
-            """
+              namespace Sample.Events {
+                  [Elarion.Abstractions.Modules.AppModule("Sample")]
+                  public static class GeneratedTestModule { }
+              }
+              """
             : "";
 
         return $"""
-        {assemblyTrigger}
+                {assemblyTrigger}
 
-        {moduleDeclaration}
+                {moduleDeclaration}
 
-        {testSource}
-        """;
+                {testSource}
+                """;
     }
 
-    private static string AllGenerated(GeneratorDriverRunResult result) =>
-        string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+    private static string AllGenerated(GeneratorDriverRunResult result) {
+        return string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+    }
 
     private static GeneratorDriverRunResult Generate(
         string source,
@@ -641,7 +643,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        GeneratorDriver driver = CSharpGeneratorDriver
+        var driver = CSharpGeneratorDriver
             .Create(new EventConsumerRegistrationGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
@@ -654,20 +656,20 @@ public sealed class EventConsumerRegistrationGeneratorTests {
             .Where(d => d.Severity == DiagnosticSeverity.Error && !allowedIds.Contains(d.Id))
             .Should().BeEmpty();
 
-        if (assertGeneratedOutputCompiles) {
+        if (assertGeneratedOutputCompiles)
             outputCompilation.GetDiagnostics()
                 .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
                 .Should().BeEmpty();
-        }
 
         return result;
     }
 
-    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");

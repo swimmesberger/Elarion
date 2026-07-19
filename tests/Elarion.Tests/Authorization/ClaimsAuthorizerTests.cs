@@ -12,9 +12,10 @@ public sealed class ClaimsAuthorizerTests {
         FakeCurrentUser user,
         IEnumerable<NamedAuthorizationPolicy>? policies = null,
         AuthorizationOptions? options = null,
-        IResourceAuthorizer? resourceAuthorizer = null) =>
-        new(user, policies ?? [], resourceAuthorizer ?? new StubResourceAuthorizer(),
+        IResourceAuthorizer? resourceAuthorizer = null) {
+        return new ClaimsAuthorizer(user, policies ?? [], resourceAuthorizer ?? new StubResourceAuthorizer(),
             options ?? new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
+    }
 
     private static AuthorizationRequirements Requirements(
         bool requireAuthenticated = false,
@@ -23,8 +24,11 @@ public sealed class ClaimsAuthorizerTests {
         IReadOnlyList<RequireClaimAttribute>? claims = null,
         IReadOnlyList<string>? policies = null,
         bool allowAnonymous = false,
-        IReadOnlyList<ResourceRequirement>? resources = null) =>
-        new(allowAnonymous, requireAuthenticated, permissions ?? [], roles ?? [], claims ?? [], policies ?? [], resources ?? []);
+        IReadOnlyList<ResourceRequirement>? resources = null) {
+        return new AuthorizationRequirements(allowAnonymous, requireAuthenticated, permissions ?? [], roles ?? [],
+            claims ?? [], policies ?? [],
+            resources ?? []);
+    }
 
     [Fact]
     public async Task AllowAnonymousShortCircuits() {
@@ -90,7 +94,7 @@ public sealed class ClaimsAuthorizerTests {
     [Fact]
     public async Task RegisteredPolicyEvaluated() {
         var user = new FakeCurrentUser { IsAuthenticated = true, Claims = [("age", "25")] };
-        var authorizer = Create(user, policies: [new NamedAuthorizationPolicy("AtLeast21", new AtLeast21Policy())]);
+        var authorizer = Create(user, [new NamedAuthorizationPolicy("AtLeast21", new AtLeast21Policy())]);
 
         var error = await authorizer.AuthorizeAsync(
             Requirements(policies: ["AtLeast21"]), new GuardedCommand(1), TestContext.Current.CancellationToken);

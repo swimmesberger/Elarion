@@ -12,9 +12,7 @@ public sealed class DefaultVariantCatalog : IVariantCatalog {
         All = descriptors.ToList();
         _byKey = new Dictionary<string, List<VariantDescriptor>>(StringComparer.OrdinalIgnoreCase);
         foreach (var descriptor in All) {
-            if (!_byKey.TryGetValue(descriptor.Key, out var list)) {
-                _byKey[descriptor.Key] = list = [];
-            }
+            if (!_byKey.TryGetValue(descriptor.Key, out var list)) _byKey[descriptor.Key] = list = [];
 
             list.Add(descriptor);
         }
@@ -24,6 +22,7 @@ public sealed class DefaultVariantCatalog : IVariantCatalog {
     public IReadOnlyList<VariantDescriptor> All { get; }
 
     /// <inheritdoc />
-    public IReadOnlyList<VariantDescriptor> FindByKey(string key) =>
-        _byKey.TryGetValue(key, out var list) ? list : [];
+    public IReadOnlyList<VariantDescriptor> FindByKey(string key) {
+        return _byKey.TryGetValue(key, out var list) ? list : [];
+    }
 }

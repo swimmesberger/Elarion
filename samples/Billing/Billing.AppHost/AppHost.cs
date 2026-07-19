@@ -2,6 +2,7 @@
 // against it. `dotnet run --project samples/Billing/Billing.AppHost` brings up the database, injects its
 // connection string into the API (resource name "billing"), and opens the Aspire dashboard with traces
 // and metrics collected over OTLP. Requires a container runtime (Docker/Podman).
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder.AddPostgres("postgres")

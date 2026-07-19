@@ -16,7 +16,8 @@ public interface IDevicePairingService {
     /// <param name="cancellationToken">Cancels the issue.</param>
     /// <exception cref="ArgumentException">A caller-supplied <see cref="PairingCodeIssueOptions.DeviceId"/>
     /// is blank or longer than <see cref="DeviceIds.MaxLength"/> characters.</exception>
-    ValueTask<PairingCode> IssueAsync(PairingCodeIssueOptions? options = null, CancellationToken cancellationToken = default);
+    ValueTask<PairingCode> IssueAsync(PairingCodeIssueOptions? options = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Revokes outstanding pairing authorization for a device. A revoked code is indistinguishable from

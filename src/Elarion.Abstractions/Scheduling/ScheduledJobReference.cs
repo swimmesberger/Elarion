@@ -8,8 +8,12 @@ public readonly record struct ScheduledJobReference {
     public required string Name { get; init; }
 
     /// <inheritdoc />
-    public override string ToString() => Name;
+    public override string ToString() {
+        return Name;
+    }
 
     /// <summary>Converts the reference to its stable job name.</summary>
-    public static implicit operator string(ScheduledJobReference reference) => reference.Name;
+    public static implicit operator string(ScheduledJobReference reference) {
+        return reference.Name;
+    }
 }

@@ -16,7 +16,8 @@ public sealed class MigrationsServiceCollectionExtensionsTests {
 
         services.AddElarionPostgreSqlMigrations(
             "Host=localhost;Database=app",
-            o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly, MigrationScriptDiscoveryTests.ScriptPrefix + "Basic."));
+            o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly,
+                MigrationScriptDiscoveryTests.ScriptPrefix + "Basic."));
 
         using var provider = services.BuildServiceProvider();
         provider.GetRequiredService<IMigrationRunner>().Should().BeOfType<PostgreSqlMigrationRunner>();
@@ -32,7 +33,8 @@ public sealed class MigrationsServiceCollectionExtensionsTests {
             "Host=localhost;Database=app",
             o => {
                 o.ApplyOnStartup = false;
-                o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly, MigrationScriptDiscoveryTests.ScriptPrefix + "Basic.");
+                o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly,
+                    MigrationScriptDiscoveryTests.ScriptPrefix + "Basic.");
             });
 
         using var provider = services.BuildServiceProvider();
@@ -45,11 +47,13 @@ public sealed class MigrationsServiceCollectionExtensionsTests {
         var services = new ServiceCollection();
         services.AddElarionPostgreSqlMigrations(
             "Host=localhost;Database=app",
-            o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly, MigrationScriptDiscoveryTests.ScriptPrefix + "Basic."));
+            o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly,
+                MigrationScriptDiscoveryTests.ScriptPrefix + "Basic."));
 
         var act = () => services.AddElarionPostgreSqlMigrations(
             "Host=localhost;Database=other",
-            o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly, MigrationScriptDiscoveryTests.ScriptPrefix + "Baseline."));
+            o => o.AddScripts(typeof(MigrationsServiceCollectionExtensionsTests).Assembly,
+                MigrationScriptDiscoveryTests.ScriptPrefix + "Baseline."));
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*already registered*");
     }

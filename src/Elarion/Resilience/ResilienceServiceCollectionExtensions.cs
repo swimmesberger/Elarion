@@ -17,7 +17,8 @@ public static class ResilienceServiceCollectionExtensions {
     public static IServiceCollection AddElarionResiliencePolicyCatalog(this IServiceCollection services) {
         // Note 29: TryAdd keeps host applications free to replace these services with custom implementations.
         services.TryAddSingleton<InMemoryResiliencePolicyCatalog>();
-        services.TryAddSingleton<IResiliencePolicyCatalog>(sp => sp.GetRequiredService<InMemoryResiliencePolicyCatalog>());
+        services.TryAddSingleton<IResiliencePolicyCatalog>(sp =>
+            sp.GetRequiredService<InMemoryResiliencePolicyCatalog>());
         return services;
     }
 

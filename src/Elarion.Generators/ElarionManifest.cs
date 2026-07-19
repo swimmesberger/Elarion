@@ -2,8 +2,7 @@ using Microsoft.CodeAnalysis;
 
 namespace Elarion.Generators;
 
-internal static class ElarionManifest
-{
+internal static class ElarionManifest {
     public const string SchemaKey = "Elarion.Manifest.Schema";
     public const string SchemaVersion = "1";
 
@@ -13,15 +12,15 @@ internal static class ElarionManifest
     /// misparsed — reported loudly because dropping permission/role entries silently would weaken authorization.
     /// </summary>
     public static readonly DiagnosticDescriptor UnsupportedManifestSchema = new(
-        id: "ELMOD003",
-        title: "Unsupported Elarion manifest schema version",
-        messageFormat:
-            "Referenced assembly '{0}' advertises Elarion manifest schema version '{1}', but this generator "
-            + "understands version '{2}'; its manifest entries (modules, endpoints, permissions) are skipped. "
-            + "Rebuild the reference against a matching Elarion version.",
-        category: "Elarion.Modules",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "ELMOD003",
+        "Unsupported Elarion manifest schema version",
+        "Referenced assembly '{0}' advertises Elarion manifest schema version '{1}', but this generator "
+        + "understands version '{2}'; its manifest entries (modules, endpoints, permissions) are skipped. "
+        + "Rebuild the reference against a matching Elarion version.",
+        "Elarion.Modules",
+        DiagnosticSeverity.Warning,
+        true);
+
     public const string ModuleKey = "Elarion.Manifest.Module.v1";
     public const string ModuleEndpointsKey = "Elarion.Manifest.ModuleEndpoints.v1";
     public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v1";
@@ -96,16 +95,14 @@ internal static class ElarionManifest
         IReadOnlyList<Permission> Permissions,
         IReadOnlyList<Role> Roles,
         IReadOnlyList<Variant> Variants
-    )
-    {
+    ) {
         public static readonly Data Empty = new([], [], [], [], [], [], [], []);
 
         public bool HasEntries =>
             Modules.Count > 0 || ModuleEndpointHooks.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0
             || ResourceFilters.Count > 0 || Permissions.Count > 0 || Roles.Count > 0 || Variants.Count > 0;
 
-        public static Data Combine(IEnumerable<Data> manifests)
-        {
+        public static Data Combine(IEnumerable<Data> manifests) {
             var modules = new List<Module>();
             var moduleEndpointHooks = new List<ModuleEndpoints>();
             var httpEndpoints = new List<HttpEndpointEmission.Model>();
@@ -115,8 +112,7 @@ internal static class ElarionManifest
             var roles = new List<Role>();
             var variants = new List<Variant>();
 
-            foreach (var manifest in manifests)
-            {
+            foreach (var manifest in manifests) {
                 modules.AddRange(manifest.Modules);
                 moduleEndpointHooks.AddRange(manifest.ModuleEndpointHooks);
                 httpEndpoints.AddRange(manifest.HttpEndpoints);
@@ -127,8 +123,7 @@ internal static class ElarionManifest
                 variants.AddRange(manifest.Variants);
             }
 
-            modules.Sort(static (a, b) =>
-            {
+            modules.Sort(static (a, b) => {
                 var byName = string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal);
                 if (byName != 0)
                     return byName;
@@ -136,8 +131,7 @@ internal static class ElarionManifest
                 return string.Compare(a.TypeFqn, b.TypeFqn, StringComparison.Ordinal);
             });
 
-            moduleEndpointHooks.Sort(static (a, b) =>
-            {
+            moduleEndpointHooks.Sort(static (a, b) => {
                 var byName = string.Compare(a.ModuleName, b.ModuleName, StringComparison.Ordinal);
                 if (byName != 0)
                     return byName;
@@ -145,8 +139,7 @@ internal static class ElarionManifest
                 return string.Compare(a.TypeFqn, b.TypeFqn, StringComparison.Ordinal);
             });
 
-            httpEndpoints.Sort(static (a, b) =>
-            {
+            httpEndpoints.Sort(static (a, b) => {
                 var byVerb = string.Compare(a.Verb, b.Verb, StringComparison.Ordinal);
                 if (byVerb != 0)
                     return byVerb;
@@ -156,8 +149,7 @@ internal static class ElarionManifest
                 return string.Compare(a.EndpointName, b.EndpointName, StringComparison.Ordinal);
             });
 
-            rpcMethods.Sort(static (a, b) =>
-            {
+            rpcMethods.Sort(static (a, b) => {
                 var byMethod = string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal);
                 if (byMethod != 0)
                     return byMethod;
@@ -166,8 +158,7 @@ internal static class ElarionManifest
 
             resourceFilters.Sort(static (a, b) => string.Compare(a.SpecFqn, b.SpecFqn, StringComparison.Ordinal));
 
-            permissions.Sort(static (a, b) =>
-            {
+            permissions.Sort(static (a, b) => {
                 var byResource = string.Compare(a.Resource, b.Resource, StringComparison.Ordinal);
                 if (byResource != 0)
                     return byResource;
@@ -175,14 +166,12 @@ internal static class ElarionManifest
                 return byVerb != 0 ? byVerb : string.Compare(a.Namespace, b.Namespace, StringComparison.Ordinal);
             });
 
-            roles.Sort(static (a, b) =>
-            {
+            roles.Sort(static (a, b) => {
                 var byValue = string.Compare(a.Value, b.Value, StringComparison.Ordinal);
                 return byValue != 0 ? byValue : string.Compare(a.Namespace, b.Namespace, StringComparison.Ordinal);
             });
 
-            variants.Sort(static (a, b) =>
-            {
+            variants.Sort(static (a, b) => {
                 var byKey = string.Compare(a.SelectorKey, b.SelectorKey, StringComparison.Ordinal);
                 if (byKey != 0)
                     return byKey;
@@ -198,8 +187,8 @@ internal static class ElarionManifest
         }
     }
 
-    public static string EncodeModule(Module module) =>
-        ElarionManifestCodec.EncodeFields(
+    public static string EncodeModule(Module module) {
+        return ElarionManifestCodec.EncodeFields(
             module.ModuleName,
             module.Namespace,
             module.TypeFqn,
@@ -212,16 +201,17 @@ internal static class ElarionManifest
             // The exposed client-feature names ride a nested length-prefixed blob (like RPC parameters), so a
             // name containing a separator can never corrupt the outer field framing.
             ElarionManifestCodec.EncodeFields([.. module.ClientFeatures]));
+    }
 
-    public static string EncodeModuleEndpoints(ModuleEndpoints hooks) =>
-        ElarionManifestCodec.EncodeFields(
+    public static string EncodeModuleEndpoints(ModuleEndpoints hooks) {
+        return ElarionManifestCodec.EncodeFields(
             hooks.ModuleName,
             hooks.TypeFqn,
             EncodeBool(hooks.HasMapEndpoints),
             EncodeBool(hooks.HasConfigureEndpointGroup));
+    }
 
-    public static bool TryDecodeModuleEndpoints(string value, out ModuleEndpoints? hooks)
-    {
+    public static bool TryDecodeModuleEndpoints(string value, out ModuleEndpoints? hooks) {
         hooks = null;
         if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 4)
             return false;
@@ -229,16 +219,14 @@ internal static class ElarionManifest
             return false;
         if (!TryDecodeBool(fields[2], out var hasMapEndpoints) ||
             !TryDecodeBool(fields[3], out var hasConfigureEndpointGroup))
-        {
             return false;
-        }
 
         hooks = new ModuleEndpoints(fields[0]!, fields[1]!, hasMapEndpoints, hasConfigureEndpointGroup);
         return true;
     }
 
-    public static string EncodeHttpEndpoint(HttpEndpointEmission.Model model) =>
-        ElarionManifestCodec.EncodeFields(
+    public static string EncodeHttpEndpoint(HttpEndpointEmission.Model model) {
+        return ElarionManifestCodec.EncodeFields(
             model.EndpointName,
             model.HandlerNamespace,
             model.RequestTypeFqn,
@@ -250,9 +238,10 @@ internal static class ElarionManifest
             EncodeBool(model.ResponseIsEmpty),
             model.Description,
             EncodeBool(model.IsIdempotent));
+    }
 
-    public static string EncodeRpcMethod(RpcMethodEmission.Model model) =>
-        ElarionManifestCodec.EncodeFields(
+    public static string EncodeRpcMethod(RpcMethodEmission.Model model) {
+        return ElarionManifestCodec.EncodeFields(
             model.MethodName,
             model.HandlerNamespace,
             model.RequestTypeFqn,
@@ -266,16 +255,17 @@ internal static class ElarionManifest
             EncodeBool(model.IsIdempotent),
             // Appended (not inserted) so earlier field indices stay stable; count-gated decode below.
             EncodeBool(model.OnConnection));
+    }
 
-    public static string EncodeResourceFilter(ResourceFilter filter) =>
-        ElarionManifestCodec.EncodeFields(
+    public static string EncodeResourceFilter(ResourceFilter filter) {
+        return ElarionManifestCodec.EncodeFields(
             filter.SpecFqn,
             filter.EntityFqn,
             filter.Namespace,
             EncodeBool(filter.IsShared));
+    }
 
-    public static bool TryDecodeResourceFilter(string value, out ResourceFilter? filter)
-    {
+    public static bool TryDecodeResourceFilter(string value, out ResourceFilter? filter) {
         filter = null;
         if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 4)
             return false;
@@ -288,11 +278,11 @@ internal static class ElarionManifest
         return true;
     }
 
-    public static string EncodePermission(Permission permission) =>
-        ElarionManifestCodec.EncodeFields(permission.Namespace, permission.Resource, permission.Verb);
+    public static string EncodePermission(Permission permission) {
+        return ElarionManifestCodec.EncodeFields(permission.Namespace, permission.Resource, permission.Verb);
+    }
 
-    public static bool TryDecodePermission(string value, out Permission? permission)
-    {
+    public static bool TryDecodePermission(string value, out Permission? permission) {
         permission = null;
         if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 3)
             return false;
@@ -303,8 +293,8 @@ internal static class ElarionManifest
         return true;
     }
 
-    public static string EncodeVariant(Variant variant) =>
-        ElarionManifestCodec.EncodeFields(
+    public static string EncodeVariant(Variant variant) {
+        return ElarionManifestCodec.EncodeFields(
             variant.Namespace,
             EncodeBool(variant.IsConfiguration),
             variant.SelectorKey,
@@ -312,9 +302,9 @@ internal static class ElarionManifest
             variant.Value,
             EncodeBool(variant.IsDefault),
             EncodeBool(variant.ContractIsPublic));
+    }
 
-    public static bool TryDecodeVariant(string value, out Variant? variant)
-    {
+    public static bool TryDecodeVariant(string value, out Variant? variant) {
         variant = null;
         if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 7)
             return false;
@@ -323,9 +313,7 @@ internal static class ElarionManifest
         if (!TryDecodeBool(fields[1], out var isConfiguration) ||
             !TryDecodeBool(fields[5], out var isDefault) ||
             !TryDecodeBool(fields[6], out var contractIsPublic))
-        {
             return false;
-        }
 
         variant = new Variant(
             fields[0]!,
@@ -338,11 +326,11 @@ internal static class ElarionManifest
         return true;
     }
 
-    public static string EncodeRole(Role role) =>
-        ElarionManifestCodec.EncodeFields(role.Namespace, role.Value);
+    public static string EncodeRole(Role role) {
+        return ElarionManifestCodec.EncodeFields(role.Namespace, role.Value);
+    }
 
-    public static bool TryDecodeRole(string value, out Role? role)
-    {
+    public static bool TryDecodeRole(string value, out Role? role) {
         role = null;
         if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 2)
             return false;
@@ -353,8 +341,7 @@ internal static class ElarionManifest
         return true;
     }
 
-    public static bool TryDecodeModule(string value, out Module? module)
-    {
+    public static bool TryDecodeModule(string value, out Module? module) {
         module = null;
         if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 10)
             return false;
@@ -365,20 +352,15 @@ internal static class ElarionManifest
             !TryDecodeBool(fields[6], out var hasMapEndpoints) ||
             !TryDecodeBool(fields[7], out var hasGetJsonTypeInfoResolver) ||
             !TryDecodeBool(fields[8], out var hasConfigureEndpointGroup))
-        {
             return false;
-        }
 
         var clientFeatures = EquatableArray<string>.Empty;
         if (fields[9] is { Length: > 0 } encodedFeatures &&
-            ElarionManifestCodec.TryDecodeFields(encodedFeatures, out var featureFields))
-        {
+            ElarionManifestCodec.TryDecodeFields(encodedFeatures, out var featureFields)) {
             var names = new List<string>();
             foreach (var name in featureFields)
-            {
                 if (name is not null)
                     names.Add(name);
-            }
 
             clientFeatures = names.ToEquatableArray();
         }
@@ -397,24 +379,19 @@ internal static class ElarionManifest
         return true;
     }
 
-    public static bool TryDecodeHttpEndpoint(string value, out HttpEndpointEmission.Model? model)
-    {
+    public static bool TryDecodeHttpEndpoint(string value, out HttpEndpointEmission.Model? model) {
         model = null;
         if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 11)
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
             fields[4] is null || fields[5] is null)
-        {
             return false;
-        }
 
         if (!TryDecodeBool(fields[6], out var useAsParameters) ||
             !TryDecodeBool(fields[7], out var disableAntiforgery) ||
             !TryDecodeBool(fields[8], out var responseIsEmpty) ||
             !TryDecodeBool(fields[10], out var isIdempotent))
-        {
             return false;
-        }
 
         model = new HttpEndpointEmission.Model(
             fields[0]!,
@@ -431,8 +408,7 @@ internal static class ElarionManifest
         return true;
     }
 
-    public static bool TryDecodeRpcMethod(string value, out RpcMethodEmission.Model? model)
-    {
+    public static bool TryDecodeRpcMethod(string value, out RpcMethodEmission.Model? model) {
         model = null;
         // 11 fields = an assembly built before the Connection transport flag existed; decode it with
         // onConnection = false (that compilation never opted into the connection surface) instead of
@@ -441,9 +417,7 @@ internal static class ElarionManifest
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
             fields[8] is null || fields[9] is null || fields[10] is null)
-        {
             return false;
-        }
 
         var onConnection = false;
         if (!TryDecodeBool(fields[5], out var onJsonRpc) ||
@@ -452,9 +426,7 @@ internal static class ElarionManifest
             !TryDecodeBool(fields[9], out var isNameInferred) ||
             !TryDecodeBool(fields[10], out var isIdempotent) ||
             (fields.Count == 12 && !TryDecodeBool(fields[11], out onConnection)))
-        {
             return false;
-        }
 
         model = new RpcMethodEmission.Model(
             fields[0]!,
@@ -472,12 +444,12 @@ internal static class ElarionManifest
         return true;
     }
 
-    private static string EncodeBool(bool value) => value ? "1" : "0";
+    private static string EncodeBool(bool value) {
+        return value ? "1" : "0";
+    }
 
-    private static bool TryDecodeBool(string? value, out bool result)
-    {
-        switch (value)
-        {
+    private static bool TryDecodeBool(string? value, out bool result) {
+        switch (value) {
             case "1":
                 result = true;
                 return true;
@@ -491,15 +463,11 @@ internal static class ElarionManifest
     }
 }
 
-internal static class ElarionManifestCodec
-{
-    public static string EncodeFields(params string?[] fields)
-    {
+internal static class ElarionManifestCodec {
+    public static string EncodeFields(params string?[] fields) {
         var result = new System.Text.StringBuilder();
-        foreach (var field in fields)
-        {
-            if (field is null)
-            {
+        foreach (var field in fields) {
+            if (field is null) {
                 result.Append("-1:");
                 continue;
             }
@@ -512,12 +480,10 @@ internal static class ElarionManifestCodec
         return result.ToString();
     }
 
-    public static bool TryDecodeFields(string value, out IReadOnlyList<string?> fields)
-    {
+    public static bool TryDecodeFields(string value, out IReadOnlyList<string?> fields) {
         var result = new List<string?>();
         var index = 0;
-        while (index < value.Length)
-        {
+        while (index < value.Length) {
             var lengthStart = index;
             if (value[index] == '-')
                 index++;
@@ -525,27 +491,23 @@ internal static class ElarionManifestCodec
             while (index < value.Length && char.IsDigit(value[index]))
                 index++;
 
-            if (index == lengthStart || index >= value.Length || value[index] != ':')
-            {
+            if (index == lengthStart || index >= value.Length || value[index] != ':') {
                 fields = [];
                 return false;
             }
 
-            if (!int.TryParse(value.Substring(lengthStart, index - lengthStart), out var length))
-            {
+            if (!int.TryParse(value.Substring(lengthStart, index - lengthStart), out var length)) {
                 fields = [];
                 return false;
             }
 
             index++;
-            if (length == -1)
-            {
+            if (length == -1) {
                 result.Add(null);
                 continue;
             }
 
-            if (length < 0 || index + length > value.Length)
-            {
+            if (length < 0 || index + length > value.Length) {
                 fields = [];
                 return false;
             }
@@ -558,11 +520,9 @@ internal static class ElarionManifestCodec
         return true;
     }
 
-    public static string EncodeParameters(IReadOnlyList<RpcMethodEmission.ParameterDescription> parameters)
-    {
+    public static string EncodeParameters(IReadOnlyList<RpcMethodEmission.ParameterDescription> parameters) {
         var fields = new string?[parameters.Count * 2];
-        for (var i = 0; i < parameters.Count; i++)
-        {
+        for (var i = 0; i < parameters.Count; i++) {
             fields[i * 2] = parameters[i].PropertyName;
             fields[i * 2 + 1] = parameters[i].Description;
         }
@@ -570,15 +530,14 @@ internal static class ElarionManifestCodec
         return EncodeFields(fields);
     }
 
-    public static bool TryDecodeParameters(string value, out IReadOnlyList<RpcMethodEmission.ParameterDescription> parameters)
-    {
+    public static bool TryDecodeParameters(string value,
+        out IReadOnlyList<RpcMethodEmission.ParameterDescription> parameters) {
         parameters = [];
         if (!TryDecodeFields(value, out var fields) || fields.Count % 2 != 0)
             return false;
 
         var result = new List<RpcMethodEmission.ParameterDescription>();
-        for (var i = 0; i < fields.Count; i += 2)
-        {
+        for (var i = 0; i < fields.Count; i += 2) {
             if (fields[i] is null || fields[i + 1] is null)
                 return false;
 
@@ -598,10 +557,8 @@ internal static class ElarionManifestCodec
 /// </summary>
 internal readonly record struct ManifestReadResult(ElarionManifest.Data Data, DiagnosticInfo? Diagnostic);
 
-internal static class ElarionManifestReader
-{
-    public static ManifestReadResult Read(MetadataReference reference, CancellationToken ct)
-    {
+internal static class ElarionManifestReader {
+    public static ManifestReadResult Read(MetadataReference reference, CancellationToken ct) {
         var modules = new List<ElarionManifest.Module>();
         var moduleEndpointHooks = new List<ElarionManifest.ModuleEndpoints>();
         var httpEndpoints = new List<HttpEndpointEmission.Model>();
@@ -615,10 +572,8 @@ internal static class ElarionManifestReader
 
         string? schemaVersion = null;
         var hasElarionEntries = false;
-        foreach (var (key, value) in entries)
-        {
-            if (key == ElarionManifest.SchemaKey)
-            {
+        foreach (var (key, value) in entries) {
+            if (key == ElarionManifest.SchemaKey) {
                 schemaVersion = value;
                 continue;
             }
@@ -631,8 +586,7 @@ internal static class ElarionManifestReader
         // may misparse. Skip the whole assembly's manifest and surface it loudly, since silently dropping
         // permission/role entries would weaken authorization.
         if ((schemaVersion is not null && schemaVersion != ElarionManifest.SchemaVersion)
-            || (schemaVersion is null && hasElarionEntries))
-        {
+            || (schemaVersion is null && hasElarionEntries)) {
             var diagnostic = DiagnosticInfo.Create(
                 ElarionManifest.UnsupportedManifestSchema,
                 LocationInfo.From((Location?)null),
@@ -654,8 +608,8 @@ internal static class ElarionManifestReader
             null);
     }
 
-    private static bool IsElarionManifestKey(string key) =>
-        key is ElarionManifest.ModuleKey
+    private static bool IsElarionManifestKey(string key) {
+        return key is ElarionManifest.ModuleKey
             or ElarionManifest.ModuleEndpointsKey
             or ElarionManifest.HttpEndpointKey
             or ElarionManifest.RpcMethodKey
@@ -663,9 +617,9 @@ internal static class ElarionManifestReader
             or ElarionManifest.PermissionKey
             or ElarionManifest.RoleKey
             or ElarionManifest.VariantKey;
+    }
 
-    private static string DescribeReference(MetadataReference reference)
-    {
+    private static string DescribeReference(MetadataReference reference) {
         if (reference is CompilationReference compilationReference)
             return compilationReference.Compilation.AssemblyName ?? "<unknown>";
 
@@ -680,13 +634,14 @@ internal static class ElarionManifestReader
         List<ElarionManifest.ResourceFilter> resourceFilters,
         List<ElarionManifest.Permission> permissions,
         List<ElarionManifest.Role> roles,
-        List<ElarionManifest.Variant> variants) =>
-        ElarionManifest.Data.Combine(
-            [
-                new ElarionManifest.Data(
-                    modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
-                    variants),
-            ]);
+        List<ElarionManifest.Variant> variants) {
+        return ElarionManifest.Data.Combine(
+        [
+            new ElarionManifest.Data(
+                modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
+                variants)
+        ]);
+    }
 
     private static void AddEntry(
         string key,
@@ -698,10 +653,8 @@ internal static class ElarionManifestReader
         List<ElarionManifest.ResourceFilter> resourceFilters,
         List<ElarionManifest.Permission> permissions,
         List<ElarionManifest.Role> roles,
-        List<ElarionManifest.Variant> variants)
-    {
-        switch (key)
-        {
+        List<ElarionManifest.Variant> variants) {
+        switch (key) {
             case ElarionManifest.SchemaKey:
                 break;
             case ElarionManifest.ModuleKey:
@@ -711,9 +664,7 @@ internal static class ElarionManifestReader
             case ElarionManifest.ModuleEndpointsKey:
                 if (ElarionManifest.TryDecodeModuleEndpoints(value, out var moduleEndpointsEntry)
                     && moduleEndpointsEntry is not null)
-                {
                     moduleEndpointHooks.Add(moduleEndpointsEntry);
-                }
 
                 break;
             case ElarionManifest.HttpEndpointKey:
@@ -725,7 +676,8 @@ internal static class ElarionManifestReader
                     rpcMethods.Add(rpcMethod);
                 break;
             case ElarionManifest.ResourceFilterKey:
-                if (ElarionManifest.TryDecodeResourceFilter(value, out var resourceFilter) && resourceFilter is not null)
+                if (ElarionManifest.TryDecodeResourceFilter(value, out var resourceFilter) &&
+                    resourceFilter is not null)
                     resourceFilters.Add(resourceFilter);
                 break;
             case ElarionManifest.PermissionKey:
@@ -742,5 +694,4 @@ internal static class ElarionManifestReader
                 break;
         }
     }
-
 }

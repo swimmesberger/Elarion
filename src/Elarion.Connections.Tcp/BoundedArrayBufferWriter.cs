@@ -22,9 +22,7 @@ internal sealed class BoundedArrayBufferWriter : IBufferWriter<byte>, IDisposabl
     public BoundedArrayBufferWriter(int initialCapacity, int maxFrameCapacity, int? maxTotalCapacity = null) {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(initialCapacity, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxFrameCapacity, 0);
-        if (initialCapacity > maxFrameCapacity) {
-            throw new ArgumentOutOfRangeException(nameof(initialCapacity));
-        }
+        if (initialCapacity > maxFrameCapacity) throw new ArgumentOutOfRangeException(nameof(initialCapacity));
 
         _initialCapacity = initialCapacity;
         _maxFrameCapacity = maxFrameCapacity;
@@ -39,24 +37,25 @@ internal sealed class BoundedArrayBufferWriter : IBufferWriter<byte>, IDisposabl
     public ReadOnlyMemory<byte> WrittenMemory => _buffer.AsMemory(0, _written);
 
     /// <summary>Marks the start of the next frame — the per-frame budget applies from here.</summary>
-    public void BeginFrame() => _frameStart = _written;
+    public void BeginFrame() {
+        _frameStart = _written;
+    }
 
     /// <summary>Drops the current frame's bytes (a failed/oversized frame) without disturbing the frames
     /// already coalesced before it.</summary>
-    public void RewindFrame() => _written = _frameStart;
+    public void RewindFrame() {
+        _written = _frameStart;
+    }
 
     public void Advance(int count) {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
-        if (count > _buffer.Length - _written) {
+        if (count > _buffer.Length - _written)
             throw new InvalidOperationException("The TCP framer advanced beyond the memory supplied by the writer.");
-        }
 
         _written += count;
         // A rented array may be larger than the frame budget — the budget is on the current frame's
         // written bytes, not on the pool bucket the bytes happen to sit in.
-        if (_written - _frameStart > _maxFrameCapacity) {
-            throw new TcpOutboundFrameTooLargeException();
-        }
+        if (_written - _frameStart > _maxFrameCapacity) throw new TcpOutboundFrameTooLargeException();
     }
 
     public Memory<byte> GetMemory(int sizeHint = 0) {
@@ -79,9 +78,7 @@ internal sealed class BoundedArrayBufferWriter : IBufferWriter<byte>, IDisposabl
     public void Trim() {
         _written = 0;
         _frameStart = 0;
-        if (_buffer.Length <= _retainCapacity) {
-            return;
-        }
+        if (_buffer.Length <= _retainCapacity) return;
 
         ArrayPool<byte>.Shared.Return(_buffer);
         _buffer = ArrayPool<byte>.Shared.Rent(_initialCapacity);
@@ -92,22 +89,16 @@ internal sealed class BoundedArrayBufferWriter : IBufferWriter<byte>, IDisposabl
         _buffer = [];
         _written = 0;
         _frameStart = 0;
-        if (buffer.Length > 0) {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
+        if (buffer.Length > 0) ArrayPool<byte>.Shared.Return(buffer);
     }
 
     private void EnsureCapacity(int sizeHint) {
         ArgumentOutOfRangeException.ThrowIfNegative(sizeHint);
         var requiredHint = Math.Max(sizeHint, 1);
-        if (requiredHint > _maxFrameCapacity - (_written - _frameStart)) {
-            throw new TcpOutboundFrameTooLargeException();
-        }
+        if (requiredHint > _maxFrameCapacity - (_written - _frameStart)) throw new TcpOutboundFrameTooLargeException();
 
         var required = _written + requiredHint;
-        if (required <= _buffer.Length) {
-            return;
-        }
+        if (required <= _buffer.Length) return;
 
         var doubled = Math.Min((long)_maxTotalCapacity, (long)_buffer.Length * 2);
         var replacement = ArrayPool<byte>.Shared.Rent((int)Math.Max(required, doubled));

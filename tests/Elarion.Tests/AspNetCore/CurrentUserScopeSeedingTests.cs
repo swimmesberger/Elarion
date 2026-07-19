@@ -22,15 +22,14 @@ public sealed class CurrentUserScopeSeedingTests {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddElarionCurrentUser();
-        if (withAuthorization) {
-            services.AddElarionAuthorization();
-        }
+        if (withAuthorization) services.AddElarionAuthorization();
 
         return services.BuildServiceProvider();
     }
 
-    private static ClaimsPrincipal Authenticated(params Claim[] claims) =>
-        new(new ClaimsIdentity(claims, authenticationType: "test"));
+    private static ClaimsPrincipal Authenticated(params Claim[] claims) {
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+    }
 
     [Fact]
     public void CreateDispatchScope_SeedsCurrentUserFromContextPrincipal() {
@@ -58,13 +57,13 @@ public sealed class CurrentUserScopeSeedingTests {
 
     [Fact]
     public async Task CreateDispatchScope_SeededUser_IsVisibleToAuthorizer() {
-        using var provider = BuildProvider(withAuthorization: true);
+        using var provider = BuildProvider(true);
         var context = new DispatchScopeContext();
         context.Set<ClaimsPrincipal>(
             Authenticated(new Claim("sub", "user-1"), new Claim("permission", "tenants.read")));
         var requirements = new AuthorizationRequirements(
-            AllowAnonymous: false, RequireAuthenticated: false, Permissions: ["tenants.read"], Roles: [],
-            Claims: [], Policies: [], Resources: []);
+            false, false, ["tenants.read"], [],
+            [], [], []);
 
         using var scope = provider.CreateDispatchScope(context);
         var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizer>();
@@ -75,10 +74,10 @@ public sealed class CurrentUserScopeSeedingTests {
 
     [Fact]
     public async Task CreateDispatchScope_AnonymousUser_AuthorizerReturnsUnauthorized() {
-        using var provider = BuildProvider(withAuthorization: true);
+        using var provider = BuildProvider(true);
         var requirements = new AuthorizationRequirements(
-            AllowAnonymous: false, RequireAuthenticated: false, Permissions: ["tenants.read"], Roles: [],
-            Claims: [], Policies: [], Resources: []);
+            false, false, ["tenants.read"], [],
+            [], [], []);
 
         using var scope = provider.CreateDispatchScope();
         var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizer>();

@@ -32,7 +32,8 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
     public async Task MarkProcessed_WithWrongLockToken_IsNoOp() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var context = fixture.CreateContext();
-        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(),
+            TimeProvider.System);
         var delivery = await SeedAsync(context);
 
         var lockId = Guid.NewGuid();
@@ -49,7 +50,8 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
     public async Task StaleWorker_CannotWipe_NewOwnersLease() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var context = fixture.CreateContext();
-        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(),
+            TimeProvider.System);
         var delivery = await SeedAsync(context);
 
         var lockA = Guid.NewGuid();
@@ -70,7 +72,8 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
     public async Task ReleaseClaim_WithCurrentLockToken_MakesDeliveryImmediatelyClaimable() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var context = fixture.CreateContext();
-        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(),
+            TimeProvider.System);
         var delivery = await SeedAsync(context, "actors");
 
         var firstLock = Guid.NewGuid();
@@ -91,7 +94,8 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
     public async Task MarkFailed_SetsVisibilityTimeout_ExcludingFromNextClaim() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var context = fixture.CreateContext();
-        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(),
+            TimeProvider.System);
         var delivery = await SeedAsync(context);
 
         var lockId = Guid.NewGuid();
@@ -130,16 +134,17 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
     public async Task RoleBoundDelivery_IsClaimedOnlyByRoleHolder() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var context = fixture.CreateContext();
-        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(),
+            TimeProvider.System);
         var delivery = await SeedAsync(context, "actors:partition-3");
 
         (await store.ClaimPendingAsync(Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, [], Ct))
             .Should().BeEmpty();
         (await store.ClaimPendingAsync(
-            Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, ["actors:partition-2"], Ct))
+                Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, ["actors:partition-2"], Ct))
             .Should().BeEmpty();
         (await store.ClaimPendingAsync(
-            Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, ["actors:partition-3"], Ct))
+                Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), 10, ["actors:partition-3"], Ct))
             .Should().ContainSingle().Which.Id.Should().Be(delivery.Id);
     }
 
@@ -156,7 +161,8 @@ public sealed class EfCoreOutboxStoreIntegrationTests(PostgreSqlOutboxStoreFixtu
         await context.SaveChangesAsync(Ct);
         var eligibleGroupId = eligible.Id;
         var retainedGroupId = retained.Id;
-        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(), TimeProvider.System);
+        var store = new EfCoreOutboxStore<OutboxIntegrationDbContext>(context, new OutboxOptions(),
+            TimeProvider.System);
 
         (await store.PurgeProcessedAsync(cutoff, Ct)).Should().BeGreaterThanOrEqualTo(1);
 

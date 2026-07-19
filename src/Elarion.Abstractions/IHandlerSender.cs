@@ -41,4 +41,19 @@ public interface IHandlerSender {
     /// <typeparam name="TResponse">The success value type.</typeparam>
     ValueTask<Result<TResponse>> SendAsync<TRequest, TResponse>(TRequest request, CancellationToken ct = default)
         where TRequest : notnull;
+
+    /// <summary>
+    /// Fully inferred send for requests implementing the self-typed marker
+    /// <see cref="IRequest{TSelf, TResponse}"/>: both generic arguments are inferred from
+    /// <paramref name="request"/> — <c>await sender.SendAsync(new GetClient.Query(id), ct)</c>.
+    /// Dispatches through the same typed resolution as
+    /// <see cref="SendAsync{TRequest, TResponse}(TRequest, CancellationToken)"/>.
+    /// </summary>
+    /// <typeparam name="TRequest">The request type (inferred).</typeparam>
+    /// <typeparam name="TResponse">The success value type (inferred from the marker).</typeparam>
+    ValueTask<Result<TResponse>> SendAsync<TRequest, TResponse>(
+        IRequest<TRequest, TResponse> request, CancellationToken ct = default)
+        where TRequest : notnull, IRequest<TRequest, TResponse> {
+        return SendAsync<TRequest, TResponse>((TRequest)request, ct);
+    }
 }

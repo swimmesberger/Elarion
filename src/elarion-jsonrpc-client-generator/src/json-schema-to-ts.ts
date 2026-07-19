@@ -1,4 +1,4 @@
-import type { JsonSchema } from './schema.js'
+import type {JsonSchema} from './schema.js'
 import {
   baseType,
   childContext,
@@ -9,7 +9,7 @@ import {
 } from './json-schema.js'
 
 export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, indent = 0): string {
-  const { schema: resolved, ctx: resolvedCtx } = resolveSchema(schema, ctx)
+  const {schema: resolved, ctx: resolvedCtx} = resolveSchema(schema, ctx)
   const pad = '  '.repeat(indent)
   const nullable = isNullable(resolved)
   const base = baseType(resolved)

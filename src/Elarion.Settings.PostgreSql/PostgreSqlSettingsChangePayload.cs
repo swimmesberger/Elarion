@@ -15,10 +15,11 @@ internal sealed record PostgreSqlSettingsChangePayload {
 
     public required string Key { get; init; }
 
-    public static string Serialize(SettingsScope scope, string key) =>
-        JsonSerializer.Serialize(
+    public static string Serialize(SettingsScope scope, string key) {
+        return JsonSerializer.Serialize(
             new PostgreSqlSettingsChangePayload { Kind = scope.Kind, Owner = scope.Owner, Key = key },
             PostgreSqlSettingsJsonContext.Default.PostgreSqlSettingsChangePayload);
+    }
 
     public static bool TryDeserialize(string payload, out SettingsScope scope, out string key) {
         try {

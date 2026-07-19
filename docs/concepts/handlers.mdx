@@ -143,6 +143,35 @@ constraints (`where TRequest : ICommand`), and runtime branching (`request is IQ
 [decorator pipelines](/docs/concepts/decorator-pipelines). Naming the nested type `Command`/`Query`
 remains a useful readability convention, but a request without the marker is treated as kind-less.
 
+### Self-typed markers: declaring the response type
+
+Each marker also has a self-typed generic form that additionally declares the request's success
+response type — `ICommand<TSelf, TResponse>`, `IQuery<TSelf, TResponse>`, `IRequest<TSelf, TResponse>`,
+and `IStreamRequest<TSelf, TItem>` for stream requests:
+
+```csharp
+public sealed record Command(string Name) : ICommand<Command, Guid>;      // handler returns Result<Guid>
+public sealed record Query(Guid Id) : IQuery<Query, Response>;           // handler returns Result<Response>
+```
+
+Requests carrying the self-typed form get **fully inferred dispatch** at every typed entry point —
+`IHandlerSender.SendAsync`, `HandlerInvoker`, `StreamHandlerInvoker`, and `ConnectionHandlerInvoker`
+all accept the request alone and infer both generic arguments:
+
+```csharp
+var result = await sender.SendAsync(new GetClient.Query(id), ct);
+// instead of: await sender.SendAsync<GetClient.Query, GetClient.Response>(new(id), ct);
+```
+
+Inference is purely compile-time — dispatch stays statically typed through the same `IHandler<,>`
+resolution with no reflection, registry, or boxing. The declared response type must match the handler's
+`Result<TResponse>`; the marker analyzer enforces both invariants at build time (`ELREQ001` when
+`TSelf` names a different type, `ELREQ002`/`ELREQ003` when a handler's response drifts from the
+declared `TResponse`/`TItem` — see [Diagnostics](/docs/reference/diagnostics#elreq--self-typed-request-markers)).
+Prefer the self-typed form for requests you dispatch by type (cross-handler sends, custom transports,
+connection codecs); the plain markers remain sufficient for requests only reached through generated
+transports.
+
 ## Accessing data
 
 Handlers query and persist through the concrete `AppDbContext`, injected like any other dependency.

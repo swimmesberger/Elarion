@@ -17,7 +17,8 @@ public static class ElarionValidationServiceCollectionExtensions {
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional <see cref="ValidationOptions"/> configuration (e.g. <c>MaxDepth</c>).</param>
-    public static IServiceCollection AddElarionValidation(this IServiceCollection services, Action<ValidationOptions>? configure = null) {
+    public static IServiceCollection AddElarionValidation(this IServiceCollection services,
+        Action<ValidationOptions>? configure = null) {
         ArgumentNullException.ThrowIfNull(services);
 
         // Guarded so repeated registration does not re-run Microsoft's AddValidation (which appends its
@@ -25,7 +26,8 @@ public static class ElarionValidationServiceCollectionExtensions {
         if (!services.Any(static descriptor => descriptor.ServiceType == typeof(ElarionValidationMarker))) {
             services.AddSingleton<ElarionValidationMarker>();
             services.AddValidation(configure);
-        } else if (configure is not null) {
+        }
+        else if (configure is not null) {
             services.Configure(configure);
         }
 
@@ -42,7 +44,8 @@ public static class ElarionValidationServiceCollectionExtensions {
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="resolver">The resolver to register.</param>
-    public static IServiceCollection AddElarionValidationResolver(this IServiceCollection services, IValidatableInfoResolver resolver) {
+    public static IServiceCollection AddElarionValidationResolver(this IServiceCollection services,
+        IValidatableInfoResolver resolver) {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(resolver);
 

@@ -29,7 +29,7 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
             Metadata = creation.Metadata,
             OwnerId = creation.OwnerId,
             ExpiresAt = creation.ExpiresAt,
-            BlobRef = null,
+            BlobRef = null
         };
 
         _entries[id] = new Entry(creation.Container, creation.Name, upload);
@@ -37,8 +37,9 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
     }
 
     /// <inheritdoc />
-    public Task<StagedUpload?> GetAsync(string uploadId, CancellationToken cancellationToken) =>
-        Task.FromResult(_entries.TryGetValue(uploadId, out var entry) ? entry.Upload : null);
+    public Task<StagedUpload?> GetAsync(string uploadId, CancellationToken cancellationToken) {
+        return Task.FromResult(_entries.TryGetValue(uploadId, out var entry) ? entry.Upload : null);
+    }
 
     /// <inheritdoc />
     public async Task<StagedUpload> AppendAsync(
@@ -46,22 +47,19 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
         long offset,
         Stream chunk,
         CancellationToken cancellationToken) {
-        if (!_entries.TryGetValue(uploadId, out var entry)) {
+        if (!_entries.TryGetValue(uploadId, out var entry))
             throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
-        }
 
         await entry.Gate.WaitAsync(cancellationToken);
         try {
             ThrowIfDeleted(entry, uploadId);
             var upload = entry.Upload;
-            if (upload.IsComplete) {
+            if (upload.IsComplete)
                 throw new StagedUploadConflictException($"Upload session '{uploadId}' is already complete.");
-            }
 
-            if (offset != upload.Offset) {
+            if (offset != upload.Offset)
                 throw new StagedUploadConflictException(
                     $"The append offset {offset} does not match the current offset {upload.Offset}.");
-            }
 
             // A previous append may have failed mid-chunk (for example a client disconnect while reading
             // the caller's stream), leaving partial bytes past the committed offset. Truncate back to the
@@ -92,29 +90,25 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
         CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(completion);
 
-        if (!_entries.TryGetValue(uploadId, out var entry)) {
+        if (!_entries.TryGetValue(uploadId, out var entry))
             throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
-        }
 
         await entry.Gate.WaitAsync(cancellationToken);
         try {
             ThrowIfDeleted(entry, uploadId);
             var upload = entry.Upload;
-            if (upload.IsComplete) {
-                return upload;
-            }
+            if (upload.IsComplete) return upload;
 
-            if (upload.Length is long declared && upload.Offset != declared) {
+            if (upload.Length is long declared && upload.Offset != declared)
                 throw new StagedUploadConflictException(
                     $"Upload session '{uploadId}' declares {declared} bytes but received {upload.Offset}.");
-            }
 
             var blobRef = await SaveBlobAsync(entry, upload, completion.BlobExpiresAt, cancellationToken);
             upload = upload with {
                 // A deferred length seals at the received byte count.
                 Length = upload.Offset,
                 ExpiresAt = completion.SessionExpiresAt,
-                BlobRef = blobRef,
+                BlobRef = blobRef
             };
 
             entry.Upload = upload;
@@ -127,13 +121,12 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
 
     /// <inheritdoc />
     public async Task DeleteAsync(string uploadId, CancellationToken cancellationToken) {
-        if (_entries.TryRemove(uploadId, out var entry)) {
-            await DisposeEntryAsync(entry, cancellationToken);
-        }
+        if (_entries.TryRemove(uploadId, out var entry)) await DisposeEntryAsync(entry, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
+    public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize,
+        CancellationToken cancellationToken) {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
 
         // Reap by expiry regardless of completion: an incomplete session past its upload-expiry window,
@@ -145,11 +138,9 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
             .Take(batchSize)
             .ToList();
 
-        foreach (var key in expired) {
-            if (_entries.TryRemove(key, out var entry)) {
+        foreach (var key in expired)
+            if (_entries.TryRemove(key, out var entry))
                 await DisposeEntryAsync(entry, cancellationToken);
-            }
-        }
 
         return expired.Count;
     }
@@ -169,9 +160,7 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
     }
 
     private static void ThrowIfDeleted(Entry entry, string uploadId) {
-        if (entry.Deleted) {
-            throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
-        }
+        if (entry.Deleted) throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
     }
 
     private async Task<BlobRef> SaveBlobAsync(
@@ -193,7 +182,7 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
                 ContentLength = upload.Offset,
                 InitialState = BlobLifecycleState.Pending,
                 ExpiresAt = blobExpiresAt,
-                OwnerId = upload.OwnerId,
+                OwnerId = upload.OwnerId
             },
             entry.Buffer,
             cancellationToken);
@@ -205,19 +194,16 @@ public sealed class InMemoryStagedUploadStore(IServiceScopeFactory scopeFactory)
         return blobRef;
     }
 
-    private static async Task<long> CopyAtMostAsync(Stream source, Stream destination, long max, CancellationToken cancellationToken) {
-        if (max <= 0) {
-            return 0;
-        }
+    private static async Task<long> CopyAtMostAsync(Stream source, Stream destination, long max,
+        CancellationToken cancellationToken) {
+        if (max <= 0) return 0;
 
         var buffer = new byte[81920];
         long total = 0;
         while (total < max) {
             var toRead = (int)Math.Min(buffer.Length, max - total);
             var read = await source.ReadAsync(buffer.AsMemory(0, toRead), cancellationToken);
-            if (read == 0) {
-                break;
-            }
+            if (read == 0) break;
 
             await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             total += read;

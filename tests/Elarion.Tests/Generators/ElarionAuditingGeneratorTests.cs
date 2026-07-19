@@ -7,8 +7,7 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ElarionAuditingGeneratorTests
-{
+public sealed class ElarionAuditingGeneratorTests {
     private const string ContextSource =
         """
         using Microsoft.EntityFrameworkCore;
@@ -25,8 +24,7 @@ public sealed class ElarionAuditingGeneratorTests
         """;
 
     [Fact]
-    public void EmitsDbSetAndModelConfigurationSeam()
-    {
+    public void EmitsDbSetAndModelConfigurationSeam() {
         var result = RunGenerator(ContextSource);
 
         NoErrors(result);
@@ -34,7 +32,8 @@ public sealed class ElarionAuditingGeneratorTests
 
         source.Should().Contain(
             "public DbSet<global::Elarion.Auditing.EntityFrameworkCore.AuditLogEntry> AuditLog => Set<global::Elarion.Auditing.EntityFrameworkCore.AuditLogEntry>();");
-        source.Should().Contain("partial void OnEntitiesConfigured_GenerateElarionAuditing(ModelBuilder modelBuilder) =>");
+        source.Should()
+            .Contain("partial void OnEntitiesConfigured_GenerateElarionAuditing(ModelBuilder modelBuilder) =>");
         source.Should().Contain("UseElarionAuditing(");
         source.Should().Contain("tableName: null");
         source.Should().Contain("schema: null");
@@ -42,8 +41,7 @@ public sealed class ElarionAuditingGeneratorTests
     }
 
     [Fact]
-    public void TableSchemaAndSnakeCaseOverrides_AreHonored()
-    {
+    public void TableSchemaAndSnakeCaseOverrides_AreHonored() {
         var result = RunGenerator(
             """
             using Microsoft.EntityFrameworkCore;
@@ -66,8 +64,7 @@ public sealed class ElarionAuditingGeneratorTests
     }
 
     [Fact]
-    public void MissingGenerateDbSets_ReportsElaud001AndGeneratesNothing()
-    {
+    public void MissingGenerateDbSets_ReportsElaud001AndGeneratesNothing() {
         var result = RunGenerator(
             """
             using Microsoft.EntityFrameworkCore;
@@ -86,8 +83,7 @@ public sealed class ElarionAuditingGeneratorTests
     }
 
     [Fact]
-    public void ComposesWithEfGeneratorSeamAndCompiles()
-    {
+    public void ComposesWithEfGeneratorSeamAndCompiles() {
         // The EF DbContext generator declares the per-feature seam OnEntitiesConfigured_GenerateElarionAuditing;
         // this generator implements it. Compiling source + both generated trees proves the contract holds.
         var ct = TestContext.Current.CancellationToken;
@@ -109,21 +105,18 @@ public sealed class ElarionAuditingGeneratorTests
     }
 
     [Fact]
-    public void IrrelevantEditReusesTargets()
-    {
+    public void IrrelevantEditReusesTargets() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new ElarionAuditingGenerator(), ContextSource, "AuditingTargets");
     }
 
     [Fact]
-    public void UnrelatedFileEditDoesNotRerunDiscovery()
-    {
+    public void UnrelatedFileEditDoesNotRerunDiscovery() {
         GeneratorCacheAssert.ReusesDiscoveryAfterUnrelatedFileEdit(
             new ElarionAuditingGenerator(), ContextSource, "AuditingTargets");
     }
 
-    private static GeneratorDriverRunResult RunGenerator(string source)
-    {
+    private static GeneratorDriverRunResult RunGenerator(string source) {
         var compilation = CSharpCompilation.Create(
             "ElarionAuditingGeneratorTests",
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview))],
@@ -134,19 +127,20 @@ public sealed class ElarionAuditingGeneratorTests
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    private static void NoErrors(GeneratorDriverRunResult result) =>
+    private static void NoErrors(GeneratorDriverRunResult result) {
         result.Diagnostics
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
+    }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
         return trustedPlatformAssemblies!

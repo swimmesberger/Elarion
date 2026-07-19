@@ -45,7 +45,7 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
         // current-user snapshot is unreachable here. RpcToolInvoker scopes again so isolation holds even if a
         // host disabled ScopeRequests; either way the per-message principal (below) is the current-user source.
         var services = request.Services
-            ?? throw new InvalidOperationException("MCP request has no service provider.");
+                       ?? throw new InvalidOperationException("MCP request has no service provider.");
         var mcp = services.GetRequiredService<McpDispatcher>();
         var dispatcher = mcp.Inner;
         var jsonOptions = mcp.SerializerOptions;
@@ -61,9 +61,7 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
         // each message) so the per-call scope's ICurrentUser resolves. This is the correct source for MCP in
         // both stateful and stateless modes — the call scope can't reach the HTTP request-scope snapshot.
         var context = new DispatchScopeContext();
-        if (request.User is { } user) {
-            context.Set<ClaimsPrincipal>(user);
-        }
+        if (request.User is { } user) context.Set<ClaimsPrincipal>(user);
 
         var result = await RpcToolInvoker.InvokeAsync(
             dispatcher, HandlerTransports.Mcp, _methodName, argumentsDocument?.RootElement, services, jsonOptions,
@@ -73,28 +71,24 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
     }
 
     internal CallToolResult ToCallToolResult(RpcToolResult result, JsonSerializerOptions jsonOptions) {
-        if (!result.IsError) {
+        if (!result.IsError)
             return new CallToolResult {
-                Content = [new TextContentBlock { Text = result.Text }],
+                Content = [new TextContentBlock { Text = result.Text }]
             };
-        }
 
         var callResult = new CallToolResult {
             IsError = true,
-            Content = [new TextContentBlock { Text = result.Text }],
+            Content = [new TextContentBlock { Text = result.Text }]
         };
 
         if (_includeErrorDetails) {
             // Build the node manually so no resolver is needed for a wrapper type; the error data is serialized
             // by its runtime type with the dispatcher's options — consistent with the JSON-RPC response path.
             var details = new JsonObject();
-            if (result.ErrorCode is { } code) {
-                details["code"] = code;
-            }
+            if (result.ErrorCode is { } code) details["code"] = code;
 
-            if (result.ErrorData is { } data) {
+            if (result.ErrorData is { } data)
                 details["data"] = JsonSerializer.SerializeToNode(data, data.GetType(), jsonOptions);
-            }
 
             // CallToolResult.StructuredContent is a JsonElement; clone so it owns its memory after the document is disposed.
             using var detailsDocument = JsonSerializer.SerializeToDocument(details, jsonOptions);

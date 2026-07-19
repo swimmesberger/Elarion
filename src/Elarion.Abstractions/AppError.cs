@@ -7,18 +7,24 @@ namespace Elarion.Abstractions;
 public enum ErrorKind {
     /// <summary>Invalid input or constraint violation.</summary>
     Validation,
+
     /// <summary>The requested resource does not exist.</summary>
     NotFound,
+
     /// <summary>The operation conflicts with existing state (e.g., duplicate, concurrent modification).</summary>
     Conflict,
+
     /// <summary>The caller is not authorized to perform this operation.</summary>
     Forbidden,
+
     /// <summary>A domain business rule was violated.</summary>
     BusinessRule,
+
     /// <summary>An unexpected internal error occurred.</summary>
     Internal,
+
     /// <summary>The caller is not authenticated (no/invalid credentials). Maps to HTTP 401.</summary>
-    Unauthorized,
+    Unauthorized
 }
 
 /// <summary>
@@ -35,8 +41,10 @@ public enum ErrorKind {
 public sealed record AppError {
     /// <summary>The semantic category of this error.</summary>
     public required ErrorKind Kind { get; init; }
+
     /// <summary>A human-readable description of the error.</summary>
     public required string Message { get; init; }
+
     /// <summary>Optional structured data providing additional context.</summary>
     public object? Data { get; init; }
 
@@ -44,12 +52,15 @@ public sealed record AppError {
     public static readonly AppError InternalError = new() { Kind = ErrorKind.Internal, Message = "Internal error" };
 
     /// <summary>Creates a validation error with optional details.</summary>
-    public static AppError Validation(string message, object? data = null) =>
-        new() { Kind = ErrorKind.Validation, Message = message, Data = data };
+    public static AppError Validation(string message, object? data = null) {
+        return new AppError { Kind = ErrorKind.Validation, Message = message, Data = data };
+    }
 
     /// <summary>Creates a validation error with a list of error messages as data.</summary>
-    public static AppError Validation(string message, IReadOnlyList<string> errors) =>
-        new() { Kind = ErrorKind.Validation, Message = message, Data = new ValidationErrorData { Errors = errors } };
+    public static AppError Validation(string message, IReadOnlyList<string> errors) {
+        return new AppError
+            { Kind = ErrorKind.Validation, Message = message, Data = new ValidationErrorData { Errors = errors } };
+    }
 
     /// <summary>
     /// Creates a validation error carrying messages keyed by wire-named field path (e.g.
@@ -57,39 +68,46 @@ public sealed record AppError {
     /// <see cref="ValidationErrorData.Errors"/> list is derived by flattening in ordinal key order, so
     /// consumers of either shape see the same messages.
     /// </summary>
-    public static AppError Validation(string message, IReadOnlyDictionary<string, string[]> fieldErrors) =>
-        new() {
+    public static AppError Validation(string message, IReadOnlyDictionary<string, string[]> fieldErrors) {
+        return new AppError {
             Kind = ErrorKind.Validation,
             Message = message,
             Data = new ValidationErrorData {
                 Errors = ValidationErrorData.Flatten(fieldErrors),
-                FieldErrors = fieldErrors,
-            },
+                FieldErrors = fieldErrors
+            }
         };
+    }
 
     /// <summary>Creates a not-found error.</summary>
-    public static AppError NotFound(string message) =>
-        new() { Kind = ErrorKind.NotFound, Message = message };
+    public static AppError NotFound(string message) {
+        return new AppError { Kind = ErrorKind.NotFound, Message = message };
+    }
 
     /// <summary>Creates a conflict error (e.g., duplicate, concurrent modification).</summary>
-    public static AppError Conflict(string message) =>
-        new() { Kind = ErrorKind.Conflict, Message = message };
+    public static AppError Conflict(string message) {
+        return new AppError { Kind = ErrorKind.Conflict, Message = message };
+    }
 
     /// <summary>Creates a forbidden/authorization error (authenticated but not permitted).</summary>
-    public static AppError Forbidden(string message) =>
-        new() { Kind = ErrorKind.Forbidden, Message = message };
+    public static AppError Forbidden(string message) {
+        return new AppError { Kind = ErrorKind.Forbidden, Message = message };
+    }
 
     /// <summary>Creates an unauthorized/authentication error (no or invalid credentials).</summary>
-    public static AppError Unauthorized(string message) =>
-        new() { Kind = ErrorKind.Unauthorized, Message = message };
+    public static AppError Unauthorized(string message) {
+        return new AppError { Kind = ErrorKind.Unauthorized, Message = message };
+    }
 
     /// <summary>Creates a business rule violation error with optional details.</summary>
-    public static AppError BusinessRule(string message, object? data = null) =>
-        new() { Kind = ErrorKind.BusinessRule, Message = message, Data = data };
+    public static AppError BusinessRule(string message, object? data = null) {
+        return new AppError { Kind = ErrorKind.BusinessRule, Message = message, Data = data };
+    }
 
     /// <summary>Creates an internal error with an optional detail message.</summary>
-    public static AppError Internal(string message, object? data = null) =>
-        new() { Kind = ErrorKind.Internal, Message = message, Data = data };
+    public static AppError Internal(string message, object? data = null) {
+        return new AppError { Kind = ErrorKind.Internal, Message = message, Data = data };
+    }
 }
 
 /// <summary>Structured data payload for validation errors.</summary>
@@ -105,6 +123,10 @@ public sealed record ValidationErrorData {
     public IReadOnlyDictionary<string, string[]>? FieldErrors { get; init; }
 
     /// <summary>Flattens field-keyed messages into one list, in deterministic (ordinal key) order.</summary>
-    internal static string[] Flatten(IReadOnlyDictionary<string, string[]> fieldErrors) =>
-        [.. fieldErrors.OrderBy(static pair => pair.Key, StringComparer.Ordinal).SelectMany(static pair => pair.Value)];
+    internal static string[] Flatten(IReadOnlyDictionary<string, string[]> fieldErrors) {
+        return [
+            .. fieldErrors.OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+                .SelectMany(static pair => pair.Value)
+        ];
+    }
 }

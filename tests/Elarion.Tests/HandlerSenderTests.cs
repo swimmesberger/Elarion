@@ -13,18 +13,28 @@ namespace Elarion.Tests;
 public sealed class HandlerSenderTests {
     private sealed record Double(int Value);
 
-    private sealed class DoublingHandler : IHandler<Double, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(Double request, CancellationToken ct) =>
-            request.Value < 0
-                ? ValueTask.FromResult<Result<int>>(AppError.Validation("negative"))
-                : ValueTask.FromResult<Result<int>>(request.Value * 2);
+    private sealed record InferredDouble(int Value) : ICommand<InferredDouble, int>;
+
+    private sealed class InferredDoublingHandler : IHandler<InferredDouble, Result<int>> {
+        public ValueTask<Result<int>> HandleAsync(InferredDouble request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<int>>(request.Value * 2);
+        }
     }
 
-    private static ServiceProvider Build() =>
-        new ServiceCollection()
+    private sealed class DoublingHandler : IHandler<Double, Result<int>> {
+        public ValueTask<Result<int>> HandleAsync(Double request, CancellationToken ct) {
+            return request.Value < 0
+                ? ValueTask.FromResult<Result<int>>(AppError.Validation("negative"))
+                : ValueTask.FromResult<Result<int>>(request.Value * 2);
+        }
+    }
+
+    private static ServiceProvider Build() {
+        return new ServiceCollection()
             .AddElarionHandlerSender()
             .AddScoped<IHandler<Double, Result<int>>, DoublingHandler>()
             .BuildServiceProvider();
+    }
 
     [Fact]
     public async Task SendAsync_RoutesToHandlerByType_AndReturnsResult() {
@@ -33,6 +43,21 @@ public sealed class HandlerSenderTests {
         var sender = scope.ServiceProvider.GetRequiredService<IHandlerSender>();
 
         var result = await sender.SendAsync<Double, int>(new Double(21), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task SendAsync_SelfTypedMarkerInfersBothTypeArguments() {
+        using var provider = new ServiceCollection()
+            .AddElarionHandlerSender()
+            .AddScoped<IHandler<InferredDouble, Result<int>>, InferredDoublingHandler>()
+            .BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var sender = scope.ServiceProvider.GetRequiredService<IHandlerSender>();
+
+        var result = await sender.SendAsync(new InferredDouble(21), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().Be(42);
@@ -87,7 +112,8 @@ public sealed class HandlerSenderTests {
     private sealed record Read;
 
     private sealed class ReadHandler(Counter counter) : IHandler<Read, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(Read request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<int>>(counter.Value);
+        public ValueTask<Result<int>> HandleAsync(Read request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<int>>(counter.Value);
+        }
     }
 }

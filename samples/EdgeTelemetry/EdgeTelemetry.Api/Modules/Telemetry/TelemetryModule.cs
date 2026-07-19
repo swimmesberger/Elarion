@@ -13,5 +13,7 @@ namespace EdgeTelemetry.Api.Modules.Telemetry;
 /// </summary>
 [AppModule("Telemetry")]
 public static partial class TelemetryModule {
-    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => TelemetryJsonContext.Default;
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() {
+        return TelemetryJsonContext.Default;
+    }
 }

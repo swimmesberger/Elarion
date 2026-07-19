@@ -180,7 +180,8 @@ public sealed class ModuleBootstrapperTransportTests {
         // so the marker appears exactly once across both mapped endpoints.
         generated.Should().Contain("app.MapPost(\"payments\",");
         generated.Should().Contain("app.MapGet(\"payments/{id}\",");
-        generated.Should().Contain(".WithMetadata(global::Elarion.AspNetCore.ElarionIdempotentEndpointMetadata.Instance)");
+        generated.Should()
+            .Contain(".WithMetadata(global::Elarion.AspNetCore.ElarionIdempotentEndpointMetadata.Instance)");
         generated.Should().Contain(".WithTags(\"Payments\")");
         generated.Split("ElarionIdempotentEndpointMetadata").Length.Should().Be(2);
     }
@@ -421,18 +422,18 @@ public sealed class ModuleBootstrapperTransportTests {
         var hooks = EncodeFields("Manifest", "global::ManifestOnly.ManifestWebEndpoints", "1", "0");
 
         var librarySource = $$"""
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ModuleEndpoints.v1", "{{hooks}}")]
+                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
+                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ModuleEndpoints.v1", "{{hooks}}")]
 
-            namespace ManifestOnly;
+                              namespace ManifestOnly;
 
-            public static class ManifestModule { }
+                              public static class ManifestModule { }
 
-            public static class ManifestWebEndpoints {
-                public static void MapEndpoints(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
-            }
-            """;
+                              public static class ManifestWebEndpoints {
+                                  public static void MapEndpoints(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+                              }
+                              """;
 
         var libraryReference = CompileToImage(librarySource, "Sample.ManifestOnly");
         var generated = RunGenerator([libraryReference], out var compilationWithGenerated);
@@ -756,11 +757,11 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             "0");
         var librarySource = $$"""
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
+                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
 
-            namespace ManifestOnly { public static class Placeholder { } }
-            """;
+                              namespace ManifestOnly { public static class Placeholder { } }
+                              """;
 
         const string hostSource =
             """
@@ -1009,7 +1010,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
         var references = new[] {
             CompileToImage(ModulesSource, "Sample.Modules"),
-            CompileToImage(duplicateSource, "Zulu.Modules"),
+            CompileToImage(duplicateSource, "Zulu.Modules")
         };
         var result = RunGeneratorRunWithReferences(HostSource, references);
 
@@ -1031,8 +1032,10 @@ public sealed class ModuleBootstrapperTransportTests {
         var compilation = CSharpCompilation.Create(
             "Host",
             [
-                CSharpSyntaxTree.ParseText(HostSource, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
-                CSharpSyntaxTree.ParseText(generated, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(HostSource, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(generated, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken)
             ],
             CreateMetadataReferences().Concat(references).ToArray(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -1051,30 +1054,31 @@ public sealed class ModuleBootstrapperTransportTests {
         braceStart.Should().BeGreaterThanOrEqualTo(0);
 
         var depth = 0;
-        for (var i = braceStart; i < source.Length; i++) {
+        for (var i = braceStart; i < source.Length; i++)
             if (source[i] == '{') {
                 depth++;
-            } else if (source[i] == '}') {
-                depth--;
-                if (depth == 0) {
-                    return source.Substring(braceStart, i - braceStart + 1);
-                }
             }
-        }
+            else if (source[i] == '}') {
+                depth--;
+                if (depth == 0) return source.Substring(braceStart, i - braceStart + 1);
+            }
 
         return source[braceStart..];
     }
 
-    private static string RunGenerator(out Compilation compilationWithGenerated) =>
-        RunGenerator(ModulesSource, out compilationWithGenerated);
+    private static string RunGenerator(out Compilation compilationWithGenerated) {
+        return RunGenerator(ModulesSource, out compilationWithGenerated);
+    }
 
     private static string RunGenerator(string modulesSource, out Compilation compilationWithGenerated) {
         var modulesReference = CompileToImage(modulesSource, "Sample.Modules");
         return RunGenerator([modulesReference], out compilationWithGenerated);
     }
 
-    private static string RunGenerator(IReadOnlyList<MetadataReference> moduleReferences, out Compilation compilationWithGenerated) =>
-        RunGenerator(HostSource, moduleReferences, out compilationWithGenerated);
+    private static string RunGenerator(IReadOnlyList<MetadataReference> moduleReferences,
+        out Compilation compilationWithGenerated) {
+        return RunGenerator(HostSource, moduleReferences, out compilationWithGenerated);
+    }
 
     private static string RunGenerator(
         string hostSource,
@@ -1092,7 +1096,10 @@ public sealed class ModuleBootstrapperTransportTests {
         // The module-services skeleton generator always runs alongside the bootstrapper in a real build; a
         // host-compilation [AppModule] needs its generated ConfigureDefaultServices sibling to compile.
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            [new AppModuleDiscoveryGenerator().AsSourceGenerator(), new ModuleDefaultServicesGenerator().AsSourceGenerator()],
+            [
+                new AppModuleDiscoveryGenerator().AsSourceGenerator(),
+                new ModuleDefaultServicesGenerator().AsSourceGenerator()
+            ],
             parseOptions: parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
             hostCompilation, out compilationWithGenerated, out var diagnostics, TestContext.Current.CancellationToken);
@@ -1102,7 +1109,8 @@ public sealed class ModuleBootstrapperTransportTests {
             .Should().BeEmpty();
 
         return driver.GetRunResult().GeneratedTrees
-            .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), "ElarionBootstrapper.g.cs", StringComparison.Ordinal))
+            .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), "ElarionBootstrapper.g.cs",
+                StringComparison.Ordinal))
             .GetText()
             .ToString();
     }
@@ -1162,34 +1170,34 @@ public sealed class ModuleBootstrapperTransportTests {
             "0");
 
         return $$"""
-            using System.Threading;
-            using System.Threading.Tasks;
-            using Elarion.Abstractions;
+                 using System.Threading;
+                 using System.Threading.Tasks;
+                 using Elarion.Abstractions;
 
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.HttpEndpoint.v1", "{{http}}")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{legacyRpc}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.HttpEndpoint.v1", "{{http}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{legacyRpc}}")]
 
-            namespace ManifestOnly;
+                 namespace ManifestOnly;
 
-            public static class ManifestModule { }
+                 public static class ManifestModule { }
 
-            public sealed class GetManifest : IHandler<GetManifest.Query, Result<GetManifest.Response>> {
-                public sealed record Query { public required System.Guid Id { get; init; } }
-                public sealed record Response(string Name);
-                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
-                    ValueTask.FromResult<Result<Response>>(new Response("manifest"));
-            }
+                 public sealed class GetManifest : IHandler<GetManifest.Query, Result<GetManifest.Response>> {
+                     public sealed record Query { public required System.Guid Id { get; init; } }
+                     public sealed record Response(string Name);
+                     public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                         ValueTask.FromResult<Result<Response>>(new Response("manifest"));
+                 }
 
-            public sealed class GetLegacy : IHandler<GetLegacy.Query, Result<GetLegacy.Response>> {
-                public sealed record Query { public required System.Guid Id { get; init; } }
-                public sealed record Response(string Name);
-                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
-                    ValueTask.FromResult<Result<Response>>(new Response("legacy"));
-            }
-            """;
+                 public sealed class GetLegacy : IHandler<GetLegacy.Query, Result<GetLegacy.Response>> {
+                     public sealed record Query { public required System.Guid Id { get; init; } }
+                     public sealed record Response(string Name);
+                     public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                         ValueTask.FromResult<Result<Response>>(new Response("legacy"));
+                 }
+                 """;
     }
 
     private static string ResourceFilterLibSource() {
@@ -1202,35 +1210,35 @@ public sealed class ModuleBootstrapperTransportTests {
             "global::FilterLib.OrderAccess", "global::FilterLib.Order", "FilterLib", "1");
 
         return $$"""
-            using System;
-            using System.Linq.Expressions;
-            using Elarion.Abstractions.Authorization;
-            using Elarion.Abstractions.Identity;
-            using Elarion.Authorization.EntityFrameworkCore;
+                 using System;
+                 using System.Linq.Expressions;
+                 using Elarion.Abstractions.Authorization;
+                 using Elarion.Abstractions.Identity;
+                 using Elarion.Authorization.EntityFrameworkCore;
 
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{owner}}")]
-            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{shared}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{owner}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{shared}}")]
 
-            namespace FilterLib;
+                 namespace FilterLib;
 
-            public static class FilterModule { }
+                 public static class FilterModule { }
 
-            public sealed class Contact { public Guid Id { get; set; } }
-            public sealed class Order { public Guid Id { get; set; } }
+                 public sealed class Contact { public Guid Id { get; set; } }
+                 public sealed class Order { public Guid Id { get; set; } }
 
-            public sealed class ContactAccess : IQueryAuthorizer<Contact> {
-                public static ContactAccess Specification { get; } = new();
-                private ContactAccess() { }
-                public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
-            }
+                 public sealed class ContactAccess : IQueryAuthorizer<Contact> {
+                     public static ContactAccess Specification { get; } = new();
+                     private ContactAccess() { }
+                     public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+                 }
 
-            public sealed class OrderAccess : IQueryAuthorizer<Order> {
-                public OrderAccess(IResourceGrantSource grants) { }
-                public Expression<Func<Order, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
-            }
-            """;
+                 public sealed class OrderAccess : IQueryAuthorizer<Order> {
+                     public OrderAccess(IResourceGrantSource grants) { }
+                     public Expression<Func<Order, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+                 }
+                 """;
     }
 
     private static string EncodeFields(params string?[] fields) {
@@ -1249,11 +1257,13 @@ public sealed class ModuleBootstrapperTransportTests {
         return result.ToString();
     }
 
-    private static IReadOnlyList<Diagnostic> RunGeneratorDiagnostics(string modulesSource) =>
-        RunGeneratorRun(HostSource, modulesSource).Diagnostics;
+    private static IReadOnlyList<Diagnostic> RunGeneratorDiagnostics(string modulesSource) {
+        return RunGeneratorRun(HostSource, modulesSource).Diagnostics;
+    }
 
-    private static GeneratorDriverRunResult RunGeneratorRun(string hostSource, string modulesSource) =>
-        RunGeneratorRunWithReferences(hostSource, [CompileToImage(modulesSource, "Sample.Modules")]);
+    private static GeneratorDriverRunResult RunGeneratorRun(string hostSource, string modulesSource) {
+        return RunGeneratorRunWithReferences(hostSource, [CompileToImage(modulesSource, "Sample.Modules")]);
+    }
 
     private static GeneratorDriverRunResult RunGeneratorRunWithReferences(
         string hostSource,

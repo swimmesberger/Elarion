@@ -38,7 +38,7 @@ public static class ClientEventsPostgreSqlServiceCollectionExtensions {
             configure,
             provider => new PostgreSqlClientEventBroadcaster(
                 NpgsqlDataSource.Create(connectionString),
-                ownsDataSource: true,
+                true,
                 provider.GetRequiredService<PostgreSqlClientEventOptions>(),
                 provider.GetRequiredService<ILogger<PostgreSqlClientEventBroadcaster>>()));
     }
@@ -64,7 +64,7 @@ public static class ClientEventsPostgreSqlServiceCollectionExtensions {
             configure,
             provider => new PostgreSqlClientEventBroadcaster(
                 dataSource,
-                ownsDataSource: false,
+                false,
                 provider.GetRequiredService<PostgreSqlClientEventOptions>(),
                 provider.GetRequiredService<ILogger<PostgreSqlClientEventBroadcaster>>()));
     }
@@ -83,8 +83,8 @@ public static class ClientEventsPostgreSqlServiceCollectionExtensions {
         // Replace (not TryAdd) the broadcaster seam so this call is authoritative regardless of whether
         // AddElarionClientEvents ran first.
         services.RemoveAll<IClientEventBroadcaster>();
-        services.AddSingleton<IClientEventBroadcaster>(
-            static provider => provider.GetRequiredService<PostgreSqlClientEventBroadcaster>());
+        services.AddSingleton<IClientEventBroadcaster>(static provider =>
+            provider.GetRequiredService<PostgreSqlClientEventBroadcaster>());
 
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, PostgreSqlClientEventListener>());

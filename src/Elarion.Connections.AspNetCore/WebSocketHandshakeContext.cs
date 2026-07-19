@@ -26,7 +26,7 @@ public sealed class WebSocketHandshakeContext {
     /// <summary>Sends one text frame to the client (e.g. the challenge nonce).</summary>
     public async ValueTask SendTextAsync(string message, CancellationToken ct = default) {
         ArgumentNullException.ThrowIfNull(message);
-        await _socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, endOfMessage: true, ct);
+        await _socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, true, ct);
     }
 
     /// <summary>
@@ -35,13 +35,10 @@ public sealed class WebSocketHandshakeContext {
     /// </summary>
     public async ValueTask<string?> ReceiveTextAsync(CancellationToken ct = default) {
         var message = await _reader.ReadAsync(ct);
-        if (message is null) {
-            return null;
-        }
+        if (message is null) return null;
 
-        if (message.Value.Type != WebSocketMessageType.Text) {
+        if (message.Value.Type != WebSocketMessageType.Text)
             throw new InvalidOperationException("The handshake expects text frames; received a binary frame.");
-        }
 
         return Encoding.UTF8.GetString(message.Value.Payload);
     }

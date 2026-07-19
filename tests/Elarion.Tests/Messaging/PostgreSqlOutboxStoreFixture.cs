@@ -37,15 +37,14 @@ public sealed class PostgreSqlOutboxStoreFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
-    public OutboxIntegrationDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<OutboxIntegrationDbContext>()
+    public OutboxIntegrationDbContext CreateContext() {
+        return new OutboxIntegrationDbContext(new DbContextOptionsBuilder<OutboxIntegrationDbContext>()
             .UseNpgsql(ConnectionString)
             .Options);
+    }
 }
 
 /// <summary>Context mapping only the outbox table for the store integration tests.</summary>
@@ -53,5 +52,7 @@ public sealed class OutboxIntegrationDbContext(DbContextOptions<OutboxIntegratio
     : DbContext(options) {
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder) => modelBuilder.UseElarionOutbox();
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
+        modelBuilder.UseElarionOutbox();
+    }
 }

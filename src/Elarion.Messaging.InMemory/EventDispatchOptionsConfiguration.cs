@@ -18,6 +18,7 @@ namespace Elarion.Messaging.InMemory;
 /// </remarks>
 internal sealed class EventDispatchOptionsConfiguration<TContext> : IDbContextOptionsConfiguration<TContext>
     where TContext : DbContext {
-    public void Configure(IServiceProvider serviceProvider, DbContextOptionsBuilder optionsBuilder) =>
+    public void Configure(IServiceProvider serviceProvider, DbContextOptionsBuilder optionsBuilder) {
         optionsBuilder.AddInterceptors(serviceProvider.GetServices<IInterceptor>());
+    }
 }

@@ -37,25 +37,25 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void HandlerInjectingVariantContract_IsWrappedInAsyncResolvedHandler() {
         var source = Preamble + AlgorithmDefs +
-            """
+                     """
 
-            namespace Sample.App {
-                public sealed record ForecastCommand(int Id) : ICommand;
-                public sealed record ForecastResponse(string Name);
+                     namespace Sample.App {
+                         public sealed record ForecastCommand(int Id) : ICommand;
+                         public sealed record ForecastResponse(string Name);
 
-                public sealed class RunForecast(IAlgorithm algorithm)
-                    : IHandler<ForecastCommand, Result<ForecastResponse>> {
-                    public ValueTask<Result<ForecastResponse>> HandleAsync(ForecastCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ForecastResponse>.Success(new ForecastResponse("x")));
-                }
+                         public sealed class RunForecast(IAlgorithm algorithm)
+                             : IHandler<ForecastCommand, Result<ForecastResponse>> {
+                             public ValueTask<Result<ForecastResponse>> HandleAsync(ForecastCommand request, CancellationToken ct) =>
+                                 ValueTask.FromResult(Result<ForecastResponse>.Success(new ForecastResponse("x")));
+                         }
 
-                public sealed record PlainQuery(int Id) : IQuery;
-                public sealed class PlainHandler : IHandler<PlainQuery, Result<ForecastResponse>> {
-                    public ValueTask<Result<ForecastResponse>> HandleAsync(PlainQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ForecastResponse>.Success(new ForecastResponse("x")));
-                }
-            }
-            """;
+                         public sealed record PlainQuery(int Id) : IQuery;
+                         public sealed class PlainHandler : IHandler<PlainQuery, Result<ForecastResponse>> {
+                             public ValueTask<Result<ForecastResponse>> HandleAsync(PlainQuery request, CancellationToken ct) =>
+                                 ValueTask.FromResult(Result<ForecastResponse>.Success(new ForecastResponse("x")));
+                         }
+                     }
+                     """;
 
         var (result, _) = Run(new HandlerRegistrationGenerator(), source);
 
@@ -72,20 +72,20 @@ public sealed class VariantServiceGeneratorTests {
         // [FromKeyedServices] pins a specific keyed implementation — DI resolves it directly, bypassing
         // variant selection — so the handler must not pay the proxy (nor warm a switch it never consults).
         var source = Preamble + AlgorithmDefs +
-            """
+                     """
 
-            namespace Sample.App {
-                using Microsoft.Extensions.DependencyInjection;
+                     namespace Sample.App {
+                         using Microsoft.Extensions.DependencyInjection;
 
-                public sealed record PinnedCommand(int Id) : ICommand;
+                         public sealed record PinnedCommand(int Id) : ICommand;
 
-                public sealed class PinnedForecast([FromKeyedServices("neural")] IAlgorithm algorithm)
-                    : IHandler<PinnedCommand, Result<string>> {
-                    public ValueTask<Result<string>> HandleAsync(PinnedCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<string>.Success("x"));
-                }
-            }
-            """;
+                         public sealed class PinnedForecast([FromKeyedServices("neural")] IAlgorithm algorithm)
+                             : IHandler<PinnedCommand, Result<string>> {
+                             public ValueTask<Result<string>> HandleAsync(PinnedCommand request, CancellationToken ct) =>
+                                 ValueTask.FromResult(Result<string>.Success("x"));
+                         }
+                     }
+                     """;
 
         var (result, _) = Run(new HandlerRegistrationGenerator(), source);
 
@@ -96,22 +96,22 @@ public sealed class VariantServiceGeneratorTests {
     public void HandlerMixingPinnedAndSelectedVariantContract_IsStillWrapped() {
         // The unkeyed parameter still needs the warmed per-scope selection; only the pinned one opts out.
         var source = Preamble + AlgorithmDefs +
-            """
+                     """
 
-            namespace Sample.App {
-                using Microsoft.Extensions.DependencyInjection;
+                     namespace Sample.App {
+                         using Microsoft.Extensions.DependencyInjection;
 
-                public sealed record CompareCommand(int Id) : ICommand;
+                         public sealed record CompareCommand(int Id) : ICommand;
 
-                public sealed class CompareForecasts(
-                    IAlgorithm selected,
-                    [FromKeyedServices("neural")] IAlgorithm pinned)
-                    : IHandler<CompareCommand, Result<string>> {
-                    public ValueTask<Result<string>> HandleAsync(CompareCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<string>.Success("x"));
-                }
-            }
-            """;
+                         public sealed class CompareForecasts(
+                             IAlgorithm selected,
+                             [FromKeyedServices("neural")] IAlgorithm pinned)
+                             : IHandler<CompareCommand, Result<string>> {
+                             public ValueTask<Result<string>> HandleAsync(CompareCommand request, CancellationToken ct) =>
+                                 ValueTask.FromResult(Result<string>.Success("x"));
+                         }
+                     }
+                     """;
 
         var (result, _) = Run(new HandlerRegistrationGenerator(), source);
 
@@ -136,20 +136,20 @@ public sealed class VariantServiceGeneratorTests {
         // The contract(s) come from [Service]; a variant impl that registers under several interfaces is
         // variant-resolved on each of them — the same rule [Service] uses, applied to all.
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IAlgorithm { }
-                public interface IWarmup { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm")]
-                public sealed class LinearAlgo : IAlgorithm, IWarmup { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
-                public sealed class NeuralAlgo : IAlgorithm, IWarmup { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IAlgorithm { }
+                         public interface IWarmup { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm")]
+                         public sealed class LinearAlgo : IAlgorithm, IWarmup { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
+                         public sealed class NeuralAlgo : IAlgorithm, IWarmup { }
+                     }
+                     """;
 
         var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -163,15 +163,15 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar007_WhenVariantImplementationIsNotAService() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IAlgorithm { }
-                [FeatureVariant("ForecastAlgorithm")]
-                public sealed class LinearAlgo : IAlgorithm { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IAlgorithm { }
+                         [FeatureVariant("ForecastAlgorithm")]
+                         public sealed class LinearAlgo : IAlgorithm { }
+                     }
+                     """;
 
         var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -192,16 +192,16 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar003_WhenNoDefaultImplementation() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IAlgorithm { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
-                public sealed class NeuralAlgo : IAlgorithm { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IAlgorithm { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
+                         public sealed class NeuralAlgo : IAlgorithm { }
+                     }
+                     """;
 
         var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -211,19 +211,19 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar001_WhenDuplicateVariantKey() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IAlgorithm { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
-                public sealed class NeuralA : IAlgorithm { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
-                public sealed class NeuralB : IAlgorithm { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IAlgorithm { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
+                         public sealed class NeuralA : IAlgorithm { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm", Variant = "neural")]
+                         public sealed class NeuralB : IAlgorithm { }
+                     }
+                     """;
 
         var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -235,19 +235,19 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar004_AndSuppressesEmission_WhenContractBoundToTwoFeatures() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IAlgorithm { }
-                [Service]
-                [FeatureVariant("FeatureA")]
-                public sealed class DefaultAlgo : IAlgorithm { }
-                [Service]
-                [FeatureVariant("FeatureB", Variant = "neural")]
-                public sealed class NeuralAlgo : IAlgorithm { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IAlgorithm { }
+                         [Service]
+                         [FeatureVariant("FeatureA")]
+                         public sealed class DefaultAlgo : IAlgorithm { }
+                         [Service]
+                         [FeatureVariant("FeatureB", Variant = "neural")]
+                         public sealed class NeuralAlgo : IAlgorithm { }
+                     }
+                     """;
 
         var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -293,17 +293,17 @@ public sealed class VariantServiceGeneratorTests {
         // Configuration-selected variants resolve synchronously (a configuration read), so the handler must not
         // pay the async-resolving proxy the feature axis needs.
         var source = Preamble + EmailDefs +
-            """
+                     """
 
-            namespace Sample.Mail {
-                public sealed record SendCommand(int Id) : ICommand;
+                     namespace Sample.Mail {
+                         public sealed record SendCommand(int Id) : ICommand;
 
-                public sealed class SendEmail(IEmailSender sender) : IHandler<SendCommand, Result<string>> {
-                    public ValueTask<Result<string>> HandleAsync(SendCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<string>.Success("sent"));
-                }
-            }
-            """;
+                         public sealed class SendEmail(IEmailSender sender) : IHandler<SendCommand, Result<string>> {
+                             public ValueTask<Result<string>> HandleAsync(SendCommand request, CancellationToken ct) =>
+                                 ValueTask.FromResult(Result<string>.Success("sent"));
+                         }
+                     }
+                     """;
 
         var (result, _) = Run(new HandlerRegistrationGenerator(), source);
 
@@ -322,19 +322,19 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar008_AndSuppressesEmission_WhenContractMixesSelectionAxes() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IAlgorithm { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm")]
-                public sealed class LinearAlgo : IAlgorithm { }
-                [Service]
-                [ConfigurationVariant("Forecast:Algorithm", Value = "neural")]
-                public sealed class NeuralAlgo : IAlgorithm { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IAlgorithm { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm")]
+                         public sealed class LinearAlgo : IAlgorithm { }
+                         [Service]
+                         [ConfigurationVariant("Forecast:Algorithm", Value = "neural")]
+                         public sealed class NeuralAlgo : IAlgorithm { }
+                     }
+                     """;
 
         var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -346,16 +346,16 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar009_WhenConfigurationKeyIsBlank() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.Mail {
-                [AppModule("Mail")] public static class MailModule { }
-                public interface IEmailSender { }
-                [Service]
-                [ConfigurationVariant("  ")]
-                public sealed class SmtpEmailSender : IEmailSender { }
-            }
-            """;
+                     namespace Sample.Mail {
+                         [AppModule("Mail")] public static class MailModule { }
+                         public interface IEmailSender { }
+                         [Service]
+                         [ConfigurationVariant("  ")]
+                         public sealed class SmtpEmailSender : IEmailSender { }
+                     }
+                     """;
 
         var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -366,19 +366,19 @@ public sealed class VariantServiceGeneratorTests {
     public void ReportsElvar001_WhenConfigurationValuesDifferOnlyByCase() {
         // Configuration values match case-insensitively, so two variants distinguished only by case collide.
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.Mail {
-                [AppModule("Mail")] public static class MailModule { }
-                public interface IEmailSender { }
-                [Service]
-                [ConfigurationVariant("Email:Backend", Value = "office365")]
-                public sealed class GraphEmailSender : IEmailSender { }
-                [Service]
-                [ConfigurationVariant("Email:Backend", Value = "OFFICE365")]
-                public sealed class LegacyEmailSender : IEmailSender { }
-            }
-            """;
+                     namespace Sample.Mail {
+                         [AppModule("Mail")] public static class MailModule { }
+                         public interface IEmailSender { }
+                         [Service]
+                         [ConfigurationVariant("Email:Backend", Value = "office365")]
+                         public sealed class GraphEmailSender : IEmailSender { }
+                         [Service]
+                         [ConfigurationVariant("Email:Backend", Value = "OFFICE365")]
+                         public sealed class LegacyEmailSender : IEmailSender { }
+                     }
+                     """;
 
         var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -388,16 +388,16 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar003_WhenNoDefaultConfigurationVariant() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.Mail {
-                [AppModule("Mail")] public static class MailModule { }
-                public interface IEmailSender { }
-                [Service]
-                [ConfigurationVariant("Email:Backend", Value = "office365")]
-                public sealed class Office365EmailSender : IEmailSender { }
-            }
-            """;
+                     namespace Sample.Mail {
+                         [AppModule("Mail")] public static class MailModule { }
+                         public interface IEmailSender { }
+                         [Service]
+                         [ConfigurationVariant("Email:Backend", Value = "office365")]
+                         public sealed class Office365EmailSender : IEmailSender { }
+                     }
+                     """;
 
         var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -407,15 +407,15 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar007_WhenConfigurationVariantIsNotAService() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.Mail {
-                [AppModule("Mail")] public static class MailModule { }
-                public interface IEmailSender { }
-                [ConfigurationVariant("Email:Backend")]
-                public sealed class SmtpEmailSender : IEmailSender { }
-            }
-            """;
+                     namespace Sample.Mail {
+                         [AppModule("Mail")] public static class MailModule { }
+                         public interface IEmailSender { }
+                         [ConfigurationVariant("Email:Backend")]
+                         public sealed class SmtpEmailSender : IEmailSender { }
+                     }
+                     """;
 
         var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -425,19 +425,19 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void NamedDefault_RegistersUnderItsValue_AndBecomesTheDefaultKey() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.Mail {
-                [AppModule("Mail")] public static class MailModule { }
-                public interface IEmailSender { }
-                [Service]
-                [ConfigurationVariant("Email:Backend", Value = "smtp", IsDefault = true)]
-                public sealed class SmtpEmailSender : IEmailSender { }
-                [Service]
-                [ConfigurationVariant("Email:Backend", Value = "office365")]
-                public sealed class Office365EmailSender : IEmailSender { }
-            }
-            """;
+                     namespace Sample.Mail {
+                         [AppModule("Mail")] public static class MailModule { }
+                         public interface IEmailSender { }
+                         [Service]
+                         [ConfigurationVariant("Email:Backend", Value = "smtp", IsDefault = true)]
+                         public sealed class SmtpEmailSender : IEmailSender { }
+                         [Service]
+                         [ConfigurationVariant("Email:Backend", Value = "office365")]
+                         public sealed class Office365EmailSender : IEmailSender { }
+                     }
+                     """;
 
         var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -452,19 +452,19 @@ public sealed class VariantServiceGeneratorTests {
     [Fact]
     public void ReportsElvar001_WhenTwoDefaultsAreDeclared() {
         var source = Preamble +
-            """
+                     """
 
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public interface IAlgorithm { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm")]
-                public sealed class LinearAlgo : IAlgorithm { }
-                [Service]
-                [FeatureVariant("ForecastAlgorithm", Variant = "neural", IsDefault = true)]
-                public sealed class NeuralAlgo : IAlgorithm { }
-            }
-            """;
+                     namespace Sample.App {
+                         [AppModule("App")] public static class AppModule { }
+                         public interface IAlgorithm { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm")]
+                         public sealed class LinearAlgo : IAlgorithm { }
+                         [Service]
+                         [FeatureVariant("ForecastAlgorithm", Variant = "neural", IsDefault = true)]
+                         public sealed class NeuralAlgo : IAlgorithm { }
+                     }
+                     """;
 
         var (result, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
 
@@ -502,14 +502,16 @@ public sealed class VariantServiceGeneratorTests {
         return (result, result.Diagnostics);
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static string AllGenerated(GeneratorDriverRunResult result) =>
-        string.Join("\n", result.GeneratedTrees.Select(t => t.GetText().ToString()));
+    private static string AllGenerated(GeneratorDriverRunResult result) {
+        return string.Join("\n", result.GeneratedTrees.Select(t => t.GetText().ToString()));
+    }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");

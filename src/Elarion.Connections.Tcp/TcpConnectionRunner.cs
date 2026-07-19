@@ -18,8 +18,11 @@ namespace Elarion.Connections.Tcp;
 /// unregistration, one disposal, and one terminal completion.
 /// </summary>
 internal static class TcpConnectionRunner {
-    private static readonly ConditionalWeakTable<SslServerAuthenticationOptions, object> UsedServerAuthenticationOptions = new();
-    private static readonly ConditionalWeakTable<SslClientAuthenticationOptions, object> UsedClientAuthenticationOptions = new();
+    private static readonly ConditionalWeakTable<SslServerAuthenticationOptions, object>
+        UsedServerAuthenticationOptions = new();
+
+    private static readonly ConditionalWeakTable<SslClientAuthenticationOptions, object>
+        UsedClientAuthenticationOptions = new();
 
     public static async Task RunAsync(
         TcpClient client,
@@ -114,9 +117,7 @@ internal static class TcpConnectionRunner {
                 }
             }
 
-            if (ticket is null) {
-                return;
-            }
+            if (ticket is null) return;
 
             identity = new ClientConnection {
                 ConnectionId = Guid.CreateVersion7().ToString("N"),
@@ -124,7 +125,7 @@ internal static class TcpConnectionRunner {
                 Principal = ticket.Principal,
                 PrincipalId = ticket.PrincipalId,
                 Metadata = ticket.Metadata,
-                ConnectedAt = timeProvider.GetUtcNow(),
+                ConnectedAt = timeProvider.GetUtcNow()
             };
             writer = new TcpOutboundWriter(
                 stream, framer, sendBufferBytes, maxOutboundMessageBytes, maxPendingSends,
@@ -143,7 +144,7 @@ internal static class TcpConnectionRunner {
                     // Observer cancellation can throw after the registry mutation. A duplicate-id failure,
                     // however, belongs to another sink and must never unregister that live connection.
                     ownsRegistration = registry.TryGet(identity.ConnectionId, out var registered)
-                        && ReferenceEquals(registered, connection);
+                                       && ReferenceEquals(registered, connection);
                     if (!ownsRegistration && failure is not OperationCanceledException) {
                         // A rejected registration is an adapter/ticket bug (e.g. an authenticated ticket
                         // without a PrincipalId, or a duplicate connection id) — the peer did nothing
@@ -230,9 +231,7 @@ internal static class TcpConnectionRunner {
             TcpConnectionTelemetry.RecordFailure(transportTag, "codec");
         }
         finally {
-            if (tlsStream is not null) {
-                await tlsStream.DisposeAsync();
-            }
+            if (tlsStream is not null) await tlsStream.DisposeAsync();
 
             lifetime.DisposeTransport();
             writer?.Dispose();
@@ -247,12 +246,10 @@ internal static class TcpConnectionRunner {
     private static async ValueTask SettleOutboundAsync(
         TcpOutboundWriter writer, TcpConnectionLifetime lifetime, TimeSpan gracePeriod, TimeProvider timeProvider) {
         var reason = lifetime.CloseReason;
-        if (reason is null && !lifetime.WasForced) {
+        if (reason is null && !lifetime.WasForced)
             writer.BeginGracefulClose();
-        }
-        else {
+        else
             writer.Abort(reason);
-        }
 
         try {
             await writer.DrainCompletion.WaitAsync(gracePeriod, timeProvider);
@@ -270,15 +267,12 @@ internal static class TcpConnectionRunner {
         ElarionTcpConnectionOptions endpoint,
         TimeProvider timeProvider,
         CancellationToken ct) {
-        if (tls is null) {
-            return stream;
-        }
+        if (tls is null) return stream;
 
         ValidateTlsDirection(tls, endpoint);
-        if (tls.HandshakeTimeout <= TimeSpan.Zero && tls.HandshakeTimeout != Timeout.InfiniteTimeSpan) {
+        if (tls.HandshakeTimeout <= TimeSpan.Zero && tls.HandshakeTimeout != Timeout.InfiniteTimeSpan)
             throw new ArgumentException(
                 "TLS HandshakeTimeout must be positive or Timeout.InfiniteTimeSpan.", nameof(tls));
-        }
 
         using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         handshakeCts.CancelAfter(tls.HandshakeTimeout);
@@ -312,7 +306,7 @@ internal static class TcpConnectionRunner {
             var outcome = failure switch {
                 OperationCanceledException when ct.IsCancellationRequested => "cancelled",
                 OperationCanceledException => "timeout",
-                _ => "failed",
+                _ => "failed"
             };
             TcpConnectionTelemetry.RecordTlsHandshake(outcome, timeProvider.GetElapsedTime(started));
             await sslStream.DisposeAsync();
@@ -324,26 +318,22 @@ internal static class TcpConnectionRunner {
         ConditionalWeakTable<TOptions, object> usedOptions,
         TOptions authenticationOptions)
         where TOptions : class {
-        if (!usedOptions.TryAdd(authenticationOptions, new object())) {
+        if (!usedOptions.TryAdd(authenticationOptions, new object()))
             throw new InvalidOperationException(
                 "TLS authentication option factories must return a fresh BCL options instance for each connection.");
-        }
     }
 
     private static void ValidateTlsDirection(TcpTlsOptions tls, ElarionTcpConnectionOptions endpoint) {
-        if (endpoint is ElarionTcpListenerOptions && tls is not TcpServerTlsOptions) {
+        if (endpoint is ElarionTcpListenerOptions && tls is not TcpServerTlsOptions)
             throw new ArgumentException("Listener connections require TcpServerTlsOptions.", nameof(tls));
-        }
 
-        if (endpoint is ElarionTcpDialerOptions && tls is not TcpClientTlsOptions) {
+        if (endpoint is ElarionTcpDialerOptions && tls is not TcpClientTlsOptions)
             throw new ArgumentException("Dialer connections require TcpClientTlsOptions.", nameof(tls));
-        }
 
-        if (endpoint is not ElarionTcpListenerOptions and not ElarionTcpDialerOptions) {
+        if (endpoint is not ElarionTcpListenerOptions and not ElarionTcpDialerOptions)
             throw new ArgumentException(
                 "TLS requires a listener or dialer endpoint so the adapter can select server or client mode.",
                 nameof(endpoint));
-        }
     }
 
     private static void ValidateResolvedSettings(
@@ -355,15 +345,13 @@ internal static class TcpConnectionRunner {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(readBufferBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(sendBufferBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxPendingSends, 0);
-        if (readBufferBytes > maxMessageBytes) {
+        if (readBufferBytes > maxMessageBytes)
             throw new ArgumentOutOfRangeException(nameof(readBufferBytes),
                 "InitialReadBufferBytes cannot exceed MaxInboundFrameBytes.");
-        }
 
-        if (sendBufferBytes > maxOutboundMessageBytes) {
+        if (sendBufferBytes > maxOutboundMessageBytes)
             throw new ArgumentOutOfRangeException(nameof(sendBufferBytes),
                 "InitialSendBufferBytes cannot exceed MaxOutboundFrameBytes.");
-        }
     }
 
     // Failure-isolated: a throwing OnClosedAsync must never break teardown/unregistration.
@@ -385,9 +373,7 @@ internal static class TcpConnectionRunner {
             var message = idleTimeout is { } window
                 ? await ReadWithIdleAsync(connection, reader, window, transportTag, ct)
                 : await reader.ReadAsync(ct);
-            if (message is null) {
-                return;
-            }
+            if (message is null) return;
 
             // Bytes are bytes on TCP: every message is a raw slice on the binary leg; a text protocol's
             // codec decodes it — the string is paid for only where it is wanted.
@@ -403,9 +389,7 @@ internal static class TcpConnectionRunner {
         TcpClientConnection connection, TcpMessageReader reader, TimeSpan window, string transportTag,
         CancellationToken ct) {
         var read = reader.ReadAsync(ct);
-        if (read.IsCompletedSuccessfully) {
-            return read.Result;
-        }
+        if (read.IsCompletedSuccessfully) return read.Result;
 
         var pending = read.AsTask();
         // If OnIdleAsync throws (documented dead-link detection) the connection tears down while this read
@@ -413,7 +397,8 @@ internal static class TcpConnectionRunner {
         // unobserved task exception.
         _ = pending.ContinueWith(
             static faulted => _ = faulted.Exception,
-            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
         while (true) {
             using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

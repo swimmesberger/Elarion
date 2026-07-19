@@ -7,8 +7,7 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ElarionResourceGrantsGeneratorTests
-{
+public sealed class ElarionResourceGrantsGeneratorTests {
     private const string ContextSource =
         """
         using Microsoft.EntityFrameworkCore;
@@ -25,8 +24,7 @@ public sealed class ElarionResourceGrantsGeneratorTests
         """;
 
     [Fact]
-    public void EmitsDbSetAndModelConfigurationSeam()
-    {
+    public void EmitsDbSetAndModelConfigurationSeam() {
         var result = RunGrantsGenerator(ContextSource);
 
         NoErrors(result);
@@ -34,14 +32,14 @@ public sealed class ElarionResourceGrantsGeneratorTests
 
         source.Should().Contain(
             "public DbSet<global::Elarion.Authorization.EntityFrameworkCore.ResourceGrantEntity> ResourceGrants => Set<global::Elarion.Authorization.EntityFrameworkCore.ResourceGrantEntity>();");
-        source.Should().Contain("partial void OnEntitiesConfigured_GenerateElarionResourceGrants(ModelBuilder modelBuilder) =>");
+        source.Should()
+            .Contain("partial void OnEntitiesConfigured_GenerateElarionResourceGrants(ModelBuilder modelBuilder) =>");
         source.Should().Contain("ApplyElarionResourceGrants(");
         source.Should().Contain("snakeCase: true");
     }
 
     [Fact]
-    public void SnakeCaseFalse_IsHonored()
-    {
+    public void SnakeCaseFalse_IsHonored() {
         var result = RunGrantsGenerator(
             """
             using Microsoft.EntityFrameworkCore;
@@ -62,8 +60,7 @@ public sealed class ElarionResourceGrantsGeneratorTests
     }
 
     [Fact]
-    public void MissingGenerateDbSets_ReportsElrg001AndGeneratesNothing()
-    {
+    public void MissingGenerateDbSets_ReportsElrg001AndGeneratesNothing() {
         var result = RunGrantsGenerator(
             """
             using Microsoft.EntityFrameworkCore;
@@ -82,8 +79,7 @@ public sealed class ElarionResourceGrantsGeneratorTests
     }
 
     [Fact]
-    public void ComposesWithEfGeneratorSeamAndCompiles()
-    {
+    public void ComposesWithEfGeneratorSeamAndCompiles() {
         // The EF DbContext generator declares the per-feature seam OnEntitiesConfigured_GenerateElarionResourceGrants;
         // the grants generator implements it. Compiling source + both generated trees proves the contract holds.
         var ct = TestContext.Current.CancellationToken;
@@ -95,7 +91,9 @@ public sealed class ElarionResourceGrantsGeneratorTests
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            new[] { new DbContextGenerator().AsSourceGenerator(), new ElarionResourceGrantsGenerator().AsSourceGenerator() },
+            new[] {
+                new DbContextGenerator().AsSourceGenerator(), new ElarionResourceGrantsGenerator().AsSourceGenerator()
+            },
             parseOptions: parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, ct);
 
@@ -105,14 +103,12 @@ public sealed class ElarionResourceGrantsGeneratorTests
     }
 
     [Fact]
-    public void IrrelevantEditReusesTargets()
-    {
+    public void IrrelevantEditReusesTargets() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new ElarionResourceGrantsGenerator(), ContextSource, "ResourceGrantsTargets");
     }
 
-    private static GeneratorDriverRunResult RunGrantsGenerator(string source)
-    {
+    private static GeneratorDriverRunResult RunGrantsGenerator(string source) {
         var compilation = CSharpCompilation.Create(
             "ElarionResourceGrantsGeneratorTests",
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview))],
@@ -123,19 +119,20 @@ public sealed class ElarionResourceGrantsGeneratorTests
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    private static void NoErrors(GeneratorDriverRunResult result) =>
+    private static void NoErrors(GeneratorDriverRunResult result) {
         result.Diagnostics
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
+    }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
         return trustedPlatformAssemblies!

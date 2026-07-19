@@ -27,7 +27,9 @@ public sealed class SqlWhere {
     private readonly List<SqlStatement> _predicates = [];
 
     /// <summary>Adds a predicate fragment; interpolated values become parameters.</summary>
-    public void And(SqlInterpolatedStringHandler predicate) => _predicates.Add(new SqlStatement(predicate));
+    public void And(SqlInterpolatedStringHandler predicate) {
+        _predicates.Add(new SqlStatement(predicate));
+    }
 
     /// <summary>Adds an already-composed predicate fragment.</summary>
     public void And(SqlStatement predicate) {
@@ -43,18 +45,16 @@ public sealed class SqlWhere {
     /// when empty. Splicing a <see cref="SqlWhere"/> into an interpolation calls this for you.
     /// </summary>
     public SqlStatement ToSql() {
-        if (_predicates.Count == 0) {
-            return SqlStatement.Empty;
-        }
+        if (_predicates.Count == 0) return SqlStatement.Empty;
 
         // WHERE ( <p0> ) AND ( <p1> ) …  — two literals per predicate plus the fragment segment.
-        var segments = new List<SqlSegment>((_predicates.Count * 3) + 1);
+        var segments = new List<SqlSegment>(_predicates.Count * 3 + 1);
         for (var i = 0; i < _predicates.Count; i++) {
             segments.Add(SqlSegment.OfLiteral(i == 0 ? "WHERE (" : " AND ("));
             _predicates[i].AddAsSegmentTo(segments);
             segments.Add(SqlSegment.OfLiteral(")"));
         }
 
-        return new SqlStatement(segments, textCapacityHint: 16 * _predicates.Count, valueCountHint: _predicates.Count);
+        return new SqlStatement(segments, 16 * _predicates.Count, _predicates.Count);
     }
 }

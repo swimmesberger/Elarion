@@ -15,10 +15,12 @@ using Xunit;
 namespace Elarion.Tests.Features;
 
 public sealed class OpenFeatureFeatureFlagServiceTests {
-    private static Dictionary<string, Flag> Flags() => new() {
-        ["feature-on"] = new Flag<bool>(new Dictionary<string, bool> { ["on"] = true, ["off"] = false }, "on"),
-        ["feature-off"] = new Flag<bool>(new Dictionary<string, bool> { ["on"] = true, ["off"] = false }, "off"),
-    };
+    private static Dictionary<string, Flag> Flags() {
+        return new Dictionary<string, Flag> {
+            ["feature-on"] = new Flag<bool>(new Dictionary<string, bool> { ["on"] = true, ["off"] = false }, "on"),
+            ["feature-off"] = new Flag<bool>(new Dictionary<string, bool> { ["on"] = true, ["off"] = false }, "off")
+        };
+    }
 
     [Fact]
     public async Task EvaluatesBooleanFlagsAndFailsClosedOnUnknownFlag() {
@@ -52,7 +54,7 @@ public sealed class OpenFeatureFeatureFlagServiceTests {
     public async Task VariantService_ReadsAllocatedVariantName_AndNullForUnknownFlag() {
         var ct = TestContext.Current.CancellationToken;
         var flags = new Dictionary<string, Flag> {
-            ["algo"] = new Flag<string>(new Dictionary<string, string> { ["neural"] = "n", ["linear"] = "l" }, "neural"),
+            ["algo"] = new Flag<string>(new Dictionary<string, string> { ["neural"] = "n", ["linear"] = "l" }, "neural")
         };
         await Api.Instance.SetProviderAsync(new InMemoryProvider(flags), ct);
 
@@ -95,8 +97,8 @@ public sealed class OpenFeatureFeatureFlagServiceTests {
         await Api.Instance.SetProviderAsync(new FeatureManagementProvider(configuration), ct);
 
         var details = await Api.Instance.GetClient().GetStringDetailsAsync("algo", "DEFAULT", cancellationToken: ct);
-        details.Value.Should().Be("n");            // the variant IS evaluated (neural's configuration_value)
-        details.Variant.Should().BeNullOrEmpty();  // but the variant NAME is not surfaced — the preview limitation
+        details.Value.Should().Be("n"); // the variant IS evaluated (neural's configuration_value)
+        details.Variant.Should().BeNullOrEmpty(); // but the variant NAME is not surfaced — the preview limitation
 
         var service = new OpenFeatureFeatureVariantService(
             Api.Instance.GetClient(), new FakeCurrentUser { IsAuthenticated = true, UserId = "u-1" });

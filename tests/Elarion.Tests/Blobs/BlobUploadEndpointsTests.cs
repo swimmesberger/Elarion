@@ -99,7 +99,7 @@ public sealed class BlobUploadEndpointsTests {
     [Fact]
     public async Task Upload_Unauthenticated_Returns401() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, user: new FakeCurrentUser("user-1", isAuthenticated: false));
+        await using var host = await StartAsync(ct, user: new FakeCurrentUser("user-1", false));
 
         var content = new ByteArrayContent([1]);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -114,7 +114,7 @@ public sealed class BlobUploadEndpointsTests {
         // The auth guard runs before the ownership check, so an anonymous DELETE is a clean 401 — even for
         // the recorded owner — rather than reaching (and, with the shipped ICurrentUser, throwing on) the id.
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, user: new FakeCurrentUser("user-1", isAuthenticated: false));
+        await using var host = await StartAsync(ct, user: new FakeCurrentUser("user-1", false));
         host.Store.Seed(new BlobMetadata {
             Id = "owned",
             Container = "uploads",
@@ -135,7 +135,7 @@ public sealed class BlobUploadEndpointsTests {
     [Fact]
     public async Task Upload_DisallowedContentType_Returns400() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, configure: options =>
+        await using var host = await StartAsync(ct, options =>
             options.AllowedContentTypes = ["application/pdf"]);
 
         var content = new ByteArrayContent([1]);
@@ -149,7 +149,7 @@ public sealed class BlobUploadEndpointsTests {
     [Fact]
     public async Task Upload_OversizeMultipart_Returns413() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, configure: options => options.MaxContentLength = 4);
+        await using var host = await StartAsync(ct, options => options.MaxContentLength = 4);
 
         using var content = new MultipartFormDataContent();
         var filePart = new ByteArrayContent([1, 2, 3, 4, 5, 6]);
@@ -165,7 +165,7 @@ public sealed class BlobUploadEndpointsTests {
     [Fact]
     public async Task Upload_OversizeRaw_WithContentLength_Returns413() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, configure: options => options.MaxContentLength = 4);
+        await using var host = await StartAsync(ct, options => options.MaxContentLength = 4);
 
         var content = new ByteArrayContent([1, 2, 3, 4, 5, 6]);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -178,7 +178,7 @@ public sealed class BlobUploadEndpointsTests {
     [Fact]
     public async Task Upload_OversizeRaw_Chunked_Returns413() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, configure: options => options.MaxContentLength = 4);
+        await using var host = await StartAsync(ct, options => options.MaxContentLength = 4);
 
         var content = new StreamContent(new MemoryStream(new byte[16]));
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -212,7 +212,7 @@ public sealed class BlobUploadEndpointsTests {
         // {ownerId}/" test over the storage name. A user "a" must not be able to cancel a blob owned by
         // "a/b" just because the name "a/b/…" begins with "a/".
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, user: new FakeCurrentUser("a", isAuthenticated: true));
+        await using var host = await StartAsync(ct, user: new FakeCurrentUser("a", true));
         host.Store.Seed(new BlobMetadata {
             Id = "victim",
             Container = "uploads",
@@ -294,7 +294,7 @@ public sealed class BlobUploadEndpointsTests {
 
         var store = new RecordingBlobStore();
         builder.Services.AddSingleton<IBlobStore>(store);
-        builder.Services.AddScoped<ICurrentUser>(_ => user ?? new FakeCurrentUser("user-1", isAuthenticated: true));
+        builder.Services.AddScoped<ICurrentUser>(_ => user ?? new FakeCurrentUser("user-1", true));
         builder.Services.AddProblemDetails();
         builder.Services.AddElarionBlobUploads(configure);
 
@@ -328,11 +328,16 @@ public sealed class BlobUploadEndpointsTests {
 
         public List<string> Deleted { get; } = [];
 
-        public void Seed(BlobMetadata metadata) => _blobs[metadata.Id] = (metadata, []);
+        public void Seed(BlobMetadata metadata) {
+            _blobs[metadata.Id] = (metadata, []);
+        }
 
-        public byte[] SavedContent(string id) => _blobs[id].Data;
+        public byte[] SavedContent(string id) {
+            return _blobs[id].Data;
+        }
 
-        public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content, CancellationToken cancellationToken) {
+        public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content,
+            CancellationToken cancellationToken) {
             Requests.Add(request);
             using var buffer = new MemoryStream();
             await content.CopyToAsync(buffer, cancellationToken);
@@ -352,25 +357,30 @@ public sealed class BlobUploadEndpointsTests {
             return new BlobRef { Value = id };
         }
 
-        public Task<BlobMetadata?> GetMetadataAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult(_blobs.TryGetValue(blobRef.Value, out var entry) ? entry.Metadata : null);
+        public Task<BlobMetadata?> GetMetadataAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult(_blobs.TryGetValue(blobRef.Value, out var entry) ? entry.Metadata : null);
+        }
 
         public Task<bool> DeleteAsync(BlobRef blobRef, CancellationToken cancellationToken) {
             Deleted.Add(blobRef.Value);
             return Task.FromResult(_blobs.Remove(blobRef.Value));
         }
 
-        public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult(_blobs.ContainsKey(blobRef.Value));
+        public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult(_blobs.ContainsKey(blobRef.Value));
+        }
 
-        public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-            Task.FromResult<BlobDownload?>(null);
+        public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+            return Task.FromResult<BlobDownload?>(null);
+        }
 
-        public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) =>
+        public Task<BlobListing> ListAsync(BlobListRequest request, CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
+        public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) {
             throw new NotSupportedException();
+        }
     }
 
     private sealed class FakeCurrentUser(string userId, bool isAuthenticated) : ICurrentUser {
@@ -382,6 +392,8 @@ public sealed class BlobUploadEndpointsTests {
 
         public bool IsAuthenticated { get; } = isAuthenticated;
 
-        public bool IsInRole(string role) => false;
+        public bool IsInRole(string role) {
+            return false;
+        }
     }
 }

@@ -13,9 +13,13 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 public sealed class GetSendStatus(IJobSchedulerInspector scheduler)
     : IHandler<GetSendStatus.Query, Result<GetSendStatus.Response>> {
     public sealed record Query(Guid JobId) : IQuery;
+
     public sealed record Response(
-        string Status, int Attempt, int MaxAttempts,
-        DateTimeOffset? NextAttemptAt, string? LastError);
+        string Status,
+        int Attempt,
+        int MaxAttempts,
+        DateTimeOffset? NextAttemptAt,
+        string? LastError);
 
     public ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
         var state = scheduler.GetJob(query.JobId);

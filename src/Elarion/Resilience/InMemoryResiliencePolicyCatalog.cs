@@ -14,12 +14,8 @@ internal sealed class InMemoryResiliencePolicyCatalog(
     }
 
     private void EnsureInitialized() {
-        if (!_policies.IsEmpty) {
-            return;
-        }
+        if (!_policies.IsEmpty) return;
 
-        foreach (var registration in registrations) {
-            _policies[registration.Metadata.Name] = registration.Metadata;
-        }
+        foreach (var registration in registrations) _policies[registration.Metadata.Name] = registration.Metadata;
     }
 }

@@ -10,6 +10,7 @@ namespace Elarion.Scheduling;
 /// </summary>
 public sealed class LocalScheduledOccurrenceCoordinator : IScheduledOccurrenceCoordinator {
     /// <inheritdoc />
-    public ValueTask<bool> TryClaimAsync(ScheduledOccurrence occurrence, CancellationToken cancellationToken) =>
-        ValueTask.FromResult(true);
+    public ValueTask<bool> TryClaimAsync(ScheduledOccurrence occurrence, CancellationToken cancellationToken) {
+        return ValueTask.FromResult(true);
+    }
 }

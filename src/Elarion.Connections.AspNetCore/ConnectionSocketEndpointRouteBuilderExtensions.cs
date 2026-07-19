@@ -47,15 +47,15 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
     private static async Task<IResult> HandleAsync<THandler>(
         HttpContext context, ElarionConnectionSocketOptions options, CancellationToken ct)
         where THandler : WebSocketConnectionHandler {
-        if (!context.WebSockets.IsWebSocketRequest) {
-            return Results.BadRequest();
-        }
+        if (!context.WebSockets.IsWebSocketRequest) return Results.BadRequest();
 
         var services = context.RequestServices;
         var registry = services.GetRequiredService<IClientConnectionRegistry>();
         var handler = services.GetRequiredService<THandler>();
-        var logger = services.GetService<ILoggerFactory>()?.CreateLogger(typeof(ConnectionSocketEndpointRouteBuilderExtensions).Namespace + ".ConnectionSocket")
-            ?? NullLogger.Instance;
+        var logger = services.GetService<ILoggerFactory>()
+                         ?.CreateLogger(typeof(ConnectionSocketEndpointRouteBuilderExtensions).Namespace +
+                                        ".ConnectionSocket")
+                     ?? NullLogger.Instance;
 
         // Per-connection configuration (the binding-config lookup point): resolved from the upgrade request
         // before the socket is accepted; nulls inherit the endpoint options.
@@ -66,7 +66,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         var receiveBufferBytes = overrides?.ReceiveBufferBytes ?? options.ReceiveBufferBytes;
 
         using var socket = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
-            KeepAliveInterval = overrides?.KeepAliveInterval ?? options.KeepAliveInterval,
+            KeepAliveInterval = overrides?.KeepAliveInterval ?? options.KeepAliveInterval
         });
         var reader = new WebSocketMessageReader(socket, maxMessageBytes, receiveBufferBytes);
 
@@ -83,7 +83,8 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             // Request abort or handshake deadline — either way nothing was registered. Cancelling a
             // pending WebSocket receive aborts the socket, so this close is best-effort: the peer may
             // observe a reset instead of a close frame; the slot is freed regardless.
-            await CloseSafelyAsync(socket, WebSocketCloseStatus.PolicyViolation, "handshake timeout", CancellationToken.None);
+            await CloseSafelyAsync(socket, WebSocketCloseStatus.PolicyViolation, "handshake timeout",
+                CancellationToken.None);
             return Results.Empty;
         }
         catch (WebSocketMessageTooLargeException) {
@@ -106,7 +107,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             Principal = ticket.Principal,
             PrincipalId = ticket.PrincipalId,
             Metadata = ticket.Metadata,
-            ConnectedAt = (services.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow(),
+            ConnectedAt = (services.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow()
         };
         // The kernel-wide invoke default (per-call ClientInvokeOptions.Timeout still wins per call).
         var connectionDefaults = services.GetService<ElarionConnectionsOptions>() ?? new ElarionConnectionsOptions();
@@ -124,7 +125,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
                 // Observer cancellation can throw after the registry mutation. A duplicate-id failure,
                 // however, belongs to another sink and must never unregister that live connection.
                 ownsRegistration = registry.TryGet(identity.ConnectionId, out var registered)
-                    && ReferenceEquals(registered, connection);
+                                   && ReferenceEquals(registered, connection);
                 throw;
             }
 
@@ -184,16 +185,12 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             var message = idleTimeout is { } window
                 ? await ReadWithIdleAsync(connection, reader, window, ct)
                 : await reader.ReadAsync(ct);
-            if (message is null) {
-                return;
-            }
+            if (message is null) return;
 
-            if (message.Value.Type == WebSocketMessageType.Text) {
+            if (message.Value.Type == WebSocketMessageType.Text)
                 await connection.Protocol.OnTextAsync(Encoding.UTF8.GetString(message.Value.Payload), ct);
-            }
-            else {
+            else
                 await connection.Protocol.OnBinaryAsync(message.Value.Payload, ct);
-            }
         }
     }
 
@@ -204,9 +201,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         WebSocketClientConnection connection, WebSocketMessageReader reader, TimeSpan window,
         CancellationToken ct) {
         var read = reader.ReadAsync(ct);
-        if (read.IsCompletedSuccessfully) {
-            return read.Result;
-        }
+        if (read.IsCompletedSuccessfully) return read.Result;
 
         var pending = read.AsTask();
         // If OnIdleAsync throws (documented dead-link detection) the connection tears down while this read
@@ -214,7 +209,8 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         // unobserved task exception.
         _ = pending.ContinueWith(
             static faulted => _ = faulted.Exception,
-            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
         while (true) {
             using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -232,9 +228,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
 
     private static async Task CloseSafelyAsync(
         WebSocket socket, WebSocketCloseStatus status, string description, CancellationToken ct) {
-        if (socket.State is not (WebSocketState.Open or WebSocketState.CloseReceived)) {
-            return;
-        }
+        if (socket.State is not (WebSocketState.Open or WebSocketState.CloseReceived)) return;
 
         try {
             await socket.CloseOutputAsync(status, description, ct);

@@ -22,16 +22,15 @@ public sealed class SendInvoiceEmailJob(
     public async ValueTask ExecuteAsync(
         SendInvoiceEmailPayload payload, IScheduledJobContext context, CancellationToken ct) {
         var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == payload.InvoiceId, ct);
-        if (invoice is null || invoice.Status != InvoiceStatus.Draft) {
-            return;   // already sent, or rolled back — nothing to do
-        }
+        if (invoice is null ||
+            invoice.Status != InvoiceStatus.Draft) return; // already sent, or rolled back — nothing to do
 
         var client = await db.Clients.FirstAsync(c => c.Id == invoice.ClientId, ct);
         await email.SendAsync(new InvoiceEmail {
             To = client.Email,
             InvoiceNumber = invoice.Number,
             AmountCents = invoice.AmountCents,
-            Currency = invoice.Currency,
+            Currency = invoice.Currency
         }, ct);
 
         invoice.Status = InvoiceStatus.Sent;

@@ -9,13 +9,14 @@
 // image — the extension rides the image, and enabling it is the API's ordinary startup migration.
 // The API itself deliberately stays the lean AOT host (no OpenTelemetry wiring), so the dashboard
 // shows its console logs but no traces — this launcher is about the one-click dev loop, not APM.
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder.AddPostgres("postgres")
     .WithImage("timescale/timescaledb", "latest-pg17")
     .WithDataVolume();
 
-var telemetryDb = postgres.AddDatabase("telemetry", databaseName: "edge_telemetry");
+var telemetryDb = postgres.AddDatabase("telemetry", "edge_telemetry");
 
 builder.AddProject<Projects.EdgeTelemetry_Api>("api")
     .WithReference(telemetryDb)

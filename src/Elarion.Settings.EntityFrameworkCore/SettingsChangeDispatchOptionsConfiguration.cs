@@ -18,6 +18,8 @@ namespace Elarion.Settings.EntityFrameworkCore;
 /// </remarks>
 internal sealed class SettingsChangeDispatchOptionsConfiguration<TContext> : IDbContextOptionsConfiguration<TContext>
     where TContext : DbContext {
-    public void Configure(IServiceProvider serviceProvider, DbContextOptionsBuilder optionsBuilder) =>
-        optionsBuilder.AddInterceptors(serviceProvider.GetRequiredService<SettingsChangeDispatchTransactionInterceptor>());
+    public void Configure(IServiceProvider serviceProvider, DbContextOptionsBuilder optionsBuilder) {
+        optionsBuilder.AddInterceptors(
+            serviceProvider.GetRequiredService<SettingsChangeDispatchTransactionInterceptor>());
+    }
 }

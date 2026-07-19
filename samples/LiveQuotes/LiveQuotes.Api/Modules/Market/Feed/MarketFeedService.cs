@@ -51,16 +51,16 @@ internal sealed class MarketFeedService(
         var interval = TimeSpan.FromSeconds(1.0 / Math.Max(1, options.TicksPerSecondPerSymbol));
         using var timer = new PeriodicTimer(interval, timeProvider);
 
-        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) {
+        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             foreach (var symbol in options.Symbols) {
                 // Random walk: ±0.2% per tick.
                 var price = prices[symbol];
-                price = Math.Round(Math.Max(0.01m, price * (1m + (decimal)(Random.Shared.NextDouble() - 0.5) * 0.004m)), 2);
+                price = Math.Round(Math.Max(0.01m, price * (1m + (decimal)(Random.Shared.NextDouble() - 0.5) * 0.004m)),
+                    2);
                 prices[symbol] = price;
 
                 var tick = new QuoteTick(++sequences[symbol], price, timeProvider.GetUtcNow());
                 await actors.Get<IStockQuote>(symbol).Apply(tick, stoppingToken).ConfigureAwait(false);
             }
-        }
     }
 }

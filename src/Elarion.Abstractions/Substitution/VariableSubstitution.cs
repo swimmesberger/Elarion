@@ -23,22 +23,20 @@ public static class VariableSubstitution {
     /// <summary>True when the entire value is a single <c>${...}</c> placeholder rather than a literal.</summary>
     public static bool IsPlaceholder(string value) {
         ArgumentNullException.ThrowIfNull(value);
-        if (!value.StartsWith(Open, StringComparison.Ordinal) || !value.EndsWith(Close)) {
-            return false;
-        }
+        if (!value.StartsWith(Open, StringComparison.Ordinal) || !value.EndsWith(Close)) return false;
 
         // The trailing '}' must be the close matching the leading "${". If the leading placeholder closes
         // earlier (e.g. "${a}-${b}" or "${a} }"), the value is a composite template, not a single whole-value
         // placeholder — treating it as one would silently resolve a garbage key like "a}-${b".
         var depth = 1;
-        for (var i = Open.Length; i < value.Length; i++) {
+        for (var i = Open.Length; i < value.Length; i++)
             if (value[i] == '$' && i + 1 < value.Length && value[i + 1] == '{') {
                 depth++;
                 i++;
-            } else if (value[i] == Close && --depth == 0) {
+            }
+            else if (value[i] == Close && --depth == 0) {
                 return i == value.Length - 1;
             }
-        }
 
         return false;
     }
@@ -57,10 +55,9 @@ public static class VariableSubstitution {
     public static string? Resolve(string value, IVariableSource source) {
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(source);
-        if (!IsPlaceholder(value)) {
+        if (!IsPlaceholder(value))
             // Literals and placeholders share one API, so attribute values can stay string-based.
             return value;
-        }
 
         var (key, inlineDefault) = ParseBody(value[Open.Length..^1], value);
         return ResolveValue(key, inlineDefault, source);
@@ -68,9 +65,10 @@ public static class VariableSubstitution {
 
     /// <summary>Resolves like <see cref="Resolve"/> but treats an unresolvable placeholder as an error.</summary>
     /// <exception cref="InvalidOperationException">The key is unset and there is no inline default.</exception>
-    public static string ResolveRequired(string value, IVariableSource source) =>
-        Resolve(value, source) ?? throw new InvalidOperationException(
+    public static string ResolveRequired(string value, IVariableSource source) {
+        return Resolve(value, source) ?? throw new InvalidOperationException(
             $"Variable placeholder '{value}' resolved to nothing: the key is not set and no inline ':-' default was provided.");
+    }
 
     /// <summary>
     /// Replaces every <c>${...}</c> placeholder inside <paramref name="template"/> with its resolved value,
@@ -83,19 +81,17 @@ public static class VariableSubstitution {
         ArgumentNullException.ThrowIfNull(source);
 
         var start = template.IndexOf(Open, StringComparison.Ordinal);
-        if (start < 0) {
+        if (start < 0)
             // Fast path: nothing to substitute, no allocation.
             return template;
-        }
 
         var builder = new StringBuilder(template.Length);
         var index = 0;
         while (start >= 0) {
             var end = template.IndexOf(Close, start + Open.Length);
-            if (end < 0) {
+            if (end < 0)
                 // Unterminated placeholder: emit the remainder verbatim.
                 break;
-            }
 
             builder.Append(template, index, start - index);
             var body = template[(start + Open.Length)..end];
@@ -120,17 +116,15 @@ public static class VariableSubstitution {
     private static (string Key, string? Default) ParseBody(string body, string original) {
         // Nested placeholders (e.g. "${a:${b}}") are unsupported by design: this is a single-pass, non-recursive
         // parser, so a nested "${" inside a body is rejected rather than mis-parsed into a garbage lookup.
-        if (body.Contains(Open, StringComparison.Ordinal)) {
+        if (body.Contains(Open, StringComparison.Ordinal))
             throw new FormatException(
                 $"Variable placeholder '{original}' contains a nested '{Open}...{Close}' placeholder, which is not supported.");
-        }
 
         var separatorIndex = body.IndexOf(DefaultSeparator, StringComparison.Ordinal);
         var key = separatorIndex >= 0 ? body[..separatorIndex] : body;
         var inlineDefault = separatorIndex >= 0 ? body[(separatorIndex + DefaultSeparator.Length)..] : null;
-        if (string.IsNullOrWhiteSpace(key)) {
+        if (string.IsNullOrWhiteSpace(key))
             throw new FormatException($"Variable placeholder '{original}' has an empty key.");
-        }
 
         return (key, inlineDefault);
     }

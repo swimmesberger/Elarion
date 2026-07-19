@@ -6,11 +6,9 @@ using Xunit;
 
 namespace Elarion.Tests.Messaging;
 
-public sealed class EventDispatchInterceptorTests
-{
+public sealed class EventDispatchInterceptorTests {
     [Fact]
-    public void AddElarionInMemoryIntegrationEventBus_RegistersBothInterceptorsScoped()
-    {
+    public void AddElarionInMemoryIntegrationEventBus_RegistersBothInterceptorsScoped() {
         var services = new ServiceCollection();
         services.AddLogging();
 

@@ -120,7 +120,9 @@ public sealed class ActorMailboxTests {
 
         public Task Gate => _gate.Task;
 
-        public void Release() => _gate.TrySetResult();
+        public void Release() {
+            _gate.TrySetResult();
+        }
     }
 
     public interface IBounded : IActorFacade<string> {
@@ -142,23 +144,29 @@ public sealed class ActorMailboxTests {
             return Task.CompletedTask;
         }
 
-        public Task<int> Executions() => Task.FromResult(_executions);
+        public Task<int> Executions() {
+            return Task.FromResult(_executions);
+        }
     }
 
     private sealed class BoundedFacade(ActorHandle<BoundedActor> handle) : IBounded {
-        public ValueTask WaitForGate(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new WaitForGateItem(), cancellationToken);
+        public ValueTask WaitForGate(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new WaitForGateItem(), cancellationToken);
+        }
 
-        public ValueTask Count(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new CountItem(), cancellationToken);
+        public ValueTask Count(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new CountItem(), cancellationToken);
+        }
 
-        public ValueTask<int> Executions(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new ExecutionsItem(), cancellationToken);
+        public ValueTask<int> Executions(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new ExecutionsItem(), cancellationToken);
+        }
 
         private sealed class WaitForGateItem : ActorWorkItem<BoundedActor, Unit> {
             public override string MethodName => "WaitForGate";
 
-            protected override async ValueTask<Unit> InvokeAsync(BoundedActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(BoundedActor actor,
+                CancellationToken cancellationToken) {
                 await actor.WaitForGate().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -167,7 +175,8 @@ public sealed class ActorMailboxTests {
         private sealed class CountItem : ActorWorkItem<BoundedActor, Unit> {
             public override string MethodName => "Count";
 
-            protected override async ValueTask<Unit> InvokeAsync(BoundedActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(BoundedActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Count().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -176,8 +185,10 @@ public sealed class ActorMailboxTests {
         private sealed class ExecutionsItem : ActorWorkItem<BoundedActor, int> {
             public override string MethodName => "Executions";
 
-            protected override async ValueTask<int> InvokeAsync(BoundedActor actor, CancellationToken cancellationToken) =>
-                await actor.Executions().ConfigureAwait(false);
+            protected override async ValueTask<int>
+                InvokeAsync(BoundedActor actor, CancellationToken cancellationToken) {
+                return await actor.Executions().ConfigureAwait(false);
+            }
         }
     }
 }

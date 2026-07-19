@@ -14,9 +14,9 @@ public sealed class RpcMcpMetadataSourceTests {
                 RequestType = typeof(object),
                 ToolName = "create_client",
                 Description = "Creates a client.",
-                Parameters = [new RpcMcpParameterDescriptor("DisplayName", "The name.")],
+                Parameters = [new RpcMcpParameterDescriptor("DisplayName", "The name.")]
             },
-            new RpcMcpMethodMetadata { MethodName = "admin.purge", RequestType = typeof(object) },
+            new RpcMcpMethodMetadata { MethodName = "admin.purge", RequestType = typeof(object) }
         ]);
 
         source.Get("clients.create").Should().NotBeNull();

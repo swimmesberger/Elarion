@@ -29,10 +29,12 @@ public static class JsonRpcEndpoint {
         var parseStartTimestamp = Stopwatch.GetTimestamp();
         try {
             doc = await JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: ctx.RequestAborted);
-        } catch (JsonException ex) {
+        }
+        catch (JsonException ex) {
             logger.LogWarning(ex, "JSON-RPC parse error — request body is not valid JSON");
             using var activity = JsonRpcTelemetry.Source.StartActivity("jsonrpc parse", ActivityKind.Server);
-            JsonRpcDispatcher.RecordEndpointError(activity, "_parse", "-32700", "Parse error", "parse", parseStartTimestamp);
+            JsonRpcDispatcher.RecordEndpointError(activity, "_parse", "-32700", "Parse error", "parse",
+                parseStartTimestamp);
             ctx.Response.ContentType = "application/json";
             await JsonSerializer.SerializeAsync(
                 ctx.Response.Body,
@@ -43,11 +45,10 @@ public static class JsonRpcEndpoint {
         }
 
         using (doc) {
-            if (doc.RootElement.ValueKind == JsonValueKind.Array) {
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 await HandleBatch(ctx, doc, dispatcher, jsonOptions, options, logger);
-            } else {
+            else
                 await HandleSingle(ctx, doc, dispatcher, jsonOptions, logger);
-            }
         }
     }
 
@@ -60,7 +61,8 @@ public static class JsonRpcEndpoint {
         JsonRpcRequest? request;
         try {
             request = doc.RootElement.Deserialize<JsonRpcRequest>(jsonOptions);
-        } catch (JsonException ex) {
+        }
+        catch (JsonException ex) {
             logger.LogWarning(ex, "JSON-RPC invalid request — could not deserialize request envelope");
             RecordEndpointInvalidRequest("_invalid", "envelope-deserialization");
             ctx.Response.ContentType = "application/json";
@@ -84,11 +86,12 @@ public static class JsonRpcEndpoint {
         }
 
         JsonRpcResponse response;
-        await using (var scope = ctx.RequestServices.CreateDispatchScope(CreateDispatchContext(ctx, includeIdempotencyKey: true))) {
+        await using (var scope = ctx.RequestServices.CreateDispatchScope(CreateDispatchContext(ctx, true))) {
             try {
                 response = await dispatcher.DispatchAsync(
                     request, scope.ServiceProvider, ctx.RequestAborted);
-            } catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested) {
+            }
+            catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested) {
                 // The client disconnected mid-dispatch. Bail quietly — do not write a response into the
                 // aborted request and do not surface this as an error (expected cancellation).
                 logger.LogDebug("JSON-RPC request aborted by the client before completion");
@@ -128,7 +131,8 @@ public static class JsonRpcEndpoint {
             logger.LogWarning(
                 "JSON-RPC batch rejected: the HTTP {Header} header is ambiguous for a batch; carry a per-item key at each request's params._meta instead",
                 Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader);
-            RecordBatchError(batchActivity, 0, "400", "Idempotency-Key not allowed for batches", "batch-idempotency-key");
+            RecordBatchError(batchActivity, 0, "400", "Idempotency-Key not allowed for batches",
+                "batch-idempotency-key");
             await WriteBatchIdempotencyKeyRejection(ctx, jsonOptions);
             return;
         }
@@ -154,15 +158,15 @@ public static class JsonRpcEndpoint {
 
         if (count > options.MaxBatchSize) {
             logger.LogWarning("JSON-RPC batch size {Count} exceeds limit {Max}", count, options.MaxBatchSize);
-            if (batchActivity?.IsAllDataRequested == true) {
+            if (batchActivity?.IsAllDataRequested == true)
                 batchActivity.SetTag("jsonrpc.batch.max_size", options.MaxBatchSize);
-            }
 
             RecordBatchError(batchActivity, count, "-32600", "Batch too large", "batch-too-large");
             ctx.Response.ContentType = "application/json";
             await JsonSerializer.SerializeAsync(
                 ctx.Response.Body,
-                JsonRpcResponse.FromError((string?)null, new RpcError { Code = -32600, Message = $"Batch too large. Max {options.MaxBatchSize}" }),
+                JsonRpcResponse.FromError((string?)null,
+                    new RpcError { Code = -32600, Message = $"Batch too large. Max {options.MaxBatchSize}" }),
                 jsonOptions,
                 ctx.RequestAborted);
             return;
@@ -174,8 +178,10 @@ public static class JsonRpcEndpoint {
             JsonRpcRequest? req;
             try {
                 req = element.Deserialize<JsonRpcRequest>(jsonOptions);
-            } catch (JsonException ex) {
-                logger.LogWarning(ex, "JSON-RPC batch item — could not deserialize request envelope, using empty request");
+            }
+            catch (JsonException ex) {
+                logger.LogWarning(ex,
+                    "JSON-RPC batch item — could not deserialize request envelope, using empty request");
                 req = null;
             }
 
@@ -194,7 +200,8 @@ public static class JsonRpcEndpoint {
                     IsInvalidEnvelope = true,
                     ForceResponse = true
                 });
-            } else {
+            }
+            else {
                 requests.Add(req with {
                     BatchIndex = index,
                     BatchSize = count,
@@ -214,7 +221,8 @@ public static class JsonRpcEndpoint {
                 ctx.RequestServices,
                 CreateDispatchContext(ctx),
                 ctx.RequestAborted);
-        } catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested) {
+        }
+        catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested) {
             // The client disconnected mid-batch. Bail quietly (expected cancellation, no response written).
             logger.LogDebug("JSON-RPC batch aborted by the client before completion");
             return;
@@ -249,16 +257,16 @@ public static class JsonRpcEndpoint {
         // header outright (it would key every distinct operation to the same value) and never sets this flag.
         if (includeIdempotencyKey &&
             ctx.Request.Headers.TryGetValue(Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader, out var key) &&
-            key.Count > 0 && !string.IsNullOrWhiteSpace(key[0])) {
+            key.Count > 0 && !string.IsNullOrWhiteSpace(key[0]))
             context.Set(new Abstractions.Idempotency.IdempotencyKey(key[0]!));
-        }
 
         return context;
     }
 
-    private static bool HasHttpIdempotencyKey(HttpContext ctx) =>
-        ctx.Request.Headers.TryGetValue(Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader, out var key) &&
-        key.Count > 0 && !string.IsNullOrWhiteSpace(key[0]);
+    private static bool HasHttpIdempotencyKey(HttpContext ctx) {
+        return ctx.Request.Headers.TryGetValue(Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader, out var key) &&
+               key.Count > 0 && !string.IsNullOrWhiteSpace(key[0]);
+    }
 
     private static async Task WriteBatchIdempotencyKeyRejection(HttpContext ctx, JsonSerializerOptions jsonOptions) {
         // Reject with HTTP 400 and a JSON-RPC error envelope (Invalid Request, -32600). A JSON-RPC error is written
@@ -271,7 +279,7 @@ public static class JsonRpcEndpoint {
             Message =
                 $"The HTTP {Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader} header is not allowed on a JSON-RPC batch: " +
                 "it applies to the whole request and cannot key the batch's distinct operations. Carry a per-item key at each " +
-                $"request's params._meta.{Abstractions.Idempotency.IdempotencyKeyNames.MetaKey} instead.",
+                $"request's params._meta.{Abstractions.Idempotency.IdempotencyKeyNames.MetaKey} instead."
         };
         await JsonSerializer.SerializeAsync(
             ctx.Response.Body, JsonRpcResponse.FromError((string?)null, error), jsonOptions, ctx.RequestAborted);
@@ -283,7 +291,8 @@ public static class JsonRpcEndpoint {
         JsonRpcDispatcher.RecordEndpointError(activity, method, "-32600", "Invalid request", phase, startTimestamp);
     }
 
-    private static void RecordBatchError(Activity? batchActivity, int count, string statusCode, string description, string phase) {
+    private static void RecordBatchError(Activity? batchActivity, int count, string statusCode, string description,
+        string phase) {
         var startTimestamp = Stopwatch.GetTimestamp();
         if (batchActivity?.IsAllDataRequested == true) {
             batchActivity.SetTag("rpc.response.status_code", statusCode);
@@ -296,13 +305,15 @@ public static class JsonRpcEndpoint {
         JsonRpcTelemetry.RecordRequest("_batch", statusCode, Stopwatch.GetElapsedTime(startTimestamp));
     }
 
-    private static bool IsInvalidBatchEnvelope(JsonRpcRequest request) =>
-        request.Jsonrpc != "2.0" || string.IsNullOrWhiteSpace(request.Method);
+    private static bool IsInvalidBatchEnvelope(JsonRpcRequest request) {
+        return request.Jsonrpc != "2.0" || string.IsNullOrWhiteSpace(request.Method);
+    }
 
-    private static bool IsNotification(JsonRpcRequest request) =>
-        !request.ShouldSendResponse &&
-        request.Jsonrpc == "2.0" &&
-        !string.IsNullOrWhiteSpace(request.Method);
+    private static bool IsNotification(JsonRpcRequest request) {
+        return !request.ShouldSendResponse &&
+               request.Jsonrpc == "2.0" &&
+               !string.IsNullOrWhiteSpace(request.Method);
+    }
 
     private static JsonRpcRequest CreateInvalidEnvelopeRequest(JsonElement element) {
         var id = ExtractResponseId(element);
@@ -320,9 +331,8 @@ public static class JsonRpcEndpoint {
 
     private static JsonRpcIdInfo ExtractResponseId(JsonElement element) {
         if (element.ValueKind != JsonValueKind.Object ||
-            !element.TryGetProperty("id", out var id)) {
+            !element.TryGetProperty("id", out var id))
             return JsonRpcIdInfo.Missing;
-        }
 
         return id.ValueKind switch {
             JsonValueKind.String => JsonRpcIdInfo.String(id.GetString()),

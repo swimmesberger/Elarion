@@ -1,11 +1,11 @@
-import { generateEventsClientSource } from './events-client-source.js'
-import { jsonSchemaToTypeScript } from './json-schema-to-ts.js'
-import { jsonSchemaToZod } from './json-schema-to-zod.js'
-import { collectFilePaths, stripNullable, type SchemaContext } from './json-schema.js'
-import { generateRpcClientSource } from './rpc-client-source.js'
-import { generateSessionClientSource } from './session-client-source.js'
-import { generateStartAdapterSource } from './start-adapter-source.js'
-import type { GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema } from './schema.js'
+import {generateEventsClientSource} from './events-client-source.js'
+import {jsonSchemaToTypeScript} from './json-schema-to-ts.js'
+import {jsonSchemaToZod} from './json-schema-to-zod.js'
+import {collectFilePaths, stripNullable, type SchemaContext} from './json-schema.js'
+import {generateRpcClientSource} from './rpc-client-source.js'
+import {generateSessionClientSource} from './session-client-source.js'
+import {generateStartAdapterSource} from './start-adapter-source.js'
+import type {GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema} from './schema.js'
 
 const DEFAULT_GENERATED_BY = 'elarion-jsonrpc-client-generator'
 const DEFAULT_SOURCE_LABEL = 'rpc-schema.json'
@@ -17,8 +17,8 @@ const DEFAULT_SESSION_OPERATION = 'elarion.session'
 const DEFAULT_START_ADAPTER_FILE = 'start-adapter.ts'
 const DEFAULT_EVENTS_CLIENT_FILE = 'events-client.ts'
 
-export { UnsupportedJsonSchemaError } from './json-schema.js'
-export type { GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema } from './schema.js'
+export {UnsupportedJsonSchemaError} from './json-schema.js'
+export type {GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema} from './schema.js'
 
 export function generateRpcClientFiles(
   schema: RpcSchema,
@@ -163,11 +163,11 @@ export function generateRpcClientFiles(
   const hasSession = Object.prototype.hasOwnProperty.call(schema.methods, sessionOperationName)
   const sessionClientSource = hasSession
     ? generateSessionClientSource({
-        generatedBy,
-        sourceLabel,
-        operationName: sessionOperationName,
-        capabilities: schema.capabilities,
-      })
+      generatedBy,
+      sourceLabel,
+      operationName: sessionOperationName,
+      capabilities: schema.capabilities,
+    })
     : undefined
 
   // The typed client-event subscription client (ADR-0043) is emitted only when the schema declares an
@@ -175,18 +175,18 @@ export function generateRpcClientFiles(
   const eventsClientFileName = options.eventsClientFileName ?? DEFAULT_EVENTS_CLIENT_FILE
   const eventsClientSource = eventTopics.length > 0
     ? generateEventsClientSource({
-        generatedBy,
-        sourceLabel,
-        schemasFileName,
-        topics: eventTopics,
-      })
+      generatedBy,
+      sourceLabel,
+      schemasFileName,
+      topics: eventTopics,
+    })
     : undefined
 
   // The framework adapter (ADR-boundary: kept opt-in so the core client stays framework-neutral) is emitted only
   // when a framework is requested, so an unopted schema produces byte-identical output.
   const frameworkAdapterFileName = options.frameworkAdapterFileName ?? DEFAULT_START_ADAPTER_FILE
   const frameworkAdapterSource = options.framework === 'tanstack-start'
-    ? generateStartAdapterSource({ generatedBy, sourceLabel, clientFileName })
+    ? generateStartAdapterSource({generatedBy, sourceLabel, clientFileName})
     : undefined
 
   return {

@@ -19,14 +19,14 @@ public sealed class SessionHandlerTests {
         var manifest = new ClientCapabilityManifest {
             Modules = [
                 new ClientModuleManifest { Name = "Billing", Enabled = true, Features = ["new-checkout", "forecast"] },
-                new ClientModuleManifest { Name = "Experiments", Enabled = false, Features = ["beta-x"] },
-            ],
+                new ClientModuleManifest { Name = "Experiments", Enabled = false, Features = ["beta-x"] }
+            ]
         };
         var user = new FakeCurrentUser {
             UserId = "u-123",
             IsAuthenticated = true,
             Roles = ["admin"],
-            Claims = { ["permission"] = ["billing.write"] },
+            Claims = { ["permission"] = ["billing.write"] }
         };
         var flags = new FakeFeatureFlags { ["new-checkout"] = true, ["forecast"] = true, ["beta-x"] = true };
         var variants = new FakeFeatureVariants { ["forecast"] = "neural" };
@@ -57,7 +57,7 @@ public sealed class SessionHandlerTests {
     [Fact]
     public async Task HandleAsync_WithNoFeatureServices_StillReturnsModulesAndGrants() {
         var manifest = new ClientCapabilityManifest {
-            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = ["new-checkout"] }],
+            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = ["new-checkout"] }]
         };
         var user = new FakeCurrentUser { UserId = string.Empty, IsAuthenticated = false, Roles = [] };
 
@@ -75,7 +75,7 @@ public sealed class SessionHandlerTests {
     [Fact]
     public async Task HandleAsync_WithAnonymousShippedCurrentUser_ProjectsEmptyIdWithoutThrowing() {
         var manifest = new ClientCapabilityManifest {
-            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = [] }],
+            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = [] }]
         };
         // The shipped ICurrentUser: unseeded, it is an anonymous caller whose UserId *throws* (the contract is
         // non-nullable and there is no id). Session bootstrap must consult IsAuthenticated first — reading UserId
@@ -96,7 +96,7 @@ public sealed class SessionHandlerTests {
         var user = new FakeCurrentUser {
             UserId = "u-1",
             IsAuthenticated = true,
-            Claims = { ["scope"] = ["orders.read"] },
+            Claims = { ["scope"] = ["orders.read"] }
         };
         var options = new AuthorizationOptions { PermissionClaimType = "scope" };
 
@@ -111,7 +111,7 @@ public sealed class SessionHandlerTests {
         var services = new ServiceCollection();
         services.AddSingleton<ICurrentUser>(new FakeCurrentUser { UserId = "u-1", IsAuthenticated = true });
         services.AddElarionSession(new ClientCapabilityManifest {
-            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = [] }],
+            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = [] }]
         });
         using var provider = services.BuildServiceProvider();
 
@@ -152,22 +152,28 @@ public sealed class SessionHandlerTests {
         public bool IsAuthenticated { get; init; }
         public Dictionary<string, string[]> Claims { get; } = new();
 
-        public bool IsInRole(string role) => Roles.Contains(role);
+        public bool IsInRole(string role) {
+            return Roles.Contains(role);
+        }
 
-        public bool HasClaim(string type, string value) =>
-            Claims.TryGetValue(type, out var values) && values.Contains(value);
+        public bool HasClaim(string type, string value) {
+            return Claims.TryGetValue(type, out var values) && values.Contains(value);
+        }
 
-        public IEnumerable<string> GetClaimValues(string type) =>
-            Claims.TryGetValue(type, out var values) ? values : [];
+        public IEnumerable<string> GetClaimValues(string type) {
+            return Claims.TryGetValue(type, out var values) ? values : [];
+        }
     }
 
     private sealed class FakeFeatureFlags : Dictionary<string, bool>, IFeatureFlagService {
-        public ValueTask<bool> IsEnabledAsync(string feature, CancellationToken ct = default) =>
-            ValueTask.FromResult(TryGetValue(feature, out var value) && value);
+        public ValueTask<bool> IsEnabledAsync(string feature, CancellationToken ct = default) {
+            return ValueTask.FromResult(TryGetValue(feature, out var value) && value);
+        }
     }
 
     private sealed class FakeFeatureVariants : Dictionary<string, string>, IFeatureVariantService {
-        public ValueTask<string?> GetVariantAsync(string feature, CancellationToken ct = default) =>
-            ValueTask.FromResult(TryGetValue(feature, out var value) ? value : null);
+        public ValueTask<string?> GetVariantAsync(string feature, CancellationToken ct = default) {
+            return ValueTask.FromResult(TryGetValue(feature, out var value) ? value : null);
+        }
     }
 }

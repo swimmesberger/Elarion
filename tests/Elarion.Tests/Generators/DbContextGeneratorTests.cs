@@ -6,11 +6,9 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class DbContextGeneratorTests
-{
+public sealed class DbContextGeneratorTests {
     [Fact]
-    public void GenerateDbSets_UnscopedContext_GeneratesDbSetsAndConfigureEntitiesOnTheClass()
-    {
+    public void GenerateDbSets_UnscopedContext_GeneratesDbSetsAndConfigureEntitiesOnTheClass() {
         var source =
             CreateSource(
                 """
@@ -71,12 +69,13 @@ public sealed class DbContextGeneratorTests
         result.GeneratedTrees
             .Select(tree => Path.GetFileName(tree.FilePath))
             .Should()
-            .NotContain(name => name.StartsWith("I", StringComparison.Ordinal) && name.EndsWith(".DbSets.g.cs", StringComparison.Ordinal));
+            .NotContain(name =>
+                name.StartsWith("I", StringComparison.Ordinal) &&
+                name.EndsWith(".DbSets.g.cs", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void GenerateDbSets_WithEntities_DeclaresClientAssignedGuidKeysScopedToEntityAssemblies()
-    {
+    public void GenerateDbSets_WithEntities_DeclaresClientAssignedGuidKeysScopedToEntityAssemblies() {
         var source =
             CreateSource(
                 """
@@ -113,7 +112,8 @@ public sealed class DbContextGeneratorTests
 
         // The pass exists, is assembly-scoped by the discovered entities, and only overrides EF's convention
         // claim (explicit configuration, custom generators, and store defaults win).
-        dbContextSource.Should().Contain("private static void ApplyElarionClientAssignedGuidKeys(ModelBuilder modelBuilder)");
+        dbContextSource.Should()
+            .Contain("private static void ApplyElarionClientAssignedGuidKeys(ModelBuilder modelBuilder)");
         dbContextSource.Should().Contain("typeof(global::Sample.Domain.Company).Assembly,");
         dbContextSource.Should().Contain("typeof(global::Sample.Domain.Invoice).Assembly,");
         dbContextSource.Should().Contain("GetValueGeneratedConfigurationSource()");
@@ -122,12 +122,12 @@ public sealed class DbContextGeneratorTests
         // It runs LAST in ConfigureEntities — after the neutral seam — so entities added by hand-written or
         // feature-generator model configuration are covered too.
         dbContextSource.IndexOf("OnEntitiesConfigured(modelBuilder);", StringComparison.Ordinal)
-            .Should().BeLessThan(dbContextSource.IndexOf("ApplyElarionClientAssignedGuidKeys(modelBuilder);", StringComparison.Ordinal));
+            .Should().BeLessThan(dbContextSource.IndexOf("ApplyElarionClientAssignedGuidKeys(modelBuilder);",
+                StringComparison.Ordinal));
     }
 
     [Fact]
-    public void GenerateDbSets_ConfigurationImplementsMultipleEntities_GeneratesDbSetAndApplyPerEntity()
-    {
+    public void GenerateDbSets_ConfigurationImplementsMultipleEntities_GeneratesDbSetAndApplyPerEntity() {
         var source =
             CreateSource(
                 """
@@ -172,8 +172,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_DuplicateDbSetPropertyName_ReportsElefc002AndSkipsCollision()
-    {
+    public void GenerateDbSets_DuplicateDbSetPropertyName_ReportsElefc002AndSkipsCollision() {
         // Regression (M17): two [EntityConfiguration] entities that share a short type name across namespaces
         // would emit two identical DbSet property names (CS0102). The generator must report ELEFC002 and emit
         // only one DbSet so the context still compiles.
@@ -230,8 +229,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_DuplicateDbSetPropertyName_GeneratedContextStillCompiles()
-    {
+    public void GenerateDbSets_DuplicateDbSetPropertyName_GeneratedContextStillCompiles() {
         // The ELEFC002 recovery contract, compiled for real: with two same-short-name entities the surviving
         // DbSet must not become an ambiguous reference (CS0104) through per-entity usings.
         var ct = TestContext.Current.CancellationToken;
@@ -287,10 +285,11 @@ public sealed class DbContextGeneratorTests
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        GeneratorDriver driver = CSharpGeneratorDriver
+        var driver = CSharpGeneratorDriver
             .Create(new DbContextGenerator())
             .WithUpdatedParseOptions(parseOptions);
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var diagnostics, ct);
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var diagnostics,
+            ct);
 
         diagnostics.Count(diagnostic => diagnostic.Id == "ELEFC002").Should().Be(1);
         outputCompilation.GetDiagnostics(ct)
@@ -299,8 +298,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_ScopedContext_FiltersConfigurationsAndEntities()
-    {
+    public void GenerateDbSets_ScopedContext_FiltersConfigurationsAndEntities() {
         var source =
             CreateSource(
                 """
@@ -378,8 +376,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_EntityConfigurationWithoutInterface_ReportsDiagnosticAndGeneratesNoEntities()
-    {
+    public void GenerateDbSets_EntityConfigurationWithoutInterface_ReportsDiagnosticAndGeneratesNoEntities() {
         var source =
             CreateSource(
                 """
@@ -412,8 +409,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_AlwaysEmitsNeutralOnEntitiesConfiguredSeam()
-    {
+    public void GenerateDbSets_AlwaysEmitsNeutralOnEntitiesConfiguredSeam() {
         var source =
             CreateSource(
                 """
@@ -441,12 +437,12 @@ public sealed class DbContextGeneratorTests
         dbContextSource.Should().Contain("partial void OnEntitiesConfigured(ModelBuilder modelBuilder);");
         // The seam is invoked at the end of ConfigureEntities, after the ApplyConfiguration calls.
         dbContextSource.IndexOf("ApplyConfiguration", StringComparison.Ordinal)
-            .Should().BeLessThan(dbContextSource.IndexOf("OnEntitiesConfigured(modelBuilder);", StringComparison.Ordinal));
+            .Should().BeLessThan(dbContextSource.IndexOf("OnEntitiesConfigured(modelBuilder);",
+                StringComparison.Ordinal));
     }
 
     [Fact]
-    public void GenerateDbSets_ContextWithoutAttribute_DoesNotGenerate()
-    {
+    public void GenerateDbSets_ContextWithoutAttribute_DoesNotGenerate() {
         var source =
             CreateSource(
                 """
@@ -480,8 +476,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_IrrelevantEdit_ReusesCollectedData()
-    {
+    public void GenerateDbSets_IrrelevantEdit_ReusesCollectedData() {
         var source = CreateSource(
             """
             namespace Sample.Domain {
@@ -520,8 +515,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_ConfigurationsFromReferencedAssembly_DiscoveredViaManifest()
-    {
+    public void GenerateDbSets_ConfigurationsFromReferencedAssembly_DiscoveredViaManifest() {
         var ct = TestContext.Current.CancellationToken;
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var references = CreateMetadataReferences();
@@ -564,7 +558,7 @@ public sealed class DbContextGeneratorTests
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        GeneratorDriver driverA = CSharpGeneratorDriver
+        var driverA = CSharpGeneratorDriver
             .Create(new DbContextGenerator(), new EntityConfigurationManifestGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driverA = driverA.RunGeneratorsAndUpdateCompilation(compilationA, out var outputA, out _, ct);
@@ -601,8 +595,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void GenerateDbSets_NewSameAssemblyConfigurationAdded_RegeneratesDbSets()
-    {
+    public void GenerateDbSets_NewSameAssemblyConfigurationAdded_RegeneratesDbSets() {
         // Reproduces the IDE scenario the user hit: a new [EntityConfiguration] is added in the same
         // assembly as the [GenerateDbSets] context (a new file), with no rebuild. The pure-Roslyn pipeline
         // must surface the new DbSet on the next incremental run — bounding any remaining "needs a restart"
@@ -642,7 +635,7 @@ public sealed class DbContextGeneratorTests
             parseOptions: parseOptions,
             additionalTexts: null,
             optionsProvider: null,
-            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
+            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, true));
 
         driver = driver.RunGenerators(compilation, ct);
 
@@ -689,8 +682,7 @@ public sealed class DbContextGeneratorTests
     }
 
     [Fact]
-    public void EntityConfigurationManifest_IrrelevantEdit_ReusesCollectedData()
-    {
+    public void EntityConfigurationManifest_IrrelevantEdit_ReusesCollectedData() {
         var source = CreateSource(
             """
             namespace Sample.Domain {
@@ -714,49 +706,49 @@ public sealed class DbContextGeneratorTests
             "ManifestConfigs");
     }
 
-    private static string CreateSource(string testSource) =>
-        $$"""
-        namespace Elarion.EntityFrameworkCore {
-            [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-            public sealed class GenerateDbSetsAttribute : System.Attribute {
-                public GenerateDbSetsAttribute(params string[] scopes) {
-                }
-            }
+    private static string CreateSource(string testSource) {
+        return $$"""
+                 namespace Elarion.EntityFrameworkCore {
+                     [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+                     public sealed class GenerateDbSetsAttribute : System.Attribute {
+                         public GenerateDbSetsAttribute(params string[] scopes) {
+                         }
+                     }
 
-            [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-            public sealed class EntityConfigurationAttribute : System.Attribute {
-                public EntityConfigurationAttribute(params string[] scopes) {
-                }
-            }
-        }
+                     [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+                     public sealed class EntityConfigurationAttribute : System.Attribute {
+                         public EntityConfigurationAttribute(params string[] scopes) {
+                         }
+                     }
+                 }
 
-        namespace Microsoft.EntityFrameworkCore {
-            public class DbContext {
-                protected DbSet<T> Set<T>() => throw null!;
-            }
+                 namespace Microsoft.EntityFrameworkCore {
+                     public class DbContext {
+                         protected DbSet<T> Set<T>() => throw null!;
+                     }
 
-            public sealed class DbSet<T> {
-            }
+                     public sealed class DbSet<T> {
+                     }
 
-            public sealed class ModelBuilder {
-                public EntityTypeBuilder<T> Entity<T>() => throw null!;
-                public ModelBuilder ApplyConfiguration<TEntity>(IEntityTypeConfiguration<TEntity> configuration)
-                    where TEntity : class => throw null!;
-            }
+                     public sealed class ModelBuilder {
+                         public EntityTypeBuilder<T> Entity<T>() => throw null!;
+                         public ModelBuilder ApplyConfiguration<TEntity>(IEntityTypeConfiguration<TEntity> configuration)
+                             where TEntity : class => throw null!;
+                     }
 
-            public interface IEntityTypeConfiguration<TEntity> where TEntity : class {
-                void Configure(EntityTypeBuilder<TEntity> builder);
-            }
+                     public interface IEntityTypeConfiguration<TEntity> where TEntity : class {
+                         void Configure(EntityTypeBuilder<TEntity> builder);
+                     }
 
-            public sealed class EntityTypeBuilder<TEntity> {
-            }
-        }
+                     public sealed class EntityTypeBuilder<TEntity> {
+                     }
+                 }
 
-        {{testSource}}
-        """;
+                 {{testSource}}
+                 """;
+    }
 
-    private static GeneratorDriverRunResult Generate(string source)
-    {
+    private static GeneratorDriverRunResult Generate(string source) {
         var result = GenerateAllowingDiagnostics(source);
 
         result.Diagnostics
@@ -766,8 +758,7 @@ public sealed class DbContextGeneratorTests
         return result;
     }
 
-    private static GeneratorDriverRunResult GenerateAllowingDiagnostics(string source)
-    {
+    private static GeneratorDriverRunResult GenerateAllowingDiagnostics(string source) {
         var syntaxTree = CSharpSyntaxTree.ParseText(
             source,
             new CSharpParseOptions(LanguageVersion.Preview));
@@ -786,14 +777,14 @@ public sealed class DbContextGeneratorTests
         return driver.GetRunResult();
     }
 
-    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
 
         trustedPlatformAssemblies.Should().NotBeNull();

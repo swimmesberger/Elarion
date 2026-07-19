@@ -45,13 +45,9 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_factory is not null) {
-            await _factory.DisposeAsync();
-        }
+        if (_factory is not null) await _factory.DisposeAsync();
 
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
     [Fact]
@@ -65,7 +61,7 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
         using var listener = new ActivityListener {
             ShouldListenTo = source => source.Name is "Elarion.Handlers" or "Npgsql",
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => spans.Add((activity.Source.Name, activity.DisplayName)),
+            ActivityStopped = activity => spans.Add((activity.Source.Name, activity.DisplayName))
         };
         ActivitySource.AddActivityListener(listener);
 
@@ -85,21 +81,24 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
             new() { DeviceId = "edge-1", Metric = "temperature", Value = 21.5, RecordedAt = recordedAt },
             new() {
                 DeviceId = "edge-1", Metric = "temperature", Value = 23.0, RecordedAt = recordedAt.AddMinutes(30),
-                Meta = new ReadingMeta { Unit = "°C", Source = "sensor-a", Quality = 3 },
+                Meta = new ReadingMeta { Unit = "°C", Source = "sensor-a", Quality = 3 }
             },
             new() { DeviceId = "edge-1", Metric = "humidity", Value = 40.0, RecordedAt = recordedAt.AddMinutes(5) },
-            new() { DeviceId = "edge-2", Metric = "temperature", Value = 19.0, RecordedAt = recordedAt },
+            new() { DeviceId = "edge-2", Metric = "temperature", Value = 19.0, RecordedAt = recordedAt }
         ];
 
-        var ingest = await client.PostAsJsonAsync("/readings", batch, TelemetryJsonContext.Default.ReadingInputArray, Ct);
+        var ingest =
+            await client.PostAsJsonAsync("/readings", batch, TelemetryJsonContext.Default.ReadingInputArray, Ct);
         ingest.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ingest.Content.ReadFromJsonAsync(TelemetryJsonContext.Default.IngestResult, Ct);
         result!.Written.Should().Be(4);
 
         // A retransmitted batch is idempotent by constraint: every row hits the hypertable's
         // composite key and ON CONFLICT DO NOTHING inserts nothing.
-        var retransmit = await client.PostAsJsonAsync("/readings", batch, TelemetryJsonContext.Default.ReadingInputArray, Ct);
-        var retransmitResult = await retransmit.Content.ReadFromJsonAsync(TelemetryJsonContext.Default.IngestResult, Ct);
+        var retransmit =
+            await client.PostAsJsonAsync("/readings", batch, TelemetryJsonContext.Default.ReadingInputArray, Ct);
+        var retransmitResult =
+            await retransmit.Content.ReadFromJsonAsync(TelemetryJsonContext.Default.IngestResult, Ct);
         retransmitResult!.Written.Should().Be(0);
 
         // Latest per device+metric: the mapper materializes the row, jsonb meta included.
@@ -139,9 +138,7 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
             if (!line.StartsWith("data: ", StringComparison.Ordinal)
                 || eventType == "elarion.keepAlive"
                 || line.Length == "data: ".Length) {
-                if (line.Length == 0) {
-                    eventType = null;
-                }
+                if (line.Length == 0) eventType = null;
                 continue;
             }
 

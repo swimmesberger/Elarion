@@ -18,7 +18,9 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
     : IClassFixture<PostgreSqlSettingsStoreFixture> {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static string UniqueKey() => $"app:{Guid.NewGuid():N}";
+    private static string UniqueKey() {
+        return $"app:{Guid.NewGuid():N}";
+    }
 
     private static EfCoreSettingsStore<SettingsIntegrationDbContext> CreateStore(
         SettingsIntegrationDbContext context,
@@ -67,7 +69,7 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
         await store.SetAsync(SettingsScope.Global, key, "v2", cancellationToken: Ct);
 
-        var result = await store.SetAsync(SettingsScope.Global, key, "v3", expectedVersion: 1, cancellationToken: Ct);
+        var result = await store.SetAsync(SettingsScope.Global, key, "v3", 1, Ct);
 
         result.Status.Should().Be(SettingWriteStatus.ConcurrencyConflict);
         (await store.GetAsync(SettingsScope.Global, key, Ct)).Should().Be("v2");
@@ -81,7 +83,7 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         var key = UniqueKey();
         await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
 
-        var result = await store.SetAsync(SettingsScope.Global, key, "v2", expectedVersion: 1, cancellationToken: Ct);
+        var result = await store.SetAsync(SettingsScope.Global, key, "v2", 1, Ct);
 
         result.IsSuccess.Should().BeTrue();
         result.Version.Should().Be(2);
@@ -94,7 +96,7 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         var store = CreateStore(context, out _);
         var key = UniqueKey();
 
-        var result = await store.SetAsync(SettingsScope.Global, key, "v1", expectedVersion: 7, cancellationToken: Ct);
+        var result = await store.SetAsync(SettingsScope.Global, key, "v1", 7, Ct);
 
         result.Status.Should().Be(SettingWriteStatus.ConcurrencyConflict);
         (await store.GetAsync(SettingsScope.Global, key, Ct)).Should().BeNull();
@@ -137,7 +139,7 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         var store = CreateStore(context, out _);
         var key = UniqueKey();
 
-        await store.SetAsync(SettingsScope.Global, key, value: null, cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, key, null, cancellationToken: Ct);
 
         await using var verifyContext = fixture.CreateContext();
         var row = await verifyContext.Set<Setting>().AsNoTracking()
@@ -169,7 +171,7 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
         await store.SetAsync(SettingsScope.Global, key, "v2", cancellationToken: Ct);
 
-        var removed = await store.RemoveAsync(SettingsScope.Global, key, expectedVersion: 1, cancellationToken: Ct);
+        var removed = await store.RemoveAsync(SettingsScope.Global, key, 1, Ct);
 
         removed.Should().BeFalse();
         (await store.GetAsync(SettingsScope.Global, key, Ct)).Should().Be("v2");
@@ -251,8 +253,8 @@ public sealed class EfCoreSettingsStoreIntegrationTests(PostgreSqlSettingsStoreF
         await storeA.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
 
         // Both writers expect the same starting version; the first wins, the second must conflict.
-        var first = await storeA.SetAsync(SettingsScope.Global, key, "a", expectedVersion: 1, cancellationToken: Ct);
-        var second = await storeB.SetAsync(SettingsScope.Global, key, "b", expectedVersion: 1, cancellationToken: Ct);
+        var first = await storeA.SetAsync(SettingsScope.Global, key, "a", 1, Ct);
+        var second = await storeB.SetAsync(SettingsScope.Global, key, "b", 1, Ct);
 
         first.IsSuccess.Should().BeTrue();
         second.Status.Should().Be(SettingWriteStatus.ConcurrencyConflict);

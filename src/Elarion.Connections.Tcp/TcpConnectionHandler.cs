@@ -22,7 +22,9 @@ public abstract class TcpConnectionHandler {
     /// <param name="peer">The connection's endpoints (all that exists this early).</param>
     /// <param name="ct">Fires on host shutdown.</param>
     public virtual ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(
-        TcpConnectionPeer peer, CancellationToken ct) => ValueTask.FromResult<TcpConnectionSettings?>(null);
+        TcpConnectionPeer peer, CancellationToken ct) {
+        return ValueTask.FromResult<TcpConnectionSettings?>(null);
+    }
 
     /// <summary>Authenticates a new link; <see langword="null"/> rejects it.</summary>
     /// <param name="handshake">The endpoints plus framed message IO for challenge/response exchanges.</param>

@@ -38,16 +38,15 @@ public sealed class PostgreSqlBulkInsertFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
-    public BulkInsertDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<BulkInsertDbContext>()
+    public BulkInsertDbContext CreateContext() {
+        return new BulkInsertDbContext(new DbContextOptionsBuilder<BulkInsertDbContext>()
             .UseNpgsql(ConnectionString)
             .UseElarionPostgreSqlBulkOperations()
             .Options);
+    }
 }
 
 public sealed class BulkInsertDbContext(DbContextOptions<BulkInsertDbContext> options) : DbContext(options) {
@@ -128,7 +127,7 @@ public sealed class BulkOrder {
 public enum BulkOrderStatus {
     Draft,
     Submitted,
-    Shipped,
+    Shipped
 }
 
 /// <summary>Identity key + store default: both columns must be filled by the database, not the COPY.</summary>

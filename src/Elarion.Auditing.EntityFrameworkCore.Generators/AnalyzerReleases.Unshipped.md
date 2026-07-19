@@ -3,6 +3,6 @@
 
 ### New Rules
 
-Rule ID | Category | Severity | Notes
---------|----------|----------|-------
-ELAUD001 | Elarion.Auditing.EntityFrameworkCore | Error | [GenerateElarionAuditing] requires [GenerateDbSets] on the same context
+ Rule ID  | Category                             | Severity | Notes
+----------|--------------------------------------|----------|-------------------------------------------------------------------------
+ ELAUD001 | Elarion.Auditing.EntityFrameworkCore | Error    | [GenerateElarionAuditing] requires [GenerateDbSets] on the same context

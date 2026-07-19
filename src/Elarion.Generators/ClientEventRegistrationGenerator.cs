@@ -21,14 +21,21 @@ namespace Elarion.Generators;
 /// <para>Trigger: <c>[assembly: UseElarion]</c> or <c>[assembly: GenerateClientEventTopics]</c>.</para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
-public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
-{
+public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator {
     private const string ClientEventInterfaceMetadataName = "Elarion.Abstractions.ClientEvents.IClientEvent";
     private const string ClientEventAttributeMetadataName = "Elarion.Abstractions.ClientEvents.ClientEventAttribute";
-    private const string RequirePermissionAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
+
+    private const string RequirePermissionAttributeMetadataName =
+        "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
+
     private const string RequireRoleAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireRoleAttribute";
-    private const string AllowAnyResourceAttributeMetadataName = "Elarion.Abstractions.ClientEvents.AllowAnyResourceAttribute";
-    private const string SubscriptionObserverAttributeMetadataName = "Elarion.Abstractions.ClientEvents.SubscriptionObserverAttribute`1";
+
+    private const string AllowAnyResourceAttributeMetadataName =
+        "Elarion.Abstractions.ClientEvents.AllowAnyResourceAttribute";
+
+    private const string SubscriptionObserverAttributeMetadataName =
+        "Elarion.Abstractions.ClientEvents.SubscriptionObserverAttribute`1";
+
     private const string ClientEventsBuilderMetadataName = "Elarion.ClientEvents.ClientEventsBuilder";
     private const string TriggerAttributeMetadataName = "Elarion.Abstractions.GenerateClientEventTopicsAttribute";
 
@@ -38,7 +45,7 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
         "Client event '{0}' is not under any [AppModule] namespace, so no topic is registered for it; move it under a module or register the topic manually via AddElarionClientEvents",
         "Elarion.Abstractions.ClientEvents",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor DuplicateTopicName = new(
         "ELCEV002",
@@ -46,7 +53,7 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
         "Client event '{0}' resolves to topic '{1}', which is also declared by another contract; topic names must be unique — rename the type or disambiguate with [ClientEvent(\"…\")]",
         "Elarion.Abstractions.ClientEvents",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor ClientEventsPackageMissing = new(
         "ELCEV003",
@@ -54,7 +61,7 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
         "This compilation declares IClientEvent contracts but does not reference Elarion.ClientEvents, so no topics are registered and nothing reaches the wire",
         "Elarion.Abstractions.ClientEvents",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private sealed record PermissionRequirement(string Resource, string Verb);
 
@@ -71,14 +78,12 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
         bool BuilderAvailable,
         LocationInfo Location);
 
-    private static class TrackingNames
-    {
+    private static class TrackingNames {
         public const string Events = "ClientEventContracts";
         public const string Combined = "ClientEventContractsCombined";
     }
 
-    public void Initialize(IncrementalGeneratorInitializationContext context)
-    {
+    public void Initialize(IncrementalGeneratorInitializationContext context) {
         // Structural trigger: the marker is an interface, not an attribute, so discovery filters type
         // declarations with a base list and resolves the symbol in the transform.
         var events = context.SyntaxProvider
@@ -95,35 +100,26 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
 
         var combined = events.Combine(modules).Combine(trigger).WithTrackingName(TrackingNames.Combined);
 
-        context.RegisterSourceOutput(combined, static (spc, source) =>
-        {
+        context.RegisterSourceOutput(combined, static (spc, source) => {
             var ((eventList, modules), hasTrigger) = source;
-            if (!hasTrigger)
-            {
-                return;
-            }
+            if (!hasTrigger) return;
 
             Emit(spc, eventList, modules);
         });
     }
 
-    private static ClientEventInfo? CreateEvent(GeneratorSyntaxContext ctx)
-    {
+    private static ClientEventInfo? CreateEvent(GeneratorSyntaxContext ctx) {
         var declaration = (TypeDeclarationSyntax)ctx.Node;
         if (ctx.SemanticModel.GetDeclaredSymbol(declaration) is not INamedTypeSymbol type ||
             type.IsAbstract ||
             type.TypeKind != TypeKind.Class)
-        {
             return null;
-        }
 
         var compilation = ctx.SemanticModel.Compilation;
         var markerInterface = compilation.GetTypeByMetadataName(ClientEventInterfaceMetadataName);
         if (markerInterface is null ||
             !type.AllInterfaces.Any(iface => SymbolEqualityComparer.Default.Equals(iface, markerInterface)))
-        {
             return null;
-        }
 
         string? nameOverride = null;
         var allowAnyResource = false;
@@ -137,51 +133,38 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
         var allowAnyResourceAttribute = compilation.GetTypeByMetadataName(AllowAnyResourceAttributeMetadataName);
         var observerAttribute = compilation.GetTypeByMetadataName(SubscriptionObserverAttributeMetadataName);
 
-        foreach (var attribute in type.GetAttributes())
-        {
+        foreach (var attribute in type.GetAttributes()) {
             var attributeClass = attribute.AttributeClass;
-            if (attributeClass is null)
-            {
-                continue;
-            }
+            if (attributeClass is null) continue;
 
             if (SymbolEqualityComparer.Default.Equals(attributeClass, overrideAttribute) &&
                 attribute.ConstructorArguments.Length >= 1 &&
                 attribute.ConstructorArguments[0].Value is string overrideName &&
-                !string.IsNullOrWhiteSpace(overrideName))
-            {
+                !string.IsNullOrWhiteSpace(overrideName)) {
                 nameOverride = overrideName;
             }
             else if (SymbolEqualityComparer.Default.Equals(attributeClass, permissionAttribute) &&
-                attribute.ConstructorArguments.Length >= 2 &&
-                attribute.ConstructorArguments[0].Value is string resource &&
-                attribute.ConstructorArguments[1].Value is string verb)
-            {
+                     attribute.ConstructorArguments.Length >= 2 &&
+                     attribute.ConstructorArguments[0].Value is string resource &&
+                     attribute.ConstructorArguments[1].Value is string verb) {
                 permissions.Add(new PermissionRequirement(resource, verb));
             }
             else if (SymbolEqualityComparer.Default.Equals(attributeClass, roleAttribute) &&
-                attribute.ConstructorArguments.Length >= 1 &&
-                attribute.ConstructorArguments[0].Value is string role)
-            {
+                     attribute.ConstructorArguments.Length >= 1 &&
+                     attribute.ConstructorArguments[0].Value is string role) {
                 roles.Add(role);
             }
-            else if (SymbolEqualityComparer.Default.Equals(attributeClass, allowAnyResourceAttribute))
-            {
+            else if (SymbolEqualityComparer.Default.Equals(attributeClass, allowAnyResourceAttribute)) {
                 allowAnyResource = true;
             }
             else if (attributeClass.IsGenericType &&
-                SymbolEqualityComparer.Default.Equals(attributeClass.ConstructedFrom, observerAttribute) &&
-                attributeClass.TypeArguments.Length == 1 &&
-                attributeClass.TypeArguments[0] is INamedTypeSymbol observerSymbol)
-            {
+                     SymbolEqualityComparer.Default.Equals(attributeClass.ConstructedFrom, observerAttribute) &&
+                     attributeClass.TypeArguments.Length == 1 &&
+                     attributeClass.TypeArguments[0] is INamedTypeSymbol observerSymbol) {
                 observerFqn = observerSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
                 foreach (var named in attribute.NamedArguments)
-                {
                     if (named.Key == "InterestLingerSeconds" && named.Value.Value is double linger)
-                    {
                         interestLingerSeconds = linger;
-                    }
-                }
             }
         }
 
@@ -205,8 +188,7 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
     private static void Emit(
         SourceProductionContext spc,
         ImmutableArray<ClientEventInfo> events,
-        EquatableArray<ModuleScanner.Module> modules)
-    {
+        EquatableArray<ModuleScanner.Module> modules) {
         // Partial declarations produce one candidate per declaration with a base list; keep one per type.
         var distinctEvents = events
             .GroupBy(static clientEvent => clientEvent.Fqn, StringComparer.Ordinal)
@@ -214,13 +196,9 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
             .OrderBy(static clientEvent => clientEvent.Fqn, StringComparer.Ordinal)
             .ToList();
 
-        if (distinctEvents.Count == 0)
-        {
-            return;
-        }
+        if (distinctEvents.Count == 0) return;
 
-        if (!distinctEvents[0].BuilderAvailable)
-        {
+        if (!distinctEvents[0].BuilderAvailable) {
             // Emitting AddElarionClientEvents calls without the package referenced would not compile;
             // fail closed with a warning instead of silently generating nothing.
             spc.ReportDiagnostic(
@@ -233,35 +211,31 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
             _ => new List<(string Fqn, string Topic, ClientEventInfo Event)>());
         var resolved = new List<(ModuleScanner.Module Module, string Topic, ClientEventInfo Event)>();
 
-        foreach (var clientEvent in distinctEvents)
-        {
+        foreach (var clientEvent in distinctEvents) {
             ModuleScanner.Module? bestMatch = null;
             foreach (var module in modules)
                 if (ModuleScanner.IsInScope(clientEvent.Namespace, module.Namespace) &&
                     (bestMatch is null || module.Namespace.Length > bestMatch.Namespace.Length))
                     bestMatch = module;
 
-            if (bestMatch is null)
-            {
+            if (bestMatch is null) {
                 spc.ReportDiagnostic(
                     DiagnosticInfo.Create(EventNotInModule, clientEvent.Location, clientEvent.Fqn).ToDiagnostic());
                 continue;
             }
 
-            resolved.Add((bestMatch, clientEvent.NameOverride ?? InferTopicName(bestMatch.Name, clientEvent.TypeName), clientEvent));
+            resolved.Add((bestMatch, clientEvent.NameOverride ?? InferTopicName(bestMatch.Name, clientEvent.TypeName),
+                clientEvent));
         }
 
         // Topic names are a global wire vocabulary: collisions are errors and the colliding topics are
         // withheld (registering both would throw at catalog composition anyway).
-        foreach (var group in resolved.GroupBy(static entry => entry.Topic, StringComparer.Ordinal))
-        {
-            if (group.Count() > 1)
-            {
+        foreach (var group in resolved.GroupBy(static entry => entry.Topic, StringComparer.Ordinal)) {
+            if (group.Count() > 1) {
                 foreach (var (_, topic, clientEvent) in group)
-                {
                     spc.ReportDiagnostic(
-                        DiagnosticInfo.Create(DuplicateTopicName, clientEvent.Location, clientEvent.Fqn, topic).ToDiagnostic());
-                }
+                        DiagnosticInfo.Create(DuplicateTopicName, clientEvent.Location, clientEvent.Fqn, topic)
+                            .ToDiagnostic());
                 continue;
             }
 
@@ -271,8 +245,7 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
 
         foreach (var kvp in moduleTopics
                      .Where(static x => x.Value.Count > 0)
-                     .OrderBy(static x => x.Key.Name, StringComparer.Ordinal))
-        {
+                     .OrderBy(static x => x.Key.Name, StringComparer.Ordinal)) {
             var module = kvp.Key;
             var moduleName = module.Name;
 
@@ -296,12 +269,10 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
             sb.AppendLine("        services.AddElarionClientEvents(events =>");
             sb.AppendLine("        {");
 
-            foreach (var (fqn, topic, clientEvent) in kvp.Value.OrderBy(static x => x.Topic, StringComparer.Ordinal))
-            {
-                var topicLiteral = SymbolDisplay.FormatLiteral(topic, quote: true);
+            foreach (var (fqn, topic, clientEvent) in kvp.Value.OrderBy(static x => x.Topic, StringComparer.Ordinal)) {
+                var topicLiteral = SymbolDisplay.FormatLiteral(topic, true);
                 if (clientEvent.Permissions.Count == 0 && clientEvent.Roles.Count == 0 &&
-                    !clientEvent.AllowAnyResource && clientEvent.ObserverFqn is null)
-                {
+                    !clientEvent.AllowAnyResource && clientEvent.ObserverFqn is null) {
                     sb.AppendLine($"            events.AddTopic<{fqn}>({topicLiteral});");
                     continue;
                 }
@@ -309,33 +280,24 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
                 sb.AppendLine($"            events.AddTopic<{fqn}>({topicLiteral}, static topic => topic");
                 var requirementLines = new List<string>();
                 foreach (var permission in clientEvent.Permissions)
-                {
                     requirementLines.Add(
-                        $"                .RequirePermission({SymbolDisplay.FormatLiteral(permission.Resource, quote: true)}, {SymbolDisplay.FormatLiteral(permission.Verb, quote: true)})");
-                }
+                        $"                .RequirePermission({SymbolDisplay.FormatLiteral(permission.Resource, true)}, {SymbolDisplay.FormatLiteral(permission.Verb, true)})");
                 foreach (var role in clientEvent.Roles)
-                {
                     requirementLines.Add(
-                        $"                .RequireRole({SymbolDisplay.FormatLiteral(role, quote: true)})");
-                }
-                if (clientEvent.AllowAnyResource)
-                {
-                    requirementLines.Add("                .AllowAnyResource()");
-                }
-                if (clientEvent.ObserverFqn is not null)
-                {
+                        $"                .RequireRole({SymbolDisplay.FormatLiteral(role, true)})");
+                if (clientEvent.AllowAnyResource) requirementLines.Add("                .AllowAnyResource()");
+                if (clientEvent.ObserverFqn is not null) {
                     requirementLines.Add($"                .ObserveSubscriptions<{clientEvent.ObserverFqn}>()");
                     if (clientEvent.InterestLingerSeconds is { } lingerSeconds)
-                    {
                         requirementLines.Add(
                             "                .WithInterestLinger(global::System.TimeSpan.FromSeconds(" +
                             lingerSeconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "))");
-                    }
                 }
+
                 for (var index = 0; index < requirementLines.Count; index += 1)
-                {
-                    sb.AppendLine(index == requirementLines.Count - 1 ? requirementLines[index] + ");" : requirementLines[index]);
-                }
+                    sb.AppendLine(index == requirementLines.Count - 1
+                        ? requirementLines[index] + ");"
+                        : requirementLines[index]);
             }
 
             sb.AppendLine("        });");
@@ -361,19 +323,17 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator
     /// Infers <c>{module}.{name}</c>: both parts camel-cased, a trailing <c>Event</c> suffix stripped from
     /// the type name (<c>InvoiceChangedEvent</c> and <c>InvoiceChanged</c> both → <c>invoiceChanged</c>).
     /// </summary>
-    private static string InferTopicName(string moduleName, string typeName)
-    {
+    private static string InferTopicName(string moduleName, string typeName) {
         var name = typeName;
         if (name.Length > "Event".Length && name.EndsWith("Event", StringComparison.Ordinal))
-        {
             name = name.Substring(0, name.Length - "Event".Length);
-        }
 
         return CamelCase(moduleName) + "." + CamelCase(name);
     }
 
-    private static string CamelCase(string value) =>
-        value.Length > 0 && char.IsUpper(value[0])
+    private static string CamelCase(string value) {
+        return value.Length > 0 && char.IsUpper(value[0])
             ? char.ToLowerInvariant(value[0]) + value.Substring(1)
             : value;
+    }
 }

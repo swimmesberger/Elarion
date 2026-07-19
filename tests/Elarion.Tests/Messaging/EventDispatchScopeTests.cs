@@ -219,21 +219,17 @@ public sealed class EventDispatchScopeTests {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(recorder);
-        if (descriptor is not null) {
-            services.AddSingleton(descriptor);
-        }
+        if (descriptor is not null) services.AddSingleton(descriptor);
 
         services.AddElarionInMemoryIntegrationEventBus(options);
-        if (pumpLogger is not null) {
-            services.AddSingleton(pumpLogger);
-        }
+        if (pumpLogger is not null) services.AddSingleton(pumpLogger);
 
         configure?.Invoke(services);
         return services.BuildServiceProvider();
     }
 
-    private static EventSubscriptionDescriptor Subscriber(string label) =>
-        new() {
+    private static EventSubscriptionDescriptor Subscriber(string label) {
+        return new EventSubscriptionDescriptor {
             EventType = typeof(SampleIntegrationEvent),
             Plane = EventPlane.Integration,
             ServiceType = typeof(EventRecorder),
@@ -243,6 +239,7 @@ public sealed class EventDispatchScopeTests {
                 return ValueTask.CompletedTask;
             }
         };
+    }
 
     private sealed record SampleIntegrationEvent(string Value) : IIntegrationEvent;
 
@@ -253,8 +250,8 @@ public sealed class EventDispatchScopeTests {
         public object Message => message;
     }
 
-    private static EventSubscriptionDescriptor SubscriberDescriptor(string label) =>
-        new() {
+    private static EventSubscriptionDescriptor SubscriberDescriptor(string label) {
+        return new EventSubscriptionDescriptor {
             EventType = typeof(SampleIntegrationEvent),
             Plane = EventPlane.Integration,
             ServiceType = typeof(EventRecorder),
@@ -265,23 +262,26 @@ public sealed class EventDispatchScopeTests {
                 return ValueTask.CompletedTask;
             }
         };
+    }
 
     private sealed class TogglingScopeFactory(EventRecorder recorder) : IServiceScopeFactory {
         public volatile bool Fail;
 
         public IServiceScope CreateScope() {
-            if (Fail) {
-                throw new InvalidOperationException("scope factory boom");
-            }
+            if (Fail) throw new InvalidOperationException("scope factory boom");
 
             return new Scope(recorder);
         }
 
         private sealed class Scope(EventRecorder recorder) : IServiceScope, IServiceProvider {
             public IServiceProvider ServiceProvider => this;
-            public object? GetService(Type serviceType) =>
-                serviceType == typeof(EventRecorder) ? recorder : null;
-            public void Dispose() { }
+
+            public object? GetService(Type serviceType) {
+                return serviceType == typeof(EventRecorder) ? recorder : null;
+            }
+
+            public void Dispose() {
+            }
         }
     }
 
@@ -307,9 +307,7 @@ public sealed class EventDispatchScopeTests {
         }
 
         public async Task WaitForAsync(int count, CancellationToken ct) {
-            for (var i = 0; i < count; i++) {
-                await _signal.WaitAsync(ct);
-            }
+            for (var i = 0; i < count; i++) await _signal.WaitAsync(ct);
         }
     }
 
@@ -324,9 +322,13 @@ public sealed class EventDispatchScopeTests {
             }
         }
 
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull {
+            return NullScope.Instance;
+        }
 
-        public bool IsEnabled(LogLevel logLevel) => true;
+        public bool IsEnabled(LogLevel logLevel) {
+            return true;
+        }
 
         public void Log<TState>(
             LogLevel logLevel,
@@ -341,7 +343,9 @@ public sealed class EventDispatchScopeTests {
 
         private sealed class NullScope : IDisposable {
             public static readonly NullScope Instance = new();
-            public void Dispose() { }
+
+            public void Dispose() {
+            }
         }
     }
 }

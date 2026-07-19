@@ -4,13 +4,11 @@ using Xunit;
 
 namespace Elarion.Tests.Paging;
 
-public sealed class CursorCodecTests
-{
+public sealed class CursorCodecTests {
     private const uint Tag = 0x1234ABCDu;
 
     [Fact]
-    public void RoundTrip_MixedColumns_PreservesValuesAndConsumesBuffer()
-    {
+    public void RoundTrip_MixedColumns_PreservesValuesAndConsumesBuffer() {
         var createdAt = new DateTime(2026, 6, 19, 8, 30, 15, DateTimeKind.Utc);
         var id = Guid.Parse("11112222-3333-4444-5555-666677778888");
         const long sequence = 9_223_372_036_854L;
@@ -37,8 +35,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void RoundTrip_NumericTypes_PreservesValues()
-    {
+    public void RoundTrip_NumericTypes_PreservesValues() {
         var writer = new CursorWriter(Tag);
         writer.WriteInt32(int.MinValue);
         writer.WriteDouble(3.141592653589793);
@@ -67,16 +64,14 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryCreate_MalformedCursor_ReturnsFalse()
-    {
+    public void TryCreate_MalformedCursor_ReturnsFalse() {
         CursorReader.TryCreate("not a real cursor!!", Tag, out _).Should().BeFalse();
         CursorReader.TryCreate("", Tag, out _).Should().BeFalse();
         CursorReader.TryCreate(null, Tag, out _).Should().BeFalse();
     }
 
     [Fact]
-    public void TryCreate_WrongKeysetTag_ReturnsFalse()
-    {
+    public void TryCreate_WrongKeysetTag_ReturnsFalse() {
         var writer = new CursorWriter(Tag);
         writer.WriteInt32(42);
         var cursor = writer.ToCursor();
@@ -88,8 +83,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryRead_TruncatedBuffer_ReturnsFalse()
-    {
+    public void TryRead_TruncatedBuffer_ReturnsFalse() {
         var writer = new CursorWriter(Tag);
         writer.WriteInt32(42);
         CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
@@ -100,8 +94,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadString_HugeVarintLength_ReturnsFalse()
-    {
+    public void TryReadString_HugeVarintLength_ReturnsFalse() {
         // Declared length uint.MaxValue casts to a negative int; the reader must report malformed,
         // never attempt the slice.
         CursorReader.TryCreate(Adversarial(0xFF, 0xFF, 0xFF, 0xFF, 0x0F), Tag, out var reader)
@@ -111,8 +104,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadString_LengthOverflowingPositionCheck_ReturnsFalse()
-    {
+    public void TryReadString_LengthOverflowingPositionCheck_ReturnsFalse() {
         // Declared length int.MaxValue over a tiny buffer: a naive "position + count > length" bounds
         // check overflows negative and passes, and the slice then throws. The reader must return false.
         CursorReader.TryCreate(Adversarial(0xFF, 0xFF, 0xFF, 0xFF, 0x07, 0x61), Tag, out var reader)
@@ -122,8 +114,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadDateTime_OutOfRangeBits_ReturnsFalse()
-    {
+    public void TryReadDateTime_OutOfRangeBits_ReturnsFalse() {
         // long.MaxValue decodes to a tick count past DateTime.MaxValue; FromBinary would throw.
         var writer = new CursorWriter(Tag);
         writer.WriteInt64(long.MaxValue);
@@ -133,8 +124,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadDateTimeOffset_OutOfRangeTicks_ReturnsFalse()
-    {
+    public void TryReadDateTimeOffset_OutOfRangeTicks_ReturnsFalse() {
         var writer = new CursorWriter(Tag);
         writer.WriteInt64(long.MaxValue);
         CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
@@ -143,8 +133,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadTimeOnly_NegativeTicks_ReturnsFalse()
-    {
+    public void TryReadTimeOnly_NegativeTicks_ReturnsFalse() {
         var writer = new CursorWriter(Tag);
         writer.WriteInt64(-1);
         CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
@@ -153,8 +142,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadTimeOnly_TicksPastOneDay_ReturnsFalse()
-    {
+    public void TryReadTimeOnly_TicksPastOneDay_ReturnsFalse() {
         var writer = new CursorWriter(Tag);
         writer.WriteInt64(TimeOnly.MaxValue.Ticks + 1);
         CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
@@ -163,8 +151,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadDateOnly_OutOfRangeDayNumber_ReturnsFalse()
-    {
+    public void TryReadDateOnly_OutOfRangeDayNumber_ReturnsFalse() {
         var writer = new CursorWriter(Tag);
         writer.WriteInt32(int.MaxValue);
         CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
@@ -173,8 +160,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadDateOnly_NegativeDayNumber_ReturnsFalse()
-    {
+    public void TryReadDateOnly_NegativeDayNumber_ReturnsFalse() {
         var writer = new CursorWriter(Tag);
         writer.WriteInt32(-1);
         CursorReader.TryCreate(writer.ToCursor(), Tag, out var reader).Should().BeTrue();
@@ -183,8 +169,7 @@ public sealed class CursorCodecTests
     }
 
     [Fact]
-    public void TryReadDecimal_InvalidFlagsBits_ReturnsFalse()
-    {
+    public void TryReadDecimal_InvalidFlagsBits_ReturnsFalse() {
         // The fourth int is the decimal's flags word; an arbitrary bit pattern is invalid and the
         // decimal constructor would throw.
         var writer = new CursorWriter(Tag);
@@ -198,8 +183,7 @@ public sealed class CursorCodecTests
     }
 
     /// <summary>Builds a cursor whose header is valid for <see cref="Tag"/> followed by raw adversarial payload bytes.</summary>
-    private static string Adversarial(params byte[] payload)
-    {
+    private static string Adversarial(params byte[] payload) {
         var header = System.Buffers.Text.Base64Url.DecodeFromChars(new CursorWriter(Tag).ToCursor().AsSpan());
         return System.Buffers.Text.Base64Url.EncodeToString([.. header, .. payload]);
     }

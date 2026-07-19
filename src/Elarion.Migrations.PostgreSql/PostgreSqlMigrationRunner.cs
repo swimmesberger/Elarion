@@ -11,12 +11,14 @@ namespace Elarion.Migrations.PostgreSql;
 /// </summary>
 public sealed class PostgreSqlMigrationRunner : MigrationRunner {
     /// <summary>Creates a runner that opens its dedicated connection from a connection string.</summary>
-    public PostgreSqlMigrationRunner(string connectionString, PostgreSqlMigrationOptions options, ILogger<PostgreSqlMigrationRunner>? logger = null)
+    public PostgreSqlMigrationRunner(string connectionString, PostgreSqlMigrationOptions options,
+        ILogger<PostgreSqlMigrationRunner>? logger = null)
         : base(new PostgreSqlMigrationDatabase(connectionString, options, logger), options, logger) {
     }
 
     /// <summary>Creates a runner that borrows connections from an existing data source (never disposes it).</summary>
-    public PostgreSqlMigrationRunner(NpgsqlDataSource dataSource, PostgreSqlMigrationOptions options, ILogger<PostgreSqlMigrationRunner>? logger = null)
+    public PostgreSqlMigrationRunner(NpgsqlDataSource dataSource, PostgreSqlMigrationOptions options,
+        ILogger<PostgreSqlMigrationRunner>? logger = null)
         : base(new PostgreSqlMigrationDatabase(dataSource, options, logger), options, logger) {
     }
 }

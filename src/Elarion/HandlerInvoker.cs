@@ -43,4 +43,29 @@ public static class HandlerInvoker {
         var handler = scope.ServiceProvider.GetRequiredService<IHandler<TRequest, Result<TResponse>>>();
         return await handler.HandleAsync(request, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Fully inferred invoke for requests implementing the self-typed marker
+    /// <see cref="IRequest{TSelf, TResponse}"/>: both generic arguments are inferred from
+    /// <paramref name="request"/> — <c>await HandlerInvoker.InvokeAsync(provider, new GetClient.Query(id), context, ct)</c>.
+    /// Dispatches through the same typed resolution as
+    /// <see cref="InvokeAsync{TRequest, TResponse}(IServiceProvider, TRequest, DispatchScopeContext?, CancellationToken)"/>.
+    /// </summary>
+    /// <typeparam name="TRequest">The handler request type (inferred).</typeparam>
+    /// <typeparam name="TResponse">The handler success value type (inferred from the marker).</typeparam>
+    /// <param name="rootProvider">The provider to create the per-call scope from (the app root, or a request scope).</param>
+    /// <param name="request">The request to handle.</param>
+    /// <param name="context">The values captured at the call boundary (e.g. the authenticated principal), or <see langword="null"/>.</param>
+    /// <param name="ct">A cancellation token flowed into the handler.</param>
+    /// <returns>The handler's <see cref="Result{T}"/>.</returns>
+    public static ValueTask<Result<TResponse>> InvokeAsync<TRequest, TResponse>(
+        IServiceProvider rootProvider,
+        IRequest<TRequest, TResponse> request,
+        DispatchScopeContext? context = null,
+        CancellationToken ct = default)
+        where TRequest : notnull, IRequest<TRequest, TResponse> {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return InvokeAsync<TRequest, TResponse>(rootProvider, (TRequest)request, context, ct);
+    }
 }

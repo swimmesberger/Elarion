@@ -19,24 +19,23 @@ internal sealed class EventDispatchSaveChangesInterceptor(EventDispatchScope sco
         SaveChangesCompletedEventData eventData,
         int result,
         CancellationToken cancellationToken = default) {
-        if (eventData.Context?.Database.CurrentTransaction is null) {
+        if (eventData.Context?.Database.CurrentTransaction is null)
             await scope.FlushAsync(cancellationToken).ConfigureAwait(false);
-        }
 
         return result;
     }
 
     /// <inheritdoc />
     public override int SavedChanges(SaveChangesCompletedEventData eventData, int result) {
-        if (eventData.Context?.Database.CurrentTransaction is null) {
-            scope.FlushSynchronously();
-        }
+        if (eventData.Context?.Database.CurrentTransaction is null) scope.FlushSynchronously();
 
         return result;
     }
 
     /// <inheritdoc />
-    public override void SaveChangesFailed(DbContextErrorEventData eventData) => scope.Discard();
+    public override void SaveChangesFailed(DbContextErrorEventData eventData) {
+        scope.Discard();
+    }
 
     /// <inheritdoc />
     public override Task SaveChangesFailedAsync(
@@ -68,12 +67,14 @@ internal sealed class EventDispatchTransactionInterceptor(EventDispatchScope sco
     public override async Task TransactionCommittedAsync(
         DbTransaction transaction,
         TransactionEndEventData eventData,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default) {
         await scope.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
-    public override void TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData) =>
+    public override void TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData) {
         scope.FlushSynchronously();
+    }
 
     /// <inheritdoc />
     public override Task TransactionRolledBackAsync(
@@ -85,12 +86,14 @@ internal sealed class EventDispatchTransactionInterceptor(EventDispatchScope sco
     }
 
     /// <inheritdoc />
-    public override void TransactionRolledBack(DbTransaction transaction, TransactionEndEventData eventData) =>
+    public override void TransactionRolledBack(DbTransaction transaction, TransactionEndEventData eventData) {
         scope.Discard();
+    }
 
     /// <inheritdoc />
-    public override void CreatedSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+    public override void CreatedSavepoint(DbTransaction transaction, TransactionEventData eventData) {
         scope.PushSavepoint();
+    }
 
     /// <inheritdoc />
     public override Task CreatedSavepointAsync(
@@ -102,8 +105,9 @@ internal sealed class EventDispatchTransactionInterceptor(EventDispatchScope sco
     }
 
     /// <inheritdoc />
-    public override void RolledBackToSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+    public override void RolledBackToSavepoint(DbTransaction transaction, TransactionEventData eventData) {
         scope.RollbackToSavepoint();
+    }
 
     /// <inheritdoc />
     public override Task RolledBackToSavepointAsync(
@@ -115,8 +119,9 @@ internal sealed class EventDispatchTransactionInterceptor(EventDispatchScope sco
     }
 
     /// <inheritdoc />
-    public override void ReleasedSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+    public override void ReleasedSavepoint(DbTransaction transaction, TransactionEventData eventData) {
         scope.ReleaseSavepoint();
+    }
 
     /// <inheritdoc />
     public override Task ReleasedSavepointAsync(

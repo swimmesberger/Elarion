@@ -9,7 +9,8 @@ namespace Elarion.Actors;
 /// per-module <c>Add{Module}Actors</c> extension does.
 /// </summary>
 public abstract class ActorRegistration {
-    private protected ActorRegistration() { }
+    private protected ActorRegistration() {
+    }
 
     /// <summary>The actor's logical name (telemetry/log identity).</summary>
     public required string Name { get; init; }
@@ -44,6 +45,7 @@ public sealed class ActorRegistration<TActor, TKey, TFacade> : ActorRegistration
 
     internal override Type FacadeType => typeof(TFacade);
 
-    internal override IActorHostEntry CreateHost(ActorRuntime runtime) =>
-        new ActorHost<TActor, TKey, TFacade>(this, runtime);
+    internal override IActorHostEntry CreateHost(ActorRuntime runtime) {
+        return new ActorHost<TActor, TKey, TFacade>(this, runtime);
+    }
 }

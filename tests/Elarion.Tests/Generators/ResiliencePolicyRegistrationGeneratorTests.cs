@@ -34,7 +34,8 @@ public sealed class ResiliencePolicyRegistrationGeneratorTests {
         generated.Should().Contain("ResilienceRetryOptions");
         generated.Should().Contain("MaxRetryAttempts = 4");
         generated.Should().Contain($"Delay = global::System.TimeSpan.FromTicks({TimeSpan.FromSeconds(10).Ticks}L)");
-        generated.Should().Contain("Backoff = global::Elarion.Abstractions.Resilience.ResilienceBackoffType.Exponential");
+        generated.Should()
+            .Contain("Backoff = global::Elarion.Abstractions.Resilience.ResilienceBackoffType.Exponential");
         generated.Should().Contain($"MaxDelay = global::System.TimeSpan.FromTicks({TimeSpan.FromMinutes(5).Ticks}L)");
         generated.Should().Contain("UseJitter = true");
         generated.Should().Contain($"Timeout = global::System.TimeSpan.FromTicks({TimeSpan.FromSeconds(30).Ticks}L)");
@@ -140,11 +141,12 @@ public sealed class ResiliencePolicyRegistrationGeneratorTests {
         return driver.GetRunResult();
     }
 
-    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
@@ -159,37 +161,38 @@ public sealed class ResiliencePolicyRegistrationGeneratorTests {
 
     private static string CreateSource(
         string testSource,
-        string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateResiliencePolicies]") =>
-        $$"""
-        {{assemblyTrigger}}
+        string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateResiliencePolicies]") {
+        return $$"""
+                 {{assemblyTrigger}}
 
-        namespace Elarion.Abstractions {
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            public sealed class GenerateResiliencePoliciesAttribute : System.Attribute;
+                 namespace Elarion.Abstractions {
+                     [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                     public sealed class GenerateResiliencePoliciesAttribute : System.Attribute;
 
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            public sealed class UseElarionAttribute : System.Attribute;
-        }
+                     [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                     public sealed class UseElarionAttribute : System.Attribute;
+                 }
 
-        namespace Elarion.Abstractions.Resilience {
-            public enum ResilienceBackoffType {
-                Constant,
-                Linear,
-                Exponential
-            }
+                 namespace Elarion.Abstractions.Resilience {
+                     public enum ResilienceBackoffType {
+                         Constant,
+                         Linear,
+                         Exponential
+                     }
 
-            [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-            public sealed class ResiliencePolicyAttribute(string name) : System.Attribute {
-                public string Name { get; } = name;
-                public int MaxRetryAttempts { get; init; } = 3;
-                public string Delay { get; init; } = "2s";
-                public ResilienceBackoffType Backoff { get; init; } = ResilienceBackoffType.Constant;
-                public string? MaxDelay { get; init; }
-                public bool UseJitter { get; init; }
-                public string? Timeout { get; init; }
-            }
-        }
+                     [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+                     public sealed class ResiliencePolicyAttribute(string name) : System.Attribute {
+                         public string Name { get; } = name;
+                         public int MaxRetryAttempts { get; init; } = 3;
+                         public string Delay { get; init; } = "2s";
+                         public ResilienceBackoffType Backoff { get; init; } = ResilienceBackoffType.Constant;
+                         public string? MaxDelay { get; init; }
+                         public bool UseJitter { get; init; }
+                         public string? Timeout { get; init; }
+                     }
+                 }
 
-        {{testSource}}
-        """;
+                 {{testSource}}
+                 """;
+    }
 }

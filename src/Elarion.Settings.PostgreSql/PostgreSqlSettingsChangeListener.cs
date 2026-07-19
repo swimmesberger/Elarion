@@ -28,7 +28,8 @@ internal sealed class PostgreSqlSettingsChangeListener(
 
         while (!stoppingToken.IsCancellationRequested) {
             try {
-                await using var connection = await changeSource.DataSource.OpenConnectionAsync(stoppingToken).ConfigureAwait(false);
+                await using var connection =
+                    await changeSource.DataSource.OpenConnectionAsync(stoppingToken).ConfigureAwait(false);
                 connection.Notification += OnNotification;
                 try {
                     await using (var command = connection.CreateCommand()) {
@@ -49,9 +50,8 @@ internal sealed class PostgreSqlSettingsChangeListener(
                     _listening.TrySetResult();
 
                     while (true) {
-                        if (await connection.WaitAsync(options.ConnectionProbeInterval, stoppingToken).ConfigureAwait(false)) {
-                            continue;
-                        }
+                        if (await connection.WaitAsync(options.ConnectionProbeInterval, stoppingToken)
+                                .ConfigureAwait(false)) continue;
 
                         // Nothing arrived within the probe window. A half-open connection (NAT idle timeout,
                         // failover without a FIN/RST) completes neither the wait nor an error, so run a cheap
@@ -89,9 +89,7 @@ internal sealed class PostgreSqlSettingsChangeListener(
     }
 
     private void OnNotification(object sender, NpgsqlNotificationEventArgs args) {
-        if (!string.Equals(args.Channel, options.ChannelName, StringComparison.Ordinal)) {
-            return;
-        }
+        if (!string.Equals(args.Channel, options.ChannelName, StringComparison.Ordinal)) return;
 
         if (PostgreSqlSettingsChangePayload.TryDeserialize(args.Payload, out var scope, out var key)) {
             changeSource.FireMatching(scope, key);
@@ -102,6 +100,7 @@ internal sealed class PostgreSqlSettingsChangeListener(
             "Ignoring a malformed settings change notification on channel '{Channel}'.", options.ChannelName);
     }
 
-    private static string QuoteIdentifier(string identifier) =>
-        "\"" + identifier.Replace("\"", "\"\"") + "\"";
+    private static string QuoteIdentifier(string identifier) {
+        return "\"" + identifier.Replace("\"", "\"\"") + "\"";
+    }
 }

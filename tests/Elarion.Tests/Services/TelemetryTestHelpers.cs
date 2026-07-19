@@ -22,7 +22,9 @@ internal sealed class ActivityCollector : IDisposable {
 
     public IReadOnlyList<Activity> Activities => _activities.ToArray();
 
-    public void Dispose() => _listener.Dispose();
+    public void Dispose() {
+        _listener.Dispose();
+    }
 }
 
 internal sealed class MeterCollector : IDisposable {
@@ -33,9 +35,7 @@ internal sealed class MeterCollector : IDisposable {
     public MeterCollector(params string[] meterNames) {
         _meterNames = new HashSet<string>(meterNames, StringComparer.Ordinal);
         _listener.InstrumentPublished = (instrument, listener) => {
-            if (_meterNames.Contains(instrument.Meter.Name)) {
-                listener.EnableMeasurementEvents(instrument);
-            }
+            if (_meterNames.Contains(instrument.Meter.Name)) listener.EnableMeasurementEvents(instrument);
         };
         _listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
             _measurements.Enqueue(new Measurement(instrument.Name, measurement, CopyTags(tags))));
@@ -48,13 +48,13 @@ internal sealed class MeterCollector : IDisposable {
 
     public IReadOnlyList<Measurement> Measurements => _measurements.ToArray();
 
-    public void Dispose() => _listener.Dispose();
+    public void Dispose() {
+        _listener.Dispose();
+    }
 
     private static IReadOnlyDictionary<string, object?> CopyTags(ReadOnlySpan<KeyValuePair<string, object?>> tags) {
         var copied = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var tag in tags) {
-            copied[tag.Key] = tag.Value;
-        }
+        foreach (var tag in tags) copied[tag.Key] = tag.Value;
 
         return copied;
     }
@@ -63,9 +63,11 @@ internal sealed class MeterCollector : IDisposable {
 }
 
 internal static class TelemetryAssertions {
-    public static object? GetTag(this Activity activity, string key) =>
-        activity.TagObjects.FirstOrDefault(tag => tag.Key == key).Value;
+    public static object? GetTag(this Activity activity, string key) {
+        return activity.TagObjects.FirstOrDefault(tag => tag.Key == key).Value;
+    }
 
-    public static bool HasTag(this MeterCollector.Measurement measurement, string key, object? value) =>
-        measurement.Tags.TryGetValue(key, out var actual) && Equals(actual, value);
+    public static bool HasTag(this MeterCollector.Measurement measurement, string key, object? value) {
+        return measurement.Tags.TryGetValue(key, out var actual) && Equals(actual, value);
+    }
 }

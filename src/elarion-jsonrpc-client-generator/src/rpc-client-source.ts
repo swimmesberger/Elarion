@@ -135,13 +135,13 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '',
     ...(hasFiles
       ? [
-          '// Where each method carries file payloads: property paths into params/results ("*" descends into',
-          '// array items; an empty path means the value itself is the file). The client converts between',
-          '// native File values and the base64 wire envelope at exactly these positions.',
-          `const rpcParamsFilePaths: Partial<Record<RpcMethod, readonly (readonly string[])[]>> = ${JSON.stringify(options.paramsFilePaths)}`,
-          `const rpcResultFilePaths: Partial<Record<RpcMethod, readonly (readonly string[])[]>> = ${JSON.stringify(options.resultFilePaths)}`,
-          '',
-        ]
+        '// Where each method carries file payloads: property paths into params/results ("*" descends into',
+        '// array items; an empty path means the value itself is the file). The client converts between',
+        '// native File values and the base64 wire envelope at exactly these positions.',
+        `const rpcParamsFilePaths: Partial<Record<RpcMethod, readonly (readonly string[])[]>> = ${JSON.stringify(options.paramsFilePaths)}`,
+        `const rpcResultFilePaths: Partial<Record<RpcMethod, readonly (readonly string[])[]>> = ${JSON.stringify(options.resultFilePaths)}`,
+        '',
+      ]
       : []),
     'type JsonRpcId = string | number',
     '',
@@ -412,27 +412,27 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '',
     ...(hasFiles
       ? [
-          '      const requests: JsonRpcRequestEnvelope[] = []',
-          '      for (const item of items) {',
-          '        requests.push(createRequest(',
-          '          item.method,',
-          '          withIdempotencyKey(',
-          '            await encodeFileParams(item.method, item.params),',
-          '            resolveIdempotencyKey(item.method, item.idempotencyKey)',
-          '          ),',
-          '          createId()',
-          '        ))',
-          '      }',
-        ]
+        '      const requests: JsonRpcRequestEnvelope[] = []',
+        '      for (const item of items) {',
+        '        requests.push(createRequest(',
+        '          item.method,',
+        '          withIdempotencyKey(',
+        '            await encodeFileParams(item.method, item.params),',
+        '            resolveIdempotencyKey(item.method, item.idempotencyKey)',
+        '          ),',
+        '          createId()',
+        '        ))',
+        '      }',
+      ]
       : [
-          '      const requests = items.map((item) =>',
-          '        createRequest(',
-          '          item.method,',
-          '          withIdempotencyKey(item.params, resolveIdempotencyKey(item.method, item.idempotencyKey)),',
-          '          createId()',
-          '        )',
-          '      )',
-        ]),
+        '      const requests = items.map((item) =>',
+        '        createRequest(',
+        '          item.method,',
+        '          withIdempotencyKey(item.params, resolveIdempotencyKey(item.method, item.idempotencyKey)),',
+        '          createId()',
+        '        )',
+        '      )',
+      ]),
     '      const context: RpcRequestContext = { methods: items.map((item) => item.method), batch: true }',
     '      const span = options.instrumentation?.startSpan(context)',
     '      try {',
@@ -662,7 +662,7 @@ function buildMethodTree(methods: readonly string[]): MethodTreeNode {
 }
 
 function createMethodTreeNode(): MethodTreeNode {
-  return { children: new Map() }
+  return {children: new Map()}
 }
 
 function generateApiTypeLines(methodTree: MethodTreeNode): string[] {

@@ -38,16 +38,15 @@ public sealed class PostgreSqlAuditTrailFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
     /// <summary>A plain context for seeding/verification — no interceptors, no audit scope.</summary>
-    public AuditIntegrationDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<AuditIntegrationDbContext>()
+    public AuditIntegrationDbContext CreateContext() {
+        return new AuditIntegrationDbContext(new DbContextOptionsBuilder<AuditIntegrationDbContext>()
             .UseNpgsql(ConnectionString)
             .Options);
+    }
 }
 
 /// <summary>Context mapping the audit-log table plus an <c>[Audited]</c> business entity, so tests can prove the

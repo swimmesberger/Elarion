@@ -34,8 +34,8 @@ public static class ResilienceTelemetry {
     public static readonly Histogram<double> ExecutionDuration =
         MeterInstance.CreateHistogram<double>(
             "resilience.policy.execution.duration",
-            unit: "s",
-            description: "Duration of resilience policy executions",
+            "s",
+            "Duration of resilience policy executions",
             advice: DurationAdvice);
 
     internal static void RecordExecution(string policyName, string outcome, TimeSpan elapsed) {

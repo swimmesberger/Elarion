@@ -21,7 +21,7 @@ internal sealed record MigrationScriptSet {
 /// silently skipped — and all problems are collected, not just the first.
 /// </summary>
 internal static class MigrationScriptDiscovery {
-    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     public static MigrationScriptSet Discover(IReadOnlyList<MigrationScriptSource> sources) {
         var errors = new List<MigrationValidationError>();
@@ -31,18 +31,15 @@ internal static class MigrationScriptDiscovery {
         foreach (var source in sources) {
             var names = source.Assembly.GetManifestResourceNames()
                 .Where(name => name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)
-                    && (source.ResourceNamePrefix is null || name.StartsWith(source.ResourceNamePrefix, StringComparison.Ordinal)))
+                               && (source.ResourceNamePrefix is null ||
+                                   name.StartsWith(source.ResourceNamePrefix, StringComparison.Ordinal)))
                 .Order(StringComparer.Ordinal);
 
             foreach (var resourceName in names) {
-                if (!seenResources.Add((source.Assembly, resourceName))) {
-                    continue;
-                }
+                if (!seenResources.Add((source.Assembly, resourceName))) continue;
 
                 var script = TryRead(source.Assembly, resourceName, errors);
-                if (script is not null) {
-                    scripts.Add(script);
-                }
+                if (script is not null) scripts.Add(script);
             }
         }
 
@@ -51,11 +48,12 @@ internal static class MigrationScriptDiscovery {
         return new MigrationScriptSet {
             Versioned = scripts.Where(s => !s.IsRepeatable).OrderBy(s => s.Version).ToList(),
             Repeatable = scripts.Where(s => s.IsRepeatable).OrderBy(s => s.ScriptName, StringComparer.Ordinal).ToList(),
-            Errors = errors,
+            Errors = errors
         };
     }
 
-    private static MigrationScript? TryRead(Assembly assembly, string resourceName, List<MigrationValidationError> errors) {
+    private static MigrationScript? TryRead(Assembly assembly, string resourceName,
+        List<MigrationValidationError> errors) {
         var scriptName = ExtractFileName(resourceName);
         if (!TryParseScriptName(scriptName, out var version, out var description, out var nameError)) {
             errors.Add(new MigrationValidationError { ScriptName = resourceName, Message = nameError });
@@ -72,7 +70,7 @@ internal static class MigrationScriptDiscovery {
             catch (DecoderFallbackException) {
                 errors.Add(new MigrationValidationError {
                     ScriptName = resourceName,
-                    Message = $"Migration script resource '{resourceName}' is not valid UTF-8.",
+                    Message = $"Migration script resource '{resourceName}' is not valid UTF-8."
                 });
                 return null;
             }
@@ -80,7 +78,8 @@ internal static class MigrationScriptDiscovery {
 
         var normalized = MigrationChecksum.Normalize(content);
         if (!TryParseDirectives(normalized, out var noTransaction, out var directiveError)) {
-            errors.Add(new MigrationValidationError { ScriptName = resourceName, Message = $"Migration script '{resourceName}': {directiveError}" });
+            errors.Add(new MigrationValidationError
+                { ScriptName = resourceName, Message = $"Migration script '{resourceName}': {directiveError}" });
             return null;
         }
 
@@ -91,7 +90,7 @@ internal static class MigrationScriptDiscovery {
             Description = description,
             Sql = normalized,
             Checksum = MigrationChecksum.Compute(normalized),
-            NoTransaction = noTransaction,
+            NoTransaction = noTransaction
         };
     }
 
@@ -106,7 +105,8 @@ internal static class MigrationScriptDiscovery {
         return (lastDot < 0 ? stem : stem[(lastDot + 1)..]) + ".sql";
     }
 
-    internal static bool TryParseScriptName(string scriptName, out MigrationVersion? version, out string description, out string error) {
+    internal static bool TryParseScriptName(string scriptName, out MigrationVersion? version, out string description,
+        out string error) {
         version = null;
         description = "";
         error = "";
@@ -132,7 +132,8 @@ internal static class MigrationScriptDiscovery {
 
             var versionPart = stem[1..separator];
             if (!MigrationVersion.TryParse(versionPart, out version)) {
-                error = $"Migration script '{scriptName}' has an invalid version '{versionPart}'; expected numeric segments separated by '_' (e.g. 'V20260713093000__…' or 'V1_2__…').";
+                error =
+                    $"Migration script '{scriptName}' has an invalid version '{versionPart}'; expected numeric segments separated by '_' (e.g. 'V20260713093000__…' or 'V1_2__…').";
                 return false;
             }
 
@@ -140,7 +141,8 @@ internal static class MigrationScriptDiscovery {
             return true;
         }
 
-        error = $"Migration script '{scriptName}' does not match 'V{{version}}__{{description}}.sql' or 'R__{{description}}.sql'. "
+        error =
+            $"Migration script '{scriptName}' does not match 'V{{version}}__{{description}}.sql' or 'R__{{description}}.sql'. "
             + "Every .sql resource in a configured script source must be a migration script (fail-closed; nothing is skipped).";
         return false;
     }
@@ -156,18 +158,12 @@ internal static class MigrationScriptDiscovery {
 
         foreach (var rawLine in normalizedSql.Split('\n')) {
             var line = rawLine.Trim();
-            if (line.Length == 0) {
-                continue;
-            }
+            if (line.Length == 0) continue;
 
-            if (!line.StartsWith("--", StringComparison.Ordinal)) {
-                break;
-            }
+            if (!line.StartsWith("--", StringComparison.Ordinal)) break;
 
             var comment = line[2..].Trim();
-            if (!comment.StartsWith("elarion:", StringComparison.OrdinalIgnoreCase)) {
-                continue;
-            }
+            if (!comment.StartsWith("elarion:", StringComparison.OrdinalIgnoreCase)) continue;
 
             var directive = comment["elarion:".Length..].Trim();
             if (string.Equals(directive, "no-transaction", StringComparison.OrdinalIgnoreCase)) {
@@ -186,15 +182,18 @@ internal static class MigrationScriptDiscovery {
         foreach (var group in scripts.Where(s => !s.IsRepeatable).GroupBy(s => s.Version!).Where(g => g.Count() > 1)) {
             var resources = string.Join(", ", group.Select(s => $"'{s.ResourceName}'"));
             errors.Add(new MigrationValidationError {
-                Message = $"Duplicate migration version {group.Key.Text}: {resources}. Each version must exist exactly once.",
+                Message =
+                    $"Duplicate migration version {group.Key.Text}: {resources}. Each version must exist exactly once."
             });
         }
 
-        foreach (var group in scripts.Where(s => s.IsRepeatable).GroupBy(s => s.ScriptName, StringComparer.Ordinal).Where(g => g.Count() > 1)) {
+        foreach (var group in scripts.Where(s => s.IsRepeatable).GroupBy(s => s.ScriptName, StringComparer.Ordinal)
+                     .Where(g => g.Count() > 1)) {
             var resources = string.Join(", ", group.Select(s => $"'{s.ResourceName}'"));
             errors.Add(new MigrationValidationError {
                 ScriptName = group.Key,
-                Message = $"Duplicate repeatable migration '{group.Key}': {resources}. Repeatable script file names must be unique.",
+                Message =
+                    $"Duplicate repeatable migration '{group.Key}': {resources}. Repeatable script file names must be unique."
             });
         }
     }

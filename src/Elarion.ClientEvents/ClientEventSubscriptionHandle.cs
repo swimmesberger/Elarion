@@ -18,5 +18,7 @@ public sealed class ClientEventSubscriptionHandle : IDisposable {
     public ChannelReader<ClientEventEnvelope> Events { get; }
 
     /// <inheritdoc />
-    public void Dispose() => Interlocked.Exchange(ref _onDispose, null)?.Invoke();
+    public void Dispose() {
+        Interlocked.Exchange(ref _onDispose, null)?.Invoke();
+    }
 }

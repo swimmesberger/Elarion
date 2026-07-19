@@ -42,7 +42,8 @@ public sealed class AuthorizationPolicyRegistrationTests {
         var named = provider.GetServices<NamedAuthorizationPolicy>().Single(candidate => candidate.Name == "EvenId");
 
         var even = await named.Policy.EvaluateAsync(
-            new AuthorizationContext(new FakeCurrentUser(), new GuardedCommand(2)), TestContext.Current.CancellationToken);
+            new AuthorizationContext(new FakeCurrentUser(), new GuardedCommand(2)),
+            TestContext.Current.CancellationToken);
         even.Should().BeTrue();
     }
 }

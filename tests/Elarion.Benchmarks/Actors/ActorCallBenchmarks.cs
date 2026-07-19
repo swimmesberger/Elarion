@@ -73,44 +73,54 @@ public class ActorCallBenchmarks {
     }
 
     [GlobalCleanup]
-    public void Cleanup() => _provider.Dispose();
+    public void Cleanup() {
+        _provider.Dispose();
+    }
 
     [Benchmark(Baseline = true)]
-    public Task<int> DirectCall() => _direct.Echo(7);
+    public Task<int> DirectCall() {
+        return _direct.Echo(7);
+    }
 
     [Benchmark]
-    public ValueTask<int> Ask() => _echo.Echo(7);
+    public ValueTask<int> Ask() {
+        return _echo.Echo(7);
+    }
 
     [Benchmark]
-    public ValueTask<int> Ask_NoCallTimeout() => _echoNoTimeout.Echo(7);
+    public ValueTask<int> Ask_NoCallTimeout() {
+        return _echoNoTimeout.Echo(7);
+    }
 
     [Benchmark]
-    public ValueTask<int> Ask_Reentrant() => _echoReentrant.Echo(7);
+    public ValueTask<int> Ask_Reentrant() {
+        return _echoReentrant.Echo(7);
+    }
 
     [Benchmark(OperationsPerInvoke = PipelineDepth)]
     public async Task<int> Ask_Pipelined() {
-        for (var i = 0; i < PipelineDepth; i++) {
-            _pipeline[i] = _echo.Echo(i).AsTask();
-        }
+        for (var i = 0; i < PipelineDepth; i++) _pipeline[i] = _echo.Echo(i).AsTask();
 
         await Task.WhenAll(_pipeline);
         return _pipeline[PipelineDepth - 1].Result;
     }
 
     [Benchmark(OperationsPerInvoke = PingPongRounds)]
-    public ValueTask PingPong() => _relay.Run(PingPongRounds);
+    public ValueTask PingPong() {
+        return _relay.Run(PingPongRounds);
+    }
 
     // --- Actors under test ---
 
     public sealed class EchoActor {
-        public Task<int> Echo(int value) => Task.FromResult(value + 1);
+        public Task<int> Echo(int value) {
+            return Task.FromResult(value + 1);
+        }
     }
 
     public sealed class RelayActor(IEcho echo) {
         public async Task Run(int rounds) {
-            for (var i = 0; i < rounds; i++) {
-                await echo.Echo(i);
-            }
+            for (var i = 0; i < rounds; i++) await echo.Echo(i);
         }
     }
 
@@ -133,18 +143,21 @@ public class ActorCallBenchmarks {
     }
 
     private sealed class EchoFacade(ActorHandle<EchoActor> handle) : IEcho {
-        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
+        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
+        }
     }
 
     private sealed class EchoNoTimeoutFacade(ActorHandle<EchoActor> handle) : IEchoNoTimeout {
-        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
+        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
+        }
     }
 
     private sealed class EchoReentrantFacade(ActorHandle<EchoActor> handle) : IEchoReentrant {
-        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
+        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(EchoItem.Rent(value), cancellationToken);
+        }
     }
 
     // Prototype of a pooled work item (what the generator would emit): rented per call, returned to
@@ -157,31 +170,34 @@ public class ActorCallBenchmarks {
         public override string MethodName => "Echo";
 
         public static EchoItem Rent(int value) {
-            if (!Pool.TryDequeue(out var item)) {
-                item = new EchoItem();
-            }
+            if (!Pool.TryDequeue(out var item)) item = new EchoItem();
 
             item._value = value;
             return item;
         }
 
-        protected override void Recycle() => Pool.Enqueue(this);
+        protected override void Recycle() {
+            Pool.Enqueue(this);
+        }
 
-        protected override async ValueTask<int> InvokeAsync(EchoActor actor, CancellationToken cancellationToken) =>
-            await actor.Echo(_value).ConfigureAwait(false);
+        protected override async ValueTask<int> InvokeAsync(EchoActor actor, CancellationToken cancellationToken) {
+            return await actor.Echo(_value).ConfigureAwait(false);
+        }
     }
 
     private sealed class RelayFacade(ActorHandle<RelayActor> handle) : IRelay {
-        public ValueTask Run(int rounds, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new RunItem(rounds), cancellationToken);
+        public ValueTask Run(int rounds, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new RunItem(rounds), cancellationToken);
+        }
     }
 
-    private sealed class RunItem(int rounds) : ActorWorkItem<RelayActor, Elarion.Abstractions.Results.Unit> {
+    private sealed class RunItem(int rounds) : ActorWorkItem<RelayActor, Abstractions.Results.Unit> {
         public override string MethodName => "Run";
 
-        protected override async ValueTask<Elarion.Abstractions.Results.Unit> InvokeAsync(RelayActor actor, CancellationToken cancellationToken) {
+        protected override async ValueTask<Abstractions.Results.Unit> InvokeAsync(RelayActor actor,
+            CancellationToken cancellationToken) {
             await actor.Run(rounds).ConfigureAwait(false);
-            return Elarion.Abstractions.Results.Unit.Value;
+            return Abstractions.Results.Unit.Value;
         }
     }
 }

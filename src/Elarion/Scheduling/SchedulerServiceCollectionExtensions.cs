@@ -78,26 +78,18 @@ public static class SchedulerServiceCollectionExtensions {
 
     private static bool ReadBool(IConfiguration configuration, string key, bool defaultValue) {
         var value = configuration[key];
-        if (string.IsNullOrWhiteSpace(value)) {
-            return defaultValue;
-        }
+        if (string.IsNullOrWhiteSpace(value)) return defaultValue;
 
-        if (bool.TryParse(value, out var parsed)) {
-            return parsed;
-        }
+        if (bool.TryParse(value, out var parsed)) return parsed;
 
         throw new InvalidOperationException($"Configuration value '{key}' must be a boolean.");
     }
 
     private static int ReadInt(IConfiguration configuration, string key, int defaultValue) {
         var value = configuration[key];
-        if (string.IsNullOrWhiteSpace(value)) {
-            return defaultValue;
-        }
+        if (string.IsNullOrWhiteSpace(value)) return defaultValue;
 
-        if (int.TryParse(value, out var parsed)) {
-            return parsed;
-        }
+        if (int.TryParse(value, out var parsed)) return parsed;
 
         throw new InvalidOperationException($"Configuration value '{key}' must be an integer.");
     }

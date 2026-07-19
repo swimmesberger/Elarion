@@ -22,28 +22,25 @@ public sealed class OutboxIntegrationEventBus(
     OutboxOptions options,
     IElarionJsonSerialization jsonSerialization,
     TimeProvider timeProvider)
-    : IIntegrationEventBus
-{
+    : IIntegrationEventBus {
     /// <inheritdoc />
     public ValueTask PublishAsync<TEvent>(TEvent @event, CancellationToken ct = default)
-        where TEvent : IIntegrationEvent
-    {
+        where TEvent : IIntegrationEvent {
         ArgumentNullException.ThrowIfNull(@event);
 
         EventTelemetry.RecordPublish(typeof(TEvent).Name, EventPlane.Integration);
 
         var consumers = consumerCatalog.GetConsumerArray(typeof(TEvent));
-        if (consumers.Length == 0) {
+        if (consumers.Length == 0)
             throw new InvalidOperationException(
                 $"Integration event '{typeof(TEvent)}' has no registered consumers and cannot be written to the outbox.");
-        }
 
         var payload = JsonSerializer.Serialize(@event, options.SerializerOptions ?? jsonSerialization.Options);
         var messageId = Guid.CreateVersion7();
         var occurredOnUtc = timeProvider.GetUtcNow();
         var eventType = typeof(TEvent).FullName
-            ?? throw new InvalidOperationException(
-                $"Integration event '{typeof(TEvent)}' has no full name and cannot be persisted.");
+                        ?? throw new InvalidOperationException(
+                            $"Integration event '{typeof(TEvent)}' has no full name and cannot be persisted.");
         var correlationId = Guid.CreateVersion7();
         var traceParent = Activity.Current?.Id;
 
@@ -67,9 +64,7 @@ public sealed class OutboxIntegrationEventBus(
         var unboundGroup = -1;
         foreach (var descriptor in consumers) {
             var targetRole = descriptor.ResolveDeliveryRole?.Invoke(serviceProvider, @event);
-            if (targetRole is not null) {
-                ArgumentException.ThrowIfNullOrWhiteSpace(targetRole);
-            }
+            if (targetRole is not null) ArgumentException.ThrowIfNullOrWhiteSpace(targetRole);
 
             int groupIndex;
             if (targetRole is null) {

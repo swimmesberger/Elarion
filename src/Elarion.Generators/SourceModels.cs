@@ -10,21 +10,20 @@ namespace Elarion.Generators;
 /// incremental pipeline without carrying a raw <see cref="Location"/> (reference-identity, and it
 /// pins the owning <see cref="SyntaxTree"/>, both of which defeat caching).
 /// </summary>
-internal readonly record struct LocationInfo(string? FilePath, TextSpan TextSpan, LinePositionSpan LineSpan)
-{
-    public static LocationInfo From(Location? location)
-    {
-        if (location is null || location.SourceTree is null)
-        {
-            return new LocationInfo(null, default, default);
-        }
+internal readonly record struct LocationInfo(string? FilePath, TextSpan TextSpan, LinePositionSpan LineSpan) {
+    public static LocationInfo From(Location? location) {
+        if (location is null || location.SourceTree is null) return new LocationInfo(null, default, default);
 
         return new LocationInfo(location.SourceTree.FilePath, location.SourceSpan, location.GetLineSpan().Span);
     }
 
-    public static LocationInfo From(ISymbol symbol) => From(symbol.Locations.FirstOrDefault());
+    public static LocationInfo From(ISymbol symbol) {
+        return From(symbol.Locations.FirstOrDefault());
+    }
 
-    public Location? ToLocation() => FilePath is null ? null : Location.Create(FilePath, TextSpan, LineSpan);
+    public Location? ToLocation() {
+        return FilePath is null ? null : Location.Create(FilePath, TextSpan, LineSpan);
+    }
 }
 
 /// <summary>
@@ -35,15 +34,18 @@ internal readonly record struct LocationInfo(string? FilePath, TextSpan TextSpan
 internal sealed record DiagnosticInfo(
     DiagnosticDescriptor Descriptor,
     LocationInfo Location,
-    EquatableArray<string> MessageArgs)
-{
+    EquatableArray<string> MessageArgs) {
     public DiagnosticSeverity Severity => Descriptor.DefaultSeverity;
 
-    public static DiagnosticInfo Create(DiagnosticDescriptor descriptor, LocationInfo location, params string[] args) =>
-        new(descriptor, location, args.ToImmutableArray());
+    public static DiagnosticInfo Create(DiagnosticDescriptor descriptor, LocationInfo location, params string[] args) {
+        return new DiagnosticInfo(descriptor, location, args.ToImmutableArray());
+    }
 
-    public static DiagnosticInfo Create(DiagnosticDescriptor descriptor, Location? location, params string[] args) =>
-        Create(descriptor, LocationInfo.From(location), args);
+    public static DiagnosticInfo Create(DiagnosticDescriptor descriptor, Location? location, params string[] args) {
+        return Create(descriptor, LocationInfo.From(location), args);
+    }
 
-    public Diagnostic ToDiagnostic() => Diagnostic.Create(Descriptor, Location.ToLocation(), [.. MessageArgs]);
+    public Diagnostic ToDiagnostic() {
+        return Diagnostic.Create(Descriptor, Location.ToLocation(), [.. MessageArgs]);
+    }
 }

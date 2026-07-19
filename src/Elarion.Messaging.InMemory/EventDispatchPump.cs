@@ -44,9 +44,7 @@ internal sealed class EventDispatchPump : BackgroundService {
     }
 
     public ValueTask EnqueueAsync(EventEnvelope envelope, CancellationToken ct) {
-        if (!_options.Enabled) {
-            return ValueTask.CompletedTask;
-        }
+        if (!_options.Enabled) return ValueTask.CompletedTask;
 
         return _channel.Writer.WriteAsync(envelope, ct);
     }
@@ -65,13 +63,9 @@ internal sealed class EventDispatchPump : BackgroundService {
     /// The async interceptor path (<see cref="EnqueueAsync"/>) still applies back-pressure via <c>WriteAsync</c>.
     /// </remarks>
     public void EnqueueSynchronously(EventEnvelope envelope) {
-        if (!_options.Enabled) {
-            return;
-        }
+        if (!_options.Enabled) return;
 
-        if (_channel.Writer.TryWrite(envelope)) {
-            return;
-        }
+        if (_channel.Writer.TryWrite(envelope)) return;
 
         _logger.LogError(
             "Dropped integration event '{Event}' from a synchronous commit: the delivery channel was full "
@@ -82,14 +76,11 @@ internal sealed class EventDispatchPump : BackgroundService {
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-        if (!_options.Enabled) {
-            return;
-        }
+        if (!_options.Enabled) return;
 
         try {
-            await foreach (var envelope in _channel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+            await foreach (var envelope in _channel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
                 await ProcessAsync(envelope, stoppingToken).ConfigureAwait(false);
-            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
             // Expected on shutdown; drain whatever was already flushed below.
@@ -101,9 +92,8 @@ internal sealed class EventDispatchPump : BackgroundService {
     private async ValueTask DrainAsync() {
         // Deliberate CancellationToken.None: a graceful shutdown drains events already flushed
         // after a successful commit. The in-memory tier makes no durability promise on crash.
-        while (_channel.Reader.TryRead(out var envelope)) {
+        while (_channel.Reader.TryRead(out var envelope))
             await ProcessAsync(envelope, CancellationToken.None).ConfigureAwait(false);
-        }
     }
 
     /// <summary>
@@ -129,9 +119,7 @@ internal sealed class EventDispatchPump : BackgroundService {
 
     private async ValueTask DispatchAsync(EventEnvelope envelope, CancellationToken ct) {
         var subscribers = _registry.GetIntegrationSubscribers(envelope.EventType);
-        if (subscribers.Length == 0) {
-            return;
-        }
+        if (subscribers.Length == 0) return;
 
         // Parent the consume span on the trace context captured at publish time, so the after-commit
         // consumers stay in the publishing operation's trace despite running on the pump's thread.
@@ -150,9 +138,8 @@ internal sealed class EventDispatchPump : BackgroundService {
         // Seed the delivered message id as the scope's idempotency key so the inbox decorator on handler-form
         // consumers (ADR-0022) claims per (consumer, message). Soft-resolved: without AddElarionIdempotency the
         // seam is absent and consumers simply run un-deduped, exactly as before the inbox existed.
-        if (envelope.Context.MessageId is { } messageId) {
+        if (envelope.Context.MessageId is { } messageId)
             scope.ServiceProvider.GetService<IIdempotencyKeySeed>()?.Seed(messageId.ToString("N"));
-        }
 
         foreach (var descriptor in subscribers) {
             var startTimestamp = Stopwatch.GetTimestamp();

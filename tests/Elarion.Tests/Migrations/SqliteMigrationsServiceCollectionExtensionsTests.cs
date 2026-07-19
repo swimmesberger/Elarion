@@ -15,7 +15,8 @@ public sealed class SqliteMigrationsServiceCollectionExtensionsTests {
 
         services.AddElarionSqliteMigrations(
             "Data Source=app.db",
-            o => o.AddScripts(typeof(SqliteMigrationRunnerIntegrationTests).Assembly, SqliteMigrationRunnerIntegrationTests.ScriptPrefix + "Basic."));
+            o => o.AddScripts(typeof(SqliteMigrationRunnerIntegrationTests).Assembly,
+                SqliteMigrationRunnerIntegrationTests.ScriptPrefix + "Basic."));
 
         using var provider = services.BuildServiceProvider();
         provider.GetRequiredService<IMigrationRunner>().Should().BeOfType<SqliteMigrationRunner>();
@@ -31,7 +32,8 @@ public sealed class SqliteMigrationsServiceCollectionExtensionsTests {
             "Data Source=app.db",
             o => {
                 o.ApplyOnStartup = false;
-                o.AddScripts(typeof(SqliteMigrationRunnerIntegrationTests).Assembly, SqliteMigrationRunnerIntegrationTests.ScriptPrefix + "Basic.");
+                o.AddScripts(typeof(SqliteMigrationRunnerIntegrationTests).Assembly,
+                    SqliteMigrationRunnerIntegrationTests.ScriptPrefix + "Basic.");
             });
 
         using var provider = services.BuildServiceProvider();

@@ -48,11 +48,11 @@ public sealed class AuditDecorator<TRequest, TResponse>(
             TResponse response;
             try {
                 response = await inner.HandleAsync(request, ct).ConfigureAwait(false);
-            } catch (Exception ex) {
-                if (!scope.Recorded && (ex is not OperationCanceledException || !ct.IsCancellationRequested)) {
+            }
+            catch (Exception ex) {
+                if (!scope.Recorded && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
                     await RecordDetachedSafelyAsync(AuditOutcome.Failed, nameof(ErrorKind.Internal))
                         .ConfigureAwait(false);
-                }
 
                 throw;
             }
@@ -66,7 +66,8 @@ public sealed class AuditDecorator<TRequest, TResponse>(
             }
 
             return response;
-        } finally {
+        }
+        finally {
             scope.End();
         }
     }
@@ -80,7 +81,8 @@ public sealed class AuditDecorator<TRequest, TResponse>(
         try {
             await trail.RecordDetachedAsync(scope.BuildRecord(outcome, errorKind), CancellationToken.None)
                 .ConfigureAwait(false);
-        } catch (Exception auditEx) {
+        }
+        catch (Exception auditEx) {
             logger?.LogError(
                 auditEx,
                 "Detached audit write failed for action '{Action}' (outcome {Outcome}); the handler's original outcome is returned unchanged.",
@@ -91,7 +93,7 @@ public sealed class AuditDecorator<TRequest, TResponse>(
                 "audit detached write failed",
                 tags: new ActivityTagsCollection {
                     { "exception.type", auditEx.GetType().FullName },
-                    { "exception.message", auditEx.Message },
+                    { "exception.message", auditEx.Message }
                 }));
         }
     }

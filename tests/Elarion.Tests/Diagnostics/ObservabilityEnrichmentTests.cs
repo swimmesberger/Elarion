@@ -20,9 +20,9 @@ public sealed class ObservabilityEnrichmentTests {
     public async Task Authenticated_StampsUserIdRolesPermissions_OnHandlerSpan() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         var user = Authenticated(
-            id: "u-1",
-            roles: ["admin", "auditor"],
-            permissions: ["invoices.read", "invoices.write"]);
+            "u-1",
+            ["admin", "auditor"],
+            ["invoices.read", "invoices.write"]);
 
         await Trace([UserEnricher(user)]).HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -36,7 +36,7 @@ public sealed class ObservabilityEnrichmentTests {
     [Fact]
     public async Task UserIdentity_NeverLeaksToExecutionMetric() {
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
-        var user = Authenticated("u-1", roles: ["admin"], permissions: ["invoices.read"]);
+        var user = Authenticated("u-1", ["admin"], ["invoices.read"]);
 
         await Trace([UserEnricher(user)]).HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -48,7 +48,7 @@ public sealed class ObservabilityEnrichmentTests {
     [Fact]
     public async Task Authenticated_OpensLogScope_WithUserContext() {
         var logger = new RecordingLoggerFactory();
-        var user = Authenticated("u-1", roles: ["admin"], permissions: ["invoices.read"]);
+        var user = Authenticated("u-1", ["admin"], ["invoices.read"]);
 
         await Build([UserEnricher(user)], logger).HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
@@ -85,7 +85,7 @@ public sealed class ObservabilityEnrichmentTests {
     [Fact]
     public async Task Disabled_BuiltInContributesNothing() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
-        var user = Authenticated("u-1", roles: ["admin"]);
+        var user = Authenticated("u-1", ["admin"]);
 
         await Trace([UserEnricher(user, new UserContextEnrichmentOptions { Enabled = false })])
             .HandleAsync(new Request(), TestContext.Current.CancellationToken);
@@ -109,7 +109,7 @@ public sealed class ObservabilityEnrichmentTests {
     [Fact]
     public async Task Roles_AreBounded_ByMaxItems() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
-        var user = Authenticated("u-1", roles: ["a", "b", "c", "d"]);
+        var user = Authenticated("u-1", ["a", "b", "c", "d"]);
 
         await Trace([UserEnricher(user, new UserContextEnrichmentOptions { MaxItems = 2 })])
             .HandleAsync(new Request(), TestContext.Current.CancellationToken);
@@ -127,8 +127,8 @@ public sealed class ObservabilityEnrichmentTests {
             .HandleAsync(new Request(), TestContext.Current.CancellationToken);
 
         var span = Span(activities);
-        span.GetTag("user.id").Should().Be("u-1");     // built-in
-        span.GetTag("tenant.id").Should().Be("acme");  // host contribution
+        span.GetTag("user.id").Should().Be("u-1"); // built-in
+        span.GetTag("tenant.id").Should().Be("acme"); // host contribution
         ToMap(logger.Logger.Scopes.Single()).Should().Contain("TenantId", "acme");
     }
 
@@ -157,44 +157,52 @@ public sealed class ObservabilityEnrichmentTests {
     // The merged observability decorator IS the tracing span (started when a listener is attached) plus the
     // enrichment. Its handler name "H" is the span display name the Span() helper looks for.
     private static IHandler<Request, Result<int>> Build(
-        IEnumerable<IHandlerContextEnricher> enrichers, ILoggerFactory? loggerFactory = null) =>
-        new ObservabilityDecorator<Request, Result<int>>(new SuccessHandler(), "H",
-            new global::Elarion.Abstractions.Pipeline.HandlerMetadata(typeof(Request), typeof(Request), typeof(Result<int>)),
+        IEnumerable<IHandlerContextEnricher> enrichers, ILoggerFactory? loggerFactory = null) {
+        return new ObservabilityDecorator<Request, Result<int>>(new SuccessHandler(), "H",
+            new global::Elarion.Abstractions.Pipeline.HandlerMetadata(typeof(Request), typeof(Request),
+                typeof(Result<int>)),
             enrichers, loggerFactory);
+    }
 
     // Alias for the tests that assert on the handler span: the span exists only when an ActivityListener is
     // attached (the caller sets up an ActivityCollector), so enrichment tags land on Activity.Current = that span.
     private static IHandler<Request, Result<int>> Trace(
-        IEnumerable<IHandlerContextEnricher> enrichers, ILoggerFactory? loggerFactory = null) =>
-        Build(enrichers, loggerFactory);
+        IEnumerable<IHandlerContextEnricher> enrichers, ILoggerFactory? loggerFactory = null) {
+        return Build(enrichers, loggerFactory);
+    }
 
-    private static UserContextEnricher UserEnricher(ICurrentUser user, UserContextEnrichmentOptions? options = null) =>
-        new(user, options ?? new UserContextEnrichmentOptions());
+    private static UserContextEnricher UserEnricher(ICurrentUser user, UserContextEnrichmentOptions? options = null) {
+        return new UserContextEnricher(user, options ?? new UserContextEnrichmentOptions());
+    }
 
-    private static Activity Span(ActivityCollector activities) =>
-        activities.Activities.Should().ContainSingle(a => a.DisplayName == "handle H").Subject;
+    private static Activity Span(ActivityCollector activities) {
+        return activities.Activities.Should().ContainSingle(a => a.DisplayName == "handle H").Subject;
+    }
 
     private static FakeCurrentUser Authenticated(
-        string id, string[]? roles = null, string[]? permissions = null, string? email = null) =>
-        new() {
+        string id, string[]? roles = null, string[]? permissions = null, string? email = null) {
+        return new FakeCurrentUser {
             UserId = id,
             IsAuthenticated = true,
             Email = email,
             Roles = roles ?? [],
             ClaimsByType = permissions is null
                 ? new Dictionary<string, string[]>()
-                : new Dictionary<string, string[]> { ["permission"] = permissions },
+                : new Dictionary<string, string[]> { ["permission"] = permissions }
         };
+    }
 
     private static IReadOnlyDictionary<string, string> ToMap(
-        IReadOnlyList<KeyValuePair<string, object>> scope) =>
-        scope.ToDictionary(kv => kv.Key, kv => (string)kv.Value);
+        IReadOnlyList<KeyValuePair<string, object>> scope) {
+        return scope.ToDictionary(kv => kv.Key, kv => (string)kv.Value);
+    }
 
     private sealed record Request;
 
     private sealed class SuccessHandler : IHandler<Request, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(Request request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<int>.Success(1));
+        public ValueTask<Result<int>> HandleAsync(Request request, CancellationToken ct) {
+            return ValueTask.FromResult(Result<int>.Success(1));
+        }
     }
 
     private sealed class TenantEnricher(string tenant) : IHandlerContextEnricher {
@@ -209,45 +217,60 @@ public sealed class ObservabilityEnrichmentTests {
         public string? Email { get; init; }
         public IReadOnlyList<string> Roles { get; init; } = [];
         public bool IsAuthenticated { get; init; }
+
         public IReadOnlyDictionary<string, string[]> ClaimsByType { get; init; } =
             new Dictionary<string, string[]>();
 
-        public bool IsInRole(string role) => Roles.Contains(role);
+        public bool IsInRole(string role) {
+            return Roles.Contains(role);
+        }
 
-        public bool HasClaim(string type, string value) =>
-            ClaimsByType.TryGetValue(type, out var values) && values.Contains(value);
+        public bool HasClaim(string type, string value) {
+            return ClaimsByType.TryGetValue(type, out var values) && values.Contains(value);
+        }
 
-        public IEnumerable<string> GetClaimValues(string type) =>
-            ClaimsByType.TryGetValue(type, out var values) ? values : [];
+        public IEnumerable<string> GetClaimValues(string type) {
+            return ClaimsByType.TryGetValue(type, out var values) ? values : [];
+        }
     }
 
     private sealed class RecordingLoggerFactory : ILoggerFactory {
         public RecordingLogger Logger { get; } = new();
-        public ILogger CreateLogger(string categoryName) => Logger;
-        public void AddProvider(ILoggerProvider provider) { }
-        public void Dispose() { }
+
+        public ILogger CreateLogger(string categoryName) {
+            return Logger;
+        }
+
+        public void AddProvider(ILoggerProvider provider) {
+        }
+
+        public void Dispose() {
+        }
     }
 
     private sealed class RecordingLogger : ILogger {
         public List<IReadOnlyList<KeyValuePair<string, object>>> Scopes { get; } = [];
 
         public IDisposable BeginScope<TState>(TState state) where TState : notnull {
-            if (state is IReadOnlyList<KeyValuePair<string, object>> items) {
-                Scopes.Add(items);
-            }
+            if (state is IReadOnlyList<KeyValuePair<string, object>> items) Scopes.Add(items);
 
             return NullScope.Instance;
         }
 
-        public bool IsEnabled(LogLevel logLevel) => true;
+        public bool IsEnabled(LogLevel logLevel) {
+            return true;
+        }
 
         public void Log<TState>(
             LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter) { }
+            Func<TState, Exception?, string> formatter) {
+        }
 
         private sealed class NullScope : IDisposable {
             public static readonly NullScope Instance = new();
-            public void Dispose() { }
+
+            public void Dispose() {
+            }
         }
     }
 }

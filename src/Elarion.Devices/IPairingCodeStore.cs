@@ -30,7 +30,8 @@ public interface IPairingCodeStore {
     /// <param name="codeHash">The hash of the normalized code being redeemed.</param>
     /// <param name="now">The current instant; entries at or past their expiry never claim.</param>
     /// <param name="cancellationToken">Cancels the claim.</param>
-    ValueTask<PairingCodeEntry?> ClaimAsync(string codeHash, DateTimeOffset now, CancellationToken cancellationToken = default);
+    ValueTask<PairingCodeEntry?> ClaimAsync(string codeHash, DateTimeOffset now,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Deletes expired entries (garbage collection); returns how many were removed.</summary>
     /// <param name="now">The current instant.</param>

@@ -117,16 +117,19 @@ public sealed class DispatchScopeTests {
     }
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     private sealed class ThrowingInitializer : IDispatchScopeInitializer {
-        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) =>
+        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
             throw new InvalidOperationException("initializer boom");
+        }
     }
 
     private sealed class ThrowingOnDispose : IDisposable {
-        public void Dispose() => throw new InvalidOperationException("dispose boom");
+        public void Dispose() {
+            throw new InvalidOperationException("dispose boom");
+        }
     }
 
     private sealed class ResolveThenThrowInitializer : IDispatchScopeInitializer {
@@ -143,9 +146,7 @@ public sealed class DispatchScopeTests {
 
     private sealed class SeedProbeInitializer : IDispatchScopeInitializer {
         public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
-            if (context.TryGet<string>(out var value)) {
-                callScope.GetRequiredService<ProbeState>().Value = value;
-            }
+            if (context.TryGet<string>(out var value)) callScope.GetRequiredService<ProbeState>().Value = value;
         }
     }
 
@@ -154,7 +155,8 @@ public sealed class DispatchScopeTests {
     private sealed record ProbeResponse(string Seen);
 
     private sealed class ProbeHandler(ProbeState state) : IHandler<ProbeQuery, Result<ProbeResponse>> {
-        public ValueTask<Result<ProbeResponse>> HandleAsync(ProbeQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<ProbeResponse>>(new ProbeResponse(state.Value ?? "<unseeded>"));
+        public ValueTask<Result<ProbeResponse>> HandleAsync(ProbeQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<ProbeResponse>>(new ProbeResponse(state.Value ?? "<unseeded>"));
+        }
     }
 }

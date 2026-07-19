@@ -32,8 +32,10 @@ public static class SchedulerModelBuilderExtensions {
             builder.ToTable(table, schema);
             builder.HasKey(claim => new { claim.JobName, claim.OccurrenceUtc });
 
-            builder.Property(claim => claim.JobName).HasColumnName(snakeCase ? "job_name" : "JobName").HasMaxLength(256);
-            builder.Property(claim => claim.OccurrenceUtc).HasColumnName(snakeCase ? "occurrence_utc" : "OccurrenceUtc");
+            builder.Property(claim => claim.JobName).HasColumnName(snakeCase ? "job_name" : "JobName")
+                .HasMaxLength(256);
+            builder.Property(claim => claim.OccurrenceUtc)
+                .HasColumnName(snakeCase ? "occurrence_utc" : "OccurrenceUtc");
             builder.Property(claim => claim.ClaimedAtUtc).HasColumnName(snakeCase ? "claimed_at_utc" : "ClaimedAtUtc");
 
             // The retention purge deletes by occurrence instant across all jobs.

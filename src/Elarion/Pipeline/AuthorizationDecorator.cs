@@ -72,23 +72,23 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
     }
 
     private static AuthorizationRequirements Parse(Type handlerType) {
-        var allowAnonymous = handlerType.GetCustomAttribute<AllowAnonymousAttribute>(inherit: true) is not null;
-        var permissions = handlerType.GetCustomAttributes<RequirePermissionAttribute>(inherit: true)
+        var allowAnonymous = handlerType.GetCustomAttribute<AllowAnonymousAttribute>(true) is not null;
+        var permissions = handlerType.GetCustomAttributes<RequirePermissionAttribute>(true)
             .Select(static attribute => attribute.Permission).ToArray();
-        var roles = handlerType.GetCustomAttributes<RequireRoleAttribute>(inherit: true)
+        var roles = handlerType.GetCustomAttributes<RequireRoleAttribute>(true)
             .Select(static attribute => attribute.Role).ToArray();
-        var claims = handlerType.GetCustomAttributes<RequireClaimAttribute>(inherit: true).ToArray();
-        var policies = handlerType.GetCustomAttributes<RequirePolicyAttribute>(inherit: true)
+        var claims = handlerType.GetCustomAttributes<RequireClaimAttribute>(true).ToArray();
+        var policies = handlerType.GetCustomAttributes<RequirePolicyAttribute>(true)
             .Select(static attribute => attribute.Policy).ToArray();
 
         return new AuthorizationRequirements(
-            AllowAnonymous: allowAnonymous,
-            RequireAuthenticated: false,
-            Permissions: permissions,
-            Roles: roles,
-            Claims: claims,
-            Policies: policies,
-            Resources: []);
+            allowAnonymous,
+            false,
+            permissions,
+            roles,
+            claims,
+            policies,
+            []);
     }
 
     // ConditionalWeakTable requires a reference-type value, so the requirements struct is boxed once per type.

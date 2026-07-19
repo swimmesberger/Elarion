@@ -60,8 +60,11 @@ export interface WhenClause<V extends Vocabulary = Vocabulary> {
  */
 export interface CapabilityReader {
   isModuleEnabled(name: string): boolean
+
   hasPermission(permission: string): boolean
+
   hasRole(role: string): boolean
+
   isFlagEnabled(name: string): boolean
 }
 
@@ -148,7 +151,7 @@ export interface ExtensionPoint<TItem, TContext = void> {
 }
 
 export function defineExtensionPoint<TItem, TContext = void>(id: string): ExtensionPoint<TItem, TContext> {
-  return { id }
+  return {id}
 }
 
 /** The payload type an extension point accepts — `ItemOf<typeof sidebarItems>`. */
@@ -189,7 +192,7 @@ export function contribute<TItem, TContext, V extends Vocabulary = Vocabulary>(
   point: ExtensionPoint<TItem, TContext>,
   items: ReadonlyArray<Contribution<TItem, V>>
 ): ContributionBatch<V> {
-  return { point, items }
+  return {point, items}
 }
 
 /**
@@ -249,9 +252,9 @@ export function createContributionRegistry<V extends Vocabulary = Vocabulary>(
         if (!evaluateWhen(item.when, capabilities)) continue
         const entries = byPoint.get(batch.point.id)
         if (entries === undefined) {
-          byPoint.set(batch.point.id, [{ item, module: manifest.name }])
+          byPoint.set(batch.point.id, [{item, module: manifest.name}])
         } else {
-          entries.push({ item, module: manifest.name })
+          entries.push({item, module: manifest.name})
         }
       }
     }
@@ -265,8 +268,8 @@ export function createContributionRegistry<V extends Vocabulary = Vocabulary>(
       if (previous !== undefined) {
         throw new Error(
           `Duplicate contribution id "${entry.item.id}" on extension point "${pointId}" ` +
-            `(contributed by module "${previous}" and module "${entry.module}"). Contribution ids must ` +
-            `be unique within a point — prefix with the module name, e.g. "${entry.module}.${entry.item.id}".`
+          `(contributed by module "${previous}" and module "${entry.module}"). Contribution ids must ` +
+          `be unique within a point — prefix with the module name, e.g. "${entry.module}.${entry.item.id}".`
         )
       }
       contributors.set(entry.item.id, entry.module)
@@ -290,7 +293,9 @@ export function createContributionRegistry<V extends Vocabulary = Vocabulary>(
 /** The vocabulary-bound facade of the kernel — created once by the application, imported by every module. */
 export interface ContributionKit<V extends Vocabulary> {
   defineModule(manifest: ModuleManifest<V>): ModuleManifest<V>
+
   defineExtensionPoint<TItem, TContext = void>(id: string): ExtensionPoint<TItem, TContext>
+
   contribute<TItem, TContext>(
     point: ExtensionPoint<TItem, TContext>,
     items: ReadonlyArray<Contribution<TItem, V>>
@@ -303,5 +308,5 @@ export interface ContributionKit<V extends Vocabulary> {
  * a type error, not a silently hidden item. Purely a typing layer with zero runtime cost.
  */
 export function createContributionKit<V extends Vocabulary>(): ContributionKit<V> {
-  return { defineModule, defineExtensionPoint, contribute }
+  return {defineModule, defineExtensionPoint, contribute}
 }

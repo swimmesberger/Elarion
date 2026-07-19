@@ -33,14 +33,11 @@ internal sealed class InMemoryIdempotencyStore(
         while (true) {
             ct.ThrowIfCancellationRequested();
 
-            if (_entries.TryAdd(key, new Entry(fingerprint))) {
-                return IdempotencyBeginResult.Began();
-            }
+            if (_entries.TryAdd(key, new Entry(fingerprint))) return IdempotencyBeginResult.Began();
 
-            if (!_entries.TryGetValue(key, out var existing)) {
+            if (!_entries.TryGetValue(key, out var existing))
                 // Removed between the failed TryAdd and this read; retry the claim.
                 continue;
-            }
 
             if (existing.Completed) {
                 if (existing.ExpiresOnUtc < timeProvider.GetUtcNow()) {
@@ -49,17 +46,15 @@ internal sealed class InMemoryIdempotencyStore(
                     continue;
                 }
 
-                if (fingerprint.Length > 0 && !string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal)) {
+                if (fingerprint.Length > 0 &&
+                    !string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal))
                     return IdempotencyBeginResult.FingerprintMismatch();
-                }
 
                 return IdempotencyBeginResult.Replay(existing.Payload!, existing.IsFailure);
             }
 
             // A pending (in-flight) claim exists.
-            if (conflictBehavior == IdempotencyConflictBehavior.Conflict) {
-                return IdempotencyBeginResult.InProgress();
-            }
+            if (conflictBehavior == IdempotencyConflictBehavior.Conflict) return IdempotencyBeginResult.InProgress();
 
             // WaitThenReplay: block until the winner completes or abandons, then re-evaluate — bounded so a
             // stuck winner can never pin the waiter forever (the decorator's documented 30 s ceiling).
@@ -67,7 +62,8 @@ internal sealed class InMemoryIdempotencyStore(
                 await existing.Signal.Task
                     .WaitAsync(IdempotencyTimeouts.WaitThenReplayCeiling, timeProvider, ct)
                     .ConfigureAwait(false);
-            } catch (TimeoutException) {
+            }
+            catch (TimeoutException) {
                 return IdempotencyBeginResult.InProgress();
             }
         }
@@ -80,19 +76,17 @@ internal sealed class InMemoryIdempotencyStore(
         bool isFailure,
         TimeSpan retention,
         CancellationToken ct) {
-        if (_entries.TryGetValue(key, out var entry)) {
+        if (_entries.TryGetValue(key, out var entry))
             entry.Complete(payload, isFailure, timeProvider.GetUtcNow() + retention);
-        }
 
         return default;
     }
 
     /// <inheritdoc />
     public ValueTask AbandonAsync(IdempotencyStoreKey key, CancellationToken ct) {
-        if (_entries.TryRemove(key, out var entry)) {
+        if (_entries.TryRemove(key, out var entry))
             // Wake any WaitThenReplay waiters so they re-attempt the claim.
             entry.Signal.TrySetResult();
-        }
 
         return default;
     }
@@ -100,20 +94,16 @@ internal sealed class InMemoryIdempotencyStore(
     /// <inheritdoc />
     public ValueTask<int> PurgeCompletedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) {
         var removed = 0;
-        foreach (var pair in _entries) {
+        foreach (var pair in _entries)
             if (pair.Value is { Completed: true } entry && entry.ExpiresOnUtc < olderThanUtc &&
-                _entries.TryRemove(pair)) {
+                _entries.TryRemove(pair))
                 removed++;
-            }
-        }
 
         return new ValueTask<int>(removed);
     }
 
     private void WarnOnce() {
-        if (logger is null || Interlocked.Exchange(ref _warned, 1) != 0) {
-            return;
-        }
+        if (logger is null || Interlocked.Exchange(ref _warned, 1) != 0) return;
 
         logger.LogWarning(
             "The in-memory IIdempotencyStore is in use: it is single-process and non-durable, so on a multi-node " +

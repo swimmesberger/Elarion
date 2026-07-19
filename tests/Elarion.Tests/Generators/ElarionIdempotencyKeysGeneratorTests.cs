@@ -7,8 +7,7 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ElarionIdempotencyKeysGeneratorTests
-{
+public sealed class ElarionIdempotencyKeysGeneratorTests {
     private const string ContextSource =
         """
         using Microsoft.EntityFrameworkCore;
@@ -25,8 +24,7 @@ public sealed class ElarionIdempotencyKeysGeneratorTests
         """;
 
     [Fact]
-    public void EmitsDbSetAndModelConfigurationSeam()
-    {
+    public void EmitsDbSetAndModelConfigurationSeam() {
         var result = RunGenerator(ContextSource);
 
         NoErrors(result);
@@ -34,7 +32,8 @@ public sealed class ElarionIdempotencyKeysGeneratorTests
 
         source.Should().Contain(
             "public DbSet<global::Elarion.Idempotency.EntityFrameworkCore.IdempotencyKeyEntity> IdempotencyKeys => Set<global::Elarion.Idempotency.EntityFrameworkCore.IdempotencyKeyEntity>();");
-        source.Should().Contain("partial void OnEntitiesConfigured_GenerateElarionIdempotencyKeys(ModelBuilder modelBuilder) =>");
+        source.Should()
+            .Contain("partial void OnEntitiesConfigured_GenerateElarionIdempotencyKeys(ModelBuilder modelBuilder) =>");
         source.Should().Contain("ApplyElarionIdempotencyKeys(");
         source.Should().Contain("tableName: null");
         source.Should().Contain("schema: null");
@@ -42,8 +41,7 @@ public sealed class ElarionIdempotencyKeysGeneratorTests
     }
 
     [Fact]
-    public void TableSchemaAndSnakeCaseOverrides_AreHonored()
-    {
+    public void TableSchemaAndSnakeCaseOverrides_AreHonored() {
         var result = RunGenerator(
             """
             using Microsoft.EntityFrameworkCore;
@@ -66,8 +64,7 @@ public sealed class ElarionIdempotencyKeysGeneratorTests
     }
 
     [Fact]
-    public void MissingGenerateDbSets_ReportsElidemef001AndGeneratesNothing()
-    {
+    public void MissingGenerateDbSets_ReportsElidemef001AndGeneratesNothing() {
         var result = RunGenerator(
             """
             using Microsoft.EntityFrameworkCore;
@@ -86,8 +83,7 @@ public sealed class ElarionIdempotencyKeysGeneratorTests
     }
 
     [Fact]
-    public void ComposesWithEfGeneratorSeamAndCompiles()
-    {
+    public void ComposesWithEfGeneratorSeamAndCompiles() {
         // The EF DbContext generator declares the per-feature seam OnEntitiesConfigured_GenerateElarionIdempotencyKeys;
         // this generator implements it. Compiling source + both generated trees proves the contract holds.
         var ct = TestContext.Current.CancellationToken;
@@ -99,7 +95,9 @@ public sealed class ElarionIdempotencyKeysGeneratorTests
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            new[] { new DbContextGenerator().AsSourceGenerator(), new ElarionIdempotencyKeysGenerator().AsSourceGenerator() },
+            new[] {
+                new DbContextGenerator().AsSourceGenerator(), new ElarionIdempotencyKeysGenerator().AsSourceGenerator()
+            },
             parseOptions: parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, ct);
 
@@ -109,21 +107,18 @@ public sealed class ElarionIdempotencyKeysGeneratorTests
     }
 
     [Fact]
-    public void IrrelevantEditReusesTargets()
-    {
+    public void IrrelevantEditReusesTargets() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new ElarionIdempotencyKeysGenerator(), ContextSource, "IdempotencyKeysTargets");
     }
 
     [Fact]
-    public void UnrelatedFileEditDoesNotRerunDiscovery()
-    {
+    public void UnrelatedFileEditDoesNotRerunDiscovery() {
         GeneratorCacheAssert.ReusesDiscoveryAfterUnrelatedFileEdit(
             new ElarionIdempotencyKeysGenerator(), ContextSource, "IdempotencyKeysTargets");
     }
 
-    private static GeneratorDriverRunResult RunGenerator(string source)
-    {
+    private static GeneratorDriverRunResult RunGenerator(string source) {
         var compilation = CSharpCompilation.Create(
             "ElarionIdempotencyKeysGeneratorTests",
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview))],
@@ -134,19 +129,20 @@ public sealed class ElarionIdempotencyKeysGeneratorTests
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    private static void NoErrors(GeneratorDriverRunResult result) =>
+    private static void NoErrors(GeneratorDriverRunResult result) {
         result.Diagnostics
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
+    }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
         return trustedPlatformAssemblies!

@@ -22,32 +22,22 @@ public sealed class ClaimsAuthorizer(
     /// <inheritdoc />
     public async ValueTask<AppError?> AuthorizeAsync(
         AuthorizationRequirements requirements, object? resource, CancellationToken ct) {
-        if (requirements.AllowAnonymous) {
-            return null;
-        }
+        if (requirements.AllowAnonymous) return null;
 
         // Unauthenticated callers fail with 401 before any permission/role/claim/policy check.
-        if (requirements.HasAny && !user.IsAuthenticated) {
-            return AppError.Unauthorized(options.UnauthorizedMessage);
-        }
+        if (requirements.HasAny && !user.IsAuthenticated) return AppError.Unauthorized(options.UnauthorizedMessage);
 
-        foreach (var permission in requirements.Permissions) {
-            if (!user.HasClaim(options.PermissionClaimType, permission)) {
+        foreach (var permission in requirements.Permissions)
+            if (!user.HasClaim(options.PermissionClaimType, permission))
                 return Forbidden("permission", permission);
-            }
-        }
 
-        foreach (var role in requirements.Roles) {
-            if (!user.IsInRole(role)) {
+        foreach (var role in requirements.Roles)
+            if (!user.IsInRole(role))
                 return Forbidden("role", role);
-            }
-        }
 
-        foreach (var claim in requirements.Claims) {
-            if (!SatisfiesClaim(claim)) {
+        foreach (var claim in requirements.Claims)
+            if (!SatisfiesClaim(claim))
                 return Forbidden("claim", claim.ClaimType);
-            }
-        }
 
         foreach (var policyName in requirements.Policies) {
             var policy = FindPolicy(policyName);
@@ -58,9 +48,8 @@ public sealed class ClaimsAuthorizer(
                 return Forbidden("policy", policyName);
             }
 
-            if (!await policy.EvaluateAsync(new AuthorizationContext(user, resource), ct).ConfigureAwait(false)) {
+            if (!await policy.EvaluateAsync(new AuthorizationContext(user, resource), ct).ConfigureAwait(false))
                 return Forbidden("policy", policyName);
-            }
         }
 
         foreach (var resourceRequirement in requirements.Resources) {
@@ -70,20 +59,17 @@ public sealed class ClaimsAuthorizer(
                 resourceRequirement.ResourceTypeName,
                 resourceRequirement.Operation,
                 resourceRequirement.ResourceId);
-            if (!await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false)) {
+            if (!await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false))
                 return Forbidden("resource", resourceRequirement.ResourceTypeName);
-            }
         }
 
         return null;
     }
 
     private IAuthorizationPolicy? FindPolicy(string name) {
-        foreach (var named in policies) {
-            if (string.Equals(named.Name, name, StringComparison.Ordinal)) {
+        foreach (var named in policies)
+            if (string.Equals(named.Name, name, StringComparison.Ordinal))
                 return named.Policy;
-            }
-        }
 
         return null;
     }
@@ -102,6 +88,7 @@ public sealed class ClaimsAuthorizer(
             "Authorization denied: unmet {RequirementKind} requirement '{Requirement}'.",
             requirementKind,
             requirement);
-        return AppError.Forbidden(string.Format(CultureInfo.InvariantCulture, options.ForbiddenMessageFormat, requirement));
+        return AppError.Forbidden(string.Format(CultureInfo.InvariantCulture, options.ForbiddenMessageFormat,
+            requirement));
     }
 }

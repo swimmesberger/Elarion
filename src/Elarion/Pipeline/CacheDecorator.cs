@@ -12,7 +12,8 @@ public sealed class CacheDecorator<TRequest, TResponse>(
     IHandlerCachePolicy<TRequest> policy
 ) : IHandler<TRequest, TResponse> {
     /// <inheritdoc />
-    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         // Passing the cancellation token through both cache and factory paths prevents cached handlers from ignoring request cancellation.
-        await cache.GetOrCreateAsync(policy, request, token => inner.HandleAsync(request, token), ct);
+        return await cache.GetOrCreateAsync(policy, request, token => inner.HandleAsync(request, token), ct);
+    }
 }

@@ -6,11 +6,14 @@
   <img src="https://raw.githubusercontent.com/swimmesberger/Elarion/main/docs/public/brand/elarion-banner-transparent-light.svg" width="640" alt="Elarion — Application framework for .NET">
 </picture>
 
-**Module-based handler pipelines, compile-time registration, JSON-RPC hosting, MCP tools for AI agents, and scheduled jobs.**
+**Module-based handler pipelines, compile-time registration, JSON-RPC hosting, MCP tools for AI agents, and scheduled
+jobs.**
 
 Declare intent next to your code; let source generators do the wiring. No runtime reflection scanning.
 
-**AI-native by design:** the same handlers that power your API are exposed to AI agents as [MCP](https://modelcontextprotocol.io) tools — generated from your code at compile time, with no separate tool definitions or duplicated schemas.
+**AI-native by design:** the same handlers that power your API are exposed to AI agents
+as [MCP](https://modelcontextprotocol.io) tools — generated from your code at compile time, with no separate tool
+definitions or duplicated schemas.
 
 [![CI](https://github.com/swimmesberger/Elarion/actions/workflows/ci.yml/badge.svg)](https://github.com/swimmesberger/Elarion/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/Elarion.svg?logo=nuget&label=NuGet)](https://www.nuget.org/packages/Elarion)
@@ -107,7 +110,8 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
 [assembly: UseElarion]
 ```
 
-The [Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/) builds a module, a handler, and a working
+The [Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/) builds a module, a handler, and a
+working
 JSON-RPC endpoint end to end.
 
 ## Package families
@@ -116,17 +120,17 @@ The README shows the shape of the framework; the
 [canonical package reference](https://elarion.wimmesberger.dev/docs/reference/packages/) lists every
 public package, grouped by capability, with the reason to add each one.
 
-| Family | Start with | Add when needed |
-| --- | --- | --- |
-| Application model | `Elarion` | `Validation`, `Resilience`, caching, and feature-flag providers |
-| Hosting and transports | `Elarion.JsonRpc`, `Elarion.AspNetCore` | OpenAPI, MCP, schema generation, Identity, `Elarion.Grpc` for unary/server-streaming mapping, or a custom transport |
-| Persistence | `Elarion.EntityFrameworkCore` | Unit of work, paging, bulk operations, authorization, idempotency, auditing, scheduling, and coordination |
-| NativeAOT SQL | `Elarion.Sql`, `Elarion.Migrations` | PostgreSQL or SQLite migrations for an EF-free host |
-| Events and live clients | `Elarion.Messaging.Outbox`, `Elarion.ClientEvents` | PostgreSQL fan-out and SSE transport |
-| Live state and device links | `Elarion.Actors`, `Elarion.Connections` | PostgreSQL actor state/home, WebSocket/TCP adapters, simulation, and device identity |
-| Blob storage | `Elarion.Blobs` | PostgreSQL or Azure storage plus direct HTTP or tus upload transports |
-| Runtime settings | `Elarion.Settings` | EF persistence, configuration reload, and PostgreSQL cross-node notifications |
-| Frontend tooling | `@swimmesberger/elarion-jsonrpc-client-generator` | Typed frontend contributions and framework bindings |
+| Family                      | Start with                                         | Add when needed                                                                                                     |
+|-----------------------------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| Application model           | `Elarion`                                          | `Validation`, `Resilience`, caching, and feature-flag providers                                                     |
+| Hosting and transports      | `Elarion.JsonRpc`, `Elarion.AspNetCore`            | OpenAPI, MCP, schema generation, Identity, `Elarion.Grpc` for unary/server-streaming mapping, or a custom transport |
+| Persistence                 | `Elarion.EntityFrameworkCore`                      | Unit of work, paging, bulk operations, authorization, idempotency, auditing, scheduling, and coordination           |
+| NativeAOT SQL               | `Elarion.Sql`, `Elarion.Migrations`                | PostgreSQL or SQLite migrations for an EF-free host                                                                 |
+| Events and live clients     | `Elarion.Messaging.Outbox`, `Elarion.ClientEvents` | PostgreSQL fan-out and SSE transport                                                                                |
+| Live state and device links | `Elarion.Actors`, `Elarion.Connections`            | PostgreSQL actor state/home, WebSocket/TCP adapters, simulation, and device identity                                |
+| Blob storage                | `Elarion.Blobs`                                    | PostgreSQL or Azure storage plus direct HTTP or tus upload transports                                               |
+| Runtime settings            | `Elarion.Settings`                                 | EF persistence, configuration reload, and PostgreSQL cross-node notifications                                       |
+| Frontend tooling            | `@swimmesberger/elarion-jsonrpc-client-generator`  | Typed frontend contributions and framework bindings                                                                 |
 
 Package names follow capability boundaries: neutral contracts and runtimes do not pull provider or host
 dependencies; `.PostgreSql`, `.EntityFrameworkCore`, `.AspNetCore`, and other suffixes make those choices
@@ -141,15 +145,21 @@ grouped documentation page is now the one maintained inventory; this overview st
 
 </details>
 
-
 ## Documentation
 
-Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/docs/) and in [`docs/`](https://github.com/swimmesberger/Elarion/tree/main/docs):
+Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/docs/) and in [
+`docs/`](https://github.com/swimmesberger/Elarion/tree/main/docs):
 
-- **[Introduction](https://elarion.wimmesberger.dev/docs/)** · **[Why Elarion](https://elarion.wimmesberger.dev/docs/why-elarion/)** · **[Installation](https://elarion.wimmesberger.dev/docs/getting-started/installation/)** · **[Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/)**
-- **Concepts** — [source generation](https://elarion.wimmesberger.dev/docs/concepts/source-generation/), [handlers](https://elarion.wimmesberger.dev/docs/concepts/handlers/), [results & errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors/), [modules](https://elarion.wimmesberger.dev/docs/concepts/modules/), [services](https://elarion.wimmesberger.dev/docs/concepts/services/), [validation](https://elarion.wimmesberger.dev/docs/concepts/validation/), [pipelines](https://elarion.wimmesberger.dev/docs/concepts/decorator-pipelines/), [cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication/)
-- **Capabilities** — [hosting](https://elarion.wimmesberger.dev/docs/capabilities/hosting/), [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints/), [JSON-RPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/json-rpc/), [gRPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/grpc/), [MCP server](https://elarion.wimmesberger.dev/docs/capabilities/transports/mcp/), [authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization/), [feature flags](https://elarion.wimmesberger.dev/docs/capabilities/feature-flags/), [identity](https://elarion.wimmesberger.dev/docs/capabilities/identity/), [scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling/), [resilience](https://elarion.wimmesberger.dev/docs/capabilities/resilience/), [events & messaging](https://elarion.wimmesberger.dev/docs/capabilities/events/), [EF Core](https://elarion.wimmesberger.dev/docs/capabilities/entity-framework/), [bulk operations](https://elarion.wimmesberger.dev/docs/capabilities/bulk-operations/), [caching](https://elarion.wimmesberger.dev/docs/capabilities/caching/), [current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user/), [blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage/), [telemetry](https://elarion.wimmesberger.dev/docs/capabilities/telemetry/)
-- **Reference** — [packages](https://elarion.wimmesberger.dev/docs/reference/packages/), [configuration](https://elarion.wimmesberger.dev/docs/reference/configuration/), [troubleshooting](https://elarion.wimmesberger.dev/docs/reference/troubleshooting/)
+- **[Introduction](https://elarion.wimmesberger.dev/docs/)** · *
+  *[Why Elarion](https://elarion.wimmesberger.dev/docs/why-elarion/)** · *
+  *[Installation](https://elarion.wimmesberger.dev/docs/getting-started/installation/)** · *
+  *[Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/)**
+- **Concepts
+  ** — [source generation](https://elarion.wimmesberger.dev/docs/concepts/source-generation/), [handlers](https://elarion.wimmesberger.dev/docs/concepts/handlers/), [results & errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors/), [modules](https://elarion.wimmesberger.dev/docs/concepts/modules/), [services](https://elarion.wimmesberger.dev/docs/concepts/services/), [validation](https://elarion.wimmesberger.dev/docs/concepts/validation/), [pipelines](https://elarion.wimmesberger.dev/docs/concepts/decorator-pipelines/), [cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication/)
+- **Capabilities
+  ** — [hosting](https://elarion.wimmesberger.dev/docs/capabilities/hosting/), [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints/), [JSON-RPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/json-rpc/), [gRPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/grpc/), [MCP server](https://elarion.wimmesberger.dev/docs/capabilities/transports/mcp/), [authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization/), [feature flags](https://elarion.wimmesberger.dev/docs/capabilities/feature-flags/), [identity](https://elarion.wimmesberger.dev/docs/capabilities/identity/), [scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling/), [resilience](https://elarion.wimmesberger.dev/docs/capabilities/resilience/), [events & messaging](https://elarion.wimmesberger.dev/docs/capabilities/events/), [EF Core](https://elarion.wimmesberger.dev/docs/capabilities/entity-framework/), [bulk operations](https://elarion.wimmesberger.dev/docs/capabilities/bulk-operations/), [caching](https://elarion.wimmesberger.dev/docs/capabilities/caching/), [current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user/), [blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage/), [telemetry](https://elarion.wimmesberger.dev/docs/capabilities/telemetry/)
+- **Reference
+  ** — [packages](https://elarion.wimmesberger.dev/docs/reference/packages/), [configuration](https://elarion.wimmesberger.dev/docs/reference/configuration/), [troubleshooting](https://elarion.wimmesberger.dev/docs/reference/troubleshooting/)
 
 ## Requirements
 
@@ -159,13 +169,15 @@ Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](https://github.com/swimmesberger/Elarion/blob/main/CONTRIBUTING.md) for the development
+Issues and pull requests are welcome.
+See [CONTRIBUTING.md](https://github.com/swimmesberger/Elarion/blob/main/CONTRIBUTING.md) for the development
 workflow, validation commands, architecture boundaries, and the publishing process. By participating
 you agree to the [Code of Conduct](https://github.com/swimmesberger/Elarion/blob/main/CODE_OF_CONDUCT.md).
 
 ## Security
 
-Please report vulnerabilities privately — see the [security policy](https://github.com/swimmesberger/Elarion/blob/main/SECURITY.md).
+Please report vulnerabilities privately — see
+the [security policy](https://github.com/swimmesberger/Elarion/blob/main/SECURITY.md).
 
 ## License
 

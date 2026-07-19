@@ -43,13 +43,9 @@ public sealed class BlobGarbageCollector(
             }
 
             // A full batch likely means more is expiring, so drain without waiting; otherwise idle.
-            if (deleted >= options.BatchSize) {
-                continue;
-            }
+            if (deleted >= options.BatchSize) continue;
 
-            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) {
-                break;
-            }
+            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) break;
         }
     }
 
@@ -60,9 +56,8 @@ public sealed class BlobGarbageCollector(
         var deleted = await lifecycle
             .DeleteExpiredPendingAsync(olderThan, options.BatchSize, cancellationToken)
             .ConfigureAwait(false);
-        if (deleted > 0) {
+        if (deleted > 0)
             logger.LogInformation("Blob garbage collection deleted {Count} expired pending blob(s).", deleted);
-        }
 
         return deleted;
     }

@@ -28,30 +28,23 @@ internal static class MigrationPlanner {
         MigrationVersion? maxKnown = null;
 
         foreach (var row in history) {
-            if (row.State == MigrationStates.Failed) {
-                failedRows.Add(row);
-            }
+            if (row.State == MigrationStates.Failed) failedRows.Add(row);
 
-            if (row.Version is null) {
-                continue;
-            }
+            if (row.Version is null) continue;
 
             if (!MigrationVersion.TryParse(row.Version, out var version)) {
                 errors.Add(new MigrationValidationError {
                     ScriptName = row.ScriptName,
-                    Message = $"History row {row.InstalledRank} has an unparseable version '{row.Version}'.",
+                    Message = $"History row {row.InstalledRank} has an unparseable version '{row.Version}'."
                 });
                 continue;
             }
 
             appliedVersions[version] = row;
-            if (row.State == MigrationStates.Baseline && (baseline is null || version.CompareTo(baseline) > 0)) {
+            if (row.State == MigrationStates.Baseline && (baseline is null || version.CompareTo(baseline) > 0))
                 baseline = version;
-            }
 
-            if (maxKnown is null || version.CompareTo(maxKnown) > 0) {
-                maxKnown = version;
-            }
+            if (maxKnown is null || version.CompareTo(maxKnown) > 0) maxKnown = version;
         }
 
         var pendingVersioned = new List<MigrationScript>();
@@ -60,39 +53,33 @@ internal static class MigrationPlanner {
             if (appliedVersions.TryGetValue(script.Version!, out var row)) {
                 // Only applied rows are checksum-guarded: editing a failed script is the legitimate fix
                 // path, and a baseline row never had content.
-                if (row.State == MigrationStates.Applied && row.Checksum is not null && row.Checksum != script.Checksum) {
+                if (row.State == MigrationStates.Applied && row.Checksum is not null && row.Checksum != script.Checksum)
                     errors.Add(new MigrationValidationError {
                         ScriptName = script.ScriptName,
                         Message = $"Checksum mismatch for applied migration '{script.ScriptName}': "
-                            + $"applied {row.Checksum}, resource {script.Checksum}. "
-                            + "An applied script was edited; either revert the edit or add a new migration script with the change.",
+                                  + $"applied {row.Checksum}, resource {script.Checksum}. "
+                                  + "An applied script was edited; either revert the edit or add a new migration script with the change."
                     });
-                }
 
                 continue;
             }
 
             // Versions at or below an explicit baseline are the schema the baseline declared already present.
-            if (baseline is not null && script.Version!.CompareTo(baseline) <= 0) {
-                continue;
-            }
+            if (baseline is not null && script.Version!.CompareTo(baseline) <= 0) continue;
 
             pendingVersioned.Add(script);
-            if (maxKnown is not null && script.Version!.CompareTo(maxKnown) < 0) {
-                outOfOrder.Add(script);
-            }
+            if (maxKnown is not null && script.Version!.CompareTo(maxKnown) < 0) outOfOrder.Add(script);
         }
 
         // A repeatable reruns when its latest recorded checksum (highest rank per script name) differs.
         var latestRepeatable = new Dictionary<string, AppliedMigrationRow>(StringComparer.Ordinal);
-        foreach (var row in history) {
-            if (row.Version is null && row.State == MigrationStates.Applied) {
+        foreach (var row in history)
+            if (row.Version is null && row.State == MigrationStates.Applied)
                 latestRepeatable[row.ScriptName] = row;
-            }
-        }
 
         var pendingRepeatable = scripts.Repeatable
-            .Where(script => !latestRepeatable.TryGetValue(script.ScriptName, out var row) || row.Checksum != script.Checksum)
+            .Where(script => !latestRepeatable.TryGetValue(script.ScriptName, out var row) ||
+                             row.Checksum != script.Checksum)
             .ToList();
 
         return new MigrationPlan {
@@ -100,7 +87,7 @@ internal static class MigrationPlanner {
             OutOfOrder = outOfOrder,
             PendingRepeatable = pendingRepeatable,
             Errors = errors,
-            FailedRows = failedRows,
+            FailedRows = failedRows
         };
     }
 }

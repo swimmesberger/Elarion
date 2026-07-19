@@ -22,7 +22,8 @@ public static class SettingsServiceCollectionExtensions {
         // One in-process instance backs both the watch (source) and signal (publisher) seams.
         services.TryAddSingleton<InProcessSettingsChangeSource>();
         services.TryAddSingleton<ISettingsChangeSource>(sp => sp.GetRequiredService<InProcessSettingsChangeSource>());
-        services.TryAddSingleton<ISettingsChangePublisher>(sp => sp.GetRequiredService<InProcessSettingsChangeSource>());
+        services.TryAddSingleton<ISettingsChangePublisher>(sp =>
+            sp.GetRequiredService<InProcessSettingsChangeSource>());
 
         services.TryAddSingleton<ISettingsStore, InProcessSettingsStore>();
 

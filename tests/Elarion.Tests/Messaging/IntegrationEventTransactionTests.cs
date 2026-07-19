@@ -130,8 +130,8 @@ public sealed class IntegrationEventTransactionTests(IntegrationEventTransaction
     }
 
     // Mirrors a generated integration-event consumer descriptor: a fan-out subscriber that records deliveries.
-    private static EventSubscriptionDescriptor RecordingSubscriber() =>
-        new() {
+    private static EventSubscriptionDescriptor RecordingSubscriber() {
+        return new EventSubscriptionDescriptor {
             EventType = typeof(SampleIntegrationEvent),
             Plane = EventPlane.Integration,
             ServiceType = typeof(EventRecorder),
@@ -141,6 +141,7 @@ public sealed class IntegrationEventTransactionTests(IntegrationEventTransaction
                 return ValueTask.CompletedTask;
             }
         };
+    }
 
     private sealed record SampleIntegrationEvent(string Value) : IIntegrationEvent;
 
@@ -166,9 +167,7 @@ public sealed class IntegrationEventTransactionTests(IntegrationEventTransaction
         }
 
         public async Task WaitForAsync(int count, CancellationToken ct) {
-            for (var i = 0; i < count; i++) {
-                await _signal.WaitAsync(ct);
-            }
+            for (var i = 0; i < count; i++) await _signal.WaitAsync(ct);
         }
     }
 }
@@ -182,11 +181,12 @@ public sealed class Marker {
 public sealed class EventTestDbContext(DbContextOptions<EventTestDbContext> options) : DbContext(options) {
     public DbSet<Marker> Markers => Set<Marker>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.Entity<Marker>(builder => {
             builder.ToTable("markers");
             builder.HasKey(marker => marker.Id);
         });
+    }
 }
 
 /// <summary>Starts a disposable PostgreSQL container and creates the marker schema once.</summary>
@@ -219,8 +219,6 @@ public sealed class IntegrationEventTransactionFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 }

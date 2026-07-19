@@ -18,5 +18,5 @@ public enum BulkInsertConflictBehavior {
     /// Upsert, overwrite variant: conflicting rows are updated to the incoming values (every
     /// insertable non-conflict-target column), the rest insert. Stages through a temporary table.
     /// </summary>
-    Update,
+    Update
 }

@@ -37,15 +37,14 @@ public sealed class PostgreSqlIdempotencyStoreFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
-    public IdempotencyIntegrationDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<IdempotencyIntegrationDbContext>()
+    public IdempotencyIntegrationDbContext CreateContext() {
+        return new IdempotencyIntegrationDbContext(new DbContextOptionsBuilder<IdempotencyIntegrationDbContext>()
             .UseNpgsql(ConnectionString)
             .Options);
+    }
 }
 
 /// <summary>Context mapping the idempotency table plus a demo business entity, so tests can prove the business

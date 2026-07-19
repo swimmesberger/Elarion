@@ -33,19 +33,20 @@ internal sealed class EventSubscriptionRegistry {
         _integrationSubscribers = Freeze(integrationSubscribers);
     }
 
-    public EventSubscriptionDescriptor[] GetDomainSubscribers(Type eventType) =>
-        _domainSubscribers.TryGetValue(eventType, out var list) ? list : None;
+    public EventSubscriptionDescriptor[] GetDomainSubscribers(Type eventType) {
+        return _domainSubscribers.TryGetValue(eventType, out var list) ? list : None;
+    }
 
-    public EventSubscriptionDescriptor[] GetIntegrationSubscribers(Type eventType) =>
-        _integrationSubscribers.TryGetValue(eventType, out var list) ? list : None;
+    public EventSubscriptionDescriptor[] GetIntegrationSubscribers(Type eventType) {
+        return _integrationSubscribers.TryGetValue(eventType, out var list) ? list : None;
+    }
 
     // OrderBy is a stable sort, so consumers that share an Order keep their generator-emitted sequence.
     private static Dictionary<Type, EventSubscriptionDescriptor[]> Freeze(
         Dictionary<Type, List<EventSubscriptionDescriptor>> source) {
         var result = new Dictionary<Type, EventSubscriptionDescriptor[]>(source.Count);
-        foreach (var (type, list) in source) {
+        foreach (var (type, list) in source)
             result[type] = list.OrderBy(static descriptor => descriptor.Order).ToArray();
-        }
 
         return result;
     }

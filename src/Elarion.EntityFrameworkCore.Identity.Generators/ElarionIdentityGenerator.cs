@@ -16,7 +16,9 @@ namespace Elarion.EntityFrameworkCore.Identity.Generators;
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
-    private const string AttributeMetadataName = "Elarion.EntityFrameworkCore.Identity.GenerateElarionIdentityAttribute`3";
+    private const string AttributeMetadataName =
+        "Elarion.EntityFrameworkCore.Identity.GenerateElarionIdentityAttribute`3";
+
     private const string GenerateDbSetsAttributeName = "Elarion.EntityFrameworkCore.GenerateDbSetsAttribute";
     private const string IdentityNamespace = "global::Microsoft.AspNetCore.Identity";
 
@@ -32,7 +34,7 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         + "so the Identity DbSets and model-configuration seam are generated",
         "Elarion.EntityFrameworkCore.Identity",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var targets = context.SyntaxProvider
@@ -44,17 +46,11 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
             .WithTrackingName("ElarionIdentityTargets");
 
         context.RegisterSourceOutput(targets, static (spc, target) => {
-            if (target is null) {
-                return;
-            }
+            if (target is null) return;
 
-            foreach (var diagnostic in target.Diagnostics) {
-                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-            }
+            foreach (var diagnostic in target.Diagnostics) spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-            if (target.Emit) {
-                Emit(spc, target);
-            }
+            if (target.Emit) Emit(spc, target);
         });
     }
 
@@ -72,14 +68,11 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         EquatableArray<DiagnosticInfo> Diagnostics);
 
     private static IdentityTarget? GetTarget(GeneratorAttributeSyntaxContext ctx) {
-        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) {
-            return null;
-        }
+        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) return null;
 
         if (ctx.Attributes.Length == 0 ||
-            ctx.Attributes[0].AttributeClass is not { TypeArguments.Length: 3 } attributeClass) {
+            ctx.Attributes[0].AttributeClass is not { TypeArguments.Length: 3 } attributeClass)
             return null;
-        }
 
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         var userFqn = attributeClass.TypeArguments[0].ToDisplayString(fmt);
@@ -89,7 +82,7 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         var snakeCase = true;
         string? schema = null;
         string? tablePrefix = null;
-        foreach (var namedArgument in ctx.Attributes[0].NamedArguments) {
+        foreach (var namedArgument in ctx.Attributes[0].NamedArguments)
             switch (namedArgument.Key) {
                 case "SnakeCase" when namedArgument.Value.Value is bool value:
                     snakeCase = value;
@@ -101,7 +94,6 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
                     tablePrefix = prefix;
                     break;
             }
-        }
 
         var ns = contextSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
             ? containing.ToDisplayString()
@@ -113,10 +105,9 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
             .Any(attribute => attribute.AttributeClass?.ToDisplayString() == GenerateDbSetsAttributeName);
 
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
-        if (!hasGenerateDbSets) {
+        if (!hasGenerateDbSets)
             diagnostics.Add(DiagnosticInfo.Create(
                 MissingGenerateDbSets, LocationInfo.From(contextSymbol), contextSymbol.ToDisplayString(fmt)));
-        }
 
         return new IdentityTarget(
             ns,
@@ -128,7 +119,7 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
             snakeCase,
             schema,
             tablePrefix,
-            Emit: hasGenerateDbSets,
+            hasGenerateDbSets,
             diagnostics.ToImmutable());
     }
 
@@ -155,9 +146,12 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         AppendDbSet(sb, $"{IdentityNamespace}.IdentityRoleClaim<{target.KeyFqn}>", "RoleClaims");
         AppendDbSet(sb, $"{IdentityNamespace}.IdentityUserToken<{target.KeyFqn}>", "UserTokens");
         sb.AppendLine();
-        sb.AppendLine("    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
-        sb.AppendLine("    // end of ConfigureEntities, so it composes with other [GenerateElarion*] features on the same");
-        sb.AppendLine("    // context and leaves the neutral OnEntitiesConfigured seam for the host's own configuration.");
+        sb.AppendLine(
+            "    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
+        sb.AppendLine(
+            "    // end of ConfigureEntities, so it composes with other [GenerateElarion*] features on the same");
+        sb.AppendLine(
+            "    // context and leaves the neutral OnEntitiesConfigured seam for the host's own configuration.");
         sb.AppendLine($"    partial void {SeamMethodName}(ModelBuilder modelBuilder) =>");
         sb.AppendLine(
             $"        global::Elarion.EntityFrameworkCore.Identity.IdentityModelBuilderExtensions.ApplyElarionIdentity<{target.UserFqn}, {target.RoleFqn}, {target.KeyFqn}>(");
@@ -169,6 +163,7 @@ public sealed class ElarionIdentityGenerator : IIncrementalGenerator {
         spc.AddSource($"{target.HintName}.ElarionIdentity.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 
-    private static void AppendDbSet(StringBuilder sb, string entityFqn, string propertyName) =>
+    private static void AppendDbSet(StringBuilder sb, string entityFqn, string propertyName) {
         sb.AppendLine($"    public DbSet<{entityFqn}> {propertyName} => Set<{entityFqn}>();");
+    }
 }

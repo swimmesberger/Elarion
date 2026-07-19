@@ -18,6 +18,7 @@ public static class CurrentUserServiceCollectionExtensions {
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddElarionCurrentUser(
         this IServiceCollection services,
-        Action<ClaimsCurrentUserOptions>? configure = null) =>
-        services.AddElarionClaimsCurrentUser(configure);
+        Action<ClaimsCurrentUserOptions>? configure = null) {
+        return services.AddElarionClaimsCurrentUser(configure);
+    }
 }

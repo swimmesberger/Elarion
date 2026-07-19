@@ -21,7 +21,8 @@ public sealed class SchedulerVariableReschedulingTests {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider(Origin);
         var source = new MutableVariableSource(new Dictionary<string, string?> { ["Jobs:Interval"] = "10m" });
-        var descriptor = Recurring("test.live", ScheduledJobSchedule.FixedRate("${Jobs:Interval:-10m}", runOnStart: false));
+        var descriptor = Recurring("test.live",
+            ScheduledJobSchedule.FixedRate("${Jobs:Interval:-10m}", runOnStart: false));
         await using var provider = BuildProvider(time, source, descriptor);
         var hosted = provider.GetRequiredService<IHostedService>();
         var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
@@ -36,7 +37,8 @@ public sealed class SchedulerVariableReschedulingTests {
             source.Update(new Dictionary<string, string?> { ["Jobs:Interval"] = "2m" });
 
             NextDue(inspector, "test.live").Should().Be(Origin + TimeSpan.FromMinutes(2));
-        } finally {
+        }
+        finally {
             await hosted.StopAsync(cts.Token);
         }
     }
@@ -63,7 +65,8 @@ public sealed class SchedulerVariableReschedulingTests {
             // (same run id) rather than superseded and re-enqueued.
             QueuedRunId(inspector, "test.literal").Should().Be(originalRunId);
             NextDue(inspector, "test.literal").Should().Be(Origin + TimeSpan.FromMinutes(10));
-        } finally {
+        }
+        finally {
             await hosted.StopAsync(cts.Token);
         }
     }
@@ -87,7 +90,8 @@ public sealed class SchedulerVariableReschedulingTests {
 
             // Resync runs synchronously inside Update, so the newly enabled occurrence is queued before it returns.
             NextDue(inspector, "test.cron").Should().Be(DateTimeOffset.Parse("2026-01-01T03:00:00Z"));
-        } finally {
+        }
+        finally {
             await hosted.StopAsync(cts.Token);
         }
     }
@@ -104,7 +108,7 @@ public sealed class SchedulerVariableReschedulingTests {
         var descriptor = Recurring(
             "test.active",
             ScheduledJobSchedule.FixedRate("${Jobs:Interval:-10m}", runOnStart: true),
-            invoke: async (_, _, _, ct) => {
+            async (_, _, _, ct) => {
                 running.TrySetResult();
                 await gate.Task.WaitAsync(ct);
             });
@@ -125,7 +129,8 @@ public sealed class SchedulerVariableReschedulingTests {
             // occurrence (Origin + 2m), NOT enqueued immediately at Origin (which would race the active run).
             NextDue(inspector, "test.active").Should().Be(Origin + TimeSpan.FromMinutes(2));
             inspector.GetSnapshot().ActiveRuns.Count.Should().Be(1);
-        } finally {
+        }
+        finally {
             gate.TrySetResult();
             await hosted.StopAsync(cts.Token);
         }
@@ -142,7 +147,7 @@ public sealed class SchedulerVariableReschedulingTests {
         var descriptor = Recurring(
             "test.fixedDelayFork",
             ScheduledJobSchedule.FixedDelay("${Jobs:Delay:-10m}", runOnStart: true),
-            invoke: async (_, _, _, ct) => {
+            async (_, _, _, ct) => {
                 Interlocked.Increment(ref runCount);
                 running.TrySetResult();
                 await gate.Task.WaitAsync(ct);
@@ -165,7 +170,7 @@ public sealed class SchedulerVariableReschedulingTests {
                 () => {
                     var snapshot = inspector.GetSnapshot();
                     return snapshot.ActiveRuns.Count == 0
-                        && snapshot.QueuedRuns.Any(run => run.JobName == "test.fixedDelayFork");
+                           && snapshot.QueuedRuns.Any(run => run.JobName == "test.fixedDelayFork");
                 },
                 cts.Token);
             // A forked chain would surface as an immediately-due extra occurrence (an extra run) plus a
@@ -177,7 +182,8 @@ public sealed class SchedulerVariableReschedulingTests {
                 .Should().ContainSingle();
             // The single surviving successor picked up the changed delay at the completion reschedule.
             NextDue(inspector, "test.fixedDelayFork").Should().Be(Origin + TimeSpan.FromMinutes(2));
-        } finally {
+        }
+        finally {
             gate.TrySetResult();
             await hosted.StopAsync(cts.Token);
         }
@@ -198,8 +204,8 @@ public sealed class SchedulerVariableReschedulingTests {
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .Where(ex => ex.Message.Contains("test.resilient")
-                && ex.Message.Contains("IResiliencePipelineRunner")
-                && ex.Message.Contains("AddElarionResilience"));
+                         && ex.Message.Contains("IResiliencePipelineRunner")
+                         && ex.Message.Contains("AddElarionResilience"));
     }
 
     [Fact]
@@ -231,13 +237,14 @@ public sealed class SchedulerVariableReschedulingTests {
     private static ScheduledJobDescriptor Recurring(
         string name,
         ScheduledJobSchedule schedule,
-        ScheduledJobInvokeDelegate? invoke = null) =>
-        new() {
+        ScheduledJobInvokeDelegate? invoke = null) {
+        return new ScheduledJobDescriptor {
             Name = name,
             Schedule = schedule,
             Overlap = ScheduledJobOverlap.AllowConcurrent,
             InvokeAsync = invoke ?? (static (_, _, _, _) => ValueTask.CompletedTask)
         };
+    }
 
     private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken ct) {
         while (!condition()) {
@@ -246,11 +253,13 @@ public sealed class SchedulerVariableReschedulingTests {
         }
     }
 
-    private static DateTimeOffset? NextDue(IJobSchedulerInspector inspector, string name) =>
-        inspector.GetSnapshot().Jobs.Single(job => job.Name == name).NextDueTimeUtc;
+    private static DateTimeOffset? NextDue(IJobSchedulerInspector inspector, string name) {
+        return inspector.GetSnapshot().Jobs.Single(job => job.Name == name).NextDueTimeUtc;
+    }
 
-    private static Guid QueuedRunId(IJobSchedulerInspector inspector, string name) =>
-        inspector.GetSnapshot().QueuedRuns.Single(run => run.JobName == name).RunId;
+    private static Guid QueuedRunId(IJobSchedulerInspector inspector, string name) {
+        return inspector.GetSnapshot().QueuedRuns.Single(run => run.JobName == name).RunId;
+    }
 
     /// <summary>
     /// A variable source that can be armed to swap its values on the <em>next read</em>, firing the watch

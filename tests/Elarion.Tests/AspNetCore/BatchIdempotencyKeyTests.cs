@@ -22,7 +22,7 @@ namespace Elarion.Tests.AspNetCore;
 /// </summary>
 public sealed class BatchIdempotencyKeyTests {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     [Fact]
@@ -36,7 +36,7 @@ public sealed class BatchIdempotencyKeyTests {
               { "jsonrpc": "2.0", "method": "things.get", "params": {}, "id": 2 }
             ]
             """,
-            idempotencyKey: "shared-key");
+            "shared-key");
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -58,7 +58,7 @@ public sealed class BatchIdempotencyKeyTests {
               { "jsonrpc": "2.0", "method": "things.get", "params": {}, "id": 2 }
             ]
             """,
-            idempotencyKey: null);
+            null);
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -73,7 +73,7 @@ public sealed class BatchIdempotencyKeyTests {
         var context = CreateContext(
             provider,
             """{ "jsonrpc": "2.0", "method": "things.create", "params": {}, "id": 1 }""",
-            idempotencyKey: "single-key");
+            "single-key");
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -112,11 +112,9 @@ public sealed class BatchIdempotencyKeyTests {
 
     private static DefaultHttpContext CreateContext(IServiceProvider provider, string body, string? idempotencyKey) {
         var context = new DefaultHttpContext {
-            RequestServices = provider,
+            RequestServices = provider
         };
-        if (idempotencyKey is not null) {
-            context.Request.Headers[IdempotencyKeyNames.HttpHeader] = idempotencyKey;
-        }
+        if (idempotencyKey is not null) context.Request.Headers[IdempotencyKeyNames.HttpHeader] = idempotencyKey;
 
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Response.Body = new MemoryStream();

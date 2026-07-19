@@ -94,10 +94,12 @@ public sealed class HandlerMetadata {
     /// Returns the single attribute of type <typeparamref name="TAttribute"/> declared on the handler,
     /// or <c>null</c> if absent.
     /// </summary>
-    public TAttribute? GetAttribute<TAttribute>() where TAttribute : Attribute =>
-        HandlerType.GetCustomAttribute<TAttribute>(inherit: true);
+    public TAttribute? GetAttribute<TAttribute>() where TAttribute : Attribute {
+        return HandlerType.GetCustomAttribute<TAttribute>(true);
+    }
 
     /// <summary>Returns all attributes of type <typeparamref name="TAttribute"/> declared on the handler.</summary>
-    public IEnumerable<TAttribute> GetAttributes<TAttribute>() where TAttribute : Attribute =>
-        HandlerType.GetCustomAttributes<TAttribute>(inherit: true);
+    public IEnumerable<TAttribute> GetAttributes<TAttribute>() where TAttribute : Attribute {
+        return HandlerType.GetCustomAttributes<TAttribute>(true);
+    }
 }

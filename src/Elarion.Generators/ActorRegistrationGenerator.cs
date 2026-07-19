@@ -40,116 +40,109 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
     private const string ActorSingletonKeyFqn = "global::Elarion.Actors.ActorSingletonKey";
     private const string UnitFqn = "global::Elarion.Abstractions.Results.Unit";
-    private const string RelayResponseFqn = "global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>";
+
+    private const string RelayResponseFqn =
+        "global::Elarion.Abstractions.Result<global::Elarion.Abstractions.Results.Unit>";
+
     private const string CancellationTokenFqn = "global::System.Threading.CancellationToken";
     private const string TaskFqn = "global::System.Threading.Tasks.Task";
     private const string ValueTaskFqn = "global::System.Threading.Tasks.ValueTask";
     private const string AsyncEnumerableFqn = "global::System.Collections.Generic.IAsyncEnumerable";
 
     private static readonly DiagnosticDescriptor InvalidActorType = new(
-        id: "ELACT001",
-        title: "Invalid [Actor] type",
-        messageFormat:
+        "ELACT001",
+        "Invalid [Actor] type",
         "Type '{0}' is annotated with [Actor] but must be a non-static, non-abstract, non-generic, "
         + "non-nested class for the facade generator to wrap it",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidActorMethod = new(
-        id: "ELACT002",
-        title: "Invalid actor method",
-        messageFormat:
+        "ELACT002",
+        "Invalid actor method",
         "Public method '{0}' on [Actor] class '{1}' cannot be exposed through the facade: actor methods "
         + "must be non-generic instance methods returning Task/Task<T>/ValueTask/ValueTask<T>/IAsyncEnumerable<T>, "
         + "without ref/out/in or ref-struct parameters and with at most one CancellationToken parameter",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor ActorNotInModule = new(
-        id: "ELACT003",
-        title: "Actor is not in any module",
-        messageFormat:
+        "ELACT003",
+        "Actor is not in any module",
         "Actor '{0}' is annotated with [Actor] but its namespace is not under any [AppModule]; "
         + "it will not be registered. Move the actor under a module's namespace so it is wired by that module.",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Warning,
+        true);
 
     private static readonly DiagnosticDescriptor AmbiguousActorKey = new(
-        id: "ELACT004",
-        title: "Ambiguous actor key",
-        messageFormat:
+        "ELACT004",
+        "Ambiguous actor key",
         "Actor '{0}' declares conflicting keys: use a single IActorContext<TKey> constructor parameter "
         + "(or one [Actor(KeyType = ...)] matching it) to make the actor keyed",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidActorConstructor = new(
-        id: "ELACT005",
-        title: "Invalid actor constructor",
-        messageFormat:
+        "ELACT005",
+        "Invalid actor constructor",
         "Actor '{0}' must have exactly one public constructor so the generator can emit its activator",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor ActorEventKeyUnresolved = new(
-        id: "ELACT008",
-        title: "Actor event-consumer key cannot be resolved",
-        messageFormat:
+        "ELACT008",
+        "Actor event-consumer key cannot be resolved",
         "The [ConsumeEvent] method '{0}' on keyed actor '{1}' needs an actor key the generator cannot "
         + "determine: event '{2}' has {3} propert(y/ies) assignable to the key type. Add "
         + "[ActorKey(nameof({2}.KeyProperty))] naming the event property whose type is the actor's key type.",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor ActorConsumeMethodNotPublic = new(
-        id: "ELACT009",
-        title: "Actor [ConsumeEvent] method must be public",
-        messageFormat:
+        "ELACT009",
+        "Actor [ConsumeEvent] method must be public",
         "The [ConsumeEvent] method '{0}' on actor '{1}' is not public. The generated relay reaches the actor "
         + "through its public facade (the same call a hand-written relay makes), so the method must be public.",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor ActorConsumeNotIntegrationEvent = new(
-        id: "ELACT010",
-        title: "Actor [ConsumeEvent] method must take one integration event",
-        messageFormat:
+        "ELACT010",
+        "Actor [ConsumeEvent] method must take one integration event",
         "The [ConsumeEvent] method '{0}' on actor '{1}' must take exactly one IIntegrationEvent parameter "
         + "(optionally with a CancellationToken). A domain event, or zero/multiple event parameters, is not a "
         + "valid actor consumer: a domain-event consumer shares the emitting command's transaction, which an "
         + "actor cannot. Consume an IIntegrationEvent, or call the actor from the command's handler after commit.",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidActorStreamMethod = new(
-        id: "ELACT012",
-        title: "Invalid actor stream method",
-        messageFormat:
+        "ELACT012",
+        "Invalid actor stream method",
         "The stream method '{0}' on actor '{1}' (returning IAsyncEnumerable<T>) must not take a "
         + "CancellationToken and cannot be a [ConsumeEvent] consumer. The turn token's lifetime ends with "
         + "the attach turn — using it inside the returned stream would observe a recycled token; "
         + "cancellation flows through the enumerator instead (the facade adds the token parameter).",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor VirtualShardedActorMustBeKeyed = new(
-        id: "ELACT013",
-        title: "Virtual-sharded actor must be keyed",
-        messageFormat:
+        "ELACT013",
+        "Virtual-sharded actor must be keyed",
         "Actor '{0}' uses Placement = VirtualShards but has no actor key; virtual-shard placement "
         + "requires an IActorContext<TKey> constructor parameter or Actor(KeyType = ...)",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private enum ReturnShape {
         TaskVoid,
@@ -232,43 +225,36 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
         context.RegisterSourceOutput(combined, static (spc, source) => {
             var ((results, modules), hasTrigger) = source;
-            if (!hasTrigger) {
-                return;
-            }
+            if (!hasTrigger) return;
 
-            foreach (var result in results) {
-                foreach (var diagnostic in result.Diagnostics) {
-                    spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-                }
-            }
+            foreach (var result in results)
+            foreach (var diagnostic in result.Diagnostics)
+                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
             var actors = new List<ActorInfo>();
-            foreach (var result in results) {
-                if (result.Actor is not null) {
+            foreach (var result in results)
+                if (result.Actor is not null)
                     actors.Add(result.Actor);
-                }
-            }
 
             actors.Sort(static (left, right) =>
                 string.Compare(left.HintName, right.HintName, StringComparison.Ordinal));
 
-            if (actors.Count == 0) {
-                return;
-            }
+            if (actors.Count == 0) return;
 
             foreach (var actor in actors) {
                 spc.AddSource($"{actor.HintName}.Actor.g.cs", SourceText.From(GenerateFacade(actor), Encoding.UTF8));
                 foreach (var consumer in actor.Consumers) {
-                    if (actor.ActorNamespace.Length == 0) {
-                        continue; // a relay needs a namespace (an actor under a module always has one)
-                    }
+                    if (actor.ActorNamespace.Length ==
+                        0) continue; // a relay needs a namespace (an actor under a module always has one)
 
                     spc.AddSource(
                         $"{actor.HintName}__{consumer.MethodName}__EventRelay.g.cs",
                         SourceText.From(GenerateRelayClass(actor, consumer), Encoding.UTF8));
                     spc.AddSource(
                         $"{actor.HintName}__{consumer.MethodName}__EventRelayRegistration.g.cs",
-                        SourceText.From(HandlerRegistrationGenerator.GenerateRegistration(BuildRelayHandlerInfo(actor, consumer)), Encoding.UTF8));
+                        SourceText.From(
+                            HandlerRegistrationGenerator.GenerateRegistration(BuildRelayHandlerInfo(actor, consumer)),
+                            Encoding.UTF8));
                 }
             }
 
@@ -276,19 +262,17 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         });
     }
 
-    private static ActorResult? CreateActorResult(GeneratorAttributeSyntaxContext ctx, CancellationToken cancellationToken) {
-        if (ctx.TargetSymbol is not INamedTypeSymbol type) {
-            return null;
-        }
+    private static ActorResult? CreateActorResult(GeneratorAttributeSyntaxContext ctx,
+        CancellationToken cancellationToken) {
+        if (ctx.TargetSymbol is not INamedTypeSymbol type) return null;
 
         var location = LocationInfo.From(type);
         var typeDisplay = type.ToDisplayString();
 
-        if (type.IsStatic || type.IsAbstract || type.IsGenericType || type.ContainingType is not null) {
+        if (type.IsStatic || type.IsAbstract || type.IsGenericType || type.ContainingType is not null)
             return new ActorResult(null, new[] {
                 DiagnosticInfo.Create(InvalidActorType, location, typeDisplay)
             }.ToEquatableArray());
-        }
 
         var compilation = ctx.SemanticModel.Compilation;
         var taskSymbol = compilation.GetTypeByMetadataName(TaskMetadataName);
@@ -312,7 +296,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         double idleTimeoutSeconds = 0;
         double callTimeoutSeconds = 0;
         var placement = "Local";
-        foreach (var named in ctx.Attributes[0].NamedArguments) {
+        foreach (var named in ctx.Attributes[0].NamedArguments)
             switch (named.Key) {
                 case "Name":
                     explicitName = named.Value.Value as string;
@@ -342,36 +326,31 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                         : "Local";
                     break;
             }
-        }
 
         var reentrant = false;
-        foreach (var attribute in type.GetAttributes()) {
-            if (attribute.AttributeClass?.ToDisplayString() == ReentrantAttributeDisplayName) {
+        foreach (var attribute in type.GetAttributes())
+            if (attribute.AttributeClass?.ToDisplayString() == ReentrantAttributeDisplayName)
                 reentrant = true;
-            }
-        }
 
         // Constructor: exactly one public constructor carries the activation dependencies.
         var constructors = type.InstanceConstructors
             .Where(static ctor => ctor.DeclaredAccessibility == Accessibility.Public)
             .ToList();
-        if (constructors.Count != 1) {
+        if (constructors.Count != 1)
             return new ActorResult(null, new[] {
                 DiagnosticInfo.Create(InvalidActorConstructor, location, typeDisplay)
             }.ToEquatableArray());
-        }
 
         ITypeSymbol? contextKeyType = null;
         var ambiguousKey = false;
         var ctorParameters = new List<CtorParameterInfo>();
-        foreach (var parameter in constructors[0].Parameters) {
+        foreach (var parameter in constructors[0].Parameters)
             if (parameter.Type is INamedTypeSymbol named && contextGenericSymbol is not null &&
                 SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, contextGenericSymbol)) {
                 var parameterKeyType = named.TypeArguments[0];
                 if (contextKeyType is not null &&
-                    !SymbolEqualityComparer.Default.Equals(contextKeyType, parameterKeyType)) {
+                    !SymbolEqualityComparer.Default.Equals(contextKeyType, parameterKeyType))
                     ambiguousKey = true;
-                }
 
                 contextKeyType = parameterKeyType;
                 ctorParameters.Add(new CtorParameterInfo(CtorParameterKind.Context, string.Empty));
@@ -393,22 +372,19 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                     CtorParameterKind.Service,
                     parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
             }
-        }
 
         if (ambiguousKey ||
             (attributeKeyType is not null && contextKeyType is not null &&
-             !SymbolEqualityComparer.Default.Equals(attributeKeyType, contextKeyType))) {
+             !SymbolEqualityComparer.Default.Equals(attributeKeyType, contextKeyType)))
             return new ActorResult(null, new[] {
                 DiagnosticInfo.Create(AmbiguousActorKey, location, typeDisplay)
             }.ToEquatableArray());
-        }
 
         var keyType = attributeKeyType ?? contextKeyType;
         var actorName = explicitName ?? DeriveActorName(type.Name);
 
-        if (placement == "VirtualShards" && keyType is null) {
+        if (placement == "VirtualShards" && keyType is null)
             diagnostics.Add(DiagnosticInfo.Create(VirtualShardedActorMustBeKeyed, location, typeDisplay));
-        }
 
         // Public instance methods become facade methods; lifecycle hooks stay off the facade. A method carrying
         // [ConsumeEvent] additionally gets a generated integration-event relay (ADR-0046).
@@ -421,29 +397,25 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                 method.MethodKind != MethodKind.Ordinary ||
                 method.IsStatic ||
                 method.IsOverride ||
-                method.IsImplicitlyDeclared) {
+                method.IsImplicitlyDeclared)
                 continue;
-            }
 
-            if (method.Name is "OnActivateAsync" or "OnDeactivateAsync") {
-                continue;
-            }
+            if (method.Name is "OnActivateAsync" or "OnDeactivateAsync") continue;
 
             var consumeAttribute = GetAttribute(method, ConsumeEventAttributeDisplayName);
 
             // Non-public methods are off the facade. The relay reaches the actor through its public facade, so a
             // non-public [ConsumeEvent] method is an error; other non-public methods are simply not facade methods.
             if (method.DeclaredAccessibility != Accessibility.Public) {
-                if (consumeAttribute is not null) {
+                if (consumeAttribute is not null)
                     diagnostics.Add(DiagnosticInfo.Create(
                         ActorConsumeMethodNotPublic, LocationInfo.From(method), method.Name, typeDisplay));
-                }
 
                 continue;
             }
 
             ReturnShape shape;
-            string resultTypeFqn = string.Empty;
+            var resultTypeFqn = string.Empty;
             if (SymbolEqualityComparer.Default.Equals(method.ReturnType, taskSymbol)) {
                 shape = ReturnShape.TaskVoid;
             }
@@ -456,7 +428,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                 resultTypeFqn = generic.TypeArguments[0].ToDisplayString(NullableAwareFullyQualifiedFormat);
             }
             else if (method.ReturnType is INamedTypeSymbol { IsGenericType: true } genericValueTask &&
-                     SymbolEqualityComparer.Default.Equals(genericValueTask.OriginalDefinition, valueTaskGenericSymbol)) {
+                     SymbolEqualityComparer.Default.Equals(genericValueTask.OriginalDefinition,
+                         valueTaskGenericSymbol)) {
                 shape = ReturnShape.ValueTaskOfResult;
                 resultTypeFqn = genericValueTask.TypeArguments[0]
                     .ToDisplayString(NullableAwareFullyQualifiedFormat);
@@ -484,10 +457,9 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                 }
 
                 var isCancellationToken = cancellationTokenSymbol is not null &&
-                                          SymbolEqualityComparer.Default.Equals(parameter.Type, cancellationTokenSymbol);
-                if (isCancellationToken) {
-                    cancellationTokenCount++;
-                }
+                                          SymbolEqualityComparer.Default.Equals(parameter.Type,
+                                              cancellationTokenSymbol);
+                if (isCancellationToken) cancellationTokenCount++;
 
                 parameters.Add(new MethodParameterInfo(
                     parameter.Name,
@@ -511,9 +483,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
             var workItemName = method.Name + "WorkItem";
             var suffix = 1;
-            while (!workItemNames.Add(workItemName)) {
-                workItemName = method.Name + "WorkItem" + suffix++;
-            }
+            while (!workItemNames.Add(workItemName)) workItemName = method.Name + "WorkItem" + suffix++;
 
             methods.Add(new ActorMethodInfo(
                 method.Name,
@@ -527,9 +497,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                     method, consumeAttribute, keyType, actorName,
                     integrationEventSymbol, cancellationTokenSymbol,
                     typeDisplay, diagnostics);
-                if (consumer is not null) {
-                    consumers.Add(consumer);
-                }
+                if (consumer is not null) consumers.Add(consumer);
             }
         }
 
@@ -585,9 +553,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         string? keyExpression = null;
         if (keyType is not null) {
             keyExpression = ResolveKeyExpression(method, eventType, keyType, actorName, typeDisplay, diagnostics);
-            if (keyExpression is null) {
-                return null; // ELACT008 already reported
-            }
+            if (keyExpression is null) return null; // ELACT008 already reported
         }
 
         var callArguments = method.Parameters
@@ -636,9 +602,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             return $"request.{match.Name}";
         }
 
-        if (candidates.Count == 1) {
-            return $"request.{candidates[0].Name}";
-        }
+        if (candidates.Count == 1) return $"request.{candidates[0].Name}";
 
         diagnostics.Add(DiagnosticInfo.Create(
             ActorEventKeyUnresolved, LocationInfo.From(method), method.Name, actorName, eventDisplay,
@@ -650,8 +614,10 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
     private static List<IPropertySymbol> GetKeyCandidateProperties(ITypeSymbol eventType, ITypeSymbol keyType) {
         var result = new List<IPropertySymbol>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var current = eventType; current is not null && current.SpecialType != SpecialType.System_Object; current = current.BaseType) {
-            foreach (var member in current.GetMembers()) {
+        for (var current = eventType;
+             current is not null && current.SpecialType != SpecialType.System_Object;
+             current = current.BaseType)
+            foreach (var member in current.GetMembers())
                 if (member is IPropertySymbol {
                         DeclaredAccessibility: Accessibility.Public,
                         IsStatic: false,
@@ -659,46 +625,44 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
                         IsIndexer: false
                     } property
                     && seen.Add(property.Name)
-                    && SymbolEqualityComparer.Default.Equals(property.Type, keyType)) {
+                    && SymbolEqualityComparer.Default.Equals(property.Type, keyType))
                     result.Add(property);
-                }
-            }
-        }
 
         return result;
     }
 
-    private static bool IsCancellationToken(ITypeSymbol type, INamedTypeSymbol? cancellationTokenSymbol) =>
-        cancellationTokenSymbol is not null && SymbolEqualityComparer.Default.Equals(type, cancellationTokenSymbol);
+    private static bool IsCancellationToken(ITypeSymbol type, INamedTypeSymbol? cancellationTokenSymbol) {
+        return cancellationTokenSymbol is not null &&
+               SymbolEqualityComparer.Default.Equals(type, cancellationTokenSymbol);
+    }
 
-    private static bool Implements(ITypeSymbol type, INamedTypeSymbol interfaceType) =>
-        type.AllInterfaces.Any(implemented => SymbolEqualityComparer.Default.Equals(implemented, interfaceType));
+    private static bool Implements(ITypeSymbol type, INamedTypeSymbol interfaceType) {
+        return type.AllInterfaces.Any(implemented => SymbolEqualityComparer.Default.Equals(implemented, interfaceType));
+    }
 
-    private static AttributeData? GetAttribute(ISymbol symbol, string attributeDisplayName) =>
-        symbol.GetAttributes()
+    private static AttributeData? GetAttribute(ISymbol symbol, string attributeDisplayName) {
+        return symbol.GetAttributes()
             .FirstOrDefault(attribute => attribute.AttributeClass?.ToDisplayString() == attributeDisplayName);
+    }
 
     private static int GetIntNamedArgument(AttributeData attribute, string name, int defaultValue) {
-        foreach (var argument in attribute.NamedArguments) {
-            if (argument.Key == name && argument.Value.Value is int value) {
+        foreach (var argument in attribute.NamedArguments)
+            if (argument.Key == name && argument.Value.Value is int value)
                 return value;
-            }
-        }
 
         return defaultValue;
     }
 
-    private static string DeriveActorName(string typeName) =>
-        typeName.Length > 5 && typeName.EndsWith("Actor", StringComparison.Ordinal)
+    private static string DeriveActorName(string typeName) {
+        return typeName.Length > 5 && typeName.EndsWith("Actor", StringComparison.Ordinal)
             ? typeName.Substring(0, typeName.Length - 5)
             : typeName;
+    }
 
     private static string GetHintName(INamedTypeSymbol type) {
         var display = type.ToDisplayString();
         var sb = new StringBuilder(display.Length);
-        foreach (var ch in display) {
-            sb.Append(char.IsLetterOrDigit(ch) ? ch : '_');
-        }
+        foreach (var ch in display) sb.Append(char.IsLetterOrDigit(ch) ? ch : '_');
 
         return sb.ToString();
     }
@@ -707,9 +671,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         SourceProductionContext spc,
         IReadOnlyList<ModuleScanner.Module> modules,
         IReadOnlyList<ActorInfo> actors) {
-        if (modules.Count == 0) {
-            return;
-        }
+        if (modules.Count == 0) return;
 
         var byModule = new Dictionary<ModuleScanner.Module, List<ActorInfo>>();
         foreach (var actor in actors) {
@@ -766,7 +728,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             : $"global::Elarion.Actors.IActorFacade<{actor.KeyTypeFqn}>";
 
         sb.AppendLine("/// <summary>");
-        sb.AppendLine($"/// Typed facade over the <see cref=\"{DocCref(actor.ActorTypeFqn)}\"/> actor: each call is enqueued");
+        sb.AppendLine(
+            $"/// Typed facade over the <see cref=\"{DocCref(actor.ActorTypeFqn)}\"/> actor: each call is enqueued");
         sb.AppendLine("/// into the actor's mailbox and executed under its single-threaded guarantee. Resolve via");
         sb.AppendLine("/// <see cref=\"global::Elarion.Actors.IActorSystem\"/>.");
         sb.AppendLine("/// </summary>");
@@ -774,12 +737,11 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine("{");
         var first = true;
         foreach (var method in actor.Methods) {
-            if (!first) {
-                sb.AppendLine();
-            }
+            if (!first) sb.AppendLine();
 
             first = false;
-            sb.AppendLine($"    /// <summary>Invokes <c>{Plain(actor.ActorTypeFqn)}.{method.Name}</c> through the actor mailbox.</summary>");
+            sb.AppendLine(
+                $"    /// <summary>Invokes <c>{Plain(actor.ActorTypeFqn)}.{method.Name}</c> through the actor mailbox.</summary>");
             sb.AppendLine($"    {FacadeReturnType(method)} {method.Name}({FacadeParameterList(method)});");
         }
 
@@ -790,7 +752,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine("{");
         sb.AppendLine($"    private readonly global::Elarion.Actors.ActorHandle<{actor.ActorTypeFqn}> _handle;");
         sb.AppendLine();
-        sb.AppendLine($"    public {actor.FacadeImplName}(global::Elarion.Actors.ActorHandle<{actor.ActorTypeFqn}> handle)");
+        sb.AppendLine(
+            $"    public {actor.FacadeImplName}(global::Elarion.Actors.ActorHandle<{actor.ActorTypeFqn}> handle)");
         sb.AppendLine("    {");
         sb.AppendLine("        _handle = handle;");
         sb.AppendLine("    }");
@@ -819,7 +782,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             // cancels the queued attach and, linked with the enumerator's token, the stream itself.
             sb.AppendLine($"    public {FacadeReturnType(method)} {method.Name}({FacadeParameterList(method)}) =>");
             sb.AppendLine($"        global::Elarion.Actors.Runtime.ActorStreams.Defer<{method.ResultTypeFqn}>(");
-            sb.AppendLine($"            elarionAttachToken => _handle.InvokeAsync({method.WorkItemClassName}.Rent({arguments}), elarionAttachToken),");
+            sb.AppendLine(
+                $"            elarionAttachToken => _handle.InvokeAsync({method.WorkItemClassName}.Rent({arguments}), elarionAttachToken),");
             sb.AppendLine($"            {tokenName});");
             return;
         }
@@ -839,33 +803,30 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var resultFqn = method.Return switch {
             ReturnShape.TaskVoid or ReturnShape.ValueTaskVoid => UnitFqn,
             ReturnShape.AsyncEnumerable => $"{AsyncEnumerableFqn}<{method.ResultTypeFqn}>",
-            _ => method.ResultTypeFqn,
+            _ => method.ResultTypeFqn
         };
         var dataParameters = method.Parameters.Where(static p => !p.IsCancellationToken).ToList();
 
         var poolFqn = $"global::Elarion.Actors.Runtime.ActorWorkItemPool<{method.WorkItemClassName}>";
-        sb.AppendLine($"    private sealed class {method.WorkItemClassName} : global::Elarion.Actors.ActorWorkItem<{actor.ActorTypeFqn}, {resultFqn}>");
+        sb.AppendLine(
+            $"    private sealed class {method.WorkItemClassName} : global::Elarion.Actors.ActorWorkItem<{actor.ActorTypeFqn}, {resultFqn}>");
         sb.AppendLine("    {");
         // Fields are mutable and the item is pooled: Rent reuses a recycled instance and overwrites
         // the arguments, so a completed call allocates no work item. The caller captures the
         // completion task before enqueue, so recycling never disturbs an in-flight await. The
         // default! initializer satisfies nullable analysis for the parameterless pooled ctor; Rent
         // always assigns before the item is used.
-        foreach (var parameter in dataParameters) {
+        foreach (var parameter in dataParameters)
             sb.AppendLine($"        private {parameter.TypeFqn} _{parameter.Name} = default!;");
-        }
 
-        if (dataParameters.Count > 0) {
-            sb.AppendLine();
-        }
+        if (dataParameters.Count > 0) sb.AppendLine();
 
         var rentParameters = string.Join(", ", dataParameters.Select(static p => $"{p.TypeFqn} {p.Name}"));
         sb.AppendLine($"        public static {method.WorkItemClassName} Rent({rentParameters})");
         sb.AppendLine("        {");
         sb.AppendLine($"            var item = {poolFqn}.Rent(static () => new {method.WorkItemClassName}());");
-        foreach (var parameter in dataParameters) {
+        foreach (var parameter in dataParameters)
             sb.AppendLine($"            item._{parameter.Name} = {parameter.Name};");
-        }
 
         sb.AppendLine("            return item;");
         sb.AppendLine("        }");
@@ -874,9 +835,7 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine("        {");
         // Clear the arguments before pooling so a reference-typed argument is not retained by the
         // idle item (value-typed args reset harmlessly).
-        foreach (var parameter in dataParameters) {
-            sb.AppendLine($"            _{parameter.Name} = default!;");
-        }
+        foreach (var parameter in dataParameters) sb.AppendLine($"            _{parameter.Name} = default!;");
 
         sb.AppendLine($"            {poolFqn}.Return(this);");
         sb.AppendLine("        }");
@@ -890,13 +849,16 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             // off the mailbox. The turn token is deliberately not passed (ELACT012 forbids the
             // parameter). RetainActivation ties the activation's lifetime to the enumeration (refCount
             // lifetime, ADR-0052): idle passivation never ends a live stream mid-flight.
-            sb.AppendLine($"        protected override global::System.Threading.Tasks.ValueTask<{resultFqn}> InvokeAsync({actor.ActorTypeFqn} actor, {CancellationTokenFqn} cancellationToken) =>");
-            sb.AppendLine($"            new(global::Elarion.Actors.Runtime.ActorStreams.RetainWhileEnumerating(actor.{method.Name}({invokeArguments}), RetainActivation()));");
+            sb.AppendLine(
+                $"        protected override global::System.Threading.Tasks.ValueTask<{resultFqn}> InvokeAsync({actor.ActorTypeFqn} actor, {CancellationTokenFqn} cancellationToken) =>");
+            sb.AppendLine(
+                $"            new(global::Elarion.Actors.Runtime.ActorStreams.RetainWhileEnumerating(actor.{method.Name}({invokeArguments}), RetainActivation()));");
             sb.AppendLine("    }");
             return;
         }
 
-        sb.AppendLine($"        protected override async global::System.Threading.Tasks.ValueTask<{resultFqn}> InvokeAsync({actor.ActorTypeFqn} actor, {CancellationTokenFqn} cancellationToken)");
+        sb.AppendLine(
+            $"        protected override async global::System.Threading.Tasks.ValueTask<{resultFqn}> InvokeAsync({actor.ActorTypeFqn} actor, {CancellationTokenFqn} cancellationToken)");
         sb.AppendLine("        {");
         if (method.Return is ReturnShape.TaskVoid or ReturnShape.ValueTaskVoid) {
             sb.AppendLine($"            await actor.{method.Name}({invokeArguments}).ConfigureAwait(false);");
@@ -931,23 +893,20 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"public static class {className}");
         sb.AppendLine("{");
         sb.AppendLine($"    /// <summary>Adds the actor system and this module's actor registrations.</summary>");
-        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        sb.AppendLine(
+            $"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("    {");
-        sb.AppendLine("        global::Elarion.Actors.ActorServiceCollectionExtensions.AddElarionActorSystem(services);");
-        foreach (var actor in actors) {
-            AppendActorRegistration(sb, actor);
-        }
+        sb.AppendLine(
+            "        global::Elarion.Actors.ActorServiceCollectionExtensions.AddElarionActorSystem(services);");
+        foreach (var actor in actors) AppendActorRegistration(sb, actor);
 
         // Actor event relays (ADR-0046) register alongside their actor's module, so they share its feature gate:
         // a disabled module's relays disappear like its actors.
-        foreach (var actor in actors) {
-            foreach (var consumer in actor.Consumers) {
-                if (actor.ActorNamespace.Length == 0) {
-                    continue;
-                }
+        foreach (var actor in actors)
+        foreach (var consumer in actor.Consumers) {
+            if (actor.ActorNamespace.Length == 0) continue;
 
-                AppendConsumerRegistration(sb, actor, consumer);
-            }
+            AppendConsumerRegistration(sb, actor, consumer);
         }
 
         sb.AppendLine("        return services;");
@@ -970,13 +929,15 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine();
         sb.AppendLine($"namespace {actor.ActorNamespace};");
         sb.AppendLine();
-        sb.AppendLine($"// Relays the {consumer.EventTypeFqn} integration event into the {actor.ActorName} actor (ADR-0046).");
+        sb.AppendLine(
+            $"// Relays the {consumer.EventTypeFqn} integration event into the {actor.ActorName} actor (ADR-0046).");
         sb.AppendLine($"internal sealed class {consumer.RelayClassName}");
         sb.AppendLine($"    : global::Elarion.Abstractions.IHandler<{consumer.EventTypeFqn}, {RelayResponseFqn}>");
         sb.AppendLine("{");
         sb.AppendLine("    private readonly global::Elarion.Actors.IActorSystem _actors;");
         sb.AppendLine();
-        sb.AppendLine($"    public {consumer.RelayClassName}(global::Elarion.Actors.IActorSystem actors) => _actors = actors;");
+        sb.AppendLine(
+            $"    public {consumer.RelayClassName}(global::Elarion.Actors.IActorSystem actors) => _actors = actors;");
         sb.AppendLine();
         sb.AppendLine($"    public async global::System.Threading.Tasks.ValueTask<{RelayResponseFqn}> HandleAsync(");
         sb.AppendLine($"        {consumer.EventTypeFqn} request,");
@@ -994,30 +955,31 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
 
     // Synthesizes the HandlerInfo the handler-registration emit consumes, so the relay's decorator chain — the
     // Consumer-scoped inbox in particular — is the same code path as a hand-written consumer's (ADR-0046).
-    private static HandlerRegistrationGenerator.HandlerInfo BuildRelayHandlerInfo(ActorInfo actor, ActorConsumerInfo consumer) {
+    private static HandlerRegistrationGenerator.HandlerInfo BuildRelayHandlerInfo(ActorInfo actor,
+        ActorConsumerInfo consumer) {
         var relayFqn = $"global::{actor.ActorNamespace}.{consumer.RelayClassName}";
         var owner = HandlerRegistrationGenerator.TruncateOwner($"{actor.ActorNamespace}.{consumer.RelayClassName}");
         return new HandlerRegistrationGenerator.HandlerInfo(
-            HandlerFqn: relayFqn,
-            HandlerName: consumer.RelayClassName,
-            RequestFqn: consumer.EventTypeFqn,
-            ResponseFqn: RelayResponseFqn,
-            Namespace: actor.ActorNamespace,
-            Decorators: EquatableArray<HandlerRegistrationGenerator.DecoratorInfo>.Empty,
-            ResiliencePolicyName: null,
-            Cacheable: null,
-            CacheInvalidation: null,
-            HasAuthorization: false,
-            RequireAuthenticatedByDefault: false,
-            ResourceBindings: EquatableArray<HandlerRegistrationGenerator.ResourceBindingInfo>.Empty,
-            HasFeatureGates: false,
-            HasValidation: false,
-            Idempotent: HandlerRegistrationGenerator.CreateInboxInfo(owner, UnitFqn),
-            Audit: null,
-            VariantContractDeps: EquatableArray<string>.Empty,
+            relayFqn,
+            consumer.RelayClassName,
+            consumer.EventTypeFqn,
+            RelayResponseFqn,
+            actor.ActorNamespace,
+            EquatableArray<HandlerRegistrationGenerator.DecoratorInfo>.Empty,
+            null,
+            null,
+            null,
+            false,
+            false,
+            EquatableArray<HandlerRegistrationGenerator.ResourceBindingInfo>.Empty,
+            false,
+            false,
+            HandlerRegistrationGenerator.CreateInboxInfo(owner, UnitFqn),
+            null,
+            EquatableArray<string>.Empty,
             // Keyed by the relay's own FQN so it coexists with any other consumer of the same event (ADR-0046).
-            EventConsumerKey: relayFqn,
-            Diagnostics: EquatableArray<DiagnosticInfo>.Empty);
+            relayFqn,
+            EquatableArray<DiagnosticInfo>.Empty);
     }
 
     // Wires a relay into the module's Add{Module}Actors: register its decorated pipeline, then the integration
@@ -1028,7 +990,8 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         var relayFqn = $"global::{actor.ActorNamespace}.{consumer.RelayClassName}";
         sb.AppendLine();
         sb.AppendLine($"        {registrationFqn}.Add{consumer.RelayClassName}(services);");
-        sb.AppendLine("        services.AddSingleton(new global::Elarion.Abstractions.Messaging.EventSubscriptionDescriptor");
+        sb.AppendLine(
+            "        services.AddSingleton(new global::Elarion.Abstractions.Messaging.EventSubscriptionDescriptor");
         sb.AppendLine("        {");
         sb.AppendLine($"            ConsumerId = \"{relayFqn}\",");
         sb.AppendLine($"            EventType = typeof({consumer.EventTypeFqn}),");
@@ -1037,24 +1000,31 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"            Order = {consumer.Order},");
         if (actor.Placement == "SingleHome") {
             sb.AppendLine("            ResolveDeliveryRole = static (serviceProvider, _) =>");
-            sb.AppendLine("                serviceProvider.GetService<global::Elarion.Actors.IActorHomeLease>()?.Role,");
+            sb.AppendLine(
+                "                serviceProvider.GetService<global::Elarion.Actors.IActorHomeLease>()?.Role,");
         }
         else if (actor.Placement == "VirtualShards") {
             var eventKey = consumer.KeyExpression!.Replace(
                 "request.", $"(({consumer.EventTypeFqn})@event).");
             sb.AppendLine("            ResolveDeliveryRole = static (serviceProvider, @event) =>");
             sb.AppendLine("            {");
-            sb.AppendLine("                var resolver = serviceProvider.GetService<global::Elarion.Actors.IActorPlacementResolver>();");
-            sb.AppendLine($"                return resolver is null ? null : resolver.Resolve(\"{actor.ActorName}\", {eventKey}.ToString() ?? string.Empty).Role;");
+            sb.AppendLine(
+                "                var resolver = serviceProvider.GetService<global::Elarion.Actors.IActorPlacementResolver>();");
+            sb.AppendLine(
+                $"                return resolver is null ? null : resolver.Resolve(\"{actor.ActorName}\", {eventKey}.ToString() ?? string.Empty).Role;");
             sb.AppendLine("            },");
         }
+
         sb.AppendLine("            InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
         sb.AppendLine("            {");
-        sb.AppendLine($"                var handler = serviceProvider.GetRequiredKeyedService<{interfaceFqn}>(\"{relayFqn}\");");
-        sb.AppendLine($"                var result = await handler.HandleAsync(({consumer.EventTypeFqn})@event, ct).ConfigureAwait(false);");
+        sb.AppendLine(
+            $"                var handler = serviceProvider.GetRequiredKeyedService<{interfaceFqn}>(\"{relayFqn}\");");
+        sb.AppendLine(
+            $"                var result = await handler.HandleAsync(({consumer.EventTypeFqn})@event, ct).ConfigureAwait(false);");
         sb.AppendLine("                if (!result.IsSuccess)");
         sb.AppendLine("                {");
-        sb.AppendLine("                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+        sb.AppendLine(
+            "                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine("        });");
@@ -1077,49 +1047,52 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
         }));
 
         sb.AppendLine();
-        sb.AppendLine($"        global::Elarion.Actors.ActorServiceCollectionExtensions.AddElarionActor(services, new global::Elarion.Actors.ActorRegistration<{actor.ActorTypeFqn}, {keyFqn}, {facadeFqn}>");
+        sb.AppendLine(
+            $"        global::Elarion.Actors.ActorServiceCollectionExtensions.AddElarionActor(services, new global::Elarion.Actors.ActorRegistration<{actor.ActorTypeFqn}, {keyFqn}, {facadeFqn}>");
         sb.AppendLine("        {");
         sb.AppendLine($"            Name = \"{actor.ActorName}\",");
         sb.AppendLine("            Options = new global::Elarion.Actors.ActorOptions");
         sb.AppendLine("            {");
-        sb.AppendLine($"                MailboxCapacity = {(actor.MailboxCapacity > 0 ? actor.MailboxCapacity.ToString(System.Globalization.CultureInfo.InvariantCulture) : "null")},");
-        sb.AppendLine($"                MailboxFullMode = global::Elarion.Actors.ActorMailboxFullMode.{(actor.MailboxFailFast ? "Fail" : "Wait")},");
-        sb.AppendLine($"                IdleTimeout = {TimeoutExpression(actor.IdleTimeoutSeconds, "DefaultIdleTimeout")},");
-        sb.AppendLine($"                CallTimeout = {TimeoutExpression(actor.CallTimeoutSeconds, "DefaultCallTimeout")},");
+        sb.AppendLine(
+            $"                MailboxCapacity = {(actor.MailboxCapacity > 0 ? actor.MailboxCapacity.ToString(System.Globalization.CultureInfo.InvariantCulture) : "null")},");
+        sb.AppendLine(
+            $"                MailboxFullMode = global::Elarion.Actors.ActorMailboxFullMode.{(actor.MailboxFailFast ? "Fail" : "Wait")},");
+        sb.AppendLine(
+            $"                IdleTimeout = {TimeoutExpression(actor.IdleTimeoutSeconds, "DefaultIdleTimeout")},");
+        sb.AppendLine(
+            $"                CallTimeout = {TimeoutExpression(actor.CallTimeoutSeconds, "DefaultCallTimeout")},");
         sb.AppendLine($"                Reentrant = {(actor.Reentrant ? "true" : "false")},");
         sb.AppendLine($"                Placement = global::Elarion.Actors.ActorPlacementMode.{actor.Placement}");
         sb.AppendLine("            },");
-        sb.AppendLine($"            Activator = static (serviceProvider, context) => new {actor.ActorTypeFqn}({activatorArguments}),");
+        sb.AppendLine(
+            $"            Activator = static (serviceProvider, context) => new {actor.ActorTypeFqn}({activatorArguments}),");
         sb.AppendLine($"            Facade = static handle => new {facadeImplFqn}(handle)");
         sb.AppendLine("        });");
     }
 
     private static string TimeoutExpression(double seconds, string defaultProperty) {
-        if (seconds < 0) {
-            return "null";
-        }
+        if (seconds < 0) return "null";
 
-        if (seconds == 0) {
-            return $"global::Elarion.Actors.ActorOptions.{defaultProperty}";
-        }
+        if (seconds == 0) return $"global::Elarion.Actors.ActorOptions.{defaultProperty}";
 
-        return $"global::System.TimeSpan.FromSeconds({seconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture)})";
+        return
+            $"global::System.TimeSpan.FromSeconds({seconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture)})";
     }
 
-    private static string FacadeReturnType(ActorMethodInfo method) => method.Return switch {
-        ReturnShape.TaskVoid => TaskFqn,
-        ReturnShape.TaskOfResult => $"{TaskFqn}<{method.ResultTypeFqn}>",
-        ReturnShape.ValueTaskVoid => ValueTaskFqn,
-        ReturnShape.AsyncEnumerable => $"{AsyncEnumerableFqn}<{method.ResultTypeFqn}>",
-        _ => $"{ValueTaskFqn}<{method.ResultTypeFqn}>"
-    };
+    private static string FacadeReturnType(ActorMethodInfo method) {
+        return method.Return switch {
+            ReturnShape.TaskVoid => TaskFqn,
+            ReturnShape.TaskOfResult => $"{TaskFqn}<{method.ResultTypeFqn}>",
+            ReturnShape.ValueTaskVoid => ValueTaskFqn,
+            ReturnShape.AsyncEnumerable => $"{AsyncEnumerableFqn}<{method.ResultTypeFqn}>",
+            _ => $"{ValueTaskFqn}<{method.ResultTypeFqn}>"
+        };
+    }
 
     private static string FacadeTokenName(ActorMethodInfo method) {
-        foreach (var parameter in method.Parameters) {
-            if (parameter.IsCancellationToken) {
+        foreach (var parameter in method.Parameters)
+            if (parameter.IsCancellationToken)
                 return parameter.Name;
-            }
-        }
 
         // The facade always exposes a trailing token (it controls queue wait + call timeout) even
         // when the actor method has none; dodge collisions with data parameter names.
@@ -1144,14 +1117,16 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             }
         }
 
-        if (!hasToken) {
-            parts.Add($"{CancellationTokenFqn} {FacadeTokenName(method)} = default");
-        }
+        if (!hasToken) parts.Add($"{CancellationTokenFqn} {FacadeTokenName(method)} = default");
 
         return string.Join(", ", parts);
     }
 
-    private static string Plain(string fqn) => fqn.Replace("global::", string.Empty);
+    private static string Plain(string fqn) {
+        return fqn.Replace("global::", string.Empty);
+    }
 
-    private static string DocCref(string fqn) => Plain(fqn).Replace('<', '{').Replace('>', '}');
+    private static string DocCref(string fqn) {
+        return Plain(fqn).Replace('<', '{').Replace('>', '}');
+    }
 }

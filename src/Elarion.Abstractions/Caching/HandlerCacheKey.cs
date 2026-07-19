@@ -22,7 +22,9 @@ public static class HandlerCacheKey {
     /// The property name is included so two request shapes with the same values in different
     /// properties do not accidentally produce the same pre-hash key.
     /// </remarks>
-    public static string Part<T>(string name, T value) => $"{name}={Format(value)}";
+    public static string Part<T>(string name, T value) {
+        return $"{name}={Format(value)}";
+    }
 
     /// <summary>
     /// Hashes generated key parts into a compact, user-input-safe key suffix.
@@ -32,9 +34,7 @@ public static class HandlerCacheKey {
     /// deterministic property order.
     /// </remarks>
     public static string Build(params string[] parts) {
-        if (parts.Length == 0) {
-            return Empty;
-        }
+        if (parts.Length == 0) return Empty;
 
         var joined = string.Join("\u001f", parts);
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(joined));
@@ -42,17 +42,19 @@ public static class HandlerCacheKey {
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    private static string Format<T>(T value) =>
-        value switch {
+    private static string Format<T>(T value) {
+        return value switch {
             null => "<null>",
             DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             TimeOnly time => time.ToString("HH:mm:ss.fffffff", CultureInfo.InvariantCulture),
             DateTime dateTime => dateTime.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
-            DateTimeOffset dateTimeOffset => dateTimeOffset.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            DateTimeOffset dateTimeOffset => dateTimeOffset.ToUniversalTime()
+                .ToString("O", CultureInfo.InvariantCulture),
             Guid guid => guid.ToString("D", CultureInfo.InvariantCulture),
             bool boolean => boolean ? "true" : "false",
             Enum enumValue => enumValue.ToString(),
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-            _ => value.ToString() ?? string.Empty,
+            _ => value.ToString() ?? string.Empty
         };
+    }
 }

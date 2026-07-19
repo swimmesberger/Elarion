@@ -18,35 +18,27 @@ public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> 
     : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         base.OnModelCreating(modelBuilder);
-        ConfigureEntities(modelBuilder);   // generated — applies every discovered IEntityTypeConfiguration<T>
+        ConfigureEntities(modelBuilder); // generated — applies every discovered IEntityTypeConfiguration<T>
 
         // PostgreSQL convention: snake_case the app's own tables/columns/keys/indexes. Applied here — after the
         // app entities are configured but *before* the framework tables below — so it only touches this app's
         // entities; the framework tables (outbox, audit log) set their own explicit snake_case names.
         ApplySnakeCaseNames(modelBuilder);
 
-        modelBuilder.UseElarionOutbox();          // integration-event outbox table (Elarion.Messaging.Outbox)
-        modelBuilder.UseElarionAuditing();        // framework audit-log table (Elarion.Auditing.EntityFrameworkCore, ADR-0045)
-        modelBuilder.UseElarionActorSnapshots();  // actor state snapshot table (Elarion.Actors.PostgreSql, ADR-0047)
+        modelBuilder.UseElarionOutbox(); // integration-event outbox table (Elarion.Messaging.Outbox)
+        modelBuilder.UseElarionAuditing(); // framework audit-log table (Elarion.Auditing.EntityFrameworkCore, ADR-0045)
+        modelBuilder.UseElarionActorSnapshots(); // actor state snapshot table (Elarion.Actors.PostgreSql, ADR-0047)
     }
 
     private static void ApplySnakeCaseNames(ModelBuilder modelBuilder) {
         foreach (var entity in modelBuilder.Model.GetEntityTypes()) {
-            if (entity.GetTableName() is { } table) {
-                entity.SetTableName(ToSnakeCase(table));
-            }
+            if (entity.GetTableName() is { } table) entity.SetTableName(ToSnakeCase(table));
 
-            foreach (var property in entity.GetProperties()) {
-                property.SetColumnName(ToSnakeCase(property.Name));
-            }
+            foreach (var property in entity.GetProperties()) property.SetColumnName(ToSnakeCase(property.Name));
 
-            foreach (var key in entity.GetKeys()) {
-                key.SetName(ToSnakeCase(key.GetName()!));
-            }
+            foreach (var key in entity.GetKeys()) key.SetName(ToSnakeCase(key.GetName()!));
 
-            foreach (var index in entity.GetIndexes()) {
-                index.SetDatabaseName(ToSnakeCase(index.GetDatabaseName()!));
-            }
+            foreach (var index in entity.GetIndexes()) index.SetDatabaseName(ToSnakeCase(index.GetDatabaseName()!));
         }
     }
 
@@ -54,9 +46,7 @@ public sealed partial class BillingDbContext(DbContextOptions<BillingDbContext> 
         var builder = new StringBuilder(name.Length + 8);
         for (var i = 0; i < name.Length; i++) {
             var c = name[i];
-            if (char.IsUpper(c) && i > 0 && name[i - 1] != '_' && !char.IsUpper(name[i - 1])) {
-                builder.Append('_');
-            }
+            if (char.IsUpper(c) && i > 0 && name[i - 1] != '_' && !char.IsUpper(name[i - 1])) builder.Append('_');
 
             builder.Append(char.ToLowerInvariant(c));
         }

@@ -39,16 +39,14 @@ public sealed class EfCoreAuditTrail<TDbContext>(
         // interceptor to contribute their diffs. Inside the ambient transaction this flush is atomic with the
         // commit anyway; with no transaction it is exactly the flush that persists the handler's work.
         var inTransaction = dbContext.Database.CurrentTransaction is not null;
-        if (dbContext.ChangeTracker.HasChanges()) {
+        if (dbContext.ChangeTracker.HasChanges())
             await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
 
         dbContext.Add(ToEntry(buildRecord()));
-        if (inTransaction) {
+        if (inTransaction)
             // The unit-of-work commit flush persists the entry; it becomes durable only when the transaction
             // commits — at which point the AuditSaveChangesInterceptor promotes the scope's pending mark.
             return AuditRecordDurability.EnlistedInTransaction;
-        }
 
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return AuditRecordDurability.Durable;
@@ -64,29 +62,32 @@ public sealed class EfCoreAuditTrail<TDbContext>(
         await detached.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static AuditLogEntry ToEntry(AuditRecord record) => new() {
-        Id = record.Id,
-        OccurredAtUtc = record.OccurredAt,
-        Action = record.Action,
-        Module = record.Module,
-        UserId = record.UserId,
-        ResourceType = record.ResourceType,
-        ResourceId = record.ResourceId,
-        ParentResourceType = record.ParentResourceType,
-        ParentResourceId = record.ParentResourceId,
-        Outcome = record.Outcome.ToString(),
-        ErrorKind = record.ErrorKind,
-        CorrelationId = record.CorrelationId,
-        Changes = record.Changes.Count > 0
-            ? JsonSerializer.Serialize(ToArray(record.Changes), AuditingJsonContext.Default.AuditChangeArray)
-            : null,
-        Details = record.Details.Count > 0
-            ? JsonSerializer.Serialize(
-                record.Details as Dictionary<string, string> ?? new Dictionary<string, string>(record.Details),
-                AuditingJsonContext.Default.DictionaryStringString)
-            : null,
-    };
+    private static AuditLogEntry ToEntry(AuditRecord record) {
+        return new AuditLogEntry {
+            Id = record.Id,
+            OccurredAtUtc = record.OccurredAt,
+            Action = record.Action,
+            Module = record.Module,
+            UserId = record.UserId,
+            ResourceType = record.ResourceType,
+            ResourceId = record.ResourceId,
+            ParentResourceType = record.ParentResourceType,
+            ParentResourceId = record.ParentResourceId,
+            Outcome = record.Outcome.ToString(),
+            ErrorKind = record.ErrorKind,
+            CorrelationId = record.CorrelationId,
+            Changes = record.Changes.Count > 0
+                ? JsonSerializer.Serialize(ToArray(record.Changes), AuditingJsonContext.Default.AuditChangeArray)
+                : null,
+            Details = record.Details.Count > 0
+                ? JsonSerializer.Serialize(
+                    record.Details as Dictionary<string, string> ?? new Dictionary<string, string>(record.Details),
+                    AuditingJsonContext.Default.DictionaryStringString)
+                : null
+        };
+    }
 
-    private static AuditChange[] ToArray(IReadOnlyList<AuditChange> changes) =>
-        changes as AuditChange[] ?? [.. changes];
+    private static AuditChange[] ToArray(IReadOnlyList<AuditChange> changes) {
+        return changes as AuditChange[] ?? [.. changes];
+    }
 }

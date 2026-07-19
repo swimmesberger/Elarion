@@ -9,8 +9,7 @@ namespace Elarion.Paging;
 /// <c>ToKeysetPageAsync</c>/<c>ToOffsetPageAsync</c>: the predicate becomes part of the single SQL statement,
 /// so pagination and total counts stay correct and the database never returns rows the caller cannot see.
 /// </summary>
-public static class QueryableAuthorizationExtensions
-{
+public static class QueryableAuthorizationExtensions {
     /// <summary>
     /// Restricts <paramref name="source"/> to the rows <paramref name="user"/> may access for
     /// <paramref name="operation"/> (defaulting to <see cref="ResourceOperation.Read"/>), using
@@ -22,8 +21,7 @@ public static class QueryableAuthorizationExtensions
         IQueryAuthorizer<TEntity> authorizer,
         ICurrentUser user,
         ResourceOperation? operation = null)
-        where TEntity : class
-    {
+        where TEntity : class {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(authorizer);
         ArgumentNullException.ThrowIfNull(user);

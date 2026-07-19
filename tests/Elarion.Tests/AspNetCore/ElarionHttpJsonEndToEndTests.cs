@@ -37,8 +37,9 @@ public sealed partial class ElarionHttpJsonEndToEndTests {
     private sealed partial class HttpJsonTestContext : JsonSerializerContext;
 
     private sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
-        public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<CreateThingResponse>>(new CreateThingResponse(request.Name));
+        public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<CreateThingResponse>>(new CreateThingResponse(request.Name));
+        }
     }
 
     [Fact]
@@ -75,7 +76,8 @@ public sealed partial class ElarionHttpJsonEndToEndTests {
             // 200 (not 500) proves the body deserialized through the source-gen resolver with reflection off.
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             (await response.Content.ReadAsStringAsync(ct)).Should().Contain("Widget");
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }
@@ -120,7 +122,8 @@ public sealed partial class ElarionHttpJsonEndToEndTests {
             var body = await invalid.Content.ReadAsStringAsync(ct);
             body.Should().Contain("Name is required");
             body.Should().Contain("\"errors\"");
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }

@@ -27,14 +27,14 @@ public sealed class JsonRpcTelemetryTests {
             .Freeze();
         await using var provider = CreateProvider(dispatcher);
         var body = """
-            [
-              { "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "ok" }, "id": "1" },
-              { "jsonrpc": "2.0", "method": "test.missing", "id": "2" },
-              { "jsonrpc": "2.0", "id": "missing-method" },
-              { "jsonrpc": "1.0", "method": "test.echo" },
-              { "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "null-id" }, "id": null }
-            ]
-            """;
+                   [
+                     { "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "ok" }, "id": "1" },
+                     { "jsonrpc": "2.0", "method": "test.missing", "id": "2" },
+                     { "jsonrpc": "2.0", "id": "missing-method" },
+                     { "jsonrpc": "1.0", "method": "test.echo" },
+                     { "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "null-id" }, "id": null }
+                   ]
+                   """;
         var context = CreateContext(provider, body);
 
         await JsonRpcEndpoint.HandleRpc(context);
@@ -107,7 +107,8 @@ public sealed class JsonRpcTelemetryTests {
                 }))
             .Freeze();
         await using var provider = CreateProvider(dispatcher);
-        var context = CreateContext(provider, """{ "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "ok" }, "id": 42 }""");
+        var context = CreateContext(provider,
+            """{ "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "ok" }, "id": 42 }""");
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -133,10 +134,10 @@ public sealed class JsonRpcTelemetryTests {
             .Freeze();
         await using var provider = CreateProvider(dispatcher);
         var context = CreateContext(provider, """
-            [
-              { "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "notify" } }
-            ]
-            """);
+                                              [
+                                                { "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "notify" } }
+                                              ]
+                                              """);
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -160,7 +161,8 @@ public sealed class JsonRpcTelemetryTests {
                 }))
             .Freeze();
         await using var provider = CreateProvider(dispatcher);
-        var context = CreateContext(provider, """{ "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "notify" } }""");
+        var context = CreateContext(provider,
+            """{ "jsonrpc": "2.0", "method": "test.echo", "params": { "value": "notify" } }""");
 
         await JsonRpcEndpoint.HandleRpc(context);
 
@@ -210,11 +212,12 @@ public sealed class JsonRpcTelemetryTests {
         return context;
     }
 
-    private static JsonSerializerOptions CreateJsonOptions() =>
-        new() {
+    private static JsonSerializerOptions CreateJsonOptions() {
+        return new JsonSerializerOptions {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             TypeInfoResolver = new DefaultJsonTypeInfoResolver()
         };
+    }
 
     private sealed record TestRequest {
         public required string Value { get; init; }

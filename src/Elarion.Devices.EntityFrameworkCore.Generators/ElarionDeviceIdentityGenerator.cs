@@ -16,7 +16,9 @@ namespace Elarion.Devices.EntityFrameworkCore.Generators;
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class ElarionDeviceIdentityGenerator : IIncrementalGenerator {
-    private const string AttributeMetadataName = "Elarion.Devices.EntityFrameworkCore.GenerateElarionDeviceIdentityAttribute";
+    private const string AttributeMetadataName =
+        "Elarion.Devices.EntityFrameworkCore.GenerateElarionDeviceIdentityAttribute";
+
     private const string GenerateDbSetsAttributeName = ElarionGeneratorConventions.GenerateDbSetsAttribute;
     private const string DevicesEntityFrameworkCoreNamespace = "global::Elarion.Devices.EntityFrameworkCore";
 
@@ -32,7 +34,7 @@ public sealed class ElarionDeviceIdentityGenerator : IIncrementalGenerator {
         + "so the device identity DbSets and model-configuration seam are generated",
         "Elarion.Devices.EntityFrameworkCore",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var targets = context.SyntaxProvider
@@ -44,17 +46,11 @@ public sealed class ElarionDeviceIdentityGenerator : IIncrementalGenerator {
             .WithTrackingName("DeviceIdentityTargets");
 
         context.RegisterSourceOutput(targets, static (spc, target) => {
-            if (target is null) {
-                return;
-            }
+            if (target is null) return;
 
-            foreach (var diagnostic in target.Diagnostics) {
-                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-            }
+            foreach (var diagnostic in target.Diagnostics) spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-            if (target.Emit) {
-                Emit(spc, target);
-            }
+            if (target.Emit) Emit(spc, target);
         });
     }
 
@@ -70,16 +66,14 @@ public sealed class ElarionDeviceIdentityGenerator : IIncrementalGenerator {
         EquatableArray<DiagnosticInfo> Diagnostics);
 
     private static DeviceIdentityTarget? GetTarget(GeneratorAttributeSyntaxContext ctx) {
-        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) {
-            return null;
-        }
+        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) return null;
 
         var snakeCase = true;
         string? keyTableName = null;
         string? pairingCodeTableName = null;
         string? schema = null;
-        if (ctx.Attributes.Length > 0) {
-            foreach (var namedArgument in ctx.Attributes[0].NamedArguments) {
+        if (ctx.Attributes.Length > 0)
+            foreach (var namedArgument in ctx.Attributes[0].NamedArguments)
                 switch (namedArgument.Key) {
                     case "SnakeCase" when namedArgument.Value.Value is bool value:
                         snakeCase = value;
@@ -94,8 +88,6 @@ public sealed class ElarionDeviceIdentityGenerator : IIncrementalGenerator {
                         schema = schemaValue;
                         break;
                 }
-            }
-        }
 
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         var ns = contextSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
@@ -108,10 +100,9 @@ public sealed class ElarionDeviceIdentityGenerator : IIncrementalGenerator {
             .Any(attribute => attribute.AttributeClass?.ToDisplayString() == GenerateDbSetsAttributeName);
 
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
-        if (!hasGenerateDbSets) {
+        if (!hasGenerateDbSets)
             diagnostics.Add(DiagnosticInfo.Create(
                 MissingGenerateDbSets, LocationInfo.From(contextSymbol), contextSymbol.ToDisplayString(fmt)));
-        }
 
         return new DeviceIdentityTarget(
             ns,
@@ -121,7 +112,7 @@ public sealed class ElarionDeviceIdentityGenerator : IIncrementalGenerator {
             keyTableName,
             pairingCodeTableName,
             schema,
-            Emit: hasGenerateDbSets,
+            hasGenerateDbSets,
             diagnostics.ToImmutable());
     }
 
@@ -140,14 +131,19 @@ public sealed class ElarionDeviceIdentityGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"partial class {target.ContextName}");
         sb.AppendLine("{");
-        sb.AppendLine($"    public DbSet<{DevicesEntityFrameworkCoreNamespace}.DeviceKeyEntity> DeviceKeys => Set<{DevicesEntityFrameworkCoreNamespace}.DeviceKeyEntity>();");
+        sb.AppendLine(
+            $"    public DbSet<{DevicesEntityFrameworkCoreNamespace}.DeviceKeyEntity> DeviceKeys => Set<{DevicesEntityFrameworkCoreNamespace}.DeviceKeyEntity>();");
         sb.AppendLine();
-        sb.AppendLine($"    public DbSet<{DevicesEntityFrameworkCoreNamespace}.DevicePairingCodeEntity> DevicePairingCodes => Set<{DevicesEntityFrameworkCoreNamespace}.DevicePairingCodeEntity>();");
+        sb.AppendLine(
+            $"    public DbSet<{DevicesEntityFrameworkCoreNamespace}.DevicePairingCodeEntity> DevicePairingCodes => Set<{DevicesEntityFrameworkCoreNamespace}.DevicePairingCodeEntity>();");
         sb.AppendLine();
-        sb.AppendLine("    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
-        sb.AppendLine("    // end of ConfigureEntities, so it composes with [GenerateElarionSettings]/[GenerateElarionActorSnapshots].");
+        sb.AppendLine(
+            "    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
+        sb.AppendLine(
+            "    // end of ConfigureEntities, so it composes with [GenerateElarionSettings]/[GenerateElarionActorSnapshots].");
         sb.AppendLine($"    partial void {SeamMethodName}(ModelBuilder modelBuilder) =>");
-        sb.AppendLine($"        {DevicesEntityFrameworkCoreNamespace}.DeviceIdentityModelBuilderExtensions.UseElarionDeviceIdentity(");
+        sb.AppendLine(
+            $"        {DevicesEntityFrameworkCoreNamespace}.DeviceIdentityModelBuilderExtensions.UseElarionDeviceIdentity(");
         sb.AppendLine(
             $"            modelBuilder, keyTableName: {SourceLiterals.String(target.KeyTableName)}, " +
             $"pairingCodeTableName: {SourceLiterals.String(target.PairingCodeTableName)}, " +

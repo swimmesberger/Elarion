@@ -16,58 +16,58 @@ namespace Elarion.EntityFrameworkCore.Generators;
 /// table for the caller's user/roles) — as a plain typed expression the query provider translates to SQL.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
-public sealed class ResourceFilterGenerator : IIncrementalGenerator
-{
+public sealed class ResourceFilterGenerator : IIncrementalGenerator {
     private const string ResourceFilterAttributeName = ElarionGeneratorConventions.ResourceFilterAttribute;
     private const string CurrentUserType = "global::Elarion.Abstractions.Identity.ICurrentUser";
     private const string OperationType = "global::Elarion.Abstractions.Authorization.ResourceOperation";
     private const string QueryAuthorizerType = ElarionGeneratorConventions.QueryAuthorizerTypeFqn;
     private const string GrantSourceType = "global::Elarion.Authorization.EntityFrameworkCore.IResourceGrantSource";
     private const string ServiceCollectionType = "global::Microsoft.Extensions.DependencyInjection.IServiceCollection";
-    private const string ServiceCollectionExtensions = "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions";
+
+    private const string ServiceCollectionExtensions =
+        "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions";
 
     private static readonly DiagnosticDescriptor UnknownProperty = new(
-        id: "ELRES001",
-        title: "ResourceFilter property does not match a property",
-        messageFormat: "Entity '{0}' has a [ResourceFilter] rule property '{1}' that does not match any property; no filter will be generated",
-        category: "Elarion.EntityFrameworkCore",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELRES001",
+        "ResourceFilter property does not match a property",
+        "Entity '{0}' has a [ResourceFilter] rule property '{1}' that does not match any property; no filter will be generated",
+        "Elarion.EntityFrameworkCore",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor UnsupportedPropertyType = new(
-        id: "ELRES002",
-        title: "ResourceFilter property type is not supported",
-        messageFormat: "Entity '{0}' has a [ResourceFilter] rule property '{1}' of type '{2}', which is not supported; use a non-nullable Guid, string, int, or long; no filter will be generated",
-        category: "Elarion.EntityFrameworkCore",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELRES002",
+        "ResourceFilter property type is not supported",
+        "Entity '{0}' has a [ResourceFilter] rule property '{1}' of type '{2}', which is not supported; use a non-nullable Guid, string, int, or long; no filter will be generated",
+        "Elarion.EntityFrameworkCore",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidFilterClass = new(
-        id: "ELRES003",
-        title: "ResourceFilter class must be a top-level partial class",
-        messageFormat: "ResourceFilter class '{0}' must be a non-nested partial class; the generator emits the filter definition into it",
-        category: "Elarion.EntityFrameworkCore",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELRES003",
+        "ResourceFilter class must be a top-level partial class",
+        "ResourceFilter class '{0}' must be a non-nested partial class; the generator emits the filter definition into it",
+        "Elarion.EntityFrameworkCore",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor NoRules = new(
-        id: "ELRES004",
-        title: "ResourceFilter declares no rules",
-        messageFormat: "ResourceFilter class '{0}' declares no rules; set OwnerProperty, TenantProperty, and/or Shared so a predicate can be generated",
-        category: "Elarion.EntityFrameworkCore",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELRES004",
+        "ResourceFilter declares no rules",
+        "ResourceFilter class '{0}' declares no rules; set OwnerProperty, TenantProperty, and/or Shared so a predicate can be generated",
+        "Elarion.EntityFrameworkCore",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor SharedWithoutResourceType = new(
-        id: "ELRES005",
-        title: "ResourceFilter Shared rule requires ResourceTypeName",
-        messageFormat: "ResourceFilter class '{0}' sets Shared = true but no ResourceTypeName; set ResourceTypeName so the grant lookup can match the resource type",
-        category: "Elarion.EntityFrameworkCore",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELRES005",
+        "ResourceFilter Shared rule requires ResourceTypeName",
+        "ResourceFilter class '{0}' sets Shared = true but no ResourceTypeName; set ResourceTypeName so the grant lookup can match the resource type",
+        "Elarion.EntityFrameworkCore",
+        DiagnosticSeverity.Error,
+        true);
 
-    public void Initialize(IncrementalGeneratorInitializationContext context)
-    {
+    public void Initialize(IncrementalGeneratorInitializationContext context) {
         var targets = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 ResourceFilterAttributeName,
@@ -77,52 +77,34 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutput(
             targets,
-            static (spc, target) =>
-            {
-                if (target is null)
-                {
-                    return;
-                }
+            static (spc, target) => {
+                if (target is null) return;
 
-                foreach (var diagnostic in target.Diagnostics)
-                {
-                    spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-                }
+                foreach (var diagnostic in target.Diagnostics) spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-                if (target.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
-                {
-                    return;
-                }
+                if (target.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)) return;
 
                 Emit(spc, target);
             });
     }
 
-    private static ResourceFilterTarget? GetTarget(GeneratorAttributeSyntaxContext ctx)
-    {
-        if (ctx.TargetSymbol is not INamedTypeSymbol filterClass)
-        {
-            return null;
-        }
+    private static ResourceFilterTarget? GetTarget(GeneratorAttributeSyntaxContext ctx) {
+        if (ctx.TargetSymbol is not INamedTypeSymbol filterClass) return null;
 
         // The filter class carries the definition; the entity comes from the generic type argument.
         if (ctx.Attributes.Length == 0 ||
             ctx.Attributes[0].AttributeClass is not { TypeArguments.Length: 1 } attributeClass ||
             attributeClass.TypeArguments[0] is not INamedTypeSymbol entity)
-        {
             return null;
-        }
 
         var location = LocationModel.From(filterClass);
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticModel>();
 
         // The generator completes the class as a partial; a nested or non-partial class cannot be filled.
         var isPartial = ctx.TargetNode is TypeDeclarationSyntax typeDecl &&
-            typeDecl.Modifiers.Any(SyntaxKind.PartialKeyword);
+                        typeDecl.Modifiers.Any(SyntaxKind.PartialKeyword);
         if (!isPartial || filterClass.ContainingType is not null)
-        {
             diagnostics.Add(DiagnosticModel.Create(InvalidFilterClass, location, filterClass.Name));
-        }
 
         string? ownerProperty = null;
         string? tenantProperty = null;
@@ -131,9 +113,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         string? resourceTypeName = null;
         var idProperty = "Id";
         foreach (var argument in ctx.Attributes[0].NamedArguments)
-        {
-            switch (argument.Key)
-            {
+            switch (argument.Key) {
                 case "OwnerProperty":
                     ownerProperty = argument.Value.Value as string;
                     break;
@@ -141,10 +121,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
                     tenantProperty = argument.Value.Value as string;
                     break;
                 case "TenantClaimType":
-                    if (argument.Value.Value is string claim && claim.Length > 0)
-                    {
-                        tenantClaimType = claim;
-                    }
+                    if (argument.Value.Value is string claim && claim.Length > 0) tenantClaimType = claim;
 
                     break;
                 case "Shared":
@@ -154,14 +131,10 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
                     resourceTypeName = argument.Value.Value as string;
                     break;
                 case "IdProperty":
-                    if (argument.Value.Value is string id && id.Length > 0)
-                    {
-                        idProperty = id;
-                    }
+                    if (argument.Value.Value is string id && id.Length > 0) idProperty = id;
 
                     break;
             }
-        }
 
         var rules = ImmutableArray.CreateBuilder<RuleModel>();
         var properties = GetAccessibleProperties(entity);
@@ -169,42 +142,30 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         // Owner is a grant rule (OR-combined); tenant is a scope rule (AND-combined). Order is fixed so the
         // emitted source is byte-identical across runs.
         if (!string.IsNullOrEmpty(ownerProperty))
-        {
-            AddPropertyRule(rules, diagnostics, properties, entity, location, RuleKindGrant, ownerProperty!, claimType: null);
-        }
+            AddPropertyRule(rules, diagnostics, properties, entity, location, RuleKindGrant, ownerProperty!, null);
 
         if (!string.IsNullOrEmpty(tenantProperty))
-        {
-            AddPropertyRule(rules, diagnostics, properties, entity, location, RuleKindScope, tenantProperty!, claimType: tenantClaimType);
-        }
+            AddPropertyRule(rules, diagnostics, properties, entity, location, RuleKindScope, tenantProperty!,
+                tenantClaimType);
 
         string? idParseKind = null;
-        if (shared)
-        {
+        if (shared) {
             if (string.IsNullOrEmpty(resourceTypeName))
-            {
                 diagnostics.Add(DiagnosticModel.Create(SharedWithoutResourceType, location, filterClass.Name));
-            }
 
-            if (!properties.TryGetValue(idProperty, out var idProp))
-            {
+            if (!properties.TryGetValue(idProperty, out var idProp)) {
                 diagnostics.Add(DiagnosticModel.Create(UnknownProperty, location, entity.Name, idProperty));
             }
-            else
-            {
+            else {
                 idParseKind = ResolveParseKind(idProp.Type);
                 if (idParseKind is null)
-                {
                     diagnostics.Add(DiagnosticModel.Create(
                         UnsupportedPropertyType, location, entity.Name, idProperty, idProp.Type.ToDisplayString()));
-                }
             }
         }
 
         if (string.IsNullOrEmpty(ownerProperty) && string.IsNullOrEmpty(tenantProperty) && !shared)
-        {
             diagnostics.Add(DiagnosticModel.Create(NoRules, location, filterClass.Name));
-        }
 
         return new ResourceFilterTarget(
             filterClass.Name,
@@ -229,17 +190,14 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         LocationModel location,
         string kind,
         string propertyName,
-        string? claimType)
-    {
-        if (!properties.TryGetValue(propertyName, out var property))
-        {
+        string? claimType) {
+        if (!properties.TryGetValue(propertyName, out var property)) {
             diagnostics.Add(DiagnosticModel.Create(UnknownProperty, location, entity.Name, propertyName));
             return;
         }
 
         var parseKind = ResolveParseKind(property.Type);
-        if (parseKind is null)
-        {
+        if (parseKind is null) {
             diagnostics.Add(DiagnosticModel.Create(
                 UnsupportedPropertyType, location, entity.Name, propertyName, property.Type.ToDisplayString()));
             return;
@@ -248,15 +206,10 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         rules.Add(new RuleModel(kind, propertyName, parseKind, claimType));
     }
 
-    private static string? ResolveParseKind(ITypeSymbol type)
-    {
-        if (IsNullable(type))
-        {
-            return null;
-        }
+    private static string? ResolveParseKind(ITypeSymbol type) {
+        if (IsNullable(type)) return null;
 
-        switch (type.SpecialType)
-        {
+        switch (type.SpecialType) {
             case SpecialType.System_String:
                 return "string";
             case SpecialType.System_Int32:
@@ -268,40 +221,26 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         return type.ToDisplayString() == "System.Guid" ? "guid" : null;
     }
 
-    private static Dictionary<string, IPropertySymbol> GetAccessibleProperties(INamedTypeSymbol entity)
-    {
+    private static Dictionary<string, IPropertySymbol> GetAccessibleProperties(INamedTypeSymbol entity) {
         var result = new Dictionary<string, IPropertySymbol>(StringComparer.Ordinal);
         for (var type = entity; type is not null; type = type.BaseType)
-        {
             foreach (var member in type.GetMembers())
-            {
                 if (member is IPropertySymbol { IsStatic: false, GetMethod: not null } property &&
                     !result.ContainsKey(property.Name))
-                {
                     result.Add(property.Name, property);
-                }
-            }
-        }
 
         return result;
     }
 
-    private static bool IsNullable(ITypeSymbol type)
-    {
-        if (type is INamedTypeSymbol named && named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
-        {
-            return true;
-        }
+    private static bool IsNullable(ITypeSymbol type) {
+        if (type is INamedTypeSymbol named &&
+            named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T) return true;
 
         return type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated;
     }
 
-    private static void Emit(SourceProductionContext context, ResourceFilterTarget target)
-    {
-        if (target.Rules.IsEmpty && !target.Shared)
-        {
-            return;
-        }
+    private static void Emit(SourceProductionContext context, ResourceFilterTarget target) {
+        if (target.Rules.IsEmpty && !target.Shared) return;
 
         var entity = target.EntityGlobalFqn;
         var className = target.ClassName;
@@ -311,8 +250,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         var hasNamespace = target.ClassNamespace.Length > 0;
-        if (hasNamespace)
-        {
+        if (hasNamespace) {
             sb.AppendLine($"namespace {target.ClassNamespace};");
             sb.AppendLine();
         }
@@ -322,8 +260,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         sb.AppendLine($"partial class {className} : {QueryAuthorizerType}<{entity}>");
         sb.AppendLine("{");
 
-        if (target.Shared)
-        {
+        if (target.Shared) {
             // A shared filter consults the grants set (an EXISTS), so it is a scoped service rather than a
             // stateless singleton; the host registers it with Register (or the generated DI aggregation).
             sb.AppendLine($"    private readonly {GrantSourceType} __grants;");
@@ -331,12 +268,12 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
             sb.AppendLine($"    public {className}({GrantSourceType} grants) => __grants = grants;");
             sb.AppendLine();
             sb.AppendLine($"    public static void Register({ServiceCollectionType} services)");
-            sb.AppendLine($"        => {ServiceCollectionExtensions}.AddScoped<{QueryAuthorizerType}<{entity}>, {className}>(services);");
+            sb.AppendLine(
+                $"        => {ServiceCollectionExtensions}.AddScoped<{QueryAuthorizerType}<{entity}>, {className}>(services);");
             sb.AppendLine();
             EmitSharedGetFilter(sb, target, entity);
         }
-        else
-        {
+        else {
             sb.AppendLine($"    public static {className} Specification {{ get; }} = new();");
             sb.AppendLine();
             sb.AppendLine($"    private {className}() {{ }}");
@@ -354,8 +291,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         context.AddSource($"{hint}.ResourceFilter.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 
-    private static void EmitGetFilter(StringBuilder sb, ResourceFilterTarget target, string entity)
-    {
+    private static void EmitGetFilter(StringBuilder sb, ResourceFilterTarget target, string entity) {
         sb.AppendLine(
             $"    public global::System.Linq.Expressions.Expression<global::System.Func<{entity}, bool>>? GetFilter(");
         sb.AppendLine($"        {CurrentUserType} user,");
@@ -369,8 +305,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
 
         var scopeTerms = new List<string>();
         var grantTerms = new List<string>();
-        for (var i = 0; i < target.Rules.Length; i++)
-        {
+        for (var i = 0; i < target.Rules.Length; i++) {
             var rule = target.Rules[i];
             var keyVar = $"__key{i}";
             EmitKeyResolution(sb, rule, keyVar);
@@ -378,21 +313,16 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
 
             var term = $"__e.{rule.PropertyName} == {keyVar}";
             if (rule.Kind == RuleKindScope)
-            {
                 scopeTerms.Add(term);
-            }
             else
-            {
                 grantTerms.Add(term);
-            }
         }
 
         sb.AppendLine($"        return __e => {ComposeBody(scopeTerms, grantTerms)};");
         sb.AppendLine("    }");
     }
 
-    private static void EmitSharedGetFilter(StringBuilder sb, ResourceFilterTarget target, string entity)
-    {
+    private static void EmitSharedGetFilter(StringBuilder sb, ResourceFilterTarget target, string entity) {
         sb.AppendLine(
             $"    public global::System.Linq.Expressions.Expression<global::System.Func<{entity}, bool>>? GetFilter(");
         sb.AppendLine($"        {CurrentUserType} user,");
@@ -406,28 +336,25 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
 
         var scopeTerms = new List<string>();
         var grantTerms = new List<string>();
-        for (var i = 0; i < target.Rules.Length; i++)
-        {
+        for (var i = 0; i < target.Rules.Length; i++) {
             var rule = target.Rules[i];
             var keyVar = $"__key{i}";
-            if (rule.Kind == RuleKindScope)
-            {
+            if (rule.Kind == RuleKindScope) {
                 // A scope that cannot be resolved means no access at all (AND), so fail closed.
                 EmitKeyResolution(sb, rule, keyVar);
                 sb.AppendLine();
                 scopeTerms.Add($"__e.{rule.PropertyName} == {keyVar}");
             }
-            else if (rule.ParseKind == "string")
-            {
+            else if (rule.ParseKind == "string") {
                 sb.AppendLine($"        var {keyVar} = user.UserId;");
                 sb.AppendLine();
                 grantTerms.Add($"__e.{rule.PropertyName} == {keyVar}");
             }
-            else
-            {
+            else {
                 // An owner key that does not parse just disqualifies the owner grant; a share may still apply.
                 var okVar = $"__ok{i}";
-                sb.AppendLine($"        var {okVar} = {TryParseMethod(rule.ParseKind)}(user.UserId, out var {keyVar});");
+                sb.AppendLine(
+                    $"        var {okVar} = {TryParseMethod(rule.ParseKind)}(user.UserId, out var {keyVar});");
                 sb.AppendLine();
                 grantTerms.Add($"({okVar} && __e.{rule.PropertyName} == {keyVar})");
             }
@@ -453,29 +380,23 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
     }
 
-    private static string ComposeBody(List<string> scopeTerms, List<string> grantTerms)
-    {
+    private static string ComposeBody(List<string> scopeTerms, List<string> grantTerms) {
         if (scopeTerms.Count > 0 && grantTerms.Count > 0)
-        {
             return string.Join(" && ", scopeTerms) + " && (" + string.Join(" || ", grantTerms) + ")";
-        }
 
         return grantTerms.Count > 0
             ? string.Join(" || ", grantTerms)
             : string.Join(" && ", scopeTerms);
     }
 
-    private static void EmitKeyResolution(StringBuilder sb, RuleModel rule, string keyVar)
-    {
+    private static void EmitKeyResolution(StringBuilder sb, RuleModel rule, string keyVar) {
         var source = rule.ClaimType is null
             ? "user.UserId"
             : $"global::System.Linq.Enumerable.FirstOrDefault(user.GetClaimValues(\"{Escape(rule.ClaimType)}\"))";
 
-        if (rule.ParseKind == "string")
-        {
+        if (rule.ParseKind == "string") {
             sb.AppendLine($"        var {keyVar} = {source};");
-            if (rule.ClaimType is not null)
-            {
+            if (rule.ClaimType is not null) {
                 sb.AppendLine($"        if ({keyVar} is null)");
                 sb.AppendLine("        {");
                 sb.AppendLine("            return __e => false;");
@@ -491,16 +412,18 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
         sb.AppendLine("        }");
     }
 
-    private static string TryParseMethod(string parseKind) => parseKind switch
-    {
-        "guid" => "global::System.Guid.TryParse",
-        "int" => "global::System.Int32.TryParse",
-        "long" => "global::System.Int64.TryParse",
-        _ => "global::System.Guid.TryParse",
-    };
+    private static string TryParseMethod(string parseKind) {
+        return parseKind switch {
+            "guid" => "global::System.Guid.TryParse",
+            "int" => "global::System.Int32.TryParse",
+            "long" => "global::System.Int64.TryParse",
+            _ => "global::System.Guid.TryParse"
+        };
+    }
 
-    private static string Escape(string value)
-        => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    private static string Escape(string value) {
+        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
 
     private const string RuleKindScope = "scope";
     private const string RuleKindGrant = "grant";
@@ -524,31 +447,29 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator
     private sealed record DiagnosticModel(
         DiagnosticDescriptor Descriptor,
         LocationModel Location,
-        EquatableArray<string> Args)
-    {
+        EquatableArray<string> Args) {
         public DiagnosticSeverity Severity => Descriptor.DefaultSeverity;
 
-        public static DiagnosticModel Create(DiagnosticDescriptor descriptor, LocationModel location, params string[] args)
-            => new(descriptor, location, args.ToImmutableArray());
+        public static DiagnosticModel Create(DiagnosticDescriptor descriptor, LocationModel location,
+            params string[] args) {
+            return new DiagnosticModel(descriptor, location, args.ToImmutableArray());
+        }
 
-        public Diagnostic ToDiagnostic()
-            => Diagnostic.Create(Descriptor, Location.ToLocation(), [.. Args]);
+        public Diagnostic ToDiagnostic() {
+            return Diagnostic.Create(Descriptor, Location.ToLocation(), [.. Args]);
+        }
     }
 
-    private readonly record struct LocationModel(string? FilePath, TextSpan Span, LinePositionSpan LineSpan)
-    {
-        public static LocationModel From(ISymbol symbol)
-        {
+    private readonly record struct LocationModel(string? FilePath, TextSpan Span, LinePositionSpan LineSpan) {
+        public static LocationModel From(ISymbol symbol) {
             var location = symbol.Locations.FirstOrDefault();
-            if (location is null || location.SourceTree is null)
-            {
-                return new LocationModel(null, default, default);
-            }
+            if (location is null || location.SourceTree is null) return new LocationModel(null, default, default);
 
             return new LocationModel(location.SourceTree.FilePath, location.SourceSpan, location.GetLineSpan().Span);
         }
 
-        public Location? ToLocation()
-            => FilePath is null ? null : Location.Create(FilePath, Span, LineSpan);
+        public Location? ToLocation() {
+            return FilePath is null ? null : Location.Create(FilePath, Span, LineSpan);
+        }
     }
 }

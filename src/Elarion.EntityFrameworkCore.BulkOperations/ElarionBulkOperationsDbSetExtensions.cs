@@ -35,7 +35,8 @@ public static class ElarionBulkOperationsDbSetExtensions {
         ArgumentNullException.ThrowIfNull(entities);
 
         var context = set.GetService<ICurrentDbContext>().Context;
-        return GetProvider(context).ExecuteInsertAsync(context, entities, options ?? BulkInsertOptions.Default, cancellationToken);
+        return GetProvider(context)
+            .ExecuteInsertAsync(context, entities, options ?? BulkInsertOptions.Default, cancellationToken);
     }
 
     /// <summary>
@@ -54,12 +55,14 @@ public static class ElarionBulkOperationsDbSetExtensions {
         ArgumentNullException.ThrowIfNull(entities);
 
         var context = set.GetService<ICurrentDbContext>().Context;
-        return GetProvider(context).ExecuteInsertAsync(context, entities, options ?? BulkInsertOptions.Default, cancellationToken);
+        return GetProvider(context)
+            .ExecuteInsertAsync(context, entities, options ?? BulkInsertOptions.Default, cancellationToken);
     }
 
-    private static IBulkInsertProvider GetProvider(DbContext context) =>
-        (IBulkInsertProvider?)context.GetInfrastructure().GetService(typeof(IBulkInsertProvider))
-            ?? throw new InvalidOperationException(
-                "No bulk operations provider is configured for this DbContext. Add one to the context options, " +
-                "e.g. 'options.UseNpgsql(...).UseElarionPostgreSqlBulkOperations()' from Elarion.BulkOperations.PostgreSql.");
+    private static IBulkInsertProvider GetProvider(DbContext context) {
+        return (IBulkInsertProvider?)context.GetInfrastructure().GetService(typeof(IBulkInsertProvider))
+               ?? throw new InvalidOperationException(
+                   "No bulk operations provider is configured for this DbContext. Add one to the context options, " +
+                   "e.g. 'options.UseNpgsql(...).UseElarionPostgreSqlBulkOperations()' from Elarion.BulkOperations.PostgreSql.");
+    }
 }

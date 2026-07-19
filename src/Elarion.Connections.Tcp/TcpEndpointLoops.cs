@@ -134,9 +134,7 @@ internal static class TcpEndpointLoops {
                 reportState?.Invoke(TcpEndpointState.Dialing, failure.Message);
             }
 
-            if (ct.IsCancellationRequested) {
-                break;
-            }
+            if (ct.IsCancellationRequested) break;
 
             try {
                 await Task.Delay(NextDelay(options, failedAttempts), timeProvider, ct);
@@ -168,11 +166,9 @@ internal static class TcpEndpointLoops {
         // thundering-herd a recovering device. A session that ended cleanly retries at the min delay.
         var exponent = Math.Clamp(failedAttempts - 1, 0, 16);
         var baseDelay = options.ReconnectMinDelay * Math.Pow(2, exponent);
-        if (baseDelay > options.ReconnectMaxDelay) {
-            baseDelay = options.ReconnectMaxDelay;
-        }
+        if (baseDelay > options.ReconnectMaxDelay) baseDelay = options.ReconnectMaxDelay;
 
-        var jitter = 0.8 + (Random.Shared.NextDouble() * 0.4);
+        var jitter = 0.8 + Random.Shared.NextDouble() * 0.4;
         return baseDelay * jitter;
     }
 }

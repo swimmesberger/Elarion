@@ -80,9 +80,8 @@ public sealed class SettingsConfigurationRefresher(
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         try {
-            await foreach (var _ in _signals.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+            await foreach (var _ in _signals.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
                 await RefreshSafelyAsync(stoppingToken).ConfigureAwait(false);
-            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
             // Expected on shutdown.

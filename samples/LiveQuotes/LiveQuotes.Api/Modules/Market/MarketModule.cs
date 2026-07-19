@@ -14,7 +14,9 @@ namespace LiveQuotes.Api.Modules.Market;
 /// </summary>
 [AppModule("Market")]
 public static partial class MarketModule {
-    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => MarketJsonContext.Default;
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() {
+        return MarketJsonContext.Default;
+    }
 
     /// <summary>Non-generated registrations: the simulated feed and its options.</summary>
     public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {

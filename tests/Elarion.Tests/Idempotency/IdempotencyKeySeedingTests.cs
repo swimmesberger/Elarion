@@ -8,8 +8,9 @@ using Xunit;
 namespace Elarion.Tests.Idempotency;
 
 public sealed class IdempotencyKeySeedingTests {
-    private static ServiceProvider BuildProvider() =>
-        new ServiceCollection().AddElarionIdempotency().BuildServiceProvider();
+    private static ServiceProvider BuildProvider() {
+        return new ServiceCollection().AddElarionIdempotency().BuildServiceProvider();
+    }
 
     [Fact]
     public void SeedScope_SeedsKeyFromDispatchContext() {
@@ -44,7 +45,8 @@ public sealed class IdempotencyKeySeedingTests {
             var context = new DispatchScopeContext();
             context.Set(new IdempotencyKey("scoped"));
             scope.ServiceProvider.SeedScope(context);
-            scope.ServiceProvider.GetRequiredService<IIdempotencyKeyAccessor>().TryGetKey(out var key).Should().BeTrue();
+            scope.ServiceProvider.GetRequiredService<IIdempotencyKeyAccessor>().TryGetKey(out var key).Should()
+                .BeTrue();
             key.Should().Be("scoped");
         }
 

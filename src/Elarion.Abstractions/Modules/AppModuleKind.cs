@@ -24,5 +24,5 @@ public enum AppModuleKind {
     /// minimal — cross-cutting <em>data</em> belongs in the shared kernel and a cross-cutting
     /// <em>mechanism</em> in a port.
     /// </remarks>
-    Core = 1,
+    Core = 1
 }

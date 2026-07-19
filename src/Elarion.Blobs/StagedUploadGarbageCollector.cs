@@ -35,13 +35,9 @@ public sealed class StagedUploadGarbageCollector(
                 deleted = 0;
             }
 
-            if (deleted >= options.BatchSize) {
-                continue;
-            }
+            if (deleted >= options.BatchSize) continue;
 
-            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) {
-                break;
-            }
+            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) break;
         }
     }
 
@@ -52,9 +48,8 @@ public sealed class StagedUploadGarbageCollector(
         var deleted = await store
             .DeleteExpiredAsync(olderThan, options.BatchSize, cancellationToken)
             .ConfigureAwait(false);
-        if (deleted > 0) {
+        if (deleted > 0)
             logger.LogInformation("Staged-upload garbage collection deleted {Count} expired session(s).", deleted);
-        }
 
         return deleted;
     }

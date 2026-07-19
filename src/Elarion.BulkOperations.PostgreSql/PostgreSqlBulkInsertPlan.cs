@@ -54,19 +54,21 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
             Target = target,
             DelimitedTable = table,
             DelimitedColumnNames = delimitedColumns,
-            ColumnStoreTypes = [.. target.Columns.Select(c => c.Property.GetRelationalTypeMapping().StoreType)],
+            ColumnStoreTypes = [.. target.Columns.Select(c => c.Property.GetRelationalTypeMapping().StoreType)]
         };
     }
 
     // Identity/serial columns are store-generated on PostgreSQL and must be absent from the COPY
     // column list (GENERATED ALWAYS even rejects explicit values); the relational-neutral resolver
     // cannot see the Npgsql strategy, so it takes this refinement as a callback.
-    private static bool IsNpgsqlStoreGenerated(IProperty property, StoreObjectIdentifier storeObject) =>
-        property.GetValueGenerationStrategy(storeObject) is NpgsqlValueGenerationStrategy.IdentityAlwaysColumn
+    private static bool IsNpgsqlStoreGenerated(IProperty property, StoreObjectIdentifier storeObject) {
+        return property.GetValueGenerationStrategy(storeObject) is NpgsqlValueGenerationStrategy.IdentityAlwaysColumn
             or NpgsqlValueGenerationStrategy.IdentityByDefaultColumn
             or NpgsqlValueGenerationStrategy.SerialColumn;
+    }
 
-    private static Func<NpgsqlBinaryImporter, TEntity, CancellationToken, Task> BuildColumnWriter(BulkInsertColumn column) {
+    private static Func<NpgsqlBinaryImporter, TEntity, CancellationToken, Task> BuildColumnWriter(
+        BulkInsertColumn column) {
         var mapping = column.Property.GetRelationalTypeMapping();
         var (npgsqlDbType, dataTypeName) = ResolveWriteType(mapping);
 
@@ -74,12 +76,13 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
         var entity = Expression.Parameter(typeof(TEntity), "entity");
         var cancellationToken = Expression.Parameter(typeof(CancellationToken), "ct");
 
-        Expression body = column.IsDiscriminator
+        var body = column.IsDiscriminator
             ? BuildDiscriminatorWrite(column, mapping, npgsqlDbType, dataTypeName, importer, cancellationToken)
             : BuildMemberWrite(column, mapping, npgsqlDbType, dataTypeName, importer, entity, cancellationToken);
 
         return Expression
-            .Lambda<Func<NpgsqlBinaryImporter, TEntity, CancellationToken, Task>>(body, importer, entity, cancellationToken)
+            .Lambda<Func<NpgsqlBinaryImporter, TEntity, CancellationToken, Task>>(body, importer, entity,
+                cancellationToken)
             .Compile();
     }
 
@@ -94,12 +97,11 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
         var providerValue = mapping.Converter is { } converter
             ? converter.ConvertToProvider(column.DiscriminatorValue)
             : column.DiscriminatorValue;
-        if (providerValue is null) {
-            return Expression.Call(importer, WriteNullAsyncMethod, cancellationToken);
-        }
+        if (providerValue is null) return Expression.Call(importer, WriteNullAsyncMethod, cancellationToken);
 
         var providerType = mapping.Converter?.ProviderClrType ?? mapping.ClrType;
-        return BuildWriteCall(importer, Expression.Constant(providerValue, providerType), npgsqlDbType, dataTypeName, cancellationToken);
+        return BuildWriteCall(importer, Expression.Constant(providerValue, providerType), npgsqlDbType, dataTypeName,
+            cancellationToken);
     }
 
     private static Expression BuildMemberWrite(
@@ -147,15 +149,12 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
 
         if (mapping.Converter is { } converter) {
             var parameterType = converter.ConvertToProviderExpression.Parameters[0].Type;
-            if (nonNullValue.Type != parameterType) {
-                nonNullValue = Expression.Convert(nonNullValue, parameterType);
-            }
+            if (nonNullValue.Type != parameterType) nonNullValue = Expression.Convert(nonNullValue, parameterType);
             nonNullValue = Expression.Invoke(converter.ConvertToProviderExpression, nonNullValue);
-            if (Nullable.GetUnderlyingType(nonNullValue.Type) is not null) {
+            if (Nullable.GetUnderlyingType(nonNullValue.Type) is not null)
                 // A converter declared over nullable types cannot yield null for the non-null input we
                 // feed it (EF composes null handling outside converters), so unwrap for the typed write.
                 nonNullValue = Expression.Property(nonNullValue, nameof(Nullable<int>.Value));
-            }
         }
 
         var write = BuildWriteCall(importer, nonNullValue, npgsqlDbType, dataTypeName, cancellationToken);
@@ -164,18 +163,19 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
             : Expression.Condition(isNull, Expression.Call(importer, WriteNullAsyncMethod, cancellationToken), write);
     }
 
-    private static MemberInfo GetClrMember(IPropertyBase property) =>
-        (MemberInfo?)property.PropertyInfo ?? property.FieldInfo
+    private static MemberInfo GetClrMember(IPropertyBase property) {
+        return (MemberInfo?)property.PropertyInfo ?? property.FieldInfo
             ?? throw new NotSupportedException(
                 $"The property '{property.DeclaringType.DisplayName()}.{property.Name}' has no CLR member to read.");
+    }
 
     private static Expression BuildWriteCall(
         ParameterExpression importer,
         Expression providerValue,
         NpgsqlDbType? npgsqlDbType,
         string? dataTypeName,
-        ParameterExpression cancellationToken) =>
-        npgsqlDbType is { } dbType
+        ParameterExpression cancellationToken) {
+        return npgsqlDbType is { } dbType
             ? Expression.Call(
                 importer,
                 WriteAsyncWithDbTypeMethod.MakeGenericMethod(providerValue.Type),
@@ -188,19 +188,19 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
                 providerValue,
                 Expression.Constant(dataTypeName!),
                 cancellationToken);
+    }
 
     // Resolve the per-column write addressing once at plan time: prefer the mapping's NpgsqlDbType
     // (exact, no per-write name lookup); mappings that are only name-addressed (mapped enums, some
     // plugin types) fall back to the facet-stripped store type name.
     private static (NpgsqlDbType? NpgsqlDbType, string? DataTypeName) ResolveWriteType(RelationalTypeMapping mapping) {
-        if (mapping is Npgsql.EntityFrameworkCore.PostgreSQL.Storage.Internal.Mapping.NpgsqlTypeMapping npgsqlMapping) {
+        if (mapping is Npgsql.EntityFrameworkCore.PostgreSQL.Storage.Internal.Mapping.NpgsqlTypeMapping npgsqlMapping)
             try {
                 return (npgsqlMapping.NpgsqlDbType, null);
             }
             catch (InvalidOperationException) {
                 // Name-addressed mapping without an NpgsqlDbType.
             }
-        }
 
         return (null, StripFacets(mapping.StoreType));
     }
@@ -209,9 +209,7 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
     // "character varying(3)[]" → "character varying[]": binary COPY resolves handlers by base type name.
     private static string StripFacets(string storeType) {
         var open = storeType.IndexOf('(');
-        if (open < 0) {
-            return storeType;
-        }
+        if (open < 0) return storeType;
 
         var close = storeType.IndexOf(')', open);
         var prefix = storeType[..open].TrimEnd();
@@ -225,8 +223,8 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
 
     private static readonly MethodInfo WriteAsyncWithNameMethod = GetWriteAsyncMethod(typeof(string));
 
-    private static MethodInfo GetWriteAsyncMethod(Type secondParameterType) =>
-        typeof(NpgsqlBinaryImporter)
+    private static MethodInfo GetWriteAsyncMethod(Type secondParameterType) {
+        return typeof(NpgsqlBinaryImporter)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .Single(m =>
                 m.Name == nameof(NpgsqlBinaryImporter.WriteAsync)
@@ -234,6 +232,7 @@ internal sealed class PostgreSqlBulkInsertPlan<TEntity> where TEntity : class {
                 && m.GetParameters() is [_, var second, var last]
                 && second.ParameterType == secondParameterType
                 && last.ParameterType == typeof(CancellationToken));
+    }
 }
 
 /// <summary>

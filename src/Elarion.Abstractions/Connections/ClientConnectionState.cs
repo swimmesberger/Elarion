@@ -30,9 +30,7 @@ public sealed class ClientConnectionState {
         ArgumentNullException.ThrowIfNull(expected);
         ArgumentNullException.ThrowIfNull(normalized);
         lock (_gate) {
-            if (_isRegistered || !ReferenceEquals(_current, expected)) {
-                return false;
-            }
+            if (_isRegistered || !ReferenceEquals(_current, expected)) return false;
 
             _current = normalized;
             Volatile.Write(ref _isRegistered, true);
@@ -44,9 +42,7 @@ public sealed class ClientConnectionState {
         ArgumentNullException.ThrowIfNull(expected);
         ArgumentNullException.ThrowIfNull(updated);
         lock (_gate) {
-            if (!_isRegistered || !ReferenceEquals(_current, expected)) {
-                return false;
-            }
+            if (!_isRegistered || !ReferenceEquals(_current, expected)) return false;
 
             _current = updated;
             return true;

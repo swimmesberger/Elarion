@@ -17,28 +17,33 @@ public sealed class ConfigurationVariantServiceProvider<TService>(
     IServiceProvider services
 ) : IVariantServiceProvider<TService> where TService : class {
     /// <inheritdoc />
-    public ValueTask<TService> GetAsync(CancellationToken ct = default) =>
-        new(ResolveRequired(services, configuration, binding));
+    public ValueTask<TService> GetAsync(CancellationToken ct = default) {
+        return new ValueTask<TService>(ResolveRequired(services, configuration, binding));
+    }
 
     /// <inheritdoc />
-    public ValueTask<TService?> GetOrDefaultAsync(CancellationToken ct = default) =>
-        new(ResolveOrDefault(services, configuration, binding));
+    public ValueTask<TService?> GetOrDefaultAsync(CancellationToken ct = default) {
+        return new ValueTask<TService?>(ResolveOrDefault(services, configuration, binding));
+    }
 
     /// <summary>
     /// Resolves the active implementation for the transparent unkeyed contract registration. Throws when
     /// neither the configured value nor a default implementation can be resolved.
     /// </summary>
-    public static TService Resolve(IServiceProvider services) => ResolveRequired(
-        services,
-        services.GetRequiredService<IConfiguration>(),
-        services.GetRequiredService<ConfigurationVariantBinding<TService>>());
+    public static TService Resolve(IServiceProvider services) {
+        return ResolveRequired(
+            services,
+            services.GetRequiredService<IConfiguration>(),
+            services.GetRequiredService<ConfigurationVariantBinding<TService>>());
+    }
 
     private static TService ResolveRequired(
-        IServiceProvider services, IConfiguration configuration, ConfigurationVariantBinding<TService> binding) =>
-        ResolveOrDefault(services, configuration, binding)
-        ?? throw new InvalidOperationException(
-            $"No variant implementation could be resolved for configuration key '{binding.Key}' (service "
-            + $"'{typeof(TService)}') and no default implementation is registered.");
+        IServiceProvider services, IConfiguration configuration, ConfigurationVariantBinding<TService> binding) {
+        return ResolveOrDefault(services, configuration, binding)
+               ?? throw new InvalidOperationException(
+                   $"No variant implementation could be resolved for configuration key '{binding.Key}' (service "
+                   + $"'{typeof(TService)}') and no default implementation is registered.");
+    }
 
     private static TService? ResolveOrDefault(
         IServiceProvider services, IConfiguration configuration, ConfigurationVariantBinding<TService> binding) {
@@ -48,9 +53,7 @@ public sealed class ConfigurationVariantServiceProvider<TService>(
         var selected = string.IsNullOrWhiteSpace(value)
             ? null
             : services.GetKeyedService<TService>(value.ToLowerInvariant());
-        if (selected is not null) {
-            return selected;
-        }
+        if (selected is not null) return selected;
 
         return binding.DefaultKey is { } defaultKey ? services.GetKeyedService<TService>(defaultKey) : null;
     }

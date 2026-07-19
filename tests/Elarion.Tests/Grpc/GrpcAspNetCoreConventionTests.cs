@@ -11,14 +11,12 @@ using Xunit;
 
 namespace Elarion.Tests.Grpc;
 
-public sealed class GrpcAspNetCoreConventionTests
-{
+public sealed class GrpcAspNetCoreConventionTests {
     [Fact]
-    public async Task AddElarion_AndContextExtension_UseAspNetCoreCallConventions()
-    {
+    public async Task AddElarion_AndContextExtension_UseAspNetCoreCallConventions() {
         using var cancellation = new CancellationTokenSource();
         var principal = new ClaimsPrincipal(
-            new ClaimsIdentity([new Claim("sub", "aspnet-grpc-user")], authenticationType: "grpc"));
+            new ClaimsIdentity([new Claim("sub", "aspnet-grpc-user")], "grpc"));
         var capture = new CallCapture();
         var services = new ServiceCollection()
             .AddSingleton(capture)
@@ -29,10 +27,9 @@ public sealed class GrpcAspNetCoreConventionTests
         grpc.AddElarion().Should().BeSameAs(grpc);
 
         using var provider = services.BuildServiceProvider();
-        var httpContext = new DefaultHttpContext
-        {
+        var httpContext = new DefaultHttpContext {
             RequestServices = provider,
-            User = principal,
+            User = principal
         };
         var callContext = new TestServerCallContext(cancellation.Token);
         callContext.UserState["__HttpContext"] = httpContext;
@@ -47,8 +44,7 @@ public sealed class GrpcAspNetCoreConventionTests
     }
 
     [Fact]
-    public async Task InvokeElarionAsync_TranslatesFailedResult()
-    {
+    public async Task InvokeElarionAsync_TranslatesFailedResult() {
         var services = new ServiceCollection()
             .AddScoped<IHandler<ApplicationRequest, Result<ApplicationResponse>>, FailingHandler>();
         services.AddGrpc().AddElarion();
@@ -66,11 +62,10 @@ public sealed class GrpcAspNetCoreConventionTests
     }
 
     [Fact]
-    public async Task InvokeElarionStreamAsync_UsesAspNetCorePrincipalAndRequestServices()
-    {
+    public async Task InvokeElarionStreamAsync_UsesAspNetCorePrincipalAndRequestServices() {
         using var cancellation = new CancellationTokenSource();
         var principal = new ClaimsPrincipal(
-            new ClaimsIdentity([new Claim("sub", "aspnet-grpc-stream-user")], authenticationType: "grpc"));
+            new ClaimsIdentity([new Claim("sub", "aspnet-grpc-stream-user")], "grpc"));
         var capture = new CallCapture();
         var services = new ServiceCollection()
             .AddSingleton(capture)
@@ -78,10 +73,9 @@ public sealed class GrpcAspNetCoreConventionTests
             .AddScoped<IStreamHandler<ApplicationRequest, ApplicationResponse>, StreamingHandler>();
         services.AddGrpc().AddElarion();
         using var provider = services.BuildServiceProvider();
-        var httpContext = new DefaultHttpContext
-        {
+        var httpContext = new DefaultHttpContext {
             RequestServices = provider,
-            User = principal,
+            User = principal
         };
         var callContext = new TestServerCallContext(cancellation.Token);
         callContext.UserState["__HttpContext"] = httpContext;
@@ -106,8 +100,7 @@ public sealed class GrpcAspNetCoreConventionTests
 
     private sealed record ApplicationResponse(string Value);
 
-    private sealed class CallCapture
-    {
+    private sealed class CallCapture {
         public ClaimsPrincipal? Principal { get; set; }
 
         public ServerCallContext? CallContext { get; set; }
@@ -115,10 +108,8 @@ public sealed class GrpcAspNetCoreConventionTests
         public CancellationToken CancellationToken { get; set; }
     }
 
-    private sealed class CaptureInitializer : IDispatchScopeInitializer
-    {
-        public void Initialize(IServiceProvider callScope, DispatchScopeContext context)
-        {
+    private sealed class CaptureInitializer : IDispatchScopeInitializer {
+        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
             var capture = callScope.GetRequiredService<CallCapture>();
             context.TryGet(out ClaimsPrincipal? principal).Should().BeTrue();
             context.TryGet(out ServerCallContext? callContext).Should().BeTrue();
@@ -127,15 +118,12 @@ public sealed class GrpcAspNetCoreConventionTests
         }
     }
 
-    private abstract class GeneratedUnaryServiceBase
-    {
+    private abstract class GeneratedUnaryServiceBase {
         public abstract Task<WireResponse> Unary(WireRequest request, ServerCallContext context);
     }
 
-    private sealed class GeneratedUnaryService : GeneratedUnaryServiceBase
-    {
-        public override async Task<WireResponse> Unary(WireRequest request, ServerCallContext context)
-        {
+    private sealed class GeneratedUnaryService : GeneratedUnaryServiceBase {
+        public override async Task<WireResponse> Unary(WireRequest request, ServerCallContext context) {
             var response = await context.InvokeElarionAsync<ApplicationRequest, ApplicationResponse>(
                 new ApplicationRequest(request.Value + "-request"));
             return new WireResponse(response.Value + "-response");
@@ -143,42 +131,36 @@ public sealed class GrpcAspNetCoreConventionTests
     }
 
     private sealed class MappingHandler(CallCapture capture)
-        : IHandler<ApplicationRequest, Result<ApplicationResponse>>
-    {
-        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct)
-        {
+        : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
+        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) {
             capture.CancellationToken = ct;
             return ValueTask.FromResult<Result<ApplicationResponse>>(new ApplicationResponse(request.Value));
         }
     }
 
-    private sealed class FailingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>>
-    {
-        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<ApplicationResponse>>(AppError.NotFound("not here"));
+    private sealed class FailingHandler : IHandler<ApplicationRequest, Result<ApplicationResponse>> {
+        public ValueTask<Result<ApplicationResponse>> HandleAsync(ApplicationRequest request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<ApplicationResponse>>(AppError.NotFound("not here"));
+        }
     }
 
     private sealed class StreamingHandler(CallCapture capture)
-        : IStreamHandler<ApplicationRequest, ApplicationResponse>
-    {
+        : IStreamHandler<ApplicationRequest, ApplicationResponse> {
         public ValueTask<Result<IAsyncEnumerable<ApplicationResponse>>> HandleAsync(
             ApplicationRequest request,
-            CancellationToken ct)
-        {
+            CancellationToken ct) {
             capture.CancellationToken = ct;
             return ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationResponse>>.Success(Values(request)));
         }
 
-        private static async IAsyncEnumerable<ApplicationResponse> Values(ApplicationRequest request)
-        {
+        private static async IAsyncEnumerable<ApplicationResponse> Values(ApplicationRequest request) {
             yield return new ApplicationResponse(request.Value + "-1");
             await Task.Yield();
             yield return new ApplicationResponse(request.Value + "-2");
         }
     }
 
-    private sealed class TestServerCallContext(CancellationToken cancellationToken) : ServerCallContext
-    {
+    private sealed class TestServerCallContext(CancellationToken cancellationToken) : ServerCallContext {
         protected override string MethodCore => "/test.Service/Method";
 
         protected override string HostCore => "localhost";
@@ -199,9 +181,12 @@ public sealed class GrpcAspNetCoreConventionTests
 
         protected override AuthContext AuthContextCore { get; } = new("insecure", []);
 
-        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options) =>
+        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options) {
             throw new NotSupportedException();
+        }
 
-        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) => Task.CompletedTask;
+        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) {
+            return Task.CompletedTask;
+        }
     }
 }

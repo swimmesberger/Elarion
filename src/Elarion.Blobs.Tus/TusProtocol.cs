@@ -31,11 +31,10 @@ internal static class TusProtocol {
 internal static class TusMetadata {
     public static IReadOnlyDictionary<string, string> Parse(string? header) {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(header)) {
-            return result;
-        }
+        if (string.IsNullOrWhiteSpace(header)) return result;
 
-        foreach (var pair in header.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
+        foreach (var pair in header.Split(',',
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
             var space = pair.IndexOf(' ');
             if (space < 0) {
                 result[pair] = string.Empty;

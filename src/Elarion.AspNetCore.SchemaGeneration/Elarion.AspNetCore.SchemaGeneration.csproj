@@ -10,26 +10,26 @@
   <ItemGroup>
     <ProjectReference Include="..\Elarion.AspNetCore.SchemaGeneration.Tool\Elarion.AspNetCore.SchemaGeneration.Tool.csproj"
                       ReferenceOutputAssembly="false"
-                      PrivateAssets="all" />
+                      PrivateAssets="all"/>
   </ItemGroup>
 
   <ItemGroup>
     <None Include="build\Elarion.AspNetCore.SchemaGeneration.props"
           Pack="true"
-          PackagePath="build\" />
+          PackagePath="build\"/>
     <None Include="build\Elarion.AspNetCore.SchemaGeneration.targets"
           Pack="true"
-          PackagePath="build\" />
+          PackagePath="build\"/>
     <None Include="buildMultiTargeting\Elarion.AspNetCore.SchemaGeneration.props"
           Pack="true"
-          PackagePath="buildMultiTargeting\" />
+          PackagePath="buildMultiTargeting\"/>
     <None Include="buildMultiTargeting\Elarion.AspNetCore.SchemaGeneration.targets"
           Pack="true"
-          PackagePath="buildMultiTargeting\" />
+          PackagePath="buildMultiTargeting\"/>
     <None Include="..\Elarion.AspNetCore.SchemaGeneration.Tool\bin\$(Configuration)\net10.0\**\*"
           Pack="true"
           PackagePath="tools\%(RecursiveDir)%(Filename)%(Extension)"
-          Visible="false" />
+          Visible="false"/>
   </ItemGroup>
 
 </Project>

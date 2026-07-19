@@ -77,13 +77,13 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
         ArgumentNullException.ThrowIfNull(configure);
         var options = new ElarionTcpListenerOptions();
         configure(options);
-        if (options.ListenEndPoint is null) {
+        if (options.ListenEndPoint is null)
             throw new ArgumentException("ListenEndPoint is required.", nameof(configure));
-        }
 
         TcpConnectionServiceCollectionExtensions.ValidateShared(options);
         return ApplyAsync(name, TcpEndpointMode.Listener, (report, token) => TcpEndpointLoops.RunListenerAsync(
-            options, services.GetRequiredService<THandler>(), Registry, DefaultInvokeTimeout, Time, Logger("TcpListener"), token, report), ct);
+            options, services.GetRequiredService<THandler>(), Registry, DefaultInvokeTimeout, Time,
+            Logger("TcpListener"), token, report), ct);
     }
 
     /// <summary>Applies (starts or reconfigures) a dial-out endpoint under <paramref name="name"/>.</summary>
@@ -97,17 +97,15 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
         ArgumentNullException.ThrowIfNull(configure);
         var options = new ElarionTcpDialerOptions();
         configure(options);
-        if (string.IsNullOrEmpty(options.Host)) {
-            throw new ArgumentException("Host is required.", nameof(configure));
-        }
+        if (string.IsNullOrEmpty(options.Host)) throw new ArgumentException("Host is required.", nameof(configure));
 
-        if (options.Port is <= 0 or > 65535) {
+        if (options.Port is <= 0 or > 65535)
             throw new ArgumentException("Port must be a valid TCP port.", nameof(configure));
-        }
 
         TcpConnectionServiceCollectionExtensions.ValidateShared(options);
         return ApplyAsync(name, TcpEndpointMode.Dialer, (report, token) => TcpEndpointLoops.RunDialerAsync(
-            options, services.GetRequiredService<THandler>(), Registry, DefaultInvokeTimeout, Time, Logger("TcpDialer"), token, report), ct);
+            options, services.GetRequiredService<THandler>(), Registry, DefaultInvokeTimeout, Time, Logger("TcpDialer"),
+            token, report), ct);
     }
 
     /// <summary>
@@ -120,9 +118,7 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
         try {
             Endpoint? existing;
             lock (_endpoints) {
-                if (!_endpoints.Remove(name, out existing)) {
-                    return false;
-                }
+                if (!_endpoints.Remove(name, out existing)) return false;
             }
 
             await StopEndpointAsync(existing!);
@@ -144,11 +140,10 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
                 _endpoints.Remove(name, out previous);
             }
 
-            if (previous is not null) {
+            if (previous is not null)
                 // The reconnect semantic: the old endpoint (and its connections) is fully down before the
                 // new settings take effect, so e.g. a re-listen on the same port never races the old socket.
                 await StopEndpointAsync(previous);
-            }
 
             ObjectDisposedException.ThrowIf(_shutdown.IsCancellationRequested, this);
             var cts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
@@ -157,8 +152,8 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
                     Name = name,
                     Mode = mode,
                     State = TcpEndpointState.Starting,
-                    ChangedAt = Time.GetUtcNow(),
-                },
+                    ChangedAt = Time.GetUtcNow()
+                }
             };
             // Visible in the dictionary before the loop runs: the loop reports its first state
             // synchronously (a listener binds immediately), and a StatusChanged subscriber calling
@@ -208,7 +203,9 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
         endpoint.Cts.Dispose();
     }
 
-    Task IHostedService.StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    Task IHostedService.StartAsync(CancellationToken cancellationToken) {
+        return Task.CompletedTask;
+    }
 
     async Task IHostedService.StopAsync(CancellationToken cancellationToken) {
         // Under the mutation gate: an Apply in flight either completes before the sweep (and its endpoint
@@ -238,9 +235,10 @@ public sealed class TcpConnectionEndpoints(IServiceProvider services) : IHostedS
 
     private TimeProvider Time => services.GetService<TimeProvider>() ?? TimeProvider.System;
 
-    private ILogger Logger(string kind) =>
-        services.GetService<ILoggerFactory>()?.CreateLogger(GetType().Namespace + "." + kind)
-            ?? (ILogger)NullLogger.Instance;
+    private ILogger Logger(string kind) {
+        return services.GetService<ILoggerFactory>()?.CreateLogger(GetType().Namespace + "." + kind)
+               ?? (ILogger)NullLogger.Instance;
+    }
 
     private sealed class Endpoint(CancellationTokenSource cts) {
         public CancellationTokenSource Cts { get; } = cts;

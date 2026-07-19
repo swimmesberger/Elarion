@@ -13,9 +13,7 @@ namespace Billing.Application.Modules.Invoicing.Events;
 public sealed class OverdueNotice(BillingDbContext db, TimeProvider clock) : IHandler<InvoiceOverdue> {
     public async ValueTask<Result> HandleAsync(InvoiceOverdue e, CancellationToken ct) {
         var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == e.InvoiceId, ct);
-        if (invoice is null) {
-            return Result.Success();
-        }
+        if (invoice is null) return Result.Success();
 
         invoice.OverdueNoticeSentAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);

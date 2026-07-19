@@ -6,11 +6,9 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class SchedulerRegistrationGeneratorTests
-{
+public sealed class SchedulerRegistrationGeneratorTests {
     [Fact]
-    public void GenerateScheduledJobs_AttributedMethod_EmitsTypedDescriptor()
-    {
+    public void GenerateScheduledJobs_AttributedMethod_EmitsTypedDescriptor() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -38,7 +36,8 @@ public sealed class SchedulerRegistrationGeneratorTests
         generatedSource.Should().Contain("Name = \"billing.daily\"");
         generatedSource.Should().Contain("ScheduledJobSchedule.FixedRate(\"1d\", null, true)");
         generatedSource.Should().Contain("Group = \"billing\"");
-        generatedSource.Should().Contain("MisfirePolicy = global::Elarion.Abstractions.Scheduling.ScheduledJobMisfirePolicy.CatchUp");
+        generatedSource.Should()
+            .Contain("MisfirePolicy = global::Elarion.Abstractions.Scheduling.ScheduledJobMisfirePolicy.CatchUp");
         generatedSource.Should().Contain("MaxConcurrentRuns = 2");
         generatedSource.Should().Contain("Enabled = \"${Modules:Billing:Enabled}\"");
         generatedSource.Should().Contain("Placement = global::Elarion.Abstractions.Scheduling.JobPlacement.Cluster");
@@ -55,8 +54,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_EveryNodePlacement_EmitsPlacement()
-    {
+    public void GenerateScheduledJobs_EveryNodePlacement_EmitsPlacement() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -81,8 +79,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_ModuleScoped_EmitsPerModuleMethodAndDefaultServicesFiller()
-    {
+    public void GenerateScheduledJobs_ModuleScoped_EmitsPerModuleMethodAndDefaultServicesFiller() {
         var source = CreateSource(
             """
             namespace Elarion.Abstractions.Modules {
@@ -122,8 +119,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_UnmatchedModule_EmitsWarning()
-    {
+    public void GenerateScheduledJobs_UnmatchedModule_EmitsWarning() {
         var source = CreateSource(
             """
             namespace Elarion.Abstractions.Modules {
@@ -155,8 +151,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_MatchedModule_DoesNotWarnUnmatched()
-    {
+    public void GenerateScheduledJobs_MatchedModule_DoesNotWarnUnmatched() {
         var source = CreateSource(
             """
             namespace Elarion.Abstractions.Modules {
@@ -185,8 +180,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_NoModules_DoesNotWarnUnmatched()
-    {
+    public void GenerateScheduledJobs_NoModules_DoesNotWarnUnmatched() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -205,8 +199,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_UseElarion_EmitsTypedDescriptor()
-    {
+    public void GenerateScheduledJobs_UseElarion_EmitsTypedDescriptor() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -224,12 +217,12 @@ public sealed class SchedulerRegistrationGeneratorTests
 
         generatedSource.Should().Contain("Name = \"billing.daily\"");
         generatedSource.Should().Contain("ScheduledJobSchedule.FixedRate(\"1d\", null, true)");
-        generatedSource.Should().Contain("MisfirePolicy = global::Elarion.Abstractions.Scheduling.ScheduledJobMisfirePolicy.FireOnce");
+        generatedSource.Should()
+            .Contain("MisfirePolicy = global::Elarion.Abstractions.Scheduling.ScheduledJobMisfirePolicy.FireOnce");
     }
 
     [Fact]
-    public void GenerateScheduledJobs_RuntimeJob_EmitsTypedPayloadDescriptor()
-    {
+    public void GenerateScheduledJobs_RuntimeJob_EmitsTypedPayloadDescriptor() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -259,8 +252,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_ResilientJob_EmitsPolicyReference()
-    {
+    public void GenerateScheduledJobs_ResilientJob_EmitsPolicyReference() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -276,12 +268,13 @@ public sealed class SchedulerRegistrationGeneratorTests
         var result = Generate(source);
         var generatedSource = AllGenerated(result);
 
-        generatedSource.Should().Contain("ResiliencePolicy = new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference { Name = \"billing-resilience\" }");
+        generatedSource.Should()
+            .Contain(
+                "ResiliencePolicy = new global::Elarion.Abstractions.Resilience.ResiliencePolicyReference { Name = \"billing-resilience\" }");
     }
 
     [Fact]
-    public void GenerateScheduledJobs_CronJob_EmitsCronSchedule()
-    {
+    public void GenerateScheduledJobs_CronJob_EmitsCronSchedule() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -303,8 +296,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_DisabledCron_EmitsCronSchedule()
-    {
+    public void GenerateScheduledJobs_DisabledCron_EmitsCronSchedule() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -323,8 +315,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_InitialDelayOnly_EmitsOneTimeSchedule()
-    {
+    public void GenerateScheduledJobs_InitialDelayOnly_EmitsOneTimeSchedule() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -344,8 +335,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_ReferenceNames_SanitizeInvalidCharactersAndAvoidCollisions()
-    {
+    public void GenerateScheduledJobs_ReferenceNames_SanitizeInvalidCharactersAndAvoidCollisions() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -379,8 +369,7 @@ public sealed class SchedulerRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateScheduledJobs_MultipleScheduleKinds_EmitsDiagnostic()
-    {
+    public void GenerateScheduledJobs_MultipleScheduleKinds_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -392,15 +381,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELSG008"]);
+        var result = Generate(source, false, ["ELSG008"]);
 
         result.Diagnostics.Any(d => d.Id == "ELSG008" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateScheduledJobs_MethodWithoutSchedule_EmitsDiagnostic()
-    {
+    public void GenerateScheduledJobs_MethodWithoutSchedule_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -412,15 +400,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELSG008"]);
+        var result = Generate(source, false, ["ELSG008"]);
 
         result.Diagnostics.Any(d => d.Id == "ELSG008" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateScheduledJobs_CronWithInitialDelay_EmitsDiagnostic()
-    {
+    public void GenerateScheduledJobs_CronWithInitialDelay_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -432,15 +419,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELSG008"]);
+        var result = Generate(source, false, ["ELSG008"]);
 
         result.Diagnostics.Any(d => d.Id == "ELSG008" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateScheduledJobs_InitialDelayOnlyWithRunOnStart_EmitsDiagnostic()
-    {
+    public void GenerateScheduledJobs_InitialDelayOnlyWithRunOnStart_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -452,15 +438,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELSG008"]);
+        var result = Generate(source, false, ["ELSG008"]);
 
         result.Diagnostics.Any(d => d.Id == "ELSG008" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateScheduledJobs_NegativeMaxConcurrentRuns_EmitsDiagnostic()
-    {
+    public void GenerateScheduledJobs_NegativeMaxConcurrentRuns_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -472,15 +457,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELSG009"]);
+        var result = Generate(source, false, ["ELSG009"]);
 
         result.Diagnostics.Any(d => d.Id == "ELSG009" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateScheduledJobs_InvalidMethodSignature_EmitsDiagnostic()
-    {
+    public void GenerateScheduledJobs_InvalidMethodSignature_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -492,15 +476,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELSG004"]);
+        var result = Generate(source, false, ["ELSG004"]);
 
         result.Diagnostics.Any(d => d.Id == "ELSG004" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateScheduledJobs_GenericRuntimeJob_EmitsDiagnostic()
-    {
+    public void GenerateScheduledJobs_GenericRuntimeJob_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -515,15 +498,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELSG005"]);
+        var result = Generate(source, false, ["ELSG005"]);
 
         result.Diagnostics.Any(d => d.Id == "ELSG005" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateScheduledJobs_DuplicateNames_EmitsDiagnostic()
-    {
+    public void GenerateScheduledJobs_DuplicateNames_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -541,15 +523,14 @@ public sealed class SchedulerRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELSG007"]);
+        var result = Generate(source, false, ["ELSG007"]);
 
         result.Diagnostics.Any(d => d.Id == "ELSG007" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateScheduledJobs_IrrelevantEdit_ReusesPipeline()
-    {
+    public void GenerateScheduledJobs_IrrelevantEdit_ReusesPipeline() {
         var source = CreateSource(
             """
             namespace Sample.Jobs {
@@ -573,144 +554,143 @@ public sealed class SchedulerRegistrationGeneratorTests
     private static string CreateSource(
         string testSource,
         string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateScheduledJobs]",
-        bool wrapInModule = true)
-    {
+        bool wrapInModule = true) {
         // Jobs register only per module, so wrap the `Sample.Jobs` test namespace in a module by default.
         // Skip when the test declares its own module attribute; tests asserting no-module behavior pass false.
         var moduleDeclaration = wrapInModule && !testSource.Contains("AppModule(")
             ? """
-            namespace Elarion.Abstractions.Modules {
-                [System.AttributeUsage(System.AttributeTargets.Class)]
-                public sealed class AppModuleAttribute : System.Attribute {
-                    public AppModuleAttribute(string name) { Name = name; }
-                    public string Name { get; }
-                }
-            }
+              namespace Elarion.Abstractions.Modules {
+                  [System.AttributeUsage(System.AttributeTargets.Class)]
+                  public sealed class AppModuleAttribute : System.Attribute {
+                      public AppModuleAttribute(string name) { Name = name; }
+                      public string Name { get; }
+                  }
+              }
 
-            namespace Sample.Jobs {
-                [Elarion.Abstractions.Modules.AppModule("Sample")]
-                public static class GeneratedTestModule { }
-            }
-            """
+              namespace Sample.Jobs {
+                  [Elarion.Abstractions.Modules.AppModule("Sample")]
+                  public static class GeneratedTestModule { }
+              }
+              """
             : "";
 
         return $$"""
-        {{assemblyTrigger}}
+                 {{assemblyTrigger}}
 
-        namespace Elarion.Abstractions {
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            public sealed class GenerateScheduledJobsAttribute : System.Attribute;
+                 namespace Elarion.Abstractions {
+                     [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                     public sealed class GenerateScheduledJobsAttribute : System.Attribute;
 
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            public sealed class UseElarionAttribute : System.Attribute;
-        }
+                     [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                     public sealed class UseElarionAttribute : System.Attribute;
+                 }
 
-        namespace Elarion.Abstractions.Scheduling {
-            public enum ScheduledJobOverlap {
-                Skip,
-                Queue,
-                AllowConcurrent
-            }
+                 namespace Elarion.Abstractions.Scheduling {
+                     public enum ScheduledJobOverlap {
+                         Skip,
+                         Queue,
+                         AllowConcurrent
+                     }
 
-            public enum ScheduledJobMisfirePolicy {
-                FireOnce,
-                Skip,
-                CatchUp
-            }
+                     public enum ScheduledJobMisfirePolicy {
+                         FireOnce,
+                         Skip,
+                         CatchUp
+                     }
 
-            public enum JobPlacement {
-                Cluster,
-                EveryNode
-            }
+                     public enum JobPlacement {
+                         Cluster,
+                         EveryNode
+                     }
 
-            [System.AttributeUsage(System.AttributeTargets.Method | System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-            public sealed class ScheduledJobAttribute : System.Attribute {
-                public ScheduledJobAttribute(string name) {
-                    Name = name;
-                }
+                     [System.AttributeUsage(System.AttributeTargets.Method | System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+                     public sealed class ScheduledJobAttribute : System.Attribute {
+                         public ScheduledJobAttribute(string name) {
+                             Name = name;
+                         }
 
-                public string Name { get; }
-                public string? FixedRate { get; init; }
-                public string? FixedDelay { get; init; }
-                public string? Cron { get; init; }
-                public string? TimeZone { get; init; }
-                public string? InitialDelay { get; init; }
-                public bool RunOnStart { get; init; } = true;
-                public string? Group { get; init; }
-                public ScheduledJobOverlap Overlap { get; init; } = ScheduledJobOverlap.Skip;
-                public ScheduledJobMisfirePolicy MisfirePolicy { get; init; } = ScheduledJobMisfirePolicy.FireOnce;
-                public int MaxConcurrentRuns { get; init; }
-                public string? Enabled { get; init; }
-                public JobPlacement Placement { get; init; } = JobPlacement.Cluster;
-            }
+                         public string Name { get; }
+                         public string? FixedRate { get; init; }
+                         public string? FixedDelay { get; init; }
+                         public string? Cron { get; init; }
+                         public string? TimeZone { get; init; }
+                         public string? InitialDelay { get; init; }
+                         public bool RunOnStart { get; init; } = true;
+                         public string? Group { get; init; }
+                         public ScheduledJobOverlap Overlap { get; init; } = ScheduledJobOverlap.Skip;
+                         public ScheduledJobMisfirePolicy MisfirePolicy { get; init; } = ScheduledJobMisfirePolicy.FireOnce;
+                         public int MaxConcurrentRuns { get; init; }
+                         public string? Enabled { get; init; }
+                         public JobPlacement Placement { get; init; } = JobPlacement.Cluster;
+                     }
 
-            public interface IScheduledJobContext;
+                     public interface IScheduledJobContext;
 
-            public readonly record struct ScheduledJobReference {
-                public required string Name { get; init; }
-            }
+                     public readonly record struct ScheduledJobReference {
+                         public required string Name { get; init; }
+                     }
 
-            public interface IScheduledJob<in TPayload> {
-                System.Threading.Tasks.ValueTask ExecuteAsync(
-                    TPayload payload,
-                    IScheduledJobContext context,
-                    System.Threading.CancellationToken ct);
-            }
+                     public interface IScheduledJob<in TPayload> {
+                         System.Threading.Tasks.ValueTask ExecuteAsync(
+                             TPayload payload,
+                             IScheduledJobContext context,
+                             System.Threading.CancellationToken ct);
+                     }
 
-            public delegate System.Threading.Tasks.ValueTask ScheduledJobInvokeDelegate(
-                System.IServiceProvider serviceProvider,
-                object? payload,
-                IScheduledJobContext context,
-                System.Threading.CancellationToken ct);
+                     public delegate System.Threading.Tasks.ValueTask ScheduledJobInvokeDelegate(
+                         System.IServiceProvider serviceProvider,
+                         object? payload,
+                         IScheduledJobContext context,
+                         System.Threading.CancellationToken ct);
 
-            public sealed record ScheduledJobDescriptor {
-                public required string Name { get; init; }
-                public System.Type? JobType { get; init; }
-                public System.Type? PayloadType { get; init; }
-                public ScheduledJobSchedule? Schedule { get; init; }
-                public string? Group { get; init; }
-                public ScheduledJobOverlap Overlap { get; init; } = ScheduledJobOverlap.Skip;
-                public ScheduledJobMisfirePolicy MisfirePolicy { get; init; } = ScheduledJobMisfirePolicy.FireOnce;
-                public int MaxConcurrentRuns { get; init; }
-                public string? Enabled { get; init; }
-                public JobPlacement Placement { get; init; } = JobPlacement.Cluster;
-                public Elarion.Abstractions.Resilience.ResiliencePolicyReference? ResiliencePolicy { get; init; }
-                public required ScheduledJobInvokeDelegate InvokeAsync { get; init; }
-            }
+                     public sealed record ScheduledJobDescriptor {
+                         public required string Name { get; init; }
+                         public System.Type? JobType { get; init; }
+                         public System.Type? PayloadType { get; init; }
+                         public ScheduledJobSchedule? Schedule { get; init; }
+                         public string? Group { get; init; }
+                         public ScheduledJobOverlap Overlap { get; init; } = ScheduledJobOverlap.Skip;
+                         public ScheduledJobMisfirePolicy MisfirePolicy { get; init; } = ScheduledJobMisfirePolicy.FireOnce;
+                         public int MaxConcurrentRuns { get; init; }
+                         public string? Enabled { get; init; }
+                         public JobPlacement Placement { get; init; } = JobPlacement.Cluster;
+                         public Elarion.Abstractions.Resilience.ResiliencePolicyReference? ResiliencePolicy { get; init; }
+                         public required ScheduledJobInvokeDelegate InvokeAsync { get; init; }
+                     }
 
-            public sealed record ScheduledJobSchedule {
-                public static ScheduledJobSchedule FixedRate(string every, string? initialDelay = null, bool runOnStart = true) => new();
-                public static ScheduledJobSchedule FixedDelay(string delay, string? initialDelay = null, bool runOnStart = true) => new();
-                public static ScheduledJobSchedule Cron(string expression, string? timeZone = null) => new();
-                public static ScheduledJobSchedule Once(string initialDelay) => new();
-            }
-        }
+                     public sealed record ScheduledJobSchedule {
+                         public static ScheduledJobSchedule FixedRate(string every, string? initialDelay = null, bool runOnStart = true) => new();
+                         public static ScheduledJobSchedule FixedDelay(string delay, string? initialDelay = null, bool runOnStart = true) => new();
+                         public static ScheduledJobSchedule Cron(string expression, string? timeZone = null) => new();
+                         public static ScheduledJobSchedule Once(string initialDelay) => new();
+                     }
+                 }
 
-        namespace Elarion.Abstractions.Resilience {
-            public readonly record struct ResiliencePolicyReference {
-                public required string Name { get; init; }
-            }
+                 namespace Elarion.Abstractions.Resilience {
+                     public readonly record struct ResiliencePolicyReference {
+                         public required string Name { get; init; }
+                     }
 
-            [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
-            public sealed class ResilientAttribute(string policyName) : System.Attribute {
-                public string PolicyName { get; } = policyName;
-            }
-        }
+                     [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+                     public sealed class ResilientAttribute(string policyName) : System.Attribute {
+                         public string PolicyName { get; } = policyName;
+                     }
+                 }
 
-        {{moduleDeclaration}}
+                 {{moduleDeclaration}}
 
-        {{testSource}}
-        """;
+                 {{testSource}}
+                 """;
     }
 
-    private static string AllGenerated(GeneratorDriverRunResult result) =>
-        string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+    private static string AllGenerated(GeneratorDriverRunResult result) {
+        return string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+    }
 
     private static GeneratorDriverRunResult Generate(
         string source,
         bool assertGeneratedOutputCompiles = true,
-        string[]? allowedDiagnosticIds = null)
-    {
+        string[]? allowedDiagnosticIds = null) {
         var allowedIds = new HashSet<string>(allowedDiagnosticIds ?? []);
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
@@ -724,7 +704,7 @@ public sealed class SchedulerRegistrationGeneratorTests
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        GeneratorDriver driver = CSharpGeneratorDriver
+        var driver = CSharpGeneratorDriver
             .Create(new SchedulerRegistrationGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
@@ -738,23 +718,21 @@ public sealed class SchedulerRegistrationGeneratorTests
         unexpectedGeneratorDiagnostics.Should().BeEmpty();
 
         if (assertGeneratedOutputCompiles)
-        {
             outputCompilation.GetDiagnostics()
                 .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
                 .Should().BeEmpty();
-        }
 
         return result;
     }
 
-    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 

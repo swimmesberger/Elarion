@@ -40,7 +40,8 @@ public interface IMigrationSession : IAsyncDisposable {
     /// measured execution duration onto the row. Provider exceptions propagate; the runner wraps them in
     /// <see cref="MigrationExecutionException"/>.
     /// </summary>
-    Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory, CancellationToken cancellationToken);
+    Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Runs <paramref name="sql"/> outside any transaction (for <c>-- elarion: no-transaction</c>

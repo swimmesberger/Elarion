@@ -136,7 +136,7 @@ public sealed class RoleHolderProxyTests {
     [Fact]
     public async Task NoLeaseRegistered_TheProxyInstallsNothing() {
         // Single-instance mode: UseElarionRoleHolderProxy is a no-op — the pipeline stays untouched.
-        await using var node = await StartWebNodeAsync(lease: null);
+        await using var node = await StartWebNodeAsync(null);
 
         (await node.Client.GetStringAsync("/quotes/ELN", Ct)).Should().Be("local:ELN");
     }
@@ -182,7 +182,7 @@ public sealed class RoleHolderProxyTests {
             [new PathString("/quotes")],
             new HttpMessageInvoker(new NeverRespondingHandler()),
             Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
-            responseHeadersTimeout: TimeSpan.FromMilliseconds(200));
+            TimeSpan.FromMilliseconds(200));
 
         var context = new DefaultHttpContext();
         context.Request.Method = "GET";
@@ -205,8 +205,8 @@ public sealed class RoleHolderProxyTests {
         // RFC 9110 §7.6.1: headers nominated by the Connection header are hop-by-hop and must be stripped in
         // addition to the static list — on the forwarded request and on the relayed response.
         var handler = new CapturingHandler(static () => {
-            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK) {
-                Content = new StringContent("ok"),
+            var response = new HttpResponseMessage(HttpStatusCode.OK) {
+                Content = new StringContent("ok")
             };
             response.Headers.TryAddWithoutValidation("Connection", "X-Hop-Response");
             response.Headers.TryAddWithoutValidation("X-Hop-Response", "secret");
@@ -279,7 +279,8 @@ public sealed class RoleHolderProxyTests {
         public RolePartitionTarget Resolve(string affinityKey) {
             ResolvedKeys.Add(affinityKey);
             var held = affinityKey == "LOCAL";
-            return new(held ? 0 : 1, $"actors:partition-{(held ? 0 : 1)}", held, null, holderAddress);
+            return new RolePartitionTarget(held ? 0 : 1, $"actors:partition-{(held ? 0 : 1)}", held, null,
+                holderAddress);
         }
 
         public RolePartitionTarget Resolve(string affinityScope, string affinityKey) {
@@ -287,7 +288,7 @@ public sealed class RoleHolderProxyTests {
             var resolved = RolePartitionHash.GetPartition(affinityScope, affinityKey, PartitionCount);
             ResolvedPartitions.Add(resolved);
             var held = resolved == 0;
-            return new(resolved, $"actors:partition-{resolved}", held, null, holderAddress);
+            return new RolePartitionTarget(resolved, $"actors:partition-{resolved}", held, null, holderAddress);
         }
     }
 
@@ -295,18 +296,21 @@ public sealed class RoleHolderProxyTests {
         public IFeatureCollection Features { get; } = BuildFeatures(addresses);
 
         public Task StartAsync<TContext>(IHttpApplication<TContext> application, CancellationToken cancellationToken)
-            where TContext : notnull => Task.CompletedTask;
+            where TContext : notnull {
+            return Task.CompletedTask;
+        }
 
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken) {
+            return Task.CompletedTask;
+        }
 
-        public void Dispose() { }
+        public void Dispose() {
+        }
 
         private static IFeatureCollection BuildFeatures(string[] addresses) {
             var features = new FeatureCollection();
             var feature = new ServerAddressesFeature();
-            foreach (var address in addresses) {
-                feature.Addresses.Add(address);
-            }
+            foreach (var address in addresses) feature.Addresses.Add(address);
 
             features.Set<IServerAddressesFeature>(feature);
             return features;
@@ -333,9 +337,7 @@ public sealed class RoleHolderProxyTests {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
-        if (lease is not null) {
-            builder.Services.AddKeyedSingleton<IRoleLease>("actors", lease);
-        }
+        if (lease is not null) builder.Services.AddKeyedSingleton<IRoleLease>("actors", lease);
 
         var app = builder.Build();
         app.UseElarionRoleHolderProxy("actors", "/quotes");
@@ -354,19 +356,17 @@ public sealed class RoleHolderProxyTests {
         builder.Services.AddKeyedSingleton<IRolePartition>(partition.Name, partition);
 
         var app = builder.Build();
-        if (affinityScope is null) {
+        if (affinityScope is null)
             app.UseElarionPartitionHolderProxy(
                 partition.Name,
                 static context => context.Request.Path.Value?.Split('/').LastOrDefault(),
                 "/quotes");
-        }
-        else {
+        else
             app.UseElarionPartitionHolderProxy(
                 partition.Name,
                 affinityScope,
                 static context => context.Request.Path.Value?.Split('/').LastOrDefault(),
                 "/quotes");
-        }
         app.MapGet("/quotes/{symbol}", static (string symbol) => $"local:{symbol}");
         await app.StartAsync(Ct);
         return new TestHost(app);

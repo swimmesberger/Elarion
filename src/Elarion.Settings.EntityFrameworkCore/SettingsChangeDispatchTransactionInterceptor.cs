@@ -18,8 +18,9 @@ namespace Elarion.Settings.EntityFrameworkCore;
 internal sealed class SettingsChangeDispatchTransactionInterceptor(SettingsChangeDispatchScope scope)
     : DbTransactionInterceptor {
     /// <inheritdoc />
-    public override void TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData) =>
+    public override void TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData) {
         scope.Flush();
+    }
 
     /// <inheritdoc />
     public override Task TransactionCommittedAsync(
@@ -31,8 +32,9 @@ internal sealed class SettingsChangeDispatchTransactionInterceptor(SettingsChang
     }
 
     /// <inheritdoc />
-    public override void TransactionRolledBack(DbTransaction transaction, TransactionEndEventData eventData) =>
+    public override void TransactionRolledBack(DbTransaction transaction, TransactionEndEventData eventData) {
         scope.Discard();
+    }
 
     /// <inheritdoc />
     public override Task TransactionRolledBackAsync(
@@ -44,8 +46,9 @@ internal sealed class SettingsChangeDispatchTransactionInterceptor(SettingsChang
     }
 
     /// <inheritdoc />
-    public override void CreatedSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+    public override void CreatedSavepoint(DbTransaction transaction, TransactionEventData eventData) {
         scope.PushSavepoint();
+    }
 
     /// <inheritdoc />
     public override Task CreatedSavepointAsync(
@@ -57,8 +60,9 @@ internal sealed class SettingsChangeDispatchTransactionInterceptor(SettingsChang
     }
 
     /// <inheritdoc />
-    public override void RolledBackToSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+    public override void RolledBackToSavepoint(DbTransaction transaction, TransactionEventData eventData) {
         scope.RollbackToSavepoint();
+    }
 
     /// <inheritdoc />
     public override Task RolledBackToSavepointAsync(
@@ -70,8 +74,9 @@ internal sealed class SettingsChangeDispatchTransactionInterceptor(SettingsChang
     }
 
     /// <inheritdoc />
-    public override void ReleasedSavepoint(DbTransaction transaction, TransactionEventData eventData) =>
+    public override void ReleasedSavepoint(DbTransaction transaction, TransactionEventData eventData) {
         scope.ReleaseSavepoint();
+    }
 
     /// <inheritdoc />
     public override Task ReleasedSavepointAsync(

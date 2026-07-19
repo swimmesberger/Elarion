@@ -85,9 +85,8 @@ public static class JsonRpcDispatcherServiceExtensions {
         // over module/host contexts. A host that must override an envelope type registers its context in
         // ElarionJsonOptions.OverrideTypeInfoResolvers, which is composed ahead of this list.
         services.ConfigureElarionJson(static o => {
-            if (!o.TypeInfoResolvers.Contains(JsonRpcJsonContext.Default)) {
+            if (!o.TypeInfoResolvers.Contains(JsonRpcJsonContext.Default))
                 o.TypeInfoResolvers.Insert(0, JsonRpcJsonContext.Default);
-            }
         });
         services.TryAddSingleton(sp => new JsonRpcDispatcher(
             sp.GetRequiredService<HandlerDispatcher>(),

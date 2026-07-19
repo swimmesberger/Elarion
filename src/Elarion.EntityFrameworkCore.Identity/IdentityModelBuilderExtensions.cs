@@ -127,9 +127,7 @@ public static class IdentityModelBuilderExtensions {
         EntityTypeBuilder<TEntity> builder, System.Linq.Expressions.Expression<Func<TEntity, TKey>> key)
         where TEntity : class
         where TKey : IEquatable<TKey> {
-        if (typeof(TKey) == typeof(Guid)) {
-            builder.Property(key).ValueGeneratedOnAdd();
-        }
+        if (typeof(TKey) == typeof(Guid)) builder.Property(key).ValueGeneratedOnAdd();
     }
 
     // Explicit snake_case column names so the mapping is self-contained (no naming-convention dependency).
@@ -137,13 +135,9 @@ public static class IdentityModelBuilderExtensions {
     // with an app that uses that convention yields an identical schema (no migration diff).
     private static void ApplyColumns(
         EntityTypeBuilder builder, bool snakeCase, (string Property, string Column)[] columns) {
-        if (!snakeCase) {
-            return;
-        }
+        if (!snakeCase) return;
 
-        foreach (var (property, column) in columns) {
-            builder.Property(property).HasColumnName(column);
-        }
+        foreach (var (property, column) in columns) builder.Property(property).HasColumnName(column);
     }
 
     private static readonly (string Property, string Column)[] UserColumns = [
@@ -161,46 +155,46 @@ public static class IdentityModelBuilderExtensions {
         ("TwoFactorEnabled", "two_factor_enabled"),
         ("LockoutEnd", "lockout_end"),
         ("LockoutEnabled", "lockout_enabled"),
-        ("AccessFailedCount", "access_failed_count"),
+        ("AccessFailedCount", "access_failed_count")
     ];
 
     private static readonly (string Property, string Column)[] RoleColumns = [
         ("Id", "id"),
         ("Name", "name"),
         ("NormalizedName", "normalized_name"),
-        ("ConcurrencyStamp", "concurrency_stamp"),
+        ("ConcurrencyStamp", "concurrency_stamp")
     ];
 
     private static readonly (string Property, string Column)[] UserClaimColumns = [
         ("Id", "id"),
         ("UserId", "user_id"),
         ("ClaimType", "claim_type"),
-        ("ClaimValue", "claim_value"),
+        ("ClaimValue", "claim_value")
     ];
 
     private static readonly (string Property, string Column)[] RoleClaimColumns = [
         ("Id", "id"),
         ("RoleId", "role_id"),
         ("ClaimType", "claim_type"),
-        ("ClaimValue", "claim_value"),
+        ("ClaimValue", "claim_value")
     ];
 
     private static readonly (string Property, string Column)[] UserRoleColumns = [
         ("UserId", "user_id"),
-        ("RoleId", "role_id"),
+        ("RoleId", "role_id")
     ];
 
     private static readonly (string Property, string Column)[] UserLoginColumns = [
         ("LoginProvider", "login_provider"),
         ("ProviderKey", "provider_key"),
         ("ProviderDisplayName", "provider_display_name"),
-        ("UserId", "user_id"),
+        ("UserId", "user_id")
     ];
 
     private static readonly (string Property, string Column)[] UserTokenColumns = [
         ("UserId", "user_id"),
         ("LoginProvider", "login_provider"),
         ("Name", "name"),
-        ("Value", "value"),
+        ("Value", "value")
     ];
 }

@@ -10,8 +10,9 @@ using Xunit;
 namespace Elarion.Tests.Serialization;
 
 public sealed class ElarionJsonSerializationTests {
-    private static IElarionJsonSerialization Resolve(IServiceCollection services) =>
-        services.BuildServiceProvider().GetRequiredService<IElarionJsonSerialization>();
+    private static IElarionJsonSerialization Resolve(IServiceCollection services) {
+        return services.BuildServiceProvider().GetRequiredService<IElarionJsonSerialization>();
+    }
 
     [Fact]
     public void Materializes_DefaultKnobs() {
@@ -119,13 +120,14 @@ public sealed class ElarionJsonSerializationTests {
         var accessor = Resolve(services);
         var data = new ValidationErrorData {
             Errors = ["Street is required"],
-            FieldErrors = new Dictionary<string, string[]> { ["address.street"] = ["Street is required"] },
+            FieldErrors = new Dictionary<string, string[]> { ["address.street"] = ["Street is required"] }
         };
 
         // The field-keyed dictionary member is statically reachable from ValidationErrorData, so the framework
         // context covers it; keys stay wire-named verbatim (no DictionaryKeyPolicy re-mapping).
         var json = JsonSerializer.Serialize(data, accessor.GetTypeInfo<ValidationErrorData>());
-        json.Should().Be("{\"errors\":[\"Street is required\"],\"fieldErrors\":{\"address.street\":[\"Street is required\"]}}");
+        json.Should()
+            .Be("{\"errors\":[\"Street is required\"],\"fieldErrors\":{\"address.street\":[\"Street is required\"]}}");
     }
 
     [Fact]
@@ -143,7 +145,7 @@ public sealed class ElarionJsonSerializationTests {
         var value = new SampleDto { Name = "receipt", Count = 7 };
         var stored = new Elarion.Abstractions.Idempotency.StoredResult {
             Ok = true,
-            Value = JsonSerializer.SerializeToElement(value, options.GetTypeInfo(typeof(SampleDto))),
+            Value = JsonSerializer.SerializeToElement(value, options.GetTypeInfo(typeof(SampleDto)))
         };
         var payload = JsonSerializer.Serialize(stored, ElarionFrameworkJsonContext.Default.StoredResult);
 
@@ -156,7 +158,7 @@ public sealed class ElarionJsonSerializationTests {
         // Failure path — the AppError must resolve through the framework context, reflection off.
         var failure = new Elarion.Abstractions.Idempotency.StoredResult {
             Ok = false,
-            Error = AppError.BusinessRule("declined"),
+            Error = AppError.BusinessRule("declined")
         };
         var failurePayload = JsonSerializer.Serialize(failure, ElarionFrameworkJsonContext.Default.StoredResult);
         var failureBack = JsonSerializer.Deserialize(
@@ -204,17 +206,16 @@ public sealed class ElarionJsonSerializationTests {
             // Simulates a transport contribution: inserted at index 0 of the ordinary list, the position that
             // beats every other TypeInfoResolvers entry regardless of registration order.
             services.ConfigureElarionJson(o => o.TypeInfoResolvers.Insert(0, new TaggingResolver("transport")));
-            if (withOverride) {
+            if (withOverride)
                 // The host override is registered later, yet must win first-match for the shared type.
                 services.ConfigureElarionJson(o => o.OverrideTypeInfoResolvers.Add(new TaggingResolver("override")));
-            }
 
             var accessor = Resolve(services);
             return JsonSerializer.Serialize(new OverrideProbeDto(), accessor.GetTypeInfo<OverrideProbeDto>());
         }
 
-        Serialize(withOverride: false).Should().Be("\"transport\"");
-        Serialize(withOverride: true).Should().Be("\"override\"");
+        Serialize(false).Should().Be("\"transport\"");
+        Serialize(true).Should().Be("\"override\"");
     }
 
     [Fact]
@@ -239,33 +240,40 @@ public sealed class ElarionJsonSerializationTests {
     }
 
     private sealed class ThrowingResolver : IJsonTypeInfoResolver {
-        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) =>
+        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) {
             throw new InvalidOperationException("should not be consulted");
+        }
     }
 
     /// <summary>Resolves <see cref="OverrideProbeDto"/> with a converter that writes a fixed tag, so a test can
     /// observe which chain segment won first-match resolution for a contested type.</summary>
     private sealed class TaggingResolver(string tag) : IJsonTypeInfoResolver {
-        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) =>
-            type == typeof(OverrideProbeDto)
+        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) {
+            return type == typeof(OverrideProbeDto)
                 ? JsonMetadataServices.CreateValueInfo<OverrideProbeDto>(options, new TagConverter(tag))
                 : null;
+        }
 
         private sealed class TagConverter(string tag) : JsonConverter<OverrideProbeDto> {
-            public override OverrideProbeDto Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            public override OverrideProbeDto Read(ref Utf8JsonReader reader, Type typeToConvert,
+                JsonSerializerOptions options) {
                 throw new NotSupportedException();
+            }
 
-            public override void Write(Utf8JsonWriter writer, OverrideProbeDto value, JsonSerializerOptions options) =>
+            public override void Write(Utf8JsonWriter writer, OverrideProbeDto value, JsonSerializerOptions options) {
                 writer.WriteStringValue(tag);
+            }
         }
     }
 
     private sealed class SampleConverter : JsonConverter<SampleDto> {
-        public override SampleDto Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        public override SampleDto Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) {
             throw new NotSupportedException();
+        }
 
-        public override void Write(Utf8JsonWriter writer, SampleDto value, JsonSerializerOptions options) =>
+        public override void Write(Utf8JsonWriter writer, SampleDto value, JsonSerializerOptions options) {
             throw new NotSupportedException();
+        }
     }
 }
 

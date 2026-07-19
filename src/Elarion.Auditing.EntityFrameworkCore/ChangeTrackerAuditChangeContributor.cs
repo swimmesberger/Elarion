@@ -48,8 +48,8 @@ public sealed class ChangeTrackerAuditChangeContributor : IAuditChangeContributo
                 case EntityState.Deleted:
                     context.Scope.AddChange(new AuditChange {
                         Entity = policy.EntityName,
-                        EntityId = FormatKey(entry, original: true),
-                        Kind = AuditChangeKind.Deleted,
+                        EntityId = FormatKey(entry, true),
+                        Kind = AuditChangeKind.Deleted
                     });
                     break;
                 case EntityState.Modified:
@@ -61,19 +61,18 @@ public sealed class ChangeTrackerAuditChangeContributor : IAuditChangeContributo
 
     /// <inheritdoc />
     public void OnSavedChanges(AuditCaptureContext context) {
-        foreach (var (entry, entityName) in _pendingAdds) {
+        foreach (var (entry, entityName) in _pendingAdds)
             context.Scope.AddChange(new AuditChange {
                 Entity = entityName,
-                EntityId = FormatKey(entry, original: false),
-                Kind = AuditChangeKind.Added,
+                EntityId = FormatKey(entry, false),
+                Kind = AuditChangeKind.Added
             });
-        }
 
         _pendingAdds.Clear();
     }
 
     private static void ContributeModified(IAuditScope scope, EntityEntry entry, CapturePolicy policy) {
-        var entityId = FormatKey(entry, original: false);
+        var entityId = FormatKey(entry, false);
         foreach (var property in entry.Properties) {
             if (!property.IsModified || property.Metadata.IsPrimaryKey())
                 continue;
@@ -92,7 +91,7 @@ public sealed class ChangeTrackerAuditChangeContributor : IAuditChangeContributo
                 Property = property.Metadata.Name,
                 OldValue = FormatValue(property.OriginalValue),
                 NewValue = FormatValue(property.CurrentValue),
-                Kind = AuditChangeKind.Modified,
+                Kind = AuditChangeKind.Modified
             });
         }
     }
@@ -112,24 +111,25 @@ public sealed class ChangeTrackerAuditChangeContributor : IAuditChangeContributo
         return result;
     }
 
-    private static string? FormatValue(object? value) => value switch {
-        null => null,
-        string s => s,
-        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-        _ => value.ToString(),
-    };
+    private static string? FormatValue(object? value) {
+        return value switch {
+            null => null,
+            string s => s,
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+            _ => value.ToString()
+        };
+    }
 
     private static CapturePolicy? BuildPolicy(Type entityType) {
-        if (entityType.GetCustomAttribute<AuditedAttribute>(inherit: false) is null)
+        if (entityType.GetCustomAttribute<AuditedAttribute>(false) is null)
             return null;
 
         HashSet<string>? ignored = null;
-        foreach (var property in entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance)) {
-            if (property.GetCustomAttribute<AuditIgnoreAttribute>(inherit: false) is not null) {
+        foreach (var property in entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            if (property.GetCustomAttribute<AuditIgnoreAttribute>(false) is not null) {
                 ignored ??= new HashSet<string>(StringComparer.Ordinal);
                 ignored.Add(property.Name);
             }
-        }
 
         return new CapturePolicy(entityType.Name, ignored ?? EmptyIgnored);
     }

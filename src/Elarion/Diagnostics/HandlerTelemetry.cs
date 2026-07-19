@@ -40,8 +40,8 @@ public static class HandlerTelemetry {
     public static readonly Histogram<double> ExecutionDuration =
         MeterInstance.CreateHistogram<double>(
             "handler.execution.duration",
-            unit: "s",
-            description: "Duration of traced handler executions",
+            "s",
+            "Duration of traced handler executions",
             advice: DurationAdvice);
 
     /// <summary>Counts authorization denials by handler and outcome (<c>unauthorized</c>/<c>forbidden</c>).</summary>
@@ -73,20 +73,23 @@ public static class HandlerTelemetry {
     }
 
     /// <summary>Records one authorization denial tagged with the bounded handler name and outcome.</summary>
-    public static void RecordAuthorizationDenied(string handler, string outcome) =>
+    public static void RecordAuthorizationDenied(string handler, string outcome) {
         AuthorizationDeniedCount.Add(1, new TagList {
             { "elarion.handler", handler },
             { "elarion.authorization.outcome", outcome }
         });
+    }
 
     /// <summary>Records one feature-gate short-circuit tagged with the bounded handler name.</summary>
-    public static void RecordFeatureGateClosed(string handler) =>
+    public static void RecordFeatureGateClosed(string handler) {
         FeatureGateClosedCount.Add(1, new TagList { { "elarion.handler", handler } });
+    }
 
     /// <summary>Records one idempotency-key resolution tagged with the bounded request type name and outcome.</summary>
-    public static void RecordIdempotency(string requestType, string outcome) =>
+    public static void RecordIdempotency(string requestType, string outcome) {
         IdempotencyCount.Add(1, new TagList {
             { "elarion.handler.request_type", requestType },
             { "elarion.idempotency.outcome", outcome }
         });
+    }
 }

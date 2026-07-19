@@ -18,7 +18,7 @@ namespace Elarion.Tests.JsonRpc;
 /// </summary>
 public sealed class IdempotencyTransportTests {
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     private sealed record ProbeCommand {
@@ -63,7 +63,8 @@ public sealed class IdempotencyTransportTests {
                 "things.create",
                 (_, sp, _) => {
                     sp.GetRequiredService<IIdempotencyKeyAccessor>().TryGetKey(out var key);
-                    return new ValueTask<Result<ProbeResponse>>(Result<ProbeResponse>.Success(new ProbeResponse(key ?? "<none>")));
+                    return new ValueTask<Result<ProbeResponse>>(
+                        Result<ProbeResponse>.Success(new ProbeResponse(key ?? "<none>")));
                 },
                 idempotent: true)
             .Freeze();
@@ -79,13 +80,14 @@ public sealed class IdempotencyTransportTests {
                 new Dictionary<string, object> {
                     ["name"] = "x",
                     ["_meta"] = new Dictionary<string, string> {
-                        [IdempotencyKeyNames.MetaKey] = "key-from-meta",
-                    },
+                        [IdempotencyKeyNames.MetaKey] = "key-from-meta"
+                    }
                 },
-                Options),
+                Options)
         };
 
-        var response = await dispatcher.DispatchAsync(request, scope.ServiceProvider, TestContext.Current.CancellationToken);
+        var response =
+            await dispatcher.DispatchAsync(request, scope.ServiceProvider, TestContext.Current.CancellationToken);
 
         response.Error.Should().BeNull();
         response.Result.Should().BeOfType<ProbeResponse>().Which.Key.Should().Be("key-from-meta");
@@ -98,7 +100,8 @@ public sealed class IdempotencyTransportTests {
                 "things.create",
                 (_, sp, _) => {
                     var has = sp.GetRequiredService<IIdempotencyKeyAccessor>().TryGetKey(out var key);
-                    return new ValueTask<Result<ProbeResponse>>(Result<ProbeResponse>.Success(new ProbeResponse(has ? key! : "<none>")));
+                    return new ValueTask<Result<ProbeResponse>>(
+                        Result<ProbeResponse>.Success(new ProbeResponse(has ? key! : "<none>")));
                 },
                 idempotent: true)
             .Freeze();
@@ -110,10 +113,11 @@ public sealed class IdempotencyTransportTests {
             Jsonrpc = "2.0",
             Method = "things.create",
             Id = "1",
-            Params = JsonSerializer.SerializeToElement(new { name = "x" }, Options),
+            Params = JsonSerializer.SerializeToElement(new { name = "x" }, Options)
         };
 
-        var response = await dispatcher.DispatchAsync(request, scope.ServiceProvider, TestContext.Current.CancellationToken);
+        var response =
+            await dispatcher.DispatchAsync(request, scope.ServiceProvider, TestContext.Current.CancellationToken);
 
         response.Result.Should().BeOfType<ProbeResponse>().Which.Key.Should().Be("<none>");
     }

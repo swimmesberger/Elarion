@@ -4,8 +4,8 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Resilience;
 using Elarion.Resilience;
 using Xunit;
-
 using Elarion.Pipeline;
+
 namespace Elarion.Tests.Services;
 
 public sealed class ResilienceDecoratorTests {
@@ -41,9 +41,7 @@ public sealed class ResilienceDecoratorTests {
             new ResiliencePolicyReference { Name = "test-retry" },
             _ => {
                 attempts++;
-                if (attempts < 3) {
-                    throw new InvalidOperationException("retry");
-                }
+                if (attempts < 3) throw new InvalidOperationException("retry");
 
                 return ValueTask.CompletedTask;
             },
@@ -101,9 +99,7 @@ public sealed class ResilienceDecoratorTests {
             new ResiliencePolicyReference { Name = "telemetry-retry" },
             _ => {
                 attempts++;
-                if (attempts == 1) {
-                    throw new InvalidOperationException("retry");
-                }
+                if (attempts == 1) throw new InvalidOperationException("retry");
 
                 return ValueTask.CompletedTask;
             },
@@ -126,9 +122,7 @@ public sealed class ResilienceDecoratorTests {
 
         public ValueTask<int> HandleAsync(Request request, CancellationToken ct) {
             Attempts++;
-            if (Attempts == 1) {
-                throw new InvalidOperationException("retry");
-            }
+            if (Attempts == 1) throw new InvalidOperationException("retry");
 
             return ValueTask.FromResult(42);
         }
