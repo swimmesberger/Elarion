@@ -1,3 +1,4 @@
+using System.Data.Common;
 using EdgeTelemetry.Api;
 using EdgeTelemetry.Api.Modules.Telemetry;
 using EdgeTelemetry.Api.Modules.Telemetry.Handlers;
@@ -38,7 +39,9 @@ var connectionString = builder.Configuration.GetConnectionString("Telemetry")
 // host's logger factory and every command logs its SQL under the "Npgsql.Command" category (visible
 // in the Aspire dashboard's structured logs). Parameter VALUES stay out of logs unless
 // EnableParameterLogging is set — the EnableSensitiveDataLogging analog, so development only.
-builder.Services.AddSingleton(sp => {
+// Registered as DbDataSource — the provider-neutral type ISqlSession opens its connection from; the
+// Npgsql builder is just how this host configures it (command logging, dev-only parameter logging).
+builder.Services.AddSingleton<DbDataSource>(sp => {
     var db = new NpgsqlSlimDataSourceBuilder(connectionString);
     db.UseLoggerFactory(sp.GetRequiredService<ILoggerFactory>());
     if (builder.Environment.IsDevelopment()) db.EnableParameterLogging();
@@ -62,6 +65,11 @@ builder.Services.AddElarionHttpJson();
 // The generated per-assembly mapper registration (ISqlRowMapper<T> singletons; the ReadingRow mapper
 // takes the canonical JSON accessor for its jsonb column).
 builder.Services.AddElarionSqlMappers();
+
+// The EF-free unit of work: registers the scoped ISqlSession handlers inject and the SqlUnitOfWork so
+// command handlers (telemetry.ingest) commit their writes atomically through the framework transaction
+// decorator — the AOT-tier counterpart to AddElarionUnitOfWork<TDbContext>().
+builder.Services.AddElarionSqlUnitOfWork();
 
 // Schema before traffic: the hosted service applies pending embedded migrations and fails startup on
 // error — an edge node serving against a half-migrated schema is worse than one that does not start.

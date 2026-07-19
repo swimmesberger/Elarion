@@ -9,6 +9,16 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **EF-free unit of work for the SQL tier (ADR-0058 addendum).** `Elarion.Sql` now implements the
+  provider-neutral `IUnitOfWork` seam, so the framework `TransactionDecorator` wraps a command handler's
+  raw-SQL writes in one atomic commit/rollback on an EF-free / NativeAOT host — previously such a host fell
+  back to the core no-op unit of work and a failed multi-write command was never rolled back. New
+  `ISqlSession` is the scoped ambient connection (the SQL analogue of EF's shared scoped `DbContext`) that a
+  handler injects; `SqlUnitOfWork` opens the transaction on it with the same semantics as
+  `EfUnitOfWork<TDbContext>` (nested handlers join via a savepoint; best-effort `SET LOCAL lock_timeout` on
+  Npgsql; no change-tracker flush). Register with `AddElarionSqlUnitOfWork()` (transactional) or
+  `AddElarionSqlSession()` (session alone, per-call auto-commit). No new package — `IUnitOfWork` already
+  lives in `Elarion.Abstractions`. Covered by Docker-gated integration tests against real PostgreSQL.
 - **Self-typed request markers and inferred dispatch (ADR-0065).** `Elarion.Abstractions` adds optional
   generic marker forms — `IRequest<TSelf, TResponse>`, `ICommand<TSelf, TResponse>`,
   `IQuery<TSelf, TResponse>`, and `IStreamRequest<TSelf, TItem>` — that declare a request's response type
@@ -22,6 +32,16 @@ minor releases may include breaking changes.
   (warnings) when a handler's response or stream item drifts from the marker's declared type.
 
 ### Changed
+- **`Elarion.Sql` data access is now `ISqlSession`-based; the `DbDataSource` query/write extensions are
+  removed (breaking).** The query/write convenience surface (`QueryAsync`, `QueryFirstOrDefaultAsync`,
+  `QuerySingleOrDefaultAsync`, `QueryUnbufferedAsync`, `ExecuteAsync`, `ExecuteScalarAsync`, `InsertAsync`,
+  `InsertManyAsync`) no longer has `DbDataSource` overloads — it lives on `ISqlSession` (the transaction-aware
+  handler entry point) and the `DbConnection` primitive it delegates to (for DI-free / NativeAOT hosts,
+  tooling, and tests that own their connection via `dataSource.OpenConnectionAsync(ct)`). A per-call-pooled
+  receiver could never join a transaction, so a handler that used it silently opted out of atomic commits;
+  removing it makes the correct path the only path. Migration: inject `ISqlSession` and call
+  `AddElarionSqlUnitOfWork()`/`AddElarionSqlSession()`; the call sites are unchanged. The EdgeTelemetry sample
+  handlers moved from `NpgsqlDataSource` to `ISqlSession`.
 - **`ConnectionHandlerInvoker` is now bound per connection (ADR-0065).** The static entry points are
   replaced by a sealed instance class constructed once with `(IServiceProvider, IClientConnectionSink)`:
   `var invoker = new ConnectionHandlerInvoker(services, connection);` then

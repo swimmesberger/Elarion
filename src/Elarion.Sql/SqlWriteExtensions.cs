@@ -34,16 +34,6 @@ public static class SqlWriteExtensions {
         }
     }
 
-    /// <inheritdoc cref="InsertAsync{T}(DbConnection, T, DbTransaction, CancellationToken)"/>
-    public static async Task<int> InsertAsync<T>(
-        this DbDataSource dataSource, T row, CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using (connection.ConfigureAwait(false)) {
-            return await connection.InsertAsync(row, null, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     /// <summary>
     /// Inserts every row via the generated full-row INSERT, reusing one prepared command inside one
     /// transaction (its own if none is passed). <paramref name="sqlSuffix"/> is appended verbatim to
@@ -89,18 +79,6 @@ public static class SqlWriteExtensions {
             if (ownsTransaction) await tx.DisposeAsync().ConfigureAwait(false);
 
             if (wasClosed) await connection.CloseAsync().ConfigureAwait(false);
-        }
-    }
-
-    /// <inheritdoc cref="InsertManyAsync{T}(DbConnection, IEnumerable{T}, string, DbTransaction, CancellationToken)"/>
-    public static async Task<int> InsertManyAsync<T>(
-        this DbDataSource dataSource, IEnumerable<T> rows, string? sqlSuffix = null,
-        CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using (connection.ConfigureAwait(false)) {
-            return await connection.InsertManyAsync(rows, sqlSuffix, null, cancellationToken)
-                .ConfigureAwait(false);
         }
     }
 

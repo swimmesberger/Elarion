@@ -219,3 +219,31 @@ implementations by tier, because the mechanism genuinely differs (runtime-compil
 never a repackaging of the EF path. It ships behind a benchmark gate at raw-COPY parity (the ADR-0051
 discipline) and dogfoods in the EdgeTelemetry ingest handler. Deferred to its own decision — v1 keeps
 `InsertManyAsync` as the batch path and points high-throughput bulk load at the EF tier.
+
+## Addendum (2026-07): scoped session and the EF-free unit of work
+
+The v1 access surface hung the query/write extensions on `DbDataSource` (a pooled connection per call)
+and `DbConnection`. That left a correctness gap: the framework `TransactionDecorator` runs on the
+provider-neutral `IUnitOfWork` seam, which this tier never implemented, so an EF-free host fell back to
+the core no-op unit of work — a command that wrote more than once was **not** rolled back on failure. And
+the `DbDataSource` overloads were structurally incapable of joining a transaction (a fresh connection per
+call), so pointing a handler at them silently opted out of atomicity.
+
+The fix introduces the tier's missing scoped state — `ISqlSession`, one connection pinned for a request
+scope plus the transaction currently open on it (the SQL analogue of EF's shared scoped `DbContext`) —
+and `SqlUnitOfWork` over it, implementing `IUnitOfWork` with the same semantics as
+`EfUnitOfWork<TDbContext>`: real transaction on the shared connection, nested handlers join via a
+savepoint (PostgreSQL forbids a second physical transaction on one connection), and best-effort
+`SET LOCAL lock_timeout` on Npgsql (detected structurally, since the package keeps no Npgsql dependency).
+There is no change tracker to flush — the handler's statements have already run on the connection inside
+the transaction — so commit only commits. `AddElarionSqlSession()` registers the session alone (per-call
+auto-commit); `AddElarionSqlUnitOfWork()` layers the transactional unit of work on it. Both live in
+`Elarion.Sql` — no new package, because `IUnitOfWork` is already in `Elarion.Abstractions`.
+
+Preferring API design over pre-1.0 compatibility, the `DbDataSource` receiver was **removed**, not kept
+alongside: the query/write surface now lives on `ISqlSession` (the handler entry point) and the
+`DbConnection` primitive it delegates to (DI-free / NativeAOT hosts, tooling, tests that own their
+connection). Two receivers, not three, and the one a handler injects is transaction-aware by
+construction — the silent non-transactional path is gone rather than merely discouraged. The EdgeTelemetry
+sample migrated its handlers from `NpgsqlDataSource` to `ISqlSession` (call sites unchanged); its e2e test
+covers ingest-then-query through the migrated schema.

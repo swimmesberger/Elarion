@@ -1,12 +1,11 @@
 using Elarion.Abstractions;
 using Elarion.Sql;
-using Npgsql;
 
 namespace EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 
 /// <summary>Recent history for a device+metric, newest first — self-mapping, no mapper argument.</summary>
 [Handler("telemetry.history")]
-public sealed class GetReadingHistory(NpgsqlDataSource db)
+public sealed class GetReadingHistory(ISqlSession db)
     : IHandler<GetReadingHistory.Query, Result<List<ReadingRow>>> {
     public sealed record Query(string DeviceId, string Metric, int Limit) : IQuery;
 
