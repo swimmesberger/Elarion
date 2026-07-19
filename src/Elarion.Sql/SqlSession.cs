@@ -3,12 +3,12 @@ using System.Data.Common;
 namespace Elarion.Sql;
 
 /// <summary>
-/// The default <see cref="ISqlSession"/>: pins one pooled connection from a <see cref="DbDataSource"/> for the
-/// scope and tracks the transaction the <see cref="SqlUnitOfWork"/> opens on it. Registered as a scoped service
-/// and shared (by reference) with the scope's <c>IUnitOfWork</c>, so the unit of work and the handler always act
-/// on the same physical connection.
+/// The default <see cref="ISqlSession"/>: pins one pooled connection — from the data source the
+/// <see cref="IElarionSqlDataSourceProvider"/> hands out for the scope — and tracks the transaction the
+/// <see cref="SqlUnitOfWork"/> opens on it. Registered as a scoped service and shared (by reference) with the
+/// scope's <c>IUnitOfWork</c>, so the unit of work and the handler always act on the same physical connection.
 /// </summary>
-internal sealed class SqlSession(DbDataSource dataSource) : ISqlSession {
+internal sealed class SqlSession(IElarionSqlDataSourceProvider dataSourceProvider) : ISqlSession {
     private DbConnection? _connection;
 
     /// <inheritdoc />
@@ -21,8 +21,10 @@ internal sealed class SqlSession(DbDataSource dataSource) : ISqlSession {
     /// <inheritdoc />
     public async ValueTask<DbConnection> GetConnectionAsync(CancellationToken cancellationToken = default) {
         // Open once and cache: every later call returns the same open connection so a transaction begun on it
-        // stays in effect for the whole scope. A pooled connection is cheap to hold for a request's duration.
-        return _connection ??= await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        // stays in effect for the whole scope. The provider decides which data source this scope opens from
+        // (single, tenant-routed, replica). A pooled connection is cheap to hold for a request's duration.
+        return _connection ??= await dataSourceProvider.GetDataSource()
+            .OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync() {

@@ -240,6 +240,14 @@ the transaction — so commit only commits. `AddElarionSqlSession()` registers t
 auto-commit); `AddElarionSqlUnitOfWork()` layers the transactional unit of work on it. Both live in
 `Elarion.Sql` — no new package, because `IUnitOfWork` is already in `Elarion.Abstractions`.
 
+Which data source a session opens from is the `IElarionSqlDataSourceProvider` seam, not a hard
+`GetRequiredService<DbDataSource>()` — consistent with the migration runner, which takes an explicit data
+source rather than resolving a global one. The no-argument DI overloads default to a container-registered
+`DbDataSource`; a factory overload names it explicitly (so a host that registered a concrete
+`NpgsqlDataSource` need not also alias it as `DbDataSource`); and a host-registered scoped provider routes
+per request — a tenant's database or a read replica — winning over the default. The seam is designed for
+that strongest implementation, and the single-database happy path stays a one-liner.
+
 Preferring API design over pre-1.0 compatibility, the `DbDataSource` receiver was **removed**, not kept
 alongside: the query/write surface now lives on `ISqlSession` (the handler entry point) and the
 `DbConnection` primitive it delegates to (DI-free / NativeAOT hosts, tooling, tests that own their

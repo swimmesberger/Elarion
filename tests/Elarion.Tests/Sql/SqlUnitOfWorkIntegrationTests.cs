@@ -17,6 +17,12 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
     : IClassFixture<PostgreSqlSqlSessionFixture> {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    // A session over the fixture's data source through the default single-source provider — the seam the DI
+    // helpers register for a single-database host.
+    private SqlSession NewSession() {
+        return new SqlSession(new SingletonSqlDataSourceProvider(fixture.DataSource));
+    }
+
     private async Task<bool> ExistsAsync(Guid id) {
         // Verify through an independent connection so we observe only committed state.
         await using var connection = fixture.CreateConnection();
@@ -31,7 +37,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var id = Guid.NewGuid();
 
-        await using (var session = new SqlSession(fixture.DataSource)) {
+        await using (var session = NewSession()) {
             var uow = new SqlUnitOfWork(session);
             await using var scope = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
             await session.InsertAsync(new SqlWidget { Id = id, Name = "committed" }, Ct);
@@ -46,7 +52,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var id = Guid.NewGuid();
 
-        await using (var session = new SqlSession(fixture.DataSource)) {
+        await using (var session = NewSession()) {
             var uow = new SqlUnitOfWork(session);
             await using var scope = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
             await session.InsertAsync(new SqlWidget { Id = id, Name = "rolled-back" }, Ct);
@@ -61,7 +67,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var id = Guid.NewGuid();
 
-        await using (var session = new SqlSession(fixture.DataSource)) {
+        await using (var session = NewSession()) {
             var uow = new SqlUnitOfWork(session);
             // No explicit commit or rollback: leaving the scope must roll the transaction back.
             await using var scope = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
@@ -76,7 +82,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var id = Guid.NewGuid();
 
-        await using var session = new SqlSession(fixture.DataSource);
+        await using var session = NewSession();
         var uow = new SqlUnitOfWork(session);
         await using var scope = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
         await session.InsertAsync(new SqlWidget { Id = id, Name = "in-flight" }, Ct);
@@ -99,7 +105,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
         var outerId = Guid.NewGuid();
         var innerId = Guid.NewGuid();
 
-        await using (var session = new SqlSession(fixture.DataSource)) {
+        await using (var session = NewSession()) {
             var uow = new SqlUnitOfWork(session);
             await using var outer = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
             await session.InsertAsync(new SqlWidget { Id = outerId, Name = "outer" }, Ct);
@@ -124,7 +130,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
         var outerId = Guid.NewGuid();
         var innerId = Guid.NewGuid();
 
-        await using (var session = new SqlSession(fixture.DataSource)) {
+        await using (var session = NewSession()) {
             var uow = new SqlUnitOfWork(session);
             await using var outer = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
             await session.InsertAsync(new SqlWidget { Id = outerId, Name = "outer" }, Ct);
@@ -146,7 +152,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
     public async Task RootScope_AppliesLockTimeout() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
 
-        await using var session = new SqlSession(fixture.DataSource);
+        await using var session = NewSession();
         var uow = new SqlUnitOfWork(session);
         await using var scope = await uow.BeginAsync(
             new UnitOfWorkOptions { LockTimeout = TimeSpan.FromSeconds(2) }, Ct);
@@ -159,7 +165,7 @@ public sealed class SqlUnitOfWorkIntegrationTests(PostgreSqlSqlSessionFixture fi
     public async Task NestedScope_AppliesLockTimeout_AndCommitRestoresTheAmbientValue() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
 
-        await using var session = new SqlSession(fixture.DataSource);
+        await using var session = NewSession();
         var uow = new SqlUnitOfWork(session);
         await using var outer = await uow.BeginAsync(UnitOfWorkOptions.Default, Ct);
         var ambient = await CurrentLockTimeoutAsync(session);
