@@ -1,16 +1,16 @@
 using Elarion.Abstractions;
 using Elarion.Abstractions.Authorization;
 using Elarion.Sql;
-using Npgsql;
 
 namespace EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 
 /// <summary>
 /// A finite, cold export of a device metric's history. Unlike the buffered history query, rows stay on the
-/// database reader until the SSE response consumes them.
+/// database reader until the SSE response consumes them — the session's connection stays open for the whole
+/// enumeration and is released when the request scope ends.
 /// </summary>
 [AllowAnonymous]
-public sealed class ExportReadingHistory(NpgsqlDataSource db)
+public sealed class ExportReadingHistory(ISqlSession db)
     : IStreamHandler<ExportReadingHistory.Query, ReadingRow> {
     public sealed record Query(string DeviceId, string Metric, int Limit) : IQuery;
 

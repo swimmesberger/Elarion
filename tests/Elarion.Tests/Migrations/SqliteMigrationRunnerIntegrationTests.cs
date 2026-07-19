@@ -1,6 +1,6 @@
 using AwesomeAssertions;
 using Elarion.Migrations;
-using Elarion.Migrations.Sqlite;
+using Elarion.Sql.Sqlite;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -192,8 +192,8 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
     private static IMigrationRunner CreateRunner(
         string connectionString,
         string scenario,
-        Action<SqliteMigrationOptions>? configure = null) {
-        var options = new SqliteMigrationOptions();
+        Action<MigrationOptions>? configure = null) {
+        var options = new MigrationOptions();
         options.AddScripts(typeof(SqliteMigrationRunnerIntegrationTests).Assembly, ScriptPrefix + scenario);
         configure?.Invoke(options);
         return new SqliteMigrationRunner(connectionString, options);

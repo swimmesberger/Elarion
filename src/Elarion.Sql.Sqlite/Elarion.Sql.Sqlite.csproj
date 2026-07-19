@@ -1,11 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>SQLite provider for the Elarion.Migrations SQL migration engine (ADR-0060), for single-node / edge EF-free (NativeAOT) hosts: embedded V{version}__/R__ scripts, SHA-256 checksums over line-ending-normalized content, and history rows that commit in the same transaction as their script — so there is no repair command and no failed-row limbo. Serializes runners with a connection-held exclusive lock (SQLite's locking_mode=EXCLUSIVE). Startup-applied via a hosted service. The EF tier keeps EF Core migrations.</Description>
+    <Description>SQLite provider for the Elarion EF-free tier (ADR-0058/ADR-0060), for single-node / edge NativeAOT hosts: the single AddElarionSqlite(connectionString) picks SQLite for every subsystem — it registers a DbDataSource over SqliteConnection (there is none in Microsoft.Data.Sqlite), the IElarionSqlDataSourceProvider the ISqlSession opens from, and the IMigrationDatabaseFactory the neutral AddElarionMigrations resolves. Contains the SQLite migration engine (in-process per-file lock, history table). Mirrors Elarion.Sql.PostgreSql; the neutral Elarion.Sql and Elarion.Migrations stay driver-free.</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Elarion.Sql\Elarion.Sql.csproj"/>
     <ProjectReference Include="..\Elarion.Migrations\Elarion.Migrations.csproj"/>
   </ItemGroup>
 

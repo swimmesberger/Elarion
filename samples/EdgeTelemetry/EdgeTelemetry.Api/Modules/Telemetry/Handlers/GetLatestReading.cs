@@ -1,6 +1,5 @@
 using Elarion.Abstractions;
 using Elarion.Sql;
-using Npgsql;
 
 namespace EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 
@@ -10,7 +9,7 @@ namespace EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 /// Full SQL, no translation layer; a miss is a <c>Result</c> failure the HTTP layer renders as 404.
 /// </summary>
 [Handler("telemetry.latest")]
-public sealed class GetLatestReading(NpgsqlDataSource db)
+public sealed class GetLatestReading(ISqlSession db)
     : IHandler<GetLatestReading.Query, Result<ReadingRow>> {
     public sealed record Query(string DeviceId, string Metric) : IQuery;
 

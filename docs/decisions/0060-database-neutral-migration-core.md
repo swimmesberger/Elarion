@@ -112,3 +112,35 @@ semantics and documents the deltas:
   `dotnet test`; the PostgreSQL provider keeps its Testcontainers integration tests.
 - `docs/reference/packages.mdx`, the `AGENTS.md` package table, `docs/capabilities/sql-migrations.mdx`, and
   the decisions index gain the two new packages.
+
+## Addendum (2026-07): neutral registration and PostgreSQL consolidation
+
+The runner engine was neutral from the start, but the *registration* was still provider-named
+(`AddElarionPostgreSqlMigrations`) and the PostgreSQL provider lived in its own package. Two changes finish the
+neutrality so a host picks its database in exactly one place:
+
+- **Neutral `AddElarionMigrations(configure)`.** The migration core adds an `IMigrationDatabaseFactory` seam
+  (a provider registers one, capturing its data source and engine settings) and a neutral
+  `AddElarionMigrations` that resolves it to build the runner. `MigrationOptions` became a concrete type so the
+  neutral registration can instantiate it, and the PostgreSQL advisory-lock key moved from
+  `PostgreSqlMigrationOptions` (deleted) to an `AddElarionPostgreSql` argument — options carry only neutral
+  concerns now.
+- **PostgreSQL consolidated into `Elarion.Sql.PostgreSql`.** `Elarion.Migrations.PostgreSql` is retired; its
+  migration database, session, history, and statement splitter moved into `Elarion.Sql.PostgreSql`, which is
+  now the one package holding every PostgreSQL-specific piece of the EF-free tier. Its single
+  `AddElarionPostgreSql(connectionString)` registers the shared `NpgsqlDataSource`, the access-tier provider,
+  and the migration-database factory at once (ADR-0058 addendum). A migration-only PostgreSQL host references
+  `Elarion.Sql.PostgreSql` (it pulls in the small neutral `Elarion.Sql`). The `PostgreSqlMigrationRunner` façade
+  remains for direct/non-DI construction.
+- **SQLite consolidated into `Elarion.Sql.Sqlite` — a full provider, not migration-only.**
+  `Elarion.Migrations.Sqlite` is retired; its migration engine moved into a new `Elarion.Sql.Sqlite` that
+  mirrors `Elarion.Sql.PostgreSql`. The single `AddElarionSqlite(cs)` picks SQLite for every subsystem:
+  `AddElarionSqliteMigrations(cs, configure)` became `AddElarionSqlite(cs)` (provider choice) + the neutral
+  `AddElarionMigrations(configure)`, and the package now **also** provides the SQL access tier. The missing
+  piece — `Microsoft.Data.Sqlite` ships no `DbDataSource` — is a trivial `SqliteDataSource : DbDataSource` over
+  `SqliteConnection`; the `[SqlRecord]` mappers are provider-portable (they emit neutral ADO.NET `DbParameter`
+  binding and `@`-named placeholders — the only Npgsql-specific branch is `[SqlJson]`→`jsonb`), and the
+  `SqlUnitOfWork` already gates its PostgreSQL `SET LOCAL lock_timeout` so commit/rollback and savepoints work
+  on SQLite unchanged. So `AddElarionSqlite` + `AddElarionSqlUnitOfWork` + `AddElarionMigrations` is the exact
+  SQLite counterpart to the PostgreSQL wiring, proven by an in-process access-tier round-trip test.
+  `SqliteMigrationOptions` (empty) was deleted; the `SqliteMigrationRunner` façade takes `MigrationOptions`.

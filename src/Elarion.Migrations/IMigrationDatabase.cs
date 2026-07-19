@@ -3,7 +3,7 @@ namespace Elarion.Migrations;
 /// <summary>
 /// The database-specific half of the migration engine (ADR-0060): opens locked, single-threaded sessions
 /// for the neutral <see cref="MigrationRunner"/> to orchestrate. One provider per database engine
-/// (<c>Elarion.Migrations.PostgreSql</c>, <c>Elarion.Migrations.Sqlite</c>); the runner supplies the
+/// (<c>Elarion.Sql.PostgreSql</c>, <c>Elarion.Sql.Sqlite</c>); the runner supplies the
 /// roll-forward policy, the provider supplies the SQL and the lock.
 /// </summary>
 public interface IMigrationDatabase {

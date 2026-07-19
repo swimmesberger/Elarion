@@ -43,9 +43,10 @@ public sealed partial record Order {
 ```
 
 The generator emits `OrderSqlMapper : ISqlRowMapper<Order>` **and** makes `Order` self-mapping, so the
-query extensions resolve its mapper from the type — **no mapper argument**. Query a `DbDataSource` (a
-pooled connection per call) or a `DbConnection`; interpolated values become parameters, and
-`Order.Select` splices the generated `SELECT`-list with no `:raw`:
+query extensions resolve its mapper from the type — **no mapper argument**. In a handler you inject
+`ISqlSession` (`db` below — the scoped, transaction-aware entry point, see
+[Transactions](#transactions-unit-of-work)); interpolated values become parameters, and `Order.Select`
+splices the generated `SELECT`-list with no `:raw`:
 
 ```csharp
 var orders = await db.QueryAsync<Order>(
@@ -140,8 +141,13 @@ zero per row); there is no cheaper *safe* way to build a dynamic `WHERE`.
 
 ## Reads and writes
 
-The query extensions live on both `DbDataSource` (opens/disposes a pooled connection per call) and
-`DbConnection` (Dapper open/close semantics):
+The same query/write surface lives on two receivers: **`ISqlSession`** — the scoped, transaction-aware
+entry point a handler injects (below and [Transactions](#transactions-unit-of-work)) — and the
+**`DbConnection`** primitive it is built on (Dapper open/close semantics), for DI-free / NativeAOT hosts,
+tooling, and tests that manage their own connection (`await using var connection = await
+dataSource.OpenConnectionAsync(ct);`). There is deliberately **no `DbDataSource` receiver**: a
+per-call-pooled-connection surface cannot participate in a transaction, and a handler that reached for it
+would silently opt out of atomic commits — inject `ISqlSession` instead.
 
 | Call | Shape |
 | --- | --- |
@@ -171,6 +177,74 @@ generated mapper if you ever need it.
 The `DbConnection` extensions (`QueryAsync`, `QueryFirstOrDefaultAsync`, `ExecuteAsync`,
 `ExecuteScalarAsync`) pair statements with mappers and open/close closed connections around the call
 (Dapper semantics). They save the command/reader ceremony — nothing more.
+
+## Transactions (unit of work)
+
+Because a handler injects `ISqlSession` — one connection pinned for the request scope — several
+statements can run in one transaction. That is what makes a command that writes more than once atomic.
+This tier supplies the same `IUnitOfWork` seam the EF tier does, so the framework
+[`TransactionDecorator`](/docs/capabilities/entity-framework) wraps a command handler in one
+commit/rollback with no per-handler transaction code. On PostgreSQL, `Elarion.Sql.PostgreSql` registers
+one **central data source** — the shared core, EF Core's `DbContext` analogue — that the access tier and
+[migrations](/docs/capabilities/sql-migrations) both draw from, so the database is configured once:
+
+```csharp
+// Pick the provider once — one NpgsqlDataSource shared by every subsystem (command logging auto-wired):
+builder.Services.AddElarionPostgreSql(connectionString);
+// ...then the neutral registrations name no provider:
+builder.Services.AddElarionSqlUnitOfWork();
+builder.Services.AddElarionMigrations(o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
+```
+
+`AddElarionSqlUnitOfWork()` registers the scoped `ISqlSession` and replaces the default no-op
+`IUnitOfWork` with `SqlUnitOfWork`, which opens the transaction on the session's shared connection. The
+handler calls the convenience surface on the session; every read and write runs on that connection and
+enlists the open transaction automatically. (A read-only host that never writes can register just
+`AddElarionSqlSession()` — the session with per-call auto-commit, no transaction machinery.)
+
+**The data source is the `IElarionSqlDataSourceProvider` seam — the session resolves the provider and
+nothing else, so there is no ambient `DbDataSource` the tier assumes.** `Elarion.Sql` itself stays
+Npgsql-free; the Npgsql binding lives in `Elarion.Sql.PostgreSql`. Register the provider with one of:
+
+| Registration | Package | Use it when |
+| --- | --- | --- |
+| `AddElarionPostgreSql(connectionString)` | `Elarion.Sql.PostgreSql` | the common PostgreSQL host — one central `NpgsqlDataSource` shared by the access tier and migrations |
+| `AddElarionSqlite(connectionString)` | `Elarion.Sql.Sqlite` | a single-node / edge SQLite host — a `DbDataSource` over `Microsoft.Data.Sqlite` plus migrations, the same shape as PostgreSQL |
+| `AddElarionSqlDataSource(sp => …)` | `Elarion.Sql` | build and own a `DbDataSource` yourself (any provider) |
+| `AddElarionSqlDataSource()` | `Elarion.Sql` | a `DbDataSource` is already in the container (`AddNpgsqlDataSource`) |
+| `AddElarionSqlDataSourceProvider<T>()` | `Elarion.Sql` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` |
+
+```csharp
+[Handler]
+public sealed class PlaceOrder(ISqlSession db) {
+    public async ValueTask<Result> HandleAsync(PlaceOrderCommand command, CancellationToken ct) {
+        await db.InsertAsync(command.Order, ct);
+        await db.ExecuteAsync($"UPDATE {Customer.Table} SET order_count = order_count + 1 WHERE id = {command.Order.CustomerId}", ct);
+        return Result.Success();   // both writes commit together; a failure/error result rolls both back
+    }
+}
+```
+
+- **Atomicity by result.** The decorator commits on a successful `Result` and rolls back otherwise —
+  the two writes above are one transaction. Reads on the session inside the scope observe its own
+  uncommitted writes (they share the connection); an outside connection sees nothing until commit.
+- **Nested handlers join, never nest physically.** A transactional command that invokes another
+  through `IHandlerSender` on the same scope joins the ambient transaction via a **savepoint** (commit
+  releases it, rollback discards only the inner writes) — PostgreSQL forbids a second physical
+  transaction on one connection.
+- **Lock timeout.** `UnitOfWorkOptions.LockTimeout` applies `SET LOCAL lock_timeout` on PostgreSQL
+  (how `[Idempotent]` fast-fails a concurrent duplicate to a 409 instead of blocking); other ADO.NET
+  providers ignore it, the closest semantics they can offer.
+- **No change tracker.** Unlike EF there is no pending-change buffer to flush — the handler's
+  statements have already executed on the connection inside the transaction, so commit only commits.
+- **Without it.** With neither `AddElarionSqlUnitOfWork()` nor `AddElarionSqlSession()` registered, a
+  command handler that injects `ISqlSession` fails to resolve at activation; and if only the session is
+  registered, the framework's `IUnitOfWork` stays the core no-op (commit/rollback do nothing, logged
+  once) so a failed multi-write command is **not** rolled back. Register `AddElarionSqlUnitOfWork()` on
+  any EF-free host whose handlers write.
+
+`InsertManyAsync` on the session enlists the ambient transaction; on the raw `DbConnection` primitive it
+opens its own (a batch is atomic on its own), so prefer the session inside a handler.
 
 ## Why not Dapper.AOT
 

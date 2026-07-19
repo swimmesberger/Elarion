@@ -1,6 +1,6 @@
 using AwesomeAssertions;
 using Elarion.Migrations;
-using Elarion.Migrations.PostgreSql;
+using Elarion.Sql.PostgreSql;
 using Npgsql;
 using Xunit;
 
@@ -242,8 +242,8 @@ public sealed class PostgreSqlMigrationRunnerIntegrationTests(PostgreSqlMigratio
     private static IMigrationRunner CreateRunner(
         string connectionString,
         string scenario,
-        Action<PostgreSqlMigrationOptions>? configure = null) {
-        var options = new PostgreSqlMigrationOptions();
+        Action<MigrationOptions>? configure = null) {
+        var options = new MigrationOptions();
         options.AddScripts(
             typeof(PostgreSqlMigrationRunnerIntegrationTests).Assembly,
             MigrationScriptDiscoveryTests.ScriptPrefix + scenario);

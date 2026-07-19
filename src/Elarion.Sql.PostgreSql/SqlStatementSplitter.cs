@@ -1,4 +1,4 @@
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Sql.PostgreSql;
 
 /// <summary>
 /// Splits a <c>-- elarion: no-transaction</c> script into individual statements so each executes as its

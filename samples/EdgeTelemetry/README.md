@@ -26,8 +26,8 @@ TimescaleDB (ADR-0056: the extension rides the server image;
              enabling it is an ordinary migration — CREATE EXTENSION,
              create_hypertable, add_retention_policy, one transaction)
         ▲
-Elarion.Migrations.PostgreSql  (ADR-0057)    the schema half: embedded V__ scripts, applied
-                                             before the host reports ready, fail-closed
+Elarion.Sql.PostgreSql         (ADR-0057)    the schema half (+ the shared data source): embedded
+                                             V__ scripts, applied before the host reports ready
 ```
 
 No EF, no reflection, no runtime code generation. Handler registrations come from the generated
@@ -122,8 +122,9 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   ProblemDetails, and the jsonb column.
 - **`Program.cs`** — the slim builder plus `AddElarion(configuration)` (the generated bootstrapper:
   module-gated handler registrations + JSON contexts), `AddElarionHttpJson()` (canonical JSON onto
-  minimal-API binding, ProblemDetails included), `AddElarionSqlMappers()`, and
-  `AddElarionPostgreSqlMigrations(dataSource, …)` for schema-before-traffic. Each unary endpoint is one
+  minimal-API binding, ProblemDetails included), `AddElarionSqlMappers()`, and — after the single
+  `AddElarionPostgreSql(connectionString)` picks the provider — the neutral `AddElarionSqlUnitOfWork()` and
+  `AddElarionMigrations(…)` for schema-before-traffic. Each unary endpoint is one
   line: bind → typed handler call → `ElarionHttpResults.ToResult` (200 / 400 / 404 ProblemDetails).
   The stream endpoint is the same RDG-visible shape: its typed `MapGet` builds the request and returns
   `ElarionHttpResults.ToStreamResult`; that lazy result owns native SSE framing and invocation lifetime,

@@ -4,17 +4,23 @@ using System.Data.Common;
 namespace Elarion.Sql;
 
 /// <summary>
-/// Query/execute convenience over a <see cref="DbDataSource"/> or <see cref="DbConnection"/>. The
-/// self-mapping happy path resolves the generated mapper from the row type
+/// Query/execute convenience over a <see cref="DbConnection"/>: the low-level primitive the SQL tier is built
+/// on. The self-mapping happy path resolves the generated mapper from the row type
 /// (<c>connection.QueryAsync&lt;Order&gt;($"…")</c>, no mapper argument — see
 /// <see cref="ISqlRecord{TSelf}"/>); an explicit-mapper escape hatch stays for hand-written mappers of
 /// non-<c>[SqlRecord]</c> shapes. Deliberately thin: no ORM, no statement generation — these save the
-/// command/reader ceremony, nothing more. On a <see cref="DbConnection"/>, a closed connection is
-/// opened for the call and closed afterwards (Dapper semantics); on a <see cref="DbDataSource"/>, a
-/// pooled connection is opened and disposed per call.
+/// command/reader ceremony, nothing more. A closed connection is opened for the call and closed afterwards
+/// (Dapper semantics); an already-open connection is left open.
 /// </summary>
+/// <remarks>
+/// Inside a handler, inject <see cref="ISqlSession"/> and call the equivalent
+/// <see cref="SqlSessionExtensions">session methods</see> instead: they run on the scope's shared connection and
+/// enlist the active unit-of-work transaction automatically. Reach for these <see cref="DbConnection"/> methods
+/// in DI-free / NativeAOT hosts, tooling, and tests that manage their own connection — for example
+/// <c>await using var connection = await dataSource.OpenConnectionAsync(ct);</c>.
+/// </remarks>
 public static class SqlDbConnectionExtensions {
-    // ---- Self-mapping happy path: DbConnection ----------------------------------------------------
+    // ---- Self-mapping happy path ------------------------------------------------------------------
 
     /// <summary>Runs the query and materializes every row through the row type's generated mapper.</summary>
     public static Task<List<T>> QueryAsync<T>(
@@ -42,42 +48,6 @@ public static class SqlDbConnectionExtensions {
         this DbConnection connection, SqlStatement sql, CancellationToken cancellationToken = default)
         where T : ISqlRecord<T> {
         return connection.QueryFirstOrDefaultAsync(T.SqlMapper, sql, cancellationToken);
-    }
-
-    // ---- Self-mapping happy path: DbDataSource (opens/disposes a pooled connection) ---------------
-
-    /// <inheritdoc cref="QueryAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static Task<List<T>> QueryAsync<T>(
-        this DbDataSource dataSource, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        return dataSource.QueryAsync<T>(new SqlStatement(sql), cancellationToken);
-    }
-
-    /// <inheritdoc cref="QueryAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static async Task<List<T>> QueryAsync<T>(
-        this DbDataSource dataSource, SqlStatement sql, CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using (connection.ConfigureAwait(false)) {
-            return await connection.QueryAsync<T>(sql, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <inheritdoc cref="QueryFirstOrDefaultAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static Task<T?> QueryFirstOrDefaultAsync<T>(
-        this DbDataSource dataSource, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        return dataSource.QueryFirstOrDefaultAsync<T>(new SqlStatement(sql), cancellationToken);
-    }
-
-    /// <inheritdoc cref="QueryFirstOrDefaultAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static async Task<T?> QueryFirstOrDefaultAsync<T>(
-        this DbDataSource dataSource, SqlStatement sql, CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using (connection.ConfigureAwait(false)) {
-            return await connection.QueryFirstOrDefaultAsync<T>(sql, cancellationToken).ConfigureAwait(false);
-        }
     }
 
     // ---- Explicit-mapper escape hatch (hand-written mappers, non-[SqlRecord] shapes) --------------
@@ -143,7 +113,7 @@ public static class SqlDbConnectionExtensions {
         }
     }
 
-    // ---- Non-query / scalar (no mapper): DbConnection ---------------------------------------------
+    // ---- Non-query / scalar (no mapper) -----------------------------------------------------------
 
     /// <summary>Executes a non-query statement and returns the affected row count.</summary>
     public static Task<int> ExecuteAsync(
@@ -195,38 +165,6 @@ public static class SqlDbConnectionExtensions {
         }
     }
 
-    // ---- Non-query / scalar (no mapper): DbDataSource ---------------------------------------------
-
-    /// <inheritdoc cref="ExecuteAsync(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static Task<int> ExecuteAsync(
-        this DbDataSource dataSource, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default) {
-        return dataSource.ExecuteAsync(new SqlStatement(sql), cancellationToken);
-    }
-
-    /// <inheritdoc cref="ExecuteAsync(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static async Task<int> ExecuteAsync(
-        this DbDataSource dataSource, SqlStatement sql, CancellationToken cancellationToken = default) {
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using (connection.ConfigureAwait(false)) {
-            return await connection.ExecuteAsync(sql, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <inheritdoc cref="ExecuteScalarAsync{TResult}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static Task<TResult?> ExecuteScalarAsync<TResult>(
-        this DbDataSource dataSource, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default) {
-        return dataSource.ExecuteScalarAsync<TResult>(new SqlStatement(sql), cancellationToken);
-    }
-
-    /// <inheritdoc cref="ExecuteScalarAsync{TResult}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static async Task<TResult?> ExecuteScalarAsync<TResult>(
-        this DbDataSource dataSource, SqlStatement sql, CancellationToken cancellationToken = default) {
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using (connection.ConfigureAwait(false)) {
-            return await connection.ExecuteScalarAsync<TResult>(sql, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     // ---- Single-row (throws on more than one) -----------------------------------------------------
 
     /// <summary>
@@ -270,23 +208,6 @@ public static class SqlDbConnectionExtensions {
         }
     }
 
-    /// <inheritdoc cref="QuerySingleOrDefaultAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static Task<T?> QuerySingleOrDefaultAsync<T>(
-        this DbDataSource dataSource, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        return dataSource.QuerySingleOrDefaultAsync<T>(new SqlStatement(sql), cancellationToken);
-    }
-
-    /// <inheritdoc cref="QuerySingleOrDefaultAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static async Task<T?> QuerySingleOrDefaultAsync<T>(
-        this DbDataSource dataSource, SqlStatement sql, CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using (connection.ConfigureAwait(false)) {
-            return await connection.QuerySingleOrDefaultAsync<T>(sql, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     // ---- Streaming (unbuffered) — O(1) per query, O(0) per row ------------------------------------
 
     /// <summary>
@@ -323,26 +244,6 @@ public static class SqlDbConnectionExtensions {
         }
         finally {
             if (wasClosed) await connection.CloseAsync().ConfigureAwait(false);
-        }
-    }
-
-    /// <inheritdoc cref="QueryUnbufferedAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static IAsyncEnumerable<T> QueryUnbufferedAsync<T>(
-        this DbDataSource dataSource, SqlInterpolatedStringHandler sql, CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        return dataSource.QueryUnbufferedAsync<T>(new SqlStatement(sql), cancellationToken);
-    }
-
-    /// <inheritdoc cref="QueryUnbufferedAsync{T}(DbConnection, SqlInterpolatedStringHandler, CancellationToken)"/>
-    public static async IAsyncEnumerable<T> QueryUnbufferedAsync<T>(
-        this DbDataSource dataSource, SqlStatement sql,
-        [System.Runtime.CompilerServices.EnumeratorCancellation]
-        CancellationToken cancellationToken = default)
-        where T : ISqlRecord<T> {
-        var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using (connection.ConfigureAwait(false)) {
-            await foreach (var row in connection.QueryUnbufferedAsync<T>(sql, cancellationToken).ConfigureAwait(false))
-                yield return row;
         }
     }
 }
