@@ -61,6 +61,34 @@ public sealed class ClaimsPrincipalCurrentUserTests {
     }
 
     [Fact]
+    public void ReseedingWithDifferentPrincipal_DropsCachedClaimsAndRoles() {
+        // A reused per-connection dispatch scope re-seeds the same instance per message; after identity
+        // promotion the lazily cached claims/roles must reflect the new principal, not the first one's.
+        var user = new ClaimsPrincipalCurrentUser(new ClaimsCurrentUserOptions { RoleClaimType = "role" });
+        var initial = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("role", "guest"), new Claim("permission", "read")], "test"));
+        var promoted = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("role", "admin"), new Claim("permission", "write")], "test"));
+
+        Seed(user, initial);
+        user.Roles.Should().BeEquivalentTo("guest");
+        user.HasClaim("permission", "read").Should().BeTrue();
+
+        Seed(user, promoted);
+        user.Roles.Should().BeEquivalentTo("admin");
+        user.HasClaim("permission", "read").Should().BeFalse();
+        user.HasClaim("permission", "write").Should().BeTrue();
+    }
+
+    private static void Seed(ClaimsPrincipalCurrentUser user, ClaimsPrincipal principal) {
+        // Through the public rail (Initialize is internal): the initializer seeds from the context.
+        var context = new DispatchScopeContext();
+        context.Set(principal);
+        using var provider = new ServiceCollection().AddSingleton(user).BuildServiceProvider();
+        new CurrentUserScopeInitializer().Initialize(provider, context);
+    }
+
+    [Fact]
     public void UnseededUser_BehavesAsAnonymousInsteadOfThrowing() {
         // A background delivery scope (integration-event pump, outbox) never seeds a principal. The current
         // user must fail closed as anonymous so authorization denies (401) rather than crashing the consumer.

@@ -40,6 +40,6 @@ public sealed class WebSocketHandshakeContext {
         if (message.Value.Type != WebSocketMessageType.Text)
             throw new InvalidOperationException("The handshake expects text frames; received a binary frame.");
 
-        return Encoding.UTF8.GetString(message.Value.Payload);
+        return Encoding.UTF8.GetString(message.Value.Payload.Span);
     }
 }

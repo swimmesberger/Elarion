@@ -86,3 +86,4 @@ designs that are not yet implemented.
 - [ADR-0063: gRPC ships as typed unary and server-streaming transport adapters](0063-grpc-unary-transport.md)
 - [ADR-0064: Acknowledgment-gated outbound delivery is a codec-tier helper, adopted on second demand — Proposed](0064-acknowledgment-gated-outbound-delivery.md)
 - [ADR-0065: Self-typed request markers enable inferred dispatch; ConnectionHandlerInvoker binds per connection](0065-self-typed-request-markers-and-bound-connection-invoker.md)
+- [ADR-0066: Opt-in low-allocation dispatch profile for high-rate connections](0066-low-allocation-connection-dispatch.md)

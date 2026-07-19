@@ -80,10 +80,22 @@ The operation name is **optional**: `[Handler]` alone is valid. When omitted, th
 | --- | --- | --- | --- |
 | `name` | `string?` (ctor) → `Name` | optional | The operation name, e.g. `"clients.create"`. When omitted, inferred by convention as `{module}.{operation}`. |
 | `Transports` | `HandlerTransports` (init, `[Flags]`) | `All` (`JsonRpc \| Mcp`) | Which dispatcher transports expose the handler. |
+| `Scope` | `ServiceScope` (init) | `Scoped` | The handler's registration lifetime — the same vocabulary and semantics as `[Service(Scope = …)]`. `Singleton` removes scope participation from dispatch (the low-allocation choice, ADR-0066) and is compile-time verified: every constructor dependency must be provably singleton (`ELSG011`/`ELSG012`) and the pipeline must not attach scope-dependent features (`ELSG013`). |
 
 **`HandlerTransports`:** `JsonRpc` (= 1), `Mcp` (= 2), `All` (= `JsonRpc \| Mcp`).
 
 See [JSON-RPC](/docs/capabilities/transports/json-rpc) and [MCP](/docs/capabilities/transports/mcp).
+
+### `[HandlerTelemetry]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** class (handler or module), assembly
+- **Triggers:** declares how much always-on observability the generated pipeline gives handlers. Leveled, nearest declaration wins: handler class → module class → assembly → `Full`. With the effective mode `None`, the registration generator does not emit the observability decorator at all — no span, no execution metric, no context enrichment, no log scope, no decorator object on the hot path (ADR-0066). Failures are unaffected: they remain `Result` values and exceptions still propagate to the transport. The typical use is a hot module opting down once while one cold handler inside it re-enables by declaring `Full` on itself.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `mode` | `HandlerTelemetryMode` (ctor) → `Mode` | required | `Full` (= 0, the default when the attribute is absent) or `None` (= 1). |
+
+See [Telemetry](/docs/capabilities/telemetry) and [Connections — the low-allocation dispatch profile](/docs/capabilities/connections#the-low-allocation-dispatch-profile).
 
 ### `[McpHandler]`
 

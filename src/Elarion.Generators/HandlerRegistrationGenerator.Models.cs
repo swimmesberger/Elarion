@@ -49,6 +49,9 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string AllowDuplicatesAttributeMetadataName =
         "Elarion.Abstractions.Messaging.AllowDuplicatesAttribute";
 
+    private const string HandlerTelemetryAttributeMetadataName =
+        "Elarion.Abstractions.HandlerTelemetryAttribute";
+
     private const string ElarionValidationExtensionsMetadataName =
         "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
 
@@ -78,7 +81,20 @@ public sealed partial class HandlerRegistrationGenerator {
         // registered unkeyed so exactly one handler resolves per request. Keying event consumers lets multiple
         // consumers (incl. actor relays) coexist for one event without colliding on IHandler<TEvent, Result<Unit>>.
         string? EventConsumerKey,
+        // The effective [HandlerTelemetry] resolution (handler over module over assembly, default Full): false
+        // means the observability decorator is not generated at all for this handler (ADR-0066).
+        bool EmitObservability,
+        // [Handler(Scope = …)] as the ServiceScope enum value (Scoped = 0, Singleton = 1, Transient = 2) —
+        // the registration lifetime the emit uses. Singleton is compile-time verified (ELSG011-013).
+        int ScopeValue,
         EquatableArray<DiagnosticInfo> Diagnostics
+    );
+
+    // One in-compilation [Service(Scope = …)] fact: a contract (or implementation) FQN and its declared scope.
+    // Consumed by the singleton-handler dependency verification (ELSG011/ELSG012).
+    internal sealed record ServiceScopeFact(
+        string Fqn,
+        int ScopeValue
     );
 
     // Audit attachment (ADR-0045): Action is the compile-resolved wire name ("{module}.{operation}" — an
@@ -321,6 +337,38 @@ public sealed partial class HandlerRegistrationGenerator {
         + "commands",
         "Elarion.Abstractions.Idempotency",
         DiagnosticSeverity.Warning,
+        true);
+
+    private static readonly DiagnosticDescriptor SingletonHandlerScopedDependencyDescriptor = new(
+        "ELSG011",
+        "Singleton handler dependency must be singleton",
+        "Handler '{0}' declares [Handler(Scope = ServiceScope.Singleton)], but constructor dependency '{1}' is "
+        + "registered {2}. A singleton handler is constructed once from the root provider, so a per-dispatch "
+        + "dependency would be captured for the application lifetime; make the dependency singleton or keep "
+        + "the handler scoped.",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
+
+    private static readonly DiagnosticDescriptor SingletonHandlerUnverifiableDependencyDescriptor = new(
+        "ELSG012",
+        "Singleton handler dependency lifetime cannot be verified",
+        "Handler '{0}' declares [Handler(Scope = ServiceScope.Singleton)], but constructor dependency '{1}' "
+        + "cannot be verified as singleton at compile time. Annotate its implementation with "
+        + "[Service(Scope = ServiceScope.Singleton)] in this assembly, or keep the handler scoped — a "
+        + "captive scoped dependency must be impossible to ship, not a runtime surprise.",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
+
+    private static readonly DiagnosticDescriptor SingletonHandlerScopedPipelineDescriptor = new(
+        "ELSG013",
+        "Singleton handler cannot use a scope-dependent pipeline feature",
+        "Handler '{0}' declares [Handler(Scope = ServiceScope.Singleton)] but its pipeline attaches {1}, "
+        + "which resolves per-dispatch services when the chain is built; remove the feature or keep the "
+        + "handler scoped",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
         true);
 
     private static readonly DiagnosticDescriptor AllowDuplicatesOnNonIntegrationEventDescriptor = new(

@@ -82,6 +82,10 @@ internal static class HandlerObservability {
     /// metric. <paramref name="pipelineTag"/> is the pre-rendered <c>elarion.handler.pipeline</c> value (the
     /// caller resolves it only when a listener is attached; <see langword="null"/> omits the tag).
     /// </summary>
+    /// <remarks>Pooled state machine (ADR-0066): the decorator wraps every generated handler, so its
+    /// suspension — the common case for any handler that awaits I/O — must not allocate.</remarks>
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(
+        typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     public static async ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
         IHandler<TRequest, TResponse> inner,
         string handlerName,

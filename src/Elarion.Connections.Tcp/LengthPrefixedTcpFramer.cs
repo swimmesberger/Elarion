@@ -35,4 +35,19 @@ public sealed class LengthPrefixedTcpFramer : TcpMessageFramer {
         output.Advance(PrefixLength);
         output.Write(payload);
     }
+
+    /// <inheritdoc />
+    public override int BeginMessage(IBufferWriter<byte> output) {
+        // Reserve the prefix; the length is unknown until the payload is serialized, so CompleteMessage
+        // backfills it. Zeroed so an (incorrectly) unfinished frame reads as an empty message, not garbage.
+        var span = output.GetSpan(PrefixLength);
+        span[..PrefixLength].Clear();
+        output.Advance(PrefixLength);
+        return PrefixLength;
+    }
+
+    /// <inheritdoc />
+    public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
+        BinaryPrimitives.WriteUInt32BigEndian(prologue, (uint)payload.Length);
+    }
 }

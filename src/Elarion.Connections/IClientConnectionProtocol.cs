@@ -45,9 +45,11 @@ public interface IClientConnectionProtocol {
         throw new NotSupportedException("This protocol does not accept text messages.");
     }
 
-    /// <summary>Handles one complete inbound binary message. The memory is only valid for the duration of
-    /// the call — copy it if the codec defers work.</summary>
-    /// <param name="message">The reassembled message.</param>
+    /// <summary>Handles one complete inbound binary message. The memory is <b>pooled and call-scoped</b>:
+    /// every shipped adapter (TCP and WebSocket) hands a slice of a reused per-connection buffer that the
+    /// next read overwrites — retaining it past this call is a use-after-reuse bug; copy it if the codec
+    /// defers work.</summary>
+    /// <param name="message">The reassembled message, valid only for the duration of the call.</param>
     /// <param name="ct">The connection's lifetime token.</param>
     ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
         throw new NotSupportedException("This protocol does not accept binary messages.");

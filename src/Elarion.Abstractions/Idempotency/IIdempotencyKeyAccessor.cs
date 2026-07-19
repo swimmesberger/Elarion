@@ -22,6 +22,10 @@ public interface IIdempotencyKeyAccessor {
 /// <see cref="IIdempotencyKeyAccessor"/>, and overrides any key seeded from the transport boundary.
 /// </summary>
 public interface IIdempotencyKeySeed {
-    /// <summary>Sets the idempotency key for the current call scope.</summary>
-    void Seed(string key);
+    /// <summary>
+    /// Sets the idempotency key for the current call scope. <see langword="null"/> clears a previously seeded
+    /// key — a reused dispatch scope (per-connection dispatch) re-seeds per message, and a message without a
+    /// key must not inherit the previous message's.
+    /// </summary>
+    void Seed(string? key);
 }

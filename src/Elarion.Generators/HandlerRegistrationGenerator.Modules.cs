@@ -71,13 +71,14 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine($"public static class {module.Name}HandlerExtensions");
         sb.AppendLine("{");
         sb.AppendLine($"    public static IServiceCollection Add{module.Name}Handlers(");
-        sb.AppendLine("        this IServiceCollection services,");
-        sb.AppendLine("        ServiceLifetime lifetime = ServiceLifetime.Scoped)");
+        sb.AppendLine("        this IServiceCollection services)");
         sb.AppendLine("    {");
 
+        // No lifetime parameter: [Handler(Scope = …)] on each handler is the single source of truth
+        // (ADR-0066) — a caller-supplied lifetime could silently defeat the ELSG011-013 verification.
         foreach (var handler in handlers.OrderBy(x => x.HandlerName, StringComparer.Ordinal))
             sb.AppendLine(
-                $"        {handler.Namespace}.{handler.HandlerName}Registration.Add{handler.HandlerName}(services, lifetime);");
+                $"        {handler.Namespace}.{handler.HandlerName}Registration.Add{handler.HandlerName}(services);");
 
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");

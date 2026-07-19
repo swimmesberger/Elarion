@@ -979,6 +979,9 @@ public sealed class ActorRegistrationGenerator : IIncrementalGenerator {
             EquatableArray<string>.Empty,
             // Keyed by the relay's own FQN so it coexists with any other consumer of the same event (ADR-0046).
             relayFqn,
+            // Relays keep the observability decorator: they run on the event plane, never a hot dispatch path.
+            EmitObservability: true,
+            ScopeValue: 0,
             EquatableArray<DiagnosticInfo>.Empty);
     }
 

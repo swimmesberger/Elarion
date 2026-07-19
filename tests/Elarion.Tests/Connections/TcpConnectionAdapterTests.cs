@@ -1065,6 +1065,22 @@ public sealed class TcpConnectionAdapterTests {
             output.Advance(headerLength);
             output.Write(payload);
         }
+
+        public override int BeginMessage(IBufferWriter<byte> output) {
+            const byte headerLength = 5;
+            var header = output.GetSpan(headerLength);
+            header[..headerLength].Clear();
+            header[0] = headerLength;
+            output.Advance(headerLength);
+            return headerLength;
+        }
+
+        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+            IBufferWriter<byte> output) {
+            if (payload.Length > byte.MaxValue) throw new ArgumentOutOfRangeException(nameof(payload));
+
+            prologue[4] = (byte)payload.Length;
+        }
     }
 
     private sealed class GreedyTcpFramer : TcpMessageFramer {
@@ -1079,6 +1095,15 @@ public sealed class TcpConnectionAdapterTests {
 
         public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
             output.GetSpan(1024 * 1024);
+        }
+
+        public override int BeginMessage(IBufferWriter<byte> output) {
+            output.GetSpan(1024 * 1024);
+            return 0;
+        }
+
+        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+            IBufferWriter<byte> output) {
         }
     }
 
@@ -1096,6 +1121,14 @@ public sealed class TcpConnectionAdapterTests {
         public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
             output.Write(payload);
         }
+
+        public override int BeginMessage(IBufferWriter<byte> output) {
+            return 0;
+        }
+
+        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+            IBufferWriter<byte> output) {
+        }
     }
 
     private sealed class NeverCompleteFramer : TcpMessageFramer {
@@ -1108,6 +1141,14 @@ public sealed class TcpConnectionAdapterTests {
 
         public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
             output.Write(payload);
+        }
+
+        public override int BeginMessage(IBufferWriter<byte> output) {
+            return 0;
+        }
+
+        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+            IBufferWriter<byte> output) {
         }
     }
 
@@ -1143,6 +1184,14 @@ public sealed class TcpConnectionAdapterTests {
 
         public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
             output.Write(payload);
+        }
+
+        public override int BeginMessage(IBufferWriter<byte> output) {
+            return 0;
+        }
+
+        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+            IBufferWriter<byte> output) {
         }
     }
 

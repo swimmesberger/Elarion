@@ -68,7 +68,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         using var socket = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
             KeepAliveInterval = overrides?.KeepAliveInterval ?? options.KeepAliveInterval
         });
-        var reader = new WebSocketMessageReader(socket, maxMessageBytes, receiveBufferBytes);
+        using var reader = new WebSocketMessageReader(socket, maxMessageBytes, receiveBufferBytes);
 
         ClientConnectionTicket? ticket;
         try {
@@ -188,7 +188,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             if (message is null) return;
 
             if (message.Value.Type == WebSocketMessageType.Text)
-                await connection.Protocol.OnTextAsync(Encoding.UTF8.GetString(message.Value.Payload), ct);
+                await connection.Protocol.OnTextAsync(Encoding.UTF8.GetString(message.Value.Payload.Span), ct);
             else
                 await connection.Protocol.OnBinaryAsync(message.Value.Payload, ct);
         }

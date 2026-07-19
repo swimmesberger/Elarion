@@ -69,9 +69,16 @@ public sealed class ClaimsPrincipalCurrentUser(ClaimsCurrentUserOptions options)
     /// <summary>
     /// Sets the principal this instance exposes. Claims and roles are materialized lazily on first access, so
     /// this is cheap and is called once per dispatch scope by the current-user dispatch-scope initializer.
+    /// Re-seeding with a <b>different</b> principal drops the cached claims/roles so a reused scope (a
+    /// per-connection dispatch scope whose connection identity was promoted mid-connection) never exposes the
+    /// previous principal's materialized view; re-seeding the same instance stays free.
     /// </summary>
     internal void Initialize(ClaimsPrincipal principal) {
+        if (ReferenceEquals(_principal, principal)) return;
+
         _principal = principal;
+        _claims = null;
+        _roles = null;
     }
 
     private ILookup<string, string> Claims =>

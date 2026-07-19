@@ -103,6 +103,7 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
                 resources,
                 ParseFeatureGates(type, diagnostics),
                 validationWalk is not null && ValidatableTypeWalker.IsValidatable(request, validationWalk),
+                ResolveEmitObservability(type, compilation, modules),
                 diagnostics.ToImmutable().ToEquatableArray()));
         }
 
@@ -170,6 +171,43 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
                    "Elarion.Abstractions.Authorization.RequirePolicyAttribute",
                    "Elarion.Abstractions.Authorization.RequireResourceAttribute") ||
                requireAuthenticatedByDefault;
+    }
+
+    // The leveled [HandlerTelemetry] resolution (ADR-0066), aligned with the unary generator: the stream
+    // handler's own declaration wins, else the owning module's (longest namespace in scope), else the
+    // assembly's, defaulting to Full (0). None means StreamObservabilityDecorator is not generated.
+    private static bool ResolveEmitObservability(INamedTypeSymbol type, Compilation compilation,
+        EquatableArray<ModuleScanner.Module> modules) {
+        var attribute = compilation.GetTypeByMetadataName("Elarion.Abstractions.HandlerTelemetryAttribute");
+        if (attribute is null) return true;
+
+        if (ReadTelemetryMode(type.GetAttributes(), attribute) is { } handlerMode)
+            return handlerMode == 0;
+
+        int? selected = null;
+        var best = -1;
+        foreach (var module in modules) {
+            if (!ModuleScanner.IsInScope(type.ContainingNamespace.ToDisplayString(), module.Namespace) ||
+                module.Namespace.Length <= best) continue;
+            if (compilation.Assembly.GetTypeByMetadataName(module.MetadataName) is { } symbol &&
+                ReadTelemetryMode(symbol.GetAttributes(), attribute) is { } moduleMode) {
+                selected = moduleMode;
+                best = module.Namespace.Length;
+            }
+        }
+
+        var mode = selected ?? ReadTelemetryMode(compilation.Assembly.GetAttributes(), attribute) ?? 0;
+        return mode == 0;
+    }
+
+    private static int? ReadTelemetryMode(ImmutableArray<AttributeData> attributes, INamedTypeSymbol telemetryAttr) {
+        foreach (var attribute in attributes)
+            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, telemetryAttr) &&
+                attribute.ConstructorArguments.Length == 1 &&
+                attribute.ConstructorArguments[0].Value is int mode)
+                return mode;
+
+        return null;
     }
 
     // A malformed/empty gate is inert at runtime just as it is for unary handlers, but it remains a build-time
@@ -382,8 +420,11 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
             if (handler.Decorators[i].Conditional)
                 sb.AppendLine(
                     $"    private static readonly bool __applies{i} = {handler.Decorators[i].Fqn}.AppliesTo(__metadata);");
+        // No lifetime parameter (ADR-0066): the stream chain registration stays Scoped — stream invocations
+        // resolve from their own per-stream scope — while a dual unary/stream handler's concrete lifetime is
+        // adopted from the unary registration below.
         sb.AppendLine(
-            $"    public static IServiceCollection Add{handler.Name}Stream(this IServiceCollection services, ServiceLifetime lifetime = ServiceLifetime.Scoped) {{");
+            $"    public static IServiceCollection Add{handler.Name}Stream(this IServiceCollection services) {{");
         AppendConcreteRegistration(sb, handler.HandlerFqn);
         sb.AppendLine(
             $"        services.Add(new ServiceDescriptor(typeof({iface}), sp => Build(sp), __handlerLifetime));");
@@ -429,10 +470,13 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
                 "        steps?.Add(new(typeof(global::Elarion.Pipeline.StreamAuthorizationDecorator<,>), false));");
         }
 
-        sb.AppendLine(
-            $"        handler = new global::Elarion.Pipeline.StreamObservabilityDecorator<{handler.RequestFqn}, {handler.ItemFqn}>(handler, \"{handler.Name}\", __metadata, sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>(), sp.GetService<global::Microsoft.Extensions.Logging.ILoggerFactory>());");
-        sb.AppendLine(
-            "        steps?.Add(new(typeof(global::Elarion.Pipeline.StreamObservabilityDecorator<,>), false));");
+        if (handler.EmitObservability) {
+            sb.AppendLine(
+                $"        handler = new global::Elarion.Pipeline.StreamObservabilityDecorator<{handler.RequestFqn}, {handler.ItemFqn}>(handler, \"{handler.Name}\", __metadata, sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>(), sp.GetService<global::Microsoft.Extensions.Logging.ILoggerFactory>());");
+            sb.AppendLine(
+                "        steps?.Add(new(typeof(global::Elarion.Pipeline.StreamObservabilityDecorator<,>), false));");
+        }
+
         sb.AppendLine("        if (steps is not null) { steps.Reverse(); __pipeline = steps; } return handler; }");
         sb.AppendLine("}");
         return sb.ToString();
@@ -441,7 +485,7 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
     private static void AppendConcreteRegistration(StringBuilder sb, string handlerFqn) {
         // Unary and stream registration can both target the same concrete class. Preserve the first concrete
         // registration's lifetime, so direct calls cannot become order-dependent last-registration-wins wiring.
-        sb.AppendLine("        var __handlerLifetime = lifetime;");
+        sb.AppendLine("        var __handlerLifetime = ServiceLifetime.Scoped;");
         sb.AppendLine("        var __hasConcreteRegistration = false;");
         sb.AppendLine("        foreach (var descriptor in services) {");
         sb.AppendLine(
@@ -466,10 +510,10 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
             sb.AppendLine($"namespace {module.Namespace};").AppendLine();
             sb.AppendLine($"public static class {module.Name}StreamHandlerExtensions {{");
             sb.AppendLine(
-                $"    public static IServiceCollection Add{module.Name}StreamHandlers(this IServiceCollection services, ServiceLifetime lifetime = ServiceLifetime.Scoped) {{");
+                $"    public static IServiceCollection Add{module.Name}StreamHandlers(this IServiceCollection services) {{");
             foreach (var entry in entries)
                 sb.AppendLine(
-                    $"        {entry.Namespace}.{entry.Name}StreamRegistration.Add{entry.Name}Stream(services, lifetime);");
+                    $"        {entry.Namespace}.{entry.Name}StreamRegistration.Add{entry.Name}Stream(services);");
             sb.AppendLine("        return services; }\n}");
             spc.AddSource($"{HintNames.Sanitize(module.Namespace + "." + module.Name)}.StreamHandlerExtensions.g.cs",
                 SourceText.From(sb.ToString(), Encoding.UTF8));
@@ -492,6 +536,9 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
         EquatableArray<ResourceBinding> Resources,
         bool HasFeature,
         bool HasValidation,
+        // The effective leveled [HandlerTelemetry] resolution (ADR-0066); false skips the stream
+        // observability decorator entirely.
+        bool EmitObservability,
         EquatableArray<DiagnosticInfo> Diagnostics);
 
     private sealed record Decorator(

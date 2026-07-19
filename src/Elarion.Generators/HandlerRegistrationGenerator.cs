@@ -51,6 +51,18 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
             .Select(static (candidates, _) => FlattenNoRetryPolicyNames(candidates))
             .WithTrackingName("NoRetryPolicies");
 
+        // In-compilation [Service(Scope = …)] lifetime facts, consumed by the singleton-handler dependency
+        // verification (ELSG011/ELSG012): each [Service] class contributes its contract FQNs and its own FQN
+        // with the declared scope. Collected via the attribute syntax provider so it stays incremental.
+        var serviceScopeFacts = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ServiceContractResolver.ServiceAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => GetServiceScopeFacts(ctx))
+            .Collect()
+            .Select(static (groups, _) => FlattenServiceScopeFacts(groups))
+            .WithTrackingName("ServiceScopeFacts");
+
         var handlerCandidates = context.SyntaxProvider
             .CreateSyntaxProvider(
                 static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
@@ -67,11 +79,12 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
             .Combine(modules)
             .Combine(variantContracts)
             .Combine(noRetryPolicies)
+            .Combine(serviceScopeFacts)
             .Combine(context.CompilationProvider)
             .Select(static (source, ct) =>
                 ResolveHandlers(
-                    source.Left.Left.Left.Left, source.Left.Left.Left.Right, source.Left.Left.Right,
-                    source.Left.Right, source.Right, ct))
+                    source.Left.Left.Left.Left.Left, source.Left.Left.Left.Left.Right,
+                    source.Left.Left.Left.Right, source.Left.Left.Right, source.Left.Right, source.Right, ct))
             .WithTrackingName("Handlers");
 
         context.RegisterSourceOutput(handlerProvider, static (spc, handlers) => {

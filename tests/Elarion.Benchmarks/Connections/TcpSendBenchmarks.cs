@@ -193,6 +193,35 @@ public class TcpSendBenchmarks {
         await done;
     }
 
+    // The writer-based send (ADR-0066): the payload is serialized straight into the shared frame buffer
+    // between the framer's prologue/epilogue — the delta against Sink_SendBinary is what skipping the
+    // caller-materialized payload buffer is worth on the uncontended path.
+    [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]
+    public async Task Sink_SendWriter() {
+        var done = _received.WaitFor(MessagesPerInvoke);
+        for (var i = 0; i < MessagesPerInvoke; i++)
+            await _sink.SendBinaryAsync(_payload, static (payload, output) => output.Write(payload), default);
+
+        await done;
+    }
+
+    // The contended writer-send: producers beyond the inline writer serialize into rented per-send buffers
+    // and queue — the delta against Sink_SendBinary_FourProducers is the rented-buffer cost under contention.
+    [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]
+    public async Task Sink_SendWriter_FourProducers() {
+        var done = _received.WaitFor(MessagesPerInvoke);
+        var producers = new Task[4];
+        for (var p = 0; p < producers.Length; p++)
+            producers[p] = Task.Run(async () => {
+                for (var i = 0; i < MessagesPerInvoke / 4; i++)
+                    await _sink.SendBinaryAsync(
+                        _payload, static (payload, output) => output.Write(payload), default);
+            });
+
+        await Task.WhenAll(producers);
+        await done;
+    }
+
     // Concurrent producers below capacity: the contended path — the first sender writes inline, the rest
     // queue FIFO behind it and a drainer settles them after each physical write.
     [Benchmark(OperationsPerInvoke = MessagesPerInvoke)]

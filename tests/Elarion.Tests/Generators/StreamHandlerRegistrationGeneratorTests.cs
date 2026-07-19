@@ -260,10 +260,10 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
         var direct = new ServiceCollection();
         assembly.GetType("Sample.App.DualHandlerRegistration")!
             .GetMethod("AddDualHandler", BindingFlags.Public | BindingFlags.Static)!
-            .Invoke(null, [direct, ServiceLifetime.Scoped]);
+            .Invoke(null, [direct]);
         assembly.GetType("Sample.App.DualHandlerStreamRegistration")!
             .GetMethod("AddDualHandlerStream", BindingFlags.Public | BindingFlags.Static)!
-            .Invoke(null, [direct, ServiceLifetime.Singleton]);
+            .Invoke(null, [direct]);
         AssertOneConcreteDescriptor(direct, handlerType, ServiceLifetime.Scoped);
         direct.Single(descriptor => descriptor.ServiceType == unaryType).Lifetime.Should().Be(ServiceLifetime.Scoped);
         direct.Single(descriptor => descriptor.ServiceType == streamType).Lifetime.Should().Be(ServiceLifetime.Scoped);
@@ -283,14 +283,14 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
 
         assembly.GetType("Sample.App.DualHandlerRegistration")!.GetMethod("AddDualHandler",
                 BindingFlags.Public | BindingFlags.Static)!
-            .Invoke(null, [services, ServiceLifetime.Singleton]);
+            .Invoke(null, [services]);
         assembly.GetType("Sample.App.DualHandlerStreamRegistration")!.GetMethod("AddDualHandlerStream",
                 BindingFlags.Public | BindingFlags.Static)!
-            .Invoke(null, [services, ServiceLifetime.Transient]);
+            .Invoke(null, [services]);
 
         services.Count(d => d.ServiceType == handlerType && !d.IsKeyedService).Should().Be(1);
         services.Single(d => d.ServiceType == handlerType && !d.IsKeyedService).Lifetime.Should()
-            .Be(ServiceLifetime.Singleton);
+            .Be(ServiceLifetime.Scoped);
         ResolveAllFromOneScope(services, handlerType, unaryType, streamType);
     }
 

@@ -32,4 +32,31 @@ public abstract class TcpMessageFramer {
 
     /// <summary>Writes <paramref name="payload"/> in wire framing onto <paramref name="output"/>.</summary>
     public abstract void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output);
+
+    /// <summary>
+    /// Begins one in-place framed message (ADR-0066's writer-based send): emit or reserve the frame's
+    /// prologue on <paramref name="output"/> and return its byte length. The caller then serializes the
+    /// payload directly onto <paramref name="output"/> and finishes with <see cref="CompleteMessage"/> —
+    /// the zero-copy inverse of <see cref="WriteMessage"/>, which copies from a caller-materialized buffer.
+    /// </summary>
+    /// <param name="output">The framed output the prologue is written to.</param>
+    /// <returns>The prologue length in bytes (0 when the framing has no prologue).</returns>
+    public abstract int BeginMessage(IBufferWriter<byte> output);
+
+    /// <summary>
+    /// Completes an in-place framed message: backfill the reserved prologue (e.g. the length prefix, now
+    /// that the payload length is known), validate the payload where the framing demands it (delimiter
+    /// occurrence), and append any epilogue to <paramref name="output"/>.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="prologue"/> and <paramref name="payload"/> view the writer's backing memory: they are
+    /// invalidated by the first write to <paramref name="output"/>, so implementations must finish reading
+    /// and backfilling both spans before appending an epilogue. Throwing (an unrepresentable payload, like a
+    /// delimiter occurrence) fails the send without ending the connection, exactly like a
+    /// <see cref="WriteMessage"/> failure.
+    /// </remarks>
+    /// <param name="prologue">The prologue bytes <see cref="BeginMessage"/> reserved, for backfill.</param>
+    /// <param name="payload">The payload the caller serialized in place, for validation.</param>
+    /// <param name="output">The framed output any epilogue is appended to.</param>
+    public abstract void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload, IBufferWriter<byte> output);
 }

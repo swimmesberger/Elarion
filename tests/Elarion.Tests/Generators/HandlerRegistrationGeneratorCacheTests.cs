@@ -28,6 +28,13 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
                 public ValueTask<Result<PingResponse>> HandleAsync(PingCommand request, CancellationToken ct) =>
                     ValueTask.FromResult(Result<PingResponse>.Success(new PingResponse("pong")));
             }
+
+            public interface IPricingService { }
+
+            // A [Service] with a declared scope keeps the ServiceScopeFacts provider (ELSG011/012 input,
+            // ADR-0066) populated so the cache assertions exercise it.
+            [Service(typeof(IPricingService), Scope = ServiceScope.Singleton)]
+            public sealed class PricingService : IPricingService { }
         }
         """;
 
@@ -40,6 +47,7 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
             "HandlerCandidates",
             "VariantContracts",
             "NoRetryPolicies",
+            "ServiceScopeFacts",
             "Handlers",
             "HandlerModuleAggregation");
     }
@@ -56,6 +64,7 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
             "HandlerCandidateNodes",
             "HandlerCandidates",
             "VariantContracts",
-            "NoRetryPolicies");
+            "NoRetryPolicies",
+            "ServiceScopeFacts");
     }
 }

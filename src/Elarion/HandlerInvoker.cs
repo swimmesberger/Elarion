@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,6 +32,10 @@ public static class HandlerInvoker {
     /// <param name="context">The values captured at the call boundary (e.g. the authenticated principal), or <see langword="null"/>.</param>
     /// <param name="ct">A cancellation token flowed into the handler.</param>
     /// <returns>The handler's <see cref="Result{T}"/>.</returns>
+    /// <remarks>Pooled state machine: this is a per-request framework path where suspension is the common
+    /// case (any real handler awaits I/O), and the pooled builder keeps that suspension allocation-free —
+    /// the same mechanism the TCP outbound writer uses (ADR-0066).</remarks>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public static async ValueTask<Result<TResponse>> InvokeAsync<TRequest, TResponse>(
         IServiceProvider rootProvider,
         TRequest request,
