@@ -3,12 +3,12 @@ using System.Data.Common;
 namespace Elarion.Sql;
 
 /// <summary>
-/// The default <see cref="ISqlSession"/>: pins one pooled connection — from the data source the
-/// <see cref="IElarionSqlDataSourceProvider"/> hands out for the scope — and tracks the transaction the
+/// The scoped <see cref="ISqlSession"/>: pins one pooled connection — from the data source the
+/// <see cref="ISqlDatabase"/> hands out for the scope — and tracks the transaction the
 /// <see cref="SqlUnitOfWork"/> opens on it. Registered as a scoped service and shared (by reference) with the
 /// scope's <c>IUnitOfWork</c>, so the unit of work and the handler always act on the same physical connection.
 /// </summary>
-internal sealed class SqlSession(IElarionSqlDataSourceProvider dataSourceProvider) : ISqlSession {
+internal sealed class SqlSession(ISqlDatabase database) : ISqlSession {
     private DbConnection? _connection;
 
     /// <inheritdoc />
@@ -23,7 +23,7 @@ internal sealed class SqlSession(IElarionSqlDataSourceProvider dataSourceProvide
         // Open once and cache: every later call returns the same open connection so a transaction begun on it
         // stays in effect for the whole scope. The provider decides which data source this scope opens from
         // (single, tenant-routed, replica). A pooled connection is cheap to hold for a request's duration.
-        return _connection ??= await dataSourceProvider.GetDataSource()
+        return _connection ??= await database.GetDataSource()
             .OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
     }
 

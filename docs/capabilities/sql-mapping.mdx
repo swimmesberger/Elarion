@@ -148,17 +148,17 @@ removes. How you obtain the session states the semantics:
 
 - **In a handler**, inject the scoped `ISqlSession` — writes join the framework unit of work
   ([Transactions](#transactions-unit-of-work)).
-- **Owning your own connection** — DI-free / NativeAOT hosts, tooling, tests, or a singleton-eligible
-  handler that holds a `DbDataSource` and deliberately wants per-call autonomous semantics with no unit
-  of work — bridge with `AsSqlSession`, deciding the transaction **once at wrap time**:
+- **In a singleton-eligible handler** (no scoped dependencies, deliberately no unit of work), inject the
+  singleton `ISqlDatabase` handle and open an owning one-shot session per operation.
+- **Owning your own connection** — DI-free / NativeAOT hosts, tooling, tests — bridge with
+  `AsSqlSession`, deciding the transaction **once at wrap time**:
 
 ```csharp
-// Singleton-eligible handler (no scoped dependencies): per-call auto-commit, no unit of work.
-await using var connection = await dataSource.OpenConnectionAsync(ct);
-var db = connection.AsSqlSession();
-var rows = await db.QueryAsync<Order>($"{Order.Select} WHERE status = {status}", ct);
+// Singleton-eligible handler: one call through the seam, autonomous per-call semantics.
+await using var session = await db.OpenSessionAsync(ct);           // db is the injected ISqlDatabase
+var rows = await session.QueryAsync<Order>($"{Order.Select} WHERE status = {status}", ct);
 
-// Tooling that owns a transaction: wrap once — every write below enlists it.
+// Tooling that owns a connection and transaction: wrap once — every write below enlists it.
 await using var transaction = await connection.BeginTransactionAsync(ct);
 var tx = connection.AsSqlSession(transaction);
 ```
@@ -221,17 +221,32 @@ handler calls the convenience surface on the session; every read and write runs 
 enlists the open transaction automatically. (A read-only host that never writes can register just
 `AddElarionSqlSession()` — the session with per-call auto-commit, no transaction machinery.)
 
-**The data source is the `IElarionSqlDataSourceProvider` seam — the session resolves the provider and
-nothing else, so there is no ambient `DbDataSource` the tier assumes.** `Elarion.Sql` itself stays
-Npgsql-free; the Npgsql binding lives in `Elarion.Sql.PostgreSql`. Register the provider with one of:
+**`ISqlDatabase` is the application's database handle — the tier's `DbContext`/`IDbContextFactory`
+counterpart, and the only thing the session resolves, so there is no ambient `DbDataSource` the tier
+assumes.** `Elarion.Sql` itself stays Npgsql-free; the Npgsql binding lives in `Elarion.Sql.PostgreSql`.
+Register it with one of:
 
 | Registration | Package | Use it when |
 | --- | --- | --- |
 | `AddElarionPostgreSql(connectionString)` | `Elarion.Sql.PostgreSql` | the common PostgreSQL host — one central `NpgsqlDataSource` shared by the access tier and migrations |
 | `AddElarionSqlite(connectionString)` | `Elarion.Sql.Sqlite` | a single-node / edge SQLite host — a `DbDataSource` over `Microsoft.Data.Sqlite` plus migrations, the same shape as PostgreSQL |
-| `AddElarionSqlDataSource(sp => …)` | `Elarion.Sql` | build and own a `DbDataSource` yourself (any provider) |
-| `AddElarionSqlDataSource()` | `Elarion.Sql` | a `DbDataSource` is already in the container (`AddNpgsqlDataSource`) |
-| `AddElarionSqlDataSourceProvider<T>()` | `Elarion.Sql` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` |
+| `AddElarionSqlDatabase(sp => …)` | `Elarion.Sql` | build and own a `DbDataSource` yourself (any provider) |
+| `AddElarionSqlDatabase()` | `Elarion.Sql` | a `DbDataSource` is already in the container (`AddNpgsqlDataSource`) |
+| `AddElarionSqlDatabase<T>()` | `Elarion.Sql` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` |
+
+Beyond feeding the scoped session, the handle is directly usable: `db.OpenSessionAsync(ct)` opens an
+**owning** one-shot session over a fresh pooled connection (autonomous per-call semantics, disposed with
+the session) — which upgrades the singleton-eligible pattern from three steps to one:
+
+```csharp
+public sealed class WorldTick(ISqlDatabase db) {          // singleton-eligible: no scoped dependencies
+    public async ValueTask<Result> HandleAsync(Tick tick, CancellationToken ct) {
+        await using var session = await db.OpenSessionAsync(ct);   // through the seam — routing still applies
+        var rows = await session.QueryAsync<Reading>($"{Reading.Select} WHERE cell = {tick.Cell}", ct);
+        // …
+    }
+}
+```
 
 ```csharp
 [Handler]

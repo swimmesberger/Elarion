@@ -10,7 +10,7 @@ namespace Elarion.Tests.SqlMapping;
 /// <summary>
 /// Registration tests for the PostgreSQL data-source provider — deterministic, no container needed (building
 /// an <see cref="NpgsqlDataSource"/> does not open a connection). They prove the central data source is shared:
-/// the same <see cref="NpgsqlDataSource"/> instance backs the <see cref="IElarionSqlDataSourceProvider"/> the
+/// the same <see cref="NpgsqlDataSource"/> instance backs the <see cref="ISqlDatabase"/> the
 /// session opens from, so migrations (which resolve <see cref="NpgsqlDataSource"/>) and the access tier use one
 /// source — EF Core's <c>DbContext</c> analogue.
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class SqlPostgreSqlServiceCollectionExtensionsTests {
 
         // The one core source migrations resolve, and the source the SQL provider hands out, are the same object.
         var core = provider.GetRequiredService<NpgsqlDataSource>();
-        provider.GetRequiredService<IElarionSqlDataSourceProvider>().GetDataSource().Should().BeSameAs(core);
+        provider.GetRequiredService<ISqlDatabase>().GetDataSource().Should().BeSameAs(core);
     }
 
     [Fact]
@@ -56,6 +56,6 @@ public sealed class SqlPostgreSqlServiceCollectionExtensionsTests {
         using var provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<NpgsqlDataSource>().Should().BeSameAs(dataSource);
-        provider.GetRequiredService<IElarionSqlDataSourceProvider>().GetDataSource().Should().BeSameAs(dataSource);
+        provider.GetRequiredService<ISqlDatabase>().GetDataSource().Should().BeSameAs(dataSource);
     }
 }

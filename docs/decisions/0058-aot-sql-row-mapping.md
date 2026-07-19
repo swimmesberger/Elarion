@@ -240,22 +240,35 @@ the transaction — so commit only commits. `AddElarionSqlSession()` registers t
 auto-commit); `AddElarionSqlUnitOfWork()` layers the transactional unit of work on it. Both live in
 `Elarion.Sql` — no new package, because `IUnitOfWork` is already in `Elarion.Abstractions`.
 
-Which data source a session opens from is the `IElarionSqlDataSourceProvider` seam — the **single source of
-truth**, and the only thing the tier resolves. There is deliberately no hard `GetRequiredService<DbDataSource>()`
-inside the session and no hidden default that reaches for an ambient `DbDataSource`: the provider is registered
-explicitly, in two steps like the EF tier (`AddDbContext` then `AddElarionUnitOfWork<TDbContext>`). Register it
-with `AddElarionSqlDataSource(sp => …)` (build and own the source here, the container disposes it),
-`AddElarionSqlDataSource()` (wrap a `DbDataSource` already in the container, e.g. from `AddNpgsqlDataSource`),
-or `AddElarionSqlDataSourceProvider<T>()` (a scoped provider that routes per request — a tenant's database or a
-read replica). This is consistent with the migration runner, which also takes an explicit data source rather
-than resolving a global one, and the seam is designed for that strongest (per-scope routing) implementation.
+Which data source a session opens from is the `ISqlDatabase` seam (originally shipped as
+`ISqlDatabase`, renamed when it became the application-facing handle) — the **single source
+of truth**, and the only thing the tier resolves. There is deliberately no hard
+`GetRequiredService<DbDataSource>()` inside the session and no hidden default that reaches for an ambient
+`DbDataSource`: the database is registered explicitly, in two steps like the EF tier (`AddDbContext` then
+`AddElarionUnitOfWork<TDbContext>`). Register it with `AddElarionSqlDatabase(sp => …)` (build and own the
+source here, the container disposes it), `AddElarionSqlDatabase()` (wrap a `DbDataSource` already in the
+container, e.g. from `AddNpgsqlDataSource`), or `AddElarionSqlDatabase<T>()` (a scoped implementation that
+routes per request — a tenant's database or a read replica). This is consistent with the migration runner,
+which also takes an explicit data source rather than resolving a global one, and the seam is designed for
+that strongest (per-scope routing) implementation.
+
+`ISqlDatabase` is more than the session's plumbing: it is the application's database handle — the EF-free
+counterpart to the `DbContext`/`IDbContextFactory` pair. `db.OpenSessionAsync(ct)` (an extension, so custom
+routers inherit it) opens an **owning** one-shot session with autonomous per-call semantics — the
+singleton-eligible handler path (a scoped `ISqlSession` would block singleton registration) now goes through
+the seam in one call instead of injecting a raw `DbDataSource` and hand-wrapping a connection, so tenant
+routing applies to singleton handlers on scoped hosts too. `IMigrationDatabase` deliberately does *not* fold
+into this handle: it is the migration engine's provider SPI (dialect, exclusive locking, dedicated unpooled
+connections) — polymorphic behavior extensions over a neutral handle cannot express — and applications never
+touch it; the app-facing unification already happens at registration (`AddElarionPostgreSql` registers both)
+and at run time via `IMigrationRunner`.
 
 `Elarion.Sql` and `Elarion.Migrations` keep no Npgsql reference; the Npgsql binding is a single provider
 package, **`Elarion.Sql.PostgreSql`**, that consolidates *all* PostgreSQL-specific code for the EF-free tier —
 the data source and the migration engine (session advisory lock, history table, statement splitter, moved here
 from the retired `Elarion.Migrations.PostgreSql`). Its single `AddElarionPostgreSql(connectionString)` picks the
 provider for **every** subsystem at once: it registers one central `NpgsqlDataSource` (the shared core, EF
-Core's `DbContext` analogue, command logging wired from DI), the `IElarionSqlDataSourceProvider` the session
+Core's `DbContext` analogue, command logging wired from DI), the `ISqlDatabase` the session
 opens from, and the `IMigrationDatabaseFactory` the migration runner resolves. The subsequent registrations are
 provider-neutral — `AddElarionSqlUnitOfWork` (access) and the migration core's `AddElarionMigrations` (schema)
 name no database — so swapping providers is a one-line change. This is how a single `DbContext` is central to

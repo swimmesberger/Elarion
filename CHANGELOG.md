@@ -18,16 +18,20 @@ minor releases may include breaking changes.
   `EfUnitOfWork<TDbContext>` (nested handlers join via a savepoint; best-effort `SET LOCAL lock_timeout` on
   Npgsql; no change-tracker flush). Register with `AddElarionSqlUnitOfWork()` (transactional) or
   `AddElarionSqlSession()` (session alone, per-call auto-commit). Which data source a session opens from is
-  the `IElarionSqlDataSourceProvider` seam — the single source of truth, registered explicitly (two-step, like
-  the EF tier's `AddDbContext` + `AddElarionUnitOfWork<TDbContext>`): `AddElarionSqlDataSource(sp => …)` builds
-  and owns a `DbDataSource`, `AddElarionSqlDataSource()` wraps one already in the container, and
-  `AddElarionSqlDataSourceProvider<T>()` routes per request (tenant database, read replica). The tier resolves
-  the provider and nothing else, so there is no ambient `DbDataSource` it assumes. Covered by Docker-gated
+  the `ISqlDatabase` seam (the application database handle) — the single source of truth, registered explicitly (two-step, like
+  the EF tier's `AddDbContext` + `AddElarionUnitOfWork<TDbContext>`): `AddElarionSqlDatabase(sp => …)` builds
+  and owns a `DbDataSource`, `AddElarionSqlDatabase()` wraps one already in the container, and
+  `AddElarionSqlDatabase<T>()` routes per request (tenant database, read replica). The tier resolves
+  the handle and nothing else, so there is no ambient `DbDataSource` it assumes. Beyond feeding the scoped
+  session, the handle is directly usable: `db.OpenSessionAsync(ct)` opens an owning one-shot session
+  (autonomous per-call semantics) — the one-call path for singleton-eligible handlers, which cannot inject
+  the scoped `ISqlSession`. (For preview-package consumers: `ISqlDatabase`/`AddElarionSqlDatabase` were
+  briefly published as `IElarionSqlDataSourceProvider`/`AddElarionSqlDataSource*`.) Covered by Docker-gated
   integration tests against real PostgreSQL.
 - **`Elarion.Sql.PostgreSql` — one provider package for the whole EF-free PostgreSQL tier.** The single
   `AddElarionPostgreSql(connectionString, configure?, advisoryLockKey?)` picks PostgreSQL for **every**
   subsystem at once: it registers one central `NpgsqlDataSource` (the shared core, EF Core's `DbContext`
-  analogue — command logging wired from DI), the `IElarionSqlDataSourceProvider` the session opens from, and
+  analogue — command logging wired from DI), the `ISqlDatabase` handle the session opens from, and
   the `IMigrationDatabaseFactory` the migration runner resolves; an `NpgsqlDataSource` overload wraps a
   host-built source. The subsequent registrations are provider-neutral — `AddElarionSqlUnitOfWork()` (access)
   and the migration core's new `AddElarionMigrations(configure)` (schema) — so swapping databases is a
@@ -69,7 +73,7 @@ minor releases may include breaking changes.
 - **`Elarion.Migrations.Sqlite` is retired; SQLite is now a full provider in `Elarion.Sql.Sqlite` (breaking).**
   Mirroring `Elarion.Sql.PostgreSql`, the single `AddElarionSqlite(cs)` picks SQLite for every subsystem — a
   `DbDataSource` over `Microsoft.Data.Sqlite` (which ships none; a small `SqliteDataSource` supplies it) plus the
-  `IElarionSqlDataSourceProvider` **and** the migration factory. `AddElarionSqliteMigrations(cs, configure)`
+  `ISqlDatabase` **and** the migration factory. `AddElarionSqliteMigrations(cs, configure)`
   became `AddElarionSqlite(cs)` + the neutral `AddElarionMigrations(configure)`. So the EF-free **access tier now
   runs on SQLite too**: `AddElarionSqlite()` + `AddElarionSqlUnitOfWork()` + `AddElarionMigrations()`, the exact
   SQLite counterpart to PostgreSQL (the `[SqlRecord]` mappers are provider-portable; `SqlUnitOfWork` already

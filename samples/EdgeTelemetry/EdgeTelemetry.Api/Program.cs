@@ -34,7 +34,7 @@ var connectionString = builder.Configuration.GetConnectionString("Telemetry")
 // The single PostgreSQL provider registration for the whole EF-free tier — pick the database once, and the
 // neutral AddElarionSqlUnitOfWork()/AddElarionMigrations() below need no provider name. AddElarionPostgreSql
 // registers one central NpgsqlDataSource (the shared core, EF Core's DbContext analogue), the
-// IElarionSqlDataSourceProvider the ISqlSession opens from, and the migration-database factory the runner
+// ISqlDatabase the ISqlSession opens from, and the migration-database factory the runner
 // resolves — so the access tier and migrations share one source. The slim builder maps exactly the
 // PostgreSQL types this app uses (uuid, text, timestamptz, double precision, jsonb-as-string). Command
 // LOGGING — the EF Core `LogTo`/`Database.Command` equivalent — is wired from the host's logger factory
@@ -67,7 +67,7 @@ builder.Services.AddElarionSqlMappers();
 // The EF-free unit of work: registers the scoped ISqlSession handlers inject and the SqlUnitOfWork so
 // command handlers (telemetry.ingest) commit their writes atomically through the framework transaction
 // decorator — the AOT-tier counterpart to AddElarionUnitOfWork<TDbContext>(). The session opens from the
-// IElarionSqlDataSourceProvider registered above.
+// ISqlDatabase registered above.
 builder.Services.AddElarionSqlUnitOfWork();
 
 // Schema before traffic: the hosted service applies pending embedded migrations and fails startup on

@@ -34,7 +34,7 @@ public sealed class SqliteSqlSessionIntegrationTests : IDisposable {
     }
 
     private SqlSession NewSession() {
-        return new SqlSession(new SingletonSqlDataSourceProvider(new SqliteDataSource(ConnectionString)));
+        return new SqlSession(new DataSourceSqlDatabase(new SqliteDataSource(ConnectionString)));
     }
 
     private async Task<bool> ExistsAsync(Guid id) {
@@ -113,6 +113,32 @@ public sealed class SqliteSqlSessionIntegrationTests : IDisposable {
 
         await using var scope = provider.CreateAsyncScope();
         scope.ServiceProvider.GetRequiredService<ISqlSession>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task SingletonHandlerPath_OpenSessionAsync_OnTheDatabaseHandle() {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionSqlite(ConnectionString);
+        await using var provider = services.BuildServiceProvider();
+
+        // The singleton-eligible pattern end-to-end: a singleton service injects ISqlDatabase (no scoped
+        // dependencies) and opens an owning one-shot session per operation — autonomous per-call semantics.
+        var db = provider.GetRequiredService<ISqlDatabase>();
+        var id = Guid.NewGuid();
+
+        await using (var session = await db.OpenSessionAsync(Ct)) {
+            session.CurrentTransaction.Should().BeNull();
+            await session.InsertAsync(new SqlWidget { Id = id, Name = "one-shot" }, Ct);
+        }
+
+        // The session owned its connection (disposed with it); the write is durable and a fresh session reads
+        // it back through the generated mapper.
+        await using var verify = await db.OpenSessionAsync(Ct);
+        var found = await verify.QueryFirstOrDefaultAsync<SqlWidget>(
+            $"SELECT id, name FROM sql_widgets WHERE id = {id}", Ct);
+        found.Should().NotBeNull();
+        found!.Name.Should().Be("one-shot");
     }
 
     public void Dispose() {
