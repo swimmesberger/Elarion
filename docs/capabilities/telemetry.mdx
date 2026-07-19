@@ -76,13 +76,25 @@ wherever one exists, and applies their spirit where none does:
 ## Handler tracing
 
 Handler tracing follows the same "instrument always, collect on demand" model as the other surfaces:
-the generator wraps every handler in an `ObservabilityDecorator` unconditionally, but the span is a no-op
+the generator wraps every handler in an `ObservabilityDecorator` by default, but the span is a no-op
 until a host registers the `Elarion.Handlers` source. To suppress handler telemetry, omit
 `HandlerTelemetry.ActivitySourceName`/`MeterName` from the OpenTelemetry registration. This mirrors
 how `HttpClient` and EF Core ship always-present `ActivitySource`s and leave collection to the host —
 no opt-in attribute required. The handler span adds the application-operation boundary as the stable
 parent of the decorator chain, so JSON-RPC, scheduler, cache, and resilience child spans all appear
 inside it.
+
+One part of the decorator is deliberately **not** free-when-unobserved: [context
+enrichment](#user--request-context) runs whenever enrichers are registered (current-user support
+registers one by default), because its consumers are the log scope and the ambient transport span —
+handler log lines should carry user context whenever logging is on, listener or not. That costs a small
+per-call allocation (~300 B with the default user-context enricher). For per-message hot paths where
+that matters, the leveled `[HandlerTelemetry(HandlerTelemetryMode.None)]` attribute — on a handler, a
+module class, or the assembly, nearest wins — makes the generator skip the decorator entirely for the
+affected handlers: no span, execution metric, enrichment, or log scope, and no wrapper object per call
+(ADR-0066). Failures are unaffected. This is a compile-time composition decision, distinct from the
+host-side "registered but unobserved" default above — see [the low-allocation dispatch
+profile](/docs/capabilities/connections#the-low-allocation-dispatch-profile) for the full recipe.
 
 The span carries `elarion.handler`, `elarion.handler.request_type`, `elarion.handler.outcome`
 (`ok`/`error`/`exception`), and **`elarion.handler.pipeline`** — the decorators actually wrapping this

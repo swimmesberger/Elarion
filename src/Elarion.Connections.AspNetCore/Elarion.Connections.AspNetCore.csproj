@@ -13,4 +13,8 @@
     <ProjectReference Include="..\Elarion.Connections\Elarion.Connections.csproj"/>
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
 </Project>

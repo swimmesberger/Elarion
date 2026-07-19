@@ -99,6 +99,27 @@ for stable public or wire-facing contracts.
 The handler registration generator emits an `Add{HandlerName}()` method and aggregates them into the
 module's `Add{Module}Handlers()` method. You never register a handler by hand.
 
+### Lifetime and telemetry
+
+A handler is registered **scoped** by default — one instance per dispatch scope, the classical
+unit-of-work-per-message shape. Two opt-in declarations tune the hot path (ADR-0066):
+
+- `[Handler(Scope = ServiceScope.Singleton)]` — the same vocabulary as `[Service(Scope = …)]` — removes
+  scope participation from dispatch entirely: the chain is built once from the root provider. It is
+  compile-time verified: every constructor dependency must be provably singleton (`ELSG011`/`ELSG012` —
+  the framework knows its own service lifetimes and reads `[Service(Scope = …)]` declarations in the
+  compilation; anything unverifiable is an error, deliberately without an escape hatch), and the pipeline
+  must not attach scope-dependent features such as transactions, idempotency, authorization, validation,
+  caching, or auditing (`ELSG013`). Per-caller log enrichment is definitionally unavailable on a singleton
+  handler; its span and execution metric remain. `[Resilient]` composes fine.
+- `[HandlerTelemetry(HandlerTelemetryMode.None)]` — on the handler, the module class, or the assembly
+  (nearest wins) — makes the generator not emit the observability decorator at all: no span, metric,
+  enrichment, or log scope, and no decorator object per call. A cold handler inside an opted-down module
+  re-enables by declaring `Full` on itself. Failures are unaffected.
+
+Both exist for high-rate dispatch (a game-server-like connection); a classical web handler keeps the
+defaults. See [the low-allocation dispatch profile](/docs/capabilities/connections#the-low-allocation-dispatch-profile).
+
 ## Request-driven server streams
 
 A **cold, request-driven** operation with a deferred response implements `IStreamHandler<TRequest, TItem>`, not
@@ -164,7 +185,11 @@ var result = await sender.SendAsync(new GetClient.Query(id), ct);
 ```
 
 Inference is purely compile-time — dispatch stays statically typed through the same `IHandler<,>`
-resolution with no reflection, registry, or boxing. The declared response type must match the handler's
+resolution with no reflection, registry, or boxing of class requests. One caveat for value types: the
+inferred overloads take the request through its marker interface, which boxes a `readonly record struct`
+request per call (C# constraints do not participate in inference). A hot value-type request should use
+the explicit-generic overload — `invoker.InvokeAsync<Move, MoveAck>(move, ct)` — which dispatches it
+unboxed (ADR-0066). The declared response type must match the handler's
 `Result<TResponse>`; the marker analyzer enforces both invariants at build time (`ELREQ001` when
 `TSelf` names a different type, `ELREQ002`/`ELREQ003` when a handler's response drifts from the
 declared `TResponse`/`TItem` — see [Diagnostics](/docs/reference/diagnostics#elreq--self-typed-request-markers)).

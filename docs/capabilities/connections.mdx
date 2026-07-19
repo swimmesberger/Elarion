@@ -489,6 +489,78 @@ come back *into* actors via `[ConsumeEvent]` on actor methods.
 The hand-written glue per app is the observer (~10 lines) and the codec's routing decision; the
 handshake, registry, lifecycle, per-message scopes, mailbox, and fan-out are all framework.
 
+## The low-allocation dispatch profile
+
+A game-server-like transport — thousands of connections, each producing frequent small messages — pays
+for a fresh DI scope, a rebuilt decorator chain, and a context dictionary on every message. The opt-in
+low-allocation profile (ADR-0066) keeps the full pipeline semantics and removes the steady-state garbage.
+Each row below is one allocation source on the default path, the opt-in that removes it, and why that
+opt-in is the right lever:
+
+| Per-message allocation (default path) | Removed by | Why this lever |
+| --- | --- | --- |
+| DI scope + initializer run + `DispatchScopeContext` dictionary | `ScopeMode = PerConnection` | The scope, the initializer list, and one reusable context are per-*connection* state; re-seeding per message keeps identity promotion observable. |
+| Decorator chain rebuilt per resolution | `ScopeMode = PerConnection` | The chain is a scoped registration — one reused scope means one build per connection, plus an invoker-side cache that skips DI lookup per message. |
+| Handler scope participation | `[Handler(Scope = ServiceScope.Singleton)]` | An all-singleton-dependency handler needs no scope at all; the compile-time check (ELSG011–013) makes a captive scoped dependency unshippable. |
+| Enrichment context + tags + log scope (~300 B) | `[HandlerTelemetry(HandlerTelemetryMode.None)]` | Enrichment is **not** listener-gated: its consumers are the log scope and the ambient transport span, so it runs whenever enrichers are registered (current-user support registers one by default) — and that is correct, because handler log lines should carry user context. Since virtually every host has logging configured, the honest lever for a hot handler is not a runtime gate but not generating the decorator at all. Spans and metrics were already free without listeners. |
+| Outbound payload buffer per send | writer-based `SendBinaryAsync` | The caller serializes into the connection's pooled framed buffer instead of materializing a payload to copy from. |
+| Inbound payload copy per message (WebSocket) | nothing to opt into | Fixed unconditionally: both adapters now hand `OnBinaryAsync` a call-scoped slice of a pooled per-connection buffer — the contract that always applied. |
+| Struct request boxed by the marker overload | explicit-generic `InvokeAsync<TReq, TResp>` | C# cannot infer both generics from a constraint, so the inferred overload takes the marker interface — a hot `readonly record struct` request calls the explicit form and stays unboxed. |
+| Async state machines on suspension | nothing to opt into | Hot framework paths use pooled async method builders unconditionally. |
+
+Each piece stands alone and composes:
+
+**Per-connection dispatch scope.** Choose the scope mode per connection at invoker construction — never
+globally:
+
+```csharp
+var invoker = new ConnectionHandlerInvoker(services, connection,
+    new ConnectionHandlerInvokerOptions { ScopeMode = ConnectionDispatchScopeMode.PerConnection });
+// ... dispatch as usual; then, when the connection closes:
+await invoker.DisposeAsync();
+```
+
+One DI scope is created lazily on first dispatch and reused for every unary and named message; the
+composed handler chain is resolved once per request type and cached; one reusable context is refilled per
+message. Scope initializers still run per message, so **identity promotion is observed by the very next
+message**. The trade: scoped services live for the *connection's* lifetime — a pipeline that assumes
+per-message scoping (the transaction decorator's unit of work, idempotency) keeps its state across every
+message, and the invoker warns once per handler type when such a pipeline is dispatched in this mode.
+Dispatch must stay sequential (the adapter's receive loop already is), and the owner that constructed the
+invoker must dispose it on close. Streams keep their own scope in both modes.
+
+**Singleton handlers and telemetry opt-down.** Declare them on the handler (or the module/assembly for
+telemetry) — see [handlers](/docs/concepts/handlers): `[Handler(Scope = ServiceScope.Singleton)]` removes
+scope participation entirely (compile-time verified, `ELSG011`–`ELSG013`), and
+`[HandlerTelemetry(HandlerTelemetryMode.None)]` removes the observability decorator from the generated
+chain.
+
+**Writer-based sends.** `SendBinaryAsync(ReadOnlyMemory<byte>)` forces one materialized buffer per
+outbound message; the writer-based overload serializes the payload directly into the framed outbound
+buffer instead:
+
+```csharp
+await connection.SendBinaryAsync(reply, static (reply, output) => {
+    // serialize straight into the framed output — no per-message payload buffer
+    MessagePackSerializer.Serialize(output, reply);
+}, ct);
+```
+
+Admission, backpressure (`MaxPendingSends`), oversize handling, and completed-send meaning are identical
+to the memory-based overload. The callback runs synchronously exactly once; a throwing callback (or a
+payload the framer rejects) faults only that send. Custom `TcpMessageFramer` implementations implement
+`BeginMessage`/`CompleteMessage` (reserve/backfill the prologue) alongside `WriteMessage`.
+
+**Inbound buffers are pooled and call-scoped** on every adapter: TCP and WebSocket both hand
+`OnBinaryAsync` a slice of a reused per-connection buffer that the next read overwrites. Copy the memory
+if the codec defers work — retaining it is a use-after-reuse bug.
+
+With the full profile — per-connection scope, singleton handler, telemetry `None`, writer sends — a
+dispatched message allocates **nothing** in steady state (the allocation gate in the test suite enforces
+0&nbsp;B/op), and the pipeline — decorators, `Result<T>`, typed dispatch — is still the one every other
+transport runs. Simulation-rate traffic (tens of messages per second per connection for movement) still
+belongs outside the pipeline in actors or tick loops.
+
 ## Rules of the road
 
 - **Facts still travel as client events**, even over a connection — the sink is for

@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Claims;
+using System.Text;
 using AwesomeAssertions;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections;
@@ -296,6 +297,158 @@ public sealed class TcpConnectionLifecycleTests {
         handler.Protocol.CloseReason.Should().BeNull();
     }
 
+    [Fact]
+    public async Task WriterSend_ProducesIdenticalWireBytes_ForBothShippedFramers() {
+        var ct = TestContext.Current.CancellationToken;
+        foreach (TcpMessageFramer framer in new TcpMessageFramer[] {
+                     new LengthPrefixedTcpFramer(), new DelimitedTcpFramer((byte)'\n', (byte)'>')
+                 }) {
+            await using var memoryWire = new MemoryStream();
+            await using var writerWire = new MemoryStream();
+            var (memoryConnection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
+                memoryWire, framer, 16, 64);
+            var (writerConnection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
+                writerWire, framer, 16, 64);
+            var payload = "hello-writer"u8.ToArray();
+
+            await memoryConnection.SendBinaryAsync(payload, ct);
+            await writerConnection.SendBinaryAsync(payload, static (bytes, output) => output.Write(bytes), ct);
+
+            writerWire.ToArray().Should().Equal(memoryWire.ToArray());
+        }
+    }
+
+    [Fact]
+    public async Task WriterSend_DelimiterViolation_FaultsTheSendButTheConnectionLives() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var wire = new MemoryStream();
+        var (connection, lifetime) = TcpConnectionAdapterTests.CreateStandaloneConnection(
+            wire, new DelimitedTcpFramer((byte)'\n'), 16, 64);
+
+        var violating = async () => await connection.SendBinaryAsync(
+            0, static (_, output) => output.Write("with\nnewline"u8), ct);
+        await violating.Should().ThrowAsync<ArgumentException>();
+
+        lifetime.ReceiveToken.IsCancellationRequested.Should().BeFalse();
+        await connection.SendTextAsync("still-alive", ct);
+        wire.ToArray().Should().Equal("still-alive\n"u8.ToArray());
+    }
+
+    [Fact]
+    public async Task WriterSend_OversizedPayload_FaultsNonFatally_AndReleasesTheSlot() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var wire = new MemoryStream();
+        var (connection, lifetime) = TcpConnectionAdapterTests.CreateStandaloneConnection(
+            wire, new LengthPrefixedTcpFramer(), 16, 32);
+
+        var oversized = async () => await connection.SendBinaryAsync(
+            0, static (_, output) => output.Write(new byte[128]), ct);
+        await oversized.Should().ThrowAsync<TcpOutboundFrameTooLargeException>();
+
+        lifetime.ReceiveToken.IsCancellationRequested.Should().BeFalse();
+        await connection.SendBinaryAsync(0, static (_, output) => output.Write("fits"u8), ct);
+        wire.ToArray().Should().EndWith("fits"u8.ToArray());
+    }
+
+    [Fact]
+    public async Task WriterSend_SerializeCallbackThrow_FaultsOnlyThatSend() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var wire = new MemoryStream();
+        var (connection, lifetime) = TcpConnectionAdapterTests.CreateStandaloneConnection(
+            wire, new LengthPrefixedTcpFramer(), 16, 64);
+
+        var throwing = async () => await connection.SendBinaryAsync<int>(
+            0, static (_, _) => throw new InvalidOperationException("serializer bug"), ct);
+        await throwing.Should().ThrowAsync<InvalidOperationException>().WithMessage("serializer bug");
+
+        lifetime.ReceiveToken.IsCancellationRequested.Should().BeFalse();
+        await connection.SendBinaryAsync(0, static (_, output) => output.Write("ok"u8), ct);
+        wire.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task WriterSend_UnderContention_QueuesWithFifoOrderAndSharedSaturation() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var stream = new GatedWriteStream();
+        var (connection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64, 3);
+
+        // The first writer-send becomes the inline writer (serialized straight into the shared frame
+        // buffer) and blocks in the stream; contended writer-sends serialize into rented per-send buffers
+        // and queue behind it. Saturation counts both paths identically.
+        var first = connection.SendBinaryAsync("w-0", static (s, o) => o.Write(Encoding.UTF8.GetBytes(s)), ct)
+            .AsTask();
+        await stream.WaitForEnteredWritesAsync(1, ct);
+        var second = connection.SendBinaryAsync("w-1", static (s, o) => o.Write(Encoding.UTF8.GetBytes(s)), ct)
+            .AsTask();
+        var third = connection.SendTextAsync("w-2", ct).AsTask();
+        var saturated = async () => await connection.SendBinaryAsync(
+            "w-3", static (s, o) => o.Write(Encoding.UTF8.GetBytes(s)), ct);
+        await saturated.Should().ThrowAsync<TcpSendQueueFullException>();
+
+        stream.ReleaseAll();
+        await Task.WhenAll(first, second, third).WaitAsync(ct);
+        string.Concat(stream.CompletedWriteTexts).Should().Be("w-0\nw-1\nw-2\n");
+    }
+
+    [Fact]
+    public async Task WriterSend_EnqueuedAfterTheInlineWriterReleasedOwnership_StillDrains() {
+        // Regression: a contended writer-send serializes OUTSIDE the gate, so the inline writer that made
+        // it contended can finish meanwhile, find an empty queue, and release stream ownership. The late
+        // enqueue must claim ownership itself — before the fix it queued into an ownerless queue and its
+        // completion never settled (deadlock caught by the four-producer send benchmark).
+        var ct = TestContext.Current.CancellationToken;
+        await using var stream = new GatedWriteStream();
+        var (connection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
+        using var enteredSerialize = new SemaphoreSlim(0);
+        using var releaseSerialize = new SemaphoreSlim(0);
+
+        // First send becomes the inline writer and blocks in the stream; the second is admitted as
+        // contended and parks inside its serialize callback (on a pool thread — the callback runs
+        // synchronously inside SendAsync).
+        var first = connection.SendTextAsync("first", ct).AsTask();
+        await stream.WaitForEnteredWritesAsync(1, ct);
+        var second = Task.Run(() => connection.SendBinaryAsync(
+            (Entered: enteredSerialize, Release: releaseSerialize),
+            static (gates, output) => {
+                gates.Entered.Release();
+                gates.Release.Wait();
+                output.Write("late"u8);
+            }, ct).AsTask(), ct);
+        await enteredSerialize.WaitAsync(ct);
+
+        // Let the inline writer finish and release ownership while the contended send is still serializing.
+        stream.ReleaseAll();
+        await first.WaitAsync(ct);
+
+        releaseSerialize.Release();
+        await second.WaitAsync(TimeSpan.FromSeconds(10), ct);
+        string.Concat(stream.CompletedWriteTexts).Should().Be("first\nlate\n");
+    }
+
+    [Fact]
+    public async Task WriterSend_QueuedCancellation_WithdrawsBeforeTheWire() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var stream = new GatedWriteStream();
+        var (connection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
+
+        var first = connection.SendTextAsync("keep", ct).AsTask();
+        await stream.WaitForEnteredWritesAsync(1, ct);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var queued = connection.SendBinaryAsync(
+            "withdrawn", static (s, o) => o.Write(Encoding.UTF8.GetBytes(s)), cancellation.Token).AsTask();
+        cancellation.Cancel();
+
+        var withdrawal = async () => await queued;
+        await withdrawal.Should().ThrowAsync<OperationCanceledException>();
+
+        stream.ReleaseAll();
+        await first.WaitAsync(ct);
+        string.Concat(stream.CompletedWriteTexts).Should().Be("keep\n");
+    }
+
     private sealed class DisposeRecorder : IDisposable {
         public int Disposals { get; private set; }
 
@@ -512,6 +665,15 @@ public sealed class TcpConnectionLifecycleTests {
         public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
             WriteCalls++;
             output.Write(payload);
+        }
+
+        public override int BeginMessage(IBufferWriter<byte> output) {
+            return 0;
+        }
+
+        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+            IBufferWriter<byte> output) {
+            WriteCalls++;
         }
     }
 

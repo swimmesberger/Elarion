@@ -42,4 +42,19 @@ public sealed class HandlerAttribute : Attribute {
     /// (JSON-RPC and MCP).
     /// </summary>
     public HandlerTransports Transports { get; init; } = HandlerTransports.All;
+
+    /// <summary>
+    /// The handler's registration lifetime — the same vocabulary and semantics as
+    /// <see cref="ServiceAttribute.Scope"/>. Defaults to <see cref="ServiceScope.Scoped"/> (one instance per
+    /// dispatch scope, the classical unit-of-work-per-message shape).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ServiceScope.Singleton"/> removes scope participation from the handler's dispatch entirely —
+    /// the low-allocation choice for high-rate messages (ADR-0066) — and is compile-time verified: every
+    /// constructor dependency must be provably singleton (<c>ELSG011</c>/<c>ELSG012</c>) and the pipeline must
+    /// not attach scope-dependent features such as transactions, idempotency, authorization, validation,
+    /// caching, or auditing (<c>ELSG013</c>). Per-caller log enrichment is unavailable on a singleton handler
+    /// (its chain is built once from the root provider); the span and execution metric remain.
+    /// </remarks>
+    public ServiceScope Scope { get; init; } = ServiceScope.Scoped;
 }

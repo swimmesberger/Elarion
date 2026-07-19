@@ -50,6 +50,197 @@ public sealed class HandlerRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateRegistration_Default_EmitsObservabilityDecoratorOutermost() {
+        var source = CreateSource("[assembly: Sample.Pipeline.DefaultPipeline]", "", "");
+
+        var generated = GenerateHandlerRegistrationSource(source);
+
+        generated.Should().Contain("ObservabilityDecorator");
+        // Outermost: emitted last, after every other decorator wraps the handler.
+        generated.IndexOf("TransactionDecorator", StringComparison.Ordinal)
+            .Should().BeLessThan(generated.IndexOf("ObservabilityDecorator", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GenerateRegistration_HandlerTelemetryNoneOnHandler_SkipsObservabilityDecorator() {
+        var source = CreateSource(
+            "[assembly: Sample.Pipeline.DefaultPipeline]",
+            "",
+            "[Elarion.Abstractions.HandlerTelemetry(Elarion.Abstractions.HandlerTelemetryMode.None)]");
+
+        var generated = GenerateHandlerRegistrationSource(source);
+
+        generated.Should().NotContain("ObservabilityDecorator");
+        // The rest of the pipeline is untouched: opting down telemetry never drops functional decorators.
+        generated.Should().Contain("TransactionDecorator");
+    }
+
+    [Fact]
+    public void GenerateRegistration_HandlerTelemetryNoneOnModule_SkipsObservabilityForOwnedHandlers() {
+        var source = CreateSource(
+            "[assembly: Sample.Pipeline.DefaultPipeline]",
+            "[Elarion.Abstractions.HandlerTelemetry(Elarion.Abstractions.HandlerTelemetryMode.None)]",
+            "");
+
+        var generated = GenerateHandlerRegistrationSource(source);
+
+        generated.Should().NotContain("ObservabilityDecorator");
+    }
+
+    [Fact]
+    public void GenerateRegistration_HandlerTelemetryNoneOnAssembly_SkipsObservabilityEverywhere() {
+        var source = CreateSource(
+            """
+            [assembly: Sample.Pipeline.DefaultPipeline]
+            [assembly: Elarion.Abstractions.HandlerTelemetry(Elarion.Abstractions.HandlerTelemetryMode.None)]
+            """,
+            "",
+            "");
+
+        var generated = GenerateHandlerRegistrationSource(source);
+
+        generated.Should().NotContain("ObservabilityDecorator");
+    }
+
+    [Fact]
+    public void GenerateRegistration_HandlerTelemetryFullOnHandler_OverridesModuleNone() {
+        var source = CreateSource(
+            "[assembly: Sample.Pipeline.DefaultPipeline]",
+            "[Elarion.Abstractions.HandlerTelemetry(Elarion.Abstractions.HandlerTelemetryMode.None)]",
+            "[Elarion.Abstractions.HandlerTelemetry(Elarion.Abstractions.HandlerTelemetryMode.Full)]");
+
+        var generated = GenerateHandlerRegistrationSource(source);
+
+        generated.Should().Contain("ObservabilityDecorator");
+    }
+
+    private const string SingletonHandlerSourcePrologue =
+        """
+        using System;
+        using System.Threading;
+        using System.Threading.Tasks;
+        using Elarion.Abstractions;
+        using Elarion.Abstractions.Modules;
+
+        [assembly: UseElarion]
+
+        namespace Sample.App {
+            [AppModule("App")]
+            public static class AppModule { }
+
+            public sealed record PingCommand(int Id);
+            public sealed record PingResponse(string Name);
+        """;
+
+    private static GeneratorDriverRunResult RunSingletonSource(string handlerAndServices) {
+        var syntaxTree = CSharpSyntaxTree.ParseText(
+            SingletonHandlerSourcePrologue + handlerAndServices + "\n}",
+            new CSharpParseOptions(LanguageVersion.Preview));
+        var compilation = CSharpCompilation.Create(
+            "SingletonHandlerTests",
+            [syntaxTree],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        compilation.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(new HandlerRegistrationGenerator());
+        return driver.RunGenerators(compilation).GetRunResult();
+    }
+
+    [Fact]
+    public void GenerateRegistration_SingletonScope_RegistersSingletonWithEnrichmentFreeObservability() {
+        var result = RunSingletonSource(
+            """
+                [Handler(Scope = ServiceScope.Singleton)]
+                public sealed class Ping(TimeProvider clock) : IHandler<PingCommand, Result<PingResponse>> {
+                    public ValueTask<Result<PingResponse>> HandleAsync(PingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<PingResponse>.Success(new PingResponse(clock.GetUtcNow().ToString())));
+                }
+            """);
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        var generated = GetGeneratedSource(result, "Sample_App_Ping.g.cs");
+        generated.Should().Contain("ServiceLifetime.Singleton");
+        // The chain is built once from the root provider: scoped enrichers are definitionally unavailable, so
+        // the observability decorator is emitted enrichment-free (span + metric survive).
+        generated.Should().Contain("Array.Empty<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>()");
+        generated.Should().NotContain("GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>");
+    }
+
+    [Fact]
+    public void GenerateRegistration_SingletonScope_ScopedServiceDependency_ReportsElsg011() {
+        var result = RunSingletonSource(
+            """
+                public interface IPricingService { }
+
+                [Service(typeof(IPricingService))]
+                public sealed class PricingService : IPricingService { }
+
+                [Handler(Scope = ServiceScope.Singleton)]
+                public sealed class Ping(IPricingService pricing) : IHandler<PingCommand, Result<PingResponse>> {
+                    public ValueTask<Result<PingResponse>> HandleAsync(PingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<PingResponse>.Success(new PingResponse("x")));
+                }
+            """);
+
+        result.Diagnostics.Any(d => d.Id == "ELSG011" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateRegistration_SingletonScope_UnverifiableDependency_ReportsElsg012() {
+        var result = RunSingletonSource(
+            """
+                public interface IMysteryService { }
+
+                [Handler(Scope = ServiceScope.Singleton)]
+                public sealed class Ping(IMysteryService mystery) : IHandler<PingCommand, Result<PingResponse>> {
+                    public ValueTask<Result<PingResponse>> HandleAsync(PingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<PingResponse>.Success(new PingResponse("x")));
+                }
+            """);
+
+        result.Diagnostics.Any(d => d.Id == "ELSG012" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateRegistration_SingletonScope_ScopedPipelineFeature_ReportsElsg013() {
+        var result = RunSingletonSource(
+            """
+                [Handler(Scope = ServiceScope.Singleton)]
+                [Elarion.Abstractions.Caching.Cacheable("sample:ping")]
+                public sealed class Ping : IHandler<PingCommand, Result<PingResponse>> {
+                    public ValueTask<Result<PingResponse>> HandleAsync(PingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<PingResponse>.Success(new PingResponse("x")));
+                }
+            """);
+
+        result.Diagnostics.Any(d => d.Id == "ELSG013" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateRegistration_SingletonScope_SingletonServiceDependency_IsAccepted() {
+        var result = RunSingletonSource(
+            """
+                public interface IPricingService { }
+
+                [Service(typeof(IPricingService), Scope = ServiceScope.Singleton)]
+                public sealed class PricingService : IPricingService { }
+
+                [Handler(Scope = ServiceScope.Singleton)]
+                public sealed class Ping(IPricingService pricing, TimeProvider clock)
+                    : IHandler<PingCommand, Result<PingResponse>> {
+                    public ValueTask<Result<PingResponse>> HandleAsync(PingCommand request, CancellationToken ct) =>
+                        ValueTask.FromResult(Result<PingResponse>.Success(new PingResponse("x")));
+                }
+            """);
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        GetGeneratedSource(result, "Sample_App_Ping.g.cs").Should().Contain("ServiceLifetime.Singleton");
+    }
+
+    [Fact]
     public void GenerateRegistration_UseElarion_EmitsModuleAggregator() {
         var source = CreateSource(
             """
@@ -64,7 +255,7 @@ public sealed class HandlerRegistrationGeneratorTests {
 
         generated.Should().Contain("public static IServiceCollection AddSalesHandlers(");
         generated.Should()
-            .Contain("Sample.Modules.Sales.Handlers.CreateOrderRegistration.AddCreateOrder(services, lifetime);");
+            .Contain("Sample.Modules.Sales.Handlers.CreateOrderRegistration.AddCreateOrder(services);");
     }
 
     [Fact]
@@ -811,7 +1002,7 @@ public sealed class HandlerRegistrationGeneratorTests {
 
         var aggregation = GetGeneratedSource(result, "PricingHandlerExtensions.g.cs");
         aggregation.Should()
-            .Contain("MyApp.Decorators.Pricing.PriceCakeRegistration.AddPriceCake(services, lifetime);");
+            .Contain("MyApp.Decorators.Pricing.PriceCakeRegistration.AddPriceCake(services);");
     }
 
     [Fact]
@@ -864,7 +1055,7 @@ public sealed class HandlerRegistrationGeneratorTests {
             .Should().Be(1);
         var aggregation = GetGeneratedSource(result, "SalesHandlerExtensions.g.cs");
         aggregation.Should().Contain("namespace Alpha;");
-        aggregation.Should().Contain("AddAlphaThing(services, lifetime);");
+        aggregation.Should().Contain("AddAlphaThing(services);");
         aggregation.Should().NotContain("BetaThing");
 
         // Both handlers still get their per-handler registration (typed-direct resolution stays intact).
@@ -984,6 +1175,16 @@ public sealed class HandlerRegistrationGeneratorTests {
                      }
 
                      public readonly record struct Result<T>(T Value);
+
+                     public enum HandlerTelemetryMode {
+                         Full = 0,
+                         None = 1,
+                     }
+
+                     [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Assembly)]
+                     public sealed class HandlerTelemetryAttribute(HandlerTelemetryMode mode) : System.Attribute {
+                         public HandlerTelemetryMode Mode { get; } = mode;
+                     }
                  }
 
                  namespace Elarion.Abstractions.Caching {

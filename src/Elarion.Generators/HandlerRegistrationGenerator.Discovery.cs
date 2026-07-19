@@ -17,12 +17,14 @@ public sealed partial class HandlerRegistrationGenerator {
         EquatableArray<ModuleScanner.Module> modules,
         EquatableArray<string> variantContracts,
         EquatableArray<string> noRetryPolicies,
+        EquatableArray<ServiceScopeFact> serviceScopeFacts,
         Compilation compilation,
         CancellationToken ct) {
         if (candidates.IsEmpty)
             return EquatableArray<HandlerInfo>.Empty;
 
-        var (moduleDecoratorLists, moduleAuthDefaults, moduleAuditDefaults) = BuildModuleMaps(compilation, modules, ct);
+        var (moduleDecoratorLists, moduleAuthDefaults, moduleAuditDefaults, moduleTelemetryDefaults) =
+            BuildModuleMaps(compilation, modules, ct);
         var assemblyRequireAuthenticated = ResolveAssemblyAuthorizationDefault(compilation);
         var assemblyAuditDefault = ResolveAssemblyAuditDefault(compilation);
         var variantContractSet = variantContracts.IsEmpty
@@ -38,6 +40,7 @@ public sealed partial class HandlerRegistrationGenerator {
         var validationWalk = compilation.GetTypeByMetadataName(ElarionValidationExtensionsMetadataName) is null
             ? null
             : new ValidatableTypeWalker.Context(compilation.Assembly);
+        var scopeFactMap = BuildServiceScopeFactMap(serviceScopeFacts);
         var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
         foreach (var metadataName in candidates) {
             ct.ThrowIfCancellationRequested();
@@ -53,7 +56,7 @@ public sealed partial class HandlerRegistrationGenerator {
             var info = GetHandlerInfo(
                 classDecl, classSymbol, compilation, moduleDecoratorLists, moduleAuthDefaults,
                 assemblyRequireAuthenticated, moduleAuditDefaults, assemblyAuditDefault, modules,
-                variantContractSet, noRetryPolicySet, validationWalk, ct);
+                variantContractSet, noRetryPolicySet, validationWalk, moduleTelemetryDefaults, scopeFactMap, ct);
             if (info is not null)
                 builder.Add(info);
         }
@@ -116,6 +119,8 @@ public sealed partial class HandlerRegistrationGenerator {
         HashSet<string>? variantContracts,
         HashSet<string>? noRetryPolicies,
         ValidatableTypeWalker.Context? validationWalk,
+        IReadOnlyList<(string Namespace, int TelemetryMode)> moduleTelemetryDefaults,
+        IReadOnlyDictionary<string, int> serviceScopeFacts,
         CancellationToken ct) {
         ct.ThrowIfCancellationRequested();
 
@@ -195,6 +200,13 @@ public sealed partial class HandlerRegistrationGenerator {
 
         var variantContractDeps = GetVariantContractDeps(classSymbol, variantContracts, fmt);
 
+        var scopeValue = ParseHandlerScope(classSymbol);
+        if (scopeValue == 1)
+            VerifySingletonHandler(
+                classDecl, classSymbol, handlerFqn, fmt, serviceScopeFacts,
+                decorators, cacheable, cacheInvalidation, hasAuthorization, hasFeatureGates, hasValidation,
+                idempotent, audit, variantContractDeps, diagnostics);
+
         return new HandlerInfo(
             handlerFqn,
             handlerName,
@@ -216,6 +228,9 @@ public sealed partial class HandlerRegistrationGenerator {
             // Event consumers register keyed by their own FQN so N of them coexist for one event; a command/query
             // stays unkeyed (exactly one handler per request, resolvable typed-direct).
             isEventConsumer ? handlerFqn : null,
+            // [HandlerTelemetry] leveled resolution (ADR-0066): None means no observability decorator at all.
+            ResolveTelemetryMode(classSymbol, compilation, moduleTelemetryDefaults) == 0,
+            scopeValue,
             diagnostics.ToImmutable());
     }
 
@@ -286,6 +301,178 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         return builder is null ? EquatableArray<string>.Empty : builder.ToImmutable();
+    }
+
+    // --- Singleton handler verification (ADR-0066, ELSG011-013) ---
+
+    private const string HandlerAttributeMetadataName = "Elarion.Abstractions.HandlerAttribute";
+
+    /// <summary>The [Handler(Scope = …)] value (ServiceScope enum int); Scoped (0) when undeclared.</summary>
+    private static int ParseHandlerScope(INamedTypeSymbol classSymbol) {
+        foreach (var attribute in classSymbol.GetAttributes()) {
+            if (attribute.AttributeClass?.ToDisplayString() != HandlerAttributeMetadataName)
+                continue;
+
+            foreach (var named in attribute.NamedArguments)
+                if (named.Key == "Scope" && named.Value.Value is int scope)
+                    return scope;
+        }
+
+        return 0;
+    }
+
+    /// <summary>One [Service] class's lifetime facts: every contract FQN plus its own FQN, with the scope.</summary>
+    private static EquatableArray<ServiceScopeFact> GetServiceScopeFacts(GeneratorAttributeSyntaxContext ctx) {
+        if (ctx.TargetSymbol is not INamedTypeSymbol classSymbol)
+            return EquatableArray<ServiceScopeFact>.Empty;
+
+        var serviceAttr = ServiceContractResolver.FindServiceAttribute(classSymbol);
+        if (serviceAttr is null)
+            return EquatableArray<ServiceScopeFact>.Empty;
+
+        var scope = 0;
+        foreach (var named in serviceAttr.NamedArguments)
+            if (named.Key == "Scope" && named.Value.Value is int declared)
+                scope = declared;
+
+        var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
+        var builder = ImmutableArray.CreateBuilder<ServiceScopeFact>();
+        foreach (var contract in ServiceContractResolver.ResolveContractFqns(classSymbol, serviceAttr, fmt))
+            builder.Add(new ServiceScopeFact(contract, scope));
+        builder.Add(new ServiceScopeFact(classSymbol.ToDisplayString(fmt), scope));
+        return builder.ToImmutable();
+    }
+
+    private static EquatableArray<ServiceScopeFact> FlattenServiceScopeFacts(
+        ImmutableArray<EquatableArray<ServiceScopeFact>> groups) {
+        if (groups.IsDefaultOrEmpty)
+            return EquatableArray<ServiceScopeFact>.Empty;
+
+        return groups
+            .SelectMany(static group => group.AsImmutableArray)
+            .Distinct()
+            .OrderBy(static fact => fact.Fqn, StringComparer.Ordinal)
+            .ThenBy(static fact => fact.ScopeValue)
+            .ToImmutableArray();
+    }
+
+    // A contract declared by two [Service] classes with DIFFERENT scopes is ambiguous: drop it to Unknown
+    // (ELSG012) rather than trusting either declaration.
+    private static IReadOnlyDictionary<string, int> BuildServiceScopeFactMap(
+        EquatableArray<ServiceScopeFact> facts) {
+        var map = new Dictionary<string, int>(StringComparer.Ordinal);
+        var conflicted = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var fact in facts) {
+            if (conflicted.Contains(fact.Fqn))
+                continue;
+
+            if (map.TryGetValue(fact.Fqn, out var existing)) {
+                if (existing != fact.ScopeValue) {
+                    map.Remove(fact.Fqn);
+                    conflicted.Add(fact.Fqn);
+                }
+
+                continue;
+            }
+
+            map[fact.Fqn] = fact.ScopeValue;
+        }
+
+        return map;
+    }
+
+    private static void VerifySingletonHandler(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol classSymbol,
+        string handlerFqn,
+        SymbolDisplayFormat fmt,
+        IReadOnlyDictionary<string, int> serviceScopeFacts,
+        ImmutableArray<DecoratorInfo> decorators,
+        CacheableInfo? cacheable,
+        CacheInvalidationInfo? cacheInvalidation,
+        bool hasAuthorization,
+        bool hasFeatureGates,
+        bool hasValidation,
+        IdempotentInfo? idempotent,
+        AuditInfo? audit,
+        EquatableArray<string> variantContractDeps,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        var location = classDecl.Identifier.GetLocation();
+
+        // ELSG013: every pipeline feature whose decorator resolves per-dispatch services when the chain is
+        // built. A singleton chain is built once from the root provider, so these are captive-dependency bugs
+        // (and with scope validation, startup failures). [Resilient] is deliberately absent: the resilience
+        // runner is a singleton.
+        void ScopedPipelineFeature(string feature) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                SingletonHandlerScopedPipelineDescriptor, location, handlerFqn, feature));
+        }
+
+        if (idempotent is not null) ScopedPipelineFeature("[Idempotent] (or the default integration-event inbox)");
+        if (audit is not null) ScopedPipelineFeature("[Auditable] audit recording");
+        if (cacheable is not null) ScopedPipelineFeature("[Cacheable] result caching");
+        if (cacheInvalidation is not null) ScopedPipelineFeature("[CacheInvalidate] cache invalidation");
+        if (hasAuthorization) ScopedPipelineFeature("an authorization requirement");
+        if (hasFeatureGates) ScopedPipelineFeature("a [FeatureGate]");
+        if (hasValidation) ScopedPipelineFeature("request validation");
+        if (!variantContractDeps.IsEmpty) ScopedPipelineFeature("a feature-variant dependency");
+
+        foreach (var decorator in decorators)
+        foreach (var dependency in decorator.ExtraDependencies) {
+            if (dependency.IsHandlerMetadata)
+                continue;
+
+            // Custom [DecoratorList] decorators must only pull singleton dependencies into a singleton chain;
+            // this is what catches the transaction decorator (IUnitOfWork is per-dispatch).
+            if (serviceScopeFacts.TryGetValue(dependency.Fqn, out var scope) && scope == 1)
+                continue;
+
+            if (IsKnownSingletonFqn(dependency.Fqn))
+                continue;
+
+            ScopedPipelineFeature($"decorator '{decorator.OpenGenericFqn}' (dependency '{dependency.Fqn}')");
+        }
+
+        // ELSG011/ELSG012: every constructor dependency must be provably singleton.
+        var constructor = SelectConstructor(classSymbol);
+        if (constructor is null)
+            return;
+
+        foreach (var parameter in constructor.Parameters) {
+            if (IsKeyedServiceParameter(parameter)) {
+                // A keyed registration's lifetime is invisible here; conservative — verify or keep scoped.
+                diagnostics.Add(DiagnosticInfo.Create(
+                    SingletonHandlerUnverifiableDependencyDescriptor, location, handlerFqn,
+                    parameter.Type.ToDisplayString(fmt)));
+                continue;
+            }
+
+            switch (ServiceLifetimeKnowledge.Classify(parameter.Type, fmt, serviceScopeFacts)) {
+                case ServiceLifetimeKnowledge.Classification.Singleton:
+                    break;
+                case ServiceLifetimeKnowledge.Classification.ScopedOrTransient:
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        SingletonHandlerScopedDependencyDescriptor, location, handlerFqn,
+                        parameter.Type.ToDisplayString(fmt), "scoped or transient"));
+                    break;
+                default:
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        SingletonHandlerUnverifiableDependencyDescriptor, location, handlerFqn,
+                        parameter.Type.ToDisplayString(fmt)));
+                    break;
+            }
+        }
+    }
+
+    // The framework-singleton check reused for decorator extra dependencies (string FQNs, no symbol at hand).
+    private static bool IsKnownSingletonFqn(string fqn) {
+        return fqn is "global::System.TimeProvider"
+                   or "global::Elarion.Abstractions.Serialization.IElarionJsonSerialization"
+                   or "global::Elarion.Abstractions.Resilience.IResiliencePipelineRunner"
+                   or "global::Elarion.Abstractions.Resilience.IResiliencePolicyCatalog"
+                   or "global::Microsoft.Extensions.Logging.ILoggerFactory"
+               || fqn.StartsWith("global::Microsoft.Extensions.Logging.ILogger<", StringComparison.Ordinal)
+               || fqn.StartsWith("global::Microsoft.Extensions.Options.IOptions<", StringComparison.Ordinal);
     }
 
     private static bool IsKeyedServiceParameter(IParameterSymbol parameter) {

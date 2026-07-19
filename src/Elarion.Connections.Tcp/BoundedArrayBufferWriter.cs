@@ -36,6 +36,18 @@ internal sealed class BoundedArrayBufferWriter : IBufferWriter<byte>, IDisposabl
     public int WrittenCount => _written;
     public ReadOnlyMemory<byte> WrittenMemory => _buffer.AsMemory(0, _written);
 
+    /// <summary>
+    /// A writable view of already-written bytes, for the in-place framing seam (ADR-0066): the framer's
+    /// <c>CompleteMessage</c> backfills the reserved prologue and validates the payload through views taken
+    /// here. Valid only until the next write to this writer (a write may re-rent the backing array).
+    /// </summary>
+    public Span<byte> GetWrittenSpan(int start, int length) {
+        ArgumentOutOfRangeException.ThrowIfNegative(start);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(length, _written - start);
+        return _buffer.AsSpan(start, length);
+    }
+
     /// <summary>Marks the start of the next frame — the per-frame budget applies from here.</summary>
     public void BeginFrame() {
         _frameStart = _written;

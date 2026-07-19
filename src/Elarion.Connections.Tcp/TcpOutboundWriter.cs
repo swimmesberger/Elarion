@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using Elarion.Abstractions.Connections;
 using Elarion.Connections.Tcp.Diagnostics;
@@ -38,6 +39,8 @@ internal sealed class TcpOutboundWriter : IDisposable {
     private readonly string _transport;
     private readonly int _maxPendingSends;
     private readonly int _flushThresholdBytes;
+    private readonly int _initialBufferBytes;
+    private readonly int _maxFrameBytes;
     private int _pending;
     private bool _writing;
     private bool _closed;
@@ -52,6 +55,8 @@ internal sealed class TcpOutboundWriter : IDisposable {
         _frameBuffer = new BoundedArrayBufferWriter(
             initialBufferBytes, maxFrameBytes, maxFrameBytes + _flushThresholdBytes);
         _maxPendingSends = maxPendingSends;
+        _initialBufferBytes = initialBufferBytes;
+        _maxFrameBytes = maxFrameBytes;
         _connectionId = connectionId;
         _transport = transport;
         _lifetime = lifetime;
@@ -103,6 +108,151 @@ internal sealed class TcpOutboundWriter : IDisposable {
         await AwaitQueuedAsync(queued, ct);
     }
 
+    /// <summary>
+    /// The writer-based send (ADR-0066): admits one message, lets <paramref name="serialize"/> write the
+    /// payload directly into the framed outbound buffer, and completes after the physical stream write —
+    /// identical admission, backpressure, and completion semantics to the memory-based
+    /// <see cref="SendAsync(ReadOnlyMemory{byte}, CancellationToken)"/>, without the caller materializing a
+    /// payload buffer.
+    /// </summary>
+    /// <remarks>
+    /// The callback runs synchronously exactly once. On the uncontended path it serializes straight into the
+    /// connection's pooled frame buffer between the framer's <c>BeginMessage</c>/<c>CompleteMessage</c>; a
+    /// contended send serializes into a rented per-send buffer and queues with unchanged FIFO/withdrawal
+    /// semantics. A serialization or framing failure (including the per-frame budget) faults only this send;
+    /// the connection lives.
+    /// </remarks>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    public async ValueTask SendAsync<TState>(
+        TState state, Action<TState, IBufferWriter<byte>> serialize, CancellationToken ct) {
+        ArgumentNullException.ThrowIfNull(serialize);
+        ct.ThrowIfCancellationRequested();
+        var inline = false;
+        lock (_gate) {
+            if (_closed) throw ClosedFault();
+
+            if (_pending >= _maxPendingSends) {
+                TcpConnectionTelemetry.RecordOutboundSaturated(_transport);
+                throw new TcpSendQueueFullException(_connectionId, _maxPendingSends);
+            }
+
+            _pending++;
+            if (!_writing) {
+                _writing = true;
+                inline = true;
+            }
+        }
+
+        TcpConnectionTelemetry.RecordOutboundAdmitted(_transport);
+        if (inline) {
+            var (error, fatal) = await WriteCallerFrameAsync(state, serialize, ct);
+            FinishWriter(error, fatal);
+            if (error is not null) {
+                if (fatal) _lifetime.Abort(error);
+
+                throw error;
+            }
+
+            return;
+        }
+
+        // Contended: the inline writer owns the shared frame buffer, so this send serializes into its own
+        // rented buffer and queues it. Serialization happens outside the gate (arbitrary caller code must
+        // never run under the connection lock); the admitted slot is already held, so a failure below
+        // releases it deterministically.
+        var owned = new BoundedArrayBufferWriter(
+            Math.Min(_initialBufferBytes, _maxFrameBytes), _maxFrameBytes);
+        try {
+            serialize(state, owned);
+        }
+        catch {
+            owned.Dispose();
+            ReleaseAdmittedSlot();
+            throw;
+        }
+
+        PendingSend queued;
+        var startDrainer = false;
+        lock (_gate) {
+            if (_closed) {
+                // Closed while serializing: the slot was admitted before the close, so it settles like a
+                // faulted queued send rather than draining.
+                var fault = ClosedFault();
+                owned.Dispose();
+                ReleaseAdmittedSlotLocked();
+                throw fault;
+            }
+
+            queued = new PendingSend(this, owned.WrittenMemory, ct, owned);
+            _queue.Enqueue(queued);
+            // Serialization ran outside the gate, so the inline writer that made this send contended may
+            // have finished meanwhile, found an empty queue, and released stream ownership — enqueueing
+            // into an ownerless queue would wait forever. Claiming ownership here mirrors the admission
+            // decision the memory-send makes atomically; the drainer settles this frame like any other.
+            if (!_writing) {
+                _writing = true;
+                startDrainer = true;
+            }
+        }
+
+        if (startDrainer) _ = Task.Run(DrainQueueAsync);
+
+        await AwaitQueuedAsync(queued, ct);
+    }
+
+    private void ReleaseAdmittedSlot() {
+        lock (_gate) {
+            ReleaseAdmittedSlotLocked();
+        }
+
+        TcpConnectionTelemetry.RecordOutboundSettled(_transport);
+    }
+
+    private void ReleaseAdmittedSlotLocked() {
+        _pending--;
+        CheckDrainedLocked();
+    }
+
+    /// <summary>
+    /// Frames one caller-serialized message in place and physically writes it — the writer-send mirror of
+    /// <see cref="WriteFrameAsync"/>, with the same fault taxonomy: a serialization/framing failure never
+    /// started the frame (non-fatal), a cancelled or failed physical write may have emitted a partial frame
+    /// (fatal).
+    /// </summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<(Exception? Error, bool Fatal)> WriteCallerFrameAsync<TState>(
+        TState state, Action<TState, IBufferWriter<byte>> serialize, CancellationToken ct) {
+        try {
+            _frameBuffer.ResetWrittenCount();
+            var prologueLength = _framer.BeginMessage(_frameBuffer);
+            var payloadStart = _frameBuffer.WrittenCount;
+            serialize(state, _frameBuffer);
+            var payloadLength = _frameBuffer.WrittenCount - payloadStart;
+            _framer.CompleteMessage(
+                _frameBuffer.GetWrittenSpan(payloadStart - prologueLength, prologueLength),
+                _frameBuffer.GetWrittenSpan(payloadStart, payloadLength),
+                _frameBuffer);
+        }
+        catch (Exception framingFailure) {
+            _frameBuffer.Trim();
+            return (framingFailure, Fatal: false);
+        }
+
+        try {
+            await _stream.WriteAsync(_frameBuffer.WrittenMemory, ct);
+            return (null, false);
+        }
+        catch (OperationCanceledException cancelled) {
+            return (cancelled, Fatal: true);
+        }
+        catch (Exception ioFailure) {
+            return (new ClientConnectionClosedException(_connectionId, ioFailure), Fatal: true);
+        }
+        finally {
+            _frameBuffer.Trim();
+        }
+    }
+
     // Separate method so its withdrawal closure cannot hoist a display-class allocation into SendAsync —
     // the uncontended inline path above must stay allocation-free.
     private static async ValueTask AwaitQueuedAsync(PendingSend queued, CancellationToken ct) {
@@ -133,7 +283,10 @@ internal sealed class TcpOutboundWriter : IDisposable {
             CheckDrainedLocked();
         }
 
-        foreach (var send in toFault) send.Completion.TrySetException(fault);
+        foreach (var send in toFault) {
+            send.Completion.TrySetException(fault);
+            send.ReleaseOwnedBuffer();
+        }
     }
 
     public void Dispose() {
@@ -195,11 +348,16 @@ internal sealed class TcpOutboundWriter : IDisposable {
                 _frameBuffer.Trim();
             }
 
-            foreach (var item in _drainBatch)
+            foreach (var item in _drainBatch) {
                 if (error is null)
                     item.Completion.TrySetResult();
                 else
                     item.Completion.TrySetException(error);
+
+                // The frame was copied into the batch buffer at activation; a contended writer-send's rented
+                // buffer is done once its completion settles.
+                item.ReleaseOwnedBuffer();
+            }
 
             List<PendingSend>? toFault = null;
             Exception? fault = null;
@@ -219,7 +377,10 @@ internal sealed class TcpOutboundWriter : IDisposable {
             for (var i = 0; i < _drainBatch.Count; i++) TcpConnectionTelemetry.RecordOutboundSettled(_transport);
 
             if (error is not null) {
-                foreach (var send in toFault!) send.Completion.TrySetException(fault!);
+                foreach (var send in toFault!) {
+                    send.Completion.TrySetException(fault!);
+                    send.ReleaseOwnedBuffer();
+                }
 
                 _lifetime.Abort(error);
                 return;
@@ -229,6 +390,7 @@ internal sealed class TcpOutboundWriter : IDisposable {
 
     private void SettleFramingFailure(PendingSend send, Exception failure) {
         send.Completion.TrySetException(failure);
+        send.ReleaseOwnedBuffer();
         lock (_gate) {
             _pending--;
             CheckDrainedLocked();
@@ -297,8 +459,10 @@ internal sealed class TcpOutboundWriter : IDisposable {
 
         TcpConnectionTelemetry.RecordOutboundSettled(_transport);
         if (toFault is not null)
-            foreach (var send in toFault)
+            foreach (var send in toFault) {
                 send.Completion.TrySetException(fault!);
+                send.ReleaseOwnedBuffer();
+            }
 
         if (startDrainer)
             // The finishing sender must not be conscripted into writing other callers' frames — the queue
@@ -316,6 +480,7 @@ internal sealed class TcpOutboundWriter : IDisposable {
 
         TcpConnectionTelemetry.RecordOutboundSettled(_transport);
         send.Completion.TrySetCanceled(send.Ct);
+        send.ReleaseOwnedBuffer();
     }
 
     // Dequeues everything still pending for faulting; withdrawn items are already settled and skipped.
@@ -341,7 +506,9 @@ internal sealed class TcpOutboundWriter : IDisposable {
             : new ClientConnectionClosedException(_connectionId, _failure);
     }
 
-    private sealed class PendingSend(TcpOutboundWriter owner, ReadOnlyMemory<byte> message, CancellationToken ct) {
+    private sealed class PendingSend(
+        TcpOutboundWriter owner, ReadOnlyMemory<byte> message, CancellationToken ct,
+        BoundedArrayBufferWriter? ownedBuffer = null) {
         /// <summary>Static + state-carrying so registering the withdrawal never allocates a closure.</summary>
         public static readonly Action<object?> WithdrawCallback =
             static state => {
@@ -350,6 +517,7 @@ internal sealed class TcpOutboundWriter : IDisposable {
             };
 
         private int _state;
+        private BoundedArrayBufferWriter? _ownedBuffer = ownedBuffer;
 
         public TcpOutboundWriter Owner { get; } = owner;
         public ReadOnlyMemory<byte> Message { get; } = message;
@@ -364,6 +532,15 @@ internal sealed class TcpOutboundWriter : IDisposable {
         /// <summary>Claims the frame for cancellation-before-write; loses once a writer activated it.</summary>
         public bool TryWithdraw() {
             return Interlocked.CompareExchange(ref _state, 2, 0) == 0;
+        }
+
+        /// <summary>
+        /// Returns the rented per-send buffer of a contended writer-send (a no-op for memory-sends). Called
+        /// once per settle site after <see cref="Completion"/> settles — <see cref="Message"/> is dead from
+        /// then on; idempotent so racing settle paths cannot double-return the array.
+        /// </summary>
+        public void ReleaseOwnedBuffer() {
+            Interlocked.Exchange(ref _ownedBuffer, null)?.Dispose();
         }
     }
 }

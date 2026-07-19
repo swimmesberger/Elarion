@@ -10,8 +10,9 @@ namespace Elarion.Idempotency;
 internal sealed class ScopedIdempotencyKeyAccessor : IIdempotencyKeyAccessor, IIdempotencyKeySeed {
     private string? _key;
 
-    /// <summary>Sets the key for this scope — from the scope initializer, or a transport's in-band seed.</summary>
-    public void Seed(string key) {
+    /// <summary>Sets the key for this scope — from the scope initializer, or a transport's in-band seed.
+    /// <see langword="null"/> clears it (a reused per-connection scope re-seeds per message).</summary>
+    public void Seed(string? key) {
         _key = key;
     }
 

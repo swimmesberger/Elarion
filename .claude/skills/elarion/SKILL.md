@@ -264,7 +264,19 @@ per-connection `new ConnectionHandlerInvoker(services, connection)` —
 marker (`ICommand<TSelf, TResponse>`/`IQuery<TSelf, TResponse>`); marker-free requests use
 `invoker.InvokeAsync<TRequest, TResponse>`, named traffic `invoker.InvokeNamedAsync(dispatcher, name,
 request, ct)` (full pipeline per message; named routes need `HandlerTransports.Connection`). Test codecs
-socket-free with `InMemoryTcpLink`.
+socket-free with `InMemoryTcpLink`. High-rate connections (game-server tier) opt into the
+**low-allocation profile** (ADR-0066), each piece independent: construct the invoker with
+`new ConnectionHandlerInvokerOptions { ScopeMode = ConnectionDispatchScopeMode.PerConnection }` (one
+reused dispatch scope + cached chain; sequential dispatch; `await invoker.DisposeAsync()` on close;
+transaction/idempotency pipelines warn — they assume per-message scoping), declare hot handlers
+`[Handler(Scope = ServiceScope.Singleton)]` (compile-time verified, ELSG011–013: all ctor deps provably
+singleton, no scope-dependent pipeline features) and `[HandlerTelemetry(HandlerTelemetryMode.None)]`
+(also on the module class or assembly, nearest wins), and serialize outbound payloads straight into the
+framed buffer with `connection.SendBinaryAsync(state, static (s, output) => …, ct)` (identical
+backpressure; custom `TcpMessageFramer`s implement `BeginMessage`/`CompleteMessage`). The full profile
+dispatches at 0 B/op; inbound `OnBinaryAsync` memory is pooled and call-scoped on every adapter — copy
+it if the codec defers work. Hot value-type requests use the explicit-generic `InvokeAsync` overload
+(the marker overload boxes a struct request).
 
 Don't hand-roll device provisioning — `Elarion.Devices` owns the identity chain (ADR-0054):
 `AddElarionDeviceIdentityEntityFrameworkCore<TDbContext>()` + `[GenerateElarionDeviceIdentity]` on the

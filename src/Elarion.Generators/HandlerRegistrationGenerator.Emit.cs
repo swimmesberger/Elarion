@@ -89,10 +89,20 @@ public sealed partial class HandlerRegistrationGenerator {
             "            static () => __pipeline ?? global::System.Array.Empty<global::Elarion.Abstractions.Pipeline.PipelineStep>());");
     }
 
+    // ServiceScope enum value → the ServiceLifetime expression the registration uses. [Handler(Scope = …)]
+    // is the single source of truth for the handler's lifetime (ADR-0066); there is deliberately no
+    // caller-supplied lifetime parameter — one would silently defeat the ELSG011-013 singleton verification.
+    private static string LifetimeExpression(int scopeValue) {
+        return scopeValue switch {
+            1 => "ServiceLifetime.Singleton",
+            2 => "ServiceLifetime.Transient",
+            _ => "ServiceLifetime.Scoped"
+        };
+    }
+
     private static void AppendRegistrationMethod(StringBuilder sb, HandlerInfo handler) {
         sb.AppendLine($"    public static IServiceCollection Add{handler.HandlerName}(");
-        sb.AppendLine("        this IServiceCollection services,");
-        sb.AppendLine("        ServiceLifetime lifetime = ServiceLifetime.Scoped)");
+        sb.AppendLine("        this IServiceCollection services)");
         sb.AppendLine("    {");
 
         // Every handler is registered through the decorator factory because tracing is applied
@@ -108,7 +118,7 @@ public sealed partial class HandlerRegistrationGenerator {
         // The concrete handler stays unkeyed either way — BuildPipeline resolves the inner handler from it.
         // A dual unary/stream handler is emitted by two generators; first registration wins deliberately so
         // direct public registration calls cannot turn its concrete lifetime into last-registration-wins.
-        sb.AppendLine("        var __handlerLifetime = lifetime;");
+        sb.AppendLine($"        var __handlerLifetime = {LifetimeExpression(handler.ScopeValue)};");
         sb.AppendLine("        var __hasConcreteRegistration = false;");
         sb.AppendLine("        foreach (var descriptor in services) {");
         sb.AppendLine(
@@ -144,6 +154,16 @@ public sealed partial class HandlerRegistrationGenerator {
             sb.AppendLine($"            {FormatStringLiteral(handler.EventConsumerKey)},");
             sb.AppendLine($"            (sp, __key) => {factory},");
             sb.AppendLine("            __handlerLifetime));");
+        }
+
+        if (handler.EventConsumerKey is null) {
+            // The pipeline metadata singleton, resolvable by request type without building the chain: the
+            // per-connection dispatch scope mode reads it to warn once when a pipeline that assumes
+            // per-message scoping (transaction/idempotency) is dispatched under a reused connection scope.
+            // Event consumers are excluded — many consumers share one event type, and they are not dispatched
+            // through the typed connection path.
+            sb.AppendLine(
+                $"        services.Add(ServiceDescriptor.KeyedSingleton<global::Elarion.Abstractions.Pipeline.HandlerMetadata>(typeof({handler.RequestFqn}), __handlerMetadata));");
         }
     }
 
@@ -565,13 +585,22 @@ public sealed partial class HandlerRegistrationGenerator {
     // with current-user support). Soft-resolves the enrichers/logger via GetServices/GetService so a bare/test host
     // never fails resolution, and it stays a pass-through when no listener is attached and no enricher contributes.
     private static void AppendObservabilityDecorator(StringBuilder sb, HandlerInfo handler) {
+        // [HandlerTelemetry(None)] (ADR-0066): the decorator is simply not generated — no span, no metric, no
+        // enrichment, no wrapper object on the hot path. Failures still flow as Result values/exceptions.
+        if (!handler.EmitObservability)
+            return;
+
         sb.AppendLine(
             $"                handler = new global::Elarion.Pipeline.ObservabilityDecorator<{handler.RequestFqn}, {handler.ResponseFqn}>(");
         sb.AppendLine("                    handler,");
         sb.AppendLine($"                    {FormatStringLiteral(handler.HandlerName)},");
         sb.AppendLine("                    __handlerMetadata,");
-        sb.AppendLine(
-            "                    sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>(),");
+        // A singleton chain is built once from the root provider: enrichers are scoped (per-caller state by
+        // definition), so the singleton form is enrichment-free — span and metric survive, per-caller log
+        // enrichment is documented unavailable (ADR-0066).
+        sb.AppendLine(handler.ScopeValue == 1
+            ? "                    global::System.Array.Empty<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>(),"
+            : "                    sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>(),");
         sb.AppendLine("                    sp.GetService<global::Microsoft.Extensions.Logging.ILoggerFactory>());");
         AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.ObservabilityDecorator<,>", false);
     }

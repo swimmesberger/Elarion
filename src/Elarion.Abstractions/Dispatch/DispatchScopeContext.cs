@@ -49,6 +49,20 @@ public sealed class DispatchScopeContext {
     }
 
     /// <summary>
+    /// Removes every captured entry, so one context instance can be refilled per message at a sequential
+    /// dispatch site (a per-connection dispatch scope) without a fresh allocation per call — an entry captured
+    /// for message A must never leak into message B's initializers.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This is the shared <see cref="Empty"/> context.</exception>
+    public void Clear() {
+        if (_isReadOnly)
+            throw new InvalidOperationException(
+                "DispatchScopeContext.Empty is a shared read-only instance; create a new DispatchScopeContext for per-call state.");
+
+        _items.Clear();
+    }
+
+    /// <summary>
     /// Gets the value captured for <typeparamref name="T"/>.
     /// </summary>
     /// <param name="value">The captured value, or <see langword="default"/> when none was captured.</param>

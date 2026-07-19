@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using Elarion.Abstractions.Connections;
 
@@ -59,6 +60,29 @@ public sealed class TcpClientConnection : IClientConnectionSink {
     /// </summary>
     public ValueTask SendBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct = default) {
         return _writer.SendAsync(message, ct);
+    }
+
+    /// <summary>
+    /// The writer-based send (ADR-0066): <paramref name="serialize"/> writes the payload directly into the
+    /// framed outbound buffer, so no per-message payload buffer is materialized — the low-allocation
+    /// counterpart of <see cref="SendBinaryAsync(ReadOnlyMemory{byte}, CancellationToken)"/> with identical
+    /// admission, backpressure (<see cref="ElarionTcpConnectionOptions.MaxPendingSends"/>), oversize, and
+    /// completed-send semantics.
+    /// </summary>
+    /// <remarks>
+    /// The callback runs synchronously exactly once and must not capture the writer beyond the call — on the
+    /// uncontended path it writes into the connection's shared frame buffer between the framer's
+    /// prologue/epilogue. <typeparamref name="TState"/> carries the caller's state without a closure
+    /// allocation. A throwing callback (or a payload the framer rejects) faults only this send; the
+    /// connection stays open.
+    /// </remarks>
+    /// <typeparam name="TState">Caller state handed to <paramref name="serialize"/> unchanged.</typeparam>
+    /// <param name="state">The state <paramref name="serialize"/> receives.</param>
+    /// <param name="serialize">Writes the complete payload onto the supplied writer, synchronously.</param>
+    /// <param name="ct">A cancellation token; see the memory-based overload for its withdrawal semantics.</param>
+    public ValueTask SendBinaryAsync<TState>(
+        TState state, Action<TState, IBufferWriter<byte>> serialize, CancellationToken ct = default) {
+        return _writer.SendAsync(state, serialize, ct);
     }
 
     /// <summary>Requests a graceful server-side close: no new sends are admitted, admitted sends drain,

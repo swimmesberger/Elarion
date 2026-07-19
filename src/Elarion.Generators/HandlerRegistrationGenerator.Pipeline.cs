@@ -27,18 +27,21 @@ public sealed partial class HandlerRegistrationGenerator {
     /// </summary>
     private static (List<(string Namespace, AttributeData DecoratorList)> DecoratorLists,
         List<(string Namespace, bool RequireAuthenticated)> AuthDefaults,
-        List<string> AuditDefaultNamespaces) BuildModuleMaps(
+        List<string> AuditDefaultNamespaces,
+        List<(string Namespace, int TelemetryMode)> TelemetryDefaults) BuildModuleMaps(
             Compilation compilation,
             EquatableArray<ModuleScanner.Module> modules,
             CancellationToken ct) {
         var decoratorLists = new List<(string, AttributeData)>();
         var authDefaults = new List<(string, bool)>();
         var auditDefaults = new List<string>();
+        var telemetryDefaults = new List<(string, int)>();
         var decoratorListMeta = compilation.GetTypeByMetadataName(DecoratorListAttributeMetadataName);
         var defaultsAttr = compilation.GetTypeByMetadataName(AuthorizationDefaultsAttributeMetadataName);
         var auditDefaultsAttr = compilation.GetTypeByMetadataName(AuditDefaultsAttributeMetadataName);
-        if (decoratorListMeta is null && defaultsAttr is null && auditDefaultsAttr is null)
-            return (decoratorLists, authDefaults, auditDefaults);
+        var telemetryAttr = compilation.GetTypeByMetadataName(HandlerTelemetryAttributeMetadataName);
+        if (decoratorListMeta is null && defaultsAttr is null && auditDefaultsAttr is null && telemetryAttr is null)
+            return (decoratorLists, authDefaults, auditDefaults, telemetryDefaults);
 
         // Deterministic order: modules sorted by namespace then name, matching ELMOD001's documented
         // "alphabetically first" ownership tie-break for modules sharing a namespace.
@@ -65,9 +68,60 @@ public sealed partial class HandlerRegistrationGenerator {
             if (auditDefaultsAttr is not null &&
                 attributes.Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, auditDefaultsAttr)))
                 auditDefaults.Add(module.Namespace);
+
+            if (telemetryAttr is not null &&
+                ReadTelemetryMode(attributes, telemetryAttr) is { } moduleMode)
+                telemetryDefaults.Add((module.Namespace, moduleMode));
         }
 
-        return (decoratorLists, authDefaults, auditDefaults);
+        return (decoratorLists, authDefaults, auditDefaults, telemetryDefaults);
+    }
+
+    /// <summary>Reads the [HandlerTelemetry] mode from an attribute list; null when undeclared.</summary>
+    private static int? ReadTelemetryMode(ImmutableArray<AttributeData> attributes, INamedTypeSymbol telemetryAttr) {
+        foreach (var attribute in attributes) {
+            if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, telemetryAttr))
+                continue;
+
+            if (attribute.ConstructorArguments.Length == 1 &&
+                attribute.ConstructorArguments[0].Value is int mode)
+                return mode;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves the effective [HandlerTelemetry] mode for one handler: the handler's own declaration wins,
+    /// else the owning module's (longest namespace in scope), else the assembly's, else Full (0).
+    /// </summary>
+    private static int ResolveTelemetryMode(
+        INamedTypeSymbol classSymbol,
+        Compilation compilation,
+        IReadOnlyList<(string Namespace, int TelemetryMode)> moduleTelemetryDefaults) {
+        var telemetryAttr = compilation.GetTypeByMetadataName(HandlerTelemetryAttributeMetadataName);
+        if (telemetryAttr is null)
+            return 0;
+
+        if (ReadTelemetryMode(classSymbol.GetAttributes(), telemetryAttr) is { } handlerMode)
+            return handlerMode;
+
+        var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
+        int? bestMode = null;
+        var bestNamespaceLength = -1;
+        foreach (var (moduleNamespace, mode) in moduleTelemetryDefaults) {
+            if (!IsNamespaceInScope(handlerNamespace, moduleNamespace) ||
+                moduleNamespace.Length <= bestNamespaceLength)
+                continue;
+
+            bestMode = mode;
+            bestNamespaceLength = moduleNamespace.Length;
+        }
+
+        if (bestMode is { } moduleScoped)
+            return moduleScoped;
+
+        return ReadTelemetryMode(compilation.Assembly.GetAttributes(), telemetryAttr) ?? 0;
     }
 
     private static AttributeData? FindModuleDecoratorList(

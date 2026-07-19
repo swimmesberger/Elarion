@@ -16,6 +16,9 @@
  ELSG008    | Elarion.Generators                 | Error    | Invalid schedule specification
  ELSG009    | Elarion.Generators                 | Error    | Invalid scheduled job concurrency
  ELSG010    | Elarion.Generators                 | Warning  | Scheduled job is not in any module
+ ELSG011    | Elarion.Generators                 | Error    | Singleton handler dependency must be singleton
+ ELSG012    | Elarion.Generators                 | Error    | Singleton handler dependency lifetime cannot be verified
+ ELSG013    | Elarion.Generators                 | Error    | Singleton handler cannot use a scope-dependent pipeline feature
  ELACT001   | Elarion.Generators                 | Error    | Invalid [Actor] type
  ELACT002   | Elarion.Generators                 | Error    | Invalid actor method
  ELACT003   | Elarion.Generators                 | Warning  | Actor is not in any module
